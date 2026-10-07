@@ -17,7 +17,7 @@
 (test
  (name test_tui_play_change)
  (modules test_tui_play_change)
- (libraries alcotest masc masc_tui_types masc_tui_collab))
+ (libraries alcotest masc masc_tui_types masc_tui_collab unix))
 (include stanzas/test_tui_runtime_status_pty.inc)
 (test
  (name test_server_lane_inventory)

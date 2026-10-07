@@ -223,7 +223,9 @@ let ended = false;
 let disconnecting = false;
 let connected = false;
 let departureConfirmed = false;
-let initialConnectIntent = true;
+// Only opening the invitation explicitly asks to rejoin a departed seat.
+// A reload may retain the bearer after confirmed departure if cleanup failed.
+let initialConnectIntent = invitation !== '' && !invitationConflict;
 let starting = Promise.resolve();
 let sending = Promise.resolve();
 let textSending = false;
@@ -278,6 +280,7 @@ function connectionSettled() {
 
 function end(text) {
   if (ended) return;
+  initialConnectIntent = false;
   // Check storage at the forget boundary too, including authentication
   // failures delivered to a restored document with an older cached state.
   if (token !== '' && !connectionSettled()) return;
@@ -290,7 +293,6 @@ function end(text) {
     }
   }
   ended = true;
-  initialConnectIntent = false;
   try { sessionStorage.removeItem(DOCUMENT_KEY); } catch (_) { /* No bearer remains in storage. */ }
   token = '';
   setStatus('disconnect', '');
@@ -332,9 +334,11 @@ async function mutate(path, body) {
   try {
     const r = await api('POST', path, body);
     const success = r.status >= 200 && r.status < 300 && r.json?.ok === true;
-    const refusal = r.status >= 400 && r.status < 600 && r.json &&
+    // The request reader rejects an oversized body before route dispatch and
+    // may answer text/plain. This response proves no mutation was admitted.
+    const refusal = r.status === 413 || (r.status >= 400 && r.status < 600 && r.json &&
       (r.json.ok === false || typeof r.json.auth_error_code === 'string' ||
-       (typeof r.json.code === 'string' && typeof r.json.error === 'string'));
+       (typeof r.json.code === 'string' && typeof r.json.error === 'string')));
     if (!success && !refusal) throw new Error('unconfirmed operation response');
     // Only this operation's terminal response clears its marker. Seat/frame
     // reads are not ordered behind it, and cannot acknowledge it instead.
@@ -443,14 +447,16 @@ async function refreshSeat() {
   renderPassTargets(r.json.participants);
   seatSavesName = r.json.saves_name;
   setStatus('seat', controllerError ?? '');
-  // A transient initial read may fail. Keep this document's connect intent
-  // until its first authoritative seat, but never carry it past disconnect.
+  // Keep explicit connect intent through transient reads and refused writes.
+  // Only observed connection, successful reconnect, or ending it settles it.
   if (initialConnectIntent && controllerError === null && !disconnecting) {
-    initialConnectIntent = false;
-    if (!connected && connectionSettled()) {
+    if (connected) initialConnectIntent = false;
+    else if (connectionSettled()) {
       const joined = await mutate(SESSION_PATH, { connected:true });
-      if (!ended && joined?.status === 200 && joined.json?.ok === true && joined.json.connected === true)
+      if (!ended && joined?.status === 200 && joined.json?.ok === true && joined.json.connected === true) {
+        initialConnectIntent = false;
         return refreshSeat();
+      }
     }
   }
   // Return this response's authority as well as rendering it. A concurrent
@@ -609,7 +615,7 @@ async function poll() {
     // Expiry and Keeper stops need not move the machine. An observer must
     // still discover that its holder departed, so a real move can recover it.
     const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
-    if (performance.now() >= nextSeatPollAt && (key !== lastActivityKey || waitingForController)
+    if (performance.now() >= nextSeatPollAt && (key !== lastActivityKey || waitingForController || initialConnectIntent)
         && await refreshSeat()) lastActivityKey = key;
     await syncPad();
   }

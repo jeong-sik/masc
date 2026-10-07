@@ -109,6 +109,10 @@ Observation and inventory reads remain available when it does not match.
 If a request loses its response or workspace authority, its outcome remains
 unknown for its original workspace. Returning to that workspace does not
 permit another issue or revoke, and refreshing inventory does not unlock it.
+The TUI durably records the origin and request before dispatch in the local
+workspace's `.masc/tui-play-pending.jsonl`; restarting retains unresolved
+changes as unknown. No invitation token is stored in this journal. An unreadable
+recovery journal refuses further changes instead of assuming none are pending.
 
 The Keeper chat composer also accepts `/play invites` to list invites, `/play invite <name>
 <hours>` issues one, `/play link` reopens the latest link issued in this TUI
@@ -145,7 +149,7 @@ cannot still finish later: inspect its completion in server logs, or stop that
 server process before restarting and inspecting the final invite state. An
 inventory read alone can race a delayed write and is not completion evidence.
 Then open Collab, press `u`, and explicitly confirm that check to permit further
-changes. Do not bypass this check by restarting the TUI. If an issue's one-time
+changes. Restarting the TUI does not bypass this check. If an issue's one-time
 link was lost, revoke its confirmed final invite before issuing another.
 A definitive revoke reply reporting controller-release failure may be retried
 with `/play revoke <name>`; a second request can release a controller after the

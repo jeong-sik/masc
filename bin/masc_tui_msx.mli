@@ -103,6 +103,11 @@ val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
     cached frame and returns [true]; keys are not sent to the machine in this
     increment. *)
 
+val close : write:(string -> unit) -> Masc_tui_types.state -> unit
+(** Delete any terminal image placement and retire the renderer when its
+    workspace is withdrawn or the operator closes it. The caller must also
+    invalidate the ordinary frame presenter. *)
+
 (** {1 The load menu (RFC-0439 §3.7)}
 
     The human picks a game from the cartridge inventory. It is an overlay on the

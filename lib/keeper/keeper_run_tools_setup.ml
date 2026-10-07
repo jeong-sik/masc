@@ -368,7 +368,13 @@ let seed_tool_calls_from_ledger
          "keeper %s repetition ledger seed unavailable: %s" keeper_name detail;
        []
      | Ok rows ->
-       List.filter_map
+       (* [read_recent] answers oldest first. The seed is newest first like
+          the history seed: the input axis counts a streak from the head, and
+          [Keeper_repetition_judged.seed_beyond] drops judged pairs from the
+          tail, so an oldest-first seed kept the judged calls and dropped the
+          new ones. *)
+       List.rev rows
+       |> List.filter_map
          (fun row ->
             match
               ( Safe_ops.json_string_opt "tool" row
@@ -394,8 +400,7 @@ let seed_tool_calls_from_ledger
                   ; input_fingerprint = Some input_fingerprint
                   ; output_fingerprint = Some output_fingerprint
                   }
-            | _ -> None)
-         rows)
+            | _ -> None))
 ;;
 
 let prepare_agent_setup

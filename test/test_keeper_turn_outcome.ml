@@ -1150,11 +1150,21 @@ let test_ledger_seed_drops_rows_the_history_already_represents () =
            ~keeper_name:"dedup-fixture"
            ()
        in
-       check int "only the ledger-only calls seed" 2 (List.length seeded);
-       check string "the newest seeded call is the ledger-only one" "in-u2"
-         (match seeded with
-          | detail :: _ -> Option.value ~default:"" detail.input_fingerprint
-          | [] -> fail "unexpected seed shape"))
+       (* Newest first, like the history seed: [seed_beyond] drops judged
+          pairs from the tail, so the last row written leads. *)
+       check (list string) "the ledger-only calls seed newest first"
+         [ "in-none"; "in-u2" ]
+         (List.map
+            (fun (detail : Masc.Keeper_agent_result.tool_call_detail) ->
+               Option.value ~default:"" detail.input_fingerprint)
+            seeded);
+       (* A yield that judged the older call leaves only the newer one. *)
+       check (list string) "a judged boundary keeps the call after it"
+         [ "in-none" ]
+         (List.map
+            (fun (detail : Masc.Keeper_agent_result.tool_call_detail) ->
+               Option.value ~default:"" detail.input_fingerprint)
+            (Masc.Keeper_repetition_judged.seed_beyond ~judged:1 seeded)))
 ;;
 
 let test_seed_stops_where_a_yield_already_judged () =

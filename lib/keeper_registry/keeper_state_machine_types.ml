@@ -64,7 +64,6 @@ type event =
       }
   | Operator_pause
   | Operator_resume
-  | Operator_stop of { remove_meta : bool }
   | Stop_requested
   | Drain_complete
   | Fiber_started
@@ -74,7 +73,6 @@ type event =
       ; http_status : int option
       }
   | Supervisor_restart_attempt of { attempt : int }
-  | Credential_archived
   | Operator_clear_requested of
       { preserve_system : bool
       ; reason : string
@@ -88,7 +86,6 @@ let event_to_string = function
   | Context_measured r -> Printf.sprintf "context_measured(ratio=%.3f)" r.context_ratio
   | Operator_pause -> "operator_pause"
   | Operator_resume -> "operator_resume"
-  | Operator_stop r -> Printf.sprintf "operator_stop(remove_meta=%b)" r.remove_meta
   | Stop_requested -> "stop_requested"
   | Drain_complete -> "drain_complete"
   | Fiber_started -> "fiber_started"
@@ -106,7 +103,6 @@ let event_to_string = function
     Printf.sprintf "fiber_terminated(%s%s%s)" outcome prov http
   | Supervisor_restart_attempt r ->
     Printf.sprintf "supervisor_restart_attempt(%d)" r.attempt
-  | Credential_archived -> "credential_archived"
   | Operator_clear_requested r ->
     Printf.sprintf
       "operator_clear_requested(preserve_system=%b,reason=%s)"

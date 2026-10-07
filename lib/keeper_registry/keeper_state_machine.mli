@@ -90,7 +90,6 @@ type event =
     }
   | Operator_pause
   | Operator_resume
-  | Operator_stop of { remove_meta : bool }
   | Stop_requested
   | Drain_complete
   | Fiber_started
@@ -100,7 +99,6 @@ type event =
       ; http_status : int option
       }
   | Supervisor_restart_attempt of { attempt : int }
-  | Credential_archived
   | Operator_clear_requested of { preserve_system : bool; reason : string }
     (** Operator invoked [masc_keeper_clear]. Last-resort: drops
         conversation context entirely; conditions reset in-place.

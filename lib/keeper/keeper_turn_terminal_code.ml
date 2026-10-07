@@ -23,7 +23,6 @@ type t =
   | Fiber_unresolved
   | Turn_overflow_failure
   | Operator_interrupt
-  | Exception_unhandled of string
   | Agent_core_error of
       { wire : string
       ; timeout : agent_core_timeout option
@@ -36,7 +35,6 @@ let to_wire = function
   | Fiber_unresolved -> "fiber_unresolved"
   | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"
-  | Exception_unhandled _ -> "exception"
   | Agent_core_error { wire; _ } -> wire
 ;;
 

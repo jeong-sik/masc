@@ -77,7 +77,6 @@ let of_termination_code (c : Code.t) : t =
   | Code.Operator_interrupt
   | Code.Provider_runtime_error _
   | Code.Fiber_unresolved
-  | Code.Exception_unhandled _
   | Code.Agent_core_error _ -> Provider_error c
 ;;
 

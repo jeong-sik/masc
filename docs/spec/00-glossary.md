@@ -671,9 +671,10 @@ status: reference
   청구 가능한 직접 입력(`claimable queued chat operation`)이 자율 턴(`autonomous turn`)보다
   항상 먼저 슬롯을 획득하는 엄격한 우선순위 규칙(#41654). 자율 레인이 바쁜 슬롯을 반복
   관측하더라도 진입 순서는 바뀌지 않으며, 이전 RFC-0373 방향(direction 2)의 유예 부채
-  한도(`autonomous_deferral_debt_cap`) 메커니즘은 폐기되었다. 슬롯을 요청했다가 거절당한
-  자율 레인은 큐잉된 직접 오퍼레이션이 모두 소진되어 슬롯이 완전히 비었을 때
-  `notify_turn_slot_released` 신호로 깨어나 실행을 재개한다.
+  한도(`autonomous_deferral_debt_cap`) 메커니즘은 폐기되었다. 러너가 준비되지 않은 Queued
+  chat은 자율 진입을 막지 않으며, 이전에 슬롯을 거절당한 자율 레인은 청구 가능한 직접 오퍼레이션이
+  슬롯을 가져가지 않고 슬롯이 여전히 미청구(`unclaimed`) 상태일 때 `notify_turn_slot_released`
+  신호로 깨어나 실행을 재개한다.
   → [Keeper_owner](../../lib/keeper/keeper_owner.mli)
 
 **Cancelled Chat Terminal Retention (취소된 채팅 종단 보존)**

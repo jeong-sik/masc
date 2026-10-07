@@ -74,6 +74,14 @@ let rows_that_fit ~cols ~rows ~frame_width ~frame_height =
 let fit_line width s =
   Masc_tui_ansi.fit_width (Masc_tui_ansi.Terminal_text.single_line s) (max width 0)
 
+(* Boxed TUI surfaces reserve four columns in their shared geometry cache.
+   This full-screen viewport has no borders: preserve the actual tty width,
+   including one-column windows, rather than printing beyond its edge. *)
+let viewport_size () =
+  match Masc_tui_ansi.probe_terminal_size () with
+  | Some size -> size
+  | None -> Masc_tui_ansi.get_terminal_size ()
+
 (* The activity sidebar (RFC machine-spectating-goes-through-lanes §2.1's
    [activity] field, drawn here for the first time): a fixed-width column of
    "when who did-what" on the right, one row per entry. [Machine_action_feed.cap]
@@ -224,7 +232,7 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     | Some (Pixels { width; height; rgb }) -> Some (width, height, rgb)
     | None -> None
   in
-  let rows, cols = Masc_tui_ansi.get_terminal_size () in
+  let rows, cols = viewport_size () in
   let rows = max 1 rows and cols = max 1 cols in
   let notice = if rows >= 4 then notice else None in
   let header_rows = if Option.is_some notice then 2 else 1 in
@@ -526,7 +534,7 @@ let entry_label (state : Masc_tui_types.state) = function
 
 let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state) =
   invalidate ();
-  let rows, cols = Masc_tui_ansi.get_terminal_size () in
+  let rows, cols = viewport_size () in
   let rows = max 1 rows and cols = max 1 cols in
   let entries = menu_entries state in
   settle_selection state entries;

@@ -58,10 +58,12 @@ def diagnose(review, *, head, policy, base_sha, current_diff, release_run=""):
     last = nonempty[-1] if nonempty else ""
     prefix = f"approve-guard: head `{head}` · "
     tail_re = re.compile(rf" · reviewed base `[0-9a-f]{{40}}` · diff sha256 `{current_diff}`$")
+    # Independent checks: one footer can miss both parts, and the refusal must
+    # name each failing part, not only the first (P2 5439285101).
     if not last.startswith(prefix):
         reasons.append(
             f"last non-empty line must start with `{prefix}` (backticked head, ' · ' separator); got `{short(last)}`")
-    elif not tail_re.search(last):
+    if not tail_re.search(last):
         found = re.search(r"diff sha256 `([0-9a-f]{64})`", last)
         if "reviewed base" not in last and "diff sha256" not in last:
             reasons.append("footer lacks the ' · reviewed base `<40hex>` · diff sha256 `<64hex>`' tail")
@@ -71,7 +73,13 @@ def diagnose(review, *, head, policy, base_sha, current_diff, release_run=""):
         elif not re.search(r" · reviewed base `[0-9a-f]{40}` · ", last):
             reasons.append("footer reviewed base is missing or not a 40-hex commit")
         else:
-            reasons.append("footer tail must end with ' · reviewed base `<40hex>` · diff sha256 `<current diff>`'")
+            tail_msg = ("footer tail must end with ' · reviewed base `<40hex>` · diff sha256 `<current diff>`'; "
+                        f"got `{short(last)}`")
+            # A trailing CR satisfies every visible char yet still fails the
+            # anchor, so the reason must name it instead of staying silent.
+            if last.endswith("\r"):
+                tail_msg += " (trailing carriage return)"
+            reasons.append(tail_msg)
     if reasons:
         reasons.append(
             "expected last line (copy): " + expected_footer(head, policy, base_sha, current_diff, release_run))

@@ -71,6 +71,27 @@ class RefusalReasons(unittest.TestCase):
             self.assertEqual(ok, bound)
             self.assertEqual(run(review(footer)) == [], bound)
 
+    def test_prefix_and_tail_both_broken_are_both_named(self):
+        # One footer can miss both parts; the refusal must name each failing
+        # part, not let the prefix failure shadow the missing tail.
+        out = run(review(f"approve-guard: head {HEAD}"))
+        joined = "\n".join(out)
+        self.assertIn("must start with `approve-guard: head `", joined)
+        self.assertIn("lacks the ' · reviewed base", joined)
+
+    def test_trailing_cr_in_verdict_line_shows_real_bytes(self):
+        out = run(review(GOOD_FOOTER, first=f"verdict: PASS head: {HEAD} by: goo-yang-bong\r"))
+        verdict_reason = next(line for line in out if "first line is not the exact-head verdict" in line)
+        self.assertIn("\\r", verdict_reason, out)
+
+    def test_trailing_cr_in_footer_tail_is_named_with_bytes(self):
+        out = run(review(GOOD_FOOTER + "\r"))
+        joined = "\n".join(out)
+        self.assertIn("footer tail must end with", joined)
+        # short() cuts the preview at 160 chars, so the \r itself can sit past
+        # the cut; the reason must still name the carriage return in words.
+        self.assertIn("trailing carriage return", joined)
+
     def test_control_bytes_in_echoed_lines_are_escaped(self):
         out = run(review(f"approve-guard: head {HEAD}\x1b[2J"))
         joined = "\n".join(out)

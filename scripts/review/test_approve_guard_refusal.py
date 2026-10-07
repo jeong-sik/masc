@@ -61,8 +61,8 @@ class Case(unittest.TestCase):
             "user": {"login": "author-keeper"}}))
         (self.data / "comments.json").write_text("[]")
 
-    def review(self, footer, *, assoc="COLLABORATOR"):
-        body = (f"verdict: PASS head: {HEAD} by: reviewer-keeper\nsource review notes\n\n---\n"
+    def review(self, footer, *, assoc="COLLABORATOR", first_suffix=""):
+        body = (f"verdict: PASS head: {HEAD} by: reviewer-keeper{first_suffix}\nsource review notes\n\n---\n"
                 f"review-scope: {SCOPE}\n{footer}")
         rev = {"id": 77, "state": "APPROVED", "author_association": assoc, "body": body,
                "commit_id": HEAD, "user": {"login": "reviewer-keeper"},
@@ -90,11 +90,23 @@ class Case(unittest.TestCase):
         self.assertIn("lacks the ' · reviewed base", r.stderr)
         self.assertIn(footer_line(), r.stderr)  # copyable expected footer
 
-    def test_unbackticked_footer_like_pr41487_is_refused_and_named(self):
+    def test_unbackticked_footer_is_refused_and_names_both_parts(self):
         self.review(f"approve-guard: head {HEAD}")
         r = self.run_guard("--merge-check")
         self.assertEqual(r.returncode, 2)
         self.assertIn("must start with `approve-guard: head `", r.stderr)
+        # The prefix failure must not shadow the missing tail.
+        self.assertIn("lacks the ' · reviewed base", r.stderr)
+
+    def test_cr_terminated_review_is_refused_and_names_the_cr(self):
+        # A CRLF-written approval fails the exact-head verdict; the refusal
+        # must show the real bytes, with the CR visible (escaped), not stripped.
+        self.review(footer_line(), first_suffix="\r")
+        r = self.run_guard("--merge-check")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not admitted", r.stderr)
+        self.assertIn("first line is not the exact-head verdict", r.stderr)
+        self.assertIn("\\r", r.stderr)
 
     def test_stale_diff_is_still_refused_and_says_diff_changed(self):
         self.review(footer_line(diff="e" * 64))

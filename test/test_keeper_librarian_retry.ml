@@ -1709,7 +1709,7 @@ let template_slot_names template =
    from its prompt cache for as long as the Memory is unchanged. *)
 let test_memory_prompt_puts_unchanging_slots_first () =
   let unchanging =
-    [ "facts_budget"; "working_contexts_rule"; "keeper_id"; "keeper_instructions"; "current_memory" ]
+    [ "facts_budget"; "memory_limits"; "working_contexts_rule"; "keeper_id"; "keeper_instructions"; "current_memory" ]
   in
   let slots =
     template_pieces (Prompt_registry.get_prompt Prompt_names.librarian)

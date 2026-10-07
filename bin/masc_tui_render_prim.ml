@@ -1241,8 +1241,10 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
-  Buffer.add_string framed (composer_line state ~cols:full_cols ^ "\n");
-  let cursor = composer_cursor state ~rows ~cols:full_cols in
+  Buffer.add_string framed
+    ((if state.keeper_navigation_open then "" else composer_line state ~cols:full_cols) ^ "\n");
+  let cursor = if state.keeper_navigation_open then Frame_presenter.Hidden
+    else composer_cursor state ~rows ~cols:full_cols in
   Masc_tui_frame_timing.finish_stage ~name:"surface.chrome" chrome_started;
   Masc_tui_frame_timing.time_stage ~name:"surface.strip_frame" (fun () ->
     finish_frame_with_strip state ?clamped ~surface_key
@@ -1330,10 +1332,13 @@ let surface_window_height state ~terminal_rows ~count =
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
     ~overflow_takes_row:true
 
-let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
+let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let full_cols = cols in
+  let sidebar_cols = match sidebar with None -> 0 | Some (width, _) -> width in
+  let cols = cols - sidebar_cols in
   let buf = Buffer.create 4096 in
   let top, line, line_styled, line_selected, divider, empty, bottom =
     match frame with
@@ -1370,7 +1375,8 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     ; push_divider = (fun () -> hold (fun () -> divider buf cols))
     ; push_empty = (fun () -> hold (fun () -> empty buf cols))
     ; next_origin =
-        (fun () -> (body_top + List.length !pushed, Masc_tui_ansi.framed_content_column))
+        (fun () -> (body_top + List.length !pushed,
+                    sidebar_cols + Masc_tui_ansi.framed_content_column))
     }
   in
   body ~budget body_pushers;
@@ -1422,8 +1428,17 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     empty buf cols
   done;
   bottom buf cols;
-  Buffer.add_string buf (footer_line ?status state ~max_cells:cols ~hints);
-  finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols buf
+  let buf = match sidebar with
+    | None -> buf
+    | Some (left_cols, draw) ->
+        let left = Buffer.create 1024 in
+        draw ~rows:(lines_ended_since buf ~start:0) left;
+        let combined = Buffer.create (Buffer.length left + Buffer.length buf) in
+        write_two_panes combined ~left_cols ~left ~right:buf;
+        combined
+  in
+  Buffer.add_string buf (footer_line ?status state ~max_cells:full_cols ~hints);
+  finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 
 let connection_status_badge (status : Masc_tui_types.connection_status) =
@@ -1555,62 +1570,96 @@ let fit_runtime_id width runtime_id =
   else Message_layout.fit_middle width runtime_id
 
 
-(* A narrow roster beside the detail: position context, not a second input
-   surface -- the keys keep their detail meaning. The window follows the
-   cursor the way the detail follows the selection. *)
+(* A quiet rail beside the conversation. Only the cursor row reverses when
+   this pane owns the keys; the selected Keeper's readings sit below the list.
+   [rows] includes the caller's footer, as it does for the detail/chat panes. *)
 let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
-  framed_top buf cols;
-  let title = " KEEPERS" in
-  let hint =
-    if focused then "ENTER OPEN" else Masc_tui_keys.roster_toggle_key ^ " HIDE"
+  let height = max 0 (rows - 1) in
+  let inner = max 0 (cols - 1) in
+  let ground = Theme.side_pane_background () in
+  let restore = Ansi.reset ^ ground in
+  let draw ?(style = "") text =
+    Buffer.add_string buf
+      (ground ^ style ^ fit_width text inner ^ Ansi.reset
+       ^ Theme.recede () ^ "│" ^ Ansi.reset ^ "\n")
   in
-  let title_gap = max 1 (framed_inner_width cols - String.length title - String.length hint) in
-  let title_row = title ^ String.make title_gap ' ' ^ hint in
-  framed_line buf cols
-    (if focused then Theme.selection ^ title_row ^ Ansi.reset
-     else
-       Ansi.bold ^ title ^ Ansi.reset ^ String.make title_gap ' ' ^ Ansi.dim
-       ^ hint ^ Ansi.reset);
-  framed_divider buf cols;
-  let content_height = max 0 (rows - framed_chrome_rows) in
-  let first =
-    if state.keeper_cursor < content_height then 0
-    else state.keeper_cursor - content_height + 1
+  let rule = "  " ^ draw_hline (max 0 (inner - 4)) ^ "  " in
+  let details =
+    if not focused then []
+    else match selected_keeper state with
+      | None -> []
+      | Some keeper ->
+          let reading = keeper_reading state keeper in
+          let health = Keeper_control.health_label reading in
+          let status = if reading.paused then "paused · " ^ health else health in
+          let runtime = match reading.liveness with
+            | Keeper_control.Present runtime -> runtime.kr_runtime_id
+            | Unobserved | Absent | Invalid _ -> "Runtime unavailable"
+          in
+          let label =
+            if state.view = Keepers Keeper_message
+               && state.msg_target_keeper_name = Some keeper.k_name then "현재 대화"
+            else "선택한 Keeper"
+          in
+          [ Theme.recede (), rule
+          ; Theme.recede (), "  " ^ label
+          ; Ansi.bold, "  " ^ Message_layout.fit_middle (max 0 (inner - 4))
+              (Terminal_text.single_line keeper.k_name)
+          ; "", "  " ^ keeper_action_color (Keeper_control.next_action reading)
+              ^ keeper_state_glyph ~paused:reading.paused
+                  ~health:(Keeper_control.health reading)
+              ^ restore ^ " " ^ Theme.recede () ^ status
+          ; Theme.recede (), "  " ^ fit_runtime_id (max 0 (inner - 4))
+              (Terminal_text.single_line runtime)
+          ]
   in
-  let keepers_window = Rows.of_list ~first:first ~height:content_height state.keepers in
-  for i = 0 to content_height - 1 do
-    match Rows.at keepers_window (first + i) with
-    | Some (k : keeper) ->
+  let header_rows = min 3 height in
+  let available = height - header_rows in
+  let count = List.length state.keepers in
+  (* Supplementary details get no more rows than the list keeps, unless the
+     entire fleet already fits beside them. Short viewports favor the list. *)
+  let detail_rows = List.length details in
+  let details =
+    if available >= detail_rows + min count detail_rows then details else []
+  in
+  let capacity = available - List.length details in
+  let first = max 0 (min (state.keeper_cursor - capacity + 1) (count - capacity)) in
+  let window = Rows.of_list ~first ~height:capacity state.keepers in
+  let count_label =
+    if count > capacity && capacity > 0 then
+      Printf.sprintf "%d–%d/%d" (first + 1) (first + Rows.length window) count
+    else string_of_int count
+  in
+  let title = "  KEEPERS" in
+  let gap = max 1 (inner - Message_layout.display_width title
+                   - Message_layout.display_width count_label - 2) in
+  let header = [ ""; title ^ String.make gap ' ' ^ count_label ^ "  "; rule ] in
+  List.iter (draw ~style:(Theme.recede ())) (List.take header_rows header);
+  for i = 0 to capacity - 1 do
+    match Rows.at window (first + i) with
+    | Some (keeper : keeper) ->
         let selected = first + i = state.keeper_cursor in
-        let name = Terminal_text.single_line k.k_name in
-        let name =
-          Masc_tui_roster_pane.name_window ~selected
-            ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7)) name
-        in
-        (* The same glyph the Keepers surface draws, for the same reading.
-           Without it the pane says a keeper exists and nothing else, so a
-           roster of ten looks identical whether one of them is offline. *)
-        let reading = keeper_reading state k in
-        let glyph =
-          keeper_state_glyph
-            ~paused:reading.Keeper_control.paused
-            ~health:(Keeper_control.health reading)
-        in
-        (* Reverse video is the one selection signal every terminal
-           renders, colour or not, and it owns the whole row: a glyph
-           tinted inside it reads as a second highlight. *)
-        let line =
-          if selected then
-            Theme.selection ^ " " ^ glyph ^ " " ^ name ^ Ansi.reset
-          else
-            " "
-            ^ keeper_action_color (Keeper_control.next_action reading)
-            ^ glyph ^ Ansi.reset ^ " " ^ Ansi.dim ^ name ^ Ansi.reset
-        in
-        framed_line buf cols line
-    | None -> framed_empty buf cols
+        let name = Masc_tui_roster_pane.name_window ~selected
+          ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7))
+          (Terminal_text.single_line keeper.k_name) in
+        let reading = keeper_reading state keeper in
+        let glyph = keeper_state_glyph ~paused:reading.paused
+          ~health:(Keeper_control.health reading) in
+        if selected && focused then
+          draw ~style:Theme.selection (" › " ^ glyph ^ " " ^ name ^ " ")
+        else
+          let caret = if selected then " › " else "   " in
+          draw (caret ^ keeper_action_color (Keeper_control.next_action reading)
+                ^ glyph ^ restore ^ " "
+                ^ (if selected then Ansi.bold else "") ^ name ^ restore ^ " ")
+    | None when i = 0 && count = 0 ->
+        draw ~style:(Theme.recede ())
+          (match state.keeper_roster_error with
+           | Some error -> "  " ^ Terminal_text.single_line error
+           | None -> "  No Keepers listed")
+    | None -> draw ""
   done;
-  framed_bottom buf cols
+  List.iter (fun (style, text) -> draw ~style text) details
 
 
 (* What a boxed listing draws under its rows: the scroll line -- a row whether

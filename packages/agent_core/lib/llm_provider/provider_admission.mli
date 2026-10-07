@@ -26,7 +26,10 @@
 
     Registry decisions are pure immutable transitions. Scheduler creation,
     diagnostics, snapshots, and permit waiting are performed after leaving
-    the registry's short process-wide critical section.
+    the registry's short process-wide critical section. {!publish} is the
+    exception: it changes a published identity's scheduler and wakes its
+    newly granted waiters inside that section, so the registry and the
+    scheduler change together.
 
     @since 0.216.0 *)
 
@@ -36,14 +39,50 @@
     shared queue when the endpoint declares no run limit); cancellation
     while waiting does not leak a permit (see {!Slot_scheduler.with_permit}).
 
-    Two configs naming the same endpoint identity with different allowances
+    On an identity whose allowance was published ({!publish}), the request
+    runs under the published allowance, whatever [config] declares. On an
+    unpublished identity, two configs with different allowances
     ([max_concurrent_requests] or [admission_priority_run_limit]) raise
-    [Invalid_argument]. Neither declaration outranks the other, so
-    honouring the one that dispatched first made the effective limit a
-    function of runtime order. The raise happens before the permit is taken,
-    so no provider request goes out under a limit its caller did not
-    declare. *)
+    [Invalid_argument]: neither declaration outranks the other, and taking
+    the first one admitted would let runtime order decide the limit. The
+    raise happens before the permit is taken, so no provider request goes
+    out under a limit its caller did not declare. *)
 val with_admission : config:Provider_config.t -> (unit -> 'a) -> 'a
+
+(** {2 Published allowances}
+
+    A consumer that knows its whole configuration publishes one allowance
+    per endpoint identity. A published allowance governs that identity
+    while the process runs: publishing a new one reconfigures the identity's
+    scheduler in place ({!Slot_scheduler.reconfigure}), and a request built
+    from an older config is admitted under the published allowance instead
+    of raising. An identity never published keeps the rule above. *)
+
+(** Configs that name one endpoint identity with more than one allowance;
+    each declaration is the caller's label with what it declared.
+    [base_url] is sanitized for logs. *)
+type allowance_disagreement =
+  { kind : string
+  ; base_url : string
+  ; declarations : (string * Provider_admission_state.allowance) list
+  }
+
+(** One agreed allowance per endpoint identity, ready to publish. *)
+type published_allowances
+
+val allowances_of_configs
+  :  (string * Provider_config.t) list
+  -> (published_allowances, allowance_disagreement list) result
+(** The allowances [configs] declare, one per endpoint identity, or every
+    identity whose configs disagree. A config without
+    [max_concurrent_requests] declares none. Each config carries the
+    caller's label, which a disagreement names. *)
+
+val publish : published_allowances -> unit
+(** Make each allowance its identity's allowance: a new identity gets a
+    scheduler, and an existing one is reconfigured when its allowance
+    changed. Identities left out are kept as they are. It does not need an
+    Eio fiber. *)
 
 (** {2 Queued requests}
 
@@ -80,17 +119,6 @@ type wait =
     request but leaves no permit held. *)
 val install_wait_observer : (wait -> unit) -> unit -> unit
 
-(** The allowance this process already admits for [config]'s endpoint
-    identity, when [config] declares a different one: [authoritative] is the
-    admitted allowance and [declared] is [config]'s. The registry keeps an
-    identity's first allowance while the process runs, so {!with_admission}
-    raises for such a config until the process restarts. [None] when
-    [config] declares no [max_concurrent_requests], when nothing has been
-    admitted for the identity yet, or when the two agree. It installs
-    nothing. *)
-val admitted_allowance_change
-  :  config:Provider_config.t
-  -> Provider_admission_state.conflict option
 
 (** {!Slot_scheduler.permit_wait}: the caller's cell the bounded waits
     below write as a wait begins and ends. An unbounded [with_admission]

@@ -5055,6 +5055,9 @@ type state = {
   (* Chat shows its roster by default; other surfaces keep their columns.
      An explicit Ctrl-B choice survives both navigation and resizing. *)
   mutable roster_pane_preference: Masc_tui_roster_pane.preference;
+  (* Left opens a temporary Keeper navigator without changing Ctrl-B's choice.
+     On narrow screens it occupies the body until a selection or dismissal. *)
+  mutable keeper_navigation_open: bool;
   (* The Activity pane on the right edge costs a surface
      [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
      [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
@@ -6538,14 +6541,16 @@ let retire_identity_login_expectations (state : state) =
   state.identity_login_expectations <- []
 
 let roster_pane_hidden (state : state) =
-  Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
-    ~in_chat:(state.view = Keepers Keeper_message)
+  not state.keeper_navigation_open
+  && Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
+       ~in_chat:(state.view = Keepers Keeper_message)
 
 (* Called at interaction and presentation boundaries with the surface width,
    after reserving any Activity pane. Visibility preference survives a resize;
    focus does not: an absent roster cannot keep arrows, Enter or the caret. *)
 let reconcile_keeper_message_focus (state : state) ~cols =
   if state.view = Keepers Keeper_message
+     && not state.keeper_navigation_open
      && not (Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols)
   then state.keeper_message_focus <- Right_pane
 
@@ -8292,6 +8297,7 @@ let create_state
   (* Wide chat starts with its Keeper roster. Other surfaces keep their
      full width until Ctrl-B records an explicit choice. *)
   roster_pane_preference = Masc_tui_roster_pane.Auto;
+  keeper_navigation_open = false;
   acting_pane_preference = Default_acting_pane;
   acting_pane_scroll = 0;
   acting_pane_cursor = None;

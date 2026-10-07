@@ -246,9 +246,10 @@ status: reference
   verifier·HITL auto judge·board attention 레인이 `Priority`다
   (`Standalone_lane.admission_class`). 이 값은 그 provider에서 `max-concurrent`를
   선언한 binding에만 붙는다. 그런 binding이 없거나 공식 클라이언트 provider이면
-  설정을 읽을 때 거절한다. 실행 중인 서버는 계정이 처음 받은 칸 수와 연속 한도를
-  재시작할 때까지 쓰므로, 허가 중인 계정의 두 값을 바꾸는 설정 저장과
-  `masc runtime-resume`은 거절된다.
+  설정을 읽을 때 거절한다. 한 계정의 binding은 칸 수와 연속 한도를 같게 선언해야
+  하고, 다르면 설정 저장과 로드에서 거절한다. 설정 저장이나 `masc runtime-resume`으로
+  두 값을 바꾸면 실행 중인 서버에 바로 반영된다. 칸이 늘면 기다리던 요청이 바로
+  허가를 받고, 줄면 쓰는 요청 수가 새 칸 수 아래로 내려갈 때까지 새 허가를 내주지 않는다.
   줄을 선 요청은 기다림이 끝날 때 `masc.provider_admission.waited` 이벤트를 하나 남긴다.
   기다림은 제공자가 보낸 429 관측인 Runtime Rate Limit이나 후보 실패 분류의
   `Binding Admission`과 다른 단계다.

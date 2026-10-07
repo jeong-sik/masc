@@ -400,9 +400,12 @@ let board_read_focus_key =
 let fusion_caller_key = b Navigate "K" "calling Keeper"
 let fusion_board_key = b Navigate "B" "Board evidence"
 
+let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
+
 let for_surface = function
   | Overview ->
-      [ b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      [ b Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
+      ; b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
       ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
       ; b Navigate "p" "requests" ~help:"approvals and questions"
       ; b Navigate ";" "agenda" ~help:"Goal confirmations and tasks waiting on you"
@@ -510,7 +513,7 @@ let for_surface = function
       ]
       @ listing_meta
   | Keepers Keeper_message ->
-      [ b Navigate "Left" "roster" ~help:"focus the visible Keeper roster"
+      [ b Navigate "Left" "roster" ~help:"open and focus the Keeper roster, including when hidden or narrow"
       ; b Navigate "Right" "chat"
           ~help:"roster focused: return focus to the chat composer"
       ; (* One key, two focuses: the roster when it holds focus, the history

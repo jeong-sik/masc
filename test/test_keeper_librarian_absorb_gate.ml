@@ -1205,6 +1205,84 @@ let test_cancellation_during_terminal_callback_settles_registry () =
     ["live", registry; "replayed", Runs.replay path]
 ;;
 
+(* The observer is what the parent Librarian run reads, so a cancellation
+   that arrives while the finish callback runs must not skip it. *)
+let test_cancellation_during_finish_callback_still_publishes_the_observation () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module F = Exact_output_fixture in
+  let server = F.start_server ~sw ~net ~clock (F.Reply
+      {|{"model":"response-model","answers":{"s0_0":{"type":"noul","noul":0.9}}}|}) in
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with destinations =
+        ({ Runtime_schema.endpoint = server.base_url; model = "request-model";
+           api_key_env = "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
+  let source = fact (List.hd sources) in
+  let observed = ref [] in
+  let raised = ref false in
+  (try Eio.Cancel.sub (fun cancellation ->
+     ignore (Gate.run ~clock ~keeper_id:"finish-cancel-fixture" ~superseding:[]
+       ~facts:[source] ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])
+       ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> "run")
+       ~after_evaluate:(fun ~evaluation_id:_ _ ->
+         Eio.Cancel.cancel cancellation Cancel_gate_fixture)
+       ~on_evaluation_aborted:(fun ~evaluation_id:_ _ -> ())
+       ~observe:(fun observation -> observed := observation :: !observed) ());
+     Alcotest.fail "Gate.run returned despite cancellation")
+   with Eio.Cancel.Cancelled Cancel_gate_fixture -> raised := true);
+  Alcotest.(check bool) "original cancellation propagates" true !raised;
+  match List.rev !observed with
+  | [ Gate.Incomplete [ _ ] ] -> ()
+  | _ -> Alcotest.fail "the completed evaluation was not published before the cancellation"
+;;
+
+(* A provider that raises while the abort callback settles the row: the
+   cancellation that arrived meanwhile wins over the provider's exception. *)
+let test_cancellation_during_failure_settlement_propagates_as_cancelled () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock:real_clock ->
+  let module F = Exact_output_fixture in
+  let server = F.start_server ~sw ~net ~clock:real_clock (F.Reply {|{}|}) in
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with destinations =
+        ({ Runtime_schema.endpoint = server.base_url; model = "request-model";
+           api_key_env = "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
+  (* The request window sleeps on this clock; raising from it is how the
+     fixture makes the provider call raise instead of returning [Error]. *)
+  let clock =
+    let module Raising = struct
+      type t = unit
+      type time = float
+      let now () = 0.
+      let sleep_until () _ = failwith "fixture clock raised"
+    end in
+    Eio.Resource.T ((), Eio.Time.Pi.clock (module Raising))
+  in
+  let source = fact (List.hd sources) in
+  let aborted = ref 0 in
+  let outcome =
+    try Eio.Cancel.sub (fun cancellation ->
+      ignore (Gate.run ~clock ~keeper_id:"failure-cancel-fixture" ~superseding:[]
+        ~facts:[source] ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])
+        ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> "run")
+        ~after_evaluate:(fun ~evaluation_id:_ _ ->
+          Alcotest.fail "a raising provider has no completed evaluation")
+        ~on_evaluation_aborted:(fun ~evaluation_id:_ -> function
+          | `Failed _ ->
+            incr aborted;
+            Eio.Cancel.cancel cancellation Cancel_gate_fixture
+          | `Cancelled -> Alcotest.fail "the provider raised before any cancellation")
+        ());
+      `Returned)
+    with
+    | Eio.Cancel.Cancelled Cancel_gate_fixture -> `Cancelled
+    | exn -> `Other (Printexc.to_string exn)
+  in
+  Alcotest.(check int) "the failed row settled once" 1 !aborted;
+  match outcome with
+  | `Cancelled -> ()
+  | `Returned -> Alcotest.fail "Gate.run returned"
+  | `Other detail -> Alcotest.failf "provider exception escaped instead of Cancelled: %s" detail
+;;
+
 let test_skipped_run_publishes_its_completed_observation () =
   let observed = ref [] in
   let run = Gate.run ~keeper_id:"empty-observation-fixture" ~superseding:[] ~facts:[] ~new_claims:[]
@@ -2241,6 +2319,10 @@ let () =
             test_run_records_the_destination_passed_over
         ; Alcotest.test_case "cancelled next request retains its completed observation" `Quick
             test_cancelled_next_request_keeps_the_completed_observation
+        ; Alcotest.test_case "finish callback cancellation still publishes the observation" `Quick
+            test_cancellation_during_finish_callback_still_publishes_the_observation
+        ; Alcotest.test_case "failure settlement cancellation propagates as Cancelled" `Quick
+            test_cancellation_during_failure_settlement_propagates_as_cancelled
         ; Alcotest.test_case "skipped run publishes its completed observation" `Quick
             test_skipped_run_publishes_its_completed_observation
         ; Alcotest.test_case "terminal callback settles before cancellation propagates" `Quick

@@ -1017,6 +1017,11 @@ let run
            | exn ->
              let backtrace = Printexc.get_raw_backtrace () in
              abort_evaluation evaluation_id (`Failed (Printexc.to_string exn));
+             (* [protect] does not look for a cancellation that arrived while
+                the row settled. Without this the caller would see the
+                provider's exception and treat the turn as an ordinary
+                failure instead of a cancelled one. *)
+             Eio.Fiber.check ();
              Printexc.raise_with_backtrace exn backtrace
          in
          let evaluation = { direction; destinations; state; questions; result } in
@@ -1027,11 +1032,13 @@ let run
                 (fun id -> settle (fun () -> finish ~evaluation_id:id evaluation))
                 evaluation_id)
            after_evaluate;
+         (* The observer keeps the completed evaluation for the parent run, so
+            it runs before the cancellation check below. *)
+         publish (Incomplete (List.rev !evaluations));
          (* [protect] does not look for a cancellation that arrived while it
             ran. Look now, so a cancelled turn stops at this evaluation
             instead of carrying its answer into the next step. *)
          Eio.Fiber.check ();
-         publish (Incomplete (List.rev !evaluations));
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
          |> Result.map_error Typesafeai_client.failure_to_string
        in

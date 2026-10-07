@@ -989,6 +989,19 @@ let run
           log names exactly what was sent (the Board gate keeps the same
           value as provenance). *)
        let evaluations = ref [] in
+       (* Every terminal callback writes its payload before it takes the
+          registry's protected lock, so a cancellation arriving in between
+          would leave the run Running. All three settle through here. *)
+       let settle callback = Eio.Cancel.protect callback in
+       let abort_evaluation evaluation_id disposition =
+         settle (fun () ->
+           Option.iter
+             (fun abort ->
+                Option.iter
+                  (fun id -> abort ~evaluation_id:id disposition)
+                  evaluation_id)
+             on_evaluation_aborted)
+       in
        let evaluate direction ~state ~questions =
          let evaluation_id =
            Option.map
@@ -999,37 +1012,25 @@ let run
            try Typesafeai_client.evaluate ?clock ~destinations:armed ~state ~questions () with
            | Eio.Cancel.Cancelled _ as exn ->
              let backtrace = Printexc.get_raw_backtrace () in
-             (* The payload write precedes the registry's protected lock.
-                Settle the whole terminal callback in the cancelled context. *)
-             Eio.Cancel.protect (fun () ->
-               Option.iter
-                 (fun abort ->
-                    Option.iter
-                      (fun id -> abort ~evaluation_id:id `Cancelled)
-                      evaluation_id)
-                 on_evaluation_aborted);
+             abort_evaluation evaluation_id `Cancelled;
              Printexc.raise_with_backtrace exn backtrace
            | exn ->
-             Option.iter
-               (fun abort ->
-                  Option.iter
-                    (fun id -> abort ~evaluation_id:id (`Failed (Printexc.to_string exn)))
-                    evaluation_id)
-               on_evaluation_aborted;
-             raise exn
+             let backtrace = Printexc.get_raw_backtrace () in
+             abort_evaluation evaluation_id (`Failed (Printexc.to_string exn));
+             Printexc.raise_with_backtrace exn backtrace
          in
          let evaluation = { direction; destinations; state; questions; result } in
          evaluations := evaluation :: !evaluations;
-         (* Terminal payload persistence precedes the registry's protected
-            lock. Finish the whole callback even if cancellation arrives
-            after the provider has returned. *)
          Option.iter
            (fun finish ->
               Option.iter
-                (fun id ->
-                   Eio.Cancel.protect (fun () -> finish ~evaluation_id:id evaluation))
+                (fun id -> settle (fun () -> finish ~evaluation_id:id evaluation))
                 evaluation_id)
            after_evaluate;
+         (* [protect] does not look for a cancellation that arrived while it
+            ran. Look now, so a cancelled turn stops at this evaluation
+            instead of carrying its answer into the next step. *)
+         Eio.Fiber.check ();
          publish (Incomplete (List.rev !evaluations));
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
          |> Result.map_error Typesafeai_client.failure_to_string

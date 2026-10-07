@@ -22,19 +22,6 @@ HELD_PATH = "/api/v1/keepers/tool-approvals"
 GATE_PATH = "/api/v1/dashboard/gate"
 FRAME_SEQUENCE = itertools.count(1)
 
-# The server derives a human_required phase from an Auto Judge summary that
-# hands the call to a person, and sends that summary on the row; the TUI
-# refuses a human_required row without it (#41464).
-def human_required_summary_status():
-    return {"status": "available", "summary": {
-        "summary_version": 2, "generated_at": 1790000000.0,
-        "model_run_id": "fixture-judge-run",
-        "context_summary": "The call reaches outside the workspace.",
-        "key_questions": ["Should this call run here?"],
-        "judgment": "require_human",
-        "rationale": "Auto Judge cannot tell whether the operator wants this."}}
-
-
 
 def selected(label):
     return re.compile(rb"\x1b\[7m[^\r\n]*" + re.escape(label))
@@ -160,9 +147,8 @@ def failed_source_keeps_known_cards(executable):
     fixtures = fixtures_with_held([held("call-known", "known-held-card")])
     fixtures[OPERATOR_PATH] = (503, {"error": "confirm source offline"})
     gate = copy.deepcopy(_keyboard_approvals.blocked_gate_detail_http_fixtures()[GATE_PATH])
-    gate[1]["approval_queue"][0].update(id="gate-known", phase="human_required",
-                                        summary_status=human_required_summary_status(),
-                                        tool_name="known-gate-card")
+    gate[1]["approval_queue"][0] = home.human_required_row(
+        gate[1]["approval_queue"][0], id="gate-known", tool_name="known-gate-card")
     fixtures[GATE_PATH] = gate
     requests = []
 
@@ -236,9 +222,9 @@ def each_failed_source_keeps_other_cards(executable):
     for failed_path, failed_label in cases:
         fixtures = fixtures_with_held([held("call-partial", "retained-held-card")])
         gate = copy.deepcopy(_keyboard_approvals.blocked_gate_detail_http_fixtures()[GATE_PATH])
-        gate[1]["approval_queue"][0].update(id="gate-partial", phase="human_required",
-                                            summary_status=human_required_summary_status(),
-                                            tool_name="retained-gate-card")
+        gate[1]["approval_queue"][0] = home.human_required_row(
+            gate[1]["approval_queue"][0], id="gate-partial",
+            tool_name="retained-gate-card")
         fixtures[GATE_PATH] = gate
         fixtures[_keyboard_harness.KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
         fixtures[failed_path] = (503, {"error": "isolated source failure"})

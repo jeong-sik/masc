@@ -29,7 +29,6 @@ type failure =
   | Source_owner_identity_changed
   | Target_owner_not_active
   | Target_owner_identity_changed
-  | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
   | Source_transfer_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Target_transfer_shutdown_reserved of Keeper_shutdown_types.Operation_id.t

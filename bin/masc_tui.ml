@@ -10112,7 +10112,8 @@ let apply_keeper_roster_load state result =
            Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle
          | Workspace_identity_match,
            (None | Some { Tui_decode.sid_state_ready = Some false; _ })
-         | (Workspace_identity_mismatch _ | Workspace_identity_unread), _ -> None);
+         | ( Workspace_identity_mismatch _ | Workspace_identity_unread
+           | Workspace_identity_match_unconfirmed _ ), _ -> None);
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None;
       (match state.item_account with

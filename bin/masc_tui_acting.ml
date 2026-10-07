@@ -60,7 +60,7 @@ let visible filter (event : Observer.event) =
       (* A reply sends one stream frame per token, and a queue-size change is
          state rather than something a keeper did. Both belong with the
          heartbeat: shown under [Everything], never counted as an action. *)
-      | Observer.Keeper_chat_stream_frame _
+      | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
       | Observer.Keeper_waiting_inventory_changed _
       (* A provider-call observation is identity the fold reads, not
          something a keeper did. *)
@@ -103,7 +103,7 @@ let retained_as_action (event : Observer.event) =
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
-  | Observer.Keeper_chat_stream_frame _
+  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
   | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
@@ -393,6 +393,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_composite_changed { keeper; _ }
   | Observer.Keeper_chat_appended { keeper; _ }
   | Observer.Keeper_chat_stream_frame { keeper; _ }
+  | Observer.Keeper_turn_stream_frame { keeper; _ }
   | Observer.Keeper_waiting_inventory_changed { keeper; _ }
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
@@ -424,7 +425,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Keeper_composite_changed _ -> "composite"
   | Observer.Keeper_turn_observation _ -> "call"
   | Observer.Keeper_chat_appended _ -> "chat"
-  | Observer.Keeper_chat_stream_frame _ -> "chat stream"
+  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ -> "chat stream"
   | Observer.Keeper_waiting_inventory_changed _ -> "waiting queue"
   | Observer.Fusion_run_status _ -> "fusion"
   | Observer.Lane_resource resource -> (
@@ -515,6 +516,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; label
       ; detail = Option.value ~default:"" frame
       }
+  | Observer.Keeper_turn_stream_frame { keeper; _ } ->
+      { at; keeper; glyph = Quiet; label; detail = "" }
   | Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; _ } ->
       { at
       ; keeper
@@ -731,7 +734,7 @@ let member_of_event (event : Observer.event) =
      ([fold_chunks]); not a member itself. *)
   | Observer.Keeper_turn_observation _
   | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
-  | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _
+  | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Snapshot _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
   | Observer.Lane_resource _ | Observer.Other _ ->
@@ -904,7 +907,7 @@ let observation_of_event (event : Observer.event) =
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
-  | Observer.Keeper_chat_stream_frame _
+  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
   | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
@@ -1047,7 +1050,7 @@ let lane_fold_key (event : Observer.event) =
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _
-  | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _
+  | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _
   | Observer.Internal_agent_runs_changed | Observer.Snapshot _
   | Observer.Other _ ->
@@ -1213,7 +1216,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
           | Observer.Keeper_turn_observation _
           | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
-          | Observer.Keeper_chat_stream_frame _
+          | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _
           | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
           | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->

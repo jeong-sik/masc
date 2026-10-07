@@ -140,10 +140,9 @@ let update_conditions (c : conditions) (ev : event) : conditions =
 let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action list =
   let lifecycle name detail = Publish_lifecycle { event_name = name; detail } in
   match new_phase with
-  | Draining -> [ Start_drain; lifecycle "draining" "" ]
+  | Draining -> [ lifecycle "draining" "" ]
   | Stopped ->
-    [ Cleanup_and_unregister
-    ; lifecycle
+    [ lifecycle
         "stopped"
         (match event with
          | Drain_complete -> "drain_complete"

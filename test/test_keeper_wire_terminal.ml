@@ -4,13 +4,30 @@
    before it can emit RUN_ERROR, so the SSE stream used to close with no
    terminal receipt. The server tracks per-operation wire audience — open
    from sink registration, dropped when the last sink leaves — and the Owner
-   settle hook synthesizes the missing terminal from the execution verdict.
-   These tests pin the registry transitions, the synthesis decision table,
-   and the production glue the operation_runner wires. *)
+   settle hook records the missing terminal before projecting the execution
+   verdict. These tests cover registry transitions, disconnected cancellation
+   replay, failed persistence, and the production glue the runner wires. *)
 
 open Alcotest
 open Masc
 module Stream = Server_routes_http_keeper_stream
+module Journal = Keeper_chat_event_log
+module Events = Keeper_chat_events
+
+let with_workspace f =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () -> f base_path)
+
+let read_journal ~base_path ~keeper_name ~operation_id =
+  match Journal.read_journal_path_result
+    (Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id) with
+  | Ok entries -> entries
+  | Error Journal.Journal_missing -> fail "settled operation has no journal"
+  | Error (Journal_unreadable detail | Journal_corrupt detail) -> fail detail
+
+let error_entries entries = List.filter (fun (entry : Journal.journaled_event) ->
+  match entry.event with Events.Event_error _ -> true | _ -> false) entries
 
 let custom_event () =
   Ag_ui.of_custom ~name:"TEST_EVENT" (`Assoc [ ("ok", `Bool true) ])
@@ -47,14 +64,21 @@ let collect_sink () =
   (events, sink)
 
 let test_settle_synthesizes_run_error_for_open_stream () =
+  with_workspace @@ fun base_path ->
   let operation_id = "op-wire-cancelled" in
-  let events, sink = collect_sink () in
+  let events, collect = collect_sink () in
+  let sink ~seq event =
+    let persisted = read_journal ~base_path ~keeper_name:"wire-test" ~operation_id in
+    check int "terminal is durable before live delivery" 1 (List.length (error_entries persisted));
+    check (option int) "live cursor names the persisted event" (Some 0) seq;
+    collect ~seq event in
   let unregister =
     Stream.For_testing.register_operation_live_sink ~operation_id sink
   in
   Fun.protect ~finally:unregister @@ fun () ->
   Stream.For_testing.note_operation_wire_event ~operation_id (custom_event ());
   Stream.For_testing.synthesize_wire_terminal_on_settle
+    ~base_path
     ~keeper_name:"wire-test"
     ~operation_id
     ~execution:(failed_execution "Keeper owner stopped the active turn");
@@ -75,12 +99,14 @@ let test_settle_synthesizes_run_error_for_open_stream () =
           (List.length events)));
   (* Settle consumed the record: a second settle stays silent. *)
   Stream.For_testing.synthesize_wire_terminal_on_settle
+    ~base_path
     ~keeper_name:"wire-test"
     ~operation_id
     ~execution:(failed_execution "second settle");
   check int "second settle synthesizes nothing" 1 (List.length !events)
 
 let test_settle_is_silent_when_terminal_already_sent () =
+  with_workspace @@ fun base_path ->
   let operation_id = "op-wire-terminal-sent" in
   let events, sink = collect_sink () in
   let unregister =
@@ -89,13 +115,20 @@ let test_settle_is_silent_when_terminal_already_sent () =
   Fun.protect ~finally:unregister @@ fun () ->
   Stream.For_testing.note_operation_wire_event ~operation_id (custom_event ());
   Stream.For_testing.note_operation_wire_event ~operation_id (run_error_event ());
+  let journal = Journal.open_journal ~base_dir:base_path
+    ~keeper_name:"wire-test" ~operation_id () in
+  Journal.append journal ~seq:0 ~ts:42. (Events.Event_error { message = "already terminal" });
   Stream.For_testing.synthesize_wire_terminal_on_settle
+    ~base_path
     ~keeper_name:"wire-test"
     ~operation_id
     ~execution:(failed_execution "already terminal");
-  check int "no duplicate terminal" 0 (List.length !events)
+  check int "no duplicate terminal" 0 (List.length !events);
+  check int "no duplicate durable failure" 1
+    (List.length (error_entries (read_journal ~base_path ~keeper_name:"wire-test" ~operation_id)))
 
 let test_settle_synthesizes_for_attached_client_with_no_events () =
+  with_workspace @@ fun base_path ->
   (* A turn that fails after claim but before the projection ever runs
      (missing input, payload parse failure) projects no events. The attached
      client still needs a terminal: sink registration alone opens the wire
@@ -107,6 +140,7 @@ let test_settle_synthesizes_for_attached_client_with_no_events () =
   in
   Fun.protect ~finally:unregister @@ fun () ->
   Stream.For_testing.synthesize_wire_terminal_on_settle
+    ~base_path
     ~keeper_name:"wire-test"
     ~operation_id
     ~execution:(failed_execution "operation input missing");
@@ -121,19 +155,25 @@ let test_settle_synthesizes_for_attached_client_with_no_events () =
          (List.length events))
 
 let test_settle_is_silent_without_audience () =
+  with_workspace @@ fun base_path ->
   let operation_id = "op-wire-no-audience" in
   check bool "no record before settle" true
     (Option.is_none (Stream.For_testing.take_operation_wire_stream ~operation_id));
-  (* No sink was ever registered (connector channels): settle must not raise
-     and must stay silent — durable operation state is the authority. *)
+  (* No sink was ever registered: settlement still creates durable failure
+     evidence for the journal endpoint and a later reconnect. *)
   Stream.For_testing.synthesize_wire_terminal_on_settle
+    ~base_path
     ~keeper_name:"wire-test"
     ~operation_id
     ~execution:(failed_execution "no audience ever attached");
-  check bool "still no record after settle" true
-    (Option.is_none (Stream.For_testing.take_operation_wire_stream ~operation_id))
+  check bool "still no wire record after settle" true
+    (Option.is_none (Stream.For_testing.take_operation_wire_stream ~operation_id));
+  check int "failure persists without an audience" 1
+    (List.length (error_entries
+      (read_journal ~base_path ~keeper_name:"wire-test" ~operation_id)))
 
 let test_unregistering_last_sink_drops_the_record () =
+  with_workspace @@ fun base_path ->
   let operation_id = "op-wire-audience-left" in
   let events, sink = collect_sink () in
   let unregister =
@@ -141,14 +181,19 @@ let test_unregistering_last_sink_drops_the_record () =
   in
   unregister ();
   Stream.For_testing.synthesize_wire_terminal_on_settle
+    ~base_path
     ~keeper_name:"wire-test"
     ~operation_id
     ~execution:(failed_execution "client disconnected before settle");
   check int "no synthesis after the audience left" 0 (List.length !events);
   check bool "record dropped with the last sink" true
-    (Option.is_none (Stream.For_testing.take_operation_wire_stream ~operation_id))
+    (Option.is_none (Stream.For_testing.take_operation_wire_stream ~operation_id));
+  check int "disconnected failure persists" 1
+    (List.length (error_entries
+      (read_journal ~base_path ~keeper_name:"wire-test" ~operation_id)))
 
 let test_production_glue_settles_claimed_operation () =
+  with_workspace @@ fun base_path ->
   (* Executes the exact function the operation_runner wires. Both identifiers
      are plain strings past this boundary, so a swapped argument would
      typecheck — the content assertions below are the guard (#28849 review). *)
@@ -168,6 +213,7 @@ let test_production_glue_settles_claimed_operation () =
   in
   Fun.protect ~finally:unregister @@ fun () ->
   Stream.For_testing.on_operation_execution_settled
+    ~base_path
     ~keeper_name:"wire-glue"
     ~claimed_operation_id:(Some operation_id)
     ~execution:(failed_execution "glue path verdict");
@@ -186,12 +232,14 @@ let test_production_glue_settles_claimed_operation () =
           (List.length events)));
   (* Unclaimed settle is a no-op through the same glue. *)
   Stream.For_testing.on_operation_execution_settled
+    ~base_path
     ~keeper_name:"wire-glue"
     ~claimed_operation_id:None
     ~execution:(failed_execution "never claimed");
   check int "unclaimed settle synthesizes nothing" 1 (List.length !events)
 
 let test_settle_success_without_terminal_emits_nothing () =
+  with_workspace @@ fun base_path ->
   let operation_id = "op-wire-success-anomaly" in
   let events, sink = collect_sink () in
   let unregister =
@@ -200,12 +248,177 @@ let test_settle_success_without_terminal_emits_nothing () =
   Fun.protect ~finally:unregister @@ fun () ->
   Stream.For_testing.note_operation_wire_event ~operation_id (custom_event ());
   Stream.For_testing.synthesize_wire_terminal_on_settle
+    ~base_path
     ~keeper_name:"wire-test"
     ~operation_id
     ~execution:(Keeper_owner.Operation_succeeded { outcome_ref = "ref" });
   check int "success anomaly is logged, not synthesized" 0 (List.length !events);
   check bool "success settle still consumes the record" true
     (Option.is_none (Stream.For_testing.take_operation_wire_stream ~operation_id))
+
+let test_interrupted_owner_without_subscriber_replays_failure () =
+  with_workspace @@ fun base_path ->
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let module Owner = Keeper_owner in
+  let keeper_name = "cancelled-owner" in
+  let operation_id_string = "op-interrupted-no-subscriber" in
+  let operation_id = match Keeper_chat_operation.Operation_id.of_string operation_id_string with
+    | Ok id -> id | Error detail -> fail detail in
+  let owner_ok = function Ok value -> value | Error error -> fail (Owner.error_to_string error) in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+    (`Assoc [ "name", `String keeper_name; "trace_id", `String "trace-cancelled-owner";
+      "activation_mode", `String "manual" ]) with
+    | Ok meta -> meta | Error detail -> fail detail in
+  let started, signal_started = Eio.Promise.create () in
+  let parked, _release = Eio.Promise.create () in
+  let settled, signal_settled = Eio.Promise.create () in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    ignore (Option.get (owner_ok (claim ())));
+    let journal = Journal.open_journal ~base_dir:base_path ~keeper_name
+      ~operation_id:operation_id_string () in
+    Journal.append journal ~seq:0 ~ts:42.
+      (Events.Run_started { run_id = "keeper-operation-run-" ^ operation_id_string;
+        thread_id = "keeper:" ^ keeper_name });
+    Journal.append journal ~seq:1 ~ts:42.
+      (Events.Text_message_start { message_id = "interrupted-message"; role = Events.Assistant });
+    Eio.Promise.resolve signal_started ();
+    Eio.Promise.await parked;
+    Owner.Operation_succeeded { outcome_ref = "unreachable-before-interrupt" } in
+  let on_execution_settled ~keeper_name ~claimed_operation_id ~execution =
+    Stream.For_testing.on_operation_execution_settled
+      ~base_path ~keeper_name ~claimed_operation_id ~execution;
+    Eio.Promise.resolve signal_settled execution in
+  let owner = owner_ok (Owner.start ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_store_path:(Filename.concat base_path "operations.sqlite3")
+    ~now:(fun () -> 42.)
+    ~operation_runner:(Some Owner.{ ready = (fun ~keeper_name:_ -> true);
+      execute; on_execution_settled })
+    ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta)) in
+  ignore (owner_ok (Owner.submit_operation owner ~operation_id
+    ~source:(`Assoc [ "kind", `String "dashboard" ])
+    ~input:(`Assoc [ "message", `String "answer me" ])));
+  Eio.Promise.await started;
+  (match owner_ok (Owner.interrupt_running_operation owner operation_id) with
+   | Owner.Operation_interrupt_signalled -> ()
+   | _ -> fail "running operation did not accept the interrupt");
+  (match Eio.Promise.await settled with
+   | Owner.Operation_failed { kind = Keeper_chat_operation.Turn_cancelled; _ } -> ()
+   | _ -> fail "interrupt did not settle as cancellation");
+  let entries = read_journal ~base_path ~keeper_name ~operation_id:operation_id_string in
+  check int "cancelled run has one durable error" 1 (List.length (error_entries entries));
+  let frames = Stream.For_testing.journal_replay_frames ~base_path ~keeper_name
+    ~operation_id:operation_id_string ~since_seq:(Journal.After_seq 1) in
+  match frames with
+  | [2, event] ->
+    check bool "reopening sees RUN_ERROR" true (event.Ag_ui.event_type = Ag_ui.Run_error);
+    check string "replay keeps Keeper identity" ("keeper:" ^ keeper_name) event.thread_id;
+    check (option string) "replay keeps request identity"
+      (Some ("keeper-operation-run-" ^ operation_id_string)) event.run_id
+  | _ -> fail "reconnect did not replay the interrupted terminal"
+
+let test_failed_continuation_after_prior_finished_segment () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "continued-owner" and operation_id = "op-continuation-failed" in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  let run_id = "keeper-operation-run-" ^ operation_id in
+  Journal.append journal ~seq:0 ~ts:42.
+    (Events.Run_started { run_id; thread_id = "keeper:" ^ keeper_name });
+  Journal.append journal ~seq:1 ~ts:42. (Events.Run_finished { run_id });
+  (* The new segment failed before its Run_started reached the journal. *)
+  Stream.For_testing.synthesize_wire_terminal_on_settle ~base_path ~keeper_name
+    ~operation_id ~execution:(failed_execution "continuation interrupted before projection");
+  let frames = Stream.For_testing.journal_replay_frames ~base_path ~keeper_name
+    ~operation_id ~since_seq:(Journal.After_seq 1) in
+  match frames with
+  | [2, event] -> check bool "old finish did not hide new failure" true
+      (event.Ag_ui.event_type = Ag_ui.Run_error)
+  | _ -> fail "continuation failure disappeared behind its prior terminal"
+
+let test_journal_failure_keeps_live_error_without_cursor () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "unwritable-journal" and operation_id = "op-journal-failed" in
+  ignore (Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id ());
+  Unix.mkdir (Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id) 0o700;
+  let delivered = ref [] in
+  let unregister = Stream.For_testing.register_operation_live_sink ~operation_id
+    (fun ~seq event -> delivered := (seq, event) :: !delivered) in
+  Fun.protect ~finally:unregister @@ fun () ->
+  Stream.For_testing.synthesize_wire_terminal_on_settle ~base_path ~keeper_name
+    ~operation_id ~execution:(failed_execution "interrupted despite journal failure");
+  match !delivered with
+  | [None, event] -> check bool "failure still reaches the live client" true
+      (event.Ag_ui.event_type = Ag_ui.Run_error)
+  | _ -> fail "failed journal append lost the live terminal or fabricated a cursor"
+
+(* Every settlement path without a live stream ends the journal through
+   [record_terminal_error], so the helper itself carries the guarantees: one
+   terminal per failure, never a second one, and a finished earlier segment
+   does not stand in for it. *)
+let test_record_terminal_error_writes_once () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-once" and operation_id = "op-terminal-once" in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  let append seq event =
+    match Journal.append_result journal ~seq ~ts:1.0 event with
+    | Ok () -> ()
+    | Error detail -> fail detail in
+  append 0 (Events.Run_started { run_id = "run-1"; thread_id = "keeper:terminal-once" });
+  append 1 (Events.Run_finished { run_id = "run-1" });
+  append 2 (Events.Run_started { run_id = "run-2"; thread_id = "keeper:terminal-once" });
+  (match Journal.record_terminal_error journal ~ts:2.0 ~message:"first cause" with
+   | Ok (Journal.Recorded_terminal_error { seq; _ }) ->
+     check int "appended after the unfinished segment" 3 seq
+   | Ok (Journal.Existing_terminal_error _) ->
+     fail "an earlier Run_finished stood in for this failure"
+   | Error detail -> fail detail);
+  (match Journal.record_terminal_error journal ~ts:3.0 ~message:"second cause" with
+   | Ok (Journal.Existing_terminal_error { seq; message; _ }) ->
+     check int "the first terminal is reported" 3 seq;
+     check string "with the cause it recorded" "first cause" message
+   | Ok (Journal.Recorded_terminal_error _) -> fail "a second terminal was appended"
+   | Error detail -> fail detail);
+  check int "one terminal in the journal" 1
+    (List.length (error_entries (read_journal ~base_path ~keeper_name ~operation_id)))
+
+(* A restart can cut an append between its write and its newline. The terminal
+   still has to land: the next sequence comes from the complete rows, and the
+   append cuts the fragment before it writes. *)
+let test_record_terminal_error_cuts_a_torn_tail () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-torn" and operation_id = "op-terminal-torn" in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  let append seq event =
+    match Journal.append_result journal ~seq ~ts:1.0 event with
+    | Ok () -> ()
+    | Error detail -> fail detail in
+  append 0 (Events.Run_started { run_id = "run-torn"; thread_id = "keeper:terminal-torn" });
+  append 1 (Events.Text_delta "partial");
+  let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
+  let oc = open_out_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path in
+  output_string oc "{\"v\":1,\"seq\":2,\"ts\":1.5,\"event\":{\"type\":\"text_del";
+  close_out oc;
+  (match Journal.record_terminal_error journal ~ts:2.0 ~message:"cut by restart" with
+   | Ok (Journal.Recorded_terminal_error { seq; _ }) ->
+     check int "appended after the last complete row" 2 seq
+   | Ok (Journal.Existing_terminal_error _) -> fail "a torn fragment stood in for a terminal"
+   | Error detail -> fail ("the torn journal refused its terminal: " ^ detail));
+  let entries = read_journal ~base_path ~keeper_name ~operation_id in
+  check (list int) "the fragment is gone and the rows are in order" [ 0; 1; 2 ]
+    (List.map (fun (entry : Journal.journaled_event) -> entry.seq) entries);
+  check int "one terminal in the journal" 1 (List.length (error_entries entries))
+
+let test_record_terminal_error_creates_a_missing_journal () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-missing" and operation_id = "op-terminal-missing" in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  (match Journal.record_terminal_error journal ~ts:1.0 ~message:"never started" with
+   | Ok (Journal.Recorded_terminal_error { seq; _ }) -> check int "first row" 0 seq
+   | Ok (Journal.Existing_terminal_error _) -> fail "nothing existed to report"
+   | Error detail -> fail detail);
+  check int "the terminal is the journal" 1
+    (List.length (read_journal ~base_path ~keeper_name ~operation_id))
 
 let () =
   Alcotest.run "keeper_wire_terminal"
@@ -218,7 +431,7 @@ let () =
             test_settle_is_silent_when_terminal_already_sent
         ; test_case "settle synthesizes for attached client with no events" `Quick
             test_settle_synthesizes_for_attached_client_with_no_events
-        ; test_case "settle silent without audience" `Quick
+        ; test_case "settle persists without audience" `Quick
             test_settle_is_silent_without_audience
         ; test_case "unregistering last sink drops the record" `Quick
             test_unregistering_last_sink_drops_the_record
@@ -226,5 +439,17 @@ let () =
             test_production_glue_settles_claimed_operation
         ; test_case "success without terminal emits nothing" `Quick
             test_settle_success_without_terminal_emits_nothing
+        ; test_case "interrupted owner replays failure without subscriber" `Quick
+            test_interrupted_owner_without_subscriber_replays_failure
+        ; test_case "failed continuation follows prior finished segment" `Quick
+            test_failed_continuation_after_prior_finished_segment
+        ; test_case "journal failure preserves live terminal without cursor" `Quick
+            test_journal_failure_keeps_live_error_without_cursor
+        ; test_case "record_terminal_error writes once" `Quick
+            test_record_terminal_error_writes_once
+        ; test_case "record_terminal_error cuts a torn tail" `Quick
+            test_record_terminal_error_cuts_a_torn_tail
+        ; test_case "record_terminal_error creates a missing journal" `Quick
+            test_record_terminal_error_creates_a_missing_journal
         ] )
     ]

@@ -666,6 +666,26 @@ status: reference
   (RFC-0468 §3.2). 접수 응답은 실행 완료를 뜻하지 않는다.
   → [Keeper_chat_operation_payload](../../lib/keeper/keeper_chat_operation_payload.mli)
 
+**Keeper Turn Slot Admission Priority (키퍼 턴 슬롯 진입 우선순위)**
+: 한 Keeper 파이버(`Owner` fiber)의 단일 실행 슬롯(`turn slot`)이 해제되었을 때, 큐에 대기 중인
+  청구 가능한 직접 입력(`claimable queued chat operation`)이 자율 턴(`autonomous turn`)보다
+  항상 먼저 슬롯을 획득하는 엄격한 우선순위 규칙(#41654). 자율 레인이 바쁜 슬롯을 반복
+  관측하더라도 진입 순서는 바뀌지 않으며, 이전 RFC-0373 방향(direction 2)의 유예 부채
+  한도(`autonomous_deferral_debt_cap`) 메커니즘은 폐기되었다. 러너가 준비되지 않은 Queued
+  chat은 자율 진입을 막지 않으며, 이전에 슬롯을 거절당한 자율 레인은 청구 가능한 직접 오퍼레이션이
+  슬롯을 가져가지 않고 슬롯이 여전히 미청구(`unclaimed`) 상태일 때 `notify_turn_slot_released`
+  신호로 깨어나 실행을 재개한다.
+  → [Keeper_owner](../../lib/keeper/keeper_owner.mli)
+
+**Cancelled Chat Terminal Retention (취소된 채팅 종단 보존)**
+: Keeper 채팅 오퍼레이션이 취소되거나 실패했을 때, 라이브 SSE 스트림 구독자의 연결 여부와
+  무관하게 종단 에러 이벤트(`Keeper_chat_events.Event_error`)의 동기 저널 기록을
+  시도(`Journal.append_result`)하는 계약(#41657). 기록에 성공하면 재연결 클라이언트의 replay에
+  보존되어 취소 상태를 확정적으로 재생할 수 있고, 저널 기록에 실패하면 `seq` 없는 live 오류
+  이벤트(`Ag_ui.Run_error`, code는 failure kind)로 투영된다.
+  → [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
+  [Server_routes_http_keeper_stream](../../lib/server/server_routes_http_keeper_stream.mli)
+
 **Speaker Authority (화자 권한)**
 : Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
   추측하지 않고 진입 경로와 Keeper 레지스트리 대조로 구조적으로 결정한다(RFC-0223 §3,
@@ -2990,6 +3010,13 @@ status: reference
 **Shared Fact (작업공간 기억 원장 행)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
+
+**World Curator / Workspace Curator (공유 맥락 합성)**
+: 여러 Keeper가 같은 원문을 반복해서 읽지 않도록 공유 맥락을 합성하는 단독 모델 레인. 코드의 `Workspace_curator`는 Keeper Memory의 변경 사실을 공유 주장·충돌로 분류한 뒤, 그 본문을 의미를 보존한 공유 요약으로 합성한다. 새 사실은 이전 요약에 합치고, 삭제·수정된 사실이나 합성 프롬프트 변경이 있으면 현재 자료로 다시 만든다. 동일한 자료의 완성본은 Keeper들이 재사용한다. 요약은 현재 작업공간의 모든 운영 상태나 검증된 사실을 뜻하지 않으며, 원본 Memory를 덮어쓰지 않는다.
+
+**Shared Briefing (공유 요약)**
+: World Curator가 만든 재사용 가능한 공유 맥락. 원장 ID 순서로 잘라낸 목록이 아니라 모델이 중복·관계·불확실성을 종합한 본문이다. 완성본과 그 자료의 식별자를 함께 보존한다. 새 합성이 진행되거나 실패한 동안에는 이전 완성본을 갱신 대기로 표시하고, 아직 첫 완성본이 없으면 준비 중임을 알린다. 제공자 입력 한도로 여러 회차가 필요하면 작성 중 상태를 저장하지만 Keeper에게는 완성본만 전달한다. 자료와 합성 계약이 같으면 모델을 다시 부르지 않는다. 중단된 추가 자료가 삭제되어 이전 완성본의 자료만 남으면, 모델 호출 없이 작성 중 상태의 원문과 부분 요약을 지우고 저장한다. 이 결속은 의미 보존을 자동 증명하지 않는다.
+  → [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli) · [server_workspace_memory_curator](../../lib/server/server_workspace_memory_curator.ml)
 
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은

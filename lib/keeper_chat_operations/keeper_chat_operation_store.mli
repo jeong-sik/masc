@@ -35,7 +35,9 @@ type outstanding_snapshot =
 val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
 (** Read-only schema/integrity checked snapshot of queued and running operations.
     Exactly validated v1 chat-only stores are readable without migration; v2
-    inspection also includes every nonterminal semantic execution.
+    inspection also includes every nonterminal semantic execution and terminal
+    executions retaining an unacknowledged native-call receipt. Those receipts
+    still own retained checkpoint references and must survive lifecycle cleanup.
     Never creates, initializes, or recovers a store. Missing files remain distinct
     from a validated empty queue. Callers authorizing lifecycle changes must
     exclude the sole writer and its creation for the whole enclosing commit. *)
@@ -139,6 +141,12 @@ val fail_running
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
+val direct_native_call : t -> operation_id:Operation.Operation_id.t ->
+  (Keeper_native_call.state, error) result
+val update_direct_native_call : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  execution_digest:string -> Keeper_native_call.change -> (unit, error) result
+(** Owner-serialized native-call identity and checkpoint CAS. Every change
+    verifies the current direct-operation execution digest. *)
 val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
 val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->

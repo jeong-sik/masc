@@ -24,8 +24,8 @@ let worker_events_buffer_size = 512
    projected event: a turn that fails after claim but before the projection
    ever runs (missing input, payload parse failure) projects nothing, yet the
    attached client is already waiting on a terminal (#28849 review). When the
-   last sink unregisters the record is dropped — with no audience there is
-   nothing to close, and the durable operation state stays the authority. *)
+   last sink unregisters the wire record is dropped. Settlement still records
+   a missing failure in the operation journal for clients that reopen it. *)
 type operation_wire_stream = Wire_started | Wire_terminal_sent
 
 let operation_wire_streams : (string, operation_wire_stream) Hashtbl.t =
@@ -99,8 +99,8 @@ let register_operation_live_sink ~operation_id sink =
         if remaining = []
         then (
           Hashtbl.remove operation_live_sinks operation_id;
-          (* Last sink gone -> no audience: drop the wire record so settle
-             stays silent instead of synthesizing into the void. *)
+          (* The wire audience is gone; durable settlement is independent of
+             this transient registry. *)
           drop_operation_wire_stream ~operation_id)
         else Hashtbl.replace operation_live_sinks operation_id remaining)
 ;;
@@ -494,6 +494,8 @@ let handle_keeper_turns_list state request reqd =
             in
             `Assoc
               [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))
+              ; ("turn_ref", match Keeper_autonomous_stream.current ~base_path:config.base_path ~keeper_name with
+                   | None -> `Null | Some turn_ref -> Ids.Turn_ref.to_yojson turn_ref)
               ; ("started_at_unix", `Float turn.started_at)
               ; ("interrupt_token", `String (Keeper_interrupt_token.to_string turn.interrupt_token))
               ; ("preview", preview_json)
@@ -3276,40 +3278,65 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   | execution -> execution
 ;;
 
-let synthesize_wire_terminal_on_settle ~keeper_name ~operation_id ~execution =
-  match take_operation_wire_stream ~operation_id, execution with
-  | None, _ ->
-    (* No live wire stream ever opened for this operation (connector
-       channels, pre-execution failures): nothing to close. *)
-    ()
-  | Some Wire_terminal_sent, _ -> ()
-  | Some Wire_started, Keeper_owner.Operation_failed { kind; detail; _ } ->
-    let event =
-      Ag_ui.run_error
-        ~thread_id:("keeper:" ^ keeper_name)
-        ~run_id:("keeper-operation-run-" ^ operation_id)
-        ~message:detail
-        ~code:(Keeper_chat_operation.failure_kind_to_string kind)
-        ()
-    in
-    note_operation_wire_event ~operation_id event;
-    Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq:None ~event;
-    publish_operation_live_event ~operation_id ~seq:None event
-  | Some Wire_started, Keeper_owner.Operation_deferred -> ()
-  | Some Wire_started, Keeper_owner.Operation_succeeded _ ->
-    Log.Misc.warn
-      "keeper chat operation %s succeeded without a wire terminal event"
-      operation_id
+(* The child and its journal publisher have ended before the Owner invokes
+   this hook; no successor can claim until the hook returns. A prior segment's
+   Run_finished is a continuation boundary, not evidence of this failure. *)
+let record_settled_error ~base_path ~keeper_name ~operation_id ~message =
+  let journal =
+    Keeper_chat_event_log.open_journal ~base_dir:base_path ~keeper_name ~operation_id ()
+  in
+  Keeper_chat_event_log.record_terminal_error journal ~ts:(Time_compat.now ()) ~message
+
+let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~execution =
+  let wire = take_operation_wire_stream ~operation_id in
+  match execution with
+  | Keeper_owner.Operation_failed { kind; detail; _ } ->
+    let receipt = record_settled_error ~base_path ~keeper_name ~operation_id ~message:detail in
+    (match receipt with
+     | Ok _ -> ()
+     | Error error -> Log.Keeper.error
+         "keeper chat terminal journal failed keeper=%s operation=%s: %s"
+         keeper_name operation_id error);
+    (match wire, receipt with
+     | Some Wire_terminal_sent, _
+     | None, Ok (Keeper_chat_event_log.Existing_terminal_error _) -> ()
+     | (Some Wire_started | None), (Ok _ | Error _) ->
+       let seq, timestamp, message = match receipt with
+         | Ok (Keeper_chat_event_log.Existing_terminal_error { seq; ts; message }) ->
+           Some seq, ts, message
+         | Ok (Keeper_chat_event_log.Recorded_terminal_error { seq; ts }) ->
+           Some seq, ts, detail
+         | Error _ -> None, Time_compat.now (), detail in
+       let event = Ag_ui.make_event ~timestamp
+         ~thread_id:("keeper:" ^ keeper_name)
+         ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
+         ~message:(Some message)
+         ~code:(Some (Keeper_chat_operation.failure_kind_to_string kind))
+         Ag_ui.Run_error in
+       (match wire with
+        | Some Wire_started -> note_operation_wire_event ~operation_id event
+        | Some Wire_terminal_sent | None -> ());
+       Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq ~event;
+       publish_operation_live_event ~operation_id ~seq event)
+  | Keeper_owner.Operation_deferred -> ()
+  | Keeper_owner.Operation_succeeded _ ->
+    (match wire with
+     | None | Some Wire_terminal_sent -> ()
+     | Some Wire_started ->
+       Log.Misc.warn
+         "keeper chat operation %s succeeded without a wire terminal event"
+         operation_id)
 
 (* The production settle glue between the Owner hook and the wire registry.
    Named (and exposed via For_testing) so a test executes exactly what the
    runner wires: both identifiers become plain strings at this boundary, so
    a swapped argument would typecheck (#28849 review). *)
-let on_operation_execution_settled ~keeper_name ~claimed_operation_id ~execution =
+let on_operation_execution_settled ~base_path ~keeper_name ~claimed_operation_id ~execution =
   match claimed_operation_id with
   | None -> ()
   | Some operation_id ->
     synthesize_wire_terminal_on_settle
+      ~base_path
       ~keeper_name
       ~operation_id:(Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
       ~execution
@@ -3332,9 +3359,9 @@ let operation_runner ~state ~clock : Keeper_owner.operation_runner =
         | Error error ->
           Log.Keeper.error "batch terminal projection failed for %s: %s"
             keeper_name (Keeper_owner_registry.command_error_to_string error);
-          on_operation_execution_settled ~keeper_name ~claimed_operation_id ~execution
+          on_operation_execution_settled ~base_path ~keeper_name ~claimed_operation_id ~execution
         | Ok members -> List.iter (fun (member : Keeper_chat_operation.t) ->
-            on_operation_execution_settled ~keeper_name
+            on_operation_execution_settled ~base_path ~keeper_name
               ~claimed_operation_id:(Some member.operation_id) ~execution) members)
   }
 ;;

@@ -86,9 +86,13 @@ def run(executable, *, columns, no_color=False):
 
         # Resizing keeps the visible navigator in charge of the arrows/Enter.
         h.send_and_wait(process, fd, output, LEFT, b"Enter:open")
+        current = columns
         for width in (80, 120):
-            h.resize_and_wait(process, fd, output, rows=30, columns=width,
-                              needle=b"KEEPERS", controls=(h.FULL_REDRAW,))
+            # A resize to the size the terminal already has draws nothing.
+            if width != current:
+                h.resize_and_wait(process, fd, output, rows=30, columns=width,
+                                  needle=b"KEEPERS", controls=(h.FULL_REDRAW,))
+                current = width
             rows = screen(process, fd, output)
             text = b"\n".join(rows.values())
             assert b"alpha" in text and b"beta" in text, rows

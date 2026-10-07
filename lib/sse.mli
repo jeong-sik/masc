@@ -18,7 +18,6 @@ type session_kind = Transport_metrics.sse_session_kind =
 type broadcast_target =
   | All
   | Observers
-  | Agent_streams
   | Presence_only
 
 type delivery_audience =

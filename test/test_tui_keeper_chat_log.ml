@@ -6,6 +6,13 @@
 
 open Alcotest
 module Live = Masc_tui_keeper_chat_live
+
+(* Most fixtures compare stream content and sequence only; timestamp parity is
+   exercised separately through the observed-delta API. *)
+let feed decoder chunk =
+  Live.feed decoder chunk
+  |> List.map (fun (item : Live.observed_delta) -> item.seq, item.delta)
+
 module Log = Masc_tui_keeper_chat_log
 module E = Masc.Keeper_chat_events
 module Journal = Masc.Keeper_chat_event_log
@@ -46,6 +53,11 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" stop_reason)
   | Live.Text text -> "text(" ^ text ^ ")"
   | Live.Thinking text -> "thinking(" ^ text ^ ")"
+  | Live.Native_tool_started { occurrence; tool_name } ->
+      Printf.sprintf "native_tool_started(%s,%s)" (occurrence_to_string occurrence)
+        (Option.value ~default:"unnamed" tool_name)
+  | Live.Native_tool_ended { occurrence } ->
+      Printf.sprintf "native_tool_ended(%s)" (occurrence_to_string occurrence)
   | Live.Tool_started { occurrence; tool_name } ->
       Printf.sprintf "tool_started(%s,%s)" (occurrence_to_string occurrence) tool_name
   | Live.Tool_args { occurrence; fragment = Live.Args_delta delta } ->
@@ -153,7 +165,7 @@ let test_decode_events_page () =
           ~next_since_seq:(Journal.After_seq 1) lines)
    with
    | Ok page ->
-       check string "operation id" "tui-req-1" page.operation_id;
+       check string "operation id" "tui-req-1" (Log.source_key page.source);
        check int "two events" 2 (List.length page.events);
        check bool "has_more" true page.has_more;
        check position "cursor" (Journal.After_seq 1) page.next_since_seq;
@@ -377,12 +389,69 @@ let wire_tagged_deltas events =
       events
   in
   let decoder = Live.create () in
-  Live.feed decoder body
+  feed decoder body
 
 let journal_tagged_deltas events =
   List.filter_map
     (fun (seq, event) -> Option.map (fun d -> (Some seq, d)) (Log.delta_of_journaled event))
     events
+
+let test_wire_timestamps_match_journal_and_survive_reconnect () =
+  let started_at = 1791363124.206972 in
+  let text_at = 1791363124.709321 in
+  let lines =
+    [ line 0 started_at
+        (E.Run_started { run_id = "run-timed"; thread_id = "keeper:keeper.one" })
+    ; line 1 (started_at +. 0.1)
+        (E.Text_message_start { message_id = "message-timed"; role = E.Assistant })
+    ; line 2 text_at (E.Text_delta "timed reply")
+    ]
+  in
+  let _, body =
+    List.fold_left
+      (fun (projection, body) (event : Journal.journaled_event) ->
+        let projection, projected =
+          Projection.project ~timestamp:event.ts ~redact_text:Fun.id
+            ~redact_json:Fun.id projection event.event
+        in
+        ( projection
+        , body
+          ^ Option.fold ~none:""
+              ~some:(Ag_ui.event_to_sse ~id:event.seq) projected ))
+      (Projection.initial, "") lines
+  in
+  let from_wire = log () in
+  let receive () =
+    Live.feed (Live.create ()) body
+    |> List.map (fun (item : Live.observed_delta) ->
+           Log.add ?at:item.at from_wire ~seq:item.seq item.delta)
+  in
+  check (list bool) "the first stream contributes two visible events"
+    [ true; true ] (receive ());
+  let from_journal = log () in
+  ignore (Log.add_journaled from_journal lines);
+  let entries log =
+    Log.entries log
+    |> List.map (fun (entry : Log.entry) ->
+           ((entry.seq, entry.at), entry.delta))
+  in
+  let observed = list (pair (pair (option int) (option (float 0.000001))) delta) in
+  let expected =
+    [ ((Some 0, Some started_at), Live.Run_started)
+    ; ((Some 2, Some text_at), Live.Text "timed reply")
+    ]
+  in
+  check observed "wire keeps the producer's fractional epoch seconds"
+    expected (entries from_wire);
+  check observed "journal replay uses identical event times"
+    expected (entries from_journal);
+  let revision = Log.revision from_wire in
+  check (list bool) "a reconnected stream contributes no repeated events"
+    [ false; false ] (receive ());
+  check observed "reconnect preserves the original event times"
+    expected (entries from_wire);
+  check int "duplicate replay does not revise the log"
+    revision (Log.revision from_wire)
 
 let events_error =
   testable (Fmt.of_to_string Log.events_error_to_string) ( = )
@@ -489,7 +558,7 @@ let test_read_whole_journal_pages_until_the_position_stops_moving () =
   in
   let page ~events ~has_more ~next_since_seq ~next_since_offset =
     Ok
-      { Log.operation_id = "op"
+      { Log.source = Log.Operation "op"
       ; events
       ; has_more
       ; next_since_seq
@@ -651,7 +720,7 @@ let test_golden_journal_equals_wire_in_chunks () =
         else
           let take = min size (length - offset) in
           loop (offset + take)
-            (List.rev_append (Live.feed decoder (String.sub body offset take)) acc)
+            (List.rev_append (feed decoder (String.sub body offset take)) acc)
       in
       check (list tagged) (Printf.sprintf "%d-byte chunks" size) whole (loop 0 []))
     [ 1; 5; 13 ]
@@ -758,6 +827,8 @@ let () =
         ] )
     ; ( "golden"
       , [ test_case "journal equals wire" `Quick test_golden_journal_equals_wire
+        ; test_case "wire timestamps match journal and survive reconnect" `Quick
+            test_wire_timestamps_match_journal_and_survive_reconnect
         ; test_case "journal equals wire in chunks" `Quick
             test_golden_journal_equals_wire_in_chunks
         ; test_case "a journal page fills the log like the wire does" `Quick

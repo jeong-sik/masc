@@ -983,7 +983,7 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
   let reports = ref [] in
   let on_stream_event = function
     | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
-    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Conversation_compacted
     | Usage_reported _ | Turn_finished _ -> ()
   in
@@ -1057,7 +1057,7 @@ let test_quota_refusal_still_reports_the_turns_spend () =
       reported :=
         (turn_id, model, usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens)
         :: !reported
-    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1085,7 +1085,7 @@ let test_quota_refusal_before_any_response_reports_no_spend () =
   let reported = ref 0 in
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
-    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1103,7 +1103,7 @@ let test_result_of_another_session_reports_no_spend () =
   let reported = ref 0 in
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
-    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1254,7 +1254,7 @@ let test_api_diagnostic_preserves_native_effects () =
                     true
                   | Turn_started _ | Usage_windows_reported _ | Conversation_compacted
                   | Usage_reported _ -> false
-                  | Text_delta _
+                  | Text_delta _ | Thinking_delta _
                   | Dynamic_tool_started _
                   | Dynamic_tool_finished _
                   | Turn_finished _ -> fail "native-only turn emitted response content")
@@ -1766,6 +1766,43 @@ let test_partial_text_streams_before_complete_block () =
            Text_delta {message_id=Some "msg-partial"; text="OK"};
            Turn_finished {text="MASC_CLAUDE_ OK"}] -> ()
         | _ -> fail "partial text must arrive as separate deltas without repeating the complete block")
+;;
+
+let test_partial_thinking_preserves_complete_suffix () =
+  let frame event =
+    "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  let events = ref [] in
+  with_fixture
+    [Emit (frame {|{"type":"message_start","message":{"id":"msg-thinking","model":"claude-fixture"}}|});
+     Emit (frame {|{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}|});
+     Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Inspect "}}|});
+     Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"opaque-signature"}}|});
+     Emit (frame {|{"type":"content_block_stop","index":0}|});
+     Emit {|{"type":"assistant","session_id":"__SESSION__","uuid":"thinking-envelope","message":{"id":"msg-thinking","role":"assistant","model":"claude-fixture","content":[{"type":"thinking","thinking":"Inspect the state","signature":"opaque-signature"},{"type":"redacted_thinking","data":"opaque-data"}]}}|};
+     Emit assistant; Emit result]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+          let thinking = List.rev !events |> List.filter_map (function
+            | Runtime_claude_code.Thinking_delta {message_id; text} -> Some (message_id, text)
+            | _ -> None) in
+          check (list (pair (option string) string)) "only missing thinking suffix follows the delta"
+            [Some "msg-thinking", "Inspect "; Some "msg-thinking", "the state"] thinking)
+;;
+
+let test_partial_thinking_rejects_text_block () =
+  let frame event =
+    "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  with_fixture
+    [Emit (frame {|{"type":"message_start","message":{"id":"msg-thinking","model":"claude-fixture"}}|});
+     Emit (frame {|{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}|});
+     Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"wrong channel"}}|});
+     Emit assistant; Emit result]
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "thinking was accepted into an assistant text block")
 ;;
 
 let test_four_partial_messages_preserve_all_blocks () =
@@ -2776,6 +2813,10 @@ let () =
             test_four_partial_messages_preserve_all_blocks
         ; test_case "partial text precedes complete block without duplication" `Quick
             test_partial_text_streams_before_complete_block
+        ; test_case "partial thinking retains only the complete suffix" `Quick
+            test_partial_thinking_preserves_complete_suffix
+        ; test_case "thinking cannot enter a public text block" `Quick
+            test_partial_thinking_rejects_text_block
         ; test_case
             "stream preserves native tool origin"
             `Quick

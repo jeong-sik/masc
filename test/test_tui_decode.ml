@@ -8229,6 +8229,7 @@ let keeper_turns_json =
                 , `Assoc
                     [ ("lane", `String "autonomous")
                     ; ("interrupt_token", `String "echo-turn-token")
+                    ; ("turn_ref", Ids.Turn_ref.to_yojson (Ids.Turn_ref.make ~trace_id:"autonomous" ~absolute_turn:3))
                     ; ("started_at_unix", `Float 1787828193.5)
                     ] )
               ]
@@ -8254,12 +8255,16 @@ let test_decode_keeper_turns () =
         running.Tui_decode.ktr_keeper_name;
       (match running.ktr_state with
        | Tui_decode.Keeper_turn_running
-           { lane; started_at_unix; interrupt_token; _ } ->
+           { lane; started_at_unix; interrupt_token; turn_ref; _ } ->
            Alcotest.(check bool) "autonomous lane" true
              (lane = Tui_decode.Turn_lane_autonomous);
            Alcotest.(check (float 0.001)) "started at" 1787828193.5
              started_at_unix;
-           Alcotest.(check string) "stop handle" "echo-turn-token" interrupt_token
+           Alcotest.(check string) "stop handle" "echo-turn-token" interrupt_token;
+           Alcotest.(check bool) "autonomous journal identity" true
+             (match turn_ref with
+              | Some turn_ref -> Ids.Turn_ref.equal turn_ref (Ids.Turn_ref.make ~trace_id:"autonomous" ~absolute_turn:3)
+              | None -> false)
        | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ ->
            Alcotest.fail "running keeper decoded as not running");
       Alcotest.(check bool) "idle keeper" true

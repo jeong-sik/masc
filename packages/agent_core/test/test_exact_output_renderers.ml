@@ -105,6 +105,7 @@ let test_execution_error_cause () =
     ; ( EO.Provider_response_refused
           { http_status = 429; refusal = EO.Rate_limited; retry_after_s = None }
       , "provider refused (http_status=429 refusal=rate_limited)" )
+    ; EO.Output_limit_reached, "output limit reached"
     ; EO.Incomplete_output, "incomplete output"
     ; EO.Missing_output, "missing output"
     ; EO.Ambiguous_output 3, "ambiguous output (candidates=3)"

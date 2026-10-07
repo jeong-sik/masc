@@ -194,6 +194,7 @@ let failure_json = function
     `Assoc [ "kind", `String "overloaded"; "http_status", `Int http_status ]
   | Server_error { http_status } ->
     `Assoc [ "kind", `String "server_error"; "http_status", `Int http_status ]
+  | Output_limit_reached -> `Assoc [ "kind", `String "output_limit_reached" ]
   | Invalid_json_output -> `Assoc [ "kind", `String "invalid_json_output" ]
 ;;
 

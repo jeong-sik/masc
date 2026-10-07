@@ -154,14 +154,8 @@ module Shell_timeout : sig
         (** I/O-bound commands. 30s. *)
     | Read
         (** Read-only commands. 15s. *)
-    | User_max
-        (** Upper bound for user-provided [timeout_sec] in
-            Execute.  180s. *)
     | Cleanup_rm
-        (** [docker rm -f] timeout used by turn-scoped cleanup.
-            Currently hardcoded 5.0 in
-            {!Keeper_turn_sandbox_runtime}.  5s. *)
-    | Unknown of string
+        (** [docker rm -f] timeout used by turn-scoped cleanup.  10s. *)
 
   val bucket_key : bucket -> string
   (** Lowercase token used in env var names. *)
@@ -173,16 +167,14 @@ module Shell_timeout : sig
 
 
   val global_default_sec : float
-  (** Final fallback (30.0s). *)
+  (** Used when the per-bucket env value is not a number (30.0s). *)
 
   val timeout_sec : bucket:bucket -> unit -> float
   (** Resolves the timeout for [bucket].  Lookup order:
 
-      1. Per-bucket env [MASC_KEEPER_SHELL_TIMEOUT_<BUCKET>_SEC].
-      2. {!known_default_sec}.
-      3. Global env [MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC] — only
-         for [Unknown _].
-      4. {!global_default_sec}. *)
+      1. Per-bucket env [MASC_KEEPER_SHELL_TIMEOUT_<BUCKET>_SEC]; a value
+         that is not a number reads as {!global_default_sec}.
+      2. The bucket's own default. *)
 end
 
 (** {1 Diagnostics / observability surface} *)

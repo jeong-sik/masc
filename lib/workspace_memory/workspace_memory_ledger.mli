@@ -61,16 +61,11 @@ val save : base_path:string -> t -> (unit, string) result
     a failure after it can leave the new one in place, so an error does not
     say which ledger the next [load] reads. Cancellation propagates. *)
 
-val digest_line_max_bytes : int
-(** Opening-line byte cap for one [claims_digest] row. A longer line is cut
-    at a UTF-8 character boundary and marked with an ellipsis. *)
-
-val digest_budget_bytes : int
-(** Total byte cap for the [claims_digest] list an observation carries. The
-    digest holds a prefix of the claims in [claim_id] order, never a
-    relevance selection; [claims_digest_truncated] reports whether claims
-    were left out. Every row bounds both its id and its opening line, so
-    the cap holds for any ledger the codec accepts. *)
+val briefing_sources : t -> Workspace_memory_briefing.source list
+(** Complete claim and conflict texts for shared semantic synthesis. Members
+    remain in the ledger; adding a member alone does not change these inputs.
+    Briefing source IDs include their claim/conflict namespace; they are not
+    unqualified ledger IDs for the read tool. *)
 
 type observation =
   | Missing
@@ -80,12 +75,10 @@ type observation =
       ; claim_count : int
       ; conflict_count : int
       ; classified_count : int
-      ; claims_digest : string list
-            (** One rendered opening line per claim, in [claim_id] order,
-                byte-bounded. Each line is ["- <claim_id>: <opening line>"];
-                the full body stays behind [keeper_workspace_memory_read]. *)
-      ; claims_digest_truncated : bool
-            (** True when claims exist beyond the digest's byte budget. *)
+      ; briefing : (Workspace_memory_briefing.observation, string) result
+            (** Last complete Curator synthesis, with source and current
+                prompt/schema-contract freshness.
+                An unreadable briefing does not hide readable ledger metadata. *)
       }
 
 val observe : base_path:string -> observation

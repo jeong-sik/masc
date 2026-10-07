@@ -4457,6 +4457,7 @@ type keeper_turn_state =
       lane : keeper_turn_lane;
       started_at_unix : float;
       interrupt_token : string;
+      turn_ref : Ids.Turn_ref.t option;
       preview : keeper_turn_preview option;
     }
   | Keeper_turn_unavailable of string
@@ -4503,6 +4504,15 @@ let decode_keeper_turn_row json =
             | None -> Error "turn is missing required field 'started_at_unix'"
           in
           let* interrupt_token = required_string_field turn_json "interrupt_token" in
+          let* turn_ref =
+            match Json_util.assoc_member_opt "turn_ref" turn_json with
+            | None | Some `Null -> Ok None
+            | Some (`String raw) ->
+                (match Ids.Turn_ref.of_string raw with
+                 | Some value -> Ok (Some value)
+                 | None -> Error "turn_ref must identify a durable Keeper turn")
+            | Some _ -> Error "turn_ref must be text or null"
+          in
           let* preview =
             match Json_util.assoc_member_opt "preview" turn_json with
             | None | Some `Null -> Ok None
@@ -4531,7 +4541,7 @@ let decode_keeper_turn_row json =
             {
               ktr_keeper_name;
               ktr_chat_control_token;
-              ktr_state = Keeper_turn_running { lane; started_at_unix; preview; interrupt_token };
+              ktr_state = Keeper_turn_running { lane; started_at_unix; preview; interrupt_token; turn_ref };
             }
       | Some other ->
           Error

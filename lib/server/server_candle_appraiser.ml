@@ -43,7 +43,7 @@ type observation =
    keep the obligation off the maintenance pulse, but they answer different
    questions and no longer share one boolean. *)
 let invalid_output = function
-  | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
+  | Exact.Output_limit_reached | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content | Exact.Invalid_json_output -> true
   | Exact.Provider_response_refused _ -> false
   | Exact.Completion_failed _ | Exact.Response_body_deadline_exceeded -> false
@@ -83,7 +83,7 @@ let retryable_execution = function
        | Agent_core.Llm_provider.Http_client.ProviderFailure _) ->
        Agent_core.Llm_provider.Error.is_retryable (Agent_core.Llm_provider.Error.of_http_error error))
   | Exact.Response_body_deadline_exceeded -> true
-  | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
+  | Exact.Output_limit_reached | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content | Exact.Invalid_json_output -> false
 let retryable_candidate rejection =
   match Exact.candidate_rejection_disposition rejection with
@@ -107,7 +107,7 @@ let request_refused = function
      | Exact.Refusal_body_not_received | Exact.Rate_limited
      | Exact.Overloaded
      | Exact.Server_error | Exact.Network_error | Exact.Timeout -> false)
-  | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
+  | Exact.Output_limit_reached | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content | Exact.Invalid_json_output
   | Exact.Completion_failed _ | Exact.Response_body_deadline_exceeded -> false
 let terminal_error ~rejected ~refused ~retryable cause =

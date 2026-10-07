@@ -188,7 +188,7 @@ type async_msg =
       * (Masc_tui_keeper_chat_projection.response, Masc_tui_keeper_chat_projection.error) result
       * unit Eio.Promise.u
   | Keeper_chat_stream_deltas of
-      Masc_tui_keeper_chat_projection.request * (int option * Masc_tui_keeper_chat_live.delta) list
+      Masc_tui_keeper_chat_projection.request * Masc_tui_keeper_chat_live.observed_delta list
   | Keeper_chat_stream_unavailable of Masc_tui_keeper_chat_projection.request * string
   | Keeper_run_next_done of Masc_tui_keeper_chat_projection.request * (string, string) result
   | Keeper_observed_interrupt_done of
@@ -204,7 +204,7 @@ type async_msg =
       int * string * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_journal_loaded of
       { keeper_name : string
-      ; operation_id : string
+      ; source : Masc_tui_keeper_chat_log.journal_source
       ; started_at : float
       ; journal :
           ( Masc.Keeper_chat_event_log.journaled_event list

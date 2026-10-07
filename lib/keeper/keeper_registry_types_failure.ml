@@ -29,10 +29,6 @@ type fiber_drop_cause =
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Stale_termination_storm of { count : int }
-  (** #10765 Phase 2: latched when [record_stale_termination] returns a
-          window count >= [escalation_threshold]. This remains a typed
-          observation; the supervisor restarts only the affected Keeper. *)
   | Provider_runtime_error of
       { code : string
       ; detail : string
@@ -74,7 +70,6 @@ type failure_reason =
           rather than letting a race between [Shutdown.is_shutting_down_global]
           flag and fiber finally collapse both into the same telemetry. *)
   | Exception of string
-  | Turn_overflow_failure
   | Operator_interrupt
 
 let failure_reason_to_string = function
@@ -83,8 +78,6 @@ let failure_reason_to_string = function
   | Heartbeat_consecutive_failures n ->
     Printf.sprintf "heartbeat_consecutive_failures(%d)" n
   | Turn_consecutive_failures n -> Printf.sprintf "turn_consecutive_failures(%d)" n
-  | Stale_termination_storm { count } ->
-    Printf.sprintf "stale_termination_storm(count=%d)" count
   | Provider_runtime_error { code; detail; provider_id; http_status; runtime_id = _ } ->
     let prov =
       Option.fold provider_id ~none:""
@@ -102,6 +95,5 @@ let failure_reason_to_string = function
   | Fiber_unresolved Cancelled_by_parent -> "fiber_unresolved(cancelled_by_parent)"
   | Fiber_unresolved Unexpected -> "fiber_unresolved(unexpected)"
   | Exception s -> Printf.sprintf "exception(%s)" s
-  | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"
 ;;

@@ -144,6 +144,7 @@ val prepare_agent_setup
   -> ?on_tool_stream_observation:
        (Keeper_hooks_agent_core.tool_stream_observation -> unit)
   -> ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit)
+  -> ?tool_result_commit_policy:Keeper_hooks_agent_core.tool_result_commit_policy
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?on_gate_deferred:(string -> unit)
   -> ?composition_plan_index:Keeper_tool_composition_plan_index.t

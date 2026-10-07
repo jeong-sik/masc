@@ -7953,6 +7953,10 @@ let open_collab state ~mailbox =
   state.collab <- Some view;
   refresh_collab state ~mailbox (Masc_tui_collab.owner view)
 
+let play_request_failure state request detail =
+  if Masc_tui_types.play_change_dispatched state request then Play_unanswered detail
+  else Play_not_dispatched detail
+
 let launch_play_issue state ~mailbox ~sink ~name ~hours =
   match Masc_tui_types.begin_play_change state (Issue_invite name) with
   | Error detail ->
@@ -7964,12 +7968,14 @@ let launch_play_issue state ~mailbox ~sink ~name ~hours =
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port ->
           match Masc_tui_types.workspace_change_origin state with
-          | Ok origin when origin = request.change_workspace ->
+          | Ok origin when origin = request.change_workspace
+              && Masc_tui_types.dispatch_play_change state request ->
               Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours)
           | Ok _ | Error _ -> Ok (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch"))
         ~wrap:(fun result -> Play_invite_issued (request, sink,
-          decode_play_mutation Tui_decode.decode_play_invite_issued
-            (match result with Ok outcome -> outcome | Error detail -> Masc_tui_http.Post_unanswered detail)));
+          match result with
+          | Ok outcome -> decode_play_mutation Tui_decode.decode_play_invite_issued outcome
+          | Error detail -> play_request_failure state request detail));
       true
 
 let launch_play_revoke state ~mailbox ~sink ~name =
@@ -7983,7 +7989,8 @@ let launch_play_revoke state ~mailbox ~sink ~name =
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port ->
           match Masc_tui_types.workspace_change_origin state with
-          | Ok origin when origin = request.change_workspace ->
+          | Ok origin when origin = request.change_workspace
+              && Masc_tui_types.dispatch_play_change state request ->
               Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name)
           | Ok _ | Error _ -> Ok (Masc_tui_http.Revoke_other
               (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch")))
@@ -7992,7 +7999,7 @@ let launch_play_revoke state ~mailbox ~sink ~name =
           | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
           | Ok (Masc_tui_http.Revoke_other outcome) ->
               Play_revoke_result (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
-          | Error detail -> Play_revoke_result (Play_unanswered detail)));
+          | Error detail -> Play_revoke_result (play_request_failure state request detail)));
       true
 
 let launch_keeper_queue state ~mailbox ~keeper_name action =
@@ -8363,11 +8370,11 @@ let handle_collab_action state ~mailbox view action =
   | Watch Masc.Machine_lane.Dos -> open_dos_screen state ~mailbox
   | Game_menu -> open_msx_screen state ~mailbox
   | Refresh -> refresh_collab state ~mailbox (Masc_tui_collab.owner view)
-  | Resolve_unknown ->
-      (match Masc_tui_types.resolve_play_change state with
+  | Resolve_unknown request_id ->
+      (match Masc_tui_types.resolve_play_change state ~request_id with
        | Ok () ->
            collab_notice state owner ~kind:Notice_reply
-             "Operator confirmed the original request finished; invite changes are available again.";
+             "Operator confirmed the original request finished; refreshing current invite status.";
            sync_collab_access state;
            refresh_current_collab state ~mailbox
        | Error detail -> collab_notice state owner ~kind:Notice_failure detail)
@@ -14940,7 +14947,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites))))
   | Play_invite_issued (request, target, result) ->
       let outcome = match result with
-        | Play_answered (Ok _) | Play_refused _ -> Change_confirmed
+        | Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _ -> Change_confirmed
         | Play_answered (Error _) | Play_unanswered _ -> Change_unknown in
       if Masc_tui_types.finish_play_change state request outcome then begin
       settle_play_mutation state target;
@@ -14975,6 +14982,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Play_refused detail ->
            play_notice state ~sink:target ~kind:Notice_failure
              ("play invite refused: " ^ detail)
+       | Play_not_dispatched detail ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             ("play invite was not sent: " ^ detail)
        | Play_unanswered detail ->
            play_notice state ~sink:target ~kind:Notice_failure
              (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
@@ -14983,7 +14993,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       end
   | Play_invite_revoked (request, target, requested_name, result) ->
       let outcome = match result with
-        | Play_revoke_absent | Play_revoke_result (Play_answered (Ok _) | Play_refused _) -> Change_confirmed
+        | Play_revoke_absent | Play_revoke_result (Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _) -> Change_confirmed
         | Play_revoke_result (Play_answered (Error _) | Play_unanswered _) -> Change_unknown in
       if Masc_tui_types.finish_play_change state request outcome then begin
       settle_play_mutation state target;
@@ -15018,6 +15028,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Play_revoke_result (Play_refused detail) ->
            play_notice state ~sink:target ~kind:Notice_failure
              ("play revoke refused: " ^ detail)
+       | Play_revoke_result (Play_not_dispatched detail) ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             ("play revoke was not sent: " ^ detail)
        | Play_revoke_result (Play_unanswered detail) ->
            play_notice state ~sink:target ~kind:Notice_failure
              (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));

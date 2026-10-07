@@ -112,6 +112,11 @@
 - Operator Candle gifts: new `Granted` ledger rows, `Candle_grant.grant`, and
   the `masc-candle-grant` CLI. No keeper wake; no keeper tool grants (#41371).
 - Every Keeper turn's shared workspace memory briefing now carries a bounded digest of the ledger's claims — one opening line per claim in id order under a byte cap — so shared claims reach context without a `keeper_workspace_memory_read` call (#41389).
+- A request that queues for a provider admission permit reports its wait when the wait ends. masc records each report as a `masc.provider_admission.waited` event in `agent-core-events` with the provider, model, admission class, waited milliseconds and outcome; a request granted a permit at once records nothing (#41361).
+- `POST /api/v1/presets/delete` removes a prompt preset by name, including one the preset list reports as unreadable. It needs admin permission, like save and restore, and answers 404 when no preset has that name (#41481).
+- The TUI deletes a prompt preset with `/preset delete <name>`, which also reaches presets listed with `!`, or with `D` pressed twice on the selected row of the Config presets pane (#41482).
+- Open Keeper navigation with Left from Dashboard or chat, including hidden rosters and narrow terminals. Select with Up/Down, open a chat with Enter, and return with Right/Esc while preserving each Keeper's draft (#41527).
+- Present the Keeper list as a compact rail with a quiet divider, full-row selection, visible counts, and selected Keeper health/runtime details (#41527).
 
 ### Changed
 
@@ -158,12 +163,20 @@
 - Run `dune build @check` on every `main` push and pull request, so a broken type-check is attributed to the change that caused it instead of surfacing at the next release (#41309).
 - Replacing a Muse account's managed configuration because its settings differ from the current managed settings is now logged with both revisions, since it used to be a visible refusal (#41355).
 - `masc_goal_transition` refuses `drop` unless `note` is non-blank after trimming. The note becomes the Goal's review note and the reason each cancelled Task's author is told. The TUI's `x` on a Goal detail opens a reason field (Enter drops, Esc cancels) and the dashboard's Drop button opens a reason form; neither sends a drop without a reason (#41357).
+- The keeper world-state briefing is no longer trimmed to a share of the smallest start-prompt ceiling; it is sent whole. `keeper.context.briefing.share_percent` is removed (#41351).
+- The Librarian's working-context pass no longer receives the current Memory facts; it organizes pending sources only and never judged Memory. It no longer reads the Memory snapshot either, so it organizes pending sources even when Memory is unreadable; before, a Memory read failure skipped the pass. Recorded passes carried 200 MB of Memory over 9.2 hours; two A/B rounds of 30 replayed passes kept the source grouping within run-to-run noise, and JEV pairwise judgments of the context text showed no preference for the answer that saw Memory (#41408).
+- Renamed the DOS machine's in-memory spectator feed library and module from `lane_activity` (`Lane_activity`) to `machine_action_feed` (`Machine_action_feed`) so the glossary no longer holds two same-named entries ("Lane Activity" for the feed, "Lane activity" for the enabled flag) that differ only by case. Wire format (`at`/`who`/`action` JSON, the `/api/v1/lane-addons` `activity` field), the `cap` of 20, and the "Lane activity" configuration flag entry are unchanged (#41435).
+- Moved the Memory OS Recall glossary's description of the draft `RFC-memory-os-recall-selection` design (Standing / Candidate / Validity & Expiry / Recall Scope & Withdrawal bullets and their not-yet-implemented names such as `Recall_scope`, `Current_projection_only`, `Recall_snapshot_bundle`, `Invalid_capacity_policy`, `Budget_overrun`, `Recall_withdrawn`) out of the glossary: the entry now says the bounded task-linked projection is a design proposal and links the RFC as the single home for its names (#41437).
+- Merged the glossary's duplicate concept clusters into one name each, per the 2026-10-07 audit DC1/DC4/DC5/DC10/DC12: "Librarian Round" is now "Librarian Pass" (code says `pass`; Continuity Lag/Width entries updated), Assignee + Producer + worker are one **Assignee** entry (wire field names `assignee`/`producer`/`worker` stay as code names, the glossary subject for the task holder/submitter), the Working Context entry now names its two other meanings explicitly, the Claim entry separates Task transitions from the Fact sentence field and the ledger `claim_id`, and the Workspace Memory Ledger entry is retitled **Shared Fact** as the ledger-row concept (#41440).
+- The JEV duplicates and the `*provider_attempt*` module renames from the same audit are deliberately not in this change: #41432 owns the Jev entry and the module rename is a code change tracked separately (#41440).
+- The Librarian Memory-pass prompt now puts its unchanging parts (selection rules, Keeper instructions, current Memory) before the pending sources and task contexts, so the provider can serve them from its prompt cache: a second pass with the same Memory was 98.5% cached instead of 0%. The model also drops about three times as many stale progress memories (closed PRs, superseded counts) in replayed passes (#41483).
 
 ### Removed
 
 - `/play qr` is gone. The QR code of an issued invite link is drawn only on the invite card that `/play invite` opens and `/play link` reopens, so the one-time link no longer appears in a chat row, the footer or the event log. The card draws its QR only on a terminal with 256 colours or more, so with `NO_COLOR` or on a 16-colour terminal it shows the link text alone (#39877).
 - Removed the hourly `Issue Taxonomy` label reconciliation workflow. Labels are still applied from the `masc-triage` block at issue creation, and `scripts/sync-issue-labels.sh` still reports and repairs drift on demand. (#41275)
 - Remove the unused sampling recovery iterator from the Lane add-on store. (#41293)
+- The model catalog no longer carries the 22 `ollama_cloud` rows that ollama.com retired (HTTP 410 since 2026-07-15, 07-31 or 09-25), among them `deepseek-v4-flash`, `glm-5.1` and `qwen3.5:397b`. Bare rows of the same ids stay for local Ollama configs (#41474).
 
 ### Fixed
 
@@ -840,6 +853,41 @@
 - The DOS core pin moves to ocaml-dos a7b1ad6. INT 33h AX=0x0C now registers the guest's mouse event handler instead of dropping it, so a game that takes its mouse path gets its callback via far call; checkpoints move to snapshot format 4 and refuse format 3, so the lane reboots affected games through their own save files (#41397).
 - Settling a cancelled execution's spend now names the raw cost rows it cannot decode, as a cost row or as their recorded observation, instead of counting them with rows that carry nothing to settle. The settle outcome lists each reason oldest first, and the pre-execution settle logs a warning with their count and the oldest reason (#41400).
 - Keeper chat now marks MASC tool calls of Muse, Claude Code and Antigravity Keepers as received when their result is committed. Only Codex reported these receipts (#40547), so the other three left every finished call at `waiting` and later `not seen · no execution id`. Receipts are keyed by call id for concurrent MCP calls, and Muse and Antigravity deliver a receipt only after its held tool block reaches the stream (#41407).
+- Changing an account's `max-concurrent` or `admission-priority-run-limit` through a runtime config save or `masc runtime-resume` now applies to the running server. Raised permits admit waiting requests at once; lowered permits take effect as running requests finish; requests built from the earlier config run under the new values. Before, every request on that account failed until the server restarted. Runtimes on one provider account that declare different values are refused at save, at `masc runtime-resume` and at server start, with each runtime and its values named; check that a runtime.toml with several bindings per provider gives them the same `max-concurrent` before deploying (#41381).
+- The repeat guard compares a tool's answer instead of its whole output, so a
+  `keeper_memory_write` rewrite whose receipt only moves `revision` and
+  `recorded_at` stops the turn on the third identical call. Each Keeper tool
+  handler names how its answer is read (`Keeper_tool_answer`), and the guard's
+  `execution_time_ms` field-name drop moved into Execute's own reader (#41398).
+- Ollama Cloud's `glm-5.3-flash` now gets its own reasoning back between the tool calls of one user turn. Its `ollama_cloud` catalog row declared only the window, so the `/v1` wire sent no reasoning back, and long keeper turns stopped thinking and fell into write loops (#41404).
+- Keeper checkpoint summaries are published and looked up under the checkpoint file's resolved path. A save resolves a symlinked session root while readers use the configured spelling, so under such a root every message-count read after a save parsed the whole checkpoint again (#41406).
+- Muse Keepers now show context occupancy instead of `Context unavailable`. The Muse runtime reports the newest model call's counted-once `promptTokens` (`session/tokenUsage`) as the request context, as Codex and Claude Code already do; a view gap after that call leaves it unreported (#41423).
+- The TUI shows why a Play invite was refused, including what is missing and
+  who holds the name; it read a `message` field the server never wrote
+  (#41427).
+- Memory search ranking no longer stops the server for tens of seconds. `Keeper_memory_search_index` builds and queries its in-memory FTS5 table as one job on the process domain pool, so the workspace curator's workspace-wide ranking and `keeper_memory_search` leave the caller's domain answering HTTP and writing logs (#41431).
+- test: the remote equipped-portrait consumer now expects the Info tab's
+  face-framed 80px icon render (exported by the fixture through the same
+  `Keeper_portrait_draw.render_icon` path) instead of the endpoint's
+  unreachable 160px full scene, and selects the fixture through a dedicated
+  `router-ledger-export` suite with an explicit missing-manifest assertion
+  (#41453).
+- A failed Board flusher start clears its started flag again, so a later
+  backend access can start one; the rollback compared against a fresh value
+  that `Atomic.compare_and_set` never matched. The start CAS now re-reads
+  until it converges, without a retry budget, backoff or test-only conflict
+  counter (#41459).
+- DeepSeek V4 rows served by Ollama Cloud and OpenRouter now send the temperature their model cards recommend (1.0) instead of the keeper default 0.4. On those hosts the low value reached the model, and deepseek-v4.1-flash turns ended with the reasoning repeating one phrase until MASC cut the stream (#41460).
+- The TUI Goals total counts paused and blocked goals, so the share done
+  is no longer overstated (#41462).
+- The TUI shows Auto Judge's rationale and questions on a gate row it
+  handed to a person; the decoder now reads the summary the server always
+  sends with a `human_required` row (#41464).
+- The seed runtime config no longer lists `glm-5.1` and `qwen3.5:397b` on Ollama Cloud, which ollama.com retired on 2026-09-25 and answers with HTTP 410. Ollama Cloud rows whose model card was read now send its temperature (1.0) instead of the keeper default 0.4: kimi-k3, glm-5.3, glm-5.3-flash, gemma4:31b, minimax-m3, nemotron-3-ultra and gpt-oss (#41472).
+- The Ollama Cloud usage read now asks `GET /api/balance`, after ollama.com's `/api/usage` stopped stating the session and weekly limits on 2026-10-07. The usage-read shape is `ollama-balance`; a legacy plan's windows now carry their reset times, and a credit plan's answer is reported as an error. A live `runtime.toml` that still names `ollama-usage` must switch shape and URL when this binary is deployed (#41476).
+- The TUI resends the reads a workspace authority change withdrew (running turns, schedules, the visible Lane read and the focused detail) as soon as the refresh that moved it is applied, so right after boot the Answering surface and an open chat no longer wait a whole tick for their turns (#41478).
+- A prompt preset restore saves the state it replaces as one `_autosave` preset, overwriting the previous one, instead of adding an `_autosave-<timestamp>` preset each time. Restoring `_autosave` undoes the latest restore's prompt overrides and runtime assignments (#41480).
+- Saving a preset under a name that already exists writes the new preset beside `presets/` and swaps it in, so a save that fails partway leaves the previous preset as it was (#41480).
 
 ### Performance
 
@@ -964,6 +1012,16 @@
   boundary and the typed equip refusal reasons, and the payout worker tests
   wait on the worker going idle instead of fixed sleeps (#41326).
 - The Fusion blank-Judge fixture no longer declares the retired `max-prompt-bytes` key, which made that case fail to load its runtime.toml after #41224 (#41358).
+- `Workspace_goals.request_current_proof` takes the next phase from
+  `Goal_phase.decide_transition` instead of a second copy of the rule, and a
+  test now covers a refused proof request on a completed goal (#41455).
+- The Keeper candle catalog tool and the dashboard items route share one
+  catalog row writer, and `masc_candle_store` no longer links
+  `masc_workspace` (#41461).
+- The TUI reads the fixed surface ring directly. Approvals is not in that ring (it opens inside Work), so the ring filter, the strip's Approvals badge and its alert colour never ran and are gone, along with the unused `approvals_count_label` and `approvals_human_pending` (#41468).
+- Removed TUI functions nothing called, including the chat operation read-back (`fetch_keeper_chat_operation`, `decode_operation_reconciliation`) and second copies of the schedule-create and ask-answer requests. The connector decoder no longer reads a `workspace_id` no connector writes; the name pages fill it (#41471).
+- `Tool_catalog.implementation_status` keeps only `Real`: `Adapter`, `Simulation` and `Placeholder` go with `is_placeholder`, the tool-help constraint notes and their prompt keys, and the `MASC_PLACEHOLDER_TOOLS_ENABLED` knob, which no tool could react to; `implementationStatus` still reads `"real"` (#41576).
+- Remove the never-built `Decision_transition` GADT from the keeper registry decision types and the empty `Keeper_event_queue_recovery.For_testing.claim_outcome` module (#41580).
 
 ## [0.49.0] - 2026-10-04
 

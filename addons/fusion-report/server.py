@@ -180,7 +180,7 @@ def computation_report(source, observation, original, *, producer, producer_stat
         raise InvalidInput("computation.input_coverage must be an array")
     inputs = [coverage(item, "computation input coverage") for item in inputs]
     validate_sampling_result(computation, fields, refs, original.get("evidence"), observation.get("sampling_receipts"))
-    inherited = input_references(fields, refs, original.get("evidence"))
+    inherited = input_references(fields)
     response, error = fields["sampling_response"], fields["sampling_error"]
     validation_error = fields.get("validation_error")
     if status is ComputationState.ANSWERED:

@@ -155,7 +155,7 @@ def prepare(binding, sources):
                                             pending=computation_status is ComputationStatus.OUTCOME_UNKNOWN)
                     validate_sampling_result(computation, fields, refs, item.get("evidence"), observation.get("sampling_receipts"))
                     references.extend(refs.values())
-                    references.extend(input_references(fields, refs, item.get("evidence")))
+                    references.extend(input_references(fields))
                     # Retain immutable lineage; URI-only citations remain in untrusted input.
                     references.extend(retained(item.get("evidence"), "upstream computation"))
                     input_complete = boolean(fields.get("input_complete"), "input_complete")

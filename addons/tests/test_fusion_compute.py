@@ -456,26 +456,19 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
             report = next(row for row in reported["structuredContent"]["rows"] if row["lane_id"] == "fusion/report")
             self.assertEqual(report["fields"]["input_evidence"], judged_row["fields"]["input_evidence"])
             self.assertIn(old_request, report["fields"]["input_evidence"])
-            legacy = copy.deepcopy(output)
-            legacy["rows"][0]["fields"].pop("input_evidence")
-            legacy["rows"][0]["evidence"].append(old_request)
-            captured = upstream(legacy, instance_id="same-worker")
-            legacy_judged = call(Host(root), [captured], binding("judge"))["structuredContent"]["rows"][0]
-            self.assertIn(old_request, legacy_judged["fields"]["input_evidence"])
-            legacy_report = call_report("fusion-report", [captured])
-            self.assertFalse(legacy_report["isError"])
-            legacy_row = next(row for row in legacy_report["structuredContent"]["rows"] if row["lane_id"] == "fusion/report")
-            self.assertIn(old_request, legacy_row["fields"]["input_evidence"])
 
     def test_explicit_input_evidence_is_validated_by_judge_and_report(self):
         with tempfile.TemporaryDirectory() as root:
             panel = call(Host(root), [source()])["structuredContent"]
-            for inherited in ({}, [{"uri": "https://example.org/unretained", "sha256": None}],
+            for inherited in (None, {}, [{"uri": "https://example.org/unretained", "sha256": None}],
                               [{"uri": "lane-evidence:invalid", "sha256": "invalid"}],
                               [{**source()["observations"][0]["evidence"][0], "provider_key": "invented"}]):
                 with self.subTest(inherited=inherited):
                     malformed = copy.deepcopy(panel)
-                    malformed["rows"][0]["fields"]["input_evidence"] = inherited
+                    if inherited is None:
+                        malformed["rows"][0]["fields"].pop("input_evidence")
+                    else:
+                        malformed["rows"][0]["fields"]["input_evidence"] = inherited
                     captured = upstream(malformed)
                     judge = Host(root)
                     self.assertTrue(call(judge, [captured], binding("judge"), ping=True)["isError"])

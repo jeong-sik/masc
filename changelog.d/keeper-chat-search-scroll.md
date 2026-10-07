@@ -1,3 +1,0 @@
-### Fixed
-
-- Search the rendered Keeper conversation at the matching physical body row, including long replies and wrapped phrases. Keep the reading position through new journal, input, broadcast, and streaming rows using shared history and journal origins.

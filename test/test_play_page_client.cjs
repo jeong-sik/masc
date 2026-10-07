@@ -1313,3 +1313,23 @@ test('changed activity does not accelerate refused explicit reconnect writes', a
   await page.poll(4700);
   assert.equal(attempts, 2, 'new authority may retry once its independent reconnect cadence is due');
 });
+
+
+test('idle free-controller observations recover out-of-band participation changes', async () => {
+  let connected = true;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected, controller:null }) : request.url.includes('/live?')
+      ? response({ ...frame, activity:[] }) : normalReply(request));
+  await page.settle();
+  assert.equal(page.padButton.disabled, false);
+  connected = false;
+  await page.poll(5000);
+  assert.equal(page.padButton.disabled, true);
+  assert.match(page.get('turn').textContent, /연결을 끊었어요/);
+  connected = true;
+  await page.poll(5000);
+  assert.equal(page.padButton.disabled, false);
+  assert.match(page.get('turn').textContent, /조종권이 비어/);
+  assert.equal(page.requests.filter(request => request.method === 'POST').length, 0,
+    'observations never rejoin or leave on behalf of another document');
+});

@@ -620,13 +620,11 @@ async function poll() {
     // Machine activity prompts a seat read; failed reads remain pending.
     // Opening the handoff selector refreshes participants independently.
     const key = activity.length === 0 ? '' : JSON.stringify(activity[0]) + '#' + activity.length;
-    // Expiry and Keeper stops need not move the machine. An observer must
-    // still discover that its holder departed, so a real move can recover it.
-    const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
+    // Participation can change while the controller is free and the game
+    // stays still. Recheck it on the same observation recovery cadence.
     const activityChanged = key !== observedActivityKey;
     observedActivityKey = key;
-    const recoveryDue = performance.now() >= nextSeatPollAt
-      && (key !== lastActivityKey || waitingForController || initialConnectIntent);
+    const recoveryDue = performance.now() >= nextSeatPollAt;
     if ((activityChanged || recoveryDue) && await refreshSeat()) lastActivityKey = key;
     await syncPad();
   }

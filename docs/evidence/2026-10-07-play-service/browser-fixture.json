@@ -1,6 +1,6 @@
 {
   "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
-  "source_sha256": "a2fdb5b6326769f9980c31d7aa4b12fabfa62901ed7e0f14039e6b42a08f1c24",
+  "source_sha256": "4d4ed191b324c225421c9acff9745884161008a419b13b9a6cbc656f48fadeb7",
   "browser_version": "149.0.7827.55",
   "seat_reads": 29,
   "frame_reads": 60,

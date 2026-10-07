@@ -3469,11 +3469,12 @@ let render_keeper_message (state : state) =
         let prefix =
           if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
         in
-        (* The input owns a calm background distinct from the conversation.
-           Foreground-only restore keeps that ground through the prompt. The
-           already viewport-fitted draft leaves room for this exact prefix. *)
+        (* Recede may use SGR dim when the terminal palette is unknown. Reset
+           that weight before the draft and reopen its background, so only
+           the prompt recedes and typed text retains the terminal foreground. *)
         box_line_styled chat_buf chat_cols ~style:chat_theme.Chat_theme.user_background
-          (Theme.recede () ^ prefix ^ Ansi.default_fg ^ line))
+          (Theme.recede () ^ prefix ^ Ansi.reset
+           ^ chat_theme.Chat_theme.user_background ^ line))
       composer.lines;
 
     let input_row =

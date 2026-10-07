@@ -11,6 +11,9 @@ val before_cursor : t -> string
 val clear : t -> unit
 val insert : t -> string -> unit
 val insert_char : t -> char -> unit
+val append : t -> string -> unit
+(** Add text at the end of the whole draft and leave the cursor there.
+    Voice transcripts keep this append contract even after cursor movement. *)
 val move_left : t -> unit
 val move_right : t -> unit
 val backspace : t -> unit

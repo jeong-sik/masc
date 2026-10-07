@@ -20,6 +20,10 @@ let insert t text =
 
 let insert_char t char = insert t (String.make 1 char)
 
+let append t text =
+  t.text <- t.text ^ text;
+  t.cursor <- length t
+
 let move_left t =
   t.cursor <- List.fold_left
     (fun previous offset -> if offset < t.cursor then offset else previous) 0

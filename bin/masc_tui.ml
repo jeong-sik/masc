@@ -13722,13 +13722,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Masc.Voice_bridge.Discard -> ()
         | Masc.Voice_bridge.Keep_what_was_heard ->
         state.msg_command_menu <- Masc_tui_command.Menu_idle;
-        (* Appended, not replacing: an operator who typed part of a message and
-           then spoke the rest keeps both. A separator only where there is
-           something to separate. *)
+        (* Voice continues the whole draft even if its editing cursor moved
+           during capture. Keep the separator and transcript together at the
+           end, where send_on_stop will read the completed message. *)
         if Masc_tui_message_input.length state.msg_input > 0
-           && not (String.equal (Masc_tui_message_input.contents state.msg_input) "")
-        then Masc_tui_message_input.insert_char state.msg_input ' ';
-        Masc_tui_message_input.insert state.msg_input text;
+        then Masc_tui_message_input.append state.msg_input " ";
+        Masc_tui_message_input.append state.msg_input text;
         save_message_draft state;
         state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ());
         (* [voice.stt].send_on_stop: the operator who says a sentence and

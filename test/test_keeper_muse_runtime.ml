@@ -531,7 +531,7 @@ assert init["method"] == "initialize", init
 if SCENARIO == "hang_init":
     drain()
 requested_capabilities = init["params"]["capabilities"]["requestedCapabilities"]
-expected_capabilities = [] if SCENARIO == "text_only" or (FIXTURE.get("usage_read_only") and requested_capabilities == []) else ["sessionMcp"]
+expected_capabilities = [] if SCENARIO in ("text_only", "quiet_final", "missing_final") or (FIXTURE.get("usage_read_only") and requested_capabilities == []) else ["sessionMcp"]
 assert init["params"]["capabilities"]["requestedCapabilities"] == expected_capabilities, init
 send({"jsonrpc": "2.0", "id": init["id"], "result": {
     "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
@@ -574,13 +574,7 @@ else:
 with open(os.path.join(HERE, "sessions.log"), "a") as handle:
     handle.write(mode + "\n")
 servers = opened["params"].get("config", {}).get("mcpServers", {})
-if SCENARIO in ["quiet_final", "missing_final"]:
-    if SCENARIO == "quiet_final":
-        item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
-                                "revision": 1, "status": "completed", "text": ""})
-    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
-    drain()
-if SCENARIO == "text_only":
+if SCENARIO in ("text_only", "quiet_final", "missing_final"):
     assert servers == {}, servers
     server = None
 else:
@@ -770,6 +764,12 @@ if SCENARIO in ["turn_failed", "turn_failed_with_usage", "read_only_tool_failure
         terminal["usage"] = {"inputTokens": 10, "outputTokens": 2,
                              "cachedTokens": 0, "reasoningTokens": 0}
     notify("turn/completed", terminal)
+    drain()
+if SCENARIO in ["quiet_final", "missing_final"]:
+    if SCENARIO == "quiet_final":
+        item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
+                                "revision": 1, "status": "completed", "text": ""})
+    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
     drain()
 if SCENARIO == "text_only":
     item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,

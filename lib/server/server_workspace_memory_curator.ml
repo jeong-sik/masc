@@ -370,20 +370,18 @@ let refresh_briefing ~base_path ~prepare =
   let resolution = Prompt_registry.resolve_prompt key in
   let sha text = Digestif.SHA256.(digest_string text |> to_hex) in
   let contract = Briefing.contract ~template:resolution.effective in
-  if sources = [] then
-    let* () = if Briefing.is_empty state then Ok ()
-      else Domain_pool_ref.submit_io_or_inline (fun () -> Briefing.save ~directory Briefing.empty) in
+  let render json = Prompt_registry.render_resolved_prompt_template key resolution
+      ["workspace_memory_briefing", Yojson.Safe.to_string json] in
+  let* preparation = Briefing.prepare ~sources ~contract ~render state in
+  match preparation with
+  | Briefing.Unchanged -> Ok false
+  | Briefing.Cleanup cleaned ->
+    let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
+      Briefing.save ~directory cleaned) in
     Ok false
-  else if not (Briefing.needs_refresh ~sources ~contract state) then Ok false
-  else
+  | Briefing.Prepared batch ->
     let* execution = prepare () in
-    let render json = Prompt_registry.render_resolved_prompt_template key resolution
-        ["workspace_memory_briefing", Yojson.Safe.to_string json] in
-    let* batch = Briefing.prepare ~sources ~contract ~render state in
-    match batch with
-    | None -> Ok false
-    | Some batch ->
-      let rec attempt batch =
+    let rec attempt batch =
       let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
         Briefing.save ~directory (Briefing.prepared_state batch)) in
       let registry = Runs.global () in
@@ -453,7 +451,7 @@ let refresh_briefing ~base_path ~prepare =
       | `Refused detail ->
         let* smaller = Briefing.narrow ~render batch in
         (match smaller with None -> Error detail | Some smaller -> attempt smaller)
-      in attempt batch
+    in attempt batch
 
 let run ~base_path ~enabled ~prepare =
   let finish classification_pending =

@@ -873,6 +873,54 @@ let test_removing_all_sources_erases_publication_and_pending_pass () =
       check_delivery ~base_path (current_briefing base_path).text;
       Worker.For_testing.stop ~base_path))
 
+let test_removing_pending_addition_cleans_pass_without_model_work () =
+  with_base (fun base_path _clock ->
+    let first_claim = "Published release evidence" in
+    let later_claim = "Deleted pending evidence" in
+    commit base_path first_claim;
+    let classifications, summaries = ref 0, ref 0 in
+    let failing = ref false in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr classifications; Ok (answer selected, "classify.slot") in
+    let summarize ~batch =
+      incr summaries;
+      if !failing then Error (Worker.Execution_failed "injected pending-pass failure")
+      else fixture_summarize ~batch in
+    let directory = Ledger.directory ~base_path in
+    let saved_building () =
+      In_channel.with_open_bin (Briefing.path ~directory) In_channel.input_all
+      |> Yojson.Safe.from_string |> field "building" in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
+      await_idle ~base_path;
+      let previous = current_briefing base_path in
+      failing := true;
+      commit_facts base_path [first_claim; later_claim];
+      await_idle ~base_path;
+      Alcotest.(check bool) "failed inference left a persisted pass" true
+        (saved_building () <> `Null);
+      commit_facts base_path [first_claim];
+      await_idle ~base_path;
+      Alcotest.(check int) "removal needs no new classification" 2 !classifications;
+      Alcotest.(check int) "current publication needs no new inference" 2 !summaries;
+      Alcotest.check json "obsolete source bodies are removed from disk" `Null (saved_building ());
+      let sources = Ledger.load ~base_path |> require |> Ledger.briefing_sources in
+      (match Briefing.observe ~sources
+          ~contract:(Briefing.contract ~template:(Prompt_registry.resolve_prompt
+            Prompt_names.workspace_memory_briefing).effective)
+          (Briefing.load ~directory |> require) with
+       | Briefing.Current retained ->
+         Alcotest.(check string) "reload preserves the current publication" previous.text retained.text
+       | Briefing.Missing | Briefing.Stale _ -> Alcotest.fail "cleanup lost the current publication");
+      request_existing base_path; await_idle ~base_path;
+      Alcotest.(check int) "cleaned pass stays idle" 2 !summaries;
+      failing := false;
+      commit_facts base_path [first_claim; later_claim];
+      await_idle ~base_path;
+      Alcotest.(check int) "returned evidence is summarized afresh" 3 !summaries;
+      check_current_sources base_path;
+      Worker.For_testing.stop ~base_path))
+
 let test_in_flight_addition_waits_for_fixed_briefing_pass () =
   with_base (fun base_path _clock ->
     commit base_path "Initial source remains valid";
@@ -1074,6 +1122,8 @@ let () = Alcotest.run "workspace curator lane"
         test_failed_briefing_keeps_publication_and_request_resumes_same_input
     ; Alcotest.test_case "all-source deletion erases completed and pending briefing state" `Quick
         test_removing_all_sources_erases_publication_and_pending_pass
+    ; Alcotest.test_case "removed pending addition is erased without new model work" `Quick
+        test_removing_pending_addition_cleans_pass_without_model_work
     ; Alcotest.test_case "in-flight additions reuse the completed fixed pass" `Quick
         test_in_flight_addition_waits_for_fixed_briefing_pass
     ; Alcotest.test_case "summary narrows after an explicit provider size refusal" `Quick

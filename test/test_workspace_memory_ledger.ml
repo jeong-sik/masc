@@ -169,8 +169,8 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
     let contract = Briefing.contract ~template in
     let batch = match Briefing.prepare ~sources:(Ledger.briefing_sources ledger) ~contract
         ~render:(fun value -> Ok (Yojson.Safe.to_string value)) Briefing.empty |> require with
-      | Some batch -> batch
-      | None -> Alcotest.fail "unsummarized ledger prepared no work" in
+      | Briefing.Prepared batch -> batch
+      | Briefing.Unchanged | Briefing.Cleanup _ -> Alcotest.fail "unsummarized ledger prepared no work" in
     Briefing.save ~directory (Briefing.prepared_state batch) |> require;
     let text = "Owner review is pending; completion has not been confirmed." in
     let accepted = Briefing.accept batch ~text |> require in
@@ -184,8 +184,8 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
     let superseded = match Briefing.prepare ~sources:(Ledger.briefing_sources ledger)
         ~contract:(Briefing.contract ~template:(template ^ "\nPrior synthesis contract"))
         ~render:(fun value -> Ok (Yojson.Safe.to_string value)) Briefing.empty |> require with
-      | Some batch -> Briefing.accept batch ~text |> require
-      | None -> Alcotest.fail "prior contract prepared no briefing" in
+      | Briefing.Prepared batch -> Briefing.accept batch ~text |> require
+      | Briefing.Unchanged | Briefing.Cleanup _ -> Alcotest.fail "prior contract prepared no briefing" in
     Briefing.save ~directory superseded |> require;
     (match Ledger.observe ~base_path with
      | Ledger.Available { briefing = Ok (Briefing.Stale summary); _ } ->
@@ -221,7 +221,7 @@ let test_briefing_keeps_claim_and_conflict_namespaces_distinct () =
   let contract = Briefing.contract ~template:"fixture" in
   match Briefing.prepare ~sources ~contract
       ~render:(fun value -> Ok (Yojson.Safe.to_string value)) Briefing.empty with
-  | Ok (Some batch) ->
+  | Ok (Briefing.Prepared batch) ->
     Alcotest.(check int) "both complete bodies reach synthesis" 2 (Briefing.selected_count batch);
     (match Briefing.accept batch ~text:"Review is pending; the release date is disputed." with
      | Ok state ->
@@ -231,7 +231,7 @@ let test_briefing_keeps_claim_and_conflict_namespaces_distinct () =
             ["claim:shared-id"; "conflict:shared-id"] summary.source_ids
         | Briefing.Missing | Briefing.Stale _ -> Alcotest.fail "valid cross-kind IDs prevented current publication")
      | Error detail -> Alcotest.fail detail)
-  | Ok None -> Alcotest.fail "populated ledger prepared no briefing"
+  | Ok (Briefing.Unchanged | Briefing.Cleanup _) -> Alcotest.fail "populated ledger prepared no briefing"
   | Error detail -> Alcotest.fail detail
 
 let test_observe_empty_ledger_needs_no_briefing () =

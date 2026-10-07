@@ -99,6 +99,20 @@ status: reference
   [Mcp.connect](../../packages/agent_core/lib/protocol/mcp.mli),
   [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
 
+**Lane Add-on Sampling Outcome (Lane Add-on 샘플링 결과)**
+: `Lane_addon_sampling`이 호스트 소유 모델 호출 하나의 종단 상태를 적는 닫힌 네 값
+  (`status`). `answered`는 호스트가 유효한 응답을 돌려준 경우, `host_error`는 invoke
+  콜백이 문자열 오류를 돌려준 경우(정책 거절인지 제공자 실패인지 이 경계는 가르지
+  않는다), `invalid_response`는 응답이 패키지 바이트 봉투를 넘거나 모델 정체성이 비어
+  있는 경우, `outcome_unknown`은 invoke 중 예기치 않은 예외로 결과를 확정할 수 없는
+  경우다. `host_error`·`invalid_response`·`outcome_unknown`은 패키지에 중립 상태로만
+  노출되고, 원문은 호스트 증거 저장소에 남는다.
+  경계: 여기의 `outcome_unknown`은 **Lane Action Receipt & Uncertainty** 항목의 같은
+  이름과 다른 층이다 — 저쪽은 파견된 액션의 내구 결과가 없는 상태이고, 이쪽은 모델
+  호출 자체가 예외로 끝난 상태다. 두 값 모두 임의 재실행을 정당화하지 않는다.
+  → [Lane_addon_sampling](../../lib/lane_addon/lane_addon_sampling.mli) ·
+  [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
+
 **HITL**
 : Human-in-the-Loop의 약어. Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는
   경로다. 사람의 답을 기다리는 동안에도 다른 Keeper의 턴이나 상관없는 작업은 계속 돈다.

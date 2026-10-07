@@ -3438,6 +3438,40 @@ let test_succeeded_operation_with_checkpoint_only_keeps_final_history () =
     (Tui_types.chat_rows_for state "alpha" |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
 ;;
 
+let test_checkpoint_activities_have_exact_row_authority () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_loaded_keeper <- Some "alpha";
+  let occurrence id index : Live.tool_occurrence =
+    {stream_scope=0; block_index=index; provider_message_id=None; tool_call_id=Some id} in
+  let skill = occurrence "c1" 1 and tool = occurrence "c2" 2 in
+  let log = settled_log ~request_id:"checkpoint-activities"
+    [Live.Run_started; Live.Tool_started {occurrence=skill; tool_name="keeper_skill"};
+     Live.Tool_ended {occurrence=skill}; Live.Tool_result {occurrence=skill; execution_id="skill-exec"};
+     Live.Tool_started {occurrence=tool; tool_name="read_file"}; Live.Tool_ended {occurrence=tool};
+     Live.Tool_result {occurrence=tool; execution_id="exec-1"};
+     Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-1#1"}; Live.Run_finished] in
+  let terminal = Keeper_chat_operation.Succeeded {completed_at=8.; outcome_ref="final"} in
+  Log.observe_operation_state log.tl_log (Some terminal);
+  Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+  Tui_types.hold_settled_log state log;
+  let activity execution_id = Keeper_chat_transcript.make_tool_activity ~execution_id
+      ~call_id:None ~tool_name:"read_file" ~args:"{}" ~outcome:Returned ~duration:None () in
+  let tool_row = { (chat_entry ~request_id:"checkpoint-activities" ~role:Tui_types.Message_tool ~text:"tools" ~at:7. ())
+    with me_tool_block=Some (Keeper_chat_transcript.tool_block [activity "exec-1"; activity "exec-2"]) } in
+  state.msg_loaded <- [tool_row; skill_evidence_row ~request_id:"checkpoint-activities" ~at:7.;
+    chat_entry ~request_id:"checkpoint-activities" ~role:Tui_types.Message_keeper ~text:"FINAL" ~at:8. ()];
+  Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" state.msg_loaded;
+  let rows = Tui_types.chat_rows_for state "alpha" in
+  let executions = List.concat_map (fun (row : Tui_types.msg_entry) -> match row.me_tool_block with
+    | None -> [] | Some block -> List.filter_map (fun (activity : Keeper_chat_transcript.tool_activity) -> activity.execution_id) block.activities) rows in
+  check (list string) "only the unobserved execution remains in history" ["exec-2"] executions;
+  let skills = List.concat_map (fun (row : Tui_types.msg_entry) -> row.me_skill_block) rows in
+  check (list string) "unidentified evidence gap remains durable" ["Skill evidence"]
+    (List.map (fun (skill : Keeper_chat_transcript.skill_activity) -> skill.skill_name) skills);
+  check bool "final history remains visible" true
+    (List.exists (fun (row : Tui_types.msg_entry) -> row.me_text = "FINAL") rows)
+;;
+
 let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -5143,6 +5177,8 @@ let () =
             test_partial_observation_survives_history_ending_and_unavailable_journal
         ; test_case "observed handoff retains progress and one final reply" `Quick
             test_observed_history_handoff_keeps_progress_and_one_final_reply
+        ; test_case "checkpoint activity rows retain exact source authority" `Quick
+            test_checkpoint_activities_have_exact_row_authority
         ; test_case "succeeded operation with checkpoint-only journal keeps final history" `Quick
             test_succeeded_operation_with_checkpoint_only_keeps_final_history
         ; test_case "a journal log of the live execution is not observed" `Quick

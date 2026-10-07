@@ -7443,12 +7443,17 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
       List.iter
         (fun (row : msg_entry) ->
           if String.equal row.me_request_id request_id then
-            List.iter
-              (Masc_tui_keeper_chat_transcript.note_skill_activity
-                 turn_log.tl_transcript)
+            List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
+              let observed = Option.exists (fun id ->
+                List.exists (fun (call : Masc_tui_keeper_chat_transcript.tool_activity) ->
+                  call.call_id = Some id
+                  && Option.is_some (Masc_tui_keeper_chat_transcript.skill_activity_of_tool call))
+                  (Masc_tui_keeper_chat_transcript.tool_calls turn_log.tl_transcript)) skill.skill_tool_use_id in
+              if turn_log_holds_the_turn turn_log || observed then
+                Masc_tui_keeper_chat_transcript.note_skill_activity turn_log.tl_transcript skill)
               row.me_skill_block)
         rows)
-    (List.filter turn_log_holds_the_turn (settled_logs_for_keeper state keeper_name))
+    (selected_source_logs_for_keeper state keeper_name)
 ;;
 
 (* Settling a turn: its log is committed and, when it has anything to draw,
@@ -9405,6 +9410,45 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
         | _ -> true)
       rows
   in
+  (* Partial selected logs own the exact activities already drawn, even
+     when they cannot own the final reply. Keep unmatched durable activities
+     and evidence gaps; a call name or transcript position is not identity. *)
+  let partial_logs = selected_source_logs_for_keeper state keeper_name
+    |> List.filter (fun log -> not (turn_log_holds_the_turn log)) in
+  let remaining_activity (row : msg_entry) =
+    let module Transcript = Masc_tui_keeper_chat_transcript in
+    let drawn = partial_logs
+      |> List.filter (fun log -> String.equal row.me_request_id (turn_log_execution_id log))
+      |> List.concat_map (fun log -> Transcript.drawn log.tl_transcript) in
+    if drawn = [] then Some row else match row.me_role with
+    | Message_tool ->
+        (match row.me_tool_block with
+         | None -> Some row
+         | Some block ->
+             let executions = List.concat_map (fun (item : Transcript.drawn_item) ->
+               match item.drawn with
+               | Drawn_tools observed -> List.filter_map (fun (activity : Transcript.tool_activity) ->
+                   activity.execution_id) observed.activities
+               | _ -> []) drawn in
+             let activities = List.filter (fun (activity : Transcript.tool_activity) ->
+               not (Option.exists (fun id -> List.mem id executions) activity.execution_id)) block.activities in
+             if activities = [] && block.omitted_steps = 0 then None
+             else Some {row with me_tool_block=Some (Transcript.tool_block
+               ~omitted_steps:block.omitted_steps activities)})
+    | Message_skill _ when row.me_skill_block <> [] ->
+        let observed = List.concat_map (fun (item : Transcript.drawn_item) ->
+          match item.drawn with Drawn_skill skills -> skills | _ -> []) drawn in
+        let skills = List.filter (fun (skill : Transcript.skill_activity) ->
+          not (List.exists (fun (shown : Transcript.skill_activity) ->
+            Option.is_some skill.skill_tool_use_id
+            && skill.skill_tool_use_id = shown.skill_tool_use_id
+            && skill.turn_ref = shown.turn_ref
+            && skill.runtime_id = shown.runtime_id) observed)) row.me_skill_block in
+        if skills = [] then None else Some {row with me_skill_block=skills}
+    | _ -> Some row
+  in
+  let loaded = List.filter_map remaining_activity loaded in
+  let session = List.filter_map remaining_activity session in
   let loaded = without_partial_replies loaded in
   let session = without_partial_replies session in
   chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows

@@ -16373,19 +16373,18 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
           Keeper_chat_log.commit log.tl_log;
           if Keeper_chat_log.entries log.tl_log <> [] then hold_settled_log state log;
-          if turn_log_holds_the_turn log then (
-            match state.msg_loaded_keeper with
+          (match state.msg_loaded_keeper with
             | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
                 enrich_held_logs_from_rows state ~keeper_name state.msg_loaded
-            | Some _ | None -> ())
-          else if
+            | Some _ | None -> ());
+          if not (turn_log_holds_the_turn log) &&
             (* A journal read whole that still cannot stand for the turn has
                nothing more to say when the loaded transcript says the turn is
                over: a cancelled turn (finished without a recorded reply), or
                a failure the server never journaled (#33108). A turn still
                running is asked again on the next load, from where this read
                stopped. *)
-            (match Keeper_chat_transcript.phase log.tl_transcript with
+            ((match Keeper_chat_transcript.phase log.tl_transcript with
              | Keeper_chat_transcript.Stream_ended
              | Keeper_chat_transcript.Stream_failed _ ->
                  true
@@ -16393,7 +16392,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                  false)
             || (match source with
                 | Keeper_chat_log.Operation _ -> loaded_turn_has_ended state ~keeper_name journal_id
-                | Keeper_chat_log.Autonomous_turn _ -> false)
+                | Keeper_chat_log.Autonomous_turn _ -> false))
           then remember_journal_unavailable state journal_id
       | Error (Keeper_chat_log.Unknown_operation | Keeper_chat_log.Journal_pruned | Keeper_chat_log.Journal_missing) ->
           (* Nothing to reload, now or later this session: the v1 rows are

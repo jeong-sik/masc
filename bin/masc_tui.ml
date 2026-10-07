@@ -11216,6 +11216,11 @@ let resume_reads_after_authority_change state ~mailbox ~(before : read_authority
     before.read_workspace <> state.workspace_authority
     || before.read_detail != state.detail_read_authority
   in
+  (* The detail goes first: it restores the remembered Keeper focus and
+     marks its identity read pending, so the side reads below neither poll
+     the same login again nor ask about the Keeper the cursor fell on. *)
+  refresh_visible_detail_after_authority_recovery state ~mailbox
+    ~previous_authority:before.read_detail;
   if moved && server_authority_ready state then begin
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
@@ -11225,9 +11230,7 @@ let resume_reads_after_authority_change state ~mailbox ~(before : read_authority
        in-flight guard. *)
     if state.workspace_identity = Workspace_identity_match && state.view = Lanes
     then launch_lanes_load state ~mailbox
-  end;
-  refresh_visible_detail_after_authority_recovery state ~mailbox
-    ~previous_authority:before.read_detail
+  end
 ;;
 
 let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox results =

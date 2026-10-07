@@ -9,6 +9,13 @@
 # sustained turns prove the local box can absorb more load. AGENT_CORE handles Gemma 4
 # thinking through the chat-template control token path, not Ollama think:true.
 
+[memory]
+# Ordinary current working-set targets, including custom categories.
+# Initial rollout: Librarian consolidation guidance and context-status reporting.
+# Existing facts are preserved when targets are exceeded. Counts, not tokens.
+category_cap = 30
+facts_per_category_cap = 30
+
 [skills]
 # The Skill resource read bound is not configured here: it is the shared
 # inline tool-result boundary (Common.max_tool_result_wire_bytes). An older

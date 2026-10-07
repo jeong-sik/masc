@@ -1,10 +1,3 @@
-type 'identity source =
-  | Stable_source of {
-      identity : 'identity;
-      text : string;
-    }
-  | Streaming_source of string
-
 module Completed = struct
   type 'identity key = {
     identity : 'identity;
@@ -85,22 +78,20 @@ let drop count entries =
 let remember cache (rendered : _ Completed.rendered) =
   Masc_tui_lru.set cache.completed rendered.key.identity rendered
 
-let render cache ~theme_revision ~palette_generation ~width ~renderer ~source =
-  match source with
-  | Streaming_source text -> renderer ~width text
-  | Stable_source { identity; text } ->
-      let key : _ Completed.key =
-        { identity; text; width; theme_revision; palette_generation }
-      in
-      (match Masc_tui_lru.find cache.completed identity with
-       (* A hit is already the most recent entry, so the bound removes the
-          completed messages the viewport has not touched for longest. *)
-       | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
-           rendered.rows
-       | Some _ | None ->
-           let rows = renderer ~width text in
-           remember cache { key; rows };
-           rows)
+let render cache ~theme_revision ~palette_generation ~width ~renderer ~identity
+    ~text =
+  let key : _ Completed.key =
+    { identity; text; width; theme_revision; palette_generation }
+  in
+  match Masc_tui_lru.find cache.completed identity with
+  (* A hit is already the most recent entry, so the bound removes the
+     completed messages the viewport has not touched for longest. *)
+  | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
+      rendered.rows
+  | Some _ | None ->
+      let rows = renderer ~width text in
+      remember cache { key; rows };
+      rows
 
 let same_visual_rest (left : _ Streaming.key) (right : _ Streaming.key) =
   left.width = right.width

@@ -18,7 +18,6 @@ let global () : Keeper_lifecycle_gate.flags =
   { reactive = Env_config_keeper.KeeperReactive.enabled ()
   ; proactive = autonomous
   ; autonomous
-  ; bootstrap = autonomous
   }
 
 (* One declarative mode owns both spontaneous initiative and automatic owner
@@ -27,7 +26,6 @@ let meta_flags (m : keeper_meta) : Keeper_lifecycle_gate.flags =
   { reactive = true
   ; proactive = Keeper_activation_mode.spontaneous m.activation_mode
   ; autonomous = Keeper_activation_mode.restore_owner m.activation_mode
-  ; bootstrap = Keeper_activation_mode.restore_owner m.activation_mode
   }
 
 (* The single resolver every lifecycle-gate call site uses:

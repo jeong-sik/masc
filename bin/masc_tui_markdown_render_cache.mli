@@ -15,15 +15,6 @@
     by its identity in one step rather than by walking what it holds, which is
     what lets the bound be large enough for a scrolled transcript. *)
 
-type 'identity source =
-  | Stable_source of {
-      identity : 'identity;
-      text : string;
-    }
-  | Streaming_source of string
-      (** A source that can grow between frames. It always bypasses the cache,
-          so a partial reply cannot be returned after more text arrived. *)
-
 type 'identity t
 
 val create : capacity:int -> 'identity t
@@ -38,10 +29,11 @@ val render :
   palette_generation:int ->
   width:int ->
   renderer:(width:int -> string -> string list) ->
-  source:'identity source ->
+  identity:'identity ->
+  text:string ->
   string list
-(** Render [source], or return its retained rows when every key field matches.
-    Streaming sources are rendered directly and are never retained. *)
+(** Render the completed entry [identity] with source [text], or return its
+    retained rows when every key field matches. *)
 
 val render_growing :
   'identity t ->

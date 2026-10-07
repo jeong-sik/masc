@@ -931,23 +931,20 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
   let cache_capacity = 2 in
   let cache = Markdown_cache.create ~capacity:cache_capacity in
   let markdown ~(entry : Layout.entry) ~width =
-    let source =
-      match entry.markdown_source with
-      | Layout.Markdown_stable
-          { keeper_name; request_id; observed_at; entry_index } ->
-          Markdown_cache.Stable_source
-            { identity = keeper_name, request_id, observed_at, entry_index;
-              text = entry.body;
-            }
-      | Layout.Markdown_growing _
-      | Layout.Markdown_streaming ->
-          Markdown_cache.Streaming_source entry.body
+    let renderer ~width text =
+      rendered := entry.request_label :: !rendered;
+      Layout.wrap_words ~max_cells:width text
     in
-    Markdown_cache.render cache ~theme_revision:1 ~palette_generation:0 ~width
-      ~renderer:(fun ~width text ->
-        rendered := entry.request_label :: !rendered;
-        Layout.wrap_words ~max_cells:width text)
-      ~source
+    match entry.markdown_source with
+    | Layout.Markdown_stable
+        { keeper_name; request_id; observed_at; entry_index } ->
+        Markdown_cache.render cache ~theme_revision:1 ~palette_generation:0
+          ~width ~renderer
+          ~identity:(keeper_name, request_id, observed_at, entry_index)
+          ~text:entry.body
+    | Layout.Markdown_growing _
+    | Layout.Markdown_streaming ->
+        renderer ~width entry.body
   in
   let stable index =
     entry

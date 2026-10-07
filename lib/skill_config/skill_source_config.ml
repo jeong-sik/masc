@@ -28,7 +28,6 @@ type source_field =
   | Anchor
   | Path
   | Access
-  | Unexpected of string
 
 type value_kind =
   | String
@@ -161,7 +160,6 @@ let source_field_to_string = function
   | Anchor -> "anchor"
   | Path -> "path"
   | Access -> "access"
-  | Unexpected field -> field
 ;;
 
 let path_rejection_to_string = function

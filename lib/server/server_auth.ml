@@ -742,13 +742,10 @@ let ensure_same_origin_if_browser_request ~request_authority request :
             { agent = "browser"; action = "malformed Origin header" }))
 
 (* Mirrors [Masc_error.code] (the typed SSOT in lib/types/masc_error.ml).
-   Previously the catch-all [_ -> `Internal_server_error] silently demoted
-   [RateLimitExceeded _] to 500 (should be 429), [Task/Agent (NotFound _)]
-   to 500 (should be 404), and the 400-class validation errors to 500.
-   Operators reading the access log could not distinguish rate limiting
-   from a real server fault. The match is now exhaustive; adding a new
-   [Masc_error.t] outer variant will trip Warning 8 here and force an
-   explicit HTTP-status decision. *)
+   The match is exhaustive, so [Task/Agent (NotFound _)] answer 404 and the
+   400-class validation errors answer 400 instead of falling into a
+   catch-all 500; adding a new [Masc_error.t] outer variant will trip
+   Warning 8 here and force an explicit HTTP-status decision. *)
 (* Type annotation kept row-polymorphic (no [Httpun.Status.t] ascription)
    so callers in both [server_h2_gateway] (H2.Status.t) and the Httpun
    handlers can narrow to their respective protocol enums.  The .mli
@@ -771,8 +768,6 @@ let http_status_of_auth_error = function
   | Masc_domain.Task (Masc_domain.Task_error.VerificationSuperseded _) -> `Conflict
   | Masc_domain.Agent (Masc_domain.Agent_error.InvalidName _) -> `Bad_request
   | Masc_domain.System _ -> `Bad_request
-  | Masc_domain.RateLimitExceeded _ -> `Too_many_requests
-  | Masc_domain.CacheError _ -> `Internal_server_error
 
 (** Server state - initialized at startup.  The published handle is replaced
     atomically so request domains never race a plain ref read with startup or

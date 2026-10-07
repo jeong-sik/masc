@@ -748,7 +748,6 @@ let test_a_request_to_another_keeper_does_not_pin_this_pane () =
      ; submitted_at = 1.0
      ; sent_at = 1.0
      ; control_generation = 0
-     ; origin = Tui_types.Direct_submission
      ; phase = Tui_types.Turn_streaming
      ; log =
          Tui_types.turn_log_create ~keeper_name
@@ -798,7 +797,6 @@ let test_live_transcripts_are_kept_per_keeper () =
      ; submitted_at = started_at
      ; sent_at = started_at
      ; control_generation = 0
-     ; origin = Tui_types.Direct_submission
      (* A request that has just been POSTed is streaming; reconciling is what
         it becomes after the stream settles. *)
      ; phase = Tui_types.Turn_streaming
@@ -859,7 +857,6 @@ let inflight_with_log ~keeper_name ~started_at deltas : Tui_types.inflight =
   ; submitted_at = started_at
   ; sent_at = started_at
      ; control_generation = 0
-  ; origin = Tui_types.Direct_submission
   ; phase = Tui_types.Turn_streaming
   ; log
   }
@@ -1244,7 +1241,6 @@ let test_queue_summary_follows_admission_and_execution () =
     state.msg_queued <- Masc_tui_keeper_chat_queue.empty;
     state.msg_inflight <- [inflight_with_log ~keeper_name:"alpha" ~started_at:7. deltas];
     check (list string) "only confirmed queued requests appear" [] (waiting "alpha") in
-  excluded [];
   excluded [Live.Accepted {admission=Live.Running; queue_length=3; interactive=None}];
   excluded [Live.Accepted {admission=Live.Settled; queue_length=3; interactive=None}];
   excluded [Live.Accepted {admission=Live.Queued; queue_length=3; interactive=None};
@@ -1252,8 +1248,6 @@ let test_queue_summary_follows_admission_and_execution () =
   excluded [Live.Accepted {admission=Live.Queued; queue_length=3; interactive=None};
     Live.Run_failed {message="cancelled"}];
   let promoted = inflight_with_log ~keeper_name:"alpha" ~started_at:8. [] in
-  let promoted = {promoted with origin=Tui_types.Promoted_queue {
-      submission_seq=0; intent=Masc_tui_keeper_chat_queue.Next; causal_parent_request_id=None}} in
   state.msg_inflight <- [promoted];
   let expect_delivery label expected =
     match Tui_types.keeper_message_waiting_requests state ~keeper_name:"alpha" with
@@ -2005,19 +1999,13 @@ let test_promoted_queue_request_keeps_its_user_in_transcript () =
       ; submitted_at = 42.0
       ; sent_at = 43.0
      ; control_generation = 0
-      ; origin =
-          Tui_types.Promoted_queue
-            { submission_seq = 7
-            ; intent = Masc_tui_keeper_chat_queue.Next
-            ; causal_parent_request_id = None
-            }
       ; phase = Tui_types.Turn_streaming
       ; log
       } ];
   check (list string) "promoted USER stays in the conversation" [ "queued input" ]
     (Tui_types.chat_rows_for state "alpha"
      |> List.map (fun row -> row.Tui_types.me_text));
-  match Tui_types.promoted_inflight_for_keeper state "alpha" with
+  match Tui_types.inflight_for_keeper state "alpha" with
   | None -> fail "typed promoted slot disappeared"
   | Some entry ->
       check string "slot keeps exact request identity" request.request_id
@@ -2125,12 +2113,6 @@ let test_promoted_live_output_survives_settlement_and_replay () =
         Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
       in
       let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:42. [] in
-      let entry =
-        { entry with
-          origin = Tui_types.Promoted_queue
-            { submission_seq = 7; intent = Masc_tui_keeper_chat_queue.Next;
-              causal_parent_request_id = None } }
-      in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
       state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
       state.msg_target_keeper_name <- Some "alpha";
@@ -3812,7 +3794,7 @@ let test_checkpoint_watcher_allows_new_input () =
   let request = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"original" () in
   let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:request.request_id ~started_at:1. in
   state.msg_inflight <- [{Tui_types.sent_request=request; submitted_at=1.; sent_at=1.; control_generation=0;
-    origin=Tui_types.Direct_submission; phase=Tui_types.Turn_streaming; log}];
+    phase=Tui_types.Turn_streaming; log}];
   List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
     [Masc_tui_keeper_chat_live.Run_started;
      Masc_tui_keeper_chat_live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"};

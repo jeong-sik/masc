@@ -1573,6 +1573,22 @@ let fit_runtime_id width runtime_id =
   else Message_layout.fit_middle width runtime_id
 
 
+(* Keeper and document indexes share one quiet edge. The row, including its
+   padding, owns its background and selection; the separator never reverses. *)
+let sidebar_line ?(style = "") buf ~cols text =
+  Buffer.add_string buf
+    (Theme.side_pane_background () ^ style ^ fit_width text (max 0 (cols - 1))
+     ^ Ansi.reset ^ Theme.recede () ^ "│" ^ Ansi.reset ^ "\n")
+
+let sidebar_rule ~cols = "  " ^ draw_hline (max 0 (cols - 5)) ^ "  "
+
+let sidebar_heading ~cols ~title ~count =
+  let title = "  " ^ Terminal_text.single_line title in
+  let count = Terminal_text.single_line count in
+  let count_cells = Message_layout.display_width count in
+  let title_cells = max 0 (cols - 1 - count_cells - 3) in
+  fit_width title title_cells ^ " " ^ count ^ "  "
+
 (* A quiet rail beside the conversation. Only the cursor row reverses when
    this pane owns the keys; the selected Keeper's readings sit below the list.
    [rows] includes the caller's footer, as it does for the detail/chat panes. *)
@@ -1581,12 +1597,8 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let inner = max 0 (cols - 1) in
   let ground = Theme.side_pane_background () in
   let restore = Ansi.reset ^ ground in
-  let draw ?(style = "") text =
-    Buffer.add_string buf
-      (ground ^ style ^ fit_width text inner ^ Ansi.reset
-       ^ Theme.recede () ^ "│" ^ Ansi.reset ^ "\n")
-  in
-  let rule = "  " ^ draw_hline (max 0 (inner - 4)) ^ "  " in
+  let draw ?style text = sidebar_line ?style buf ~cols text in
+  let rule = sidebar_rule ~cols in
   let details =
     if not focused then []
     else match selected_keeper state with
@@ -1633,10 +1645,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
       Printf.sprintf "%d–%d/%d" (first + 1) (first + Rows.length window) count
     else string_of_int count
   in
-  let title = "  KEEPERS" in
-  let gap = max 1 (inner - Message_layout.display_width title
-                   - Message_layout.display_width count_label - 2) in
-  let header = [ ""; title ^ String.make gap ' ' ^ count_label ^ "  "; rule ] in
+  let header = [ ""; sidebar_heading ~cols ~title:"KEEPERS" ~count:count_label; rule ] in
   List.iter (draw ~style:(Theme.recede ())) (List.take header_rows header);
   for i = 0 to capacity - 1 do
     match Rows.at window (first + i) with
@@ -1717,17 +1726,12 @@ let list_count_text ~loaded ~holding =
    where leaving it out could not be told from forgetting. *)
 let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
     ~labels ~selection =
-  framed_top buf cols;
-  (* Focus wears a caret, not a key list: which keys work is the footer's
-     sentence; which pane hears them is this one glyph. *)
-  framed_line buf cols
-    ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " %s%s %s"
-         (if focused then Masc_tui_theme.Glyph.current_entry ^ " " else "")
-         title
-         (list_count_text ~loaded:(List.length labels) ~holding)
-     ^ Ansi.reset);
-  framed_divider buf cols;
+  let draw ?style text = sidebar_line ?style buf ~cols text in
+  draw "";
+  draw ~style:(Theme.recede ())
+    (sidebar_heading ~cols ~title
+       ~count:(list_count_text ~loaded:(List.length labels) ~holding));
+  draw ~style:(Theme.recede ()) (sidebar_rule ~cols);
   let content_height = max 0 (rows - framed_chrome_rows) in
   let first =
     match selection with
@@ -1750,27 +1754,20 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
          read "#verification Approved task...", three "#verification Verify:
          wkbl ..." -- and folding from the middle leaves all fifty distinct.
 
-         Every row folds to the same room whether or not the cursor is on it.
-         The caret takes two cells more than the plain lead, so a label
-         fitted to the wider room re-folded as the cursor passed over it. *)
+         Every row uses the same lead and folding width, whether or not
+         the cursor is on it. Moving the caret never shifts the label. *)
       let drawn =
         Message_layout.fit_middle
           (max 1 (framed_inner_width cols - sidebar_row_lead_cells))
           (Terminal_text.single_line label)
       in
-      framed_line buf cols
-        (if Option.equal Int.equal selection (Some (first + i)) then
-           if focused then
-             Theme.selection ^ " " ^ drawn
-             ^ String.make
-                 (max 0 (cols - 5 - Message_layout.display_width drawn))
-                 ' '
-             ^ Ansi.reset
-           else Ansi.bold ^ sidebar_caret_lead ^ drawn ^ Ansi.reset
-         else " " ^ drawn)
-    | None -> framed_empty buf cols
+      if Option.equal Int.equal selection (Some (first + i)) then
+        draw ~style:(if focused then Theme.selection else Ansi.bold)
+          (sidebar_caret_lead ^ drawn)
+      else draw (String.make sidebar_row_lead_cells ' ' ^ drawn)
+    | None -> draw ""
   done;
-  framed_bottom buf cols
+  draw ""
 
 (* The same index for a list whose open row is always in it. *)
 let write_list_sidebar buf ~rows ~cols ~title ~focused ~holding ~labels

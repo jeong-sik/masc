@@ -324,9 +324,6 @@ val tool_help_prompt_hint_tool_help : string
 val tool_help_when_to_use_tool_help : string
 val tool_help_when_to_use_generic : string
 val tool_help_constraint_hidden : string
-val tool_help_constraint_placeholder : string
-val tool_help_constraint_simulation : string
-val tool_help_constraint_adapter : string
 val tool_help_short_description_empty : string
 
 val tool_help_entry_header : string

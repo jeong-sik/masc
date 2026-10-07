@@ -21,16 +21,6 @@ let source_member ~post_id ~admitted_revision ~checkpoint_retentions ~source_sha
   else if not (canonical_sha source_sha256) then Error "source hash must be canonical SHA-256"
   else Ok { post_id; admitted_revision; checkpoint_retentions; source_sha256 }
 
-type source_projection = 
-  { original : source_member
-  ; observed : source_member
-  ; bound_scope : Keeper_execution_scope_id.t
-  }
-let source_projection ~original ~observed ~bound_scope =
-  if not (String.equal original.post_id observed.post_id) then
-    Error "source projection changed the admitted source identity"
-  else Ok { original; observed; bound_scope }
-
 let valid_time value = Float.is_finite value && value >= 0.
 
 type runtime_retry =
@@ -211,10 +201,8 @@ type error = Invalid_record of string | Invalid_transition of string | Revision_
 type action =
   | Confirm_sources
   | Begin_execution
-  | Recheck_sources of source_projection list
   | Resume_checkpoint of Keeper_checkpoint_ref.t
   | Resume_official_checkpoint of official_client_checkpoint
-  | Record_observation of Snapshot.observation
   | Require_reconciliation of string
   | Suspend of Keeper_checkpoint_ref.t
   | Suspend_official_checkpoint of official_client_checkpoint
@@ -312,22 +300,6 @@ let same_admission left right =
   Scope_id.equal left.id right.id && left.sources = right.sources
   && String.equal left.input_sha256 right.input_sha256
 
-let projected_sources current projections =
-  let rec loop originals previous projections =
-    match originals, previous, projections with
-    | [], [], [] -> Ok []
-    | original :: originals, previous :: previous_tail, projection :: projections
-      when projection.original = original
-           && String.equal projection.observed.post_id original.post_id
-           && Scope_id.equal projection.bound_scope (scope current)
-           && projection.observed.admitted_revision >= previous.admitted_revision
-           && projection.observed.checkpoint_retentions >= previous.checkpoint_retentions ->
-        let* rest = loop originals previous_tail projections in
-        Ok (projection.observed :: rest)
-    | _ -> Error (Invalid_transition "source recheck must preserve each original admission and its exact bound scope")
-  in
-  loop current.sources current.current_sources projections
-
 let recovery_origin = function
   | Preparing -> Some Unconfirmed_sources
   | Ready -> Some Confirmed_undispatched
@@ -339,9 +311,9 @@ let recovery_origin = function
 let apply ~now action current =
   if not (valid_time now) then Error (Invalid_transition "invalid transition time")
   else
-    let unchanged phase = Ok (phase, current.frame, current.current_sources) in
+    let unchanged phase = Ok phase in
     let reject () = Error (Invalid_transition ("action is not admitted in " ^ phase_name current.phase)) in
-    let* phase, frame, current_sources = match action with
+    let* phase = match action with
       | Confirm_sources ->
           (match current.phase with
            | Preparing -> unchanged Ready
@@ -350,19 +322,6 @@ let apply ~now action current =
           (match current.phase with
            | Ready -> unchanged Running
            | Preparing | Running | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Suspended _ | Settled _ -> reject ())
-      | Recheck_sources projections ->
-          let recheck phase =
-            let* sources = projected_sources current projections in
-            Ok (phase, current.frame, sources) in
-          (match current.phase with
-           | Preparing -> recheck Preparing
-           | Ready -> recheck Ready
-           | Recovering recovery ->
-               (match recovery.origin with
-                | Unconfirmed_sources -> recheck Preparing
-                | Confirmed_undispatched -> recheck Ready
-                | Checkpointed _ | Official_checkpointed _ | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
-           | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Resume_official_checkpoint checkpoint ->
           (match current.phase with
            | Recovering recovery ->
@@ -386,13 +345,6 @@ let apply ~now action current =
                 | Checkpointed expected -> resume expected
                 | Official_checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Settled _ -> reject ())
-      | Record_observation observation ->
-          (match current.phase with
-           | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
-               Snapshot.record current.frame ~scope:(scope current) observation
-               |> Result.map (fun frame -> current.phase, frame, current.current_sources)
-               |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error))
-           | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Suspend_official_checkpoint checkpoint ->
           (match current.phase, validate_official_client_checkpoint checkpoint with
            | (Running | Resuming_runtime_retry _ | Resuming_gate _), Ok ()
@@ -516,19 +468,18 @@ let apply ~now action current =
       | Suspend_gate waiting | Reconcile_gate_binding (_, waiting) -> waiting.obligations
       | Discharge_gate obligation -> List.filter (fun current -> current <> obligation) current.gate_obligations
       | Settle _ -> []
-      | Confirm_sources | Begin_execution | Recheck_sources _ | Resume_checkpoint _
+      | Confirm_sources | Begin_execution | Resume_checkpoint _
       | Resume_official_checkpoint _ | Suspend_official_checkpoint _
-      | Record_observation _ | Require_reconciliation _ | Suspend _ | Suspend_runtime_retry _
+      | Require_reconciliation _ | Suspend _ | Suspend_runtime_retry _
       | Resume_runtime_retry _ | Update_runtime_retry_wait _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
-    if phase = current.phase && Snapshot.equal frame current.frame && current_sources = current.current_sources
-       && gate_obligations = current.gate_obligations
+    if phase = current.phase && gate_obligations = current.gate_obligations
     then Ok current
     else if current.revision = Int64.max_int then Error Revision_exhausted
     else
       let input = match phase with
         | Settled _ -> None
         | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Recovering _ -> current.input in
-      Ok { current with revision = Int64.succ current.revision; phase; frame; current_sources; input; gate_obligations; updated_at = now }
+      Ok { current with revision = Int64.succ current.revision; phase; input; gate_obligations; updated_at = now }
 
 let source_to_json source =
   `Assoc [ "post_id", `String source.post_id

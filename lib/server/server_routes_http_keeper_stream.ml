@@ -1952,9 +1952,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
         ~extra_mentions:operation_extra_mentions
         ()
       |> Result.map (fun _ -> ())
-    | Keeper_chat_store.Already_persisted _
-    | Keeper_chat_store.Already_persisted_upstream ->
-      Ok ()
+    | Keeper_chat_store.Already_persisted_upstream -> Ok ()
   in
   let append_queued_assistant_once ~content ?(tool_calls = []) ?blocks ?turn_ref () =
     persist_operation_attempt
@@ -2924,7 +2922,7 @@ let persist_batch_user_rows ~base_dir ~keeper_name members =
         ~source:operation.source ~input in
       let source = decoded.source in
       match source.user_row_origin with
-      | Keeper_chat_store.Already_persisted _ | Already_persisted_upstream -> Ok ()
+      | Keeper_chat_store.Already_persisted_upstream -> Ok ()
       | Needs_append ->
         let* request_id = Keeper_chat_delivery_identity.Request_id.of_string
           (Keeper_chat_operation.Operation_id.to_string operation.operation_id) in

@@ -98,13 +98,3 @@ val project_discovered_bounded :
     in page order. The cursor is process-local and carries no migration or
     persistence contract. Executor unavailability returns an empty page with
     the unchanged cursor and a typed [discovery_error]. *)
-
-module For_testing : sig
-  type 'a claim_outcome =
-    | Claim_acquired of 'a
-    | Claim_already_held
-
-
-  (** Read-only observation of the canonical durable outbox. No raw entry or
-      transition-retirement capability crosses this testing boundary. *)
-end

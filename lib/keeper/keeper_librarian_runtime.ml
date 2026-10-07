@@ -1163,7 +1163,7 @@ let context_write_json = function
   | Write_failed detail -> `Assoc ["status", `String "failed"; "detail", `String detail]
 ;;
 
-type write_scope = Context_only | Context_and_memory
+type write_scope = Context_only | Context_and_memory | Memory_maintenance
 
 (* How one continuity publication ended. The caller that owns nothing else
    decides its run's outcome from it. *)
@@ -1231,6 +1231,7 @@ let run_best_effort
         let pass =
           match write_scope, continuity with
           | Context_and_memory, continuity -> Memory_pass continuity
+          | Memory_maintenance, _ -> Memory_pass None
           | Context_only, Some prepared -> Continuity_state_pass prepared
           | Context_only, None -> Working_context_pass
         in
@@ -1548,7 +1549,9 @@ let run_best_effort
                 it retires consumed contexts exactly as a generated one does. *)
              (match selection.working_contexts, continuity_answer with
               | Keeper_librarian.Working_contexts_organized pockets, Memory_only ->
-               organize_working_context pockets
+               (match write_scope with
+                | Memory_maintenance -> ()
+                | Context_only | Context_and_memory -> organize_working_context pockets)
               | Keeper_librarian.Working_contexts_organized _, Continuity _ -> ()
               | Keeper_librarian.Working_contexts_missing, (Memory_only | Continuity _) ->
                 context_write := Answer_missing;

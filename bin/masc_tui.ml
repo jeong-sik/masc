@@ -10112,10 +10112,16 @@ let apply_remote_keeper_rows state =
 let apply_keeper_roster_load state result =
   (match result with
   | Ok (roster, candle) ->
+      (* The roster's Candle totals are this workspace's only when the
+         server is this workspace's and has finished booting; a foreign
+         server's totals are not the operator's. *)
       state.candle_observation <-
-        (match state.server_identity with
-         | None | Some { Tui_decode.sid_state_ready = Some false; _ } -> None
-         | Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle);
+        (match state.workspace_identity, state.server_identity with
+         | Workspace_identity_match,
+           Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle
+         | Workspace_identity_match,
+           (None | Some { Tui_decode.sid_state_ready = Some false; _ })
+         | (Workspace_identity_mismatch _ | Workspace_identity_unread), _ -> None);
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None;
       (match state.item_account with
@@ -10440,6 +10446,9 @@ let withdraw_currency_authority state =
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation =
   withdraw_voice_capture state;
+  (* A decision receipt states what one workspace's Keeper answered; the
+     next workspace's screens must not carry it. *)
+  state.home_decision_receipt <- None;
   (* Keeper names are local to a workspace. Retire both the selected roster
      and its input request before another workspace can reuse the same name. *)
   state.memory_input <- Masc_tui_fetched.clear state.memory_input;
@@ -11014,6 +11023,9 @@ let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
 
 let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket =
   apply_server_identity_reading state (Error detail);
+  (* The Candle surface says why it has no reading rather than looking
+     unread. *)
+  state.candle_observation <- Some (Error detail);
   Option.iter (fun ao_ticket ->
     apply_approval_observation state {ao_ticket; ao_result = Error detail}) approval_ticket;
   state.connection_status <-

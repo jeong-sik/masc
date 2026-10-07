@@ -2237,7 +2237,10 @@ let test_replayed_chat_failure_is_visible_without_a_history_error () =
              {message="operator interrupted the turn"}]
       in
       let journal : Masc.Keeper_chat_event_log.journaled_event list =
-        List.mapi (fun seq event -> {seq; ts=42. +. float_of_int seq; event}) events
+        List.mapi
+          (fun seq event ->
+            {Masc.Keeper_chat_event_log.seq = seq; ts=42. +. float_of_int seq; event})
+          events
       in
       let _ = Tui_types.turn_log_add_journaled log journal in
       Log.commit log.tl_log;

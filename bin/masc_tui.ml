@@ -19174,6 +19174,9 @@ and is loaded on demand through keeper_skill.
           ~port:state.port ~body_json)
   in
   let handle_schedule_modify () =
+    (* Every modify attempt retires the earlier refusal, including the ones
+       refused before an editor opens; their reason goes to the footer. *)
+    state.schedule_form_refusal <- None;
     match selected_schedule_row state with
     | None -> report_action state "error" "modify: no schedule under the cursor"
     (* The refusal was always real; it just arrived after the operator had

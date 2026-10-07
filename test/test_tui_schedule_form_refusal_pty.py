@@ -16,6 +16,7 @@ import tui_keyboard_harness as h
 import tui_keyboard_schedule as schedule
 
 REFUSAL = b"create: the editor form must be a JSON object"
+MODIFY_REFUSAL = b"modify: the store refuses to modify a running"
 GUARD_REFUSAL = b"create: Workspace identity changed or is unavailable"
 CREATE_PATH = "/api/v1/tools/masc_schedule_create"
 
@@ -64,6 +65,46 @@ def object_form_refusal(executable):
         h.run_terminal_scenario(
             executable,
             description="a refused Schedules create form stays on the surface",
+            interact=interact,
+            http_fixtures=fixtures,
+            extra_env={"EDITOR": str(editor), "VISUAL": str(editor)},
+        )
+
+
+def modify_refused_before_the_editor_retires_the_create_refusal(executable):
+    """The fixture's one schedule is running, which the store refuses to
+    modify. That refusal is reported before any editor opens, and it must still
+    retire the create refusal that was on the surface."""
+    fixtures = schedule.schedule_detail_http_fixtures()
+    with tempfile.TemporaryDirectory() as directory:
+        editor = Path(directory) / "array-form.sh"
+        editor.write_text("#!/bin/sh\nprintf %s '[]' > \"$1\"\n")
+        editor.chmod(0o755)
+
+        def interact(process, fd, _slave, output, _base):
+            h.palette_go(process, fd, output, b"go schedules", b"Requests: 1")
+            h.drain_until_quiet(process, fd, output)
+            start = len(output)
+            os.write(fd, b"n")
+            h.wait_for_output(process, fd, output, REFUSAL, start=start, timeout=10)
+            h.drain_until_quiet(process, fd, output)
+            start = len(output)
+            os.write(fd, b"e")
+            h.wait_for_output(process, fd, output, MODIFY_REFUSAL, start=start, timeout=10)
+            h.drain_until_quiet(process, fd, output)
+            # The next key clears the footer; the create refusal must not
+            # come back in the body.
+            start = len(output)
+            os.write(fd, b"j")
+            h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=5)
+            h.drain_until_quiet(process, fd, output)
+            rows = body_rows(output)
+            assert not any(REFUSAL in row for row in rows), rows
+            os.write(fd, b"q")
+
+        h.run_terminal_scenario(
+            executable,
+            description="a modify refused before the editor retires the create refusal",
             interact=interact,
             http_fixtures=fixtures,
             extra_env={"EDITOR": str(editor), "VISUAL": str(editor)},
@@ -142,6 +183,7 @@ def guard_refusal_survives_its_withdrawal(executable):
 
 def run(executable):
     object_form_refusal(executable)
+    modify_refused_before_the_editor_retires_the_create_refusal(executable)
     guard_refusal_survives_its_withdrawal(executable)
     print("tui schedule form refusal: PASS")
 

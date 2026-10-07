@@ -1319,7 +1319,6 @@ type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
-  | Code_overlay  (** diff is drawn over the file *)
   | Code_notes  (** wrapped memo document is drawn over the file *)
   | Code_history  (** complete history document is drawn over the file *)
 
@@ -1357,7 +1356,7 @@ let footer_hints_code ~pane =
     | Code_file -> overlay_keys
     | Code_diff -> overlay_keys @ ("Right / Enter" ::
         List.filter (fun key -> not (String.equal key "Shift-Left / Shift-Right")) file_keys)
-    | Code_overlay | Code_notes -> "Right / Enter" :: overlay_keys @ file_keys
+    | Code_notes -> "Right / Enter" :: overlay_keys @ file_keys
     | Code_history ->
         (* [Right / Enter] names the tree and file panes' open. With the
            history overlay up, the one arm behind Right and Enter takes the
@@ -1374,7 +1373,7 @@ let footer_hints_code ~pane =
         List.map (fun b -> { b with key = "Shift-←/→" }) pan
         @ List.map (fun b ->
             if String.equal b.key "Left / Esc" then { b with key = "Esc" } else b) others
-    | Code_tree | Code_file | Code_overlay | Code_notes | Code_history -> visible in
+    | Code_tree | Code_file | Code_notes | Code_history -> visible in
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
@@ -1385,7 +1384,7 @@ let footer_hints_code ~pane =
       match pane with
       | Code_notes -> hints_of_bindings code_notes_bindings
       | Code_history -> hints_of_bindings code_history_bindings
-      | Code_tree | Code_file | Code_overlay | Code_diff -> hints
+      | Code_tree | Code_file | Code_diff -> hints
 
 (* The Runtime footer is the table's, with the two keys that depend on the
    reading on screen: [p] names where it goes from here, and [e] exists only on

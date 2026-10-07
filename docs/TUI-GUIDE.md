@@ -1031,9 +1031,10 @@ this guarantee.
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did. Reasoning starts folded with a `THINKING`
 label; tool calls start as a compact activity row labelled `TOOLS`.
-Folded reasoning summarizes a thought only when the summary uses fewer rendered
-rows than its source Markdown at the available message-body width. Short notes
-stay visible, and link-preview cards do not make a fitting thought fold.
+Folded reasoning summarizes a thought only when the summary uses fewer displayed
+rows than its source Markdown at the available message-body width, with the same
+trailing-blank trimming used by the transcript. Short notes stay visible, and
+link-preview cards do not make a fitting thought fold.
 Resizing or changing the origin display recalculates that fold.
 `Ctrl-R` cycles reasoning through folded, full, and hidden; `Ctrl-D` cycles
 tool details through compact, results, and full, so

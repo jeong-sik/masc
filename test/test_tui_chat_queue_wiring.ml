@@ -3152,7 +3152,13 @@ let test_thinking_folds_only_when_it_saves_rows () =
         ~inner_width:(Masc_tui_ansi.framed_inner_width columns) initial in
       let context = Masc_tui_ansi.Chat_theme.body_context
         (Masc_tui_ansi.Chat_theme.snapshot ()) Layout.Thinking in
-      let height text = List.length (Render.For_testing.chat_markdown ~context ~width text) in
+      let height body =
+        Layout.rows_of_entry
+          ~markdown:(fun ~(entry : Layout.entry) ~width ->
+            Render.For_testing.chat_markdown ~context ~width entry.body)
+          ~origin ~inner_width:(Masc_tui_ansi.framed_inner_width columns)
+          ~previous:None {initial with Layout.body}
+        |> List.length in
       state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
       List.iter (fun body ->
         let original = { initial with Layout.body } in
@@ -3161,8 +3167,11 @@ let test_thinking_folds_only_when_it_saves_rows () =
           (height folded.body <= height body);
         if not (String.equal folded.body body) then
           check bool "a replaced thought saves at least one terminal row" true
-            (height folded.body < height body))
-        [String.make (width + 1) 'x'; "one\ntwo"; String.make (width * 10) 'x'];
+            (height folded.body < height body);
+        if List.mem body ["short\n"; "short\n\n"] then
+          check string "trailing blank rows do not hide a visible one-row thought" body folded.body)
+        [String.make (width + 1) 'x'; "one\ntwo"; "short\n"; "short\n\n";
+         String.make (width * 10) 'x'];
       if width < 20 then
         let body = String.make (width + 1) 'x' in
         check string "two short wrapped rows are not replaced by a taller summary" body

@@ -261,14 +261,18 @@ let folded_thinking_summary ~render body =
 
 let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry) =
   if entry.style = Message_layout.Thinking && state.msg_reasoning_visibility = Reasoning_folded then
-    let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
-      ~inner_width:(max 1 (framed_inner_width chat_cols)) entry in
     let context = Chat_theme.body_context (Chat_theme.snapshot ()) entry.style in
-    (* Measure only the thought's Markdown. Preview cards are annotations,
-       and measuring raw text must not replace the draw cache's folded body
-       under the same growing-entry identity on every delta. *)
-    { entry with body = folded_thinking_summary
-        ~render:(chat_markdown ~context ~width) entry.body }
+    (* Raw Markdown includes trailing blank rows that the transcript trims.
+       Compare both bodies through that same layout, without adding previews
+       or modifying the growing draw cache. *)
+    let render body =
+      Message_layout.rows_of_entry
+        ~markdown:(fun ~(entry : Message_layout.entry) ~width ->
+          chat_markdown ~context ~width entry.body)
+        ~origin:state.msg_origin_display
+        ~inner_width:(max 1 (framed_inner_width chat_cols)) ~previous:None
+        {entry with body} in
+    { entry with body = folded_thinking_summary ~render entry.body }
   else entry
 
 let tool_projection_mode (state : state) =

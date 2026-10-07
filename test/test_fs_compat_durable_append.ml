@@ -483,6 +483,18 @@ let test_private_jsonl_append_at_end_offset_refuses_incomplete_tail () =
   check string "incomplete bytes unchanged" original (Fs_compat.load_file path)
 ;;
 
+(* The stable-lock append never truncates: a torn row is reported and the
+   bytes stay as they were. Only the recovery read cuts it. *)
+let test_private_jsonl_stable_append_refuses_incomplete_tail () =
+  let original = "{\"row\":1}\n{\"row\":2" in
+  with_temp_jsonl original @@ fun path ->
+  (match Fs_compat.append_private_jsonl_durable_stable_result path "{\"row\":3}\n" with
+   | Error (Fs_compat.Incomplete_transaction_tail _) -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "a stable append wrote after an incomplete row");
+  check string "incomplete bytes unchanged" original (Fs_compat.load_file path)
+;;
+
 let test_private_jsonl_append_rejects_incomplete_suffix () =
   with_temp_jsonl "" @@ fun path ->
   match Fs_compat.append_private_jsonl_durable_locked_result path "{\"row\":1}" with
@@ -1247,6 +1259,10 @@ let () =
             "private JSONL offset append refuses incomplete tail"
             `Quick
             test_private_jsonl_append_at_end_offset_refuses_incomplete_tail
+        ; test_case
+            "private JSONL stable append refuses incomplete tail"
+            `Quick
+            test_private_jsonl_stable_append_refuses_incomplete_tail
         ; test_case
             "private JSONL append rejects incomplete suffix"
             `Quick

@@ -17,19 +17,13 @@
 type cancel_reason =
   | Cancelled_supervisor_stop
   | Cancelled_external
-  | Cancelled_phase_gate_close
   | Cancelled_provider_timeout
-  | Cancelled_fleet_shutdown
   | Cancelled_input_required
 
 type failure_reason =
   | Failure_runtime_unavailable of {
       base : string;
       resolved : string option;
-    }
-  | Failure_no_capable_provider of {
-      runtime_id : string;
-      detail : string;
     }
   | Failure_provider_error of { kind : string; detail : string }
   | Failure_receipt_lost of {
@@ -95,14 +89,11 @@ let is_idle state = Tla_symbol.is_idle (tla_symbol_variant state)
 let cancel_reason_label = function
   | Cancelled_supervisor_stop -> "supervisor_stop"
   | Cancelled_external -> "external_cancel"
-  | Cancelled_phase_gate_close -> "phase_gate_close"
   | Cancelled_provider_timeout -> "provider_timeout"
-  | Cancelled_fleet_shutdown -> "fleet_shutdown"
   | Cancelled_input_required -> "input_required"
 
 let failure_reason_label = function
   | Failure_runtime_unavailable _ -> "runtime_unavailable"
-  | Failure_no_capable_provider _ -> "no_capable_provider"
   | Failure_provider_error _ -> "provider_error"
   | Failure_receipt_lost _ -> "receipt_lost"
   | Failure_runtime_error _ -> "runtime_error"
@@ -122,10 +113,6 @@ let pp_failure_reason fmt = function
         (Printf.sprintf "runtime_unavailable(base=%s,resolved=%s)"
            base
            resolved)
-  | Failure_no_capable_provider { runtime_id; detail } ->
-      Format.pp_print_string fmt
-        (Printf.sprintf "no_capable_provider(runtime=%s,detail=%s)"
-           runtime_id detail)
   | Failure_provider_error { kind; detail } ->
       Format.pp_print_string fmt
         (Printf.sprintf "provider_error(kind=%s,detail=%s)" kind detail)
@@ -156,7 +143,6 @@ type transition_action =
   | StreamComplete
   | FinishTurn
   | ReceiptLost
-  | NoToolCapableProvider
   | ProviderError
   | GenericFail
   | SupervisorRequestsStop
@@ -180,7 +166,6 @@ let all_transition_actions =
   ; StreamComplete
   ; FinishTurn
   ; ReceiptLost
-  ; NoToolCapableProvider
   ; ProviderError
   ; GenericFail
   ; SupervisorRequestsStop
@@ -202,7 +187,6 @@ let transition_action_label = function
   | StreamComplete -> "StreamComplete"
   | FinishTurn -> "FinishTurn"
   | ReceiptLost -> "ReceiptLost"
-  | NoToolCapableProvider -> "NoToolCapableProvider"
   | ProviderError -> "ProviderError"
   | GenericFail -> "GenericFail"
   | SupervisorRequestsStop -> "SupervisorRequestsStop"
@@ -271,9 +255,6 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
   | Any Runtime_routing, Any (Failed (Failure_runtime_unavailable _))
     when not stop_signaled_before ->
       Some RuntimeUnavailable
-  | Any Runtime_routing, Any (Failed (Failure_no_capable_provider _))
-    when not stop_signaled_before ->
-      Some NoToolCapableProvider
   | Any Runtime_routing, Any (Failed (Failure_provider_error _))
     when not stop_signaled_before ->
       Some ProviderError

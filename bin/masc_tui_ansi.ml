@@ -202,6 +202,10 @@ module Theme = struct
   let action_probe () = (resolved ()).probe
   let action_message () = (resolved ()).message
   let selection = Masc_tui_theme.selection
+  let sidebar_selection () =
+    Masc_tui_terminal_palette.snapshot ()
+    |> Masc_tui_terminal_palette.snapshot_palette
+    |> Masc_tui_theme.sidebar_selection
   let border_focus = Masc_tui_theme.border_focus
 
   (* A row drawn behind the ones around it.

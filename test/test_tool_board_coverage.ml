@@ -565,7 +565,6 @@ let test_post_create_typed_attachments () =
         ~mime:"application/octet-stream"
     with
     | Tool_output.Stored reference -> reference
-    | Tool_output.Inline _ -> Alcotest.fail "artifact was not stored"
   in
   let artifact =
     `Assoc
@@ -725,7 +724,6 @@ let test_attachment_artifact_read_bound () =
         ~mime:"application/octet-stream"
     with
     | Tool_output.Stored reference -> reference
-    | Tool_output.Inline _ -> Alcotest.fail "artifact was not stored"
   in
   let entries =
     [ { Board_tool_attachment.kind = Board_tool_attachment.Image

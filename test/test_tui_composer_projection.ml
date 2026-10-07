@@ -63,7 +63,7 @@ let test_focus_and_draft_are_projected_together () =
     unfocused.focus;
   check string "initially empty" "" unfocused.draft;
   state.composer_focused <- true;
-  Buffer.add_string state.msg_input "draft for analyst";
+  Masc_tui_message_input.insert state.msg_input "draft for analyst";
   let focused = Projection.of_state state in
   check focus_testable "focused" Composer.Focused focused.focus;
   check string "draft" "draft for analyst" focused.draft
@@ -105,6 +105,19 @@ let test_the_composer_row_says_what_a_slash_word_is () =
   check (option string) "a message draws nothing" None
     (Masc_tui_render_prim.slash_hint_text ~restore:"" "hello")
 
+let test_shared_composer_keeps_emoji_cursor_on_boundaries () =
+  let state = state () in
+  let input = state.msg_input in
+  Masc_tui_message_input.insert input "👩‍💻X";
+  List.iter (fun expected_cells ->
+    Masc_tui_message_input.move_left input;
+    let visible, cells = Masc_tui_render_prim.composer_draft_window state
+      ~cols:80 ~prompt:"" in
+    check string "full joined emoji remains visible" "👩‍💻X" visible;
+    check bool "window never slices an emoji scalar" true (String.is_valid_utf_8 visible);
+    check int "caret at the visible grapheme boundary" expected_cells cells)
+    [2; 0]
+
 let () =
   run "tui-composer-projection"
     [ ( "state projection"
@@ -112,6 +125,8 @@ let () =
         ; test_case "ready target" `Quick test_selected_keeper_is_ready
         ; test_case "unread roster" `Quick
             test_unread_roster_keeps_the_selected_name
+        ; test_case "shared composer ZWJ caret" `Quick
+            test_shared_composer_keeps_emoji_cursor_on_boundaries
         ; test_case "focus and draft" `Quick
             test_focus_and_draft_are_projected_together
         ; test_case "workspace loss withdraws queued message target" `Quick

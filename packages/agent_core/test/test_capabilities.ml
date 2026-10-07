@@ -1621,7 +1621,7 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
          a schema guarantee nor a parseable json_object reply. *)
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "thinking" )
     ; ( "Ollama Cloud Kimi K2.7 Code"
       , Provider_qualified "ollama_cloud"
@@ -1637,14 +1637,14 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , "minimax-m3"
       , Extended_thinking
       , Response_format_json
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "reasoning" )
     ; ( "Ollama Cloud Nemotron 3 Ultra"
       , Provider_qualified "ollama_cloud"
       , "nemotron-3-ultra"
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "thinking" )
     ; ( "Ollama Cloud DeepSeek V4 Pro"
       , Provider_qualified "ollama_cloud"
@@ -1668,21 +1668,21 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , "glm-5.2"
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "thinking" )
     ; ( "Ollama Cloud GPT-OSS 20B"
       , Provider_qualified "ollama_cloud"
       , "gpt-oss:20b"
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "thinking" )
     ; ( "Ollama Cloud GPT-OSS 120B"
       , Provider_qualified "ollama_cloud"
       , "gpt-oss:120b"
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      , Replay_latest_user_tool_turn_only
       , Delta_stream "thinking" )
     ]
   in

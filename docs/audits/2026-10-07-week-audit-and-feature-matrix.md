@@ -164,6 +164,14 @@ PR(모두 Draft, base main):
 - #41485 (#41475 위에 쌓음) Board 읽기 전용 오류 타입 `board_read_error`. Board 읽기는 메모리만 봐서 `Io_error` 를 낼 수 없어요.
 - #41486 (#41485 위에 쌓음) Keeper 의 Board 읽기 "일시 실패" 처리(intake 보류, 커서 스캔 정지, 밀어 주기 경고), `disposition` 타입, 테스트 뒷문 `force_transient_board_reads`, 그 뒷문으로만 돌던 테스트 5개 삭제. Keeper 코드에서 `Board.Io_error` 를 만드는 곳은 테스트 뒷문 두 개뿐이었고, 09-30~10-07 로그에 일시 실패 줄 0번.
 
+5차(사용자 "불필요한 거 버려"): 운영 코드가 한 번도 만들지 않는 상태를 지웠어요. 기준은 "만드는 곳이 없으면 지우고, 바깥 입력(저장된 기록, 외부 프로토콜)이 보낼 수 있으면 남긴다"예요. 컴파일된 타입 트리(`.cmt`)에서 variant 생성자를 만드는 곳을 세는 도구로 후보 319개를 찾고, 하나씩 다시 확인한 뒤 지웠어요.
+- 실제 버그 1건: #41562 `keeper_candle_gift` 가 MCP 와 tag 경로에서 실패. 세 곳 중 한 곳만 고쳐져 있었고, misc 도구 56개를 한 함수에서 전부 다루게 바꿈.
+- 삭제 PR: #41534 #41535 #41538 #41540 #41541 #41543 #41544 #41545 #41547 #41548 #41549 #41551 #41552 #41553 #41554 #41559 #41563 #41564 #41566 #41567 #41569 #41570 #41571 #41575 #41576 #41577 #41578 #41580 #41581 #41585 #41586 #41587 #41588 #41593 #41597 #41598 #41599 #41600 #41601 #41602 #41603 #41605 #41606 #41607 #41608 #41609 #41610 #41613 #41616 #41617 #41618 #41619 #41621 #41625 #41628 #41629 #41630 #41631 #41632 #41634 #41635 #41639 #41644 #41646.
+- 읽는 곳이 없는 필드 통째 삭제: 런타임 실패 경로의 `provenance`(#41602), fleet scan 의 `non_executable_cause`(#41608), 구독 저장소 전체(#41613).
+- 빈 테스트: TOML 을 안 보고 OCaml 목록 둘만 비교하던 config category 테스트를 TOML 을 읽게 고침(#41585, TOML 값을 빼면 실패하는 것 확인). 없는 도구의 부재만 확인하던 테스트 2개 삭제(#41631).
+- main 빌드 수정: #41520 이 #41583 뒤에 머지되며 `bin/masc_tui.ml:10935` 타입 검사가 깨짐 → #41643. #41520 의 `test_tui_home_queue_identity_pty.py` 는 main 꼬리말과 기대 문구가 달라 따로 실패.
+- 이슈: #41627 `LockContention` 이 HTTP 400 으로 나감(`Masc_error.code` 는 503).
+
 남은 TUI 문구(B3·B4·B5): "task owner without fiber N", "running X/Y" 와 "not running" 목록의 Failing 처리, Approvals 제목 수와 Home "need you" 수 차이. 다음 차례.
 
 Keeper 가 올린 Glossary PR(`polisher`): #41435 DOS 피드 개명, #41437 Draft RFC 이름 제거, #41440 중복 개념 통일, #41446 어려운 말 15곳, #41449 RFC-0472 분할 제안.
@@ -197,6 +205,21 @@ Keeper 에게 맡긴 것:
 | 11 | Goal 확정과 Candle 지급의 결합 | Goal 확정은 먼저 끝내고, 지급 줄은 그 뒤 따로 씀(실패하면 다시 시도) | 지금은 Candle 쓰기 실패가 Goal 확정을 막음 |
 | 12 | Candle 분배 대상이 한 명일 때 | 모델 호출 없이 그 한 명에게 전부(원장 `weights_trace` 에 "규칙으로 정함" variant 추가) | 지금은 결과가 정해진 질문을 모델에 하고, 0 을 답하면 지급이 거절됨(D-F6). 라이브 지급 줄 0개라 형식 변경 비용이 지금이 가장 작음 |
 | 13 | 잔액 조회가 반감기 정책을 기록하는 구조 | 정책 사건은 설정 변경 경로가 쓰고, 잔액 도구는 읽기만 | 지금은 Keeper 의 `keeper_candle_balance` 가 쓰기 lock 을 잡고 정책 사건을 덧붙임(D-F5) |
+
+
+5차 삭제 작업에서 나온 결정(바깥으로 나가는 출력이나 저장 형식이 바뀌어서 직접 하지 않음):
+
+| # | 무엇 | 선택지 | 근거 |
+|---|---|---|---|
+| 14 | `lib/autonomous` 와 `/api/v1/autonomous/{phases,transitions}` | 라이브러리·경로·`specs/autonomous` 삭제 | #41617 뒤 남은 건 고정 목록 둘. 저장소 안에서 이 경로를 읽는 곳 없음 |
+| 15 | Slack `record_gateway_event` | Discord 처럼 연결하거나, 카운터 선언까지 삭제(`/metrics` 의 0 시리즈가 사라짐) | 부르는 곳 0 |
+| 16 | Keeper 상태의 `credential_archived` | 조건 칸·JSON 키·phase 계산·Mermaid 문구를 함께 삭제 | 이제 참이 될 수 없음. 대시보드 `keeper-composite.ts:88` 이 키를 읽음 |
+| 17 | `Context_measured` 와 composite JSON 의 `measurement` 키 | 함께 삭제 | 만드는 곳 없음. 대시보드·TUI 해석기 확인 필요 |
+| 18 | `reload_class` 를 `requires_restart` 하나로, 설명자 `sandbox` 를 `backend` 에서 계산 | 합치기 | 두 쌍 모두 늘 같은 짝으로만 나옴(#41618, #41646) |
+| 19 | IDE `?kind=turn`, `staticArguments`, `implementationStatus` 키 | hard cut | 값이 늘 같거나 쓰는 곳 없음 |
+| 20 | `Store.semantic_prepare`, `FileSystem.set_if_not_exists`·`extend_lock`, `validate_decision_transition` | 삭제 | 운영 호출 0. 앞의 것은 저장 형식과 얽힘 |
+| 21 | span `masc.turn_type`, `Auth_error_kind.Invalid_json` | 삭제 | 앞의 것은 늘 `"direct"`, 뒤의 것은 TUI 만 읽음 |
+| 22 | `keeper_decision_audit` 의 Mermaid 문구 | 지금 동작에 맞게 고침 | 지워진 `decide` 를 설명함 |
 
 ## 9. 버린 것 (확인해 보니 틀림)
 

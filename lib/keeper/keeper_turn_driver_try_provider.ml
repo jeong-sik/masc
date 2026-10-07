@@ -2284,10 +2284,12 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
 ;;
 
 (* #27320: same-runtime retry stage for a typed provider context overflow on
-   the official-client lanes, whose seed history is cut against a declared
-   prompt byte cap ([Keeper_claude_code_runtime], [Keeper_codex_runtime]).
-   A ContextOverflow there means the cap over-states what the client
-   carries, not that the request was malformed: a smaller view of the SAME
+   the official-client lanes ([Keeper_claude_code_runtime],
+   [Keeper_codex_runtime]). Their first request carries the whole windowed
+   history, or the start-prompt ceiling a Muse or Antigravity runtime derives
+   from its declared window ([Runtime_instance.prompt_capacity_bytes]).
+   A ContextOverflow there means that view is more than the client carries,
+   not that the request was malformed: a smaller view of the SAME
    conversation can still answer the same turn, so the lane retries the same
    candidate rather than rotating runtimes immediately. The Agent Core lane
    answers the same refusal by moving the carried front instead

@@ -71,7 +71,7 @@ description = "Scene node; survives reordering, fails on detach/replacement."
 [[params]]
 name = "point"
 type = "object"
-description = "click_at/scroll_at: normalized x/y in [0,1); copy screenshot viewport/expectedUrl."
+description = "click_at/hover_at/scroll_at: normalized x/y in [0,1); copy screenshot viewport/expectedUrl."
 
 additional_properties = false
 
@@ -128,7 +128,7 @@ minimum = 0.0
 [[params]]
 name = "viewport"
 type = "object"
-description = "click_at/scroll_at/drag: copy screenshot documentId, CSS dimensions and scroll offsets exactly; changes fail."
+description = "click_at/hover_at/scroll_at/drag: copy screenshot documentId, CSS dimensions and scroll offsets exactly; changes fail."
 
 additional_properties = false
 

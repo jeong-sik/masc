@@ -386,7 +386,14 @@ let execute_unlocked t = function
         | Browser_lane.Click_at {point;viewport}
         | Browser_lane.Scroll_at {point;viewport;_}
         | Browser_lane.Drag {from=point;viewport;_} ->
-          let* before = script t session (Browser_scene_script.runtime ^ Browser_interaction.pointer_guard_script) [args] in
+          (* The guard runs before any /actions request, so a stale URL or
+             viewport cannot have moved the pointer. [execute] turns this
+             payload into [Rejected_before_effect]. *)
+          (match script t session (Browser_scene_script.runtime ^ Browser_interaction.pointer_guard_script) [args] with
+          | Error error ->
+            Ok (`Assoc ["interactionFailure", `Assoc
+              ["message", `String (error_message error); "effectStarted", `Bool false]])
+          | Ok before ->
           let move (point : Browser_lane.Pointer.point) = `Assoc [
             "type",`String "pointerMove"; "duration",`Int 0; "origin",`String "viewport";
             "x",`Int (int_of_float (point.x *. viewport.width));
@@ -435,7 +442,7 @@ let execute_unlocked t = function
           (match after with
            | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before) ::
                ("action",`String (match action with Browser_lane.Hover_at _ -> "hover_at" | Browser_lane.Click_at _ -> "click_at" | Browser_lane.Scroll_at _ -> "scroll_at" | _ -> "drag")) :: fields))
-           | _ -> Error (Protocol "invalid pointer receipt"))
+           | _ -> Error (Protocol "invalid pointer receipt")))
         | _ -> script t session (Browser_scene_script.runtime ^ Browser_interaction.script) [args]
       in
       match result with

@@ -42,7 +42,7 @@ BOX_BOTTOM_LEFT = "└"
 # A side pane's edge on the title row: its own border, or the corner of a
 # framed body next to it.
 BORDER_GLYPHS = frozenset(
-    ("│", "┃", "┌", "┐", "└", "┘"))
+    ("│", "┃", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴"))
 # Every box-drawing glyph. The footer is the frame's key hints, and a footer
 # row holding one of these is a pane's border the frame pushed down onto it.
 BOX_DRAWING = range(0x2500, 0x2580)
@@ -253,13 +253,30 @@ def measure_pane(rows: dict[int, bytes], *, left: int, right: int) -> dict[str, 
 
 
 def assert_pane_edge(rows: dict[int, bytes], column: int, where: str) -> None:
-    """The column a side pane's border stands in holds a border glyph on the
-    title row, so a body slice cut there is cut at the pane and not inside
-    the body."""
-    edge = cells(rows[3], column, column + 1)
-    if edge not in BORDER_GLYPHS:
-        raise AssertionError(f"{where}: no pane border at cell {column} "
-                             f"({edge!r}): {rows[3]!r}")
+    """The column a side pane's border stands in holds a border glyph on a
+    row of the body's top band, so a body slice cut there is cut at the pane
+    and not inside the body.
+
+    The probe walks down from the terminal's third row instead of pinning
+    row 3: the chat's left pane stands a portrait caption above its frame
+    (render_chat draws "현재 대화 · <keeper>", then the picture, before the
+    roster's box top), so on the chat the frame's own top glyph is the edge
+    row there and the probe reads rows down to and including the frame top.
+    A pane without a picture still answers on the third row. A slice that
+    cut into the body would show prose on every row of the band and the
+    probe would find no border at all."""
+    for row in range(3, 12):
+        edge = cells(rows.get(row, b""), column, column + 1)
+        if edge in BORDER_GLYPHS:
+            return
+        if row == 11:
+            # The walk reached the row the roster top stands on without
+            # finding the edge glyph: that top itself is the last chance.
+            edge = cells(rows.get(12, b""), column, column + 1)
+            if edge in BORDER_GLYPHS:
+                return
+    raise AssertionError(f"{where}: no pane border at cell {column} "
+                         f"on rows 3-12: {rows!r}")
 
 
 def print_screen(name: str, columns: int, output: bytearray) -> None:

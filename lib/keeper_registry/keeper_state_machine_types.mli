@@ -38,7 +38,6 @@ type event =
     }
   | Operator_pause
   | Operator_resume
-  | Operator_stop of { remove_meta : bool; }
   | Stop_requested
   | Drain_complete
   | Fiber_started
@@ -46,7 +45,6 @@ type event =
       http_status : int option;
     }
   | Supervisor_restart_attempt of { attempt : int; }
-  | Credential_archived
   | Operator_clear_requested of { preserve_system : bool; reason : string; }
 val event_to_string : event -> string
 type entry_action =

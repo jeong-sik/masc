@@ -178,6 +178,9 @@ type _ command =
       Operation_id.t -> (bool, error) result command
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
+  | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
+  | Update_direct_native_call :
+      {operation_id:Operation_id.t; execution_digest:string; change:Keeper_native_call.change} -> (unit, error) result command
   | Defer_direct_checkpoint :
       { operation_id : Operation_id.t; execution_digest : string;
         checkpoint : Keeper_semantic_execution.gate_checkpoint } ->
@@ -563,6 +566,8 @@ let answer : type response. response command -> answer = function
   | Exact_operation _ -> In_its_drain_step
   | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
+  | Direct_native_call _ -> In_its_drain_step
+  | Update_direct_native_call _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
   | Resume_direct_checkpoint _ -> In_its_drain_step
   | Direct_runtime_retry _ -> In_its_drain_step
@@ -1497,6 +1502,17 @@ let start
             Chat_operation_store.direct_checkpoint t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Direct_native_call operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read direct native execution" (fun () ->
+            Chat_operation_store.direct_native_call t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Update_direct_native_call {operation_id; execution_digest; change}, resolve) ->
+          let response = run_operation_command t ~label:"persist direct native execution" (fun () ->
+            Chat_operation_store.update_direct_native_call t.operation_store ~now:(t.now ())
+              ~operation_id ~execution_digest change) |> Result.map fst in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint}, resolve) ->
           let response = run_operation_command t ~label:"defer direct cooperative checkpoint" (fun () ->
             Chat_operation_store.defer_direct_checkpoint t.operation_store ~now:(t.now ())
@@ -2117,6 +2133,15 @@ let apply_meta t command = request t (Apply_meta command)
 let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_id)
 let defer_direct_checkpoint t ~operation_id ~execution_digest ~checkpoint =
   request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint})
+let direct_native_call t ~operation_id = request t (Direct_native_call operation_id)
+let bind_direct_native_call t ~operation_id ~execution_digest ~observed ~call =
+  request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Bind {observed; call}})
+let checkpoint_direct_native_call t ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
+  request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Checkpoint {call_id; observed; checkpoint}})
+let terminal_direct_native_call t ~operation_id ~execution_digest ~call_id ~disposition =
+  request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Terminal {call_id; disposition}})
+let acknowledge_direct_native_call t ~operation_id ~execution_digest ~call_id =
+  request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Acknowledge call_id})
 let resume_direct_checkpoint t ~operation_id ~observed =
   request t (Resume_direct_checkpoint {operation_id; observed})
 

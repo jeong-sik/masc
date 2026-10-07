@@ -895,7 +895,12 @@ let inspect_outstanding_with ~scope ~path =
     let* semantic_executions =
       match scope with
       | Pending_inputs -> Ok []
-      | Outstanding_integrity_audit -> if chat_only then Ok [] else semantic_rows db ~active_only:true in
+      | Outstanding_integrity_audit -> if chat_only then Ok [] else
+        let* rows = semantic_rows db ~active_only:false in
+        Ok (List.filter (fun (row : Semantic.t) ->
+          not (Semantic.is_terminal row) || match row.native_call with
+          | Keeper_native_call.No_native_call -> false
+          | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ -> true) rows) in
     let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
     Ok (Stored_operations { chat_operations = outstanding; semantic_executions })
   in
@@ -2145,6 +2150,45 @@ let confirm_semantic_transition store expected result =
   | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
       | Idempotency_conflict _ | Integrity_error _) -> result
 
+let direct_native_call store ~operation_id =
+  let* () = ensure_open store in
+  let* operation = operation_or_unknown store.db operation_id in
+  let* execution = direct_execution_with_db store.db operation in
+  Ok (match execution with None -> Keeper_native_call.No_native_call | Some execution -> execution.native_call)
+
+let update_direct_native_call store ~now ~operation_id ~execution_digest change =
+  let* () = ensure_open store in
+  let expected_commit = ref None in
+  let result = with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    let* () = if operation.execution_digest = execution_digest then Ok ()
+      else Error (Invalid_input "native call operation digest changed") in
+    match operation.state with
+    | Operation.Queued | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Error (Not_running operation_id)
+    | Operation.Running _ ->
+      let* current = direct_execution_with_db store.db operation in
+      let* execution = match current, change with
+        | Some execution, _ -> Ok execution
+        | None, Keeper_native_call.Bind _ ->
+          let* input = required_option "native operation input" operation.input in
+          let* created = Semantic.create ~id:(Keeper_execution_scope_id.direct_operation operation_id)
+              ~input ~sources:[] ~now
+            |> Result.map_error (fun error -> Invalid_input (Semantic.error_to_string error)) in
+          let* ready = semantic_transition ~now Semantic.Confirm_sources created in
+          semantic_transition ~now Semantic.Begin_execution ready
+        | None, (Keeper_native_call.Checkpoint _ | Keeper_native_call.Terminal _ | Keeper_native_call.Acknowledge _) ->
+          Error (Integrity_error "native call has no owning execution") in
+      let* replacement = Keeper_native_call.transition execution.native_call change
+        |> Result.map_error (fun detail -> Integrity_error detail) in
+      let* next = Semantic.update_native_call ~now ~expected:execution.native_call ~replacement execution
+        |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error)) in
+      expected_commit := Some (next, ());
+      match current with
+      | None -> insert_semantic store.db next
+      | Some expected when Semantic.to_json expected = Semantic.to_json next -> Ok ()
+      | Some expected -> update_semantic store.db ~expected next) in
+  confirm_semantic_transition store expected_commit result
+
 let resolve_direct_gate store ~now ~operation_id ~resolution =
   let* () = ensure_open store in
   let expected_commit = ref None in
@@ -2233,7 +2277,16 @@ let settle_direct_semantic_with_db db current command =
       | Reducer.Fail_running {completed_at; failure} -> Ok (completed_at, Semantic.Failed failure.detail)
       | Reducer.Start _ | Reducer.Requeue_continuation | Reducer.Edit_queued _ | Reducer.Move_queued _ ->
         Error (Integrity_error "nonterminal command cannot settle direct continuation") in
-    let* next = semantic_transition ~now (Semantic.Settle terminal) expected in
+    (* Retire is acknowledged by the operation's actual terminal transaction,
+       never by the Core callback alone. Unknown outcomes keep their receipt. *)
+    let* acknowledged = match expected.native_call with
+      | Keeper_native_call.Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Agent_core.Agent.Retire; _}) ->
+        Semantic.update_native_call ~now ~expected:expected.native_call
+          ~replacement:Keeper_native_call.No_native_call expected
+        |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error))
+      | Keeper_native_call.No_native_call | Keeper_native_call.Active _
+      | Keeper_native_call.Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Agent_core.Agent.Operator_repair_required _; _}) -> Ok expected in
+    let* next = semantic_transition ~now (Semantic.Settle terminal) acknowledged in
     update_semantic db ~expected next
 ;;
 
@@ -2325,15 +2378,18 @@ let reconcile_semantic_running_with_db db ~now =
   let* executions = semantic_rows db ~active_only:true in
   List.fold_left (fun result (execution : Semantic.t) ->
     let* count = result in
-    match execution.phase with
-    | Semantic.Running | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ ->
+    match execution.native_call, execution.phase with
+    | Keeper_native_call.Active _, _ -> Ok count
+    | (Keeper_native_call.No_native_call | Keeper_native_call.Terminal_unacknowledged _),
+      (Semantic.Running | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _) ->
         let* next = Semantic.apply ~now
           (Semantic.Require_reconciliation "process restarted during semantic execution") execution
           |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error)) in
         let* () = update_semantic db ~expected:execution next in
         Ok (count + 1)
-    | Semantic.Preparing | Semantic.Ready | Semantic.Suspended _
-    | Semantic.Recovering _ | Semantic.Settled _ -> Ok count) (Ok 0) executions
+    | (Keeper_native_call.No_native_call | Keeper_native_call.Terminal_unacknowledged _),
+      (Semantic.Preparing | Semantic.Ready | Semantic.Suspended _
+      | Semantic.Recovering _ | Semantic.Settled _) -> Ok count) (Ok 0) executions
 ;;
 
 let settle_running_after_restart store ~now =
@@ -2359,10 +2415,24 @@ let settle_running_after_restart store ~now =
     let* interrupted = List.fold_left (fun result operation ->
       let* interrupted = result in
       let* execution = direct_execution_with_db store.db operation in
-      match pending_checkpoint execution, pending_retry execution, gate_state execution with
-      | None, None, None -> Ok (operation :: interrupted)
-      | Some _, _, _ | None, Some _, _ | None, None, Some _ ->
-        requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)) (Ok []) running in
+      match Option.map (fun (execution : Semantic.t) -> execution.native_call) execution with
+      | Some (Keeper_native_call.Active _) ->
+        requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)
+      | Some (Keeper_native_call.Terminal_unacknowledged _) ->
+        (* A committed Core terminal is not an Owner response receipt. Keep
+           its identity, report interruption, and never resume its journal. *)
+        let* () = match execution with
+          | None -> Error (Integrity_error "native terminal lost its execution")
+          | Some expected ->
+            let* next = semantic_transition ~now
+              (Semantic.Settle (Semantic.Failed "process restarted before Owner receipt acknowledgement")) expected in
+            update_semantic store.db ~expected next in
+        Ok (operation :: interrupted)
+      | None | Some Keeper_native_call.No_native_call ->
+        (match pending_checkpoint execution, pending_retry execution, gate_state execution with
+         | None, None, None -> Ok (operation :: interrupted)
+         | Some _, _, _ | None, Some _, _ | None, None, Some _ ->
+           requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted))) (Ok []) running in
     let interrupted = List.rev interrupted in
     let* _reconciled = reconcile_semantic_running_with_db store.db ~now in
     let* count = with_statement

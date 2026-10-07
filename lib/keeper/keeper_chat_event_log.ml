@@ -793,8 +793,14 @@ let read_journal_rows_path path = read_complete_rows ~allow_torn_tail:true path
 let read_journal_path_result path = read_journal_path ~allow_torn_tail:true path
 let read_journal journal = read_journal_path_result journal.path
 
-let next_sequence ?(require_existing = false) journal =
-  match read_journal_path ~allow_torn_tail:false journal.path with
+(* [allow_torn_tail] only changes which bytes count as rows: a fragment after
+   the last newline is not one either way. A producer resuming a segment must
+   refuse it (the cursor may sit past a frame a live reader already holds), so
+   [next_sequence] keeps it false. Recovery that ends the journal after a
+   crash passes true and derives the cursor from the complete rows; the append
+   that follows cuts the fragment. *)
+let sequence_after_complete_rows ~allow_torn_tail ~require_existing journal =
+  match read_journal_path ~allow_torn_tail journal.path with
   | Error Journal_missing when not require_existing -> Ok 0
   | Error (Journal_missing | Journal_unreadable _ | Journal_corrupt _) as error -> error
   | Ok entries ->
@@ -817,6 +823,34 @@ let next_sequence ?(require_existing = false) journal =
          let highest = Option.fold ~none:(-1) ~some:(fun entry -> entry.seq) latest in
          if highest = max_int then Error (Journal_corrupt "journal sequence space exhausted")
          else Ok (highest + 1))
+;;
+
+let next_sequence ?(require_existing = false) journal =
+  sequence_after_complete_rows ~allow_torn_tail:false ~require_existing journal
+;;
+
+type terminal_error_receipt =
+  | Recorded_terminal_error of { seq : int; ts : float }
+  | Existing_terminal_error of { seq : int; ts : float; message : string }
+
+let record_terminal_error journal ~ts ~message =
+  let ( let* ) = Result.bind in
+  let read_error = function
+    | Journal_missing -> "operation journal disappeared during settlement"
+    | Journal_unreadable detail | Journal_corrupt detail -> detail in
+  let* seq =
+    sequence_after_complete_rows ~allow_torn_tail:true ~require_existing:false journal
+    |> Result.map_error read_error in
+  let* entries = match read_journal journal with
+    | Ok entries -> Ok entries
+    | Error Journal_missing -> Ok []
+    | Error error -> Error (read_error error) in
+  match List.rev entries with
+  | { event = Keeper_chat_events.Event_error { message }; seq; ts } :: _ ->
+    Ok (Existing_terminal_error { seq; ts; message })
+  | _ ->
+    let* () = append_result journal ~seq ~ts (Keeper_chat_events.Event_error { message }) in
+    Ok (Recorded_terminal_error { seq; ts })
 ;;
 
 (** {1 Replay position} *)

@@ -121,6 +121,74 @@ def run_unknown(executable, operation):
           '/api/v1/play/invites/guest': h.MethodHttpResponse(revoke)})
 
 
+def run_pre_dispatch_failure(executable, operation):
+    current, observed, prepare, health = workspace_fixture()
+    rows = [] if operation == 'issue' else [row()]
+    armed = threading.Event()
+    mutations = []
+
+    def checked_health():
+        # Wait for durable preparation, then fail the identity check before
+        # the HTTP mutation can run. Ordinary background reads are harmless.
+        if armed.is_set() and current['base']:
+            journal = Path(current['base'], '.masc', 'tui-play-pending.jsonl')
+            if journal.exists():
+                content = journal.read_text()
+                events = content.splitlines()
+                if content.endswith('\n') and events and json.loads(events[-1])['event'] == 'pending':
+                    current['phase'] = 'unknown'
+        return health()
+
+    def inventory(body):
+        if not body:
+            return 200, {'invites': rows.copy()}
+        mutations.append('issue')
+        rows[:] = [row()]
+        return 201, {**row(), 'link': 'https://play.example.test/play#retry-fixture-token'}
+
+    def revoke(method):
+        assert method == 'DELETE'
+        mutations.append('revoke')
+        rows.clear()
+        return 200, {'name': 'guest', 'revoked': True, 'released_controller': False}
+
+    def interact(process, master, _slave, output, _base):
+        def key(value, needle):
+            return press(process, master, output, value, needle)
+
+        def open_form():
+            if operation == 'issue':
+                key(b'nguest\r', b'Expires in hours:')
+            else:
+                key(b'x', b'Revoke guest?')
+
+        key(b':go Collab\r', b'No invites' if operation == 'issue' else '› guest'.encode())
+        open_form()
+        armed.set()
+        key(b'\r', b'MASC Dashboard')
+        assert observed['unknown'].is_set() and mutations == [], mutations
+        armed.clear()
+        start = len(output)
+        current['phase'] = 'a'
+        h.wait_for_output(process, master, output, ('Base: ' + current['base']).encode(), start=start, timeout=8)
+        key(b':go Collab\r', b'No invites' if operation == 'issue' else '› guest'.encode())
+        # No explicit unknown resolution: the first request was never sent.
+        open_form()
+        key(b'\r', b'https://play.example.test/play#retry-fixture-token' if operation == 'issue' else b'Play invite guest: revoked')
+        assert mutations == [operation], mutations
+        if operation == 'issue':
+            key(b'\x1b', b'MASC Collab')
+        key(b'q', b'MASC Dashboard')
+        os.write(master, b'q')
+
+    h.run_terminal_scenario(executable,
+        description='pre-dispatch identity failure releases the ' + operation + ' guard',
+        interact=interact, prepare_workspace=prepare, refresh=0.5, terminal_cols=300,
+        http_fixtures={'/health': checked_health, '/health?full=1': checked_health,
+          '/api/v1/play/invites': h.RequestHttpResponse(inventory),
+          '/api/v1/play/invites/guest': h.MethodHttpResponse(revoke)})
+
+
 def run_control_boundary(executable):
     current, observed, prepare, health = workspace_fixture()
     requests = []
@@ -192,5 +260,7 @@ def run_control_boundary(executable):
 if __name__ == '__main__':
     run_unknown(sys.argv[1], 'issue')
     run_unknown(sys.argv[1], 'revoke')
+    run_pre_dispatch_failure(sys.argv[1], 'issue')
+    run_pre_dispatch_failure(sys.argv[1], 'revoke')
     run_control_boundary(sys.argv[1])
     print('tui Collab authority: PASS')

@@ -75,7 +75,13 @@ type delta =
       }
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
-  | Stream_model_started of { model : string }
+  | Stream_model_started of
+      { message_id : string option
+      ; model : string
+      ; usage : stream_usage option
+      }
+      (** The provider message identity and initial counter snapshot. A known
+          repeated identity is the same message, not a counter reset. *)
   | Stream_details of
       { usage : stream_usage option
       ; stop_reason : string option

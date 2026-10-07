@@ -1408,7 +1408,7 @@ let test_the_row_names_the_model_phase_between_tool_calls () =
     [ Live.Run_started
     ; Live.Runtime_attempt_started { runtime_id = Some "deepseek"; attempt_index = Some 0 }
     ];
-  feed ~now:(origin +. 1.) t [ Live.Stream_model_started { model = "deepseek" } ];
+  feed ~now:(origin +. 1.) t [ Live.Stream_model_started { message_id = None; model = "deepseek"; usage = None } ];
   check bool "the endpoint answering without a token is its own phase" true
     (contains ~needle:"model started, nothing back for 4s" (progress_text ~now:(origin +. 5.) t));
   feed ~now:(origin +. 6.) t [ Live.Thinking "let me" ];
@@ -1551,7 +1551,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
         ; cache_read_input_tokens = Some 4096
         ; cache_creation_input_tokens = None
         }
-    ; Live.Stream_model_started { model = "glm-5-turbo" }
+    ; Live.Stream_model_started { message_id = None; model = "glm-5-turbo"; usage = None }
     ];
   check (option string) "a second round starts from neither" None
     (usage (Some t));
@@ -1657,7 +1657,7 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
       "configured: assigned-runtime"
       (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t));
-    feed t [ Live.Stream_model_started { model = "new-model" } ];
+    feed t [ Live.Stream_model_started { message_id = None; model = "new-model"; usage = None } ];
     (* A model name is not a runtime id: the header says which it has. *)
     check (option string) "the model event does not name a runtime" None
       (Transcript.current_runtime_id t);
@@ -2823,9 +2823,101 @@ let test_native_tools_are_observations_without_execution_receipts () =
     (Option.get rows.summary_outcome)
 ;;
 
+let test_response_boundaries_preserve_origins () =
+  let speech t = Transcript.drawn t |> List.filter_map (fun (item:Transcript.drawn_item) ->
+    match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) in
+  let cases = [
+    "tool round", [Live.Text "COMMENTARY"] @ read_file_call;
+    "native tool round", [Live.Text "COMMENTARY";
+      Live.Native_tool_started {occurrence=occurrence "native";tool_name=Some "Read"};
+      Live.Native_tool_ended {occurrence=occurrence "native"}];
+    "provider response", [Live.Text "COMMENTARY";
+      Live.Stream_model_started {message_id=Some "new";model="glm";usage=None}];
+    "retry", [Live.Text "COMMENTARY";
+      Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
+    "continuation", [Live.Text "COMMENTARY";
+      Live.Reply_details {reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+        turn_ref="trace#1"}; Live.Run_finished; Live.Run_started]
+  ] in
+  List.iter (fun (label,boundary) ->
+    let log = Log.create ~keeper_name:"keeper.one" ~request_id:"req-1" ~started_at:origin in
+    let t = fresh () in
+    let put delta = ignore (Log.add ~at:origin log ~seq:None delta); Transcript.apply ~now:origin t delta in
+    List.iter put (Live.Run_started :: boundary @ [Live.Text "PREFIX"; Live.Thinking "thought"; Live.Text "SUFFIX"]);
+    let before = Transcript.drawn t in
+    let last = List.hd (List.rev before) in
+    put (reply_details ~reply:"SUFFIX" ());
+    put Live.Run_finished;
+    check (list string) (label ^ ": prior content and observed order preserved")
+      ["COMMENTARY"; "PREFIX"; "SUFFIX"] (speech t);
+    let after = Transcript.drawn t in
+    let reply = List.find (fun (item:Transcript.drawn_item) -> match item.drawn with Drawn_reply _ -> true | _ -> false) after in
+    check bool (label ^ ": reply keeps surviving stretch origin") true (last.origin = reply.origin);
+    check bool (label ^ ": origins are unique across boundaries") true
+      (let origins = List.map (fun (item:Transcript.drawn_item) -> item.origin) after in
+       List.length origins = List.length (List.sort_uniq compare origins));
+    check bool (label ^ ": refolding preserves origins and content") true
+      (after = Transcript.drawn (Transcript.of_log ~now:origin log))) cases
+;;
+
+let test_usage_resets_only_at_response_boundaries () =
+  let t = fresh () in
+  let usage input output = {Live.input_tokens=input;output_tokens=output;
+    cache_read_input_tokens=None;cache_creation_input_tokens=None} in
+  let tokens () = Transcript.stream_tokens_text ~keeper_name:"keeper.one" (Some t) in
+  let seed () = feed t [Live.Stream_model_started {message_id=Some "message";
+    model="glm";usage=Some (usage (Some 99) (Some 0))};
+    Live.Stream_details {usage=Some (usage None (Some 7));stop_reason=Some "tool_use"}] in
+  feed t [Live.Run_started]; seed ();
+  check (option string) "sparse report retains earlier fields"
+    (Some "tokens: in 99 · out 7") (tokens ());
+  feed t [Live.Stream_model_started {message_id=Some "next";model="glm";usage=None}];
+  check (option string) "new message clears old counters" None (tokens ());
+  seed ();
+  feed t [Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
+  check (option string) "retry clears prior message counters" None (tokens ());
+  seed ();
+  feed t [Live.Reply_details {reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+    turn_ref="trace#1"};Live.Run_finished;Live.Run_started];
+  check (option string) "continuation does not inherit old counters" None (tokens ());
+  check (option string) "continuation does not inherit old stop reason" None
+    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+  seed ();
+  check (option string) "same provider id may start again in a new segment"
+    (Some "tokens: in 99 · out 7") (tokens ());
+  feed t [Live.Stream_details {usage=Some {Live.input_tokens=Some 0;
+    output_tokens=None;cache_read_input_tokens=Some 12;
+    cache_creation_input_tokens=Some 3};stop_reason=None}];
+  check (option string) "zero updates one field while absent output is retained"
+    (Some "tokens: in 0 · out 7 · cache read 12 · cache write 3") (tokens ());
+  feed t [Live.Stream_details {usage=Some {Live.input_tokens=None;
+    output_tokens=Some 8;cache_read_input_tokens=None;
+    cache_creation_input_tokens=None};stop_reason=None}];
+  check (option string) "a later sparse output retains both cache fields"
+    (Some "tokens: in 0 · out 8 · cache read 12 · cache write 3") (tokens ());
+  feed t [Live.Stream_model_started {message_id=None;model="unknown-id";usage=None}];
+  check (option string) "unidentified start cannot inherit another response's usage"
+    None (tokens ())
+;;
+
+let test_empty_new_response_does_not_replace_prior_message () =
+  let t = fresh () in
+  feed t [Live.Run_started;Live.Text "EARLIER";
+    Live.Stream_model_started {message_id=Some "next";model="observed";usage=None};
+    reply_details ~reply:"FINAL" ();Live.Run_finished];
+  let items = Transcript.drawn t in
+  check (list string) "a response without streamed text leaves earlier output in place"
+    ["EARLIER";"FINAL"]
+    (List.filter_map (fun (item:Transcript.drawn_item) ->
+       match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) items);
+  check bool "unstreamed final uses its own synthetic origin" true
+    ((List.hd (List.rev items)).origin = Transcript.Reply_of_segment 0)
+;;
+
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "event timeline"
+    [ ( "response boundaries", [test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
+    ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts] )
     ; ( "content"

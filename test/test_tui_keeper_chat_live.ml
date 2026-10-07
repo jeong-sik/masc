@@ -22,7 +22,7 @@ let delta_to_string : Live.delta -> string = function
       Printf.sprintf "runtime_attempt_started(%s,%s)"
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
-  | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
   | Live.Stream_details { usage; stop_reason } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
         (match usage with
@@ -734,7 +734,7 @@ let test_stream_model_started_is_typed () =
             ]))
   in
   check (list delta) "stream message start yields stream_model_started"
-    [ Live.Stream_model_started { model = "claude-3-7-sonnet" } ]
+    [ Live.Stream_model_started { message_id = Some "pm-1"; model = "claude-3-7-sonnet"; usage = None } ]
     (feed_whole body)
 
 let test_stream_usage_is_typed () =

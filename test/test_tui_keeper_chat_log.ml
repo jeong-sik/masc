@@ -39,7 +39,7 @@ let delta_to_string : Live.delta -> string = function
       Printf.sprintf "runtime_attempt_started(%s,%s)"
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
-  | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
   | Live.Stream_details { usage; stop_reason } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
         (match usage with
@@ -798,9 +798,59 @@ let test_a_blank_reason_is_not_a_reason () =
       failf "a blank reason survived beside the counters: %s"
         (match other with None -> "no row" | Some delta -> delta_to_string delta)
 
+let test_response_boundaries_and_usage_survive_wire_and_replay () =
+  let module T = Masc_tui_keeper_chat_transcript in
+  let start id usage = E.Agent_core_stream_message_start
+      {provider_message_id=id; model="observed"; usage} in
+  let sparse output = E.Agent_core_stream_message_delta
+      {stop_reason=None; usage=Some {Agent_core.Types.input_tokens=None;
+        output_tokens=Some output; cache_read_input_tokens=None;
+        cache_creation_input_tokens=None}} in
+  let initial = {Agent_core.Types.zero_api_usage with input_tokens=500;
+    cache_read_input_tokens=100} in
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1 in
+  let events = [
+    E.Run_started {run_id="run"; thread_id="keeper:keeper.one"};
+    E.Text_message_start {message_id="outer"; role=E.Assistant};
+    start "response-1" (Some initial);
+    E.Text_delta "EARLIER_RESPONSE";
+    start "response-2" (Some initial);
+    E.Text_delta "PREFIX";
+    E.Agent_core_thinking_delta {index=1; delta="REASONING"};
+    sparse 7;
+    start "response-2" (Some initial); (* repeated snapshot cannot erase delta usage *)
+    E.Text_delta "SUFFIX";
+    E.Reply_details {reply="SUFFIX"; turn_outcome=Outcome.Visible_reply; turn_ref};
+    E.Run_finished {run_id="run"}] in
+  let indexed = List.mapi (fun seq event -> seq,event) events in
+  let wire = log () in
+  wire_tagged_deltas indexed |> List.iter (fun (seq,delta) ->
+    ignore (Log.add ~at:1000. wire ~seq delta));
+  let replay = log () in
+  let journal = List.map (fun (seq,event) -> line seq 1000. event) indexed in
+  ignore (Log.add_journaled replay journal);
+  let projected log =
+    let t = T.of_log ~now:2000. log in
+    let speech = T.drawn t |> List.filter_map (fun (item:T.drawn_item) ->
+      match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) in
+    check (list string) "earlier response and observed stretches stay in place"
+      ["EARLIER_RESPONSE"; "PREFIX"; "SUFFIX"] speech;
+    check (option string) "start counters survive sparse output and duplicate start"
+      (Some "tokens: in 500 · out 7 · cache read 100 · cache write 0")
+      (T.stream_tokens_text ~keeper_name:"keeper.one" (Some t));
+    T.drawn t in
+  let wire_items = projected wire and replay_items = projected replay in
+  check bool "wire and replay agree on content and stable origins" true
+    (wire_items = replay_items);
+  ignore (Log.add_journaled replay journal);
+  check bool "overlapping replay leaves origins and content unchanged" true
+    (replay_items = projected replay)
+;;
+
 let () =
   run "tui keeper chat log"
-    [ ( "log"
+    [ ( "response windows", [test_case "wire/replay boundaries and usage" `Quick test_response_boundaries_and_usage_survive_wire_and_replay])
+    ; ( "log"
       , [ test_case "seq dedup, and None never dedupes" `Quick
             test_seq_dedup_and_none_never_dedupes
         ; test_case "last seq follows the highest held" `Quick

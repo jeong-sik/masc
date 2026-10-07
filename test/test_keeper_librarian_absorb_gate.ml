@@ -283,12 +283,11 @@ let runtime_skip_reason = function
   | Invalid_answer_run | Memory_write_failure -> None
 ;;
 
-let run_runtime_evidence ?fixture_dir () =
+let run_runtime_evidence () =
   let module Librarian = Masc.Keeper_librarian in
   let module Current = Masc.Keeper_memory_os_current in
   let module Absorbed = Masc.Keeper_memory_absorbed in
   let module Runs = Masc.Exact_lane_run_registry in
-  let module Projection = Server_standalone_lane_projection in
   let module Fixture = Exact_output_fixture in
   let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
   let member = Yojson.Safe.Util.member in
@@ -660,17 +659,7 @@ let run_runtime_evidence ?fixture_dir () =
     Alcotest.(check (list string)) "only applied originals are archived"
       (List.sort String.compare archived)
       (List.sort String.compare (List.map (fun (r : Absorbed.record) -> r.fact.claim) records));
-    Option.iter (fun directory ->
-      let detail = match Projection.For_testing.run_detail_json_with
-        ~run_id:replayed.run_id ~exact_runs:[ replayed ]
-        ~verification_runs:[] ~goal_verification_runs:[] with
-        | Projection.Detail_found detail -> detail
-        | Detail_not_found | Detail_ambiguous -> Alcotest.fail "replayed run has no HTTP detail" in
-      let page = Projection.For_testing.recent_run_page_json_with
-        ~limit:1 ~before:None ~lane:(Some "librarian_exact") ~run_kind:None
-        ~exact_runs:[ replayed ] ~verification_runs:[] ~goal_verification_runs:[] |> require in
-      Yojson.Safe.to_file (Filename.concat directory (case_name ^ ".json"))
-        (`Assoc [ "scenario", `String case_name; "detail", detail; "page", page ])) fixture_dir)
+    Librarian_run_tui_reading.check replayed)
     [ Judged_run; Gate_disabled_run; Lane_disabled_run; Missing_key_run; Excluded_run
     ; Http_failure; Invalid_json_run; Invalid_response_run; Nonfinite_response_run
     ; Duplicate_response_run; Nonutf8_response_run
@@ -2067,9 +2056,7 @@ let test_persisted_evaluation_request_survives_restart () =
 ;;
 
 let () =
-  if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) "--emit-tui-fixtures"
-  then run_runtime_evidence ~fixture_dir:Sys.argv.(2) ()
-  else Alcotest.run
+  Alcotest.run
     "keeper_librarian_absorb_gate"
     [ ( "statements"
       , [ Alcotest.test_case "the cut matches the golden" `Quick test_statements_match_the_golden ] )

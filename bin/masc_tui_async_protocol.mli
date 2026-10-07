@@ -206,10 +206,16 @@ type async_msg =
       * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_copy_loaded of
       int * string * (Masc_tui_keeper_chat_history.decoded, string) result
+  | Keeper_chat_operation_loaded of
+      { keeper_name : string
+      ; operation_id : string
+      ; operation_state : (Keeper_chat_operation.state, string) result
+      }
   | Keeper_chat_journal_loaded of
       { keeper_name : string
       ; source : Masc_tui_keeper_chat_log.journal_source
       ; started_at : float
+      ; operation_state : (Keeper_chat_operation.state option, string) result
       ; journal :
           ( Masc.Keeper_chat_event_log.journaled_event list
           , Masc_tui_keeper_chat_log.events_error )

@@ -138,6 +138,9 @@ type skill_activity = private
           every decoded activation and every live call carries one. *)
   ; skill_tool_use_id : string option
   ; turn_ref : string option
+      (** The activation's exact turn, or the Reply_details receipt for the
+          stream segment that made this call. Absent until that receipt
+          arrives; a later continuation never supplies it. *)
   ; content_revision : string option
   ; runtime_id : string option
   ; state : skill_state
@@ -308,6 +311,15 @@ val settled_at : t -> float option
     span a block drawn from this transcript covered. *)
 
 val apply : now:float -> t -> Masc_tui_keeper_chat_live.delta -> unit
+(** [now] stamps a tool call as it opens, so the progress row can say how long
+    the call in flight has been open rather than only how long the turn has. *)
+(** Fold one delta in. Tool deltas join only by their server-owned stream
+    occurrence. Provider ids are optional correlation data; an unknown
+    occurrence is reported unreadable rather than attached by position. *)
+
+val reconcile_operation : t -> Keeper_chat_operation.state -> unit
+(** Reconcile an exact durable operation state without fabricating journal
+    events or a reply. Preserve partial text, tools, and continuation history. *)
 
 val close_from_operation_record :
   now:float -> t -> Masc_tui_keeper_chat_projection.operation_record -> unit
@@ -315,11 +327,6 @@ val close_from_operation_record :
     server's operation record says about the request. A turn already ended by
     a delta is left as it is. Unlike {!note_rejection} it does not claim the
     server refused the request. *)
-(** [now] stamps a tool call as it opens, so the progress row can say how long
-    the call in flight has been open rather than only how long the turn has. *)
-(** Fold one delta in. Tool deltas join only by their server-owned stream
-    occurrence. Provider ids are optional correlation data; an unknown
-    occurrence is reported unreadable rather than attached by position. *)
 
 val note_interrupt : t -> interrupt -> unit
 
@@ -337,10 +344,10 @@ val note_skill_activity : t -> skill_activity -> unit
 (** Folds in the exact delivery record of one skill read -- the states the
     wire has no event for ([Skill_served_only], [Skill_delivered],
     [Skill_used]), the calls the read led to, and the proof ids -- keyed by
-    its [skill_tool_use_id]. A record in a state the stream speaks for
+    [(turn_ref, skill_tool_use_id)]. A record in a state the stream speaks for
     itself (calling, pending, failed) or an evidence gap changes nothing,
-    and neither does one without a tool-use id. A second record for the
-    same id replaces the first. {!drawn} lays the record over the skill item
+    and neither does one without that complete identity. A second record for the
+    same identity replaces the first. {!drawn} lays the record over the skill item
     derived from the same call, and draws it on its own when the trail never
     saw that call. *)
 

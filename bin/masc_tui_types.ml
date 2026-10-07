@@ -3060,7 +3060,16 @@ let turn_log_holds_the_turn turn_log =
   match Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
   | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
   | Masc_tui_keeper_chat_transcript.Stream_ended ->
-      Option.is_some
+      Option.exists (fun (reply : Masc_tui_keeper_chat_transcript.reply) ->
+        match reply.reply_outcome with
+        | Masc.Keeper_turn_outcome.Continuation_checkpoint ->
+            (* An autonomous journal owns one finished turn. A direct
+               operation can continue past this checkpoint, so its final
+               history must remain visible if that later journal is lost. *)
+            (match Masc_tui_keeper_chat_log.source turn_log.tl_log with
+             | Autonomous_turn _ -> true
+             | Operation _ -> false)
+        | Visible_reply | Terminal_effect_settled | Awaiting_gate_approval | No_visible_reply -> true)
         (Masc_tui_keeper_chat_transcript.reply turn_log.tl_transcript)
   | Masc_tui_keeper_chat_transcript.Waiting
   | Masc_tui_keeper_chat_transcript.Working ->
@@ -7057,6 +7066,33 @@ let journal_held_request_ids state keeper_name =
   @ state.msg_journal_inflight
 ;;
 
+(* A journal's permanent failure says nothing about the exact operation
+   endpoint. On a later history refresh, retained partial direct logs still
+   need that endpoint until it records an ending. Reuse the source read's
+   inflight exclusion; the operation-only read never advances a journal cursor.
+   Autonomous turns have no operation record, and pane-owned requests settle
+   through their own subscription. *)
+let unavailable_journal_operation_targets state keeper_name =
+  state.msg_settled_logs
+  |> List.filter_map (fun log ->
+      let request_id = turn_log_request_id log in
+      let journal_unavailable = state.msg_journal_reads_refused
+        || List.mem request_id state.msg_journal_unavailable in
+      let read_inflight = List.mem request_id state.msg_journal_inflight in
+      let owned = List.exists (fun (entry : inflight) ->
+        String.equal entry.sent_request.request_id request_id) state.msg_inflight in
+      let terminal = Option.exists Keeper_chat_operation.is_terminal
+        (Masc_tui_keeper_chat_log.operation_state log.tl_log) in
+      match Masc_tui_keeper_chat_log.source log.tl_log with
+      | Operation operation_id
+        when String.equal (turn_log_keeper_name log) keeper_name
+             && journal_unavailable && not read_inflight && not owned && not terminal
+             && not (turn_log_holds_the_turn log) ->
+          Some operation_id
+      | Operation _ | Autonomous_turn _ -> None)
+  |> List.sort_uniq String.compare
+;;
+
 (* A settled log takes its place among the others by when its turn started,
    so a turn rebuilt from its journal sits where a turn settled live would
    have. A request already held by a log that stands for its turn is not
@@ -7430,12 +7466,23 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
       List.iter
         (fun (row : msg_entry) ->
           if String.equal row.me_request_id request_id then
-            List.iter
-              (Masc_tui_keeper_chat_transcript.note_skill_activity
-                 turn_log.tl_transcript)
+            List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
+              let observed =
+                Option.is_some skill.turn_ref && Option.is_some skill.skill_tool_use_id
+                && List.exists (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+                  match item.drawn with
+                  | Drawn_skill skills -> List.exists
+                      (fun (shown : Masc_tui_keeper_chat_transcript.skill_activity) ->
+                        shown.turn_ref = skill.turn_ref
+                        && shown.skill_tool_use_id = skill.skill_tool_use_id) skills
+                  | Drawn_tools _ | Drawn_thinking _ | Drawn_text _ | Drawn_reply _
+                  | Drawn_status _ | Drawn_error _ -> false)
+                    (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+              if turn_log_holds_the_turn turn_log || observed then
+                Masc_tui_keeper_chat_transcript.note_skill_activity turn_log.tl_transcript skill)
               row.me_skill_block)
         rows)
-    (List.filter turn_log_holds_the_turn (settled_logs_for_keeper state keeper_name))
+    (selected_source_logs_for_keeper state keeper_name)
 ;;
 
 (* Settling a turn: its log is committed and, when it has anything to draw,
@@ -9394,6 +9441,47 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
         | _ -> true)
       rows
   in
+  (* Partial selected logs own the exact activities already drawn, even
+     when they cannot own the final reply. Keep unmatched durable activities
+     and evidence gaps; a call name or transcript position is not identity. *)
+  let partial_logs = selected_source_logs_for_keeper state keeper_name
+    |> List.filter (fun log -> not (turn_log_holds_the_turn log)) in
+  let remaining_activity (row : msg_entry) =
+    let module Transcript = Masc_tui_keeper_chat_transcript in
+    let drawn = partial_logs
+      |> List.filter (fun log -> String.equal row.me_request_id (turn_log_execution_id log))
+      |> List.concat_map (fun log -> Transcript.drawn log.tl_transcript) in
+    if drawn = [] then Some row else match row.me_role with
+    | Message_tool ->
+        (match row.me_tool_block with
+         | None -> Some row
+         | Some block ->
+             let executions = List.concat_map (fun (item : Transcript.drawn_item) ->
+               match item.drawn with
+               | Drawn_tools observed -> List.filter_map (fun (activity : Transcript.tool_activity) ->
+                   activity.execution_id) observed.activities
+               | _ -> []) drawn in
+             let activities = List.filter (fun (activity : Transcript.tool_activity) ->
+               not (Option.exists (fun id -> List.mem id executions) activity.execution_id)) block.activities in
+             if activities = [] && block.omitted_steps = 0 then None
+             else Some {row with me_tool_block=Some (Transcript.tool_block
+               ~omitted_steps:block.omitted_steps activities)})
+    | Message_skill _ when row.me_skill_block <> [] ->
+        let observed = List.concat_map (fun (item : Transcript.drawn_item) ->
+          match item.drawn with Drawn_skill skills -> skills | _ -> []) drawn in
+        let skills = List.filter (fun (skill : Transcript.skill_activity) ->
+          not (List.exists (fun (shown : Transcript.skill_activity) ->
+            Option.is_some skill.skill_tool_use_id
+            && skill.skill_tool_use_id = shown.skill_tool_use_id
+            && skill.turn_ref = shown.turn_ref
+            && skill.runtime_id = shown.runtime_id) observed)) row.me_skill_block in
+        if skills = [] then None
+        else Some {row with me_skill_block=skills;
+          me_role=Message_skill (Transcript.skill_block_state skills)}
+    | _ -> Some row
+  in
+  let loaded = List.filter_map remaining_activity loaded in
+  let session = List.filter_map remaining_activity session in
   let loaded = without_partial_replies loaded in
   let session = without_partial_replies session in
   chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
@@ -12149,14 +12237,37 @@ let keeper_message_status_log (state : state) =
   | None -> None
   | Some keeper_name ->
       let logs = selected_source_logs_for_keeper state keeper_name in
-      (match List.find_opt (fun log ->
-          Masc_tui_keeper_chat_transcript.phase log.tl_transcript = Working
-          && not (observed_log_has_ended state log)
-          && not (observed_log_is_unavailable state log)) logs with
+      let owned log =
+        List.exists (fun (entry : inflight) ->
+          turn_log_keeper_name entry.log = keeper_name
+          && turn_log_execution_id entry.log = turn_log_execution_id log)
+          state.msg_inflight
+      in
+      let autonomous log =
+        List.exists (fun (source, _) -> source = Masc_tui_keeper_chat_log.source log.tl_log)
+          (autonomous_journal_candidates ~keeper_name state.keeper_turns)
+      in
+      let observed log =
+        match Masc_tui_keeper_chat_log.operation_state log.tl_log with
+        | Some (Keeper_chat_operation.Running _) -> true
+        | Some (Queued | Succeeded _ | Failed _ | Cancelled _) | None -> false
+      in
+      let current log = owned log || autonomous log || observed log in
+      let working log =
+        Masc_tui_keeper_chat_transcript.phase log.tl_transcript = Working
+        && not (observed_log_has_ended state log)
+        && not (observed_log_is_unavailable state log)
+      in
+      let active = List.find_map (fun authority ->
+        List.find_opt (fun log -> authority log && working log) logs)
+        [owned; autonomous; observed] in
+      (match active with
        | Some log -> Some log
        | None ->
            match state.msg_live with
-           | Some log when turn_log_keeper_name log = keeper_name -> Some log
+           | Some log when turn_log_keeper_name log = keeper_name
+               && (Masc_tui_keeper_chat_transcript.phase log.tl_transcript <> Working
+                   || current log) -> Some log
            | Some _ | None ->
                List.find_opt (fun log ->
                  Masc_tui_keeper_chat_transcript.awaiting_continuation log.tl_transcript

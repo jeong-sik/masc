@@ -11,6 +11,19 @@ import tui_keyboard_harness as _keyboard_harness
 
 
 
+# The server derives a human_required phase from an Auto Judge summary that
+# hands the call to a person, and sends that summary on the row; the TUI
+# refuses a human_required row without it (#41464).
+def human_required_summary_status():
+    return {"status": "available", "summary": {
+        "summary_version": 2, "generated_at": 1790000000.0,
+        "model_run_id": "fixture-judge-run",
+        "context_summary": "The call reaches outside the workspace.",
+        "key_questions": ["Should this call run here?"],
+        "judgment": "require_human",
+        "rationale": "Auto Judge cannot tell whether the operator wants this."}}
+
+
 
 def select_destination(process, fd, output, label, *, destinations=12):
     os.write(fd, b"k" * destinations)
@@ -151,7 +164,8 @@ def automatic_gate_is_not_a_human_decision(executable):
         assert_no_decision_posts(requests)
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         # A separate explicit human handoff retains its own identity.
-        queue.append(dict(template, id="appr-human", phase="human_required"))
+        queue.append(dict(template, id="appr-human", phase="human_required",
+                          summary_status=human_required_summary_status()))
         _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 2 need you")
         # Change the width so capture receives a full redraw after refresh;
         # requesting the current 80x24 size does not produce another frame.

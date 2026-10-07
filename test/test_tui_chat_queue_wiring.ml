@@ -3243,6 +3243,28 @@ let test_partial_observation_survives_history_ending_and_unavailable_journal () 
     (Tui_types.observed_log_has_ended state (List.hd state.msg_settled_logs))
 ;;
 
+let test_succeeded_operation_with_checkpoint_only_keeps_final_history () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_loaded_keeper <- Some "alpha";
+  let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"checkpoint-only" ~started_at:1. in
+  Tui_types.turn_log_add ~now:2. log ~seq:(Some 0) Live.Run_started;
+  Tui_types.turn_log_add ~now:3. log ~seq:(Some 1)
+    (Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-checkpoint#1"});
+  Tui_types.turn_log_add ~now:4. log ~seq:(Some 2) Live.Run_finished;
+  let terminal = Keeper_chat_operation.Succeeded {completed_at=8.; outcome_ref="final-result"} in
+  Log.observe_operation_state log.tl_log (Some terminal);
+  Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+  Log.commit log.tl_log;
+  Tui_types.hold_settled_log state log;
+  state.msg_loaded <- [chat_entry ~request_id:"checkpoint-only" ~role:Tui_types.Message_keeper
+    ~text:"FINAL_REPLY_FROM_HISTORY" ~at:8. ()];
+  check bool "a closed checkpoint does not claim the final reply" false
+    (Tui_types.turn_log_holds_the_turn log);
+  check (list string) "durable final output remains visible beside the checkpoint"
+    ["FINAL_REPLY_FROM_HISTORY"]
+    (Tui_types.chat_rows_for state "alpha" |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
+;;
+
 let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -4939,6 +4961,8 @@ let () =
             test_partial_observation_survives_history_ending_and_unavailable_journal
         ; test_case "observed handoff retains progress and one final reply" `Quick
             test_observed_history_handoff_keeps_progress_and_one_final_reply
+        ; test_case "succeeded operation with checkpoint-only journal keeps final history" `Quick
+            test_succeeded_operation_with_checkpoint_only_keeps_final_history
         ; test_case "a journal log of the live execution is not observed" `Quick
             test_a_journal_log_of_the_live_execution_is_not_observed
         ; test_case "hidden partial reply cannot remove durable final reply" `Quick

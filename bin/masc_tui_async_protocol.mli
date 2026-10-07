@@ -206,6 +206,7 @@ type async_msg =
       { keeper_name : string
       ; source : Masc_tui_keeper_chat_log.journal_source
       ; started_at : float
+      ; operation_state : (Keeper_chat_operation.state option, string) result
       ; journal :
           ( Masc.Keeper_chat_event_log.journaled_event list
           , Masc_tui_keeper_chat_log.events_error )

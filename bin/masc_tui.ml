@@ -6308,6 +6308,28 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
   let host = server_peer_host in
   let port = state.port in
   let run (source, started_at, since_seq) =
+    (* The journal can lack its final event after interruption or an append
+       failure. Its cursor remains the journal's; the exact operation is a
+       separate authority for whether that execution is still running. Read
+       it first: terminal store settlement follows the final journal append,
+       so the following journal read cannot cut off that terminal prefix. *)
+    let operation_state =
+      match source with
+      | Keeper_chat_log.Autonomous_turn _ -> Ok None
+      | Keeper_chat_log.Operation operation_id ->
+          (try
+             let ( let* ) = Result.bind in
+             let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+             let path = Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
+               (Masc_tui_http.percent_encode_path_segment keeper_name)
+               (Masc_tui_http.percent_encode_path_segment operation_id) in
+             let* json = Masc_tui_http.get_json ~host ~port ~path in
+             let* state = Keeper_chat_log.decode_operation_state ~operation_id json in
+             Ok (Some state)
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> Error (Printexc.to_string exn))
+    in
     let journal =
       try
         Keeper_chat_log.read_whole_journal ~since_seq
@@ -6325,7 +6347,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
       | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
     in
     enqueue_async mailbox
-      (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal })
+      (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state })
   in
   match targets, Eio_context.get_switch_opt () with
   | [], Some _ | [], None -> ()
@@ -16243,7 +16265,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
           !journal_targets;
         launch_current_autonomous_journals state ~mailbox ~keeper_name
-  | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal } -> (
+  | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state } -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever
          keeper the pane shows now, and the log is kept per keeper. *)
@@ -16282,6 +16304,17 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                   ~started_at:(journal_log_started_at ~fallback:started_at lines)
           in
           let accepted = turn_log_add_journaled log lines in
+          (match operation_state with
+           | Ok observed ->
+               Keeper_chat_log.observe_operation_state log.tl_log observed;
+               Option.iter (Keeper_chat_transcript.reconcile_operation log.tl_transcript)
+                 (Keeper_chat_log.operation_state log.tl_log)
+           | Error detail ->
+               Keeper_chat_log.observe_operation_state log.tl_log None;
+               add_event state "error"
+                 (Printf.sprintf "operation for %s not loaded: %s"
+                    (Keeper_chat.compact_request_id journal_id)
+                    (Keeper_chat.terminal_safe_text detail)));
           (* An observer-followed turn has no pane-owned delta delivery.
              Refresh its durable results after the journal accepts them;
              replayed seqs and text-only reads do not request another load. *)

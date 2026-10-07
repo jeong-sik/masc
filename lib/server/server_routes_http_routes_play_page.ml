@@ -14,6 +14,7 @@ open Server_auth
 module Http = Http_server_eio
 
 let seat_path = "/api/v1/play/seat"
+let session_path = "/api/v1/play/session"
 
 (* 16 bytes from the CSPRNG, as hex: the page holds a bearer, so the nonce
    that lets its script run is not a PRNG draw. *)
@@ -140,6 +141,7 @@ const SEAT_POLL_MS = 5000;
 const ACTIVITY_SHOWN = 8;
 const LIVE_PATH = '/api/v1/lane-addons/live?source_kind=dos_capture';
 const SEAT_PATH = '/api/v1/play/seat';
+const SESSION_PATH = '/api/v1/play/session';
 const PAD_PATH = '/api/v1/play/pad';
 
 // A physical gamepad in the standard mapping (W3C Gamepad, "Remapping") ->
@@ -164,6 +166,11 @@ const KEY_NAMES = {
 
 const SESSION_KEY = 'masc.play.invite';
 const PENDING_KEY = 'masc.play.pending';
+const DOCUMENT_KEY = 'masc.play.document';
+function operationId() {
+  return [...crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+let documentId = null;
 const invitation = location.hash.slice(1);
 let token = invitation;
 let invitationConflict = false;
@@ -175,7 +182,12 @@ try {
     invitationConflict = invitation !== '' && invitation !== retained;
   } else if (token !== '') sessionStorage.setItem(SESSION_KEY, token);
   unsettled = token !== '' && sessionStorage.getItem(PENDING_KEY) !== null;
-} catch (_) { /* A browser may deny storage; the original link still works. */ }
+  if (token !== '') {
+    const identity = operationId();
+    sessionStorage.setItem(DOCUMENT_KEY, identity);
+    documentId = identity;
+  }
+} catch (_) { /* Without durable operation receipts, this page only observes. */ }
 history.replaceState(null, '', location.pathname + location.search);
 // Opening an invitation again in this tab can be only a fragment navigation.
 // Re-enter initialization after disconnect or for the same invitation. A new
@@ -209,6 +221,10 @@ let nextSeatPollAt = 0;
 let handoffRead = null;
 let ended = false;
 let disconnecting = false;
+let connected = false;
+let departureConfirmed = false;
+let initialConnectIntent = true;
+let starting = Promise.resolve();
 let sending = Promise.resolve();
 let textSending = false;
 // The saves name the seat last reported (null: nothing loaded), and the one
@@ -223,6 +239,7 @@ let gamepadLoop = false;
 const statusMessages = new Map();
 const UNKNOWN_MESSAGE = '전송 결과를 확인하지 못해 초대 연결을 유지했어요. 추가 입력과 연결 끊기를 멈췄어요. 운영자에게 초대 회수를 요청한 뒤 새 링크를 새 탭에서 열어 주세요.';
 if (unsettled) setStatus('action', UNKNOWN_MESSAGE);
+if (token !== '' && documentId === null) setStatus('storage', '탭 저장소를 사용할 수 없어 관전만 할 수 있어요. 입력과 연결 끊기는 저장소를 허용한 뒤 새로고침해 주세요.');
 if (invitationConflict) setStatus('invitation', '새 초대를 열려면 현재 연결을 먼저 끊은 뒤 새 초대 링크를 다시 열어 주세요.');
 function setStatus(source, text) {
   if (text === '') statusMessages.delete(source);
@@ -241,7 +258,7 @@ function connectionSettled() {
   try {
     const retained = sessionStorage.getItem(SESSION_KEY);
     const pending = sessionStorage.getItem(PENDING_KEY);
-    if (retained !== token) {
+    if (retained !== token || documentId === null || sessionStorage.getItem(DOCUMENT_KEY) !== documentId) {
       unsettled = true;
       setStatus('connection', '이 탭의 연결 정보가 바뀌었어요. 페이지를 새로고침해 주세요.');
     }
@@ -264,10 +281,17 @@ function end(text) {
   // Check storage at the forget boundary too, including authentication
   // failures delivered to a restored document with an older cached state.
   if (token !== '' && !connectionSettled()) return;
-  ended = true;
   if (token !== '') {
-    try { sessionStorage.removeItem(SESSION_KEY); } catch (_) { /* Storage can be disabled. */ }
+    try { sessionStorage.removeItem(SESSION_KEY); }
+    catch (_) {
+      setStatus('disconnect', '탭에 저장된 초대 연결을 지우지 못했어요. 연결 끊기를 다시 눌러 주세요.');
+      setControlsEnabled(false);
+      return;
+    }
   }
+  ended = true;
+  initialConnectIntent = false;
+  try { sessionStorage.removeItem(DOCUMENT_KEY); } catch (_) { /* No bearer remains in storage. */ }
   token = '';
   setStatus('disconnect', '');
   setStatus('invitation', '');
@@ -297,7 +321,7 @@ async function mutate(path, body) {
   try {
     // Persist before dispatch: closing/reloading the document can lose its
     // response while the authenticated server operation is still pending.
-    pending = JSON.stringify({ token, operation: crypto.randomUUID() });
+    pending = JSON.stringify({ token, operation: operationId() });
     sessionStorage.setItem(PENDING_KEY, pending);
   } catch (_) {
     setStatus('action', '브라우저에 연결 상태를 저장하지 못해 입력을 보내지 않았어요. 이 사이트의 탭 저장소를 허용해 주세요.');
@@ -314,7 +338,8 @@ async function mutate(path, body) {
     if (!success && !refusal) throw new Error('unconfirmed operation response');
     // Only this operation's terminal response clears its marker. Seat/frame
     // reads are not ordered behind it, and cannot acknowledge it instead.
-    if (sessionStorage.getItem(SESSION_KEY) !== token || sessionStorage.getItem(PENDING_KEY) !== pending)
+    if (sessionStorage.getItem(SESSION_KEY) !== token || sessionStorage.getItem(PENDING_KEY) !== pending
+        || sessionStorage.getItem(DOCUMENT_KEY) !== documentId)
       throw new Error('connection or operation changed before acknowledgement');
     sessionStorage.removeItem(PENDING_KEY);
     unsettled = false;
@@ -327,14 +352,17 @@ async function mutate(path, body) {
 }
 
 function canMove() {
-  return machine && controllerError === null && !ended && !disconnecting && !unsettled
+  return documentId !== null && connected && !departureConfirmed && machine && controllerError === null && !ended && !disconnecting && !unsettled
     && (controller === null || controller === me || controllerRecoverable);
 }
 
 function renderTurn() {
   const turn = el('turn');
   setControlsEnabled(canMove());
-  if (!machine) {
+  if (!connected || departureConfirmed) {
+    turn.className = '';
+    turn.textContent = '조종 연결을 끊었어요. 다시 참여하려면 초대 링크를 새로 열어 주세요.';
+  } else if (!machine) {
     turn.className = '';
     turn.textContent = '지금 켜진 게임이 없어요.';
   } else if (controllerError !== null) {
@@ -392,6 +420,7 @@ async function refreshSeat() {
   }
   if (ended || latestSeatRequest !== request) return null;
   if (r.status !== 200 || !r.json || typeof r.json.machine !== 'boolean'
+      || typeof r.json.connected !== 'boolean'
       || typeof r.json.name !== 'string'
       || !(r.json.controller === null || typeof r.json.controller === 'string')
       || typeof r.json.controller_recoverable !== 'boolean'
@@ -405,6 +434,7 @@ async function refreshSeat() {
     return null;
   }
   me = r.json.name;
+  connected = r.json.connected;
   controller = r.json.controller;
   controllerRecoverable = r.json.controller_recoverable;
   controllerError = r.json.controller_error ?? null;
@@ -413,10 +443,20 @@ async function refreshSeat() {
   renderPassTargets(r.json.participants);
   seatSavesName = r.json.saves_name;
   setStatus('seat', controllerError ?? '');
+  // A transient initial read may fail. Keep this document's connect intent
+  // until its first authoritative seat, but never carry it past disconnect.
+  if (initialConnectIntent && controllerError === null && !disconnecting) {
+    initialConnectIntent = false;
+    if (!connected && connectionSettled()) {
+      const joined = await mutate(SESSION_PATH, { connected:true });
+      if (!ended && joined?.status === 200 && joined.json?.ok === true && joined.json.connected === true)
+        return refreshSeat();
+    }
+  }
   // Return this response's authority as well as rendering it. A concurrent
   // live response may change the shared projection before a caller resumes.
   return controllerError === null
-    ? { name: r.json.name, machine: r.json.machine, controller: r.json.controller }
+    ? { name: r.json.name, machine: r.json.machine, controller: r.json.controller, connected: r.json.connected }
     : null;
 }
 
@@ -577,17 +617,17 @@ async function poll() {
 
 function send(path, body) {
   sending = sending.then(async () => {
-    if (!canMove()) return false;
+    if (!canMove()) return null;
     const r = await mutate(path, body);
-    if (ended || r === null) return false;
+    if (ended || r === null) return null;
     const applied = r.status >= 200 && r.status < 300 && r.json && r.json.ok === true;
     if (!applied) setStatus('action', (r.json && (r.json.message || r.json.error)) || ('요청이 거절됐어요 (' + r.status + ')'));
     else setStatus('action', '');
     await refreshSeat();
-    return applied;
+    return applied ? r.json : null;
   }).catch(() => {
     setStatus('action', '요청 뒤 화면을 갱신하지 못했어요. 다시 읽고 있어요.');
-    return false;
+    return null;
   });
   return sending;
 }
@@ -595,11 +635,13 @@ function send(path, body) {
 async function disconnect() {
   if (ended || disconnecting) return;
   disconnecting = true;
+  initialConnectIntent = false;
   setControlsEnabled(false);
   setStatus('disconnect', '조종권을 확인하고 연결을 끊고 있어요.');
   try {
     // A previously admitted move can acquire a formerly free controller.
     // Drain it before observing/releasing our seat, and admit no new moves.
+    await starting;
     await sending;
     if (ended) return;
     if (unsettled) {
@@ -607,21 +649,15 @@ async function disconnect() {
       setStatus('action', UNKNOWN_MESSAGE);
       return;
     }
-    const seat = await refreshSeat();
+    const r = await mutate(SESSION_PATH, { connected:false });
     if (ended) return;
-    if (seat === null) {
-      if (!ended) setStatus('disconnect', '조종권을 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
+    if (r === null) { setStatus('disconnect', ''); return; }
+    if (!(r.status >= 200 && r.status < 300 && r.json?.ok === true && r.json.connected === false)) {
+      setStatus('disconnect', '서버의 연결 종료를 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
       return;
     }
-    if (seat.machine && seat.controller === seat.name) {
-      const r = await mutate('/api/v1/dos/pass', {});
-      if (ended) return;
-      if (r === null) { setStatus('disconnect', ''); return; }
-      if (!(r.status >= 200 && r.status < 300 && r.json && r.json.ok === true)) {
-        setStatus('disconnect', '조종권 반납을 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
-        return;
-      }
-    }
+    connected = false;
+    departureConfirmed = true;
     end('연결을 끊었어요. 다시 들어오려면 받은 초대 링크를 열어 주세요.');
   } catch (_) {
     if (!ended) setStatus('disconnect', '조종권 반납 결과를 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
@@ -666,8 +702,27 @@ el('send-text').addEventListener('click', () => {
   const text = el('text').value;
   if (text === '' || textSending) return;
   textSending = true;
-  send('/api/v1/dos/type', { text }).then(applied => {
-    if (applied && el('text').value === text) el('text').value = '';
+  send('/api/v1/dos/type', { text }).then(result => {
+    if (!result) return;
+    const count = result.data?.keys_pressed;
+    const encoder = new TextEncoder();
+    if (!Number.isSafeInteger(count) || count < 0 || count > encoder.encode(text).length) {
+      setStatus('action', '입력된 글자 수를 확인하지 못했어요. 초안을 유지했으니 게임 화면을 확인해 주세요.');
+      return;
+    }
+    let bytes = 0, offset = 0;
+    for (const character of text) {
+      const next = bytes + encoder.encode(character).length;
+      if (next > count) break;
+      bytes = next;
+      offset += character.length;
+    }
+    if (bytes !== count) {
+      setStatus('action', '입력이 글자 중간에서 멈췄어요. 초안을 유지했으니 게임 화면을 확인해 주세요.');
+      return;
+    }
+    if (el('text').value === text) el('text').value = text.slice(offset);
+    if (offset < text.length) setStatus('action', '일부만 입력됐어요. 남은 글자를 확인한 뒤 직접 보내 주세요.');
   }).finally(() => { textSending = false; });
 });
 el('text').addEventListener('keydown', (event) => { if (event.key === 'Enter') el('send-text').click(); });
@@ -692,7 +747,8 @@ setControlsEnabled(false);
 if (token === '') {
   end('링크에 초대 토큰이 없어요. 받은 링크를 그대로 열어 주세요.');
 } else {
-  refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.')).finally(tick);
+  starting = refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.'));
+  starting.finally(tick);
 }
 </script>
 </body>
@@ -742,16 +798,36 @@ let controller_json ~transaction ~config ~now =
 let seat_response ~config ~name =
   let snapshot = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
     let now = Time_compat.now () in
-    Result.map (fun participants ->
+    let ( let* ) = Result.bind in
+    let* participants = Play_seat.hand_to_in_transaction ~transaction config ~now in
+    let* participation = Play_participation.current ~transaction ~base_path:config.base_path ~name in
+    Ok (
       `Assoc
         ((("name", `String name) :: controller_json ~transaction ~config ~now)
+         @ [ ("connected", `Bool (participation = Play_participation.Connected)) ]
          @ [ ("participants", `List (List.map (fun p -> `String p) participants)) ]))
-      (Play_seat.hand_to_in_transaction ~transaction config ~now))
+    )
     |> Result.map_error Masc_domain.masc_error_to_string |> Result.join in
   match snapshot with
   | Error detail ->
     `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
   | Ok seat -> `OK, seat
+
+let session_response ~config ~name ~token body =
+  let decoded = try match Yojson.Safe.from_string body with
+    | `Assoc ["connected", `Bool connected] -> Ok connected
+    | _ -> Error "expected exactly {connected: boolean}"
+    with Yojson.Json_error _ -> Error "session body is not JSON" in
+  match decoded with
+  | Error detail -> `Bad_request, Server_refusal.json ~code:"invalid_request" detail
+  | Ok connected ->
+    let participation = if connected then Play_participation.Connected else Departed in
+    (match Keeper_dos_controller.set_participation ~config ~who:name ~token participation with
+     | Ok () -> `OK, `Assoc ["ok", `Bool true; "connected", `Bool connected]
+     | Error Keeper_dos_controller.Credential_changed ->
+       `Unauthorized, Server_refusal.json ~code:"credential_changed" "the invitation is no longer current"
+     | Error (Keeper_dos_controller.Participation_unavailable detail) ->
+       `Service_unavailable, Server_refusal.json ~code:"participation_unavailable" detail)
 
 let add_routes router =
   router
@@ -761,4 +837,13 @@ let add_routes router =
          (fun state name request reqd ->
            let status, json = seat_response ~config:(Mcp_server.workspace_config state) ~name in
            respond_json_value_with_cors ~status request reqd json)
+         request reqd)
+  |> Http.Router.post session_path (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanPlayMachine
+         (fun state name request reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let status, json = match auth_token_from_request request with
+               | Some token -> session_response ~config:(Mcp_server.workspace_config state) ~name ~token body
+               | None -> `Unauthorized, Server_refusal.json ~code:"missing_token" "a bearer is required" in
+             respond_json_value_with_cors ~status request reqd json))
          request reqd)

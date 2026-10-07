@@ -1551,6 +1551,8 @@ type msx_poll_state = Poll_ready of Masc_tui_msx_tick.poll_policy
   | Poll_observing of msx_poll_request * Masc_tui_msx_tick.refusal
 let msx_pending_poll = ref (Poll_ready Advancing)
 let invalidate_msx_poll () = msx_poll_view := ref ()
+let machine_changes_allowed state = Result.is_ok (Masc_tui_types.workspace_change_origin state)
+let machine_change_refusal = "MSX control requires a verified server matching this TUI's local workspace."
 type lane_addons_slice_source = Cached_snapshot | Fresh_inventory
 let decode_play_mutation decode = function
   | Masc_tui_http.Post_answered json -> Play_answered (decode json)
@@ -2644,12 +2646,20 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
           Result.map (fun activity -> activity,
             Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.poll_port Masc.Machine_lane.Msx ~since)
             (Masc_tui_http.fetch_msx_activity ~host:server_peer_host ~port:request.poll_port))
+  | Poll_ready Advancing when not (machine_changes_allowed state) ->
+      state.machine_interaction <- Observe_machine;
+      state.msx_notice <- Some machine_change_refusal;
+      launch_msx_live_read state ~mailbox
   | Poll_ready Advancing ->
       let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority } in
       msx_pending_poll := Poll_pending request;
       let run () =
         let frame =
-          try Masc_tui_http.tick_msx ~host:server_peer_host ~port:request.poll_port with
+          try
+            if request.poll_authority <> state.workspace_authority || not (machine_changes_allowed state)
+            then Error machine_change_refusal
+            else Masc_tui_http.tick_msx ~host:server_peer_host ~port:request.poll_port
+          with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
               Error (Printexc.to_string exn)
@@ -7920,7 +7930,9 @@ let settle_play_mutation state = function
   | Play_collab {owner; mutation} ->
       update_collab state owner (fun view -> Masc_tui_collab.settled view mutation)
 
-let play_mutation_pending_notice = "An invite change is still pending; wait for its result."
+let sync_collab_access state =
+  state.collab <- Option.map (fun view ->
+    Masc_tui_collab.write_access view (Masc_tui_types.play_change_access state)) state.collab
 
 let refresh_collab state ~mailbox owner =
   match state.collab with
@@ -7936,9 +7948,52 @@ let refresh_current_collab state ~mailbox =
   Option.iter (fun view -> refresh_collab state ~mailbox (Masc_tui_collab.owner view)) state.collab
 
 let open_collab state ~mailbox =
-  let view = Masc_tui_collab.create () in
+  let view = Masc_tui_collab.write_access (Masc_tui_collab.create ())
+    (Masc_tui_types.play_change_access state) in
   state.collab <- Some view;
   refresh_collab state ~mailbox (Masc_tui_collab.owner view)
+
+let launch_play_issue state ~mailbox ~sink ~name ~hours =
+  match Masc_tui_types.begin_play_change state (Issue_invite name) with
+  | Error detail ->
+      settle_play_mutation state sink;
+      play_notice state ~sink ~kind:Notice_failure detail;
+      false
+  | Ok request ->
+      sync_collab_access state;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port ->
+          match Masc_tui_types.workspace_change_origin state with
+          | Ok origin when origin = request.change_workspace ->
+              Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours)
+          | Ok _ | Error _ -> Ok (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch"))
+        ~wrap:(fun result -> Play_invite_issued (request, sink,
+          decode_play_mutation Tui_decode.decode_play_invite_issued
+            (match result with Ok outcome -> outcome | Error detail -> Masc_tui_http.Post_unanswered detail)));
+      true
+
+let launch_play_revoke state ~mailbox ~sink ~name =
+  match Masc_tui_types.begin_play_change state (Revoke_invite name) with
+  | Error detail ->
+      settle_play_mutation state sink;
+      play_notice state ~sink ~kind:Notice_failure detail;
+      false
+  | Ok request ->
+      sync_collab_access state;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port ->
+          match Masc_tui_types.workspace_change_origin state with
+          | Ok origin when origin = request.change_workspace ->
+              Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name)
+          | Ok _ | Error _ -> Ok (Masc_tui_http.Revoke_other
+              (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch")))
+        ~wrap:(fun result -> Play_invite_revoked (request, sink, name,
+          match result with
+          | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
+          | Ok (Masc_tui_http.Revoke_other outcome) ->
+              Play_revoke_result (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
+          | Error detail -> Play_revoke_result (Play_unanswered detail)));
+      true
 
 let launch_keeper_queue state ~mailbox ~keeper_name action =
   let enqueue_async = workspace_enqueue state in
@@ -8308,6 +8363,14 @@ let handle_collab_action state ~mailbox view action =
   | Watch Masc.Machine_lane.Dos -> open_dos_screen state ~mailbox
   | Game_menu -> open_msx_screen state ~mailbox
   | Refresh -> refresh_collab state ~mailbox (Masc_tui_collab.owner view)
+  | Resolve_unknown ->
+      (match Masc_tui_types.resolve_play_change state with
+       | Ok () ->
+           collab_notice state owner ~kind:Notice_reply
+             "Operator confirmed the original request finished; invite changes are available again.";
+           sync_collab_access state;
+           refresh_current_collab state ~mailbox
+       | Error detail -> collab_notice state owner ~kind:Notice_failure detail)
   | Open_link name ->
       (match Masc_tui_types.play_invite_find state name with
        | Some _ -> state.play_invite <- {state.play_invite with shown_name = Some name}; state.play_invite_scroll <- 0
@@ -8315,33 +8378,10 @@ let handle_collab_action state ~mailbox view action =
            "The one-time link is not retained in this session. Revoke this invite and issue a new one to obtain a link.")
   | Issue (mutation, name, hours) ->
       let sink = Play_collab {owner; mutation} in
-      if state.play_mutation_inflight then begin
-        settle_play_mutation state sink;
-        play_notice state ~sink ~kind:Notice_failure play_mutation_pending_notice
-      end else begin
-        state.play_mutation_inflight <- true;
-        launch_preset_call state ~mailbox
-          ~call:(fun ~host ~port -> Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
-          ~wrap:(fun result -> Play_invite_issued (sink,
-            decode_play_mutation Tui_decode.decode_play_invite_issued
-              (match result with Ok outcome -> outcome | Error detail -> Masc_tui_http.Post_unanswered detail)))
-      end
+      ignore (launch_play_issue state ~mailbox ~sink ~name ~hours)
   | Revoke (mutation, name) ->
       let sink = Play_collab {owner; mutation} in
-      if state.play_mutation_inflight then begin
-        settle_play_mutation state sink;
-        play_notice state ~sink ~kind:Notice_failure play_mutation_pending_notice
-      end else begin
-        state.play_mutation_inflight <- true;
-        launch_preset_call state ~mailbox
-          ~call:(fun ~host ~port -> Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name))
-          ~wrap:(fun result -> Play_invite_revoked (sink, name,
-            match result with
-            | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
-            | Ok (Masc_tui_http.Revoke_other outcome) ->
-                Play_revoke_result (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
-            | Error detail -> Play_revoke_result (Play_unanswered detail)))
-      end
+      ignore (launch_play_revoke state ~mailbox ~sink ~name)
 
 (* Where a reference lands, and what it opens when it gets there.
 
@@ -9825,40 +9865,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
              { state.play_invite with shown_name = Some (Masc_tui_play_card.name card) };
            state.play_invite_scroll <- 0)
   | Masc_tui_command.Play_invite { name; hours } ->
-      if state.play_mutation_inflight then
-        notice ~kind:Notice_failure
-          play_mutation_pending_notice
-      else begin
-        Masc_tui_message_input.clear state.msg_input;
-        state.play_mutation_inflight <- true;
-        launch_preset_call state ~mailbox
-          ~call:(fun ~host ~port ->
-            Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
-          ~wrap:(fun result ->
-            Play_invite_issued (Play_chat target,
-              decode_play_mutation Tui_decode.decode_play_invite_issued
-                (match result with
-                 | Ok outcome -> outcome
-                 | Error detail -> Masc_tui_http.Post_unanswered detail)))
-      end
+      if launch_play_issue state ~mailbox ~sink:(Play_chat target) ~name ~hours then
+        Masc_tui_message_input.clear state.msg_input
   | Masc_tui_command.Play_revoke name ->
-      if state.play_mutation_inflight then
-        notice ~kind:Notice_failure play_mutation_pending_notice
-      else begin
-        Masc_tui_message_input.clear state.msg_input;
-        state.play_mutation_inflight <- true;
-        launch_preset_call state ~mailbox
-          ~call:(fun ~host ~port ->
-            Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name))
-          ~wrap:(fun result ->
-            Play_invite_revoked (Play_chat target, name,
-              match result with
-              | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
-              | Ok (Masc_tui_http.Revoke_other outcome) ->
-                  Play_revoke_result
-                    (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
-              | Error detail -> Play_revoke_result (Play_unanswered detail)))
-      end
+      if launch_play_revoke state ~mailbox ~sink:(Play_chat target) ~name then
+        Masc_tui_message_input.clear state.msg_input
   | Masc_tui_command.Unknown word ->
       report_action state "error"
         (Printf.sprintf
@@ -10573,10 +10584,14 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      cards; only a confirmed different workspace discards them. Old replies
      are independently rejected by Workspace_scoped. *)
   state.collab <- None;
+  invalidate_msx_poll ();
+  Masc_tui_msx.invalidate ();
+  msx_surface_frame := None;
+  Masc_tui_types.withdraw_machine_control state;
   Masc_tui_types.withdraw_play_invite_workspace state ~previous
     ~current:(workspace_input_identity_of_server state.server_identity);
   state.play_invite_scroll <- 0;
-  state.play_mutation_inflight <- false;
+  Masc_tui_types.withdraw_play_changes state;
   (* A decision receipt states what one workspace's Keeper answered; the
      next workspace's screens must not carry it. *)
   state.home_decision_receipt <- None;
@@ -14923,8 +14938,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            in
            play_notice state ~sink:target ~kind:Notice_reply
              ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites))))
-  | Play_invite_issued (target, result) ->
-      state.play_mutation_inflight <- false;
+  | Play_invite_issued (request, target, result) ->
+      let outcome = match result with
+        | Play_answered (Ok _) | Play_refused _ -> Change_confirmed
+        | Play_answered (Error _) | Play_unanswered _ -> Change_unknown in
+      if Masc_tui_types.finish_play_change state request outcome then begin
       settle_play_mutation state target;
       (match result with
        | Play_answered (Ok invite) ->
@@ -14953,16 +14971,21 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                    ^ "; check MASC_HTTP_BASE_URL, then list and revoke it before retrying"))
        | Play_answered (Error _) ->
            play_notice state ~sink:target ~kind:Notice_failure
-             "play invite may exist, but its one-time link was unreadable; list and revoke it before retrying"
+             ("Play invite response unreadable. " ^ Masc_tui_types.play_change_unknown_notice request)
        | Play_refused detail ->
            play_notice state ~sink:target ~kind:Notice_failure
              ("play invite refused: " ^ detail)
        | Play_unanswered detail ->
            play_notice state ~sink:target ~kind:Notice_failure
-             ("play invite outcome unknown (" ^ detail ^ "); list and revoke before retrying"));
+             (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
+      sync_collab_access state;
       refresh_current_collab state ~mailbox
-  | Play_invite_revoked (target, requested_name, result) ->
-      state.play_mutation_inflight <- false;
+      end
+  | Play_invite_revoked (request, target, requested_name, result) ->
+      let outcome = match result with
+        | Play_revoke_absent | Play_revoke_result (Play_answered (Ok _) | Play_refused _) -> Change_confirmed
+        | Play_revoke_result (Play_answered (Error _) | Play_unanswered _) -> Change_unknown in
+      if Masc_tui_types.finish_play_change state request outcome then begin
       settle_play_mutation state target;
       let retry reason =
         Printf.sprintf "retry /play revoke %s — %s" requested_name reason
@@ -14991,14 +15014,16 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                      (if revoked.pir_released_controller then "; controller released" else "")))
        | Play_revoke_result (Play_answered (Error detail)) ->
            play_notice state ~sink:target ~kind:Notice_failure
-             (retry (detail ^ " (play revoke response unreadable)"))
+             (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request)
        | Play_revoke_result (Play_refused detail) ->
            play_notice state ~sink:target ~kind:Notice_failure
              ("play revoke refused: " ^ detail)
        | Play_revoke_result (Play_unanswered detail) ->
            play_notice state ~sink:target ~kind:Notice_failure
-             (retry (detail ^ " (play revoke outcome unknown)")));
+             (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
+      sync_collab_access state;
       refresh_current_collab state ~mailbox
+      end
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
         match selected_prompt_for_state state with
@@ -19840,6 +19865,9 @@ and is loaded on demand through keeper_skill.
               state.msx_last_poll_ns <- 0L;
               render_spectator state
           | (Load cart | Swap_disk cart) as choice -> (
+              if not (machine_changes_allowed state) then
+                Masc_tui_msx.render_menu ~write:write_to_terminal ~status:machine_change_refusal state
+              else begin
               state.msx_notice <- None;
               match
                 (match choice with
@@ -19858,7 +19886,16 @@ and is loaded on demand through keeper_skill.
               | Error message ->
                   (* Stay in the menu and say why, so the human can pick again. *)
                   Masc_tui_msx.render_menu ~write:write_to_terminal
-                    ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state))
+                    ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state
+              end))
+      | Some name when state.machine_source = Masc.Machine_lane.Msx
+          && not (machine_changes_allowed state)
+          && (List.mem name ["f5"; "f6"; "f7"; "f8"]
+              || (state.machine_interaction = Control_machine
+                  && Option.is_some (Masc_tui_msx.server_key name))) ->
+          state.machine_interaction <- Observe_machine;
+          state.msx_notice <- Some machine_change_refusal;
+          render_spectator state
       | Some name
         when (match state.machine_source with
               | Masc.Machine_lane.Dos -> true
@@ -20467,6 +20504,7 @@ and is loaded on demand through keeper_skill.
        | Some key when Option.is_some state.collab ->
            (match state.collab with
             | Some view when not compact_viewport || key = "esc" ->
+                let view = Masc_tui_collab.write_access view (Masc_tui_types.play_change_access state) in
                 let view, action = Masc_tui_collab.key view key in
                 state.collab <- Some view;
                 handle_collab_action state ~mailbox:async_messages view action

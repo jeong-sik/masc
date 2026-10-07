@@ -68,6 +68,9 @@ DOS directly, including an empty machine's status. `Esc` returns to Collab.
 Observation reads the shared screen without advancing the machine or sending
 keys. MSX's `F5` explicitly switches between observation and control; only
 control sends game keys, advances frames, or offers checkpoint/disk actions.
+Control and game changes require a verified server matching the TUI's local
+workspace. Losing that authority closes the machine view and clears control;
+returning to the same workspace requires a new explicit control action.
 Reopening the MSX view starts its own read even if a previous view is still
 waiting for a response.
 
@@ -101,6 +104,11 @@ confirmed different workspace clears them before its invite names can be used.
 Issue and revoke requests run one at a time across Collab and chat, including
 while their originating view is closed, so delayed replies cannot replace a
 newer credential's card.
+Invite forms and writes require the server to match the TUI's local workspace.
+Observation and inventory reads remain available when it does not match.
+If a request loses its response or workspace authority, its outcome remains
+unknown for its original workspace. Returning to that workspace does not
+permit another issue or revoke, and refreshing inventory does not unlock it.
 
 The Keeper chat composer also accepts `/play invites` to list invites, `/play invite <name>
 <hours>` issues one, `/play link` reopens the latest link issued in this TUI
@@ -110,7 +118,7 @@ an admin operator credential, token-required authentication and
 `MASC_HTTP_BASE_URL`. A refusal shows the server's own sentence and what it
 says is missing, for example when auth is off or `require_token` is false.
 The server's default address is local. A link beginning with `localhost`,
-`127.*`, or `::1` works only on that computer; the card explains this before
+`127.*`, `::1`, or an IPv4-mapped loopback address works only on that computer; the card explains this before
 sharing. For another device, configure the server launch's `MASC_HTTP_BASE_URL`
 to an address it can reach through the listener or an authenticated reverse
 proxy. Changing the TUI connection address does not change issued links.
@@ -132,11 +140,16 @@ taller than the window scrolls with `j`/`k`, the arrow keys or the mouse wheel,
 and `g`/`G` jump to its top and its end, so a long link can be read to its last
 byte.
 
-If the issue request has no trustworthy answer, inspect the invite list and
-revoke that name before retrying because the original link cannot be recovered.
-If revocation reports a controller release failure or an unknown outcome,
-repeat `/play revoke <name>`: a second request can release a controller even
-after the invite credential was deleted.
+For an unknown outcome, first establish that the original server request
+cannot still finish later: inspect its completion in server logs, or stop that
+server process before restarting and inspecting the final invite state. An
+inventory read alone can race a delayed write and is not completion evidence.
+Then open Collab, press `u`, and explicitly confirm that check to permit further
+changes. Do not bypass this check by restarting the TUI. If an issue's one-time
+link was lost, revoke its confirmed final invite before issuing another.
+A definitive revoke reply reporting controller-release failure may be retried
+with `/play revoke <name>`; a second request can release a controller after the
+invite credential was deleted.
 
 The invited person opens the link in a browser to watch and play the shared
 DOS machine. The link can also go to an AI agent (Claude Code, Codex, Hermes,

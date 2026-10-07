@@ -10109,13 +10109,21 @@ let apply_remote_keeper_rows state =
     apply_keeper_log_snapshot state
       { entries = []; error = Some Metrics_tail.Remote_workspace }
 
+(* The only rule for when a roster reading may become the currency
+   observation: a server that is not ready is a withdrawn workspace, so it
+   keeps the observation empty whether the reading is a value or an error. *)
+let currency_observation_under (identity : Tui_decode.server_identity) reading =
+  match identity.Tui_decode.sid_state_ready with
+  | Some false -> None
+  | Some true | None -> Some reading
+
 let apply_keeper_roster_load state result =
   (match result with
   | Ok (roster, candle) ->
       state.candle_observation <-
         (match state.server_identity with
-         | None | Some { Tui_decode.sid_state_ready = Some false; _ } -> None
-         | Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle);
+         | None -> None
+         | Some identity -> currency_observation_under identity candle);
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None;
       (match state.item_account with
@@ -10133,8 +10141,15 @@ let apply_keeper_roster_load state result =
       state.keeper_roster <- Keeper_control.Roster_unobserved;
       withdraw_keeper_items state;
       state.item_account_error <- Some "Keeper roster authority is unavailable";
-      state.candle_observation <- Some (Error (Keeper_control.roster_failure_message
-        ~credential_sent:(Masc_tui_http.operator_token_present ()) failure));
+      (* A failed roster read may explain itself while the identity is
+         unknown, but a not-ready server is a withdrawn workspace and says
+         nothing about currency. *)
+      state.candle_observation <-
+        (let diagnostic = Error (Keeper_control.roster_failure_message
+           ~credential_sent:(Masc_tui_http.operator_token_present ()) failure) in
+         match state.server_identity with
+         | None -> Some diagnostic
+         | Some identity -> currency_observation_under identity diagnostic);
       remember_surface_error state ~surface:"keeper roster"
         ~current_error:state.keeper_roster_error
         ~set_error:(fun value -> state.keeper_roster_error <- value)
@@ -10250,7 +10265,7 @@ let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~appr
   let http_keeper_roster =
     when_needed needs.needs_keeper_roster (fun () ->
         match expected_workspace with
-        | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
+        | None -> Error Keeper_control.roster_identity_unavailable
         | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace)
   in
   let http_runtime_quota =
@@ -10427,6 +10442,9 @@ let same_currency_workspace source current =
       && String.equal (Masc_tui_types.canonical_path source.Tui_decode.sid_masc_root)
         (Masc_tui_types.canonical_path current.Tui_decode.sid_masc_root)
   | _ -> false
+
+let currency_authority_never_held state =
+  state.candle_authority_generation = 0 && Option.is_none state.server_identity
 
 let withdraw_currency_authority state =
   state.candle_authority_generation <- state.candle_authority_generation + 1;
@@ -10805,12 +10823,14 @@ let apply_server_identity_reading state reading =
      workspace becomes ready again before those reads finish. *)
   if not (same_currency_workspace state.server_identity (Result.to_option reading))
   then begin
-    (* The first identity read of a booting TUI carries no previous answer,
-       so there is nothing to withdraw: the observation is empty anyway and
-       the pending read may establish it. Bumping the generation here would
-       consume the read's own authorization and leave a fresh TUI silent
-       until a later refresh. A withdrawn workspace bumps for real. *)
-    if state.server_identity <> None then withdraw_currency_authority state
+    (* A TUI that has never held a workspace has no authority to withdraw.
+       Bumping then would consume the generation its own first read was
+       dispatched under, and the read's roster could never speak. Once any
+       authority has been held, every change bumps, including a return from
+       an unreadable identity. *)
+    if currency_authority_never_held state
+    then state.candle_observation <- None
+    else withdraw_currency_authority state
   end;
   let same_item_authority =
     match state.server_identity, reading with
@@ -10975,10 +10995,7 @@ let apply_http_surfaces state ~mailbox results =
   if Http_refresh_order.is_current state.http_refresh_order
        results.http_scoped.http_refresh_ticket then begin
   let previous_items = visible_item_revision state in
-  let currency_authority = {
-    car_generation = state.candle_authority_generation;
-    car_identity = state.server_identity;
-  } in
+  let generation_before_identity = state.candle_authority_generation in
   apply_server_identity_reading state results.http_server_identity;
   if Result.is_ok results.http_server_identity then begin
     (* The full refresh carries its own scoped surfaces, its roster among
@@ -10990,17 +11007,7 @@ let apply_http_surfaces state ~mailbox results =
        under the authority it just withdrew, and the mismatch screen shows
        foreign currency until the next tick. *)
     let same_workspace =
-      (match currency_authority.car_identity with
-       | None ->
-         (* First establishment ever: no authority was held when this read
-            dispatched, so it may found one. A read dispatched after a
-            withdrawal carries None too, but then the generation has already
-            left zero and only an authorized read may answer. *)
-         state.candle_authority_generation = 0
-       | Some _ ->
-         currency_authority.car_generation = state.candle_authority_generation
-         && same_currency_workspace currency_authority.car_identity state.server_identity)
-    in
+      state.candle_authority_generation = generation_before_identity in
     let results = if same_workspace then results
       else { results with http_scoped =
         { results.http_scoped with http_keeper_roster = None } } in
@@ -11038,16 +11045,6 @@ let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
   apply_server_identity_reading state identity;
   apply_keeper_roster_load state
     (Error (Keeper_control.Roster_unreachable "server booting"));
-  (* The roster failure above keeps its keeper diagnostic, but it also
-     re-establishes a candle reading from an authority the identity reading
-     just withdrew (a booting server is a different workspace until it is
-     ready). Help would then draw "Candle details" from a withdrawn
-     authority. Only the withdrawal may answer here. *)
-  if (match state.server_identity with
-      | None -> false
-      | Some { Tui_decode.sid_state_ready = Some false; _ } -> true
-      | Some _ -> false)
-  then state.candle_observation <- None;
   Option.iter
     (fun ao_ticket ->
        apply_approval_observation state
@@ -11058,17 +11055,12 @@ let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
 
 let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket =
   apply_server_identity_reading state (Error detail);
-  (* The surface loads that would answer the roster never ran: the identity
-     reading failed first. Leave the answer that roster loader gives while
-     the workspace identity is unavailable, so Help keeps its diagnostic
-     instead of a withdrawn silence; the withdrawal above already removed
-     the stale amounts. A transport failure is not an identity answer, so it
-     keeps the silence. *)
+  (* The roster surface never ran because the identity reading failed first.
+     An identity answer gives the roster the same failure its loader gives
+     for an unknown workspace; a transport failure is not an identity answer
+     and keeps the silence. *)
   if not unreachable then
-    state.candle_observation <-
-      Some (Error (Keeper_control.roster_failure_message
-        ~credential_sent:(Masc_tui_http.operator_token_present ())
-        (Keeper_control.Roster_malformed "Server workspace identity is unavailable")));
+    apply_keeper_roster_load state (Error Keeper_control.roster_identity_unavailable);
   Option.iter (fun ao_ticket ->
     apply_approval_observation state {ao_ticket; ao_result = Error detail}) approval_ticket;
   state.connection_status <-

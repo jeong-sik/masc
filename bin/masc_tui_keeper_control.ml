@@ -65,6 +65,9 @@ type roster_failure =
   | Roster_unreachable of string
   | Roster_malformed of string
 
+let roster_identity_unavailable =
+  Roster_malformed "Server workspace identity is unavailable"
+
 let roster_failure_message ~credential_sent = function
   | Roster_unauthorized reason ->
       Printf.sprintf

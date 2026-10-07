@@ -1241,8 +1241,10 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
-  Buffer.add_string framed (composer_line state ~cols:full_cols ^ "\n");
-  let cursor = composer_cursor state ~rows ~cols:full_cols in
+  Buffer.add_string framed
+    ((if state.keeper_navigation_open then "" else composer_line state ~cols:full_cols) ^ "\n");
+  let cursor = if state.keeper_navigation_open then Frame_presenter.Hidden
+    else composer_cursor state ~rows ~cols:full_cols in
   Masc_tui_frame_timing.finish_stage ~name:"surface.chrome" chrome_started;
   Masc_tui_frame_timing.time_stage ~name:"surface.strip_frame" (fun () ->
     finish_frame_with_strip state ?clamped ~surface_key
@@ -1330,10 +1332,13 @@ let surface_window_height state ~terminal_rows ~count =
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
     ~overflow_takes_row:true
 
-let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
+let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let full_cols = cols in
+  let sidebar_cols = match sidebar with None -> 0 | Some (width, _) -> width in
+  let cols = cols - sidebar_cols in
   let buf = Buffer.create 4096 in
   let top, line, line_styled, line_selected, divider, empty, bottom =
     match frame with
@@ -1370,7 +1375,8 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     ; push_divider = (fun () -> hold (fun () -> divider buf cols))
     ; push_empty = (fun () -> hold (fun () -> empty buf cols))
     ; next_origin =
-        (fun () -> (body_top + List.length !pushed, Masc_tui_ansi.framed_content_column))
+        (fun () -> (body_top + List.length !pushed,
+                    sidebar_cols + Masc_tui_ansi.framed_content_column))
     }
   in
   body ~budget body_pushers;
@@ -1422,8 +1428,17 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     empty buf cols
   done;
   bottom buf cols;
-  Buffer.add_string buf (footer_line ?status state ~max_cells:cols ~hints);
-  finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols buf
+  let buf = match sidebar with
+    | None -> buf
+    | Some (left_cols, draw) ->
+        let left = Buffer.create 1024 in
+        draw ~rows:(lines_ended_since buf ~start:0) left;
+        let combined = Buffer.create (Buffer.length left + Buffer.length buf) in
+        write_two_panes combined ~left_cols ~left ~right:buf;
+        combined
+  in
+  Buffer.add_string buf (footer_line ?status state ~max_cells:full_cols ~hints);
+  finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 
 let connection_status_badge (status : Masc_tui_types.connection_status) =
@@ -1608,6 +1623,11 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
             ^ glyph ^ Ansi.reset ^ " " ^ Ansi.dim ^ name ^ Ansi.reset
         in
         framed_line buf cols line
+    | None when i = 0 && state.keepers = [] ->
+        framed_line buf cols
+          (match state.keeper_roster_error with
+           | Some error -> " " ^ Terminal_text.single_line error
+           | None -> " No Keepers listed")
     | None -> framed_empty buf cols
   done;
   framed_bottom buf cols

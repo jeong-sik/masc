@@ -343,6 +343,14 @@ only while the pane has room to show. Below 110 columns it reports the width
 requirement and leaves the preference unchanged, so resizing wider cannot
 reveal a hidden toggle that had no visible effect when it was pressed.
 
+From Dashboard (Overview) or a Keeper chat, press `Left` to open the Keeper
+list. `Up`/`Down` (or `j`/`k`) select a Keeper; `Enter` opens its chat.
+`Right`, `Esc`, or `Tab` returns to the screen you were reading without sending
+a message or interrupting the Keeper. Chat drafts stay with their Keeper when
+you switch. `Left` also opens a list hidden with `Ctrl-B`, without changing
+that visibility preference. On a narrow terminal the list uses the whole body;
+on a wider terminal it sits to the left of Dashboard or the conversation.
+
 ### The Activity pane
 
 Home keeps the Recent pane closed by default even on a wide terminal. An

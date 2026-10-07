@@ -4975,6 +4975,7 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
   let first = operation_id "kmsg-first-question" in
   let next = operation_id "kmsg-next-question" in
   let started, resolve_started = Eio.Promise.create () in
+  let next_started, resolve_next_started = Eio.Promise.create () in
   let release_first, resolve_first = Eio.Promise.create () in
   let release_next, resolve_next = Eio.Promise.create () in
   let executed = ref [] and released = ref 0 in
@@ -4989,6 +4990,7 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
       check string "the queued follow-up took the slot"
         (Chat_operation.Operation_id.to_string next)
         (Chat_operation.Operation_id.to_string id);
+      Eio.Promise.resolve resolve_next_started ();
       Eio.Promise.await release_next);
     Owner.Operation_succeeded { outcome_ref = "answered" }
   in
@@ -5026,6 +5028,7 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
      autonomous callback, so the regression fails without awaiting a chat
      that the scheduler never started. *)
   observe_busy ();
+  Eio.Promise.await next_started;
   check (list string) "both direct messages run before autonomous work"
     [ Chat_operation.Operation_id.to_string first
     ; Chat_operation.Operation_id.to_string next ]

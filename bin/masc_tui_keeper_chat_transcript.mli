@@ -15,6 +15,14 @@ type phase =
   | Stream_ended  (** The run reported it finished. *)
   | Stream_failed of string  (** The run reported an error. *)
 
+(** How a closed {!phase} was learned. *)
+type ending_source =
+  | Ending_heard_in_stream
+      (** RUN_FINISHED or RUN_ERROR reached this log. *)
+  | Ending_read_from_record
+      (** Only the server's operation record said the request ended, so the
+          journal appends this log missed may still be missing. *)
+
 (** What came of an operator's request to interrupt this turn.
 
     [Signal_sent] is not "the turn stopped". The server reports whether it
@@ -300,15 +308,22 @@ val settled_at : t -> float option
     span a block drawn from this transcript covered. *)
 
 val apply : now:float -> t -> Masc_tui_keeper_chat_live.delta -> unit
-
-val reconcile_operation : t -> Keeper_chat_operation.state -> unit
-(** Reconcile an exact durable operation state without fabricating journal
-    events or a reply. Preserve partial text, tools, and continuation history. *)
 (** [now] stamps a tool call as it opens, so the progress row can say how long
     the call in flight has been open rather than only how long the turn has. *)
 (** Fold one delta in. Tool deltas join only by their server-owned stream
     occurrence. Provider ids are optional correlation data; an unknown
     occurrence is reported unreadable rather than attached by position. *)
+
+val reconcile_operation : t -> Keeper_chat_operation.state -> unit
+(** Reconcile an exact durable operation state without fabricating journal
+    events or a reply. Preserve partial text, tools, and continuation history. *)
+
+val close_from_operation_record :
+  now:float -> t -> Masc_tui_keeper_chat_projection.operation_record -> unit
+(** Ends a turn whose closing event never reached the log, from what the
+    server's operation record says about the request. A turn already ended by
+    a delta is left as it is. Unlike {!note_rejection} it does not claim the
+    server refused the request. *)
 
 val note_interrupt : t -> interrupt -> unit
 
@@ -339,6 +354,12 @@ val revision : t -> int
     drawn from this transcript. *)
 
 val phase : t -> phase
+
+val ending_source : t -> ending_source
+(** {!Ending_read_from_record} only after {!close_from_operation_record} closed
+    the turn. A later RUN_FINISHED or RUN_ERROR the log hears sets it back to
+    {!Ending_heard_in_stream}. *)
+
 val awaiting_continuation : t -> bool
 (** A checkpoint segment ended; the original request still awaits its answer. *)
 val admission : t -> (Masc_tui_keeper_chat_live.admission * int) option
@@ -578,6 +599,10 @@ val status_rows : now:float -> t -> (status_kind * string) list
     budget answering differently from the drawing is how the unavailable row
     once went missing while the send hint still read Enter:send
     (see [keeper_message_status_rows]). One list, counted and drawn.
+
+    Between continuation segments there is no progress row: the open
+    request is retained, but no run is starting. Approval and diagnostic rows
+    remain available. A subsequent [Run_started] restores progress.
 
     The progress row carries the turn's age, measured against [now] rather
     than a clock read here so a test can state the instant. A [now] before

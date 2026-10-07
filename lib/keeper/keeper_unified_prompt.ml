@@ -1464,6 +1464,19 @@ let format_workspace_memory_observation = function
         "briefing", briefing;
         "briefing_status", briefing_status ] ^ "\n\n")
 
+let format_recent_work = function
+  | Keeper_recent_work.Absent -> None
+  | Evidence evidence ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work
+            [ "evidence", evidence ] ^ "\n\n")
+  | Preview evidence ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work_preview
+            [ "evidence", evidence ] ^ "\n\n")
+  | Unavailable detail ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work
+            [ "evidence", Yojson.Safe.to_string (`Assoc ["unavailable", `String detail]) ] ^ "\n\n")
+;;
+
 let build_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
@@ -1474,6 +1487,7 @@ let build_prompt_internal
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
+    ?(recent_work = Keeper_recent_work.Absent)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
   =
@@ -2073,6 +2087,7 @@ let build_prompt_internal
        outcomes are shown: the rejections are what the keeper must not repeat,
        the successes are what it must not redo. *)
     | Keeper_context_layers.Own_recent_actions -> own_recent_actions_section
+    | Keeper_context_layers.Recent_work -> format_recent_work recent_work
     | Keeper_context_layers.Fleet_messages ->
       if observation.fleet_messages <> [] then (
         let ubuf = Buffer.create 256 in
@@ -2168,6 +2183,7 @@ let build_prompt
       ?workspace_memory
       ?lane_updates
       ?repository_freshness
+      ?recent_work
       ~observation
       ()
   =
@@ -2180,6 +2196,7 @@ let build_prompt
     ?workspace_memory
     ?lane_updates
     ?repository_freshness
+    ?recent_work
     ~observation
     ()
 ;;
@@ -2191,6 +2208,7 @@ let build_prompt_preview
       ?workspace_memory
       ?lane_updates
       ?repository_freshness
+      ?recent_work
       ~observation
       ()
   =
@@ -2202,6 +2220,7 @@ let build_prompt_preview
     ?workspace_memory
     ?lane_updates
     ?repository_freshness
+    ?recent_work
     ~observation
     ()
 ;;

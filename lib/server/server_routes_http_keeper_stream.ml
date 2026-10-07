@@ -3278,33 +3278,14 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   | execution -> execution
 ;;
 
-type settled_error_receipt =
-  | Recorded_error of int * float * string
-  | Existing_error of int * float * string
-
 (* The child and its journal publisher have ended before the Owner invokes
    this hook; no successor can claim until the hook returns. A prior segment's
    Run_finished is a continuation boundary, not evidence of this failure. *)
 let record_settled_error ~base_path ~keeper_name ~operation_id ~message =
-  let module Journal = Keeper_chat_event_log in
-  let ( let* ) = Result.bind in
-  let read_error = function
-    | Journal.Journal_missing -> "operation journal disappeared during settlement"
-    | Journal_unreadable detail | Journal_corrupt detail -> detail in
-  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
-  let* seq = Journal.next_sequence journal |> Result.map_error read_error in
-  let* entries = match Journal.read_journal journal with
-    | Ok entries -> Ok entries
-    | Error Journal.Journal_missing -> Ok []
-    | Error error -> Error (read_error error) in
-  match List.rev entries with
-  | { Journal.event = Keeper_chat_events.Event_error { message }; seq; ts } :: _ ->
-    Ok (Existing_error (seq, ts, message))
-  | _ ->
-    let entry = Journal.{ seq; ts = Time_compat.now ();
-      event = Keeper_chat_events.Event_error { message } } in
-    let* () = Journal.append_result journal ~seq ~ts:entry.ts entry.event in
-    Ok (Recorded_error (entry.seq, entry.ts, message))
+  let journal =
+    Keeper_chat_event_log.open_journal ~base_dir:base_path ~keeper_name ~operation_id ()
+  in
+  Keeper_chat_event_log.record_terminal_error journal ~ts:(Time_compat.now ()) ~message
 
 let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~execution =
   let wire = take_operation_wire_stream ~operation_id in
@@ -3317,11 +3298,14 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
          "keeper chat terminal journal failed keeper=%s operation=%s: %s"
          keeper_name operation_id error);
     (match wire, receipt with
-     | Some Wire_terminal_sent, _ | None, Ok (Existing_error _) -> ()
+     | Some Wire_terminal_sent, _
+     | None, Ok (Keeper_chat_event_log.Existing_terminal_error _) -> ()
      | (Some Wire_started | None), (Ok _ | Error _) ->
        let seq, timestamp, message = match receipt with
-         | Ok (Recorded_error (seq, ts, message) | Existing_error (seq, ts, message)) ->
+         | Ok (Keeper_chat_event_log.Existing_terminal_error { seq; ts; message }) ->
            Some seq, ts, message
+         | Ok (Keeper_chat_event_log.Recorded_terminal_error { seq; ts }) ->
+           Some seq, ts, detail
          | Error _ -> None, Time_compat.now (), detail in
        let event = Ag_ui.make_event ~timestamp
          ~thread_id:("keeper:" ^ keeper_name)

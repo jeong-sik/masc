@@ -2715,7 +2715,11 @@ let test_checkpoint_wait_keeps_the_request_live () =
     turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace-1#3"}; Live.Run_finished];
   check bool "checkpoint waits for continuation" true (Transcript.awaiting_continuation t);
   check (option (float 0.)) "checkpoint does not settle request" None (Transcript.settled_at t);
+  check int "an idle continuation reserves no status row even days later" 0
+    (List.length (rows ~now:(origin +. 172_800.) t));
   feed t [Live.Run_started];
+  check bool "the next segment restores progress" true
+    (List.exists (fun (kind, _) -> kind = Transcript.Progress) (rows t));
   check phase "continued segment is working" Transcript.Working (Transcript.phase t);
   check bool "new segment no longer waits" false (Transcript.awaiting_continuation t);
   feed t [tool_started ~block_index:0 "after" "read_file"; tool_ended ~block_index:0 "after";

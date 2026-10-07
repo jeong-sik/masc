@@ -15,6 +15,10 @@ type phase =
   | Stream_ended
   | Stream_failed of string
 
+type ending_source =
+  | Ending_heard_in_stream
+  | Ending_read_from_record
+
 type interrupt =
   | Not_requested
   | Signal_sent of { turn_id : int option; signalled_at_ns : int64 }
@@ -280,6 +284,11 @@ type t =
         (* Not a trail node: the server streams the reply text as deltas --
            chunked at the end when nothing streamed -- so the text is already
            in the trail. [drawn] reconciles the two. *)
+  ; mutable ending_source : ending_source
+        (* How [phase] came to be closed. A log that heard RUN_FINISHED or
+           RUN_ERROR holds the turn it drew. One closed from the operation
+           record never heard the end, so the journal appends it missed may
+           still be missing and it holds part of the turn at most. *)
   ; mutable settled_at : float option
         (* The instant the turn's outcome landed: the first of Run_finished,
            Run_failed or Reply_details. [started_at] is when the request left;
@@ -330,6 +339,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
+  ; ending_source = Ending_heard_in_stream
   ; settled_at = None
   ; noted_skills = []
   ; revision = 0
@@ -466,6 +476,7 @@ let settled_at t = t.settled_at
 let attempt t = t.attempt
 let reply t = t.reply
 let phase t = t.phase
+let ending_source t = t.ending_source
 let awaiting_continuation t =
   match t.phase, t.reply with
   | Waiting, Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ } -> true
@@ -1753,7 +1764,8 @@ let awaiting_text t =
     t.awaiting
 
 let status_rows ~now t =
-  [ Some (Progress, progress_text ~now t)
+  [ (if awaiting_continuation t then None
+     else Some (Progress, progress_text ~now t))
   ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text t)
   ; Option.map
       (fun settlement ->
@@ -2185,6 +2197,7 @@ let apply_delta ~now t (delta : Live.delta) =
         | _ -> message
       in
       t.phase <- Stream_failed message;
+      t.ending_source <- Ending_heard_in_stream;
       t.ended_at <- Some now;
       settle t ~now
   | Live.Run_finished ->
@@ -2196,6 +2209,7 @@ let apply_delta ~now t (delta : Live.delta) =
          t.settled_at <- None
        | _, (Some _ | None) ->
          t.phase <- Stream_ended;
+         t.ending_source <- Ending_heard_in_stream;
          t.ended_at <- Some now;
          settle t ~now)
   | Live.Reply_details { reply; turn_outcome; turn_ref } ->
@@ -2211,6 +2225,8 @@ let apply ~now t delta =
   bump t;
   apply_delta ~now t delta
 
+(* The operation closes progress but does not fill gaps in its journal.
+   Keep the same partial-log authority as a terminal subscription receipt. *)
 let reconcile_operation t (state : Keeper_chat_operation.state) =
   match state with
   | Queued | Running _ -> ()
@@ -2218,21 +2234,49 @@ let reconcile_operation t (state : Keeper_chat_operation.state) =
       (match t.phase with
        | Stream_failed _ -> ()
        | Waiting | Working | Stream_ended ->
-           apply ~now:completed_at t (Live.Run_failed { message = failure.detail }))
+           apply ~now:completed_at t (Live.Run_failed { message = failure.detail });
+           t.ending_source <- Ending_read_from_record)
   | Cancelled { completed_at } ->
       (match t.phase with
        | Stream_failed _ -> ()
        | Waiting | Working | Stream_ended ->
-           apply ~now:completed_at t (Live.Run_failed { message = "요청이 취소되었습니다" }))
+           apply ~now:completed_at t (Live.Run_failed { message = "요청이 취소되었습니다" });
+           t.ending_source <- Ending_read_from_record)
   | Succeeded { completed_at; _ } ->
       (match t.phase with
        | Stream_ended | Stream_failed _ -> ()
        | Waiting | Working ->
            bump t;
            t.phase <- Stream_ended;
+           t.ending_source <- Ending_read_from_record;
            t.ended_at <- Some completed_at;
            settle t ~now:completed_at)
 ;;
+
+(* A stop or a restart settles the operation on the server without writing its
+   closing event, so the journal stops where the turn was cut and this log
+   never sees RUN_FINISHED or RUN_ERROR. The end is known only from the
+   operation record the server answered a repeat with. Only a turn still open
+   is closed; one a delta already ended keeps its own ending. This is not a
+   rejection: the server ran the request, so [rejection] stays empty. *)
+let close_from_operation_record ~now t (record : Projection.operation_record) =
+  match t.phase with
+  | Stream_ended | Stream_failed _ -> ()
+  | Waiting | Working ->
+      (match record with
+       | Projection.Operation_succeeded -> t.phase <- Stream_ended
+       | Operation_failed ->
+           t.phase <-
+             Stream_failed
+               "the server recorded this request as failed; its closing event never reached this screen"
+       | Operation_cancelled ->
+           t.phase <-
+             Stream_failed
+               "the server recorded this request as cancelled; its closing event never reached this screen");
+      t.ending_source <- Ending_read_from_record;
+      t.ended_at <- Some now;
+      settle t ~now;
+      bump t
 
 (* Replay source identity and event clocks without inventing a run age. *)
 let of_log ~now (log : Masc_tui_keeper_chat_log.t) =

@@ -135,6 +135,29 @@ val next_sequence : ?require_existing:bool -> journal -> (int, read_failure) res
     also requires a durable last Run_finished/Event_error boundary, so a dropped
     final append cannot reuse a sequence already delivered to a live reader. *)
 
+(** What {!record_terminal_error} left in the journal. *)
+type terminal_error_receipt =
+  | Recorded_terminal_error of { seq : int; ts : float }
+      (** This call appended the terminal. *)
+  | Existing_terminal_error of { seq : int; ts : float; message : string }
+      (** The journal already ended in an [Event_error]; nothing was written
+          and [message] is the one it carries. *)
+
+val record_terminal_error :
+  journal -> ts:float -> message:string -> (terminal_error_receipt, string) result
+(** Ends a settled operation's journal with an [Event_error] unless it already
+    ends in one. A [Run_finished] earlier in the journal is a continuation
+    boundary, not a record of this failure, so it does not stop the append.
+    Every settlement path that has no live stream to carry its terminal
+    (Owner settlement, restart recovery) records it here, so a reader that
+    reopens the operation finds the terminal the settled record already holds.
+    A fragment after the last newline (an append the crash cut) is not a row:
+    the terminal takes the sequence after the last complete row and the append
+    cuts the fragment, so a crashed append does not leave the journal without
+    its terminal. [Error] names a journal that could not be read or appended; the caller
+    decides whether that blocks anything. [ts] is the caller's clock, as for
+    {!append}. *)
+
 (** {1 Replay position} *)
 
 (** Where a client wants a journal read to start: the whole turn, or only the

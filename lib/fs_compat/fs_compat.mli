@@ -1105,6 +1105,40 @@ val read_private_jsonl_rows_locked_result :
   , Private_jsonl_rows.error )
   private_file_transaction_outcome
 
+module Private_jsonl_tail : sig
+  type t =
+    | Tail_missing
+    | Tail_present of
+        { rows : string
+        ; prefix_omitted : bool
+        ; incomplete_tail : bool
+        ; end_offset : int
+        }
+
+  type error =
+    | Invalid_max_bytes of int
+    | Read_error of Private_jsonl_rows.error
+
+  val error_to_string : error -> string
+end
+
+(** Read a bounded observational tail under the same locks and descriptor
+    validation as {!read_private_jsonl_rows_locked_result}. [max_bytes] must
+    be positive. Reads at most [max_bytes] trailing bytes plus one boundary
+    lookbehind byte; it never scans farther to find a row or matching content.
+    Only complete rows are returned. A leading partial row is discarded;
+    [prefix_omitted] means older bytes were outside the window, so an empty
+    [rows] value does not establish absence in the full store. A final fragment
+    is discarded and reported by [incomplete_tail]. [end_offset] is the locked
+    file length, not a durable consumer cursor. Missing stores and descriptor
+    cleanup failures retain the full reader's distinct outcomes. *)
+val read_private_jsonl_tail_locked_result :
+  string ->
+  max_bytes:int ->
+  ( Private_jsonl_tail.t
+  , Private_jsonl_tail.error )
+  private_file_transaction_outcome
+
 type private_jsonl_transaction_success =
   | Snapshot_succeeded of private_jsonl_snapshot
   | Cursor_succeeded of Private_jsonl_cursor.t

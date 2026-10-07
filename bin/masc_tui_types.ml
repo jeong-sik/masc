@@ -367,19 +367,9 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
             meant knowing the two words were one axis. *)
          | Memory_hidden -> Some "journal:off"
          | Memory_full -> Some "journal:full")
-      ; (* The short clock is the resting layout. It was the bare gutter, on
-           the grounds that a clock on every row was noise -- and it was, back
-           when it drew on every row. It is now drawn only where the minute
-           moved, which over 531 captured rows left it blank on 45% of them,
-           and a gutter that spends seventeen cells without saying when
-           anything happened is the emptier column of the two.
-
-           So the header names the two projections away from it: the bare
-           gutter, because a pane with no clock at all should say that it is
-           the reader's choice, and the full row. *)
-        (match origin with
-         | Masc_tui_message_layout.Origin_bare -> Some "metadata:off"
-         | Masc_tui_message_layout.Origin_inline -> None
+      ; (match origin with
+         | Masc_tui_message_layout.Origin_bare -> None
+         | Masc_tui_message_layout.Origin_inline -> Some "metadata:inline"
          | Masc_tui_message_layout.Origin_row -> Some "metadata:full")
       ; (match reasoning with
          | Reasoning_folded -> None
@@ -400,11 +390,8 @@ let next_reasoning_visibility = function
   | Reasoning_full -> Reasoning_hidden
 ;;
 
-(* One key walks the whole axis, and the walk is unchanged: from the resting
-   short clock to the full timestamp and request id on a row of their own,
-   then to the bare gutter, then back. What moved is where it rests -- see
-   [chat_visibility_summary]. Every stop is still reachable, and the two ends
-   are still one press apart from each other. *)
+(* Start without clocks; Ctrl-F adds the short clock, then full headings,
+   then returns to the reading layout. *)
 let next_origin_display = function
   | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_inline
   | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_row
@@ -3060,10 +3047,16 @@ let autonomous_journal_candidates ~keeper_name rows =
    and no KEEPER_REPLY_DETAILS), whose ending the log cannot draw; and a log
    that never heard the end -- the request went without a live view (no Eio
    clock), or the stream was cut and nothing replayed it -- holds part of the
-   turn at most. In both the committed rows keep saying what the turn did. *)
+   turn at most. In both the committed rows keep saying what the turn did.
+   A log closed from the operation record alone is the second kind: it never
+   heard the end, so appends it missed may be absent, and a retained
+   continuation checkpoint is not the final reply. *)
 let turn_log_holds_the_turn turn_log =
   Masc_tui_keeper_chat_log.committed turn_log.tl_log
   &&
+  match Masc_tui_keeper_chat_transcript.ending_source turn_log.tl_transcript with
+  | Masc_tui_keeper_chat_transcript.Ending_read_from_record -> false
+  | Masc_tui_keeper_chat_transcript.Ending_heard_in_stream ->
   match Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
   | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
   | Masc_tui_keeper_chat_transcript.Stream_ended ->
@@ -7446,6 +7439,18 @@ let settle_turn_log state (entry : inflight) =
   | Some _ | None -> ()
 ;;
 
+(* Settle a log whose request the server ended without a closing event
+   reaching it. The transcript is closed from the operation record first:
+   settling alone keeps the log and leaves its transcript Working, which the
+   pane draws as a running turn. [None] settles the log as it stands. *)
+let settle_turn_log_ended_by state (entry : inflight) ~record =
+  Option.iter
+    (Masc_tui_keeper_chat_transcript.close_from_operation_record
+       ~now:(Unix.gettimeofday ()) entry.log.tl_transcript)
+    record;
+  settle_turn_log state entry
+;;
+
 (* The strict decode's row for a completed turn, or nothing when the settled
    log stands for the turn and draws its reply itself
    ([Masc_tui_keeper_chat_transcript.drawn]). *)
@@ -8966,7 +8971,7 @@ let create_state
   (* Chat opens on the answer, not its bookkeeping. The gutter still carries
      the typed speaker/kind; Ctrl-F adds inline, then full timestamp/request
      metadata when the operator needs to trace a turn. *)
-  msg_origin_display = Masc_tui_message_layout.Origin_inline;
+  msg_origin_display = Masc_tui_message_layout.Origin_bare;
   msg_tool_visibility = tool_visibility;
   msg_turn_folded = true;
   msg_spill = None;
@@ -12377,8 +12382,6 @@ let keeper_message_activity_rows (state : state) =
                     request entry.sent_request) waiting)
           | Turn_preflight _ | Turn_streaming -> false) own then
         attention "메시지 전달 재확인 중";
-      if any_phase Masc_tui_keeper_chat_transcript.awaiting_continuation then
-        add "이어서 처리하기를 기다리는 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
       if has_working then add "기존 작업 처리 중";

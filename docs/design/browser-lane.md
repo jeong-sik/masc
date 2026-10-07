@@ -73,6 +73,7 @@ checking rendered application state, and gathering evidence across tabs.
 | `click`, `fill` | `documentId`/`nodeId`, or one visible CSS `selector`; fill adds `text` | live or automation |
 | `follow_link` | `documentId`/`nodeId` for a same-tab HTTP(S) anchor | live or automation |
 | `scroll` | relative CSS pixels `x`/`y` | live or automation |
+| `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live BiDi or automation |
 | `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y` | live or automation |
 | `drag` | normalized `from`/`to` and captured `viewport` | automation, using WebDriver pointer actions |
 | `activate_tab` | the selected live `clientId`/`tabId` | live only |

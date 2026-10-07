@@ -19,6 +19,13 @@ pages also discover these sources, so opening the pane after a turn started or
 after it ended does not require a new token notification. Live SSE timestamps and
 replayed journal timestamps both retain the server's epoch-seconds clock.
 
+The operation SSE subscription buffers live events through acceptance and replay.
+A single sender then drains that queue, including events arriving during the
+drain, before releasing sender ownership. The state lock never covers a send.
+Rejection, release and send failure close the queue; a publisher holding an old
+subscription callback cannot reactivate it. Replay still deduplicates exact
+sequence membership, retaining a buffered event if its journal append failed.
+
 Inputs remain in a separate pending area through local dispatch, unconfirmed
 transport, and server queue admission. `Run_started` or an authoritative persisted
 input proves processing began. A verified refusal keeps the original input text

@@ -3507,13 +3507,11 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Switch.run (fun stream_sw ->
       Eio.Switch.on_release stream_sw close_stream;
-      let accepted = ref false in
-      let buffered = ref [] in
-      let buffered_mu = Stdlib.Mutex.create () in
+      let handoff = Server_keeper_stream_handoff.create () in
       let base_path = (Mcp_server.workspace_config state).base_path in
       (* Seqs the reconnect replay wrote to this stream. Filled by the handler
-         fiber before [accepted] flips (under [buffered_mu]), read by the live
-         sink only after it observes the flip, so the mutex orders the two. *)
+         before accepting the handoff. Its state mutex publishes this immutable
+         set to the sole live sender; producers buffer throughout replay. *)
       let replayed : (int, unit) Hashtbl.t = Hashtbl.create 64 in
       let send_event ~seq event =
         let sent = keeper_stream_send_event ?seq writer mutex closed event in
@@ -3524,24 +3522,30 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              | Run_started | Text_message_start | Text_message_content
              | Text_message_end | Tool_call_start | Tool_call_args
              | Tool_call_end | Custom -> false
-        then finish ()
+        then finish ();
+        sent
       in
-      let send_live ~seq event =
-        if live_event_is_new ~replayed seq then send_event ~seq event
+      let send_live (seq, event) =
+        if not (live_event_is_new ~replayed seq)
+        then Server_keeper_stream_handoff.Continue
+        else
+          match send_event ~seq event with
+          | true -> Server_keeper_stream_handoff.Continue
+          | false -> Server_keeper_stream_handoff.Stop
+          | exception exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            finish ();
+            Printexc.raise_with_backtrace exn backtrace
       in
       let sink ~seq event =
-        let send_now =
-          Stdlib.Mutex.protect buffered_mu (fun () ->
-            if !accepted
-            then true
-            else (
-              buffered := (seq, event) :: !buffered;
-              false))
-        in
-        if send_now then send_live ~seq event
+        Server_keeper_stream_handoff.publish handoff ~send:send_live (seq, event)
       in
       let unregister = register_operation_live_sink ~operation_id sink in
-      Eio.Switch.on_release stream_sw unregister;
+      Eio.Switch.on_release stream_sw (fun () ->
+        (* A publisher may already hold a registry snapshot containing this
+           sink. Close its queue before unregistering so it cannot restart. *)
+        Server_keeper_stream_handoff.close handoff;
+        unregister ());
       let publish_acceptance (acceptance, interactive) =
         let operation = acceptance.Keeper_owner.operation in
         let state =
@@ -3572,7 +3576,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
            above [since_seq] goes out through the same pure projection the
            live adapter uses, with the ts the bus stamped, so the bytes equal
            the frames the client missed. The sink is already registered, so
-           events published meanwhile sit in [buffered] and flush below,
+           events published meanwhile stay in the handoff and drain below,
            where [send_live] drops the seqs the replay already wrote. *)
         (match acceptance.Keeper_owner.existing, payload.since_seq with
          | true, since_seq ->
@@ -3583,7 +3587,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              ~since_seq
            |> List.iter (fun (seq, event) ->
              Hashtbl.replace replayed seq ();
-             send_event ~seq:(Some seq) event)
+             ignore (send_event ~seq:(Some seq) event))
          | false, Keeper_chat_event_log.After_seq _ ->
            (* The owner has never seen this operation, so there is no turn
               to catch up on. Replaying here would read whatever a previous
@@ -3595,14 +3599,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
          | false, Keeper_chat_event_log.Whole_turn ->
            (* A first submit: nothing journaled, nothing asked for. *)
            ());
-        let pending =
-          Stdlib.Mutex.protect buffered_mu (fun () ->
-            accepted := true;
-            let pending = List.rev !buffered in
-            buffered := [];
-            pending)
-        in
-        List.iter (fun (seq, event) -> send_live ~seq event) pending;
+        Server_keeper_stream_handoff.accept handoff ~send:send_live;
         if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
       in
       let submit_result =
@@ -3629,6 +3626,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       (match submit_result with
        | Ok acceptance -> publish_acceptance acceptance
        | Error (`Input detail) ->
+         Server_keeper_stream_handoff.close handoff;
          ignore
            (keeper_stream_send_event
               writer
@@ -3637,6 +3635,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
               (Ag_ui.run_error ~thread_id ~message:detail ~code:"invalid_input" ()));
          finish ()
        | Error (`Owner error) ->
+         Server_keeper_stream_handoff.close handoff;
          let detail = Keeper_owner_registry.command_error_to_string error in
          let code = operation_submit_error_code error in
          ignore

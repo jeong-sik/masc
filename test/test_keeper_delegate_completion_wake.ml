@@ -294,6 +294,48 @@ let a_cut_reply_names_the_read_path () =
        && contains delegate note))
 ;;
 
+(* Regression (PR #41766 review): [short_preview] measures after
+   [String.trim], so the cut note must key on the trimmed bytes too. A reply
+   padded past the ceiling with whitespace is short after trimming -- adding
+   the status read note to it would mark a fully delivered answer as partial
+   and send the reader to fetch text it already holds. *)
+let a_padded_short_reply_is_not_cut () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    (* 544 raw bytes so the untrimmed length crosses the ceiling; "OK" after
+       trim stays well inside it. *)
+    let padded = "OK" ^ String.make (480 - 2 + 64) ' ' in
+    match
+      Wake.deliver
+        ~base_path:config.Workspace.base_path
+        ~asked_by:asker
+        ~operation_id
+        ~delegate
+        ~terminal:(Event_queue.Delegate_replied padded)
+    with
+    | Error detail -> fail ("deliver failed: " ^ detail)
+    | Ok () ->
+      let meta =
+        match Keeper_meta_store.read_meta config asker with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "the asker has no meta"
+        | Error err -> fail ("meta load failed: " ^ err)
+      in
+      match
+        queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker
+        |> List.map (fun (stimulus, _) ->
+               match WO.pending_board_event_of_stimulus ~meta stimulus with
+               | Error _ -> fail "the answer must project without a Board read"
+               | Ok None -> fail "the answer projects to nothing the turn can read"
+               | Ok (Some event) -> event)
+      with
+      | [ row ] ->
+        check string "the preview equals the trimmed answer" "OK" row.WO.preview;
+        check bool "no status read note on an uncut answer" true
+          (not (String.contains row.WO.preview '\n'))
+      | _ -> fail "one delegation must project one row")
+;;
+
 (* The queue is durable, so an answer that cannot be read back is lost on the
    next restart — silently, because the reader has no other copy. *)
 let the_answer_survives_a_round_trip () =
@@ -403,6 +445,10 @@ let () =
             "a cut reply names the read path"
             `Quick
             a_cut_reply_names_the_read_path
+        ; test_case
+            "a padded short reply is not cut"
+            `Quick
+            a_padded_short_reply_is_not_cut
         ; test_case
             "the answer survives a round trip"
             `Quick

@@ -742,6 +742,10 @@ let pending_board_event_of_composition_completion
      composition's detail exists nowhere else, so a cut here is never silent
      either -- the row appends the request id the title already carries. *)
   let preview =
+    (* [short_preview] measures after [String.trim], so the cut test must
+       measure the same trimmed bytes: a space-padded short answer must not
+       read as cut. Trim once here and share it with the preview. *)
+    let message = String.trim message in
     let cut = short_preview ~max_len:delegate_reply_preview_max_len message in
     if String.length message > delegate_reply_preview_max_len then
       let note =
@@ -811,6 +815,10 @@ let pending_board_event_of_delegate_completion
      a different size; the wording lives in config/prompts like every event
      row, and a render failure still states the cut and the id as bare data. *)
   let preview =
+    (* [short_preview] measures after [String.trim], so the cut test must
+       measure the same trimmed bytes: a space-padded short reply must not
+       read as cut. Trim once here and share it with the preview. *)
+    let message = String.trim message in
     let cut = short_preview ~max_len:delegate_reply_preview_max_len message in
     if String.length message > delegate_reply_preview_max_len then
       let note =

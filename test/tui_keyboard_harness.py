@@ -2803,6 +2803,7 @@ def escape_to_keeper_detail(
     *,
     name: bytes,
     presses: int = 4,
+    destination: bytes | None = None,
 ) -> None:
     """Leave a keeper's chat for its detail, however many Escapes that takes.
 
@@ -2821,7 +2822,7 @@ def escape_to_keeper_detail(
     The bound is here so a surface that never leaves fails as a test rather
     than hangs. Arriving is the assertion; the number of presses is not.
     """
-    title = b"Keepers \xe2\x96\xb8 \x1b[1m" + name
+    title = destination if destination is not None else b"Keepers \xe2\x96\xb8 \x1b[1m" + name
     for _ in range(presses):
         start = len(output)
         os.write(master_fd, b"\x1b")

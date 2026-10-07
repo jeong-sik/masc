@@ -40,7 +40,8 @@ let page_style =
 :root { color-scheme: dark; --bg:#111418; --panel:#1b2027; --ink:#e8ecf1; --dim:#9aa4b2; --mine:#2e7d4f; --line:#2c333d; }
 * { box-sizing: border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; }
-main { max-width: 760px; margin: 0 auto; padding: 12px 16px 32px; display:flex; flex-direction:column; gap:12px; }
+main { max-width: 760px; min-width:0; margin: 0 auto; padding: 12px 16px 32px; display:flex; flex-direction:column; gap:12px; overflow-wrap:anywhere; }
+main > *, .row > * { min-width:0; max-width:100%; }
 #turn { padding:10px 12px; border-radius:8px; background:var(--panel); font-weight:600; }
 #turn.mine { background:var(--mine); }
 #screen-wrap { background:#000; border-radius:8px; overflow:hidden; outline:none; }
@@ -53,6 +54,7 @@ button, input, select { font:inherit; color:var(--ink); background:var(--panel);
 button { cursor:pointer; min-width:44px; min-height:44px; }
 button:disabled, input:disabled, select:disabled { opacity:.5; cursor:default; }
 input { flex:1; min-width:0; }
+select { flex:1 1 12em; width:0; text-overflow:ellipsis; }
 #activity { margin:0; padding-left:1.2em; color:var(--dim); font-size:13px; }
 h2 { font-size:13px; color:var(--dim); margin:4px 0; font-weight:600; }
 [hidden] { display:none !important; }

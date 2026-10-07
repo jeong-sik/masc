@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Explain why one APPROVED review is not admitted by approve-guard.
+"""Decide whether one review is admitted by approve-guard, and say why not.
 
-Diagnostic only: approve-guard decides admission with its own jq test and
-review-scope.py. This helper never grants or widens anything; it re-runs the
-same textual tests one at a time so a refusal can name the failing part and
-print the footer a reviewer should have written.
+This is the only place that tests a review body against a head: approve-guard
+reads the review JSON on stdin through this script. Exit 0 means admitted and
+prints the review id. Exit 1 means refused and prints one reason per failed
+test, then the footer a reviewer should have written. review-scope.py still
+checks the review-scope stamp separately.
 """
 import argparse
 import json
@@ -12,6 +13,9 @@ import re
 import sys
 
 TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")
+REASON_PREVIEW_CHARS = 160
+EXIT_ADMITTED = 0
+EXIT_REFUSED = 1
 
 
 def expected_footer(head, policy, base_sha, current_diff, release_run=""):
@@ -29,21 +33,23 @@ def verdict_pattern(head, policy):
     return re.compile(rf"^verdict: PASS head: {head} by: [A-Za-z0-9._-]+$")
 
 
-def short(text, limit=160):
+def short(text, limit=REASON_PREVIEW_CHARS):
     text = text.replace("\n", "\\n")
     return text if len(text) <= limit else text[:limit] + "..."
 
 
 def diagnose(review, *, head, policy, base_sha, current_diff, release_run=""):
-    """Return a list of failed-test descriptions (empty when all textual tests pass)."""
+    """Return failed-test descriptions; an empty list means the review is admitted."""
     reasons = []
+    if review.get("state") != "APPROVED":
+        reasons.append(f"review state is {review.get('state')}; approval needs APPROVED")
     body = review.get("body") or ""
     assoc = review.get("author_association") or "UNKNOWN"
     if assoc not in TRUSTED:
         reasons.append(
             f"author_association is {assoc}; approval needs OWNER, MEMBER or COLLABORATOR")
     lines = body.split("\n")
-    first = lines[0].rstrip("\r") if lines else ""
+    first = lines[0]
     if not verdict_pattern(head, policy).fullmatch(first):
         want = (f"verdict: PASS head: {head} run: <run> by: <keeper>" if policy == "release"
                 else f"verdict: PASS head: {head} by: <keeper>")
@@ -79,10 +85,14 @@ def main():
     p.add_argument("--release-run", default="")
     a = p.parse_args()
     review = json.load(sys.stdin)
-    for line in diagnose(review, head=a.head, policy=a.policy, base_sha=a.base_sha,
-                         current_diff=a.current_diff, release_run=a.release_run):
+    reasons = diagnose(review, head=a.head, policy=a.policy, base_sha=a.base_sha,
+                       current_diff=a.current_diff, release_run=a.release_run)
+    if not reasons:
+        print(review["id"])
+        return EXIT_ADMITTED
+    for line in reasons:
         print(line)
-    return 0
+    return EXIT_REFUSED
 
 
 if __name__ == "__main__":

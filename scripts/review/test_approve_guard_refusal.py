@@ -109,17 +109,6 @@ class Case(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("latest structured verdict is UNTRUSTED", r.stderr)
 
-    def test_print_footer_emits_scope_and_footer_for_head(self):
-        self.review(footer_line())
-        r = self.run_guard("--print-footer")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.splitlines(), [f"review-scope: {SCOPE}", footer_line()])
-
-    def test_print_footer_cannot_combine_with_check_modes(self):
-        self.review(footer_line())
-        self.assertEqual(self.run_guard("--print-footer", "--merge-check").returncode, 2)
-        self.assertEqual(self.run_guard("--print-footer", "--check").returncode, 2)
-
 
 if __name__ == "__main__":
     unittest.main()

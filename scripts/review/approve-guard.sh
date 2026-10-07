@@ -5,7 +5,7 @@ GH="${GUARD_GH:-gh}"
 here="$(cd "$(dirname "$0")" && pwd)"
 repo=""; pr=""; head=""; body=""; run=""; replace_cr=""
 review_base=""; review_diff=""
-check_only=0; merge_check=0; receipt_json=0; print_footer=0
+check_only=0; merge_check=0; receipt_json=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo|--pr|--head|--body|--run|--replace-own-cr|--review-base|--review-diff)
@@ -18,7 +18,6 @@ while [ $# -gt 0 ]; do
     --review-base) review_base="$2"; shift 2;; --review-diff) review_diff="$2"; shift 2;;
     --check) check_only=1; shift;; --merge-check) merge_check=1; shift;;
     --receipt-json) receipt_json=1; shift;;
-    --print-footer) print_footer=1; shift;;
     *) echo "approve-guard: unknown argument $1" >&2; exit 1;;
   esac
 done
@@ -27,7 +26,6 @@ done
 [ -z "$replace_cr" ] || [[ "$replace_cr" =~ ^[1-9][0-9]*$ ]] || exit 2
 [ "$check_only" -eq 0 ] || [ "$merge_check" -eq 0 ] || exit 2
 [ "$receipt_json" -eq 0 ] || [ "$merge_check" -eq 1 ] || exit 2
-[ "$print_footer" -eq 0 ] || { [ "$check_only" -eq 0 ] && [ "$merge_check" -eq 0 ] && [ -z "$body" ]; } || exit 2
 source "$here/ci-checks.sh"
 source "$here/review-verdict.sh"
 refuse() { echo "REFUSED #$pr head $head: $*" >&2; exit 2; }
@@ -43,15 +41,6 @@ compute_scope() {
 }
 read_current_pr
 current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || refuse "complete review diff unavailable"
-if [ "$print_footer" -eq 1 ]; then
-  # Read-only: print the exact lines a reviewer appends for this head, base and diff.
-  check_current_ci
-  footer_line=$(printf 'approve-guard: head `%s` · %s review' "$head" "$review_policy")
-  [ -z "$release_run" ] || footer_line="$footer_line · release run $release_run"
-  printf 'review-scope: %s\n%s · reviewed base `%s` · diff sha256 `%s`\n' \
-    "$(compute_scope)" "$footer_line" "$pr_base_sha" "$current_diff"
-  exit 0
-fi
 # Read-only candidate admission uses repository review evidence; Actions
 # installation tokens cannot query /user. Review/check paths still require
 # the caller identity for self-approval and owned change-request rules.
@@ -60,28 +49,19 @@ if [ "$merge_check" -eq 0 ]; then
   me=$(ci_gh_json user '.login')
   [ -n "$me" ] || exit 1
 fi
-footer_prefix=$(printf 'approve-guard: head `%s` · ' "$head")
 # Neither GitHub commit_id nor a footer alone supplies immutable head binding.
-verdict_pattern="^verdict: PASS head: ${head} by: [A-Za-z0-9._-]+$"
-[ "$review_policy" != release ] || verdict_pattern="^verdict: PASS head: ${head} run: [1-9][0-9]* by: [A-Za-z0-9._-]+$"
-approval_head_jq="((.body // \"\" | split(\"\\n\") | first) | test(\"${verdict_pattern}\")) and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | startswith(\"${footer_prefix}\"))"
-approval_head_jq="$approval_head_jq and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | test(\" · reviewed base [\`][0-9a-f]{40}[\`] · diff sha256 [\`]${current_diff}[\`]$\"))"
-# Diagnostic only: append why review $1 by $2 failed the textual admission test.
-explain_unbound() {
-  local why
-  why=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$1" '.' 2>/dev/null |
-    python3 "$here/review-refusal.py" --head "$head" --policy "$review_policy" --base-sha "$pr_base_sha" \
-      --current-diff "$current_diff" --release-run "${release_run:-}" 2>/dev/null | sed 's/^/    - /') || why=""
-  refusal_detail="$refusal_detail  review $1 by $2: not admitted
-$why
-"
+# review-refusal.py is the single admission test; it prints the review id when
+# admitted and the failed tests otherwise (exit 1).
+admit_review() {
+  printf '%s' "$1" | python3 "$here/review-refusal.py" --head "$head" --policy "$review_policy" \
+    --base-sha "$pr_base_sha" --current-diff "$current_diff" --release-run "${release_run:-}"
 }
 review_rows() {
   ci_gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv' |
     sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++'
 }
 check_reviews() {
-  local rows who rid state bound scope_status
+  local rows who rid state bound scope_status review_json admit_status
   rows=$(review_rows) || return 1
   approvals=""; replaced=""; own_approval=""; refusal_detail=""
   while IFS=$'\t' read -r who rid state; do
@@ -91,10 +71,15 @@ check_reviews() {
       else refuse "open CHANGES_REQUESTED from $who (review $rid)"; fi
     fi
     if [ "$state" = APPROVED ] && [ "$who" != "$pr_author" ]; then
-      bound=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select(.state == \"APPROVED\" and (.author_association == \"OWNER\" or .author_association == \"MEMBER\" or .author_association == \"COLLABORATOR\") and ($approval_head_jq)) | .id") || return 1
-      if [ -z "$bound" ]; then
-        # Name the failing test(s); the admission decision above is unchanged.
-        explain_unbound "$rid" "$who" || true
+      review_json=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" '.') || return 1
+      admit_status=0
+      bound=$(admit_review "$review_json") || admit_status=$?
+      [ "$admit_status" -le 1 ] || return 1
+      if [ "$admit_status" -eq 1 ]; then
+        refusal_detail="$refusal_detail  review $rid by $who: not admitted
+$(printf '%s\n' "$bound" | sed 's/^/    - /')
+"
+        bound=""
       fi
       if [ -n "$bound" ]; then
         scope_status=0
@@ -197,6 +182,8 @@ fi
 footer="$footer$(printf ' · reviewed base `%s` · diff sha256 `%s`' "$review_base" "$review_diff")"
 response=$( { printf '%s' "$review_body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/$repo/pulls/$pr/reviews" -f event=APPROVE -f "commit_id=$head" -F body=@- --jq '[(.id|tostring), .state, .commit_id] | @tsv')
 IFS=$'\t' read -r rid state commit <<<"$response"
-back=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select($approval_head_jq) | [.state, .commit_id] | @tsv")
+back_json=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" '.')
+admit_review "$back_json" >/dev/null || { echo "approval readback is not admitted for this head" >&2; exit 1; }
+back=$(printf '%s' "$back_json" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["state"]+"\t"+r["commit_id"])')
 [ "$back" = "$(printf 'APPROVED\t%s' "$head")" ] || { echo "approval readback differs from submitted head" >&2; exit 1; }
 echo "APPROVED #$pr head $head review $rid"

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Fixtures for review-refusal.py: a refusal must name the failing footer part."""
 import importlib.util
+import json
 import pathlib
 import re
+import subprocess
+import sys
 import unittest
 
 spec = importlib.util.spec_from_file_location(
@@ -16,9 +19,9 @@ DIFF = "a" * 64
 OTHER_DIFF = "b" * 64
 
 
-def review(footer, *, assoc="COLLABORATOR", first=None):
+def review(footer, *, assoc="COLLABORATOR", first=None, state="APPROVED"):
     first = first or f"verdict: PASS head: {HEAD} by: goo-yang-bong"
-    return {"author_association": assoc,
+    return {"id": 5437395249, "state": state, "author_association": assoc,
             "body": f"{first}\nindependent source review: details\n\n{footer}"}
 
 
@@ -67,6 +70,25 @@ class RefusalReasons(unittest.TestCase):
             ok = footer.startswith(f"approve-guard: head `{HEAD}` · ") and bool(tail.search(footer))
             self.assertEqual(ok, bound)
             self.assertEqual(run(review(footer)) == [], bound)
+
+    def test_non_approved_state_is_refused(self):
+        out = run(review(GOOD_FOOTER, state="COMMENTED"))
+        self.assertTrue(any("review state is COMMENTED" in line for line in out), out)
+
+    def test_cli_prints_id_when_admitted_and_exits_zero(self):
+        proc = self.cli(review(GOOD_FOOTER))
+        self.assertEqual((proc.returncode, proc.stdout.strip()), (rr.EXIT_ADMITTED, "5437395249"))
+
+    def test_cli_exits_one_with_reasons_when_refused(self):
+        proc = self.cli(review(f"approve-guard: head {HEAD}"))
+        self.assertEqual(proc.returncode, rr.EXIT_REFUSED)
+        self.assertIn("expected last line (copy): " + GOOD_FOOTER, proc.stdout)
+
+    def cli(self, rev):
+        return subprocess.run(
+            [sys.executable, "-I", str(pathlib.Path(rr.__file__)), "--head", HEAD, "--policy", "source",
+             "--base-sha", BASE, "--current-diff", DIFF],
+            input=json.dumps(rev), capture_output=True, text=True)
 
 
 if __name__ == "__main__":

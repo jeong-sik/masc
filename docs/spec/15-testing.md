@@ -172,7 +172,7 @@ Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적,
 | `duration_ms` | int | 실행 시간 |
 | `cost_usd` | float | 추정 비용 |
 
-**trajectory_outcome**: `Completed | Failed | Timeout | CostExceeded | Gated`.
+**trajectory_outcome**: `Completed | Failed | Timeout | Gated`.
 
 ### 5.4 Judgment boundary tests
 

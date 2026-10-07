@@ -11,7 +11,7 @@ import tui_keyboard_harness as h
 
 
 
-def run(binary, *, quit_from_history=False, disconnected=False):
+def run(binary, *, quit_from_history=False, disconnected=False, identity_recovery=False):
     fixtures = h.keeper_runtime_http_fixtures()
     client = "11111111-1111-4111-8111-111111111111"
     current = "https://example.org/current"
@@ -23,6 +23,17 @@ def run(binary, *, quit_from_history=False, disconnected=False):
     goto_entered = threading.Event()
     goto_release = threading.Event()
     goto_returned = threading.Event()
+    identity_unavailable = threading.Event()
+    artifact_reads = []
+
+    if identity_recovery:
+        def health():
+            if identity_unavailable.is_set():
+                return h.RawHttpResponse(503, b'{"error":"identity unavailable"}',
+                                         content_type="application/json")
+            return 200, {}
+        fixtures["/health"] = health
+        fixtures["/health?full=1"] = health
 
     def node(text):
         return {"nodeId": "text", "kind": "text", "tag": "p", "text": text,
@@ -48,13 +59,17 @@ def run(binary, *, quit_from_history=False, disconnected=False):
                          "mime": "application/vnd.masc.browser-scene+json", "preview": ""}}]})
         if name == "Beta":
             def beta(_body, response=envelope):
+                artifact_reads.append("Beta")
                 beta_entered.set()
                 assert beta_release.wait(10), "test never released older request"
                 beta_returned.set()
                 return 200, response
             fixtures["/api/v1/artifacts/" + digest] = h.RequestHttpResponse(beta)
         else:
-            fixtures["/api/v1/artifacts/" + digest] = (200, envelope)
+            def alpha(_body, response=envelope):
+                artifact_reads.append("Alpha")
+                return 200, response
+            fixtures["/api/v1/artifacts/" + digest] = h.RequestHttpResponse(alpha)
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (200, {
         "keeper": "alpha", "count": 2, "health": "ok", "entries": rows})
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True,
@@ -128,6 +143,23 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             h.send_and_wait(process, fd, output, b"]", b"SAVED ALPHA CONTENT")
             beta_release.set()
             assert h.wait_for_fixture_event(process, fd, output, beta_returned, timeout=5)
+            if identity_recovery:
+                # Both selecting another artifact and reloading the list can
+                # start after identity was already lost. No periodic tick is
+                # needed to settle their local refusal or resume the request.
+                for key in (b"[", b"r"):
+                    identity_unavailable.set()
+                    h.send_and_wait(process, fd, output, b"R", b"[workspace unconfirmed]")
+                    reads_before = len(artifact_reads)
+                    h.send_and_wait(process, fd, output, key, b"reading will resume after recovery")
+                    assert len(artifact_reads) == reads_before, \
+                        "unconfirmed history dispatched an artifact read"
+                    identity_unavailable.clear()
+                    h.send_and_wait(process, fd, output, b"R", b"SAVED BETA CONTENT")
+                    assert len(artifact_reads) > reads_before, \
+                        "identity recovery did not resume the selected history read"
+                os.write(fd, b"q")
+                return
             if quit_from_history:
                 os.write(fd, b"Q")
                 return
@@ -188,11 +220,15 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             beta_release.set()
             goto_release.set()
 
-    h.run_terminal_scenario(binary, description="retained browser observation isolation",
-                            interact=interact, http_fixtures=fixtures)
+    h.run_terminal_scenario(binary,
+                            description="browser history selection during identity outage" if identity_recovery
+                                        else "retained browser observation isolation",
+                            interact=interact, http_fixtures=fixtures,
+                            terminal_cols=160 if identity_recovery else 100)
 
 
 if __name__ == "__main__":
     run(str(Path(sys.argv[1]).resolve()))
     run(str(Path(sys.argv[1]).resolve()), quit_from_history=True, disconnected=True)
+    run(str(Path(sys.argv[1]).resolve()), identity_recovery=True)
     print("Browser observation history: PASS")

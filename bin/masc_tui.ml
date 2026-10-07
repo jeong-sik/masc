@@ -4449,6 +4449,12 @@ let launch_browser_history state ~mailbox ~reload =
        | None -> state.browser_history <- Some {history with content=List_failed "Eio switch is unavailable"}
        | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
            enqueue_async mailbox (perform ()); `Stop_daemon))
+  end else begin
+    (* Opening or changing history can own a loading state after the last
+       identity failure already retired reads. Keep this unsent selection
+       eligible for recovery too. *)
+    state.browser_history_generation <- state.browser_history_generation + 1;
+    state.browser_history <- Option.map Browser_history.suspend state.browser_history
   end
 
 let launch_browser_lane state ~mailbox operation =

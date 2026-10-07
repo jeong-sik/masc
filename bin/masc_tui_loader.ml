@@ -1850,7 +1850,7 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
   | Error (`Unknown_outcome message) ->
     Error
       ("preset restore outcome unknown — the server may have finished it; \
-        check the preset list for a new autosave before retrying: " ^ message)
+        check when the preset list says _autosave was saved before retrying: " ^ message)
   | Ok json -> Tui_decode.decode_preset_restore json
 
 (* The fleet reading answers what the keeper list cannot: a keeper that never

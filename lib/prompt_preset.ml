@@ -17,7 +17,8 @@
    take effect at three different moments; the report names each:
    overrides at once, instructions at the keeper's next up, runtime through
    the runtime.toml commit path (which re-publishes the exact-output lanes in
-   process). The current state is saved first as [_autosave-<stamp>]. *)
+   process). The current state is saved first as [_autosave], over the one
+   the previous restore left. *)
 
 let ( let* ) = Result.bind
 
@@ -80,7 +81,7 @@ let overrides_file = "prompt_overrides.json"
 let runtime_file = "runtime.json"
 let instructions_dir = "instructions"
 let instructions_extension = ".txt"
-let autosave_prefix = "_autosave-"
+let autosave_name = "_autosave"
 
 let is_valid_name name =
   (not (String.equal name ""))
@@ -104,19 +105,6 @@ let runtime_toml_path ~base_path =
 ;;
 
 let now_iso () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
-
-(* [YYYYMMDDTHHMMSSZ], a stamp that is also a valid preset name segment. *)
-let compact_stamp () =
-  let tm = Unix.gmtime (Unix.gettimeofday ()) in
-  Printf.sprintf
-    "%04d%02d%02dT%02d%02d%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
-;;
 
 (* The filesystem boundary raises; a preset call answers with [Error]. *)
 let guard f =
@@ -791,20 +779,11 @@ let restore_runtime ~base_path ~assignments ~lanes =
          | Error message -> Runtime_failed message))
 ;;
 
-(* The stamp has one-second resolution; a second restore inside that second
-   takes the next free suffix rather than overwriting the first autosave. *)
-let fresh_autosave_name ~base_path =
-  let stamp = autosave_prefix ^ compact_stamp () in
-  let rec pick n =
-    let candidate = if n = 0 then stamp else Printf.sprintf "%s-%d" stamp n in
-    if Sys.file_exists (preset_dir ~base_path candidate) then pick (n + 1) else candidate
-  in
-  pick 0
-;;
-
 let restore ~base_path name =
+  (* The target is read before the autosave is written, so restoring the
+     autosave itself applies what it held, not the state just captured. *)
   let* target = load ~base_path name in
-  let autosave = fresh_autosave_name ~base_path in
+  let autosave = autosave_name in
   let* current =
     capture ~base_path ~name:autosave ~description:("state before restoring " ^ name)
   in

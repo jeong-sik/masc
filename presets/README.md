@@ -78,7 +78,7 @@ scripts/seed-team.sh --preset world-scarcity --base-path ~/lab/scarcity
 ```
 
 운영 중 갈아끼우기는 TUI 의 `/preset save <name>` 과 `/preset restore <name>` 을 쓴다.
-`restore` 는 덮기 전에 현재 상태를 `_autosave-<stamp>` 로 저장하므로 되돌릴 길이 남는다.
+`restore` 는 덮기 전에 현재 상태를 `_autosave` 에 덮어써 저장한다. `/preset restore _autosave` 로 마지막 restore 를 되돌린다.
 instructions 는 각 keeper 의 다음 up 에서 반영된다.
 
 ### autoboot 와 proactive 가 켜져 있다

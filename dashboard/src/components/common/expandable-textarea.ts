@@ -72,6 +72,12 @@ export function ExpandableTextarea({
     setExpanded(false)
   }
 
+  // A click reaches the backdrop when the press started there, and also when
+  // a text selection started inside the dialog is released past its edge:
+  // the browser then targets the nearest common ancestor. Only a press that
+  // began on the backdrop itself discards the draft.
+  const backdropPressed = useRef(false)
+
   const borderClass = dirty
     ? 'border-l-4 border-l-[var(--color-accent-fg)]'
     : ''
@@ -131,7 +137,14 @@ export function ExpandableTextarea({
         ? html`
             <div
               class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-              onClick=${cancelExpanded}
+              onMouseDown=${(e: MouseEvent) => {
+                backdropPressed.current = e.target === e.currentTarget
+              }}
+              onClick=${(e: MouseEvent) => {
+                const pressed = backdropPressed.current
+                backdropPressed.current = false
+                if (pressed && e.target === e.currentTarget) cancelExpanded()
+              }}
             >
               <div
                 class="flex flex-col w-full max-w-5xl h-[85vh] rounded-[var(--r-3)] border border-card-border bg-[var(--color-bg-elevated)] shadow-[var(--shadow-3)] p-4"

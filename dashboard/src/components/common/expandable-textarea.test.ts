@@ -83,13 +83,31 @@ describe('ExpandableTextarea draft synchronization', () => {
       ? host!.querySelector<HTMLElement>('.fixed')!
       : Array.from(host!.querySelectorAll('button'))
         .find(button => button.textContent?.trim() === close)!
-    act(() => closer.click())
+    act(() => {
+      if (close === 'backdrop') closer.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      closer.click()
+    })
     expect(host!.querySelectorAll('textarea')).toHaveLength(1)
     const inline = host!.querySelector('textarea')!
     expect(inline.value).toBe('Before expansion')
     expect(onInput).toHaveBeenLastCalledWith('Before expansion')
     act(() => { inline.focus(); inline.blur() })
     expect(onChange).toHaveBeenLastCalledWith('Before expansion')
+  })
+
+  it('keeps the draft when a selection started in the dialog ends on the backdrop', async () => {
+    act(() => { editor('Original instructions') })
+    act(() => host!.querySelector('button')!.click())
+    const expanded = host!.querySelectorAll('textarea')[1]!
+    act(() => input(expanded, 'Selected fullscreen draft'))
+    // The browser sends the click to the common ancestor of the press and
+    // the release, which is the backdrop when the drag leaves the dialog.
+    act(() => {
+      expanded.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      host!.querySelector<HTMLElement>('.fixed')!.click()
+    })
+    expect(host!.querySelectorAll('textarea')).toHaveLength(2)
+    expect(host!.querySelectorAll('textarea')[1]!.value).toBe('Selected fullscreen draft')
   })
 
   it('keeps a parent reset when fullscreen editing is cancelled', async () => {

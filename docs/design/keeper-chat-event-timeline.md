@@ -242,8 +242,13 @@ in the journal and the current tool row shows the latest one.
 Adapters look up the exact existing native index without allocating a start.
 The direct producer captures its current scope and enqueues the typed observation
 on the same worker FIFO as ordinary content and native completion. The autonomous
-producer applies it under the existing stream mutex. Both flush preceding held
-text first. The bridge accepts only a currently active native occurrence with the
+producer applies it under the existing stream mutex. Progress is an observation
+on an existing native row, not a model-content boundary: it never flushes the text
+redactor. An earlier model-text fragment may remain safely withheld while progress
+is published, just as with a ping. Journal sequence is safe-publication order;
+it does not reconstruct the provider's original chunk reception order. Authored
+text retains its own order, and progress adds no speech/tool-start row or origin.
+The bridge accepts only a currently active native occurrence with the
 same scope/index/call ID; ended, stopped, cancelled, superseded and MASC-owned
 occurrences cannot be changed by progress. Repeated journal sequences deduplicate
 in the log, while distinct progress sequences remain distinct observations.
@@ -261,7 +266,8 @@ Thinking/Streaming phase, native completion, or MASC execution identity/outcome.
 
 The actual Codex protocol fixture in `test_runtime_codex_app_server.ml` passes
 command/MCP notifications through the runtime receiver and Keeper adapter into
-`native_tool_outcome_fixture`, which runs the production bridge, journal codec,
+`native_tool_outcome_fixture`, which runs the production scoped text redactor,
+bridge, journal codec,
 server SSE encoder, live decoder, replay log and Tools projection. It includes
 repeated UTF-8 deltas, whitespace/empty chunks, interleaved assistant text, absent
 and wrong item IDs/kinds, late events and redacted/control-bearing MCP messages.
@@ -277,3 +283,12 @@ version's [FileChangeOutputDeltaNotification](https://github.com/openai/codex/bl
 contract says the server no longer emits that notification, so it is not promoted
 to a progress source. Claude parent/child progress and Antigravity progress need
 separate source contracts. GLM HTTP execution tools and their receipts are unchanged.
+
+Progress redaction regression cases configure an exact Keeper secret, stream its
+prefix, publish native progress, and only then stream its suffix and newline.
+The prefix must remain unpublished at the progress observation. After the complete
+record is available, both direct Scoped projection and the actual autonomous
+on-disk journal must contain redacted text; concatenating their text events must
+not reconstruct the secret. The same check includes streamed Thinking. Native
+completion and ordinary block start/stop remain separate content boundaries;
+this progress repair does not redesign those existing redaction boundaries.

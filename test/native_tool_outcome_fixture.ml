@@ -1,8 +1,10 @@
-(* Feed real adapter callbacks through the same bridge, journal codec, server
+(* Feed real adapter callbacks through the same scoped redactor, bridge, journal codec, server
    SSE projection and TUI decoder used by direct and autonomous chat. *)
 module E = Masc.Keeper_chat_events
 module Bridge = Masc.Keeper_chat_agent_core_stream_bridge
 module Accum = Masc.Keeper_stream_tool_accum
+module Redactor = Masc.Keeper_stream_text_redaction.Scoped
+module Secret = Masc.Keeper_secret_redaction
 module Journal = Masc.Keeper_chat_event_log
 module Projection = Server_keeper_chat_agui_projection
 module Live = Masc_tui_keeper_chat_live
@@ -12,12 +14,13 @@ module Transcript = Masc_tui_keeper_chat_transcript
 type t = {
   accum : Accum.t;
   redact_text : string -> string;
+  text : Redactor.t;
   mutable bridge : Bridge.state;
   mutable reversed : E.keeper_chat_event list;
 }
 
-let create ?(redact_text=Fun.id) () =
-  {redact_text; accum=Accum.create (); bridge=Bridge.empty_state ();
+let create ?(redaction=Secret.empty) () =
+  {redact_text=Secret.redact_text redaction; text=Redactor.create redaction; accum=Accum.create (); bridge=Bridge.empty_state ();
    reversed=[E.Text_message_start {message_id="outer"; role=E.Assistant};
              E.Run_started {run_id="native-outcome"; thread_id="keeper:fixture"}]}
 
@@ -25,12 +28,17 @@ let apply t (translated : Bridge.translated_event) =
   t.bridge <- translated.bridge_state;
   t.reversed <- List.rev_append translated.chat_events t.reversed
 
+let forward t events =
+  List.iter (fun (stream_scope,event) ->
+    apply t (Bridge.translate ~redact_text:t.redact_text ~base_dir:"/unused-no-media"
+      ~stream_scope t.bridge event)) events
+
 let on_event t event =
   Accum.on_event t.accum event;
-  apply t (Bridge.translate ~redact_text:t.redact_text ~base_dir:"/unused-no-media"
-    ~stream_scope:(Accum.current_stream_scope t.accum) t.bridge event)
+  forward t (Redactor.on_event t.text ~stream_scope:(Accum.current_stream_scope t.accum) event)
 
 let on_completion t ~block_index ~tool_call_id completion =
+  forward t (Redactor.flush t.text);
   apply t (Bridge.finish_native_tool ~redact_text:t.redact_text
     ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id
     completion t.bridge)

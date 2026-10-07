@@ -1,6 +1,6 @@
 (** Shared production-path assertions used by real vendor protocol fixtures. *)
 type t
-val create : ?redact_text:(string -> string) -> unit -> t
+val create : ?redaction:Masc.Keeper_secret_redaction.t -> unit -> t
 val on_event : t -> Agent_core.Types.sse_event -> unit
 val on_progress : t -> block_index:int -> tool_call_id:string option ->
   Runtime_native_tools.progress -> unit

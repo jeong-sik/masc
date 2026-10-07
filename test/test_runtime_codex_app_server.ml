@@ -4933,7 +4933,7 @@ let test_native_progress_reaches_tui () =
     let message = "waiting " ^ secret ^ "\027[31m" in
     let safe_message = redact_text message in
     check bool "fixture exercises real secret redaction" false (message=safe_message);
-    let fixture = F.create ~redact_text () in
+    let fixture = F.create ~redaction () in
     let output ?(id=Some "native-command-1") delta = codex_progress_frame
       ~method_:"item/commandExecution/outputDelta" ~item_id:id ~field:"delta" (`String delta) in
     let mcp ?(id=Some "native-mcp-1") message = codex_progress_frame
@@ -4945,7 +4945,7 @@ let test_native_progress_reaches_tui () =
       match progress with
       | Runtime_native_tools.Message_reported {message=received} when received=message ->
           incr snapshots;
-          (try F.check_progress fixture ~running:true ~expected_text:"MASC_"
+          (try F.check_progress fixture ~running:true ~expected_text:""
              ~expected:["native-command-1",Some 9,None; "native-mcp-1",None,Some safe_message]
            with
            | Eio.Cancel.Cancelled _ as exn -> raise exn

@@ -11561,7 +11561,7 @@ let runtime_selection_summary_lines ~cols state =
             (Masc.Tui_terminal_text.sanitize_terminal_text line))
       |> List.map (fun line -> "  " ^ line)
 
-let runtime_surface_base_chrome ~cols state =
+let runtime_surface_base_chrome_with ~cols state ~route_rows =
   runtime_listing_chrome
     ~cols
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
@@ -11571,10 +11571,7 @@ let runtime_surface_base_chrome ~cols state =
     ~prompt:(Option.is_some (runtime_lane_prompt state))
     (* The wrapped default route, media_failover and divider sit above the
        lane table. The key geometry counts the same default lines as render. *)
-    ~route_rows:
-      (match state.runtime_mode with
-       | Runtime_lanes -> List.length (runtime_default_route_lines ~cols state) + 2
-       | Runtime_all -> 0)
+    ~route_rows
     ~editor_rows:
       (match state.slot_editor with
        | Some { se_target = Media_failover_slots; _ } ->
@@ -11587,18 +11584,43 @@ let runtime_surface_base_chrome ~cols state =
       (runtime_picker_projection state))
     ()
 
+(* The route block (the wrapped default route, the media_failover row and its
+   divider) sits above the lane table. A short viewport cannot hold the block
+   and the table header plus the selected row at once, and a cursor on a hidden
+   row is a bug in itself -- the same rule #41143 applied to the status column.
+   So the media_failover row and its divider fold away first when the frame
+   would otherwise leave no data row; the route line itself stays. *)
+let runtime_media_row_folded ~rows ~cols state =
+  match state.runtime_mode with
+  | Runtime_all -> false
+  | Runtime_lanes ->
+      let route_lines = List.length (runtime_default_route_lines ~cols state) in
+      let base_without = runtime_surface_base_chrome_with ~cols state ~route_rows:0 in
+      rows - (base_without + route_lines + 2) < 1
+
+let runtime_surface_base_chrome ~rows ~cols state =
+  let route_rows =
+    match state.runtime_mode with
+    | Runtime_all -> 0
+    | Runtime_lanes ->
+        let route_lines = List.length (runtime_default_route_lines ~cols state) in
+        if runtime_media_row_folded ~rows ~cols state then route_lines
+        else route_lines + 2
+  in
+  runtime_surface_base_chrome_with ~cols state ~route_rows
+
 (* The selected row must keep a place in the list. Full account/status facts
    remain in Enter's detail reading when a short viewport cannot fit both. *)
 let runtime_selection_summary_for_viewport ~rows ~cols state =
   let lines = runtime_selection_summary_lines ~cols state in
-  let spare = rows - runtime_surface_base_chrome ~cols state - 1 in
+  let spare = rows - runtime_surface_base_chrome ~rows ~cols state - 1 in
   if lines = [] || List.length lines + 1 <= spare then lines
   else if spare >= 2 then ["  Enter: full connection and status details"]
   else []
 
 let runtime_surface_listing_chrome ~rows ~cols state =
   let selection_rows = runtime_selection_summary_for_viewport ~rows ~cols state in
-  runtime_surface_base_chrome ~cols state
+  runtime_surface_base_chrome ~rows ~cols state
   + (if selection_rows = [] then 0 else List.length selection_rows + 1)
 
 (* The Runtime listing's bound. Its chrome depends on the viewport size, so

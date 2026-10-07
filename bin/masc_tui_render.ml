@@ -9943,12 +9943,17 @@ let render_runtime (state : state) =
        List.iter
          (fun line -> c.push_styled ~style:(Theme.recede ()) ("  " ^ line))
          (Masc_tui_types.runtime_default_route_lines ~cols state);
-       c.push_styled ~style:(Theme.recede ())
-         (Printf.sprintf "  %s %s   %s"
-            (runtime_column runtime_lane_width "media_failover")
-            (runtime_column runtime_candidate_width media_text)
-            (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
-       c.push_divider ());
+       (* A short viewport folds the media_failover row and its divider away so
+          the table header and the selected row keep a place (#41143's rule for
+          the status column, applied to height). *)
+       if not (Masc_tui_types.runtime_media_row_folded ~rows ~cols state) then begin
+         c.push_styled ~style:(Theme.recede ())
+           (Printf.sprintf "  %s %s   %s"
+              (runtime_column runtime_lane_width "media_failover")
+              (runtime_column runtime_candidate_width media_text)
+              (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
+         c.push_divider ()
+       end);
   let table_cells = runtime_table_cells ~cols ~status_cells ~mode:state.runtime_mode in
   c.push_styled ~style:(Theme.recede ())
     ("  " ^ Masc_tui_table.header_row

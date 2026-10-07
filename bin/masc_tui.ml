@@ -19986,6 +19986,11 @@ and is loaded on demand through keeper_skill.
         Masc_tui_keys.cancels_two_press
           ~input_seen:(Option.is_some input) ~key ~second_press
       in
+      (* A view change that no key caused, such as a dispatched task opening
+         its surface, leaves the presets pane without passing through the
+         Config arm below. A delete cannot be put back, so the first input
+         seen anywhere else ends the arm. *)
+      if state.view <> Config && Option.is_some input then state.preset_armed <- None;
       (match state.view with
        | Approvals ->
            if cancelled [ "y"; "Y"; "n"; "N" ] then

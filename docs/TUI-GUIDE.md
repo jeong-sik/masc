@@ -1133,6 +1133,8 @@ Config 탭의 `presets` 패널(`p` 로 순환)이 이 기능의 자리다. 목�
 Resources 와 Tools 로 가는 키라 쓰지 않는다. 되돌리기와 삭제는 한 번 누르면 준비만
 하고, 같은 키를 한 번 더 눌러야 실행된다. 다른 키를 누르면 풀린다. `!` 줄의
 프리셋은 목록에서 고를 수 없으니 채팅의 `/preset delete <name>` 으로 지운다.
+이름이 프리셋 이름 규칙(`A-Z a-z 0-9 . _ -`)에 맞지 않는 디렉터리는 이 명령으로도
+지울 수 없다.
 이름을 입력하는 동안에는 패널이 모든 인쇄 가능 키를 가져가므로 이름에 `n`, `u`,
 `D` 가 들어가도 키가 발화하지 않는다.
 
@@ -1150,7 +1152,9 @@ prompt overrides and runtime assignments; a keeper that had no instructions,
 or a lane that restore added, stays as it left them. Every skipped key
 is listed with its reason, and a restore that skipped anything or whose
 commit failed is shown as an error. `/preset delete <name>` removes that
-preset, including one listed with `!`; typing the name is the confirmation.
+preset, including one listed with `!` because it does not load; typing the
+name is the confirmation. A directory whose name is not a valid preset name
+is refused.
 The answers land in the chat pane of the keeper selected when the command was
 typed.
 

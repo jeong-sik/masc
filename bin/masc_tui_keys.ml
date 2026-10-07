@@ -118,7 +118,8 @@ let config_bindings =
        default back, and a delete cannot be put back. *)
   ; b Act "D" "delete"
       ~help:"on presets, delete the selected one; press twice to confirm. \
-             A preset listed with ! is deleted with /preset delete <name>",
+             A preset listed with ! under a valid name is deleted with \
+             /preset delete <name>",
       Some [ Config_presets ]
   ; b Act "S" "save draft"
       ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",

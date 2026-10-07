@@ -39,11 +39,16 @@
     workspace's MSX/DOS viewers, invited participants, operators and Keepers.
     History, chat and presence are independent of game input and controller
     ownership; a spectator can speak while another participant controls DOS.
+    Room polling starts independently of the first seat read and continues
+    on its own timer when a game read remains pending.
     Each page instance has its own presence client. Session storage preserves
     the chat draft and any unconfirmed message's client/message identifiers
     with its exact payload for retry after reload, bound to the invitation.
     Retrying the same message uses its original identifiers so an uncertain
-    acknowledgment does not create a second message. Conversation remains
+    acknowledgment does not create a second message. An edited next draft
+    remains separate: the next send reconciles the earlier receipt first,
+    preserving the new text until it can be submitted on a later send.
+    Conversation remains
     available while a game write is unsettled. A changed stored identity or
     draft stops an older document from sending or overwriting that draft.
     A current document's confirmed disconnect or settled credential rejection

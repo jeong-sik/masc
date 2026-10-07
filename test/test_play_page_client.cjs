@@ -91,7 +91,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     requestAnimationFrame() {},
     atob,
     performance: { now: () => now },
-    setTimeout: fn => timers.push(fn),
+    setTimeout: (callback, delay) => timers.push({ callback, delay }),
     fetch: async (url, init) => {
       const request = { url, authorization: init.headers.Authorization, method: init.method, body: init.body && JSON.parse(init.body) };
       requests.push(request);
@@ -106,16 +106,28 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     // Existing cases assert game requests; room traffic has its own assertions.
     get requests() { return requests.filter(request => request.url !== '/api/v1/play/room'); },
     get roomRequests() { return requests.filter(request => request.url === '/api/v1/play/room'); },
-    async roomPoll() { vm.runInContext('roomNextRead = 0; refreshRoom();', context); await settle(); },
+    async roomPoll() { vm.runInContext('refreshRoom();', context); await settle(); },
     get reloads() { return reloads; },
     get hash() { return location.hash; },
     navigateFragment(hash) { context.location.hash = hash; windowHandlers.get('hashchange')?.(); },
     restoreFromCache() { windowHandlers.get('pageshow')?.({ persisted: true }); },
     get clears() { return clears; },
+    async roomTick() {
+      const pending = timers.filter(timer => timer.delay === 2000);
+      assert.equal(pending.length, 1, 'conversation owns one independent refresh timer');
+      const timer = pending[0];
+      timers.splice(timers.indexOf(timer), 1);
+      now += timer.delay;
+      await timer.callback();
+      await settle();
+    },
     async poll(elapsed = 5000) {
       now += elapsed;
-      assert.equal(timers.length, 1, 'the page keeps one next poll');
-      await timers.shift()();
+      const pending = timers.filter(timer => timer.delay === 300);
+      assert.equal(pending.length, 1, 'the game keeps one next poll');
+      const timer = pending[0];
+      timers.splice(timers.indexOf(timer), 1);
+      await timer.callback();
       await settle();
     },
   };
@@ -171,6 +183,79 @@ test('an uncertain public message preserves its exact receipt and draft through 
   assert.equal(reloaded.get('chat-text').value, '');
   assert.notEqual(first.roomRequests[0].body.client_id, reloaded.roomRequests[0].body.client_id);
 });
+
+test('an edited next draft cannot replace the unconfirmed public message after reload', async () => {
+  const storage = new Map();
+  const sends = [];
+  const roomReply = ({ body }) => {
+    if (body.action === 'say') {
+      sends.push(body);
+      if (sends.length === 1) throw new Error('first outcome unknown');
+    }
+    return response(emptyRoom);
+  };
+  const first = fixture(gameReply, { storage, roomReply });
+  await first.settle();
+  first.get('chat-text').value = 'first public message';
+  first.get('chat-send').handlers.click();
+  await first.settle();
+  first.get('chat-text').value = 'next draft';
+  first.get('chat-text').handlers.input();
+  const reloaded = fixture(gameReply, { storage, hash:'', roomReply });
+  await reloaded.settle();
+  const retryLabel = reloaded.get('chat-send').textContent;
+  reloaded.get('chat-send').handlers.click();
+  await reloaded.settle();
+  assert.deepEqual(sends[1], sends[0], 'retry reconciles the original payload and receipt first');
+  assert.match(retryLabel, /이전.*확인/);
+  assert.equal(reloaded.get('chat-text').value, 'next draft');
+  assert.equal(JSON.parse(storage.get('masc.play.room.draft')).pending, null);
+  reloaded.get('chat-send').handlers.click();
+  await reloaded.settle();
+  assert.equal(sends[2].text, 'next draft');
+  assert.notEqual(sends[2].message_id, sends[0].message_id);
+  assert.equal(reloaded.get('chat-text').value, '');
+});
+
+test('an empty next draft still allows reconciliation of an uncertain public message', async () => {
+  let calls = 0;
+  const page = fixture(gameReply, { roomReply: ({ body }) => {
+    if (body.action === 'say' && ++calls === 1) throw new Error('unknown result');
+    return response(emptyRoom);
+  } });
+  await page.settle();
+  page.get('chat-text').value = 'keep this receipt';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  page.get('chat-text').value = '';
+  page.get('chat-text').handlers.input();
+  assert.equal(page.get('chat-send').disabled, false);
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  const sends = page.roomRequests.filter(request => request.body.action === 'say');
+  assert.equal(sends.length, 2);
+  assert.deepEqual(sends[1].body, sends[0].body);
+  assert.equal(page.get('chat-text').value, '');
+});
+
+for (const blocked of ['/api/v1/play/seat', '/api/v1/lane-addons/live']) {
+  test('room presence and conversation continue while ' + blocked + ' never answers', async () => {
+    let messages = [];
+    const page = fixture(request => request.url.startsWith(blocked)
+      ? new Promise(() => {}) : gameReply(request), {
+      roomReply: () => response({ ...emptyRoom, messages }),
+    });
+    await page.settle();
+    assert.equal(page.roomRequests.length, 1, 'the room starts before the first seat read settles');
+    for (let id = 1; id <= 2; id += 1) {
+      messages = [roomMessage(id, 'Keeper message ' + id)];
+      await page.roomTick();
+      assert.equal(page.get('room-messages').children[0].children[1].textContent, 'Keeper message ' + id);
+    }
+    assert.equal(page.roomRequests.length, 3, 'independent refreshes renew presence');
+    assert.equal(new Set(page.roomRequests.map(request => request.body.client_id)).size, 1);
+  });
+}
 
 test('public chat reserves one send while preserving edits made during its acknowledgment', async () => {
   let finish;

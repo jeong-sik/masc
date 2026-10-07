@@ -166,6 +166,7 @@ let page_script =
 const POLL_MS = 300;
 // Seat authority scans credentials; frame reads do not need that inventory.
 const SEAT_POLL_MS = 5000;
+const ROOM_POLL_MS = 2000;
 const ACTIVITY_SHOWN = 8;
 const LIVE_PATH = '/api/v1/lane-addons/live?source_kind=';
 const SEAT_PATH = '/api/v1/play/seat';
@@ -255,7 +256,6 @@ let chatSending = false;
 let roomBefore = null;
 let roomSnapshot = null;
 let roomMessagesKey = null;
-let roomNextRead = 0;
 let pendingChat = null;
 let roomAbort = null;
 let roomDetached = false;
@@ -351,7 +351,8 @@ async function api(method, path, body, signal) {
 function setRoomControls() {
   const closed = ended || disconnecting || roomDetached;
   el('chat-text').disabled = closed;
-  el('chat-send').disabled = closed || chatSending || el('chat-text').value.trim() === '';
+  el('chat-send').disabled = closed || chatSending || (!pendingChat && el('chat-text').value.trim() === '');
+  el('chat-send').textContent = pendingChat ? '이전 전송 확인' : '대화 보내기';
   el('room-older').disabled = closed || roomBusy || !roomSnapshot || !roomSnapshot.has_more;
   el('room-latest').disabled = closed || roomBusy;
   el('room-latest').hidden = roomBefore === null;
@@ -471,10 +472,10 @@ function roomRequest(body) {
 }
 
 function refreshRoom() {
-  if (ended || disconnecting || roomDetached || roomBusy || Date.now() < roomNextRead) return;
+  if (ended || disconnecting || roomDetached || roomBusy) return;
   roomBusy = true;
   setRoomControls();
-  const before = roomBefore, revision = viewRevision;
+  const before = roomBefore;
   // While reading an older page, keep it stable and renew presence separately.
   const body = { action:'read', client_id:roomClient, machine:viewMachine };
   if (before !== null) body.before = before;
@@ -488,20 +489,31 @@ function refreshRoom() {
     if (!ended && !roomDetached) el('room-status').textContent = '공용 대화 연결이 끊겼어요. 다시 읽고 있어요.';
   }).finally(() => {
     roomBusy = false;
-    roomNextRead = before === roomBefore && revision === viewRevision ? Date.now() + 2000 : 0;
     setRoomControls();
   });
 }
 
+// Room presence and conversation have their own clock. A stalled seat or
+// live-frame request must not prevent an otherwise healthy room from updating.
+function tickRoom() {
+  if (ended || roomDetached) return;
+  refreshRoom();
+  setTimeout(tickRoom, ROOM_POLL_MS);
+}
+
 function sendChat() {
-  const text = el('chat-text').value;
+  // An edited textarea is the next draft, not permission to abandon a send
+  // whose outcome is still unknown. Reconcile that exact payload first.
+  const text = pendingChat ? pendingChat.text : el('chat-text').value;
   if (ended || disconnecting || chatSending || text.trim() === '' || !roomConnectionCurrent(true)) return;
   if (new TextEncoder().encode(text).length > 4096) {
     el('room-status').textContent = '대화 한 번은 UTF-8 4096바이트까지 보낼 수 있어요.';
     return;
   }
-  if (!pendingChat || pendingChat.text !== text) {
+  if (!pendingChat) {
     pendingChat = { client_id:roomClient, message_id:roomId(), machine:viewMachine, text };
+  } else {
+    el('room-status').textContent = '이전 대화 전송을 먼저 확인해요. 작성 중인 초안은 남겨 두어요.';
   }
   const request = pendingChat;
   chatSending = true;
@@ -515,7 +527,8 @@ function sendChat() {
       roomBefore = null;
       renderRoom(result.json);
       el('room-messages').scrollTop = el('room-messages').scrollHeight;
-      el('room-status').textContent = '';
+      el('room-status').textContent = el('chat-text').value === '' ? ''
+        : '이전 대화 전송을 확인했어요. 작성 중인 초안은 따로 보낼 수 있어요.';
     } else if (result.status >= 400 && result.status < 500) {
       pendingChat = null;
       el('room-status').textContent = (result.json && result.json.error) || '대화 전송이 거절됐어요. 초안은 남겨 두었어요.';
@@ -527,7 +540,6 @@ function sendChat() {
     if (!ended && !roomDetached) el('room-status').textContent = '전송 결과를 확인하지 못했어요. 다시 보내면 같은 메시지를 확인해요.';
   }).finally(() => {
     chatSending = false;
-    roomNextRead = 0;
     setRoomControls();
   });
 }
@@ -780,7 +792,6 @@ async function tick() {
 
 async function poll() {
   if (ended) return;
-  refreshRoom();
   const watched = viewMachine, revision = viewRevision;
   const query = since === null ? '' : '&since=' + since.count + '&incarnation=' + encodeURIComponent(since.incarnation);
   const r = await api('GET', LIVE_PATH + watched + '_capture' + query);
@@ -952,7 +963,7 @@ el('machine-view').addEventListener('change', () => {
   since = null;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   setStatus('frame', '화면을 읽고 있어요.');
-  roomNextRead = 0;
+  refreshRoom();
   renderTurn();
 });
 el('chat-send').addEventListener('click', sendChat);
@@ -966,12 +977,10 @@ el('chat-text').addEventListener('keydown', event => {
 el('room-older').addEventListener('click', () => {
   if (roomBusy || !roomSnapshot || !roomSnapshot.has_more || roomSnapshot.messages.length === 0) return;
   roomBefore = roomSnapshot.messages[0].id;
-  roomNextRead = 0;
   refreshRoom();
 });
 el('room-latest').addEventListener('click', () => {
   roomBefore = null;
-  roomNextRead = 0;
   refreshRoom();
 });
 
@@ -980,6 +989,7 @@ setControlsEnabled(false);
 if (token === '') {
   end('링크에 초대 토큰이 없어요. 받은 링크를 그대로 열어 주세요.');
 } else {
+  tickRoom();
   refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.')).finally(tick);
 }
 </script>

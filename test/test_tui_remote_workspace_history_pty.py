@@ -1719,7 +1719,12 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output)
                 release.set()
                 assert _keyboard_harness.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-                _keyboard_harness.send_and_wait(process, fd, output, b"r", b"resource-b")
+                # Since #41518 an authority move rereads the surface on view
+                # without a manual `r`, so B's row can already be drawn by the
+                # time we get here; wait for the automatic recovery to finish,
+                # then judge the pane and let Enter reread the body.
+                _keyboard_harness.drain_until_quiet(process, fd, output)
+                assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output), screen(output)
                 _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)
                 if held_method == "initialize":
@@ -1848,12 +1853,17 @@ def live_identity_before_chat_and_lifecycle(binary: str, captures: Path | None =
             expected = ["/api/v1/keepers/alpha/boot"] if operation == "boot-recovery" else []
             assert [path for path, _ in writes] == expected, (operation, writes)
             if operation == "chat":
-                # Main retires the chat pane on authority withdrawal. The
-                # draft must return to its editable composer when A returns.
-                assert b"MASC Keepers" in screen(output), screen(output)
-                assert "▸ chat".encode() not in screen(output), screen(output)
+                # Since #41520 a refused draft keeps its pane open instead of
+                # being retired to the keeper list: the banner explains the
+                # retention and Enter stays disabled, so the draft cannot
+                # dispatch to B.
+                assert "Keepers ▸ alpha ▸ chat".encode() in screen(output), screen(output)
+                assert b"draft retained" in screen(output), screen(output)
                 assert writes == [], "leaving the refused draft dispatched chat"
                 wire.publish("a-returned")
+                # The banner's own escape is the way back: Esc opens the roster
+                # and r rereads it under the returned authority...
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
                 os.write(fd, b"r")
                 assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                     lambda: b"a.returned" in screen(output)
@@ -1862,6 +1872,8 @@ def live_identity_before_chat_and_lifecycle(binary: str, captures: Path | None =
                 with wire.lock:
                     assert any(event["event"] == "roster" and event["phase"] == "a-returned"
                                for event in wire.events), "returning to A did not read its roster"
+                # ...and re-entering chat restores the refused draft as an
+                # editable composer without dispatching it.
                 _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
                 _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
                 assert _keyboard_harness.wait_for_fixture_state(process, fd, output,

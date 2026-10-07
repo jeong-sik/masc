@@ -102,9 +102,8 @@ let test_public_tools_expose_only_truthful_statuses () =
       List.iter
         (fun tool ->
           let status = tool_catalog_string_field tool "implementationStatus" in
-          check bool ("truthful public status: " ^ tool_string_field tool "name")
-            true
-            (String.equal status "real" || String.equal status "adapter"))
+          check string ("truthful public status: " ^ tool_string_field tool "name")
+            "real" status)
         tools)
 
 let test_keeper_lifecycle_front_door_is_public () =

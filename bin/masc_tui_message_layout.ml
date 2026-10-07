@@ -1985,13 +1985,16 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
            gutter_rail_cells = 0; gutter_clock_cells = 0; gutter_label_at = 0;
            action = Action_none })
   in
-  let message_rows = diagnostic_rows @ (
+  let body_with_diagnostics = match body_rows with
+    | [] -> diagnostic_rows
+    | first :: rest -> first :: diagnostic_rows @ rest in
+  let message_rows = (
     match origin with
-    | Origin_inline | Origin_bare -> body_rows
+    | Origin_inline | Origin_bare -> body_with_diagnostics
     | Origin_row -> (
         match metadata_row ~previous ~inner_width ~indent entry with
-        | None -> body_rows
-        | Some metadata -> metadata :: body_rows))
+        | None -> body_with_diagnostics
+        | Some metadata -> metadata :: body_with_diagnostics))
   in
   match timeline_break_row ~previous ~inner_width:pane_width entry with
   | None -> message_rows

@@ -1996,14 +1996,14 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
            ; action = Message_layout.Action_none
            } : Message_layout.entry) in
         let status_style = Message_layout.Status in
-        [ { speech with style = status_style; speaker = "STATUS";
+        [ speech
+        ; { speech with style = status_style; speaker = "STATUS";
             role_label = Message_layout.align_role_label
               ~column:role_label_column ~style:status_style "STATUS";
             role_label_mark_cells = Message_layout.role_label_mark_cells
               ~column:role_label_column ~style:status_style ();
             body = Printf.sprintf "%s · %s · 최근 출력 발췌"
-              note (Masc_tui_answering.lane_word lane) }
-        ; speech ]
+              note (Masc_tui_answering.lane_word lane) } ]
     | Some _ | None -> []
 
 (* One conversation's layout entries, reused per message across a change of
@@ -3090,8 +3090,7 @@ let render_keeper_message (state : state) =
                   turn_rail =
                     turn_rail_of ~siding ~edge
                       ~style:entry.Message_layout.style;
-                  span_clock = None;
-                  diagnostics = []
+                  span_clock = None
                 } )
           | Some _ | None -> item)
         merged

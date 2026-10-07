@@ -3010,7 +3010,21 @@ let test_scrolled_styled_meter_rows () =
     check bool "each row closes before footer" true (String.ends_with ~suffix:reset row);
     check bool "meter and wide glyphs obey cells" true (Layout.display_width row <= 12)) rows
 
+let test_diagnostics_keep_the_message_opening () =
+  let source = entry Layout.Keeper "keeper" "request-id"
+      (String.concat "\n" (List.init 20 (Printf.sprintf "body-%02d"))) in
+  let source = {source with diagnostics=["request exact-id"; "attempt 1: runtime"]} in
+  List.iter (fun origin ->
+    let rows = Layout.visible_rows ~origin ~inner_width:80 ~height:5 [source] in
+    check bool "opening survives expanded diagnostics" true
+      (List.exists (fun (row : Layout.row) -> row.kind = Layout.Body && holds row.text "body-00") rows);
+    check bool "latest output survives expanded diagnostics" true
+      (List.exists (fun (row : Layout.row) -> row.kind = Layout.Body && holds row.text "body-19") rows))
+    [Layout.Origin_inline; Origin_bare; Origin_row]
+;;
+
 let () =
+  test_diagnostics_keep_the_message_opening ();
   run "tui_message_layout"
     [
       ( "scrolled styles", [test_case "styled quota cells keep blanks and close each row" `Quick test_scrolled_styled_meter_rows] );

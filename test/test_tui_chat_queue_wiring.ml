@@ -4977,6 +4977,23 @@ let test_expanded_chat_diagnostics_preserve_settled_identity () =
     (List.exists (fun (row : Masc_tui_message_layout.row) -> match row.kind with
       | Metadata Diagnostic -> Astring.String.is_infix ~affix:request_id row.text
       | _ -> false) rows);
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_history <- [];
+  let logged = inflight_with_log ~keeper_name:"alpha" ~started_at:10.
+      [Live.Run_started; Live.Runtime_attempt_started {runtime_id=Some "first-runtime"; attempt_index=Some 0};
+       Live.Text "first reply";
+       Live.Runtime_attempt_started {runtime_id=Some "next-runtime"; attempt_index=Some 1};
+       Live.Text "second reply"] in
+  state.msg_settled_logs <- [logged.log];
+  let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+  let screen = String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+  check bool "merged settled block keeps request diagnostics" true
+    (Astring.String.is_infix ~affix:logged.sent_request.request_id screen);
+  check bool "merged settled block keeps superseded runtime diagnostics" true
+    (Astring.String.is_infix ~affix:"first-runtime" screen);
+  state.msg_settled_logs <- [];
   let pending, _ = preflight_input () in
   state.msg_inflight <- [pending];
   let width = Masc_tui_message_layout.chat_role_label_width ~pane_cells:80 in

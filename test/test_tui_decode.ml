@@ -11329,10 +11329,35 @@ let test_decode_gate_null_queue_is_empty_with_modes () =
         (List.length snapshot.Tui_decode.gs_pending);
       match snapshot.Tui_decode.gs_modes with
       | Some modes ->
-          Alcotest.check Alcotest.string "workspace lane" "always_allow"
-            modes.Tui_decode.glm_workspace;
-          Alcotest.check Alcotest.string "external lane" "manual"
-            modes.Tui_decode.glm_external
+          Alcotest.check Alcotest.bool "workspace lane" true
+            (modes.Tui_decode.glm_workspace
+             = Tui_decode.Gate_mode Keeper_gate_mode.Always_allow);
+          Alcotest.check Alcotest.bool "external lane" true
+            (modes.Tui_decode.glm_external
+             = Tui_decode.Gate_mode Keeper_gate_mode.Manual)
+      | None -> Alcotest.fail "the lanes went missing")
+
+(* A lane word this build does not know is kept by name. The snapshot that
+   carries it also carries the queue, so refusing the word would take the
+   operator's pending decisions off the screen with it. *)
+let test_decode_gate_unknown_lane_mode_is_kept_by_name () =
+  let hitl =
+    `Assoc
+      [ ("gate_mode", `Assoc [ ("mode", `String "escalate_to_human") ]);
+        ("external_gate_mode", `Assoc [ ("mode", `String "manual") ]);
+      ]
+  in
+  match Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:`Null ~hitl ()) with
+  | Error message -> Alcotest.failf "an unknown lane word failed the snapshot: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_modes with
+      | Some modes ->
+          Alcotest.check Alcotest.bool "kept as the server wrote it" true
+            (modes.Tui_decode.glm_workspace
+             = Tui_decode.Unrecognised_gate_mode "escalate_to_human");
+          Alcotest.check Alcotest.bool "the known lane still reads" true
+            (modes.Tui_decode.glm_external
+             = Tui_decode.Gate_mode Keeper_gate_mode.Manual)
       | None -> Alcotest.fail "the lanes went missing")
 
 let test_decode_gate_unreadable_queue_carries_the_detail () =
@@ -11408,8 +11433,8 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
   match Tui_decode.decode_keeper_gate_settings keeper_gate_settings_json with
   | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
   | Ok (modes, exact_lanes) ->
-    Alcotest.(check (list (pair string string)))
-      "modes" [ ("echo", "manual") ] modes;
+    Alcotest.(check bool)
+      "modes" true (modes = [ ("echo", Tui_decode.Gate_mode Keeper_gate_mode.Manual) ]);
     Alcotest.(check (list (pair string (pair string string))))
       "exact lanes" [ ("echo", ("hitl_auto_judge", "glm-coding.glm-5-turbo")) ]
       (List.map
@@ -11419,6 +11444,22 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
     Alcotest.(check (list bool)) "offered is carried, not defaulted" [ false ]
       (List.map (fun (first : Tui_decode.keeper_exact_lane_first) -> first.Tui_decode.kel_offered)
          exact_lanes)
+
+let test_decode_keeper_gate_settings_keeps_an_unknown_mode_by_name () =
+  let json =
+    `Assoc
+      [ ( "modes"
+        , `List
+            [ `Assoc [ ("keeper_name", `String "echo"); ("mode", `String "escalate_to_human") ] ] )
+      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+      ; ("exact_lanes", `List [])
+      ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
+      ]
+  in
+  match Tui_decode.decode_keeper_gate_settings json with
+  | Ok ([ ("echo", Tui_decode.Unrecognised_gate_mode "escalate_to_human") ], []) -> ()
+  | Ok _ -> Alcotest.fail "the unknown mode was not kept by name"
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
 
 (* An unreadable store answers an empty list beside state=unavailable. Read
    as the list alone, that is "nobody singled out". *)
@@ -13347,6 +13388,8 @@ let () =
           test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper;
         Alcotest.test_case "refuses an unavailable store" `Quick
           test_decode_keeper_gate_settings_refuses_an_unavailable_store;
+        Alcotest.test_case "keeps an unknown mode by name" `Quick
+          test_decode_keeper_gate_settings_keeps_an_unknown_mode_by_name;
       ] );
     ( "keeper_secret_projection",
       [
@@ -13392,6 +13435,8 @@ let () =
           test_decode_gate_row_of_another_operation_keeps_its_preview;
         Alcotest.test_case "a null queue is empty with modes" `Quick
           test_decode_gate_null_queue_is_empty_with_modes;
+        Alcotest.test_case "an unknown lane mode is kept by name" `Quick
+          test_decode_gate_unknown_lane_mode_is_kept_by_name;
         Alcotest.test_case "an unreadable queue carries the detail" `Quick
           test_decode_gate_unreadable_queue_carries_the_detail;
         Alcotest.test_case "a ready queue state is not a warning" `Quick

@@ -961,6 +961,14 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+(** A Gate stance as the server wrote it ({!Keeper_gate_mode}). Read once
+    here so every screen draws the same thing: [Unrecognised_gate_mode] keeps a
+    word this build does not know as the server wrote it, rather than failing
+    the reading that carries it (the Gate snapshot also carries the queue). *)
+type gate_mode =
+  | Gate_mode of Keeper_gate_mode.t
+  | Unrecognised_gate_mode of string
+
 (** The slot one Keeper reaches first in one exact-output lane. *)
 type keeper_exact_lane_first = {
   kel_keeper : string;
@@ -973,7 +981,7 @@ type keeper_exact_lane_first = {
 
 val decode_keeper_gate_settings :
   Yojson.Safe.t ->
-  ((string * string) list * keeper_exact_lane_first list, string) result
+  ((string * gate_mode) list * keeper_exact_lane_first list, string) result
 (** [(keeper, mode) list, exact-lane firsts] from
     [/api/v1/dashboard/gate/keeper-settings] ([modes] and [exact_lanes]). A
     list whose [*_state] says [unavailable] is an [Error], never an empty
@@ -1092,8 +1100,8 @@ type gate_pending = {
 }
 
 type gate_lane_modes = {
-  glm_workspace : string;
-  glm_external : string;
+  glm_workspace : gate_mode;
+  glm_external : gate_mode;
       (** The external-services lane. A separate switch from the workspace
           lane: opening one does not open the other. *)
 }

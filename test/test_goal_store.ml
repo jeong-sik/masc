@@ -640,18 +640,18 @@ let test_upsert_accepts_a_real_calendar_day () =
         goal.due_date)
     [ "2026-09-23"; "2028-02-29"; "9999-12-31" ]
 
-(* RFC-0387 B2: creation is a feasibility review. A goal born without a
+(* Creation input check. A goal born without a
    name states no success condition to hold it to, on either create path;
    a goal born past its due date is overdue before its first observation.
    Updates stay ungated: an existing goal's due date passing is ordinary
    life, and backdating a stored date is a correction, not a birth. *)
-let test_upsert_b2_reviews_a_new_goal_for_feasibility () =
+let test_upsert_refuses_a_blank_title_and_a_past_due_date_at_creation () =
   with_workspace ~now:calendar_fixture_now @@ fun config ->
-  let rejected_as_b2 = function
+  let rejected_naming affix = function
     | Error (Goal_store.Rejected message) ->
-      check bool "the refusal names B2" true
-        (String_util.contains_substring message "RFC-0387 B2")
-    | Error other -> fail ("B2 refusal was not Rejected: " ^ write_error_msg other)
+      check bool ("the refusal says " ^ affix) true
+        (String_util.contains_substring message affix)
+    | Error other -> fail ("creation refusal was not Rejected: " ^ write_error_msg other)
     | Ok _ -> fail "an infeasible goal was created"
   in
   (* A whitespace title states nothing, on the id-less path (refused before
@@ -661,11 +661,11 @@ let test_upsert_b2_reviews_a_new_goal_for_feasibility () =
    | Error other -> fail ("blank title was not Rejected: " ^ write_error_msg other)
    | Ok _ -> fail "a goal with a blank title was created");
   (* … and an explicit unknown id no longer defaults to "Untitled goal". *)
-  rejected_as_b2
+  rejected_naming "non-blank title"
     (Goal_store.upsert_goal config ~id:"goal-explicit-no-title" ~metric:"m"
        ~target_value:"1" ());
   (* A past due date is unreachable by construction. *)
-  rejected_as_b2
+  rejected_naming "already past"
     (Goal_store.upsert_goal config ~title:"Late" ~metric:"m" ~target_value:"1"
        ~due_date:"2026-09-21" ());
   check bool "refused creates wrote no goals.json" false
@@ -1325,8 +1325,8 @@ let () =
             test_upsert_refuses_a_due_date_that_is_not_a_calendar_day;
           test_case "a real calendar day is stored as written" `Quick
             test_upsert_accepts_a_real_calendar_day;
-          test_case "B2 reviews a new goal for feasibility" `Quick
-            test_upsert_b2_reviews_a_new_goal_for_feasibility;
+          test_case "creation refuses a blank title and a past due date" `Quick
+            test_upsert_refuses_a_blank_title_and_a_past_due_date_at_creation;
           test_case "creation uses the UTC due-day boundary" `Quick
             test_upsert_due_date_uses_the_utc_day_boundary;
           test_case "a refused update keeps the stored due date" `Quick

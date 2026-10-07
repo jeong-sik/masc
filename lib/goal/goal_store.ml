@@ -1053,8 +1053,8 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                      not to hold the row. On refusal the closure returns the
                      state it received and [update_state] writes nothing; the
                      error is carried out via [refusal]. *)
-                  (* RFC-0387 B2: creation is a feasibility review, not just
-                     a shape check. A goal born without a name states no
+                  (* Creation input check, not just a shape check. A goal born
+                     without a name states no
                      condition to hold it to — the [id = None] path is
                      refused before the lock, while an explicit unknown id
                      reaches this arm and used to default to "Untitled
@@ -1067,8 +1067,8 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                     if blank_opt title then
                       Some
                         "a non-blank title is required for a new goal \
-                         (RFC-0387 B2: a goal without a name states no \
-                         success condition to hold it to)"
+                         (a goal without a name states no success condition \
+                         to hold it to)"
                     else (
                       match due_date with
                       | None -> None
@@ -1081,7 +1081,7 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                              Some
                                (Printf.sprintf
                                   "due_date %S is already past: a goal born \
-                                   overdue is unreachable (RFC-0387 B2)"
+                                   overdue is unreachable"
                                   raw)
                            else None))
                   in

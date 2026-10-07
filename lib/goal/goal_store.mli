@@ -329,7 +329,7 @@ val upsert_goal :
       write lock on the freshly decoded state, so an undecodable store is
       {!Store_unavailable}, never this one. Updating an existing row is not
       gated.
-    - RFC-0387 B2: creation is a feasibility review. A new row needs a
+    - Creation input check: a new row needs a
       non-blank [title] on every create path (an explicit unknown [id]
       without one no longer defaults to "Untitled goal"), and a [due_date]
       already past is refused — a goal born overdue is unreachable by

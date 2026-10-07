@@ -36,9 +36,8 @@ let operation_wire_streams_mu = Stdlib.Mutex.create ()
 let ag_ui_terminal_event (event : Ag_ui.event) =
   match event.Ag_ui.event_type with
   | Ag_ui.Run_finished | Ag_ui.Run_error -> true
-  | Run_started | Step_started | Step_finished | Text_message_start
-  | Text_message_content | Text_message_end | Tool_call_start
-  | Tool_call_args | Tool_call_end | State_snapshot | State_delta
+  | Run_started | Text_message_start | Text_message_content
+  | Text_message_end | Tool_call_start | Tool_call_args | Tool_call_end
   | Custom -> false
 
 let note_operation_wire_opened ~operation_id =
@@ -3479,10 +3478,9 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
           (not sent)
           || match event.Ag_ui.event_type with
              | Ag_ui.Run_finished | Ag_ui.Run_error -> true
-             | Run_started | Step_started | Step_finished | Text_message_start
-             | Text_message_content | Text_message_end | Tool_call_start
-             | Tool_call_args | Tool_call_end | State_snapshot | State_delta
-             | Custom -> false
+             | Run_started | Text_message_start | Text_message_content
+             | Text_message_end | Tool_call_start | Tool_call_args
+             | Tool_call_end | Custom -> false
         then finish ()
       in
       let send_live ~seq event =

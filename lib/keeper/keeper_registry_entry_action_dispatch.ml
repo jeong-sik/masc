@@ -33,10 +33,7 @@ let execute_observability
     let (_ignore_ts : float) = ts_unix in
     ()
   | Start_drain
-  | Schedule_restart _
-  | Cleanup_and_unregister
-  | Trigger_immediate_cleanup
-  | Cancel_pending_agent_core -> ()
+  | Cleanup_and_unregister -> ()
 ;;
 
 let followup_event_of_action

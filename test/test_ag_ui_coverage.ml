@@ -24,16 +24,12 @@ let test_event_type_to_string () =
   assert (event_type_to_string Run_started = "RUN_STARTED");
   assert (event_type_to_string Run_finished = "RUN_FINISHED");
   assert (event_type_to_string Run_error = "RUN_ERROR");
-  assert (event_type_to_string Step_started = "STEP_STARTED");
-  assert (event_type_to_string Step_finished = "STEP_FINISHED");
   assert (event_type_to_string Text_message_start = "TEXT_MESSAGE_START");
   assert (event_type_to_string Text_message_content = "TEXT_MESSAGE_CONTENT");
   assert (event_type_to_string Text_message_end = "TEXT_MESSAGE_END");
   assert (event_type_to_string Tool_call_start = "TOOL_CALL_START");
   assert (event_type_to_string Tool_call_args = "TOOL_CALL_ARGS");
   assert (event_type_to_string Tool_call_end = "TOOL_CALL_END");
-  assert (event_type_to_string State_snapshot = "STATE_SNAPSHOT");
-  assert (event_type_to_string State_delta = "STATE_DELTA");
   assert (event_type_to_string Custom = "CUSTOM")
 
 let test_role_to_string () =

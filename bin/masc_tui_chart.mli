@@ -14,15 +14,6 @@ val sparkline : ?min:int -> ?max:int -> int list -> string
     Each value maps to one of the 8 height levels.
     Returns [""] for empty list. *)
 
-val sparkline_colored :
-  ?min:int ->
-  ?max:int ->
-  style_of_level:(int -> Masc_tui_theme.status) ->
-  int list ->
-  string
-(** [sparkline_colored] applies a typed [Masc_tui_theme.status] colour based on level (0..7),
-    resetting with [Masc_tui_theme.Sgr.reset] after each glyph. *)
-
 (** {1 Gauges and Utilization Bars} *)
 
 val format_compact_num : int -> string

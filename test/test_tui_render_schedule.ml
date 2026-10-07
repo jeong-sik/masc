@@ -2933,35 +2933,6 @@ let test_a_board_post_without_a_time_has_no_age () =
   check string "no time is a dash, not an age" "\xe2\x80\x94"
     (Schedule.board_age_text ~now:7200. None)
 
-(* The narrow-mode ledger (task-2025): every list the schedule renderer
-   draws, at the least width its own columns admit.
-
-   [Table.fit] on a pane narrower than these numbers leaves the mandatory
-   row wider than the pane, which is the frame's cut; a narrow mode that
-   wants to promise a reading before the cut stacks instead, and reads the
-   threshold from [floor] rather than copying it into a second number that
-   can age apart from the columns. Each entry pins the floor value itself;
-   the hand-summed widths the entries hold are the ledger the values are
-   checked against. *)
-let test_the_narrow_floors_the_lists_are_read_to () =
-  let check_floor name (floor, inner) =
-    check int (name ^ ": the floor") floor inner
-  in
-  check_floor "workspace" (Schedule.workspace_floor_width, 37);
-  check_floor "system log" (Schedule.system_log_floor_width, 29);
-  check_floor "lane run" (Schedule.lane_run_floor_width, 53);
-  check_floor "change" (Schedule.change_floor_width, 51);
-  check_floor "harness" (Schedule.harness_floor_width, 37);
-  check_floor "board" (Schedule.board_floor_width, 39);
-  check_floor "schedules" (Schedule.schedule_floor_width ~wake_width:7, 33);
-  check_floor "keeper automation"
-    (Schedule.kauto_floor_width ~status_width:7 ~clock_width:16, 60);
-  check_floor "verification"
-    (* Sixteen: the least submitter width the render measures at
-       (render.ml -- the fold floors at 16), the reading the RFC's
-       ledger row states. *)
-    (Schedule.verification_floor_width ~submitter_width:16, 58)
-
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -3179,7 +3150,5 @@ let () =
         ; test_case "a hold the runner has not reread names when it was seen"
             `Quick
             test_a_hold_the_runner_has_not_reread_names_when_it_was_seen
-        ; test_case "the narrow floors the lists are read to" `Quick
-            test_the_narrow_floors_the_lists_are_read_to
         ] )
     ]

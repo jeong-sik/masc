@@ -165,14 +165,6 @@ val workspace_layout : inner_width:int -> workspace_column Masc_tui_table.layout
 (** Keep repository, status and path. Fold sync and then branch as the
     viewport narrows; path receives the remaining cells. *)
 
-val workspace_floor_width : int
-(** The least inner width the repository list reads at: name, status and the
-    path's floor, the columns the narrow list never gives up. This is where
-    a narrow mode's threshold comes from -- the pane fits or it is stacked --
-    so it is measured from the same description {!workspace_layout} draws
-    from rather than copied as a second number that can age apart from the
-    columns. *)
-
 val workspace_header_row : layout:workspace_column Masc_tui_table.layout -> string
 val workspace_row :
   layout:workspace_column Masc_tui_table.layout -> workspace_row_values -> string
@@ -216,11 +208,6 @@ val system_log_layout : inner_width:int -> system_log_column Masc_tui_table.layo
 (** Keep time, level and message. Fold category, keeper and module in that
     order when they would squeeze the message below its readable floor. *)
 
-val system_log_floor_width : int
-(** The least inner width the log reads at: time, level and the message's
-    floor -- the three the narrow list never gives up. Measured from the
-    same description {!system_log_layout} draws from. *)
-
 val system_log_header_row : layout:system_log_column Masc_tui_table.layout -> string
 val system_log_row :
   styles:system_log_styles -> level_style:string ->
@@ -241,12 +228,6 @@ val verification_minimum_title_width : int
 val verification_title_width : inner_width:int -> submitter_width:int -> int
 (** Cells the title may occupy: what the named columns leave, never below
     {!verification_minimum_title_width}. *)
-
-val verification_floor_width : submitter_width:int -> int
-(** The least inner width the request list reads at (task-2025): the task,
-    the submitter at the width the caller measured from its page -- it names
-    who owes the work, which the narrow pane keeps -- the evidence and the
-    title at its own minimum. *)
 
 val verification_header_row : submitter_width:int -> title_width:int -> string
 
@@ -319,14 +300,6 @@ val schedule_layout :
     recurrence stay; target names are bounded before fitting so one long name
     cannot consume the recurrence. Very narrow tables shrink those primary
     widths and the detail carries their full readings. *)
-
-val schedule_floor_width : wake_width:int -> int
-(** The least inner width the schedules list reads at (task-2025): the state
-    word goes last in the drop order, so the floor leaves it -- full state
-    is in the detail -- while the due stamp, the target and recurrence at
-    their minimums, the wake at the width the caller measured from its
-    page, and the delivery at the least reading any page gives it all stay.
-    Below it the list is stacked, not cut. *)
 
 val schedule_header_row : layout:schedule_layout -> string
 
@@ -434,15 +407,6 @@ val kauto_row :
   string
 (** One automation, on the same columns as {!kauto_header_row}. *)
 
-val kauto_floor_width : status_width:int -> clock_width:int -> int
-(** The least inner width the automation tab reads at (task-2025): the mark,
-    the state word, the two clocks and the summary's minimum. The status and
-    clock widths are the caller's constants -- the contract's word list and
-    the stamp format, the same on every page; the outcome, recurrence and
-    actor columns count at the least reading any page can give them. Below
-    the result the tab is stacked, not cut; the caller adds its two-cell
-    lead outside this number. *)
-
 val kauto_status_mark : string -> string
 (** The mark a status word draws: the Fusion pipeline's vocabulary, one cell
     -- waiting, active, done, failed. A word this build does not name keeps
@@ -477,11 +441,6 @@ val lane_run_layout : inner_width:int -> lane_run_column Masc_tui_table.layout
     it. When the row is narrow the start goes first, then the elapsed time;
     the subject, the status and the slot stay, and the slot takes what the
     others leave, never below its floor. *)
-
-val lane_run_floor_width : int
-(** The least inner width the run list reads at: the run's subject, how it
-    ended, and the slot's minimum -- the columns the narrow list never gives
-    up. Measured from the same description {!lane_run_layout} draws from. *)
 
 val lane_run_header_row :
   identity_header:string -> layout:lane_run_column Masc_tui_table.layout -> string
@@ -522,11 +481,6 @@ val change_layout : inner_width:int -> change_column Masc_tui_table.layout
     of it. When the row is narrow the turn goes first, then the task, the
     operation and the result; the file and the summary stay, and the summary
     takes what the others leave, never below its floor. *)
-
-val change_floor_width : int
-(** The least inner width the change list reads at: which file the turn
-    touched and what it did there -- the two the narrow list never gives up.
-    Measured from the same description {!change_layout} draws from. *)
 
 val change_header_row : layout:change_column Masc_tui_table.layout -> string
 
@@ -635,11 +589,6 @@ val harness_layout : inner_width:int -> harness_column Masc_tui_table.layout
     of it. When the row is narrow the evaluator goes first, then the time and
     the gate; the task, the verdict and the reason stay, and the reason takes
     what the others leave, never below its floor. *)
-
-val harness_floor_width : int
-(** The least inner width the verdict list reads at: which task was judged,
-    what the judge said, and why -- the three the narrow list never gives
-    up. Measured from the same description {!harness_layout} draws from. *)
 
 val harness_header_row : layout:harness_column Masc_tui_table.layout -> string
 
@@ -773,12 +722,6 @@ val board_layout : inner_width:int -> board_column Masc_tui_table.layout
     goes first, then the hearth, the replies, the score and the author; the
     mark, the title and the age stay, and the title takes what the others
     leave, never below its floor. *)
-
-val board_floor_width : int
-(** The least inner width the board list reads at: the kind mark, the title's
-    minimum and the age -- the three a row is read for. Measured from the
-    same description {!board_layout} draws from, and owed the same four-cell
-    lead {!board_layout} is. *)
 
 val board_header_row :
   age_header:string -> layout:board_column Masc_tui_table.layout -> string

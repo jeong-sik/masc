@@ -93,24 +93,6 @@ val fit :
     @raise Invalid_argument when [flex] is absent from [columns] or listed
     more than once. *)
 
-val floor :
-  width:('col -> int) ->
-  flex:'col ->
-  drop_order:'col list ->
-  'col list ->
-  int
-(** [floor ~width ~flex ~drop_order columns] is the least [inner_width] the
-    table can be read in: the mandatory row -- every column [fit] is still
-    drawing after dropping everything [drop_order] names, the flexible one
-    at its floor -- measured the same way [fit] measures, gaps included.
-    Above it [fit] stops dropping once the row fits; below it [fit] arrives
-    at this row still not fitting, which is the frame's cut. A surface that
-    wants to promise a reading before that cut names this number.
-
-    Divided from [fit] so the answer cannot drift from the question: both
-    read the table's own [width] description, so a column added to the table
-    answers to both or neither. *)
-
 val header_row : cell list -> string
 (** The column names, laid out on the given cells. *)
 

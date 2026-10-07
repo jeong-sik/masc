@@ -528,6 +528,12 @@
  (libraries masc yojson))
 
 (library
+ (name masc_tui_play_pending)
+ (wrapped false)
+ (modules masc_tui_play_pending)
+ (libraries masc.fs_compat yojson unix))
+
+(library
  (name masc_tui_lane_broadcast_pending)
  (wrapped false)
  (modules masc_tui_lane_broadcast_pending)
@@ -1442,6 +1448,8 @@
   masc_tui_lane_application
   masc_tui_lane_addons
   masc_tui_lane_broadcast_pending
+  masc_tui_play_pending
+  masc.masc_random_id
   masc_tui_fusion_launch
   masc_tui_queue_inspection
   masc_tui_lane_declaration

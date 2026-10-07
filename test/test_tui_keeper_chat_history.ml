@@ -2059,18 +2059,18 @@ let test_a_caption_keeps_its_whitespace () =
     ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
   in
   List.iter
-    (fun caption ->
+    (fun (caption, displayed) ->
        Alcotest.(check string) "caption retained before attachment metadata"
-         (caption ^ "\n⎘ #1 notes.txt")
+         (displayed ^ "⎘ #1 notes.txt")
          (History.text_with_attachments ~format_bytes:bytes_only ~text:caption
             ~notes:[ note ]);
        Alcotest.(check string) "same caption without attachments"
          caption
          (History.text_with_attachments ~format_bytes:bytes_only ~text:caption
             ~notes:[]))
-    [ "    첫 줄의 코드\n    둘째 줄의 코드"
-    ; "첫 문단\n\n둘째 문단\n\n"
-    ; "  앞뒤 공백을 보존해 주세요.  "
+    [ "    첫 줄의 코드\n    둘째 줄의 코드", "    첫 줄의 코드\n    둘째 줄의 코드\n"
+    ; "첫 문단\n\n둘째 문단\n\n", "첫 문단\n\n둘째 문단\n\n"
+    ; "  앞뒤 공백을 보존해 주세요.  ", "  앞뒤 공백을 보존해 주세요.  \n"
     ]
 ;;
 

@@ -4810,10 +4810,53 @@ let test_search_counts_visible_request_annotations () =
               (Masc_tui_theme.strip_sgr line)) frame.Masc_tui_frame_presenter.lines))
 ;;
 
+let test_attachment_caption_whitespace_reaches_chat_rows () =
+  let module History = Masc_tui_keeper_chat_history in
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let note : History.attachment_note =
+    { att_name = "notes.txt"; att_mime = ""; att_bytes = 0
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image } in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let theme = Masc_tui_ansi.Chat_theme.snapshot () in
+  let role = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
+  let render caption =
+    let text = History.text_with_attachments ~format_bytes:string_of_int
+        ~text:caption ~notes:[note]
+      |> Keeper_chat.terminal_safe_text ~preserve_newlines:true in
+    let message = chat_entry ~request_id:"" ~role ~text ~at:42. () in
+    let entry = match Render.keeper_message_layout_entries ~messages:[message]
+        state ~keeper_name:"alpha" ~chat_cols:120 with
+      | [entry] -> entry
+      | _ -> fail "expected one caption entry" in
+    check bool "the production projection uses stable Markdown" true
+      (match entry.Layout.markdown_source with Markdown_stable _ -> true | _ -> false);
+    let markdown = Render.cached_chat_markdown ~link_previews_mode:`Off ~theme in
+    Layout.rows_of_entry ~markdown ~origin:Layout.Origin_bare ~inner_width:120
+      ~previous:None entry
+    |> List.filter_map (fun (row : Layout.row) -> match row.kind with
+      | Layout.Body -> Some (Masc_tui_theme.strip_sgr row.text)
+      | Layout.Metadata _ | Layout.Viewport_gap _ -> None) in
+  List.iter (fun (caption, expected) ->
+    check (list string) (Printf.sprintf "displayed caption %S" caption)
+      (List.map (fun line -> "  " ^ line) (expected @ ["⎘ #1 notes.txt"]))
+      (render caption))
+    [ "    first line\n    second line", ["    first line"; "    second line"]
+    ; "  앞뒤 공백  ", ["  앞뒤 공백  "]
+    ; "  **styled caption**  ", ["  styled caption  "]
+    ; "caption", ["caption"]
+    ; "caption\n", ["caption"]
+    ; "caption\n\n", ["caption"; ""]
+    ; "first\n\nsecond\n\n", ["first"; ""; "second"; ""]
+    ; " \n  ", []
+    ]
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [ ( "visible delivery", [test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable; test_case "search counts annotations" `Quick test_search_counts_visible_request_annotations] )
+    [ ( "attachment captions", [test_case "whitespace and separators survive rendered chat rows" `Quick test_attachment_caption_whitespace_reaches_chat_rows] )
+    ; ( "visible delivery", [test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable; test_case "search counts annotations" `Quick test_search_counts_visible_request_annotations] )
     ; ( "rejected input", [test_case "refusal preserves original input" `Quick test_verified_rejection_is_visible_without_mutating_original_input] )
     ; ( "status ownership",
         [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post

@@ -273,17 +273,14 @@ type token = {
    the next row instead of ending it there. *)
 let tokens_of_segments segments =
   let tokens = ref [] in
-  let first = ref true in
   List.iter
     (fun (text, kind) ->
        let pieces = String.split_on_char ' ' text in
        List.iteri
          (fun index piece ->
-            let space_before = (not !first) && index > 0 in
-            if String.length piece > 0 || space_before then begin
-              tokens := { word = piece; kind; space_before } :: !tokens;
-              first := false
-            end)
+            let space_before = index > 0 in
+            if String.length piece > 0 || space_before then
+              tokens := { word = piece; kind; space_before } :: !tokens)
          pieces)
     segments;
   List.rev !tokens
@@ -306,10 +303,15 @@ let wrap_tokens palette ~width tokens =
      to decide the row and a third time to advance the count segmented every
      word of every rendered line three times over. *)
   let push ~word_cells token =
-    let separator = if !current_cells > 0 && token.space_before then " " else "" in
+    (* Empty leading tokens are source indentation. Keep their spaces even
+       before the first word; only a width-induced wrap consumes a separator. *)
+    let separator = if token.space_before then " " else "" in
     let cells = Layout.display_width separator + word_cells in
-    if !current_cells > 0 && !current_cells + cells > width then flush ();
-    let separator = if !current_cells > 0 && token.space_before then " " else "" in
+    let separator =
+      if !current_cells > 0 && !current_cells + cells > width then (
+        flush ();
+        "")
+      else separator in
     Buffer.add_string current separator;
     Buffer.add_string current (render_token palette token);
     current_cells :=

@@ -1,0 +1,1 @@
+- Show Codex native command output activity and MCP progress in Keeper Tools rows, retaining exact active tool identity and journal replay without mixing progress into assistant speech or execution results.

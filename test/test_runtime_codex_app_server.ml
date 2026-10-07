@@ -2269,7 +2269,7 @@ let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn
         { frame = Runtime_codex_app_server.Context_window_filled _; _ } ->
       fail "a counted frame was read as a fill"
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
     | Usage_windows_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
   with_fixture
@@ -3120,7 +3120,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
   let on_stream_event = function
     | Runtime_codex_app_server.Usage_windows_reported report -> reports := report :: !reports
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
     | Usage_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
   with_fixture
@@ -4237,7 +4237,7 @@ let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
     ?(initial_messages = []) ?base_path ?raw_trace_path ?session_id
-    ?on_native_tool_completion ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
+    ?on_native_tool_progress ?on_native_tool_completion ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model ?accept () =
@@ -4299,7 +4299,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ?context
                       ~raw_trace
                       ?session_id
-                      ?on_native_tool_completion ?on_event
+                      ?on_native_tool_progress ?on_native_tool_completion ?on_event
                       ?on_request_attribution
                       ~sw
                       ~net:(Eio.Stdenv.net env)
@@ -4908,6 +4908,98 @@ let test_native_completion_reaches_tui () =
      Some "declined", None, Decline_reported;
      Some "future-status", None, Unrecognized_status "future-status";
      None, None, End_observed]
+;;
+
+let codex_progress_frame ?(thread_id="thread-1") ?(turn_id="turn-1")
+    ~method_ ~item_id ~field payload =
+  `Assoc ["method", `String method_; "params", `Assoc
+    (["threadId", `String thread_id; "turnId", `String turn_id; field,payload]
+     @ Option.to_list (Option.map (fun id -> "itemId", `String id) item_id))]
+  |> Yojson.Safe.to_string
+;;
+
+let test_native_progress_reaches_tui () =
+  let module F = Native_tool_outcome_fixture in
+  let base_path = temp_workspace "codex-progress-" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let secret = "fixture-native-progress-private-token" in
+    let secret_file = Filename.concat base_path "progress-secret" in
+    let channel = open_out_bin secret_file in
+    output_string channel secret; close_out channel;
+    let redaction = Keeper_secret_redaction.snapshot_with_additional_secret_files
+      ~redact_identity_scalars:false ~additional_secret_files:[secret_file] ~base_path
+      ~keeper_name:"codex-fixture" in
+    let redact_text = Keeper_secret_redaction.redact_text redaction in
+    let message = "waiting " ^ secret ^ "\027[31m" in
+    let safe_message = redact_text message in
+    check bool "fixture exercises real secret redaction" false (message=safe_message);
+    let fixture = F.create ~redact_text () in
+    let output ?(id=Some "native-command-1") delta = codex_progress_frame
+      ~method_:"item/commandExecution/outputDelta" ~item_id:id ~field:"delta" (`String delta) in
+    let mcp ?(id=Some "native-mcp-1") message = codex_progress_frame
+      ~method_:"item/mcpToolCall/progress" ~item_id:id ~field:"message" (`String message) in
+    let snapshots = ref 0 in
+    let callback_failures = ref [] in
+    let on_progress ~block_index ~tool_call_id progress =
+      F.on_progress fixture ~block_index ~tool_call_id progress;
+      match progress with
+      | Runtime_native_tools.Message_reported {message=received} when received=message ->
+          incr snapshots;
+          (try F.check_progress fixture ~running:true ~expected_text:"MASC_"
+             ~expected:["native-command-1",Some 9,None; "native-mcp-1",None,Some safe_message]
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> callback_failures := exn :: !callback_failures)
+      | Output_observed _ | Message_reported _ -> () in
+    with_fixture
+      [init_result; account_chatgpt; thread_result; turn_result;
+       output "before-start"; mcp "before-start";
+       native_command_started; native_command_started; native_mcp_call_started;
+       output "가"; output "가"; output "  "; output "";
+       output ~id:None "unbound"; output ~id:(Some "") "unbound";
+       mcp ~id:None "unbound"; mcp ~id:(Some "") "unbound";
+       output ~id:(Some "native-mcp-1") "wrong-kind";
+       mcp ~id:(Some "native-command-1") "wrong-kind";
+       agent_message_delta; output "Z"; mcp message;
+       native_command_completed; output "after-end";
+       native_mcp_call_completed; mcp "after-end";
+       item_completed; turn_completed]
+      (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture"
+        ~on_event:(F.on_event fixture) ~on_native_tool_progress:on_progress
+        ~on_native_tool_completion:(F.on_completion fixture) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ ->
+            (* Runtime callbacks isolate observer failures; do not let a failed
+               mid-turn assertion be mistaken for a passing provider fixture. *)
+            List.iter raise (List.rev !callback_failures);
+            check int "active native progress reaches the pane during the turn" 1 !snapshots;
+            F.check_progress fixture ~running:false ~expected_text:"MASC_SUBSCRIPTION_OK"
+              ~expected:["native-command-1",Some 9,None; "native-mcp-1",None,Some safe_message];
+            let observed = F.events fixture |> List.filter_map (function
+              | Keeper_chat_events.Native_tool_progress (tool, progress) -> Some (tool.tool_call_id, progress)
+              | _ -> None) in
+            check int "empty, unbound, wrong kind, and late events never attach" 5 (List.length observed);
+            let journal = F.events fixture |> List.map Keeper_chat_event_log.keeper_chat_event_to_json
+              |> fun events -> Yojson.Safe.to_string (`List events) in
+            check bool "no secret crosses the journal boundary" false
+              (Astring.String.is_infix ~affix:secret journal);
+            check bool "command output content is not stored as speech or progress text" false
+              (Astring.String.is_infix ~affix:"가" journal)))
+;;
+
+let test_native_progress_rejects_wrong_turn_and_malformed_message () =
+  List.iter (fun (thread_id,turn_id,payload) ->
+    let progress = codex_progress_frame ~thread_id ~turn_id
+      ~method_:"item/mcpToolCall/progress" ~item_id:(Some "native-mcp-1") ~field:"message" payload in
+    with_fixture [init_result;account_chatgpt;thread_result;turn_result;
+      native_mcp_call_started;progress;native_mcp_call_completed;item_completed;turn_completed]
+      (fun path -> match run_fixture path with
+       | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "foreign or malformed MCP progress was accepted"))
+    ["other-thread","turn-1",`String "message";
+     "thread-1","other-turn",`String "message";
+     "thread-1","turn-1",`Int 3]
 ;;
 
 let test_codex_reasoning_rejects_wrong_turn () =
@@ -7418,6 +7510,8 @@ let () =
     [ ( "reasoning", [test_case "Keeper retains reasoning before native tools and answer" `Quick
             test_keeper_preserves_codex_reasoning_and_tool_order
         ; test_case "native completion through adapter, journal, SSE and TUI" `Quick test_native_completion_reaches_tui
+        ; test_case "native progress through provider, adapter and TUI" `Quick test_native_progress_reaches_tui
+        ; test_case "native progress validates active turn and payload" `Quick test_native_progress_rejects_wrong_turn_and_malformed_message
         ; test_case "reasoning belongs to the active turn" `Quick test_codex_reasoning_rejects_wrong_turn] )
     ; ( "RPC capacity", [test_case "blank completion closes identity across four messages" `Quick
             test_blank_completion_closes_identity_across_four_messages

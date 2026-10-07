@@ -82,7 +82,7 @@ claim to reconstruct missing scope provenance in those older journals.
 
 | Runtime | Turn and text events | Thinking | Tools and progress |
 | --- | --- | --- | --- |
-| Codex app-server | `Turn_started` becomes `MessageStart`; agent-message deltas and completed-item suffixes become `TextDelta`; terminal completion becomes `MessageDelta` and `MessageStop`. Item IDs separate messages within a turn. | `item/reasoning/summaryTextDelta` and `item/reasoning/textDelta` become `ThinkingDelta`. The item ID and summary/content index identify each part; completed reasoning contributes only missing suffixes. | Dynamic tools carry call IDs and argument snapshots. Native `item/started` and `item/completed` produce observed start/end with identity and name. Known completed-item status and nullable command exit code remain native metadata. Command/file output deltas and MCP progress messages are not projected as chat progress. |
+| Codex app-server | `Turn_started` becomes `MessageStart`; agent-message deltas and completed-item suffixes become `TextDelta`; terminal completion becomes `MessageDelta` and `MessageStop`. Item IDs separate messages within a turn. | `item/reasoning/summaryTextDelta` and `item/reasoning/textDelta` become `ThinkingDelta`. The item ID and summary/content index identify each part; completed reasoning contributes only missing suffixes. | Dynamic tools carry call IDs and argument snapshots. Native `item/started` and `item/completed` produce observed start/end with identity and name. Known completed-item status and nullable command exit code remain native metadata. Command output deltas carry byte observations; MCP progress carries a redacted message, attached only to its active native item. File-change output notifications are outside this contract. |
 | Claude Code | Partial SDK text and complete assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | Partial `thinking_delta` and complete thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end with the tool result’s optional `is_error` flag. `tool_progress` keeps transport activity alive but is not projected as chat progress. |
 | Antigravity | Init opens the normalized turn; step text and terminal response reconciliation provide text; result closes the turn. Step index identifies the source. | No typed thinking event exists in this adapter. `Internal` is not established as a reasoning payload. Thinking support is unverified. | MCP callbacks provide dynamic-tool events; tool steps provide native observed start/end using conversation ID and step index. `Done` reports native completion; `Step_error` reports a native error. Neither is a MASC execution receipt. |
 | GLM Coding | The configured `openai-compatible-http` route uses AGENT_CORE SSE parsing with message start/stop, text deltas, and indexed blocks. | Provider reasoning fields accepted by the configured streaming dialect produce `ThinkingDelta` or `ReasoningDetailsDelta`. Absence of a provider reasoning payload produces no invented thinking. | Indexed tool calls carry their IDs, names, and argument deltas. MASC execution receipts determine tool execution results. Official-client native-tool notifications do not apply to this HTTP route. |
@@ -129,8 +129,8 @@ through the Keeper bridge, server SSE projection and journal replay in
 `test_tui_keeper_chat_transcript.ml`, and hidden/folded/full reasoning rendering in
 `test_tui_chat_response_origins.ml`.
 
-Provider-internal subturns are not fabricated as completed Keeper turns. Native
-progress payloads and Antigravity reasoning remain separate missing capabilities. Provider omissions and opaque signatures cannot be
+Provider-internal subturns are not fabricated as completed Keeper turns. Claude and
+Antigravity native progress and Antigravity reasoning remain separate capabilities. Provider omissions and opaque signatures cannot be
 recovered by a renderer.
 
 Keeper operation events and autonomous journal notifications carry a typed runtime
@@ -217,3 +217,63 @@ can remain in progress, including pending tool work or final-response persistenc
 A new provider response, retry, or continuation establishes its own activity.
 Empty text/thinking chunks do not resume activity. Provider stop does not erase
 speech, settle tool receipts, or complete the Keeper turn.
+
+## Codex native progress
+
+The Codex 0.160.1 app-server contract carries exact thread, turn and item identity
+in [CommandExecutionOutputDeltaNotification](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/typescript/v2/CommandExecutionOutputDeltaNotification.ts)
+and [McpToolCallProgressNotification](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/typescript/v2/McpToolCallProgressNotification.ts).
+The runtime retains the active item's typed kind from start to completion,
+independently of idle-window tracking, which can clear while background tools
+continue. Command deltas attach only to a command item; MCP messages attach only
+to an MCP item. Missing/blank item identity, unstarted items, wrong item kinds and
+completed items cannot create a new row or update another one. Thread/turn identity
+and payload type are validated before projection.
+
+Nonempty command deltas become `Output_observed {byte_count}`. This is the UTF-8
+byte length of the decoded delta, not a token count, total process output size,
+execution receipt or success. Whitespace counts; an empty delta has no output
+bytes and emits no output observation. The delta body is then discarded. Equal
+successive deltas are separate observations and both count. An MCP message becomes
+`Message_reported {message}` after whole-value secret redaction at the bridge.
+Messages are full observations, not concatenated fragments: every message remains
+in the journal and the current tool row shows the latest one.
+
+Adapters look up the exact existing native index without allocating a start.
+The direct producer captures its current scope and enqueues the typed observation
+on the same worker FIFO as ordinary content and native completion. The autonomous
+producer applies it under the existing stream mutex. Both flush preceding held
+text first. The bridge accepts only a currently active native occurrence with the
+same scope/index/call ID; ended, stopped, cancelled, superseded and MASC-owned
+occurrences cannot be changed by progress. Repeated journal sequences deduplicate
+in the log, while distinct progress sequences remain distinct observations.
+
+`KEEPER_NATIVE_TOOL_PROGRESS` and the journal `native_tool_progress` event carry
+the same strict progress object. Unknown variants, duplicate keys, incompatible
+variant fields and invalid byte counts are unreadable data. The TUI retains the
+last journal/SSE observation timestamp (with receipt-time fallback for unstamped
+local deltas) and elapsed time from the tool's observed start to that update. This
+is observation timing, not provider-reported execution duration. Compact Tools rows
+say `output arriving` while active and `output observed` after the step ends, with
+the last update's elapsed time; byte counts belong to Full/Results detail. MCP
+messages use terminal-safe display. Progress updates do not touch authored speech,
+Thinking/Streaming phase, native completion, or MASC execution identity/outcome.
+
+The actual Codex protocol fixture in `test_runtime_codex_app_server.ml` passes
+command/MCP notifications through the runtime receiver and Keeper adapter into
+`native_tool_outcome_fixture`, which runs the production bridge, journal codec,
+server SSE encoder, live decoder, replay log and Tools projection. It includes
+repeated UTF-8 deltas, whitespace/empty chunks, interleaved assistant text, absent
+and wrong item IDs/kinds, late events and redacted/control-bearing MCP messages.
+`test_tui_native_tool_progress.ml` covers duplicate replay sequence, exact scope and
+ID reuse, cancelled/stopped occurrences, strict nested payloads, stable model phase,
+and the actual autonomous callbacks and on-disk journal. The direct serving worker
+FIFO is source-inspected; the shared helper does not execute that HTTP worker and
+is not evidence of a complete direct-route run. No local build or tests were run.
+
+This unit does not retain raw command output, expose native result bodies, infer
+progress percentages, or introduce provider subagent relationships. The installed
+version's [FileChangeOutputDeltaNotification](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/typescript/v2/FileChangeOutputDeltaNotification.ts)
+contract says the server no longer emits that notification, so it is not promoted
+to a progress source. Claude parent/child progress and Antigravity progress need
+separate source contracts. GLM HTTP execution tools and their receipts are unchanged.

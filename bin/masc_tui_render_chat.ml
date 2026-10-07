@@ -1318,8 +1318,10 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
               (match activity.outcome with
                | Keeper_chat_transcript.Native_ended ->
                    Some (Keeper_chat_transcript.native_completion_summary
-                     (Option.value activity.native_completion ~default:Runtime_native_tools.end_observed))
-               | Keeper_chat_transcript.Native_running -> None
+                     (Option.value activity.native_completion ~default:Runtime_native_tools.end_observed)
+                     ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail)
+                         (Keeper_chat_transcript.native_progress_details activity))
+               | Keeper_chat_transcript.Native_running -> Keeper_chat_transcript.native_progress_details activity
                | Keeper_chat_transcript.Started
                | Keeper_chat_transcript.Awaiting_result -> None
                | Keeper_chat_transcript.Returned

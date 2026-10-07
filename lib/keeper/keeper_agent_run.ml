@@ -1975,6 +1975,12 @@ let run_turn
                                      ~messages:provider_content
                                  | Some (Error _) | None ->
                                    Keeper_projection_change.Request_not_digested))
+                      ?on_native_tool_progress:
+                        (Option.map
+                           (fun observe ~block_index ~tool_call_id progress ->
+                              observe (Keeper_hooks_agent_core.Native_tool_progress
+                                {block_index; tool_call_id; progress}))
+                           on_tool_stream_observation)
                       ?on_native_tool_completion:
                         (Option.map
                            (fun observe ~block_index ~tool_call_id completion ->

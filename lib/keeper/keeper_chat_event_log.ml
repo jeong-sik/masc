@@ -258,6 +258,12 @@ let keeper_chat_event_to_json event =
       ([ "occurrence", occurrence_to_json tool.occurrence ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
        @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
+  | Native_tool_progress (tool, progress) ->
+    type_tag "native_tool_progress"
+      ([ "occurrence", occurrence_to_json tool.occurrence;
+         "progress", Runtime_native_tools.progress_to_json progress ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
   | Native_tool_end (tool, completion) ->
     type_tag "native_tool_end"
       ([ "occurrence", occurrence_to_json tool.occurrence;
@@ -471,7 +477,7 @@ let keeper_chat_event_of_json json =
            { occurrence
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            })
-    | ("native_tool_start" | "native_tool_end") as tag ->
+    | ("native_tool_start" | "native_tool_end" | "native_tool_progress") as tag ->
       let* occurrence = occurrence_of_json (json |> member "occurrence") in
       let tool =
         { occurrence
@@ -480,6 +486,9 @@ let keeper_chat_event_of_json json =
         }
       in
       if String.equal tag "native_tool_start" then Ok (Native_tool_start tool)
+      else if String.equal tag "native_tool_progress" then
+        let* progress = Runtime_native_tools.progress_of_json (json |> member "progress") in
+        Ok (Native_tool_progress (tool, progress))
       else
         let* completion =
           match json with

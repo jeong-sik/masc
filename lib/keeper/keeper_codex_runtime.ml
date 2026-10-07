@@ -305,7 +305,7 @@ let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
 (* Always installed so usage-window reports and the thread's usage counts are
    recorded. A turn nobody streams, traces or observes gets only those; its
    other events are ignored as before. *)
-let codex_stream_callback ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
+let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report ~position on_event =
   (* The thread's running count, reported under the app-server turn id (the
      identity the completion hook also writes for a Codex turn) and the
@@ -334,8 +334,8 @@ let codex_stream_callback ?on_native_tool_completion ?receipts ~keeper_name ~quo
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion with
-  | None, None, None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress with
+  | None, None, None, None, None, None ->
     Some
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
@@ -343,7 +343,7 @@ let codex_stream_callback ?on_native_tool_completion ?receipts ~keeper_name ~quo
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
         | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-        | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
+        | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
         | Compaction_observed | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
@@ -434,6 +434,11 @@ let codex_stream_callback ?on_native_tool_completion ?receipts ~keeper_name ~quo
                ; tool_id = Runtime_native_tools.call_id observation
                ; tool_name = observation.tool_name
                })
+        | Runtime_codex_app_server.Native_tool_progress {item_id; progress} ->
+          Option.iter (fun index ->
+            Option.iter (fun observe -> observe ~block_index:index ~tool_call_id:(Some item_id) progress)
+              on_native_tool_progress)
+            (Hashtbl.find_opt native_tool_indexes (Runtime_native_tools.Call_id item_id))
         | Runtime_codex_app_server.Native_tool_finished {observation; completion} ->
           Host.record_raw_native_tool
             ~keeper_name
@@ -767,7 +772,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
-    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
+    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
     ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -1312,7 +1317,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let turn_result =
       try
         let observe_stream =
-          codex_stream_callback ?receipts ?on_native_tool_completion
+          codex_stream_callback ?receipts ?on_native_tool_completion ?on_native_tool_progress
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1336,7 +1341,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               | Runtime_codex_app_server.Counted { last = Context_estimate _; _ }
               | Context_window_filled _ -> settled_held_context := []
               | Counted { last = Request_usage _; _ } -> ())
-           | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _
+           | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _
            | Dynamic_tool_finished _ | Elicitation_cancelled _
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
@@ -1657,6 +1662,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ?on_official_client_tool_boundary
     ?on_tool_execution
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_tool_progress
     ?on_native_tool_completion
     ?on_native_action
     ?on_usage_report
@@ -1772,7 +1778,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
           ~context_injector
           ~context
           ~terminal_effect_state
-        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
+        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
           ~on_usage_report
           ~event_bus
           ~raw_trace

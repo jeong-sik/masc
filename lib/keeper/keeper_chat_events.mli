@@ -167,6 +167,7 @@ type keeper_chat_event =
       (** Provider argument streaming ended. This is not execution completion. *)
   | Native_tool_start of native_tool
   | Native_tool_end of native_tool * Runtime_native_tools.completion
+  | Native_tool_progress of native_tool * Runtime_native_tools.progress
       (** The provider reported the native step's end and its available outcome
           metadata. This observation does not establish a MASC execution result. *)
   | Tool_approval_requested of

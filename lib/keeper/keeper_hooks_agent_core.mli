@@ -197,6 +197,8 @@ type tool_stream_observation =
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
       (** Agent Core retained the exact pre-admission mapping before tools run. *)
+  | Native_tool_progress of
+      { block_index : int; tool_call_id : string option; progress : Runtime_native_tools.progress }
   | Native_tool_completion of
       { block_index : int
       ; tool_call_id : string option

@@ -68,11 +68,15 @@ DOS directly, including an empty machine's status. `Esc` returns to Collab.
 Observation reads the shared screen without advancing the machine or sending
 keys. MSX's `F5` explicitly switches between observation and control; only
 control sends game keys, advances frames, or offers checkpoint/disk actions.
+Reopening the MSX view starts its own read even if a previous view is still
+waiting for a response.
 
 `g` in Collab (also `:` then `go MSX`) takes the terminal over with the workspace MSX
 machine (RFC-0439): a load menu first, listing the cartridge images in
 `<base-path>/.masc/msx/carts/`, then the screen of the game a Keeper or you
-loaded. `Esc` returns. The directory starts empty;
+loaded. Entering this picker resets to observation, so `Esc` back to a loaded
+screen does not resume earlier control. The `F8` disk picker keeps the current
+control mode. The directory starts empty;
 `scripts/msx-fetch-homebrew-carts.sh` fills it with open-source games, and
 the [MSX cartridges runbook](operations/msx-carts-runbook.md) says what the
 machine accepts and where the images come from.

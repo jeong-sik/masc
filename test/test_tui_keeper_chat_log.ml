@@ -803,6 +803,7 @@ let test_a_blank_reason_is_not_a_reason () =
 
 let test_response_boundaries_and_usage_survive_wire_and_replay () =
   let module T = Masc_tui_keeper_chat_transcript in
+  let progress_text ~now t = List.assoc T.Progress (T.status_rows ~now t) in
   let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
   let module Accum = Masc.Keeper_stream_tool_accum in
   List.iter (fun provider_id ->
@@ -851,10 +852,10 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       let t = T.of_log ~now:2000. log in
       check bool "response stop does not finish the Keeper turn" true (T.phase t = T.Working);
       check bool "provider stop reaches the progress row" true
-        (String_util.contains_substring (T.progress_text ~now:2000. t) "model response ended");
+        (String_util.contains_substring (progress_text ~now:2000. t) "model response ended");
       check bool "stopped provider is not still streaming or thinking" false
-        (String_util.contains_substring (T.progress_text ~now:2000. t) "STREAMING"
-         || String_util.contains_substring (T.progress_text ~now:2000. t) "THINKING");
+        (String_util.contains_substring (progress_text ~now:2000. t) "STREAMING"
+         || String_util.contains_substring (progress_text ~now:2000. t) "THINKING");
       check string "the completed response text stays authored text" "EARLIER_RESPONSE" (T.text t))
       [wire; replay];
     let revision = Log.revision replay in
@@ -865,7 +866,7 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
     send (start next_initial);
     let wire,replay,_ = snapshots () in
     List.iter (fun log ->
-      let text = T.progress_text ~now:2000. (T.of_log ~now:2000. log) in
+      let text = progress_text ~now:2000. (T.of_log ~now:2000. log) in
       check bool "the next response clears its predecessor's stop" false
         (String_util.contains_substring text "model response ended");
       check bool "a response start does not invent reasoning or text" false

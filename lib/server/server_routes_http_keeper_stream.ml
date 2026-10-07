@@ -2774,9 +2774,10 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
     | `Worker_event (Stream_native_tool_progress (stream_scope, block_index, tool_call_id, progress)) ->
+        (* Native side observations are not model-content boundaries. Publishing
+           one must not finalize a possibly incomplete secret held by [stream_text]. *)
         let translated = Keeper_chat_agent_core_stream_bridge.progress_native_tool
-          ~redact_text ~stream_scope ~block_index ~tool_call_id progress
-          (publish_held_stream_text bridge_state) in
+          ~redact_text ~stream_scope ~block_index ~tool_call_id progress bridge_state in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
     | `Worker_event (Stream_native_tool_completion (stream_scope, block_index, tool_call_id, completion)) ->

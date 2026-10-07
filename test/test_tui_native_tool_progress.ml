@@ -19,10 +19,10 @@ let test_replayed_sequence_and_model_signal () =
   let f = F.create () in
   F.on_event f (start_message "response");
   F.on_event f (tool_start ~native:true 1 "native");
-  F.on_event f (text "Authored text");
+  F.on_event f (text "Authored text\n");
   F.on_progress f ~block_index:1 ~tool_call_id:(Some "native") (output 3);
   F.on_progress f ~block_index:1 ~tool_call_id:(Some "native") (output 3);
-  F.check_progress f ~running:true ~expected_text:"Authored text"
+  F.check_progress f ~running:true ~expected_text:"Authored text\n"
     ~expected:["native",Some 6,None];
   let live,replay = F.snapshots f in
   List.iter (fun log ->
@@ -157,8 +157,77 @@ let test_autonomous_progress_journal_matches_direct_projection () =
           (Option.bind call.native_progress (fun value -> value.output_bytes))
       | _ -> fail "native autonomous row lost"))
 
+let test_split_secret_held_across_native_progress () =
+  let module Stream = Masc.Keeper_autonomous_stream in
+  let module Secret = Masc.Keeper_secret_redaction in
+  List.iter (fun thinking ->
+    List.iter (fun progress ->
+      let base_path = Filename.temp_dir "masc-progress-redaction-" "" in
+      Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+        Eio_main.run (fun _ ->
+          let keeper_name = "fixture" in
+          let secret = "forest-cobalt-window-private-value" in
+          let prefix = "forest-cobalt-" in
+          let suffix = String.sub secret (String.length prefix) (String.length secret - String.length prefix) in
+          let secret_file = Secret.ssh_remote_token_file ~base_path ~keeper_name in
+          Fs_compat.mkdir_p (Filename.dirname secret_file);
+          Out_channel.with_open_bin secret_file (fun channel -> output_string channel secret);
+          let redaction = Secret.snapshot ~base_path ~keeper_name in
+          let expected_text = Secret.redact_text redaction (secret ^ "\n") in
+          check bool "fixture has a configured exact secret" false (expected_text=secret ^ "\n");
+          let direct = F.create ~redaction () in
+          let turn_ref = Ids.Turn_ref.make ~trace_id:"split-secret-progress" ~absolute_turn:1 in
+          let stream = Stream.create ~base_path ~keeper_name ~turn_ref in
+          let journal_path = Journal.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
+          let read () = match Journal.read_journal_path_result journal_path with
+            | Ok lines -> List.map (fun (line:Journal.journaled_event) -> line.event) lines
+            | Error _ -> fail "autonomous journal not readable" in
+          let send event = F.on_event direct event; Stream.on_event stream event in
+          let delta value = Agent_core.Types.ContentBlockDelta {index=0;
+            delta=(if thinking then ThinkingDelta value else TextDelta value)} in
+          let fragments events = List.filter_map (function
+            | E.Text_delta value | E.Agent_core_thinking_delta value -> Some value
+            | _ -> None) events in
+          let check_held events =
+            check (list string) "native progress cannot release a secret prefix" [] (fragments events);
+            check bool "side observation remains visible while text is withheld" true
+              (List.exists (function E.Native_tool_progress _ -> true | _ -> false) events) in
+          send (start_message "response");
+          send (tool_start ~native:true 1 "native");
+          send (delta prefix);
+          F.on_progress direct ~block_index:1 ~tool_call_id:(Some "native") progress;
+          Stream.on_tool_stream_observation stream (Masc.Keeper_hooks_agent_core.Native_tool_progress
+            {block_index=1;tool_call_id=Some "native";progress});
+          check_held (F.events direct); check_held (read ());
+          send (delta (suffix ^ "\n"));
+          List.iter (fun events ->
+            check string "same content channel redacts across side progress" expected_text
+              (String.concat "" (fragments events));
+            check bool "concatenated released content cannot reconstruct the secret" false
+              (Astring.String.is_infix ~affix:secret (String.concat "" (fragments events)));
+            let serialized = `List (List.map Journal.keeper_chat_event_to_json events) |> Yojson.Safe.to_string in
+            check bool "secret is absent from persisted event payloads" false
+              (Astring.String.is_infix ~affix:secret serialized);
+            let order = List.filter_map (function
+              | E.Native_tool_progress _ -> Some "progress"
+              | E.Text_delta _ | E.Agent_core_thinking_delta _ -> Some "safe-content"
+              | _ -> None) events in
+            check (list string) "publication order records safe disclosure, not held raw chunks"
+              ["progress";"safe-content"] order) [F.events direct;read ()];
+          let live,replay = F.snapshots direct in
+          List.iter (fun log ->
+            let transcript = T.of_log ~now:2000. log in
+            let visible = if thinking then String.concat "\n" (T.thinking_lines transcript)
+              else T.text transcript in
+            check bool "neither live nor replay reconstructs the secret" false
+              (Astring.String.is_infix ~affix:secret visible)) [live;replay];
+          Stream.finish stream (Stream.Completed
+            {reply="Safe final response";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply}))))
+      [output 3; Native.Message_reported {message="still working"}]) [false;true]
+
 let () = run "native tool progress" ["contract",[
   test_case "same deltas count twice, same journal seq once" `Quick test_replayed_sequence_and_model_signal;
   test_case "exact current active native scope" `Quick test_exact_active_scope_only;
+  test_case "split secrets stay held across native side observations" `Quick test_split_secret_held_across_native_progress;
   test_case "strict nested progress payload" `Quick test_strict_nested_wire_and_journal;
   test_case "autonomous actual journal matches direct projection" `Quick test_autonomous_progress_journal_matches_direct_projection]]

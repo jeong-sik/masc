@@ -27,7 +27,7 @@ turn source counterexamples into reproduced production incidents. Updated on
 
 These scopes and SHAs are distinct. No full RC, provider session, deployment,
 GitHub approval or merge is established by these checks. External coding agents
-did not run local Dune builds or wait for CI.
+did not run local Dune builds.
 
 Additional server execution: [run 37616731656](https://github.com/jeong-sik/masc/actions/runs/37616731656)
 passed replay/handoff 17/17 at `b4822afb3f11d028ac1a9fbbcf521e5bcd932611`.
@@ -136,12 +136,52 @@ or installed binary change is established.
 
 [#41704](https://github.com/jeong-sik/masc/pull/41704) separately retains provider
 response-stop events so a still-running Keeper turn no longer shows stale
-STREAMING/THINKING. Independent source review passed `b24147089d3fbed65b050307c50351d106019841`
-against #41702 after correcting a missing-value decode P2. Its focused CI
-[37631318907](https://github.com/jeong-sik/masc/actions/runs/37631318907), including
-an actual TUI scenario, is still pending verification. Codex native
-progress is another bounded implementation in progress. Claude child identity
-and progress, and viewport source-position preservation under reflow, remain.
+STREAMING/THINKING. Independent source review passed
+`f31bb3c28783ff4e7abea78fd1b956a1bd187afc` against #41702 after correcting a
+missing-value decode P2; complete diff SHA256
+`60596e99ece45b36b2256e149bd910d1ad744aca832fe148e245a3b8e7b5a924`.
+The first focused run [37631318907](https://github.com/jeong-sik/masc/actions/runs/37631318907)
+reached all four TUI activity states but failed during fixture exit and on a
+missing test dependency. The repaired scenario passed in
+[37633584018](https://github.com/jeong-sik/masc/actions/runs/37633584018) at
+`13eeb43f91fe4a05eef311714ffdb82db9941de8`; its four actual terminal frames are
+in [model-phase-pty-frames.json](model-phase-pty-frames.json). That run still
+failed overall because an OCaml fixture referenced private `T.progress_text`.
+`f31bb3c287` reads the public `status_rows` projection instead. No complete
+phase-suite PASS is inferred from the PTY result.
+
+## Progress and child metadata repair boundaries
+
+[#41716](https://github.com/jeong-sik/masc/pull/41716) preserves Codex command
+output activity and redacted MCP progress with exact active tool authority.
+[37633910236](https://github.com/jeong-sik/masc/actions/runs/37633910236) passed
+at initial head `94176ce6f70f672c9ef4b4bc6b88b8ecc3cec738`: Codex 152,
+native progress 4, native boundary 6 and journal codec 26. Independent review
+nevertheless found a P1: a side progress observation finalized text redaction,
+allowing pieces of a split secret to be reassembled from published fragments.
+The original fixture bypassed the actual Scoped redactor, so those passing
+tests did not exercise that boundary.
+
+`1c0c6c6e83f609e26a7e5ad27942e7afe406c42a` removes progress-only finalization
+and makes the shared fixture use the actual Scoped redactor. Text and Thinking
+cases now span progress between a configured secret's prefix and suffix through
+the direct Scoped projection and an actual autonomous on-disk journal. Independent
+source review PASS against `08cc89a954f266b0ff1807fe3d26614c0a431768`, full diff
+SHA256 `ed1e9bafd6fc2455f2d46b09c63a8bab640fe0d0ff66750f889517e89fd7ce2e`.
+Execution of this P1 repair remains unverified here. Existing native completion
+and unrelated block events still finalize held content; that separate defect
+requires content ownership and real provider content-end evidence.
+
+[#41719](https://github.com/jeong-sik/masc/pull/41719) prevents Claude child
+tool envelopes from overwriting root model and latest-input usage. Installed
+Claude 2.1.292 schema and serializers confirm the required parent field and
+preserved child metadata. Source review PASS for its own delta at
+`98e4c725165a34c8a6d08f1a8fc8403d0d475426` against `94176ce6f70f672c9ef4b4bc6b88b8ecc3cec738`,
+full diff SHA256 `aef9c99209b0b55d7c40fa988b6606f453bcc407de046ad539e55952a8ada63a`.
+Its focused run [37634890474](https://github.com/jeong-sik/masc/actions/runs/37634890474)
+was pending at this evidence boundary. This does not qualify child tool identity
+or progress, and does not enable child text forwarding. The source verdict
+does not clear the independently found ancestor progress defect.
 
 ## Challenged leads
 

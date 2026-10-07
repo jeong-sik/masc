@@ -120,8 +120,9 @@ let on_tool_stream_observation t observation = with_stream t (fun () -> match ob
       (match Accum.close_turn_without_sources t.accum ~turn with
        | Ok () -> () | Error detail -> mapping_failed t detail)
   | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
+      (* This observation updates an existing native row. It is not a model
+         content boundary: keep any partial secret held across later deltas. *)
       if not t.closed then begin
-        flush t;
         apply t (Bridge.progress_native_tool ~redact_text:t.redact_text
           ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id progress t.bridge)
       end

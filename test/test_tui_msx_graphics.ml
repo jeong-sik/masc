@@ -325,7 +325,15 @@ let test_surface_lifecycle () =
     Buffer.clear buf;
     ignore (Msx.consume ~write:(Buffer.add_string buf) state "esc");
     check bool "exit removes image" true (mentions ~needle:"d=I,i=32" (Buffer.contents buf));
-    check bool "reopen sends pixels" true (mentions ~needle:"f=24" (drawn ())))
+    check bool "reopen sends pixels" true (mentions ~needle:"f=24" (drawn ()));
+    state.msx_open <- true;
+    Buffer.clear buf;
+    Msx.close ~write:(Buffer.add_string buf) state;
+    Types.withdraw_machine_control state;
+    check bool "workspace withdrawal deletes the image" true
+      (mentions ~needle:"d=I,i=32" (Buffer.contents buf));
+    check bool "workspace withdrawal releases screen ownership" false state.msx_open;
+    check bool "new workspace sends its pixels" true (mentions ~needle:"f=24" (drawn ())))
 
 let test_synchronized_batch () =
   with_protocol Graphics.Kitty_protocol (fun () ->

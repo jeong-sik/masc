@@ -10667,7 +10667,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      are independently rejected by Workspace_scoped. *)
   state.collab <- None;
   invalidate_msx_poll ();
-  Masc_tui_msx.invalidate ();
+  Masc_tui_msx.close ~write:write_to_terminal state;
   msx_surface_frame := None;
   Masc_tui_types.withdraw_machine_control state;
   Masc_tui_types.withdraw_play_invite_workspace state ~previous
@@ -17383,12 +17383,14 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
             "async result waited %.0f ms in the mailbox before the loop applied it"
             (Masc_tui_http.ms_of_ns waited_ns);
         let image_was_open = state.image_open in
+        let machine_was_open = state.msx_open in
         apply_async_message state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
         (* The image renderer cleared the text screen outside the presenter.
            If an async failure dismisses it, cached unchanged rows must also
            be restored, just as they are after a keyboard dismissal. *)
-        if image_was_open && not state.image_open then (
+        if (image_was_open && not state.image_open)
+           || (machine_was_open && not state.msx_open) then (
           Frame_presenter.invalidate frame_presenter;
           Render_schedule.request render_schedule Render_schedule.Force);
         loop true

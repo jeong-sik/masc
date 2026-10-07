@@ -25,18 +25,6 @@ let account_json (account : Candle_shop.account) =
     ]
 ;;
 
-let entry_json (entry : Candle_shop.catalog_entry) =
-  `Assoc
-    ([ "id", `String (Item.id entry.item)
-     ; "slot", `String (Item.slot_id (Item.slot entry.item))
-     ]
-     @
-     match entry.price with
-     | Candle_config.Unpriced -> [ "price_status", `String "unpriced" ]
-     | Candle_config.Priced amount ->
-       [ "price_status", `String "priced"; "price_milli", `String (string_of_int amount) ])
-;;
-
 let shop result = Result.map_error (fun error -> Shop_failed error) result
 let input result = Result.map_error (fun error -> Bad_arguments error) result
 
@@ -81,7 +69,7 @@ let run ~operation ~base_path ~keeper_name ~args =
   | Catalog ->
     let* () = input (Candle_json.finish ~context fields) in
     let* catalog = shop (Candle_shop.catalog ~base_path) in
-    Ok (`Assoc [ "items", `List (List.map entry_json catalog) ])
+    Ok (`Assoc [ "items", `List (List.map Candle_shop.catalog_entry_to_yojson catalog) ])
   | Equip ->
     let* slot_id, fields = input (Candle_json.field ~context "slot" Candle_json.as_string fields) in
     let* id, fields = input (Candle_json.field ~context "item" Candle_json.as_string fields) in

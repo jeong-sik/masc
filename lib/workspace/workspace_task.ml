@@ -186,7 +186,6 @@ let project_task_release_to_todo
       log_event
         config
         (transition_log_event
-           ~event_type:Task_transition
            ~actor_kind
            ~agent_name:actor
            ~task_id

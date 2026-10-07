@@ -142,10 +142,14 @@ let test_stream_watermark_across_secret_chunks () =
     check int "finish after a complete record retains watermark" next.consumed finished.consumed;
     check int "no record is emitted twice" 0 (List.length finished.pieces);
     let plain = R.create_stream_state redaction in
+    (* Stateful input arrives in source order, before the stream is finished. *)
+    let plain_first = R.redact_stream_chunk plain first in
+    let plain_second = R.redact_stream_chunk plain second in
+    let plain_next = R.redact_stream_chunk plain "next\r" in
+    let plain_finished = R.redact_stream_finish plain in
     check string "plain streaming is the same release projection"
       (S.render_pieces (released.pieces @ next.pieces))
-      (R.redact_stream_chunk plain first ^ R.redact_stream_chunk plain second
-       ^ R.redact_stream_chunk plain "next\r" ^ R.redact_stream_finish plain))
+      (plain_first ^ plain_second ^ plain_next ^ plain_finished))
 
 let test_bounded_release_consumes_the_entire_crossing_secret () =
   List.iter (fun secret -> with_secrets [secret] (fun redaction ->

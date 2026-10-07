@@ -40,17 +40,6 @@ let run_with ~execute ~base_path ~keeper_name =
         | Error detail | Ok (_, Keeper_meta_store.Meta_not_current detail) -> Unavailable detail
         | Ok (_, Keeper_meta_store.Meta_absent) -> Unavailable "Keeper metadata is absent"
         | Ok (keeper_id, Keeper_meta_store.Meta_present meta) ->
-          let signature = Digestif.SHA256.(to_hex (digest_string
-            (Yojson.Safe.to_string
-               (`Assoc
-                 [ "limits", Limits.to_json limits
-                 ; "instructions", `String meta.instructions
-                 ; "facts", `List (List.map Keeper_memory_os_types.fact_to_json snapshot.facts)
-                 ])))) in
-          let seen = Stdlib.Mutex.protect mutex (fun () ->
-            Hashtbl.find_opt reviewed key = Some signature) in
-          if seen then Already_reviewed
-          else
             let input : Keeper_librarian.input =
               { keeper_id
               ; turn_ref = Ids.Turn_ref.make
@@ -59,12 +48,27 @@ let run_with ~execute ~base_path ~keeper_name =
               ; keeper_instructions = meta.instructions
               ; current = Some { facts = snapshot.facts }
               ; historical_task_contexts = []
-              ; goal_context = Keeper_librarian.No_task
+              ; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+                  Keeper_librarian_input_sources.goal_context_for_task
+                    ~config meta.current_task_id)
               ; working_context = Keeper_librarian_context.empty
               ; messages = []
               ; tool_observations = []
               ; counterpart_observations = []
               } in
+            let signature = Digestif.SHA256.(to_hex (digest_string
+              (Yojson.Safe.to_string
+                (`Assoc
+                  [ "variables", `Assoc (List.map (fun (name, value) -> name, `String value)
+                      (Keeper_librarian.prompt_variables input))
+                  ; "template", `String (Prompt_registry.get_prompt Prompt_names.librarian)
+                  ; "context_rule", `String
+                      (Prompt_registry.get_prompt Prompt_names.librarian_working_contexts_rule)
+                  ])))) in
+            let seen = Stdlib.Mutex.protect mutex (fun () ->
+              Hashtbl.find_opt reviewed key = Some signature) in
+            if seen then Already_reviewed
+            else
             if not (execute ~keepers_dir ~keeper_name ~expected_revision:snapshot.revision input)
             then Unavailable "Librarian memory cleanup did not commit"
             else (

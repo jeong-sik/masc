@@ -28,8 +28,9 @@ boundary is separate. There is no new token injection budget.
 
 The existing Librarian lane checks for count overflow after boot catch-up,
 post-turn and intake wakes. It can review current memory even with no unread
-conversation. A successful decision on the same facts, Keeper instructions and
-limits is not repeated on every wake; failures remain retryable on the next wake.
+conversation. A successful decision on the same facts, current Goal context,
+Keeper instructions, limits and prompt is not repeated on every wake; failures
+remain retryable on the next wake.
 Restart clears that observation and rechecks persisted Keepers, including ones
 that did not launch. A partial consolidation is eligible again on a later wake.
 The cleanup uses the regular disposition and absorption checks; it leaves

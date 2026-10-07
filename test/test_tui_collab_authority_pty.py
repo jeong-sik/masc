@@ -157,6 +157,8 @@ def run_control_boundary(executable):
         current['phase'] = 'b'
         assert h.wait_for_fixture_event(process, master, output, observed['b'], timeout=8)
         h.wait_for_output(process, master, output, b'MASC Dashboard', start=start, timeout=8)
+        screen = h.screen_text(bytes(output))
+        assert 'MASC Dashboard' in screen and 'Controlling' not in screen, screen
         boundary = len(requests)
         key(b':go Collab\r', '› guest'.encode())
         key(b'n', b'matching this TUI\'s local workspace')

@@ -27,6 +27,7 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
   ; timestamp
   ; timeline_bucket
   ; span_clock = None
+  ; diagnostics = []
   ; speaker = Option.value speaker ~default:role
   ; role_label = role
   ; role_label_mark_cells =
@@ -911,6 +912,7 @@ let transcript count =
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
         timeline_bucket = None;
         span_clock = None;
+        diagnostics = [];
         speaker = "code-reviewer";
         role_label = "code-reviewer";
         request_label = Printf.sprintf "turn-%d" index;
@@ -1240,7 +1242,7 @@ let without_hour_rail rows =
     (fun (row : Layout.row) ->
       match row.kind with
       | Layout.Metadata (Layout.Timeline_break _) -> false
-      | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+      | Layout.Metadata (Layout.Diagnostic | Layout.Origin _ | Layout.Continued_at _)
       | Layout.Body | Layout.Viewport_gap _ ->
           true)
     rows
@@ -1338,7 +1340,7 @@ let test_a_turn_keeps_one_heading_across_its_blocks () =
        (fun (row : Layout.row) ->
          match row.kind with
          | Layout.Metadata (Layout.Origin _) -> Some row.style
-         | Layout.Metadata (Layout.Continued_at _ | Layout.Timeline_break _)
+         | Layout.Metadata (Layout.Diagnostic | Layout.Continued_at _ | Layout.Timeline_break _)
          | Layout.Body | Layout.Viewport_gap _ ->
              None)
        drawn
@@ -1474,7 +1476,7 @@ let test_timeline_breaks_follow_civil_hours () =
         match row.kind with
         | Layout.Metadata (Layout.Timeline_break bucket) ->
             Some (bucket.tb_hour, row.text)
-        | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+        | Layout.Metadata (Layout.Diagnostic | Layout.Origin _ | Layout.Continued_at _)
         | Layout.Body
         (* The fold marker is not a timeline rail. Named rather than matched
            by a wildcard, so the next row kind fails here instead of being
@@ -1573,7 +1575,7 @@ let test_repeated_dst_hour_has_distinct_rails () =
     |> List.filter_map (fun (row : Layout.row) ->
          match row.kind with
          | Layout.Metadata (Layout.Timeline_break _) -> Some row.text
-         | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+         | Layout.Metadata (Layout.Diagnostic | Layout.Origin _ | Layout.Continued_at _)
          | Layout.Body
          | Layout.Viewport_gap _ ->
              None)

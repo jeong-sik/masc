@@ -192,6 +192,9 @@ type entry = {
           the mark. Carried on the entry because the caller is what chose the
           column, and read back by the renderer to style the mark and the
           label differently: colour says status, the label only says kind. *)
+  diagnostics : string list;
+      (** Explicitly expanded technical metadata, wrapped and measured separately
+          from the original speech body. Empty in the default chat view. *)
   request_label : string;
       (** The turn this entry belongs to, for grouping: rows of one request
           share a heading. Never drawn -- the grouping is what a reader sees. *)
@@ -245,6 +248,7 @@ type metadata =
       speaker : string;
       role_label : string;
     }
+  | Diagnostic
   | Continued_at of { clock : string }
       (** Only emitted where the entry has a trustworthy time: a continuation
           that cannot say when it moved has nothing to draw. *)

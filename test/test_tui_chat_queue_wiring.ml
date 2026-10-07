@@ -4180,6 +4180,11 @@ let test_batch_reply_follows_all_original_inputs () =
       (Live.Batch_bound {operation_id="batch-third"; execution_id="batch-owner"});
     check bool "binding without output invalidates layout identity" false
       (before_binding == layouts ());
+    let rebound = layouts () in
+    check bool "unrelated first entry retains its cached body" true
+      (List.hd before_binding == List.hd rebound);
+    check bool "unrelated second entry retains its cached body" true
+      (List.nth before_binding 1 == List.nth rebound 1);
     let verify_bound_inputs () =
       let entries = layouts () in
       check (list string) "all bound inputs use the full canonical grouping key"
@@ -4762,7 +4767,10 @@ let test_delivery_states_and_observed_work_are_identifiable () =
           let text = screen () in
           check int "pending input is displayed exactly once" 1 (count text "아니야 진행해");
           check bool "pending area is explicit" true (has text "대기 입력 1건");
-          check bool "delivery state is explicit" true (has text label);
+          check bool "delivery state is explicit or fits the shared column" true
+            (has text label || origin <> Layout.Origin_row
+              && Layout.display_width label + Layout.role_label_mark_cells ~style:Layout.Local ()
+                 > Layout.chat_role_label_width ~pane_cells:columns);
           check bool "pending is never claimed as reflected" false (has text "입력 반영됨");
           let bodies = Masc_tui_render_chat.chat_tail_entries state ~keeper_name:"alpha"
               ~role_label_column:20
@@ -4950,10 +4958,40 @@ let test_search_measures_original_message_rows () =
       [80; 140])
 ;;
 
+let test_expanded_chat_diagnostics_preserve_settled_identity () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let request_id = "completed-exact-request-id" in
+  state.msg_history <- [chat_entry ~request_id ~role:Tui_types.Message_keeper
+      ~text:"unaltered reply" ~at:1. ()];
+  let entries () = Masc_tui_render_chat.keeper_message_layout_entries state
+      ~keeper_name:"alpha" ~chat_cols:80 in
+  let compact = List.hd (entries ()) in
+  check (list string) "compact speech hides technical metadata" [] compact.diagnostics;
+  state.msg_tool_visibility <- Tui_types.Tools_full;
+  let expanded = List.hd (entries ()) in
+  check string "expansion preserves speech" "unaltered reply" expanded.body;
+  check bool "settled full ID has a visible diagnostic row" true
+    (List.mem ("request " ^ request_id) expanded.diagnostics);
+  let rows = Masc_tui_message_layout.rows_of_entry ~inner_width:80 ~previous:None expanded in
+  check bool "diagnostic does not masquerade as speech" true
+    (List.exists (fun (row : Masc_tui_message_layout.row) -> match row.kind with
+      | Metadata Diagnostic -> Astring.String.is_infix ~affix:request_id row.text
+      | _ -> false) rows);
+  let pending, _ = preflight_input () in
+  state.msg_inflight <- [pending];
+  let width = Masc_tui_message_layout.chat_role_label_width ~pane_cells:80 in
+  let tails = Masc_tui_render_chat.chat_tail_entries state ~keeper_name:"alpha" ~role_label_column:width in
+  List.iter (fun (entry : Masc_tui_message_layout.entry) ->
+    check int "pending entries keep the pane-wide label column" width
+      (Masc_tui_message_layout.display_width entry.role_label)) tails
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [ ( "visible delivery",
+    [ ( "expanded diagnostics", [test_case "settled identity and shared pending width" `Quick
+          test_expanded_chat_diagnostics_preserve_settled_identity] )
+    ; ( "visible delivery",
         [ test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable
         ; test_case "speech preserves original words" `Quick test_speech_keeps_original_words_across_metadata_and_retry
         ; test_case "search measures original rows" `Quick test_search_measures_original_message_rows ] )

@@ -127,6 +127,9 @@ type entry = {
           has the pane's width and draws this instead. *)
   role_label : string;
   role_label_mark_cells : int;
+  diagnostics : string list;
+      (** Explicitly expanded technical metadata, wrapped and measured separately
+          from the original speech body. Empty in the default chat view. *)
   request_label : string;
   body : string;
   journal : journal_line list;
@@ -145,6 +148,7 @@ type metadata =
       speaker : string;
       role_label : string;
     }
+  | Diagnostic
   | Continued_at of { clock : string }
 
 type row_kind =
@@ -1970,13 +1974,24 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       ; action = (if index = 0 then entry.action else Action_none)
       })
   in
-  let message_rows =
+  let diagnostic_rows =
+    entry.diagnostics
+    |> List.concat_map (fun text ->
+         text |> String.split_on_char '\n'
+         |> List.concat_map (split_cells ~max_cells:(Int.max 1 (inner_width - 2))))
+    |> List.map (fun text ->
+         { style = Status; kind = Metadata Diagnostic; shade = Shade_none;
+           text = String.make indent ' ' ^ "  " ^ text; gutter = "";
+           gutter_rail_cells = 0; gutter_clock_cells = 0; gutter_label_at = 0;
+           action = Action_none })
+  in
+  let message_rows = diagnostic_rows @ (
     match origin with
     | Origin_inline | Origin_bare -> body_rows
     | Origin_row -> (
         match metadata_row ~previous ~inner_width ~indent entry with
         | None -> body_rows
-        | Some metadata -> metadata :: body_rows)
+        | Some metadata -> metadata :: body_rows))
   in
   match timeline_break_row ~previous ~inner_width:pane_width entry with
   | None -> message_rows

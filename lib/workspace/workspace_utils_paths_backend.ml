@@ -120,8 +120,7 @@ let backend_get config ~key =
    | Ok v -> Ok (Some v)
    | Error (Backend_types.NotFound _) -> Ok None
    | Error (Backend_types.AlreadyExists _ | Backend_types.IOError _
-           | Backend_types.InvalidKey _ | Backend_types.ConnectionFailed _
-           | Backend_types.BackendNotSupported _) as err -> err)
+           | Backend_types.InvalidKey _) as err -> err)
 
 let backend_set config ~key ~value =
   match config.backend with
@@ -139,8 +138,7 @@ let backend_delete config ~key =
    | Ok () -> Ok true
    | Error (Backend_types.NotFound _) -> Ok false
    | Error (Backend_types.AlreadyExists _ | Backend_types.IOError _
-           | Backend_types.InvalidKey _ | Backend_types.ConnectionFailed _
-           | Backend_types.BackendNotSupported _) as err -> err)
+           | Backend_types.InvalidKey _) as err -> err)
 
 let backend_exists config ~key =
   match config.backend with

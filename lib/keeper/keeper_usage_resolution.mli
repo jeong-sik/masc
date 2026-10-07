@@ -43,6 +43,8 @@ type t =
 
 val sample_of_api_usage : Agent_core.Types.api_usage -> sample
 val api_usage_of_sample : sample -> Agent_core.Types.api_usage
+val sample_to_json : sample -> Yojson.Safe.t
+val sample_of_json : Yojson.Safe.t -> (sample, string) result
 
 (** The cost the runtime reported with [sample], as the plain float that
     running totals and cost-ledger rows hold. A sample with no reported cost
@@ -56,6 +58,7 @@ val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val status_to_string : status -> string
 val position_to_string : cumulative_position -> string
+val position_of_string : string -> (cumulative_position, string) result
 
 val resolve :
   cursor:cursor option ->

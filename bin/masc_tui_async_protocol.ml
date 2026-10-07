@@ -380,7 +380,7 @@ type async_msg =
   (* Its own message rather than a field on the stance one: the two come from
      different endpoints and one failing must not blank the other. *)
   | Keeper_gate_settings_loaded of
-      (((string * string) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
+      (((string * Masc.Tui_decode.gate_mode) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
       * Masc_tui_operator_projection.Listing_order.ticket
@@ -491,6 +491,7 @@ type async_msg =
   | Preset_contents_shown of preset_sink * (Masc.Tui_decode.preset_detail, string) result
   | Preset_saved of preset_sink * (Masc.Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Masc.Tui_decode.preset_restore_report, string) result
+  | Preset_deleted of preset_sink * (string, string) result
   | Play_invites_listed of string option * (Masc.Tui_decode.play_invite_row list, string) result
   | Play_invite_issued of string option * Masc.Tui_decode.play_invite_issued play_mutation
   | Play_invite_revoked of string option * string * play_revoke

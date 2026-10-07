@@ -168,6 +168,72 @@ let test_mcp_block_arriving_during_message_start () =
   | _ -> failf "a block raced MessageStart (%d events)" (List.length events)
 ;;
 
+(* A call the bridge answers before MessageStart commits its tool log while
+   its block is still held. The stream rejects a receipt naming a block it
+   has not seen, so the receipt must follow the released block. *)
+let test_receipt_of_a_held_block_follows_the_block () =
+  let module Receipts = Keeper_official_client_tool_receipts in
+  Fun.protect ~finally:Keeper_execution_join.For_testing.clear @@ fun () ->
+  Eio_main.run @@ fun _env ->
+  let timeline = ref [] in
+  let receipts =
+    Receipts.create ~delivery:Receipts.Held_until_released
+      ~notify:(fun ~block_index ~tool_call_id ~execution_id ->
+        timeline :=
+          Printf.sprintf "receipt %d %s %s" block_index tool_call_id
+            (Ids.Execution_id.to_string execution_id)
+          :: !timeline)
+  in
+  let hooks = Receipts.hooks receipts Agent_core.Hooks.empty in
+  let invoke hook event =
+    match hook with
+    | Some hook -> ignore (hook event)
+    | None -> fail "receipt hook missing"
+  in
+  let commit call_id =
+    let invocation =
+      Agent_core.Tool_contract.Invocation.create ~tool_use_id:call_id ~turn:1
+        ~completion:Agent_core.Tool_contract.Continue_after_success
+        ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
+                  ; execution_mode = Agent_core.Tool_contract.Serial }
+    in
+    invoke hooks.pre_tool_use
+      (Agent_core.Hooks.PreToolUse
+         { invocation; tool_name = "masc_probe"; input = `Assoc []
+         ; accumulated_cost_usd = 0. });
+    Keeper_execution_join.record ~invocation ~execution_id:("exec-" ^ call_id);
+    invoke hooks.post_tool_use
+      (Agent_core.Hooks.PostToolUse
+         { invocation; tool_name = "masc_probe"; input = `Assoc []
+         ; output = Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None }
+         ; result_bytes = 2; duration_ms = 1. })
+  in
+  let events =
+    Adapter.project_stream_inputs ~receipts
+      ~during:(fun event ->
+        timeline :=
+          (match event with
+           | Agent_core.Types.MessageStart _ ->
+             (* The bridge's fiber commits while the viewer yields here. *)
+             commit "mcp-held";
+             "message start"
+           | ContentBlockStart { index; _ } -> Printf.sprintf "block start %d" index
+           | ContentBlockStop { index } -> Printf.sprintf "block stop %d" index
+           | _ -> "other")
+          :: !timeline;
+        [])
+      [ mcp_started "mcp-held"
+      ; Adapter.Serve_event turn_started
+      ; Adapter.Mcp_tool_finished { call_id = "mcp-held" }
+      ]
+  in
+  check int "held block and message reached the stream" 4 (List.length events);
+  check (list string) "receipt follows its released block"
+    [ "message start"; "block start 1"; "other"; "receipt 1 mcp-held exec-mcp-held"
+    ; "block stop 1" ]
+    (List.rev !timeline)
+;;
+
 (* ── Usage report ────────────────────────────────────────────────────── *)
 
 let test_usage_report_is_the_turn_total () =
@@ -792,7 +858,7 @@ type observed_run =
 
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
-let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary
+let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary ?on_tool_execution
     ?(admission_timeout_s = 20.) ?(idle_timeout_s = 20.)
     ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
     ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
@@ -846,6 +912,7 @@ let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) 
           native_actions := (official_turn, call_id ^ ":" ^ tool_name) :: !native_actions
         | Runtime_native_tools.Provider_step _ -> fail "Muse Code reports call ids")
       ~on_usage_report:(fun report -> reports := report :: !reports; on_usage report)
+      ?on_tool_execution
       ~event_bus:None
       ~raw_trace:None
       ~on_event:
@@ -969,6 +1036,75 @@ let masc_probe_tool ?descriptor observed_input =
     (fun input ->
        observed_input := input;
        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+;;
+
+(* The committed execution id of a MASC call reaches the stream observer
+   once, named by the block that opened the call and after that block. *)
+let test_scripted_host_reports_the_tool_receipt () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_execution_join.For_testing.clear ();
+      try Fs_compat.remove_tree base_path with _ -> ())
+    (fun () ->
+      let runtime_path = prepare_scripted_host ~base_path in
+      let tool = masc_probe_tool (ref `Null) in
+      let snapshot = Runtime.For_testing.snapshot () in
+      Fun.protect
+        ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+        (fun () ->
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Eio_context.set_env env;
+              Eio_context.with_test_env
+                ~net:(Eio.Stdenv.net env)
+                ~clock:(Eio.Stdenv.clock env)
+                ~mono_clock:(Eio.Stdenv.mono_clock env)
+                ~sw
+                (fun () ->
+                  (match Runtime.init_default ~config_path:runtime_path with
+                   | Ok () -> ()
+                   | Error detail -> fail detail);
+                  persist_fixture_meta ~base_path;
+                  (* Stands in for the Keeper hook that commits the tool log. *)
+                  let hooks =
+                    { Agent_core.Hooks.empty with
+                      post_tool_use =
+                        Some (function
+                          | Agent_core.Hooks.PostToolUse { invocation; _ } ->
+                            Keeper_execution_join.record ~invocation
+                              ~execution_id:"exec-muse-probe";
+                            Agent_core.Hooks.Continue
+                          | _ -> Agent_core.Hooks.Continue)
+                    }
+                  in
+                  let timeline = ref [] in
+                  let run =
+                    run_turn_with ~hooks ~base_path ~tool
+                      ~on_stream_event:(function
+                        | Agent_core.Types.ContentBlockStart
+                            { index; content_type = "tool_use"; _ } ->
+                          timeline := Printf.sprintf "block %d" index :: !timeline
+                        | _ -> ())
+                      ~on_tool_execution:(fun ~block_index ~tool_call_id:_ ~execution_id ->
+                        timeline :=
+                          Printf.sprintf "receipt %d %s" block_index
+                            (Ids.Execution_id.to_string execution_id)
+                          :: !timeline)
+                      ()
+                  in
+                  (match run.outcome.result with
+                   | Error error -> fail (Agent_core.Error.to_string error)
+                   | Ok _ -> ());
+                  match List.rev !timeline with
+                  | [ block; receipt ] ->
+                    let index = Scanf.sscanf block "block %d" Fun.id in
+                    check string "one receipt after its own block"
+                      (Printf.sprintf "receipt %d exec-muse-probe" index)
+                      receipt
+                  | other ->
+                    failf "expected one MASC block then its receipt, got [%s]"
+                      (String.concat "; " other))))))
 ;;
 
 let test_turn_through_scripted_host () =
@@ -1968,7 +2104,20 @@ let test_call_usage_survives_missing_terminal_aggregate () =
               check int "two model calls" 14 usage.output_tokens;
               check int "cache reads" 80 usage.cache_read_input_tokens;
               check int "cache writes" 20 usage.cache_creation_input_tokens
-            | None -> fail "per-call usage lost when terminal aggregate was absent")
+            | None -> fail "per-call usage lost when terminal aggregate was absent");
+           (* The context gauge reads one request, not the turn's sum. *)
+           (match result.runtime_observation with
+            | Some { request_context = Some context; _ } ->
+              check int "the newest request's counted-once prompt" 150 context.input_tokens;
+              check (option (pair int int)) "that request's cache writes and reads"
+                (Some (10, 40))
+                (Option.map
+                   (fun (cache : Runtime_observation.request_cache) ->
+                      cache.cache_creation_input_tokens, cache.cache_read_input_tokens)
+                   context.cache);
+              check (option int) "that request's own output" (Some 7) context.output_tokens
+            | Some { request_context = None; _ } -> fail "request context not reported"
+            | None -> fail "runtime observation missing")
          | Error error -> fail (Agent_core.Error.to_string error));
         match run.reports with
         | [report] ->
@@ -2406,6 +2555,8 @@ let () =
         ; test_case "a second message starts a paragraph" `Quick
             test_a_second_message_starts_a_paragraph
         ; test_case "MCP blocks wait for MessageStart" `Quick test_mcp_blocks_wait_for_message_start
+        ; test_case "receipt of a held block follows the block" `Quick
+            test_receipt_of_a_held_block_follows_the_block
         ; test_case "MCP block arriving during MessageStart" `Quick
             test_mcp_block_arriving_during_message_start
         ] )
@@ -2434,6 +2585,8 @@ let () =
     ; ( "scripted host"
       , [ test_case "start and resume through muse serve with a MASC tool" `Quick
             test_turn_through_scripted_host
+        ; test_case "a MASC call reports its receipt after its block" `Quick
+            test_scripted_host_reports_the_tool_receipt
         ; test_case "declared Muse runtime routes and resumes Keeper turns" `Quick
             test_declared_muse_runtime_routes_keeper_turns
         ; test_case "subscription exhaustion uses selected account scope" `Quick

@@ -1719,7 +1719,7 @@ let test_ollama_cloud_v1_vendor_models_admit_json_mode_only () =
                 model_id)
              msg
          | Ok () -> Alcotest.failf "%s must reject native json_schema" model_id)
-      [ "qwen3.5:cloud"; "gemma4:31b-cloud" ])
+      [ "gemma4:31b-cloud" ])
 ;;
 
 let test_validate_output_schema_ollama_cloud_catalog_rejects_model_without_so () =

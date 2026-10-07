@@ -112,7 +112,6 @@ val apply_post_turn_lifecycle
 
 val dispatch_keeper_phase_event
   :  config:Workspace.config
-  -> ?origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
   -> Keeper_state_machine.event
   -> unit
@@ -123,7 +122,6 @@ type lifecycle_dispatch_error =
 
 val dispatch_keeper_phase_event_result
   :  config:Workspace.config
-  -> ?origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
   -> Keeper_state_machine.event
   -> (unit, lifecycle_dispatch_error) result

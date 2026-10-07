@@ -461,7 +461,7 @@ let tui_answer source json =
        | Masc.Machine_lane.Dos, Tui_live.Activity entries ->
            let expected =
              List.map
-               (fun (entry : Lane_activity.entry) ->
+               (fun (entry : Machine_action_feed.entry) ->
                  { Tui_live.at = entry.at; who = entry.who; action = entry.action })
                (Dos_lane.recent_activity ())
            in
@@ -573,7 +573,7 @@ let test_live_route () =
         check bool "TUI retains activity from a DOS no-machine answer" true
           (tui_answer Masc.Machine_lane.Dos no_machine_json = Tui_live.No_machine);
         check (list string) "no-machine activity matches Dos_lane.recent_activity"
-          (List.map (fun e -> e.Lane_activity.who) (Dos_lane.recent_activity ()))
+          (List.map (fun e -> e.Machine_action_feed.who) (Dos_lane.recent_activity ()))
           (List.map (fun j -> string_member "who" j) (activity_list no_machine_json));
         with_dos (fun ~dir ->
           dos_ok "load" (dos_load ~dir hello_com);

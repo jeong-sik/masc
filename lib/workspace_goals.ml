@@ -702,15 +702,18 @@ let proof_request_failure ~tool_name ~start_time = function
   | Refused { code; message } -> error_result_typed ~tool_name ~start_time ~code message
 ;;
 
+(* The phase comes from [Goal_phase.decide_transition], so a proof request
+   and a completion request cannot disagree on where the goal goes. Only a goal
+   that is, or now enters, [Verifying] gets a pending proof. *)
 let request_current_proof ?evidence_refs config ~goal_id =
   transact_or_refuse config ~goal_id (fun goal ->
-    match goal.phase with
-    | Goal_phase.Executing | Goal_phase.Verifying ->
+    match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Request_complete with
+    | Ok (Goal_phase.Move_to (Goal_phase.Verifying as phase))
+    | Ok (Goal_phase.Already (Goal_phase.Verifying as phase)) ->
       Result.bind (capture_goal_evidence config evidence_refs) (fun submitted_evidence ->
-        Result.map (fun record -> { goal with phase = Goal_phase.Verifying }, record)
+        Result.map (fun record -> { goal with phase }, record)
           (mark_proof_pending ?submitted_evidence config ~goal_id goal))
-    | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped
-    | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
+    | Ok (Goal_phase.Move_to _ | Goal_phase.Already _) | Error _ ->
       Error (refuse Precondition_failed "goal is not requesting verification"))
 ;;
 

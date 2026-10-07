@@ -281,15 +281,6 @@ let install () =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Log.Workspace.warn "activity_graph emit failed: %s" (Printexc.to_string exn));
 
-  Atomic.set Workspace_hooks.subscribe_messages_fn (fun ~subscriber ->
-    let _ =
-      Subscriptions.SubscriptionStore.subscribe
-        ~subscriber
-        ~resource:Subscriptions.Messages
-        ()
-    in
-    ());
-
   Atomic.set Workspace_hooks.tool_assigned_fn Tool_assignment_telemetry.emit_assigned;
 
   Atomic.set Workspace_hooks.workspace_broadcast_observed_fn record_workspace_broadcast;

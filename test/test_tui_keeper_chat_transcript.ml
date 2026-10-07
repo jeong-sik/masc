@@ -493,6 +493,27 @@ let test_drawn_keeps_earlier_rounds_when_the_reply_is_the_last_stretch () =
     (drawn t)
 ;;
 
+(* A turn that spoke before its tool round and streamed nothing after it:
+   the reply is the terminal message, which came after the tools, so the
+   words before them are progress and stay. Taking them as the reply's
+   stand-in drew "Done." where "Let me check." had been. *)
+let test_drawn_keeps_pre_tool_progress_when_nothing_streamed_after () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Text "Let me check."
+    ; tool_started "c1" "read_file"
+    ; tool_ended "c1"
+    ; reply_details ~reply:"Done." ()
+    ];
+  check (list string) "the pre-tool words stay and the reply follows the tools"
+    [ "text:Let me check."
+    ; "tools:" ^ String.concat "|" (Transcript.tool_rows t)
+    ; "reply:Done."
+    ]
+    (drawn t)
+;;
+
 (* The wire carries neither a call's duration nor whether it failed; the
    durable transcript does. Folded in by execution id, the block says what
    the loaded row it replaces would have said. A durable word that says less
@@ -2759,6 +2780,8 @@ let () =
             test_drawn_replaces_the_streamed_text_with_a_differing_reply
         ; test_case "drawn keeps earlier rounds when the reply is the last stretch" `Quick
             test_drawn_keeps_earlier_rounds_when_the_reply_is_the_last_stretch
+        ; test_case "drawn keeps pre-tool progress when nothing streamed after" `Quick
+            test_drawn_keeps_pre_tool_progress_when_nothing_streamed_after
         ; test_case "note_tool_outcome folds the durable facts in" `Quick
             test_note_tool_outcome_folds_the_durable_facts_in
         ; test_case "drawn appends the reply when nothing streamed" `Quick

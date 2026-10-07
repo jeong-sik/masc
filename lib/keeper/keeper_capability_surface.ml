@@ -6,7 +6,6 @@ type capability_availability =
   | Refused_by_sandbox of { detail : string }
   | Node_tools_outside_surface of { tools : string list }
   | Invalid_definition
-  | Missing_task_skill
   | Missing_configured_skill
 
 type skill_exposure =
@@ -256,7 +255,6 @@ let capability_availability_to_string = function
   | Refused_by_sandbox _ -> "refused_by_sandbox"
   | Node_tools_outside_surface _ -> "node_tools_outside_surface"
   | Invalid_definition -> "invalid_definition"
-  | Missing_task_skill -> "missing_task_skill"
   | Missing_configured_skill -> "missing_configured_skill"
 ;;
 
@@ -288,7 +286,6 @@ let availability_detail_fields = function
   | Not_model_invocable
   | Denied_by_profile
   | Invalid_definition
-  | Missing_task_skill
   | Missing_configured_skill -> []
 ;;
 
@@ -397,7 +394,6 @@ let candidate_invocation_name = function
                                    | Outside_skill_surface
                                    | Node_tools_outside_surface _
                                    | Invalid_definition
-                                   | Missing_task_skill
                                    | Missing_configured_skill)
                   ; _
                   }
@@ -407,7 +403,6 @@ let candidate_invocation_name = function
                            | Outside_skill_surface
                            | Node_tools_outside_surface _
                            | Invalid_definition
-                           | Missing_task_skill
                            | Missing_configured_skill)
           ; _
           } -> None

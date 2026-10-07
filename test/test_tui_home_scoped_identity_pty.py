@@ -582,7 +582,7 @@ def goal_drop_arm_withdrawal_journey(executable):
         h.wait_for_output(process, fd, output, b"Confirm Goal", start=0, timeout=10)
         cards.select_home(process, fd, output, b"goal-arm-40176", destinations=3)
         h.send_and_wait(process, fd, output, b"\r", b"Goal arm workspace proof")
-        h.send_and_wait(process, fd, output, b"x", b"press x again")
+        h.send_and_wait(process, fd, output, b"x", b"DROP REASON")
         assert_no_drop()
         # No key is sent between arming and identity withdrawal: the normal
         # periodic read must clear the arm, not the generic key dispatcher.
@@ -618,9 +618,17 @@ def goal_drop_arm_withdrawal_journey(executable):
         # Overview, so the Planning-only generic key disarm does not run;
         # the first x still tests the identity/reconciliation reset itself.
         cards.select_home(process, fd, output, b"goal-arm-40176", destinations=3)
-        h.send_and_wait(process, fd, output, b"\r", b"goal-arm-40176")
-        h.send_and_wait(process, fd, output, b"x", b"press x again")
+        entered = h.send_and_wait(process, fd, output, b"\r", b"goal-arm-40176")
+        # The identity change must have cleared the pending drop. If a stale
+        # reason field survived, this Enter would land in it and the field
+        # would still be on screen -- the regression this scenario exists for.
+        assert b"DROP REASON" not in h.screen_text(entered), entered
+        h.send_and_wait(process, fd, output, b"x", b"DROP REASON")
         assert_no_drop()
+        # The drop-reason prompt owns the keyboard; leave it before quitting so
+        # the exit key is not typed into the reason field.
+        os.write(fd, b"\x1b")
+        h.drain_until_quiet(process, fd, output)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

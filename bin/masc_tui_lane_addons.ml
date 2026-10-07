@@ -435,6 +435,23 @@ let open_selected_instance view =
           select_initial_result {view with screen=Detail (item.id,item.incarnation); focus=Timeline;
             scroll=0; selected=[]; document_key=None}
       | None -> view
+(* Opening a declaration from the Lane inventory shows its document. The
+   cursor has to name the same declaration: every action that reads
+   [selected_declaration] -- detach, observe, add -- reaches the row the
+   cursor names, and a cursor left on another row would act on that one
+   while this document is on screen. A declaration the snapshot does not
+   list, or no snapshot yet, names no row. *)
+let open_declaration view path =
+  let configuration_cursor =
+    Option.bind view.snapshot (fun snapshot ->
+      Option.bind snapshot.configuration (fun (configuration : configuration) ->
+        List.find_index (fun (declaration : declaration) -> declaration.source_path = path)
+          configuration.declarations))
+    |> Option.value ~default:(-1)
+  in
+  {view with screen=Overview; focus=Configurations; configuration_cursor;
+    current_selection=Selection (Declaration_anchor path);
+    scroll=0; error=None; editor_ready=false; presentation=Technical}
 let evidence_target view =
   let* snapshot = Option.to_result ~none:"Observation snapshot unavailable" view.snapshot in
   let* () = if view.selected=[] then Error "Select evidence rows first" else Ok () in

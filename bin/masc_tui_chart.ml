@@ -2,16 +2,6 @@
 
 module Layout = Masc_tui_message_layout
 
-type style =
-  | Status of Masc_tui_theme.status
-  | Tone of Masc_tui_theme.tone
-
-(** Serializes a [style] into its theme ANSI SGR code. *)
-let render_style = function
-  | Status s -> Masc_tui_theme.status s
-  | Tone t -> Masc_tui_theme.tone t
-;;
-
 let bar_full = "\xe2\x96\x88" (* U+2588 FULL BLOCK *)
 let bar_dark = "\xe2\x96\x93" (* U+2593 DARK SHADE *)
 let bar_medium = "\xe2\x96\x92" (* U+2592 MEDIUM SHADE *)
@@ -72,40 +62,6 @@ let sparkline ?min ?max values =
             Stdlib.max 0 (Stdlib.min 7 raw)
         in
         Buffer.add_string buf sparkline_glyphs.(level))
-      values;
-    Buffer.contents buf
-;;
-
-let sparkline_colored ?min ?max ~style_of_level values =
-  match values with
-  | [] -> ""
-  | _ ->
-    let v_min =
-      match min with
-      | Some m -> m
-      | None -> List.fold_left Stdlib.min (List.hd values) values
-    in
-    let v_max =
-      match max with
-      | Some m -> m
-      | None -> List.fold_left Stdlib.max (List.hd values) values
-    in
-    let range = v_max - v_min in
-    let buf = Buffer.create (List.length values * 16) in
-    List.iter
-      (fun v ->
-        let level =
-          if range <= 0 then
-            if v_min <= 0 then 0 else 3
-          else
-            let clamped_v = Stdlib.max v_min (Stdlib.min v_max v) in
-            let raw = ((clamped_v - v_min) * 7) / range in
-            Stdlib.max 0 (Stdlib.min 7 raw)
-        in
-        let st = style_of_level level in
-        Buffer.add_string buf (render_style st);
-        Buffer.add_string buf sparkline_glyphs.(level);
-        Buffer.add_string buf Masc_tui_theme.Sgr.reset)
       values;
     Buffer.contents buf
 ;;
@@ -244,7 +200,7 @@ let heatmap_24h ?label hours =
 type bar_item = {
   name : string;
   count : int;
-  style : style option;
+  style : Masc_tui_theme.status option;
 }
 
 let distribution_bars ~width items =
@@ -263,7 +219,7 @@ let distribution_bars ~width items =
         let pct = if total <= 0 then 0 else (count * 100) / total in
         let color =
           match it.style with
-          | Some s -> render_style s
+          | Some s -> Masc_tui_theme.status s
           | None -> Masc_tui_theme.tone Accent
         in
         let padded_name = Layout.fit_width it.name name_col_width in

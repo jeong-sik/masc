@@ -21,7 +21,7 @@ module Id = Keeper_execution_scope_id
 
 module Scopes = Map.Make (Id)
 
-type admission = Fresh of Id.t | Resume of Id.t
+type admission = Fresh of Id.t
 type observation =
   { tool_name : string
   ; input_fingerprint : string option
@@ -44,16 +44,12 @@ let empty = { active = None; scopes = Scopes.empty }
 let active state = state.active
 let scope_ids state = List.map fst (Scopes.bindings state.scopes)
 
-let admit state = function
-  | Fresh id ->
-      let scopes =
-        if Scopes.mem id state.scopes then state.scopes
-        else Scopes.add id [] state.scopes
-      in
-      Ok { active = Some id; scopes }
-  | Resume id ->
-      if Scopes.mem id state.scopes then Ok { state with active = Some id }
-      else Error (Unknown_scope id)
+let admit state (Fresh id) =
+  let scopes =
+    if Scopes.mem id state.scopes then state.scopes
+    else Scopes.add id [] state.scopes
+  in
+  Ok { active = Some id; scopes }
 
 let record state ~scope observation =
   match Scopes.find_opt scope state.scopes with

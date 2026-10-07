@@ -114,6 +114,13 @@ let config_bindings =
              on runtime.toml, keep the draft and adopt the displayed current \
              file revision; S saves",
       Some [ Config_presets; Config_runtime ]
+    (* Upper case, as Runtime's lane removal: x on the other panes puts a
+       default back, and a delete cannot be put back. *)
+  ; b Act "D" "delete"
+      ~help:"on presets, delete the selected one; press twice to confirm. \
+             A preset listed with ! under a valid name is deleted with \
+             /preset delete <name>",
+      Some [ Config_presets ]
   ; b Act "S" "save draft"
       ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
       Some [ Config_runtime ]
@@ -148,6 +155,7 @@ let config_bindings =
 type runtime_key =
   | Every_reading of binding
   | Keeper_lanes_only of binding
+  | All_runtimes_only of binding
   | Reading_walk
 
 let runtime_reading_walk_help =
@@ -166,6 +174,9 @@ let runtime_keys =
   ; Every_reading
       (b Navigate "c" "clients"
          ~help:"everyone attached to this workspace, off the ring under Runtime")
+  ; All_runtimes_only
+      (b Act "e" "model settings"
+         ~help:"open the selected binding in Config Models; Esc then c copies a variant")
   ; Keeper_lanes_only
       (b Act "e" "add candidate"
          ~help:"append a candidate to the candidate order of the lane under the cursor (keeper lanes only)")
@@ -202,7 +213,7 @@ let runtime_keys =
   ]
 
 let runtime_sheet_binding = function
-  | Every_reading binding | Keeper_lanes_only binding -> binding
+  | Every_reading binding | Keeper_lanes_only binding | All_runtimes_only binding -> binding
   | Reading_walk ->
     b Navigate "p" "keeper lanes / all runtimes / service lanes"
       ~help:runtime_reading_walk_help
@@ -213,6 +224,8 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
     (match mode with
      | Runtime_lanes -> Some binding
      | Runtime_all -> None)
+  | All_runtimes_only binding ->
+    (match mode with Runtime_all -> Some binding | Runtime_lanes -> None)
   | Reading_walk ->
     Some
       (b Navigate "p"
@@ -270,7 +283,7 @@ let global =
       "the MSX screen: the emulator core over the whole terminal (esc: back; \
        also `:` go MSX)"
   ; b Meta roster_toggle_key "show or hide the Keeper roster"
-      ~help:"wide chats show the roster by default; this choice persists \
+      ~help:"the roster starts hidden; this choice persists \
              across navigation and resizing"
   ; b Meta "Ctrl-L"
       "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
@@ -393,9 +406,12 @@ let board_read_focus_key =
 let fusion_caller_key = b Navigate "K" "calling Keeper"
 let fusion_board_key = b Navigate "B" "Board evidence"
 
+let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
+
 let for_surface = function
   | Overview ->
-      [ b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      [ b Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
+      ; b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
       ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
       ; b Navigate "p" "requests" ~help:"approvals and questions"
       ; b Navigate ";" "agenda" ~help:"Goal confirmations and tasks waiting on you"
@@ -503,7 +519,7 @@ let for_surface = function
       ]
       @ listing_meta
   | Keepers Keeper_message ->
-      [ b Navigate "Left" "roster" ~help:"focus the visible Keeper roster"
+      [ b Navigate "Left" "roster" ~help:"empty composer: open the Keeper list; with text: move the cursor left"
       ; b Navigate "Right" "chat"
           ~help:"roster focused: return focus to the chat composer"
       ; (* One key, two focuses: the roster when it holds focus, the history
@@ -1182,16 +1198,20 @@ let config_row ~own ~shared =
 
 let footer_hints_config ~pane =
   let own, shared = config_pane_bindings pane in
-  if pane = Config_params then
+  match pane with
+  | Config_params | Config_presets ->
     (* At 80 cells the page/selection hints otherwise outlive E, the only
        door to advanced JSON. The pane body already names those navigation
-       keys; keep its distinct edit actions ahead of them in the footer. *)
+       keys; keep its distinct edit actions ahead of them in the footer.
+       Presets the same at 120: n, u and D are the pane's three writes, and
+       behind the navigation keys D was the one cut. *)
     let actions, navigation =
       List.partition (fun binding -> binding.group = Act) own in
     String.concat "  "
       [ hints_of_bindings actions; hints_of_bindings navigation
       ; hints_of_bindings shared ]
-  else config_row ~own ~shared
+  | Config_runtime | Config_models | Config_prompts | Config_themes | Config_voice ->
+    config_row ~own ~shared
 
 (* The keeper-voice screen: two lists and one write. The keys are its own --
    the keeper walks under [j]/[k] and the voice under the arrows, so an
@@ -1305,7 +1325,6 @@ type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
-  | Code_overlay  (** diff is drawn over the file *)
   | Code_notes  (** wrapped memo document is drawn over the file *)
   | Code_history  (** complete history document is drawn over the file *)
 
@@ -1343,7 +1362,7 @@ let footer_hints_code ~pane =
     | Code_file -> overlay_keys
     | Code_diff -> overlay_keys @ ("Right / Enter" ::
         List.filter (fun key -> not (String.equal key "Shift-Left / Shift-Right")) file_keys)
-    | Code_overlay | Code_notes -> "Right / Enter" :: overlay_keys @ file_keys
+    | Code_notes -> "Right / Enter" :: overlay_keys @ file_keys
     | Code_history ->
         (* [Right / Enter] names the tree and file panes' open. With the
            history overlay up, the one arm behind Right and Enter takes the
@@ -1360,7 +1379,7 @@ let footer_hints_code ~pane =
         List.map (fun b -> { b with key = "Shift-←/→" }) pan
         @ List.map (fun b ->
             if String.equal b.key "Left / Esc" then { b with key = "Esc" } else b) others
-    | Code_tree | Code_file | Code_overlay | Code_notes | Code_history -> visible in
+    | Code_tree | Code_file | Code_notes | Code_history -> visible in
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
@@ -1371,7 +1390,7 @@ let footer_hints_code ~pane =
       match pane with
       | Code_notes -> hints_of_bindings code_notes_bindings
       | Code_history -> hints_of_bindings code_history_bindings
-      | Code_tree | Code_file | Code_overlay | Code_diff -> hints
+      | Code_tree | Code_file | Code_diff -> hints
 
 (* The Runtime footer is the table's, with the two keys that depend on the
    reading on screen: [p] names where it goes from here, and [e] exists only on

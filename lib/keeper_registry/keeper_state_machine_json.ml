@@ -49,7 +49,6 @@ let event_to_json (ev : event) : Yojson.Safe.t =
       ]
   | Operator_pause -> obj "operator_pause" []
   | Operator_resume -> obj "operator_resume" []
-  | Operator_stop r -> obj "operator_stop" [ "remove_meta", `Bool r.remove_meta ]
   | Stop_requested -> obj "stop_requested" []
   | Drain_complete -> obj "drain_complete" []
   | Fiber_started -> obj "fiber_started" []
@@ -68,7 +67,6 @@ let event_to_json (ev : event) : Yojson.Safe.t =
     obj "fiber_terminated" with_http
   | Supervisor_restart_attempt r ->
     obj "supervisor_restart_attempt" [ "attempt", `Int r.attempt ]
-  | Credential_archived -> obj "credential_archived" []
   | Operator_clear_requested r ->
     obj
       "operator_clear_requested"

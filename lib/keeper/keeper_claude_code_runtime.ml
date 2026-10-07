@@ -154,8 +154,8 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
 (* Always installed so usage-window and turn usage reports are recorded. A
    turn nobody streams, traces or observes gets only those; its other events
    are ignored as before. *)
-let claude_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
-    ~on_usage_report ~position ~on_compacted on_event =
+let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
+    ~on_native_action ~on_usage_report ~position ~on_compacted on_event =
   (* The result frame's uuid is the response identity the completion hook
      also writes for a Claude Code turn; the session is the conversation. *)
   let report_usage ~session_id ~turn_id ~model usage =
@@ -173,8 +173,8 @@ let claude_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count 
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action with
-  | None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts with
+  | None, None, None, None ->
     Some
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
@@ -209,6 +209,10 @@ let claude_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count 
           Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
+          Option.iter
+            (fun receipts ->
+               Keeper_official_client_tool_receipts.start receipts ~call_id ~block_index:index)
+            receipts;
           Hashtbl.replace tool_indexes call_id index;
           emit
             (Agent_core.Types.ContentBlockStart
@@ -225,6 +229,9 @@ let claude_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count 
                      (Yojson.Safe.to_string arguments)
                })
         | Runtime_claude_code.Dynamic_tool_finished { call_id } ->
+          Option.iter
+            (fun receipts -> Keeper_official_client_tool_receipts.finish receipts ~call_id)
+            receipts;
           Option.iter
             (fun index ->
                Hashtbl.remove tool_indexes call_id;
@@ -547,7 +554,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
-    ~on_usage_report ~(config : Runtime_execution.claude_code) =
+    ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.claude_code) =
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -565,6 +572,19 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       match hooks with
       | Some hooks -> hooks
       | None -> Agent_core.Hooks.empty
+    in
+    let receipts =
+      Option.map
+        (fun notify ->
+           Keeper_official_client_tool_receipts.create
+             ~delivery:Keeper_official_client_tool_receipts.Immediate
+             ~notify)
+        on_tool_execution
+    in
+    let hooks =
+      match receipts with
+      | Some receipts -> Keeper_official_client_tool_receipts.hooks receipts hooks
+      | None -> hooks
     in
     let owner_epoch = Session_store.process_epoch () in
     let* stored_session =
@@ -610,10 +630,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~default:Runtime_native_tools.claude_code_default
         ~none_supported:(Runtime_execution.supports_native_none (Claude_code config))
     in
-    (* The keeper TOML surface no longer declares setting sources — the
-       fleet never used the field. The safe value the old admission rule
-       degraded to is now the only value. *)
-    let setting_sources = [] in
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256
@@ -763,7 +779,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; cwd = base_path
       ; model = config.model
       ; native = native_posture
-      ; setting_sources
       ; system_prompt
       ; admission_timeout_s = config.timeout_s
       ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
@@ -1124,7 +1139,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let turn_result =
       let on_stream_event =
-        claude_stream_callback
+        claude_stream_callback ?receipts
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1388,6 +1403,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ?on_usage_report
+    ?on_tool_execution
     ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.claude_code) () =
   let quota_scope =
     Runtime_quota_window.scope_of_claude_code_home
@@ -1404,11 +1420,8 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
   let starting_capacity_bytes =
     (* Every turn starts at the runtime's own ceiling when it has one, and
        unbounded otherwise: the provider's typed overflow is what narrows it.
-       The pinned briefing was sized earlier from the smallest ceiling among
-       the candidates the turn's walk holds
-       ([Keeper_turn_runtime_budget.world_state_briefing_budget_bytes]). That
-       budget can only withhold [Own_recent_actions] rows, so it does not
-       promise a fit; the shrink below cuts only the conversation window. *)
+       The shrink below cuts only the conversation window; the pinned
+       briefing is sent whole. *)
     Option.value
       (Runtime.prompt_capacity_bytes_of_runtime_id runtime_id)
       ~default:unbounded_model_input_capacity_bytes
@@ -1502,6 +1515,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
             ~context_overflow_retry_safe
         ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
             ~on_usage_report
+            ~on_tool_execution
             ~config)
         ())
   in

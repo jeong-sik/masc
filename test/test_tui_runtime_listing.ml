@@ -1744,7 +1744,7 @@ let test_short_viewport_preserves_selected_list_row () =
             (visible >= 1);
           let summary = runtime_selection_summary_for_viewport ~rows ~cols state in
           expect "render budget counts exactly the drawn summary and divider"
-            (runtime_surface_base_chrome ~cols state
+            (runtime_surface_base_chrome ~rows ~cols state
              + (if summary = [] then 0 else List.length summary + 1)) chrome;
           (match runtime_scrolled ~rows ~cols state with
            | None -> Alcotest.fail "runtime list has no scroll geometry"

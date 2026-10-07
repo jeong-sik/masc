@@ -27,7 +27,7 @@ failure just because a keeper uses the Docker backend.
 | `Agent_tool_execute_command_words` | Dependency-light command word extraction for guard tokens, action keys, and history/logging command prefixes | Sandbox cwd policy, Docker process execution |
 | `Agent_tool_execute_command_semantics` | Pure command-shape and cwd policy for `git`/`gh` commands | Docker process execution |
 | `Keeper_sandbox_shell_ir_target` | Backend target construction for typed Shell IR dispatch | Tool-surface ownership, command parsing, `tool_execute` policy |
-| `Keeper_sandbox_runner` | Backend-neutral command execution facade used by tools; route selection between host and sandbox backend; mockable backend contract | Git/remote workflow semantics, tool input validation, command parsing ownership |
+| `Keeper_sandbox_runner` | Effective sandbox profile; backend-neutral command execution facade with a mockable backend contract | Git/remote workflow semantics, tool input validation, command parsing ownership |
 | `Keeper_sandbox_docker` | Docker runtime setup, mounts, network mode, command execution, Docker result envelope | Generic command classification or cwd policy ownership |
 | `Keeper_sandbox_exec_failure` | Sandbox backend failure messages and registry recording | Tool-surface naming, command classification, shell-specific policy |
 
@@ -57,8 +57,9 @@ failure just because a keeper uses the Docker backend.
 - `shared shell compatibility facade` is retired; do not reintroduce it as a compatibility
   facade or implementation owner.
 - Tool modules must not branch on `meta.sandbox_profile = Docker` or call
-  `Keeper_sandbox_docker` directly. They pass host/backend command
-  projections to `Keeper_sandbox_runner`.
+  `Keeper_sandbox_docker` directly. They read the profile through
+  `Keeper_sandbox_runner.effective_sandbox_profile` and dispatch through
+  `Keeper_sandbox_shell_ir_target` or `Keeper_sandbox_read_runner`.
 - Status, list, operator, and sandbox-status surfaces must read effective
   keeper meta via `Keeper_meta_store.read_effective_meta*`, not raw persisted
   JSON, before displaying `sandbox_profile`, `network_mode`, `tool_access`, or

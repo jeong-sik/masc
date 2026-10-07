@@ -98,6 +98,7 @@ val cost_event_payload :
   ?response_id:string ->
   ?runtime_attempt:(string * string * int) ->
   ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
+  ?spend_observation:Keeper_spend_observation.t ->
   ?vendor_total_tokens:int ->
   ?resolution_status:Keeper_usage_resolution.status ->
   ?cache_creation_input_tokens:int ->
@@ -130,6 +131,7 @@ val emit_cost_event :
   ?response_id:string ->
   ?runtime_attempt:(string * string * int) ->
   ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
+  ?spend_observation:Keeper_spend_observation.t ->
   ?vendor_total_tokens:int ->
   ?resolution_status:Keeper_usage_resolution.status ->
   ?cache_creation_input_tokens:int ->

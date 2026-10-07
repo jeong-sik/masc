@@ -316,6 +316,97 @@ let build_presence_snapshot state =
     ]
 ;;
 
+(* ── POST /api/v1/ide/asks ── IDE milestone M1: the first IDE-to-masc write.
+
+   An editor posts what the operator is asking about; masc files it as a Todo
+   task created by "ide" and the fleet's existing pickup does the rest: a
+   keeper claims it, works it, completes it, and the IDE polls the outcome
+   through the dashboard task detail/history routes it already reads.
+
+   Routing is pool-wide on purpose. Tasks carry no pre-assignment -- a keeper
+   becomes the assignee by claiming -- so the body names no keeper and there
+   is no client-supplied identity to spoof, which is what the task-1736 B3
+   mutation contract asks of this plane's first mutation. Targeted asks
+   (name a keeper, or the keeper attached to this codebase) are M2. *)
+
+let ( let* ) = Result.bind
+
+type ide_ask =
+  { question : string
+  ; file_path : string option
+  ; line : int option
+  ; context : string option
+  ; priority : int
+  }
+
+let ide_ask_default_priority = 3
+
+let ide_ask_created_by = "ide"
+
+let json_int_member_opt json name =
+  match Yojson.Safe.Util.member name json with
+  | `Null -> Ok None
+  | `Int n -> Ok (Some n)
+  | `Intlit raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some n -> Ok (Some n)
+     | None -> Error (Printf.sprintf "%s must be an integer" name))
+  | _ -> Error (Printf.sprintf "%s must be an integer" name)
+;;
+
+let json_string_member_opt json name =
+  match Yojson.Safe.Util.member name json with
+  | `Null -> Ok None
+  | `String raw ->
+    let trimmed = String.trim raw in
+    if String.equal trimmed "" then Ok None else Ok (Some trimmed)
+  | _ -> Error (Printf.sprintf "%s must be a string" name)
+;;
+
+let parse_ide_ask (json : Yojson.Safe.t) : (ide_ask, string) result =
+  match json with
+  | `Assoc _ ->
+    (match Yojson.Safe.Util.member "question" json with
+     | `String raw when not (String.equal (String.trim raw) "") ->
+       let question = String.trim raw in
+       let* file_path = json_string_member_opt json "file_path" in
+       let* line = json_int_member_opt json "line" in
+       let* context = json_string_member_opt json "context" in
+       let* priority =
+         match json_int_member_opt json "priority" with
+         | Error _ as error -> error
+         | Ok None -> Ok ide_ask_default_priority
+         | Ok (Some n) -> Ok n
+       in
+       (match line, file_path with
+        | Some n, _ when n < 1 -> Error "line must be a positive integer"
+        | Some _, None -> Error "line requires file_path"
+        | _, _ ->
+          (match priority with
+           | n when n < 1 || n > 5 ->
+             Error (Printf.sprintf "priority must be between 1 and 5, got %d" n)
+           | _ -> Ok { question; file_path; line; context; priority }))
+     | _ -> Error "question is required and must be a non-blank string")
+  | _ -> Error "the ask body must be a JSON object"
+;;
+
+(* The file reference rides the description because tasks carry no file
+   column of their own: what the keeper reads is where the operator was
+   looking, then what else the operator sent. *)
+let ide_ask_description { file_path; line; context; _ } =
+  let where =
+    match file_path, line with
+    | None, _ -> None
+    | Some path, None -> Some (Printf.sprintf "IDE ask from %s" path)
+    | Some path, Some line -> Some (Printf.sprintf "IDE ask from %s:%d" path line)
+  in
+  match where, context with
+  | None, None -> ""
+  | Some where, None -> where
+  | None, Some context -> context
+  | Some where, Some context -> where ^ "\n\n" ^ context
+;;
+
 let add_routes router =
   Ide_bridge.install_agent_observation_sinks ();
   router
@@ -487,4 +578,66 @@ let add_routes router =
            reqd)
       request
       reqd)
+  |> Http.Router.post "/api/v1/ide/asks" (fun request reqd ->
+    (* The plane's first mutation, so the first route behind CanAdmin: filing
+       a task spends keeper attention, and an unauthenticated caller could
+       flood the backlog the fleet claims from. *)
+    with_token_permission_auth ~permission:Masc_domain.CanAdmin
+      (fun state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           match
+             (match Yojson.Safe.from_string body_str with
+              | json -> parse_ide_ask json
+              | exception Yojson.Json_error _ -> Error "the ask body must be JSON")
+           with
+           | Error detail ->
+             Http.Response.json_value
+               ~status:`Bad_request ~request:req
+               (json_error ~code:"invalid_ask" detail)
+               reqd
+           | Ok ask ->
+             let config = Mcp_server.workspace_config state in
+             (match
+                (match
+                   Task.Goal_assignment.add_task_with_result
+                     ~created_by:ide_ask_created_by
+                     config
+                     ~title:ask.question
+                     ~priority:ask.priority
+                     ~description:(ide_ask_description ask)
+                 with
+                 | result -> result
+                 | exception Workspace.Not_initialized ->
+                   Error
+                     (Workspace_task.Backlog_read_failed
+                        "workspace is not initialized"))
+              with
+              | Ok created ->
+                Http.Response.json_value
+                  ~status:`Accepted ~request:req
+                  (json_ok
+                     (`Assoc
+                       [ "ask_id", `String created.task_id
+                       ; "status", `String "todo"
+                       ]))
+                  reqd
+              | Error
+                  ((Workspace_task.Unknown_goal _
+                   | Workspace_task.Unknown_predecessor _
+                   | Workspace_task.Predecessor_not_terminal _) as error) ->
+                (* Unreachable through this route -- asks carry no goal or
+                   predecessor -- but the backend's error is closed and the
+                   mapping stays total if that ever changes. *)
+                Http.Response.json_value
+                  ~status:`Bad_request ~request:req
+                  (json_error ~code:"invalid_ask"
+                     (Workspace_task.add_task_error_to_string error))
+                  reqd
+              | Error error ->
+                Http.Response.json_value
+                  ~status:`Internal_server_error ~request:req
+                  (json_error ~code:"ask_store_unavailable"
+                     (Workspace_task.add_task_error_to_string error))
+                  reqd)))
+      request reqd)
 ;;

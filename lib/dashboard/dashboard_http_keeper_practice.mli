@@ -4,14 +4,18 @@
     {!Keeper_unified_metrics_decision.append_decision_record}) into window
     counts that answer "does this Keeper practice its role, or only wake":
     turn-mode mix, outcome mix, terminal-code histogram, wake-trigger
-    histogram, and tool-use histogram for autonomous turns.
+    histogram, tool-use histogram for autonomous turns, and the
+    affordance-response join — per observed affordance, how the turns that
+    offered it resolved by mode and outcome.
 
     Read-only observability: counts only, no flow control. Unknown wire
     labels are never defaulted into a known bucket (constitution
     [strict_parse_no_default]); turn rows that fail the closed parse land
-    in [unrecognized_turn_rows], and lines that fail JSON parsing land in
-    [malformed_lines], so writer drift and log corruption show up as
-    numbers instead of silently reshaping the known buckets. *)
+    in [unrecognized_turn_rows], affordance labels that fail the closed
+    parse land in [unrecognized_affordance_labels], and lines that fail
+    JSON parsing land in [malformed_lines], so writer drift and log
+    corruption show up as numbers instead of silently reshaping the known
+    buckets. *)
 
 (** Closed turn-outcome vocabulary of the decision log writer:
     [Keeper_unified_turn_success.decision_outcome_to_label] plus the
@@ -28,10 +32,32 @@ val turn_outcome_of_string : string -> turn_outcome option
     padded or empty strings; callers count [None] as unrecognized, never
     as success. *)
 
+(** Closed observed-affordance vocabulary of the decision log writer:
+    [Keeper_unified_metrics_support.observed_affordances_of_observation]. *)
+type affordance =
+  | Board_post_or_comment
+  | Board_curation
+  | Message_sweep
+  | Task_claim
+  | Task_audit
+  | Schedule_dispatch_monitor
+
+val affordance_to_string : affordance -> string
+val affordance_of_string : string -> affordance option
+(** Exact match on the writer label. [None] for anything else, including
+    padded or empty strings; callers count [None] occurrences as
+    unrecognized, never as a known affordance. *)
+
+(** The keeper's declared stance, for reading the practice against. *)
+type role =
+  { activation_mode : string
+  ; paused : bool
+  }
+
 type summary
 (** One keeper's folded window. Opaque: readers consume {!to_json}. *)
 
-val summarize_rows : keeper_name:string -> Yojson.Safe.t list -> summary
+val summarize_rows : keeper_name:string -> ?role:role -> Yojson.Safe.t list -> summary
 (** Pure fold over already-parsed decision-log rows. Rows whose [event]
     member is not exactly ["turn"] are expected log siblings (tool_exec,
     memory_search, ...) and are skipped without counting. A ["turn"] row
@@ -42,7 +68,13 @@ val summarize_rows : keeper_name:string -> Yojson.Safe.t list -> summary
     no strictness is lost. A recognized autonomous row without a
     parseable [turn_mode] counts as mode-absent (error turns normally
     carry no mode; mode strictness inherits
-    {!Turn_mode_codec.turn_mode_of_string}). *)
+    {!Turn_mode_codec.turn_mode_of_string}).
+
+    Each recognized autonomous turn also answers its [observed_affordances]:
+    every recognized label records the turn's mode and outcome under that
+    affordance (a turn offering two affordances answers for both), and
+    every unrecognized label counts as [unrecognized_affordance_labels].
+    Non-string affordance items read as absent. *)
 
 val summarize_keeper :
   config:Workspace.config ->
@@ -59,10 +91,12 @@ val summarize_keeper :
     so tailed lines = [tail_rows] + [malformed_lines]. *)
 
 val to_json : summary -> Yojson.Safe.t
-(** [schema = "keeper.practice.v1"]. Fixed objects for the closed mode
-    and outcome buckets; open label lists (sorted by count desc, label
-    asc) for terminal codes, triggers, and tool names. The window bounds
-    ([since_unix]/[until_unix]) cover recognized turns on any path. *)
+(** [schema = "keeper.practice.v2"]. [role] is the declared stance, or
+    null when the fold ran without one. Fixed objects for the closed
+    mode, outcome, and affordance-response buckets; open label lists
+    (sorted by count desc, label asc) for terminal codes, triggers, and
+    tool names. The window bounds ([since_unix]/[until_unix]) cover
+    recognized turns on any path. *)
 
 val fleet_json :
   config:Workspace.config ->

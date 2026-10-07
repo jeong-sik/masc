@@ -14,10 +14,10 @@ def run(executable, no_color=False):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         h.send_and_wait(process, fd, output,
-                        b"\x1b[200~" + query + b"\x1b[201~", b"(no match)")
+                        b"\x1b[200~" + query + b"\x1b[201~", b"No matching command")
         for width in (40, 60, 120, 28, 31):
             h.resize_and_wait(process, fd, output, rows=24, columns=width,
-                              needle=b"(no match)", controls=(h.FULL_REDRAW,))
+                              needle=b"No matching command", controls=(h.FULL_REDRAW,))
             screen = h.screen_text(bytes(output))
             if b"TAIL987" + caret not in screen:
                 raise AssertionError(f"{width} columns hide filter tail or caret: {screen!r}")

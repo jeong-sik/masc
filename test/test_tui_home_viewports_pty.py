@@ -74,7 +74,7 @@ def viewport_journey(executable, *, unread, no_color):
         executable,
         description=f"Home viewports unread={unread} no_color={no_color}",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
-        prepare_workspace=home.seed_goals,
+        prepare_workspace=home.seed_goals, refresh=0.5,
         extra_env={"NO_COLOR": "1"} if no_color else None,
     )
 

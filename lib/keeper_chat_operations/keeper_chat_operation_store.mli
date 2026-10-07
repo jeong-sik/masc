@@ -195,11 +195,8 @@ end
     recovering records reserve only their own sources, never the running slot. *)
 type semantic_error =
   | Semantic_store_error of error
-  | Unknown_execution of Keeper_execution_scope_id.t
   | Admission_conflict of Keeper_execution_scope_id.t
-  | Execution_changed of Semantic.t
   | Sources_owned of Keeper_execution_scope_id.t list
-  | Execution_slot_busy of Keeper_execution_scope_id.t
   | Invalid_execution of Semantic.error
 
 type semantic_admission = Semantic_created of Semantic.t | Semantic_existing of Semantic.t
@@ -215,12 +212,6 @@ val semantic_prepare :
     Preparing phase together. Reusing identity never clears recorded evidence.
     An uncertain commit is an error; reload by that identity before deciding a
     retry. Different outstanding operations may coexist with disjoint sources. *)
-val semantic_apply :
-  t -> expected:Semantic.t -> now:float -> Semantic.action ->
-  (Semantic.t, semantic_error) result
-(** Exact-record CAS; terminal records are immutable. Only Running occupies the
-    single semantic execution slot. Startup moves interrupted Running records
-    to Recovering without clearing frames, allowing unrelated work to proceed. *)
 
 (** Gate waiting remains the original queued operation, but cannot be claimed
     until a bound durable resolution is supplied. A deferred runtime retry

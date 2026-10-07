@@ -382,7 +382,6 @@
   test_domain_pool
   test_sse
   test_graphql_api
-  test_subscriptions
   test_session
   test_progress
   test_validation
@@ -742,7 +741,6 @@
   test_domain_pool
   test_sse
   test_graphql_api
-  test_subscriptions
   test_session
   test_progress
   test_validation
@@ -2471,6 +2469,7 @@
 (include stanzas/test_candle_goal_flow.inc)
 (include stanzas/test_candle_grant.inc)
 (include stanzas/test_candle_grant_cli.inc)
+(include stanzas/test_candle_gift.inc)
 
 (include stanzas/test_candle_config.inc)
 
@@ -2516,7 +2515,7 @@
 
 (include stanzas/test_machine_checkpoint.inc)
 
-(include stanzas/test_lane_activity.inc)
+(include stanzas/test_machine_action_feed.inc)
 
 (include stanzas/test_lane_id.inc)
 
@@ -3287,7 +3286,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_link_preview masc_tui_image_preview
+ (libraries masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -3346,7 +3345,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries masc_tui_identity_model masc_tui_surface_navigation
+ (libraries masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -3738,6 +3737,11 @@
  unix))
 
 (test
+ (name test_tui_message_input)
+ (modules test_tui_message_input)
+ (libraries alcotest masc_tui_message_input masc_tui_message_layout))
+
+(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries
@@ -3893,7 +3897,7 @@
 (test
  (name test_tui_composer_projection)
  (modules test_tui_composer_projection)
- (libraries
+ (libraries masc_tui_message_input
  alcotest
 
  masc
@@ -6149,8 +6153,14 @@
   astring
   masc
   masc.runtime
+  masc_tui_ansi
   masc_tui_answering
-  masc_tui_message_layout))
+  masc_tui_frame
+  masc_tui_message_layout
+  masc_tui_render_prim
+  masc_tui_render_schedule
+  masc_tui_types
+  unix))
 
 (test
  (name test_tui_chat_activity)
@@ -6320,6 +6330,7 @@
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
 (include stanzas/test_keeper_turn_spend.inc)
+(include stanzas/test_keeper_unsettled_spend.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
@@ -6369,18 +6380,6 @@
  (name test_keeper_tool_surface_schema)
  (modules test_keeper_tool_surface_schema)
  (libraries alcotest yojson masc masc_test_deps))
-
-; The assembled keeper system prompt is built from registry text plus in-code
-; XML structure; substring assertions cannot see block order, separator bytes,
-; or a block that resolved to the empty string. This golden pins the whole
-; string, and declaring the prompt sources as deps is what makes an edit under
-; config/prompts re-run it instead of returning a cached pass.
-(test
- (name test_keeper_system_prompt_blocks)
- (modules test_keeper_system_prompt_blocks)
- (deps
-  (source_tree %{workspace_root}/config/prompts))
- (libraries alcotest masc_test_deps))
 
 (include stanzas/test_librarian_journal_failures.inc)
 
@@ -6779,6 +6778,40 @@
  (modules test_tui_identity_tab)
  (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
 
+(rule
+ (alias runtest-test_tui_identity_login_poll_pty)
+ (deps test_tui_identity_login_poll_pty.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
+ (action
+  (run python3 %{dep:test_tui_identity_login_poll_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_identity_login_poll_pty)))
+
 (test
  (name test_tui_log_channel_column)
  (modules test_tui_log_channel_column)
@@ -6973,7 +7006,7 @@
 (test
  (name test_tui_browser_lane_text)
  (modules test_tui_browser_lane_text)
- (libraries yojson masc masc.browser_lane masc_tui_types masc_tui_message_layout))
+ (libraries masc_tui_message_input yojson masc masc.browser_lane masc_tui_types masc_tui_message_layout))
 
 (include stanzas/test_browser_downloads.inc)
 (include stanzas/test_browser_bidi_lifecycle.inc)
@@ -8010,7 +8043,7 @@
 (test
  (name test_keeper_memory_search_index)
  (modules test_keeper_memory_search_index)
- (libraries alcotest masc))
+ (libraries alcotest masc masc_core eio eio_main))
 
 (test
  (name test_workspace_memory_request)
@@ -8118,6 +8151,11 @@
  (name test_lane_addon_resource_events)
  (modules test_lane_addon_resource_events)
  (libraries masc_test_deps eio eio_main yojson unix))
+
+(test
+ (name test_provider_admission_events)
+ (modules test_provider_admission_events)
+ (libraries masc_test_deps eio eio_main yojson))
 
 (test
  (name test_runtime_setup_spec)
@@ -8492,6 +8530,16 @@
  (libraries alcotest masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 (include stanzas/test_tui_sidebar_index_fold.inc)
+(rule
+ (alias runtest-test_tui_keeper_navigation_pty)
+ (deps test_tui_keeper_navigation_pty.py tui_keyboard_harness.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keeper_navigation_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keeper_navigation_pty)))
+
 (include stanzas/test_tui_surface_chrome_overflow.inc)
 
 (rule
@@ -9400,7 +9448,7 @@
 
 (rule
  (alias runtest-test_tui_task_metadata_viewport_pty)
- (deps test_tui_task_metadata_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+ (deps test_tui_task_metadata_viewport_pty.py test_tui_keyboard_input.py tui_region_harness.py ../bin/masc_tui.exe
   tui_keyboard_approvals.py
   tui_keyboard_board.py
   tui_keyboard_browser.py

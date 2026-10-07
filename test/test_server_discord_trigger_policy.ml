@@ -357,11 +357,8 @@ let test_durable_accept_precedes_delivery_handoff () =
   check string "exact Discord message id" "discord-exact-123"
     failure.Connector_ingress_lane.event_id.opaque_id;
   check string "typed source" "discord_triggered" failure.event_id.source;
-  match failure.lane with
-  | Connector_ingress_lane.Keeper_lane keeper_name ->
-    check string "resolved Keeper lane" "luna" keeper_name
-  | Connector_ingress_lane.Connector_lane connector_id ->
-    failf "expected Keeper lane, got connector:%s" connector_id
+  let (Connector_ingress_lane.Keeper_lane keeper_name) = failure.lane in
+  check string "resolved Keeper lane" "luna" keeper_name
 ;;
 
 module Gw = Discord_gateway_state

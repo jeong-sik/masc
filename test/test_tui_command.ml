@@ -98,6 +98,8 @@ let describe = function
   | Command.Preset_restore_missing_name -> "preset-restore-missing-name"
   | Command.Preset_show name -> "preset-show:" ^ name
   | Command.Preset_show_missing_name -> "preset-show-missing-name"
+  | Command.Preset_delete name -> "preset-delete:" ^ name
+  | Command.Preset_delete_missing_name -> "preset-delete-missing-name"
   | Command.Unknown word -> "unknown:" ^ word
 
 let test_measurement_command () =
@@ -345,6 +347,8 @@ let test_preset_commands_parse_verb_name_and_description () =
     ; "preset-restore-missing-name"
     ; "preset-show:morning"
     ; "preset-show-missing-name"
+    ; "preset-delete:_autosave"
+    ; "preset-delete-missing-name"
     ; "unknown:preset drop"
     ]
     (List.map
@@ -359,6 +363,8 @@ let test_preset_commands_parse_verb_name_and_description () =
        ; "/preset restore"
        ; "/preset show morning"
        ; "/preset show"
+       ; "/preset delete _autosave"
+       ; "/preset delete"
        ; "/preset drop morning"
        ])
 

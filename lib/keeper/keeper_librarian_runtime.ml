@@ -62,7 +62,6 @@ let served_slot_id = function
 
 type extraction_error =
   | Prompt_render_failed of string
-  | Execution_clock_unavailable
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
   | Cli_slots_exhausted of
@@ -83,7 +82,6 @@ type extraction_error =
 let rec extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
   = function
   | Prompt_render_failed _ -> Prompt_render_failure
-  | Execution_clock_unavailable -> Execution_clock_unavailable
   | Exact_setup_failed _ -> Exact_setup_failure
   | Exact_execution_failed _ ->
     Exact_execution_failure
@@ -129,8 +127,6 @@ let exact_setup_error_to_string = function
 
 let rec extraction_error_to_string = function
   | Prompt_render_failed detail -> detail
-  | Execution_clock_unavailable ->
-    "execution clock unavailable"
   | Exact_setup_failed error -> exact_setup_error_to_string error
   | Exact_execution_failed { outward_effect; detail; _ } ->
     Printf.sprintf
@@ -172,7 +168,6 @@ let selected_slot_of_extraction_error = function
   | Absorb_judgment_failed { selected_slot; _ }
   | Memory_snapshot_write_failed { selected_slot; _ } -> Some selected_slot
   | Prompt_render_failed _
-  | Execution_clock_unavailable
   | Exact_setup_failed _
   | Exact_execution_failed _
   | Cli_slots_exhausted _
@@ -614,7 +609,7 @@ let rec extraction_shows_size = function
         | None -> false)
   | Cli_prompt_unavailable { prior_error = Some error } -> extraction_shows_size error
   | Cli_prompt_unavailable { prior_error = None } -> false
-  | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
+  | Prompt_render_failed _ | Exact_setup_failed _
   | No_transport_declared | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> false
 ;;
 
@@ -639,7 +634,7 @@ let extraction_cli_input_limit = function
           then Some observed else selected)
       None failures
   | Exact_execution_failed _
-  | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
+  | Prompt_render_failed _ | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared
   | Domain_output_invalid _ | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> None
 ;;
@@ -1163,7 +1158,7 @@ let context_write_json = function
   | Write_failed detail -> `Assoc ["status", `String "failed"; "detail", `String detail]
 ;;
 
-type write_scope = Context_only | Context_and_memory
+type write_scope = Context_only | Context_and_memory | Memory_maintenance
 
 (* How one continuity publication ended. The caller that owns nothing else
    decides its run's outcome from it. *)
@@ -1231,6 +1226,7 @@ let run_best_effort
         let pass =
           match write_scope, continuity with
           | Context_and_memory, continuity -> Memory_pass continuity
+          | Memory_maintenance, _ -> Memory_pass None
           | Context_only, Some prepared -> Continuity_state_pass prepared
           | Context_only, None -> Working_context_pass
         in
@@ -1548,7 +1544,9 @@ let run_best_effort
                 it retires consumed contexts exactly as a generated one does. *)
              (match selection.working_contexts, continuity_answer with
               | Keeper_librarian.Working_contexts_organized pockets, Memory_only ->
-               organize_working_context pockets
+               (match write_scope with
+                | Memory_maintenance -> ()
+                | Context_only | Context_and_memory -> organize_working_context pockets)
               | Keeper_librarian.Working_contexts_organized _, Continuity _ -> ()
               | Keeper_librarian.Working_contexts_missing, (Memory_only | Continuity _) ->
                 context_write := Answer_missing;

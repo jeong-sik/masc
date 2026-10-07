@@ -97,7 +97,7 @@ type usage_read_shape =
   | Openrouter_key
   | Zai_quota_limit
   | Kimi_coding_usages
-  | Ollama_usage
+  | Ollama_balance
 [@@deriving show, eq]
 
 val all_usage_read_shapes : usage_read_shape list

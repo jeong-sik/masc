@@ -138,6 +138,14 @@ type config = Runtime_agent_context.config = {
   min_p : float option;
   on_run_complete : (bool -> unit) option;
   checkpoint_sink : Agent_core.Agent.checkpoint_sink option;
+  execution_store : Agent_core.Agent.execution_store option;
+      (** Optional caller-owned durable scope for one selected native Agent
+          API call. [None] leaves scope selection to Core, including ambient
+          child execution; Core rejects an explicit store together with an
+          ambient child scope. Use one store/directory per call, including
+          checkpoint continuations; a cooperative yield terminates its scope.
+          The host owns locator persistence, terminal disposition handling
+          and checkpoint recovery. *)
 }
 
 val default_config :

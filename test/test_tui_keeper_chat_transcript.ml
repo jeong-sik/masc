@@ -398,6 +398,7 @@ let drawn_to_string (item : Transcript.drawn_item) =
   | Transcript.Drawn_text text -> "text:" ^ text
   | Transcript.Drawn_reply text -> "reply:" ^ text
   | Transcript.Drawn_status text -> "status:" ^ text
+  | Transcript.Drawn_error text -> "error:" ^ text
 ;;
 
 let drawn t = List.map drawn_to_string (Transcript.drawn t)
@@ -626,11 +627,15 @@ let test_run_failure_and_finish_set_the_phase () =
   check phase "a failed run says so"
     (Transcript.Stream_failed "provider 429")
     (Transcript.phase failed);
+  check (list string) "a failure before any output remains in the transcript"
+    [ "error:provider 429" ] (drawn failed);
   check string "failure progress carries the cause without another error label"
     "provider 429 \xc2\xb7 0s"
     (List.assoc Transcript.Progress (rows failed));
   let missing = fresh () in
   feed missing [ Live.Run_started; Live.Run_failed { message = " " } ];
+  check (list string) "a missing failure cause remains visible"
+    [ "error:cause not reported" ] (drawn missing);
   check string "a missing cause is explicit" "cause not reported \xc2\xb7 0s"
     (List.assoc Transcript.Progress (rows missing));
   let missing_on_runtime = fresh () in
@@ -647,6 +652,24 @@ let test_run_failure_and_finish_set_the_phase () =
   feed finished [ Live.Run_started; Live.Run_finished ];
   check phase "a finished run says so" Transcript.Stream_ended
     (Transcript.phase finished)
+
+let test_failure_after_recorded_reply_preserves_both () =
+  List.iter (fun (outcome, expected_reply) ->
+    let t = fresh () in
+    feed t [ Live.Run_started; control_reply outcome; Live.Run_finished ];
+    feed ~now:(origin +. 12.) t [ Live.Run_failed {message="resumed operation failed"} ];
+    check (list string) "the prior reply and later terminal failure both remain"
+      [expected_reply; "error:resumed operation failed"] (drawn t);
+    match List.rev (Transcript.drawn t) with
+    | { Transcript.drawn = Drawn_error _; at; segment; _ } :: _ ->
+        check (option (float 0.001)) "failure retains its later observation time"
+          (Some (origin +. 12.)) at;
+        check int "failure belongs to its original segment" 0 segment
+    | _ -> fail "terminal failure disappeared from the drawn timeline")
+    [ Masc.Keeper_turn_outcome.Visible_reply, "reply:recorded but not chunked"
+    ; Masc.Keeper_turn_outcome.Continuation_checkpoint,
+      "status:Continuation checkpoint recorded (turn trace-1#3)" ]
+;;
 
 let test_terminal_turn_marks_only_unresolved_tools () =
   List.iter
@@ -2993,6 +3016,8 @@ let () =
     ; ( "phase"
       , [ test_case "failure and finish are distinct" `Quick
             test_run_failure_and_finish_set_the_phase
+        ; test_case "failure after recorded reply preserves both" `Quick
+            test_failure_after_recorded_reply_preserves_both
         ; test_case "terminal turns settle only unresolved tool projections" `Quick
             test_terminal_turn_marks_only_unresolved_tools
         ; test_case "superseded tools keep attempt identity" `Quick

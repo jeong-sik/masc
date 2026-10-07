@@ -7313,7 +7313,8 @@ let observed_turn_text_drawn state keeper_name =
           | Masc_tui_keeper_chat_transcript.Drawn_thinking _
           | Masc_tui_keeper_chat_transcript.Drawn_skill _
           | Masc_tui_keeper_chat_transcript.Drawn_tools _
-          | Masc_tui_keeper_chat_transcript.Drawn_status _ ->
+          | Masc_tui_keeper_chat_transcript.Drawn_status _
+          | Masc_tui_keeper_chat_transcript.Drawn_error _ ->
               false)
         (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript))
     (observed_logs_for_keeper state keeper_name
@@ -7352,8 +7353,8 @@ let held_turn_of_log turn_log =
    [enrich_held_logs_from_rows]), its skills (with the exact delivery record
    folded in by the same pass), and its reasoning when it has any. What a
    person said, what the server said about the turn (gate rows), what the
-   pane said, and a failure are drawn from the committed rows whether or not
-   a log holds the turn -- the log draws none of them. *)
+   pane said, and a failure stay in the committed rows. The renderer uses a
+   log's failure only when no committed error row names that operation. *)
 let log_draws_row (held : held_turn) (row : msg_entry) =
   String.equal row.me_request_id held.ht_request_id
   &&

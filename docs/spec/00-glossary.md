@@ -2952,13 +2952,10 @@ status: reference
   `render_if_enabled`가 호출되어 각 스토어의 상태(`Present`, `Authoritatively empty / Absent`, `Unavailable`)를 투영하며, 회상 비활성화 시 안정적 중지 마커(`disabled`)를 방출한다.
   현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 표면이 가진 조회 기능에 따라 투영을 나눈다. `keeper_memory_search`를 쓸 수 있는 표면에는 저장소 가용성·건수와 현재 조회 안내만 전달하며, 주장 본문을 싣거나 소스 파일을 재검증하거나 아티팩트를 발행하지 않는다. 아티팩트 전용 표면은 전체 투영을 재검증해 보존되는 페이지형 아티팩트로 발행하고, 프롬프트에는 상태·건수·타입화된 무효화·읽지 못한 소스 식별자와 아티팩트 핸들만 보낸다. 이때도 주장 본문은 프롬프트에 복사하지 않는다. 조회 기능이 없거나 아티팩트 발행이 실패하면 가용성과 과거 참조 철회 안내를 보내며 사실 전량을 폴백 주입하지 않는다. Recall 경로의 선택은 저장 기억을 삭제하지 않는다.
   소스 바인딩 사실은 반환되기 전에 저장된 SHA-256과 대상 파일의 정확한 바이트를 대조한다. 검색 표면은 쿼리에 맞는 소스 후보만 재검증하고, 아티팩트 전용 표면은 전체 투영을 확인한다. 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)가 된다. 읽기 실패·접근 불능이면 주장 본문(`claim text`)을 보류(`withheld`)하고 소스 식별자·사유·재읽기 안내(`deferred source identity, reason, re-read instructions`)만 전달한다. 출판된 스냅샷 참조는 키퍼 런타임 트리에 구조적으로 고정(`current pin`)되어 dated reference 이력이 유지되는 동안 롱텀 히스토리 GC에서 보존된다(#40486·#40557).
-  유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 정의하는 아키텍처다:
-  - **보존과 전송의 분리**: 저장소는 모든 current fact를 영구 보존하며, 전송 예산이나 링크 미부합으로 누락된 fact를 저장 사실의 삭제·철회·부정으로 해석하지 않는다.
-  - **상시 블록(`Standing`)**: Keeper 정체성, 지속 선호, 권한 경계, 현재 Task/Goal 주소만 포함하며, 넓은 분류(`category=constraint`)만으로 상시 승격하지 않는다.
-  - **후보 선정(`Candidate`)**: 현재 턴의 Task(`Task of task_id`), Goal(`Goal of goal_id`), 자극(`Stimulus of stimulus_id`)과 타입화 링크(`typed link`)가 확인된 사실만 후보가 되며, 비연결 사실에 최신순·문자열 유사도 점수를 임의 적용하지 않는다.
-  - **조건부 유효성과 만료(`Validity & Expiry`)**: 유효성(`Unconditional | Conditional of condition`)은 사건 증거가 확인되었을 때만 만료(`Expired`)하며, 상태를 읽지 못했을 때는 유효나 만료로 단정하지 않고 미확인(`Unknown`)으로 다룬다.
-  - **적용 권한 고정과 철회(`Recall Scope & Withdrawal`)**: 모든 정상 투영은 `Recall_scope = Current_projection_only`를 선언하여 과거 턴 Recall projection의 본문과 조건이 현재 턴의 근거가 아님을 확정한다. 용량 정책 위반(`Invalid_capacity_policy`)이나 예산 초과(`Budget_overrun`) 시에는 과거 적용 권한을 즉시 끝내는 고정 제어 블록(`Recall_withdrawn`)을 발행한다.
-  - **식별자 및 원자적 번들**: 식별자는 `Ordinary { keeper_id; memory_id } | Source_bound { keeper_id; claim_id }`의 닫힌 형태를 따르고, 일반·소스·메타데이터 3대 스냅샷은 불변 번들(`Recall_snapshot_bundle`)과 CAS 매니페스트로 원자적 출판 경계를 유지한다.
+  작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)은 아직 구현이
+  아니라 설계 제안이다 — 그 설계의 이름들(`Standing`·`Candidate`·`Validity & Expiry`·
+  `Recall Scope & Withdrawal` 등)은 코드에 없고, 전문은
+  [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md) 한 곳에만 둔다.
   → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
 
 **Keeper Demand Recall (요구 기반 회상)**

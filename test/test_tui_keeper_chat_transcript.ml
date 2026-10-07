@@ -69,8 +69,10 @@ let phase = testable (Fmt.of_to_string phase_to_string) ( = )
 
 let outcome_to_string : Transcript.tool_outcome -> string = function
   | Transcript.Started -> "started"
+  | Transcript.Native_running -> "native_running"
   | Transcript.Awaiting_result -> "awaiting_result"
   | Transcript.Returned -> "returned"
+  | Transcript.Native_ended -> "native_ended"
   | Transcript.Failed -> "failed"
   | Transcript.Never_returned -> "never_returned"
   | Transcript.Outcome_unrecorded -> "outcome_unrecorded"
@@ -2750,9 +2752,61 @@ let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
         (String.length (String.trim meaning) > 0))
     Transcript.legend
 
+let test_event_times_survive_log_replay_and_continuation () =
+  let log = Log.create ~keeper_name:"keeper.one" ~request_id:"timed" ~started_at:100. in
+  let put at delta = ignore (Log.add ~at log ~seq:None delta) in
+  put 101. Live.Run_started;
+  put 110. (Live.Text "First segment.");
+  put 115. (Live.Reply_details {reply="";
+    turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"});
+  put 116. Live.Run_finished;
+  let checkpoint = Transcript.of_log ~now:999. log |> Transcript.drawn in
+  check (list (option (float 0.001))) "checkpoint uses its event time"
+    [Some 110.; Some 115.] (List.map (fun (item : Transcript.drawn_item) -> item.at) checkpoint);
+  put 140. Live.Run_started;
+  put 141. (Live.Runtime_attempt_started {runtime_id=Some "codex"; attempt_index=Some 0});
+  (* This continuation supplies a canonical answer without a text delta.
+     It cannot replace the first segment's text. *)
+  put 150. (Live.Reply_details {reply="Second segment.";
+    turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="trace#2"});
+  put 151. Live.Run_finished;
+  let replayed = Transcript.of_log ~now:999. log |> Transcript.drawn in
+  check (list (option (float 0.001))) "server times survive refolding"
+    [Some 110.; Some 150.] (List.map (fun (item : Transcript.drawn_item) -> item.at) replayed);
+  check (list string) "new canonical reply preserves earlier segment"
+    ["First segment."; "Second segment."]
+    (List.filter_map (fun (item : Transcript.drawn_item) -> match item.drawn with
+      | Drawn_text text | Drawn_reply text -> Some text | _ -> None) replayed);
+  check bool "continuation is not a superseded runtime attempt" true
+    (List.for_all (fun (item : Transcript.drawn_item) -> item.superseded=None) replayed)
+;;
+
+let test_native_tools_are_observations_without_execution_receipts () =
+  let t = fresh () in
+  let occurrence = occurrence ~block_index:7 "native-7" in
+  feed t [Live.Run_started; Live.Native_tool_started {occurrence;tool_name=Some "Read"}];
+  let call () = match Transcript.tool_calls t with
+    | [call] -> call | calls -> failf "expected one native step, got %d" (List.length calls) in
+  check tool_outcome "provider step runs; arguments are not inferred" Transcript.Native_running (call ()).outcome;
+  feed t [Live.Native_tool_started {occurrence;tool_name=Some "Read"};
+          Live.Native_tool_ended {occurrence}; Live.Native_tool_ended {occurrence}];
+  check tool_outcome "provider end is not a result receipt" Transcript.Native_ended (call ()).outcome;
+  check (option string) "no invented physical execution" None (call ()).execution_id;
+  feed t [Live.Tool_result {occurrence; execution_id="wrong-authority"}];
+  check (option string) "MASC receipt cannot attach to native observation" None (call ()).execution_id;
+  check bool "mixed-authority event is reported" true (Option.is_some (Transcript.unreadable t));
+  let rows = Transcript.project_tool_block Transcript.Compact
+      (Transcript.tool_block (Transcript.tool_calls t)) in
+  check tool_outcome "collapsed tools retain native outcome" Transcript.Native_ended
+    (Option.get rows.summary_outcome)
+;;
+
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "content"
+    [ ( "event timeline"
+      , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
+         test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts] )
+    ; ( "content"
       , [ test_case "the legend names every mark and phrase the rows draw" `Quick
             test_the_legend_names_every_mark_and_phrase_the_rows_draw
         ; test_case "checkpoint keeps original request live" `Quick test_checkpoint_wait_keeps_the_request_live

@@ -49,6 +49,17 @@ val events_dir : base_dir:string -> string
 (** [<base>/.masc/keeper_chat_events]: the root every keeper's journals live
     under, [<events_dir>/<keeper>/<operation_id>.jsonl]. *)
 
+val turn_events_dirname : string
+(** Separate store for autonomous turn journals, keyed by typed turn reference. *)
+
+val turn_journal_path :
+  base_dir:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t -> string
+
+val open_turn_journal :
+  base_dir:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t -> unit -> journal
+(** Same envelope and failure policy as operation journals, without inventing
+    a chat operation for an autonomous turn. *)
+
 val journal_path :
   base_dir:string -> keeper_name:string -> operation_id:string -> string
 (** [<base>/.masc/keeper_chat_events/<keeper>/<operation_id>.jsonl], with both

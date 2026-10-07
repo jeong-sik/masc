@@ -10704,6 +10704,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_composite_changed _
       | Masc_tui_observer.Keeper_chat_appended _
       | Masc_tui_observer.Keeper_chat_stream_frame _
+      | Masc_tui_observer.Keeper_turn_stream_frame _
       | Masc_tui_observer.Keeper_waiting_inventory_changed _
       | Masc_tui_observer.Fusion_run_status _
       | Masc_tui_observer.Internal_agent_runs_changed

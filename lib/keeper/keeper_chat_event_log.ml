@@ -253,6 +253,16 @@ let keeper_chat_event_to_json event =
       "tool_call_end"
       ([ "occurrence", occurrence_to_json occurrence ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Native_tool_start tool ->
+    type_tag "native_tool_start"
+      ([ "occurrence", occurrence_to_json tool.occurrence ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
+  | Native_tool_end tool ->
+    type_tag "native_tool_end"
+      ([ "occurrence", occurrence_to_json tool.occurrence ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
   | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
     type_tag
       "tool_approval_requested"
@@ -460,6 +470,15 @@ let keeper_chat_event_of_json json =
            { occurrence
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            })
+    | ("native_tool_start" | "native_tool_end") as tag ->
+      let* occurrence = occurrence_of_json (json |> member "occurrence") in
+      let tool =
+        { occurrence
+        ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+        ; tool_call_name = json |> member "tool_call_name" |> to_string_option
+        }
+      in
+      Ok (if String.equal tag "native_tool_start" then Native_tool_start tool else Native_tool_end tool)
     | "tool_approval_requested" ->
       Ok
         (Tool_approval_requested
@@ -590,6 +609,7 @@ let sanitize_segment = Workspace_utils_backend_setup.sanitize_namespace_segment
    consistency audit's sweep, and the retention pruner all derive their paths
    from it. *)
 let events_dirname = "keeper_chat_events"
+let turn_events_dirname = "keeper_turn_events"
 
 let events_dir ~base_dir =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) events_dirname
@@ -603,8 +623,7 @@ let journal_path ~base_dir ~keeper_name ~operation_id =
 
 (* Fail-open at construction too: a directory we cannot create must not abort
    the turn; the per-event append below then logs each failure. *)
-let open_journal ~base_dir ~keeper_name ~operation_id () =
-  let path = journal_path ~base_dir ~keeper_name ~operation_id in
+let open_path path =
   (try Fs_compat.mkdir_p (Filename.dirname path) with
    | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
    | exn ->
@@ -613,6 +632,22 @@ let open_journal ~base_dir ~keeper_name ~operation_id () =
        path
        (Printexc.to_string exn));
   { path }
+;;
+
+let open_journal ~base_dir ~keeper_name ~operation_id () =
+  open_path (journal_path ~base_dir ~keeper_name ~operation_id)
+;;
+
+let turn_journal_path ~base_dir ~keeper_name ~turn_ref =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) turn_events_dirname)
+       (sanitize_segment keeper_name))
+    (sanitize_segment (Ids.Turn_ref.to_string turn_ref) ^ ".jsonl")
+;;
+
+let open_turn_journal ~base_dir ~keeper_name ~turn_ref () =
+  open_path (turn_journal_path ~base_dir ~keeper_name ~turn_ref)
 ;;
 
 (* A non-finite float (NaN/inf) would serialize to a bare NaN/Infinity token —

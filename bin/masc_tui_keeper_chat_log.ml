@@ -2,8 +2,15 @@ module Live = Masc_tui_keeper_chat_live
 module E = Masc.Keeper_chat_events
 module Journal = Masc.Keeper_chat_event_log
 
+type journal_source = Operation of string | Autonomous_turn of Ids.Turn_ref.t
+
+let source_key = function
+  | Operation operation_id -> operation_id
+  | Autonomous_turn turn_ref -> Ids.Turn_ref.to_string turn_ref
+
 type entry =
   { seq : int option
+  ; at : float option
   ; attempt : int
   ; delta : Live.delta
   }
@@ -11,6 +18,7 @@ type entry =
 type t =
   { keeper_name : string
   ; request_id : string
+  ; source : journal_source
   ; started_at : float
   ; mutable reversed_entries : entry list
   ; held_seqs : (int, unit) Hashtbl.t
@@ -21,9 +29,10 @@ type t =
   ; mutable revision : int
   }
 
-let create ~keeper_name ~request_id ~started_at =
+let create_for_source ~keeper_name ~source ~started_at =
   { keeper_name
-  ; request_id
+  ; request_id = source_key source
+  ; source
   ; started_at
   ; reversed_entries = []
   ; held_seqs = Hashtbl.create 64
@@ -33,6 +42,10 @@ let create ~keeper_name ~request_id ~started_at =
   ; revision = 0
   }
 
+let create ~keeper_name ~request_id ~started_at =
+  create_for_source ~keeper_name ~source:(Operation request_id) ~started_at
+
+let source t = t.source
 let keeper_name t = t.keeper_name
 let request_id t = t.request_id
 let started_at t = t.started_at
@@ -44,7 +57,7 @@ let revision t = t.revision
 
 let bump t = t.revision <- t.revision + 1
 
-let add t ~seq (delta : Live.delta) =
+let add ?at t ~seq (delta : Live.delta) =
   let duplicate =
     match seq with
     | Some seq -> Hashtbl.mem t.held_seqs seq
@@ -57,6 +70,7 @@ let add t ~seq (delta : Live.delta) =
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
      | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
      | Live.Stream_details _
+     | Live.Native_tool_started _ | Live.Native_tool_ended _
      | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
      | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint
@@ -67,7 +81,7 @@ let add t ~seq (delta : Live.delta) =
        Hashtbl.replace t.held_seqs seq ();
        t.resume_position <- Journal.replay_position_advance t.resume_position seq
      | None -> ());
-    t.reversed_entries <- { seq; attempt = t.attempt; delta } :: t.reversed_entries;
+    t.reversed_entries <- { seq; at; attempt = t.attempt; delta } :: t.reversed_entries;
     bump t;
     true
   end
@@ -159,6 +173,13 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
                error.quarantined_occurrence
          ; detail = protocol_error_detail error
          })
+  | E.Native_tool_start native ->
+    Some (Live.Native_tool_started
+      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id
+      ; tool_name = native.tool_call_name })
+  | E.Native_tool_end native ->
+    Some (Live.Native_tool_ended
+      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id })
   | E.Tool_call_start { occurrence = o; tool_call_id; tool_call_name } ->
     Some
       (Live.Tool_started
@@ -215,14 +236,14 @@ let add_journaled t (lines : Journal.journaled_event list) =
          hold_seq t line.seq;
          taken
        | Some delta ->
-         if add t ~seq:(Some line.seq) delta then (line, delta) :: taken else taken)
+         if add ~at:line.ts t ~seq:(Some line.seq) delta then (line, delta) :: taken else taken)
     []
     lines
   |> List.rev
 ;;
 
 type events_page =
-  { operation_id : string
+  { source : journal_source
   ; events : Journal.journaled_event list
   ; has_more : bool
   ; next_since_seq : Journal.replay_position
@@ -235,16 +256,21 @@ let decode_events_page (json : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   match json with
   | `Assoc fields ->
-    let* () =
+    let* source =
       match List.assoc_opt "schema" fields with
-      | Some (`String schema) when String.equal schema events_schema -> Ok ()
+      | Some (`String schema) when String.equal schema events_schema ->
+          (match List.assoc_opt "operation_id" fields with
+           | Some (`String value) when String.trim value <> "" -> Ok (Operation value)
+           | Some _ | None -> Error "events body has no operation_id")
+      | Some (`String "masc.keeper_turn_events.v1") ->
+          (match List.assoc_opt "turn_ref" fields with
+           | Some (`String value) ->
+               (match Ids.Turn_ref.of_string value with
+                | Some turn_ref -> Ok (Autonomous_turn turn_ref)
+                | None -> Error "events body has invalid turn_ref")
+           | Some _ | None -> Error "events body has no turn_ref")
       | Some (`String schema) -> Error ("unexpected events schema: " ^ schema)
       | Some _ | None -> Error "events body has no schema"
-    in
-    let* operation_id =
-      match List.assoc_opt "operation_id" fields with
-      | Some (`String value) when String.trim value <> "" -> Ok value
-      | Some _ | None -> Error "events body has no operation_id"
     in
     let* has_more =
       match List.assoc_opt "has_more" fields with
@@ -287,7 +313,7 @@ let decode_events_page (json : Yojson.Safe.t) =
         raw_events
       |> Result.map List.rev
     in
-    Ok { operation_id; events; has_more; next_since_seq; next_since_offset }
+    Ok { source; events; has_more; next_since_seq; next_since_offset }
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "events body is not an object"
 ;;
@@ -317,9 +343,23 @@ let events_query ~encode_value ~operation_id ~since_seq ~since_offset ~limit =
     limit
 ;;
 
+let journal_path ~encode_value ~keeper_name ~source ~since_seq ~since_offset ~limit =
+  match source with
+  | Operation operation_id ->
+      Printf.sprintf "/api/v1/keepers/%s/chat/events?%s" (encode_value keeper_name)
+        (events_query ~encode_value ~operation_id ~since_seq ~since_offset ~limit)
+  | Autonomous_turn turn_ref ->
+      let cursor name = function None -> "" | Some value -> Printf.sprintf "&%s=%d" name value in
+      Printf.sprintf "/api/v1/keepers/%s/turns/%s/events?limit=%d%s%s"
+        (encode_value keeper_name) (encode_value (Ids.Turn_ref.to_string turn_ref)) limit
+        (cursor "since_seq" (Journal.replay_position_to_wire since_seq))
+        (cursor "since_offset" (Journal.page_start_to_wire since_offset))
+;;
+
 type events_error =
   | Unknown_operation
   | Journal_pruned
+  | Journal_missing
   | Journal_unavailable of string
   | Cursor_refused of
       { refusal : Journal.cursor_refusal
@@ -339,6 +379,7 @@ let cursor_refusal_to_string = function
 let events_error_to_string = function
   | Unknown_operation -> "unknown operation"
   | Journal_pruned -> "journal pruned"
+  | Journal_missing -> "journal not recorded"
   | Journal_unavailable detail -> "journal unavailable: " ^ detail
   | Cursor_refused { refusal; message } ->
     Printf.sprintf
@@ -393,6 +434,7 @@ let decode_events_error ~status ~credential_sent body =
     (match List.assoc_opt "error" fields with
      | Some (`String "unknown_operation") -> Unknown_operation
      | Some (`String "journal_pruned") -> Journal_pruned
+     | Some (`String "journal_missing") -> Journal_missing
      | Some (`String ("journal_unreadable" | "journal_corrupt")) ->
        Journal_unavailable message
      | Some (`String code) ->

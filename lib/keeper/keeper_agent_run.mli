@@ -280,6 +280,7 @@ val run_turn
   -> ?on_tool_stream_observation:
        (Keeper_hooks_agent_core.tool_stream_observation -> unit)
   -> ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit)
+  -> ?tool_result_commit_policy:Keeper_hooks_agent_core.tool_result_commit_policy
   -> ?approval_gate:Keeper_tool_approval_gate.t
   -> ?trajectory_acc:Trajectory.accumulator
      (* The receipt's degraded-retry report takes no caller argument. A caller

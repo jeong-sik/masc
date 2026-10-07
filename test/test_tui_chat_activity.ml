@@ -15,7 +15,7 @@ let state () =
 
 let running ?(keeper_name = "alpha") lane : Decode.keeper_turn_row =
   { ktr_chat_control_token = None; ktr_keeper_name = keeper_name
-  ; ktr_state = Keeper_turn_running { lane; started_at_unix = 1.; interrupt_token = "fixture-token"; preview = None }
+  ; ktr_state = Keeper_turn_running { lane; started_at_unix = 1.; interrupt_token = "fixture-token"; turn_ref = None; preview = None }
   }
 
 let live ?(keeper_name = "alpha") ?(request_id = "request-1") state admission =
@@ -69,7 +69,9 @@ let test_the_band_does_not_repeat_the_admission () =
            [ "Your message"; "Your request"; "queued at the server" ])
     | rows -> fail (String.concat " | " (texts rows)))
     [ None, ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 awaiting receipt"]
-    ; Some Live.Running, []; Some Live.Settled, []
+    ; Some Live.Running,
+        ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"]
+    ; Some Live.Settled, []
     ; Some Live.Queued,
         ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"] ]
 
@@ -502,10 +504,60 @@ let test_compact_failure_keeps_exact_cause () =
           && Astring.String.is_infix ~affix:"exact stream failure cause" text) rows)) [false; true])
     [Tui.Tools_compact; Tui.Tools_results]
 
+let test_compact_progress_follows_working_execution () =
+  let state = state () in
+  state.msg_tool_visibility <- Tui.Tools_compact;
+  let active = inflight ~request_id:"active-execution" ~at:1. () in
+  Tui.turn_log_add ~now:2. active.log ~seq:(Some 0) Live.Run_started;
+  Tui.turn_log_add ~now:3. active.log ~seq:(Some 1)
+    (Live.Thinking "Consider the observed state");
+  let pending = inflight ~request_id:"new-pending-input" ~at:4. () in
+  Tui.turn_log_add ~now:4. pending.log ~seq:(Some 0)
+    (Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None});
+  state.msg_inflight <- [pending; active];
+  state.msg_live <- Some pending.log;
+  let progress ~now =
+    match Tui.keeper_message_status_log state with
+    | None -> fail "working execution disappeared behind pending input"
+    | Some source ->
+        check string "status belongs to the execution producing events"
+          "active-execution" (Tui.turn_log_execution_id source);
+        Tui.keeper_message_visible_status_rows state source.tl_transcript ~now
+        |> List.filter_map (fun (kind, text) ->
+            match kind with
+            | Masc_tui_keeper_chat_transcript.Progress -> Some text
+            | Answer_needed | Attention | Approval _ -> None)
+        |> String.concat "\n"
+  in
+  List.iter (fun folded ->
+    state.msg_turn_folded <- folded;
+    check bool "reasoning remains visible in compact progress" true
+      (Astring.String.is_infix ~affix:"reasoning" (progress ~now:3.5))) [false; true];
+  let occurrence : Live.tool_occurrence =
+    {stream_scope=0; block_index=1; provider_message_id=None;
+     tool_call_id=Some "observed-tool"} in
+  Tui.turn_log_add ~now:5. active.log ~seq:(Some 2)
+    (Live.Tool_started {occurrence; tool_name="Inspect_state"});
+  check bool "the running tool is named without expanding tool details" true
+    (Astring.String.is_infix ~affix:"Inspect_state" (progress ~now:5.5));
+  check (list string) "the new input remains pending beside actual progress"
+    ["new-pending-input"]
+    (Tui.keeper_message_waiting_requests state ~keeper_name:"alpha"
+     |> List.map (fun (request, _) -> request.Chat.request_id));
+  (* Reopening the pane follows a held journal, with no locally owned stream. *)
+  Masc_tui_keeper_chat_log.commit active.log.tl_log;
+  state.msg_settled_logs <- [active.log];
+  state.msg_inflight <- [];
+  state.msg_live <- None;
+  check bool "an observed journal keeps the same compact tool progress" true
+    (Astring.String.is_infix ~affix:"Inspect_state" (progress ~now:6.))
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
       [ test_case "compact exact failure cause" `Quick test_compact_failure_keeps_exact_cause
+      ; test_case "compact progress follows working execution" `Quick
+          test_compact_progress_follows_working_execution
       ; test_case "priority control receipt ordering" `Quick test_priority_control_receipt_ordering
       ; test_case "foreign stop command remains complete" `Quick test_foreign_stop_command_remains_complete
       ; test_case "uncovered execution failures remain visible" `Quick test_compact_keeps_uncovered_execution_problems

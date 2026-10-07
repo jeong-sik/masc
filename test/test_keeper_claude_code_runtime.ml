@@ -1472,6 +1472,40 @@ let streamed_text events =
    row on any chat surface, so without a break the viewer read
    "확인할게요.완료". The result repeats the last response, which already
    streamed, so the end of the turn adds nothing. *)
+let test_keeper_preserves_claude_thinking_before_tools () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [Emit (response_frame ~turn_id:"thinking-turn" ~message_id:"thinking-message"
+          (`Assoc ["type", `String "thinking"; "thinking", `String "Inspect the state";
+            "signature", `String "opaque-signature"]));
+       Emit (response_native_tool ~turn_id:"thinking-turn" ~message_id:"thinking-message"
+          ~call_id:"thinking-tool" ~tool_name:"Read");
+       Emit (response_native_tool ~turn_id:"thinking-turn" ~message_id:"thinking-message"
+          ~call_id:"thinking-tool" ~tool_name:"Read");
+       Emit (native_tool_result ~call_id:"thinking-tool" ~content:"observed");
+       Emit (response_text ~turn_id:"thinking-turn" ~message_id:"answer-message" "Answer");
+       Emit (result_text ~turn_id:"thinking-turn" "Answer")]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"THINK_THEN_ANSWER"
+            ~on_event:(fun event -> events := event :: !events) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok turn ->
+            (match List.rev !events with
+             | [Agent_core.Types.MessageStart _;
+                ContentBlockDelta {index=1; delta=ThinkingDelta "Inspect the state"};
+                ContentBlockStart {index=2; content_type="native_tool_use";
+                  tool_id=Some "thinking-tool"; tool_name=Some "Read"};
+                ContentBlockStart {index=2; content_type="native_tool_use";
+                  tool_id=Some "thinking-tool"; tool_name=Some "Read"};
+                ContentBlockStop {index=2};
+                ContentBlockDelta {index=0; delta=TextDelta "Answer"};
+                MessageDelta _; MessageStop] -> ()
+             | _ -> fail "thinking, native tool, and answer lost their order or separate indices");
+            check string "thinking does not enter final response" "Answer" (keeper_response_text turn)))
+;;
+
 let test_keeper_streams_two_claude_responses_apart () =
   let base_path = temp_workspace () in
   let events = ref [] in
@@ -3721,6 +3755,8 @@ let () =
             "two Claude responses stream apart"
             `Quick
             test_keeper_streams_two_claude_responses_apart
+        ; test_case "thinking stays ahead of tools and outside answer text" `Quick
+            test_keeper_preserves_claude_thinking_before_tools
         ; test_case
             "no break across a MASC tool row"
             `Quick

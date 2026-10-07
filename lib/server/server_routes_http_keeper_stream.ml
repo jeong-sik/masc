@@ -494,6 +494,8 @@ let handle_keeper_turns_list state request reqd =
             in
             `Assoc
               [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))
+              ; ("turn_ref", match Keeper_autonomous_stream.current ~base_path:config.base_path ~keeper_name with
+                   | None -> `Null | Some turn_ref -> Ids.Turn_ref.to_yojson turn_ref)
               ; ("started_at_unix", `Float turn.started_at)
               ; ("interrupt_token", `String (Keeper_interrupt_token.to_string turn.interrupt_token))
               ; ("preview", preview_json)

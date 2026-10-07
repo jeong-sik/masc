@@ -41,6 +41,10 @@ type tool_outcome =
   | Started
   | Awaiting_result
   | Returned
+  | Native_running
+  | Native_ended
+      (** The provider ended its native tool step; no MASC result or success
+          receipt was reported. *)
   | Failed
   | Never_returned
       (** No result was observed here before the attempt ended. This does not
@@ -265,6 +269,11 @@ type awaiting_approval =
 
 type t
 
+val create_for_source :
+  keeper_name:string -> source:Masc_tui_keeper_chat_log.journal_source -> started_at:float -> t
+(** Autonomous journals close at their turn boundary; operation journals may
+    resume the same request after a continuation checkpoint. *)
+
 val create :
   keeper_name:string -> request_id:string -> started_at:float -> t
 (** [started_at] is when the request was dispatched, not when the run
@@ -276,6 +285,10 @@ val keeper_name : t -> string
 val request_id : t -> string
 val execution_id : t -> string
 (** Shared batch execution owner, or the singleton request identity. *)
+val rejection : t -> string option
+val note_rejection : now:float -> t -> string -> unit
+(** A verified pre-execution refusal. Retained separately from user content;
+    an interrupted or unverified transport is never a rejection. *)
 val started_at : t -> float
 (** The dispatch instant supplied to {!create}. Exposed as typed timeline
     input so a live turn keeps its original civil-hour rail while it grows. *)
@@ -422,6 +435,7 @@ val stream_details_within :
     outcome, and the turn it was recorded under. *)
 type reply =
   { reply_text : string
+  ; reply_at : float (** Recorded observation time, including checkpoints. *)
   ; reply_outcome : Masc.Keeper_turn_outcome.t
   ; reply_turn_ref : string
   }
@@ -458,7 +472,12 @@ type drawn =
           reply through {!turn_status_text}. *)
 
 type drawn_item =
-  { superseded : int option
+  { at : float option
+        (** First observed event time for this stretch; [None] for delivery
+            records whose stream event was unavailable. Journal replay keeps
+            the recorded time, rather than the time the page was fetched. *)
+  ; segment : int (** Continuation segment owning this stretch. *)
+  ; superseded : int option
         (** [Some attempt] when a later runtime attempt superseded this row;
             [None] on the current attempt's rows. *)
   ; superseded_runtime_id : string option
@@ -490,14 +509,9 @@ val drawn : t -> drawn_item list
     row when no stretch streamed. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
-(** The transcript a log projects to: {!create} from the log's identity, then
-    {!apply} over every entry in order with the one [now] given. Equal to the
-    transcript that grew with the same deltas in trail, text, thinking,
-    attempt, phase, tool rows and reply. Not in the status rows: a tool call's
-    [started_at] is the [now] of its [apply], so a re-fold dates every call to
-    the re-fold and the progress row's ages and oldest-open-call choice can
-    differ. Log entries carry no arrival time yet; the reload task adds one
-    before it draws a re-folded turn's status row. *)
+(** Replays entries in journal order using each recorded event time. [now]
+    is used only for entries whose source did not provide a timestamp; those
+    logs do not claim a measured terminal duration. *)
 
 val tool_rows : t -> string list
 

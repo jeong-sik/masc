@@ -984,9 +984,11 @@ let tool_detail_palette () : Tool_detail.palette =
    rather than through the tree's own default. The two that are still moving
    read as attention; the two that stopped badly read as failure. *)
 let tool_outcome_tone : Keeper_chat_transcript.tool_outcome -> string = function
-  | Keeper_chat_transcript.Started | Keeper_chat_transcript.Awaiting_result ->
+  | Keeper_chat_transcript.Started | Keeper_chat_transcript.Native_running
+  | Keeper_chat_transcript.Awaiting_result ->
       Theme.info ()
   | Keeper_chat_transcript.Returned -> Theme.ok ()
+  | Keeper_chat_transcript.Native_ended -> Theme.recede ()
   | Keeper_chat_transcript.Failed -> Theme.bad ()
   | Keeper_chat_transcript.Never_returned
   | Keeper_chat_transcript.Outcome_unrecorded -> Theme.warn ()
@@ -996,6 +998,8 @@ let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = functio
   | Keeper_chat_transcript.Started -> "PREPARING · ARGUMENTS STREAMING"
   | Keeper_chat_transcript.Awaiting_result -> "WAITING FOR RESULT"
   | Keeper_chat_transcript.Returned -> "RETURNED"
+  | Keeper_chat_transcript.Native_running -> "NATIVE STEP RUNNING"
+  | Keeper_chat_transcript.Native_ended -> "NATIVE STEP ENDED · OUTCOME NOT REPORTED"
   | Keeper_chat_transcript.Failed -> "FAILED"
   | Keeper_chat_transcript.Never_returned -> "RESULT NOT SEEN HERE"
   | Keeper_chat_transcript.Outcome_unrecorded -> "OUTCOME UNRECORDED"
@@ -1279,6 +1283,8 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
                  | Keeper_chat_transcript.Failed -> "failed"
                  | Keeper_chat_transcript.Never_returned -> "not seen"
                  | Keeper_chat_transcript.Outcome_unrecorded -> "unknown"
+                 | Keeper_chat_transcript.Native_running -> "native running"
+                 | Keeper_chat_transcript.Native_ended -> "native ended"
                  | Keeper_chat_transcript.Returned -> "received")
         in
         let fixed_cells = Message_layout.display_width (marker ^ "  · " ^ status) in
@@ -1310,6 +1316,8 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
           | Some _ -> Some "(empty result)"
           | None ->
               (match activity.outcome with
+               | Keeper_chat_transcript.Native_ended -> Some "provider step ended; outcome not reported"
+               | Keeper_chat_transcript.Native_running -> None
                | Keeper_chat_transcript.Started
                | Keeper_chat_transcript.Awaiting_result -> None
                | Keeper_chat_transcript.Returned
@@ -1835,7 +1843,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
      ; role_label_mark_cells =
          Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
      ; request_label = ""
-     ; body = note ^ "\n" ^ Terminal_text.single_line body
+     ; body = note ^ "\n" ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true body
      ; journal = []
      ; markdown_source = Message_layout.Markdown_streaming
      ; turn_rail = Message_layout.Rail_none
@@ -1843,34 +1851,32 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
      }
       : Message_layout.entry)
   in
-  let pending =
-    Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
-    |> keeper_message_pending_preview
-    |> List.map (function
-         | Pending_preview_item (position, item) ->
-             let intent =
-               match item.Masc_tui_keeper_chat_queue.intent with
-               | Masc_tui_keeper_chat_queue.Next -> "NEXT"
-               | Masc_tui_keeper_chat_queue.Steer_after_interrupt -> "STEER"
-             in
-             let note = Printf.sprintf "%s %d" intent position in
-             entry ~at:item.submitted_at ~label:"YOU" ~note
-               ~body:item.Masc_tui_keeper_chat_queue.request.Keeper_chat.message
-         | Pending_preview_omitted omitted ->
-             entry ~at:(Unix.gettimeofday ()) ~label:""
-               ~note:
-                 (Printf.sprintf
-                    "… %d pending row(s) hidden · Ctrl-K:cancel last · \
-                     Ctrl-P:edit last" omitted)
-               ~body:"")
-  in
-  pending
+  Masc_tui_types.keeper_message_waiting_requests state ~keeper_name
+  |> List.map (fun (request, delivery) ->
+      let at =
+        match List.find_opt (fun (inflight : Masc_tui_types.inflight) ->
+            Keeper_chat.same_request_identity inflight.sent_request request)
+            state.msg_inflight with
+        | Some inflight -> inflight.submitted_at
+        | None ->
+            match List.find_opt (fun (item : Masc_tui_keeper_chat_queue.item) ->
+                Keeper_chat.same_request_identity item.request request)
+                (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name) with
+            | Some item -> item.submitted_at
+            | None -> Unix.gettimeofday ()
+      in
+      let note = match delivery with
+        | Local_pending -> "전송 대기"
+        | Awaiting_receipt -> "전송 중 · 접수 확인 전"
+        | Keeper_queued -> "서버 접수 · 처리 대기"
+        | Rechecking_delivery -> "전달 확인 중 · 결과 미확인"
+      in
+      entry ~at ~label:"YOU" ~note ~body:request.Keeper_chat.message)
 
-(* Autonomous turns have no operation journal to follow. Their polled tail
-   is an excerpt, never an append-only transcript: render it in the same
-   scrollable pane, replace it on refresh, and let durable history take over
-   after settlement. Do not invent a request id or save the excerpt as a reply.
-   A working direct operation or journal text already draws the real output. *)
+
+(* The polled tail is an excerpt for a turn whose journal is unavailable.
+   Once that exact turn's journal supplies text, the chronological transcript
+   owns the output and the excerpt must disappear. *)
 let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
   let live_text_drawn =
     match state.msg_live with
@@ -1892,14 +1898,25 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
          String.equal row.ktr_keeper_name keeper_name)
       state.keeper_turns with
     | Some { ktr_state = Tui_decode.Keeper_turn_running
-        { lane; preview = Some preview; _ }; _ }
+        { lane; turn_ref; preview = Some preview; _ }; _ }
       when String.trim preview.ktp_text_tail <> ""
            && (match lane with
                | Tui_decode.Turn_lane_chat_operation ->
                    not (Option.is_some (Masc_tui_types.working_chat_for_keeper state keeper_name)
                         || live_text_drawn
                         || Masc_tui_types.observed_turn_text_drawn state keeper_name)
-               | Tui_decode.Turn_lane_autonomous | Tui_decode.Turn_lane_maintenance -> true) ->
+               | Tui_decode.Turn_lane_autonomous | Tui_decode.Turn_lane_maintenance ->
+                   not (Option.exists (fun turn_ref ->
+                     let source = Masc_tui_keeper_chat_log.Autonomous_turn turn_ref in
+                     Masc_tui_types.selected_source_logs_for_keeper state keeper_name
+                     |> List.exists (fun log ->
+                       Masc_tui_keeper_chat_log.source log.tl_log = source
+                       && not (Masc_tui_types.observed_log_is_unavailable state log)
+                       && List.exists (fun (item : Keeper_chat_transcript.drawn_item) ->
+                         match item.drawn with
+                         | Drawn_text _ | Drawn_reply _ -> true
+                         | Drawn_thinking _ | Drawn_tools _ | Drawn_skill _ | Drawn_status _ -> false)
+                         (Keeper_chat_transcript.drawn log.tl_transcript))) turn_ref)) ->
         let style = Message_layout.Keeper in
         let label = keeper_name in
         let note =
@@ -2240,12 +2257,18 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
 (* One turn's block as the chat pane draws it: the log it comes from, where
    it goes in the committed timeline, and its rows -- built as continuations,
    the corners set once the blocks are merged with the committed rows. *)
+type log_entry = {
+  le_at : float option;
+  le_entry : Message_layout.entry;
+}
+
 type log_block = {
   lb_log : Masc_tui_types.turn_log;
   lb_request_id : string;
+  lb_member_ids : string list;
   lb_insertion : int;
   lb_timeline_at : float option;
-  lb_entries : Message_layout.entry list;
+  lb_entries : log_entry list;
 }
 
 (* Whose a merged row is: a committed message's, or a block's log's. *)
@@ -2264,6 +2287,7 @@ type settled_block_memo = {
       (** Which placement the block was projected with: a settled turn's,
           or the open placement an observed turn takes. *)
   sbm_revision : int;
+  sbm_member_ids : string list;
   sbm_timeline : (Masc_tui_types.msg_entry * float option) list;
   sbm_messages : Masc_tui_types.msg_entry list;
   sbm_reasoning : reasoning_visibility;
@@ -2545,15 +2569,16 @@ let render_keeper_message (state : state) =
        read, and the merged list is reused whole while no block is live. That
        is what keeps an idle pane holding settled turns at the same per-frame
        cost it had before they were logs. *)
-    let log_projection ~committed (turn_log : Masc_tui_types.turn_log) =
+    let log_projection ~committed:_ (turn_log : Masc_tui_types.turn_log) =
       let transcript = turn_log.tl_transcript in
-      let request_id = Masc_tui_types.turn_log_request_id turn_log in
+      let request_id = Masc_tui_types.turn_log_execution_id turn_log in
+      let member_ids = Masc_tui_types.chat_execution_member_ids state
+          ~keeper_name ~execution_id:request_id in
       let request_label = Keeper_chat.compact_request_id request_id in
       let started_at = Keeper_chat_transcript.started_at transcript in
       let bounds_request (message : Masc_tui_types.msg_entry) =
-        (not (String.equal message.me_request_id request_id))
-        || committed = false
-        || message.me_turn_phase <> Turn_output
+        (not (List.mem message.me_request_id member_ids))
+        || message.me_turn_phase = Turn_input
       in
       let request_messages =
         List.filter bounds_request committed_timeline_messages
@@ -2564,20 +2589,13 @@ let render_keeper_message (state : state) =
           committed_visible_timeline
       in
       let timeline_at =
-        chat_live_timeline_at ~request_id ~started_at ~request_messages
+        chat_live_timeline_at ~member_ids ~request_id ~started_at ~request_messages
           bounded_timeline
       in
       let insertion =
-        if committed
-        then
-          chat_settled_insertion_index ~request_id ~timeline_at
-            committed_visible_timeline
-        else
-          chat_live_insertion_index ~request_id ~timeline_at
-            committed_visible_timeline
-      in
-      let timeline_bucket =
-        Option.map keeper_message_timeline_bucket timeline_at
+        chat_block_insertion_index ~member_ids
+          ~bounds:(fun row -> row.me_turn_phase = Turn_input)
+          ~request_id ~timeline_at committed_visible_timeline
       in
       let keeper_label =
         Keeper_chat.terminal_safe_text
@@ -2611,10 +2629,17 @@ let render_keeper_message (state : state) =
          last row are known. *)
       (* The gutter follows the block's causal timeline position. The body
          span separately preserves dispatch and settlement times. *)
+      let frontier = ref timeline_at in
       let entries =
         List.filter_map Fun.id
         @@ List.mapi
              (fun entry_index (item : Keeper_chat_transcript.drawn_item) ->
+                let timeline_at = match !frontier, item.at with
+                  | Some floor, Some at -> Some (Float.max floor at)
+                  | Some _ as at, None | None, (Some _ as at) -> at
+                  | None, None -> None in
+                frontier := timeline_at;
+                let timeline_bucket = Option.map keeper_message_timeline_bucket timeline_at in
                 let label text =
                   match item.superseded with
                   | Some attempt ->
@@ -2663,7 +2688,7 @@ let render_keeper_message (state : state) =
                      result again pays the badge's width twice, so the second
                      call trims what the first had already fitted. *)
                   Some
-                    ({ style;
+                    { le_at = timeline_at; le_entry = ({ style;
                        timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
                        timeline_bucket;
                        span_clock;
@@ -2689,7 +2714,7 @@ let render_keeper_message (state : state) =
                           there is no argument here to unfold. *)
                        action = Message_layout.Action_none;
                      }
-                      : Message_layout.entry)
+                      : Message_layout.entry) }
                 in
                 match item.drawn with
                 | Keeper_chat_transcript.Drawn_thinking _
@@ -2734,7 +2759,7 @@ let render_keeper_message (state : state) =
                     entry Message_layout.Status (label "STATUS") text)
              (Keeper_chat_transcript.drawn transcript)
       in
-      { lb_log = turn_log; lb_request_id = request_id; lb_insertion = insertion; lb_timeline_at = timeline_at;
+      { lb_log = turn_log; lb_request_id = request_id; lb_member_ids = member_ids; lb_insertion = insertion; lb_timeline_at = timeline_at;
         lb_entries = entries }
     in
     (* One projection per held log per change of its inputs, settled or
@@ -2747,6 +2772,8 @@ let render_keeper_message (state : state) =
         ( Masc_tui_types.turn_log_keeper_name turn_log
         , Masc_tui_types.turn_log_request_id turn_log )
       in
+      let member_ids = Masc_tui_types.chat_execution_member_ids state
+          ~keeper_name ~execution_id:(Masc_tui_types.turn_log_execution_id turn_log) in
       let revision = Keeper_chat_transcript.revision turn_log.tl_transcript in
       let palette_generation =
         Masc_tui_terminal_palette.snapshot_generation
@@ -2757,6 +2784,7 @@ let render_keeper_message (state : state) =
         when memo.sbm_log == turn_log
              && memo.sbm_committed = committed
              && memo.sbm_revision = revision
+             && memo.sbm_member_ids = member_ids
              && memo.sbm_timeline == committed_visible_timeline
              && memo.sbm_messages == committed_timeline_messages
              && memo.sbm_reasoning = state.msg_reasoning_visibility
@@ -2776,6 +2804,7 @@ let render_keeper_message (state : state) =
             { sbm_log = turn_log;
               sbm_committed = committed;
               sbm_revision = revision;
+              sbm_member_ids = member_ids;
               sbm_timeline = committed_visible_timeline;
               sbm_messages = committed_timeline_messages;
               sbm_reasoning = state.msg_reasoning_visibility;
@@ -2815,8 +2844,8 @@ let render_keeper_message (state : state) =
           let block = held_projection ~committed:(ended || unavailable) log in
           let entries =
             if ended || unavailable then
-              List.map (fun (entry : Message_layout.entry) ->
-                { entry with span_clock = None }) block.lb_entries
+              List.map (fun item ->
+                { item with le_entry = { item.le_entry with span_clock = None } }) block.lb_entries
             else block.lb_entries
           in
           let entries =
@@ -2824,13 +2853,13 @@ let render_keeper_message (state : state) =
             | true, last :: _ ->
                 let style = Message_layout.Status in
                 entries @
-                [{ last with style; speaker = "STATUS";
+                [{ last with le_entry = { last.le_entry with style; speaker = "STATUS";
                    role_label = Message_layout.align_role_label
                      ~column:role_label_column ~style "STATUS";
                    role_label_mark_cells = Message_layout.role_label_mark_cells
                      ~column:role_label_column ~style ();
                    body = "저널 갱신 불가 · 받은 기록을 유지합니다";
-                   markdown_source = Message_layout.Markdown_streaming }]
+                   markdown_source = Message_layout.Markdown_streaming } }]
             | false, _ | true, [] -> entries
           in
           { block with lb_entries = entries })
@@ -2871,19 +2900,27 @@ let render_keeper_message (state : state) =
        Equal clocks preserve source order; unknown clocks follow known ones. *)
     let merge_blocks () =
       let placed =
-        List.map
-          (fun block ->
-            ( block.lb_insertion
-            , List.map (fun entry -> Tagged_block block.lb_log, entry)
-                block.lb_entries ))
-          blocks
+        List.concat_map (fun block ->
+          List.map (fun item ->
+            let by_time = chat_block_insertion_index ~member_ids:[]
+                ~bounds:(fun _ -> false) ~request_id:block.lb_request_id
+                ~timeline_at:item.le_at committed_visible_timeline in
+            let insertion = max block.lb_insertion by_time in
+            insertion, item.le_at, (Tagged_block block.lb_log, item.le_entry))
+            block.lb_entries) blocks
+        |> List.stable_sort (fun (left, left_at, _) (right, right_at, _) ->
+            let by_slot = Int.compare left right in
+            if by_slot <> 0 then by_slot
+            else match left_at, right_at with
+              | Some left, Some right -> Float.compare left right
+              | Some _, None -> -1 | None, Some _ -> 1 | None, None -> 0)
       in
       let rec merge index committed placed =
         match committed with
-        | [] -> List.concat_map snd placed
+        | [] -> List.map (fun (_, _, item) -> item) placed
         | item :: rest ->
-            let due, later = List.partition (fun (at, _) -> at <= index) placed in
-            List.concat_map snd due @ (item :: merge (index + 1) rest later)
+            let due, later = List.partition (fun (at, _, _) -> at <= index) placed in
+            List.map (fun (_, _, item) -> item) due @ (item :: merge (index + 1) rest later)
       in
       let merged = merge 0 committed_tagged placed in
       (* A turn opens once and closes once, wherever its rows ended up: the
@@ -2903,8 +2940,11 @@ let render_keeper_message (state : state) =
       in
       let request_of = function
         | Tagged_row (message : Masc_tui_types.msg_entry) ->
-            message.me_request_id
-        | Tagged_block log -> Masc_tui_types.turn_log_request_id log
+            (match List.find_opt (fun block ->
+                List.mem message.me_request_id block.lb_member_ids) blocks with
+             | Some block -> block.lb_request_id
+             | None -> message.me_request_id)
+        | Tagged_block log -> Masc_tui_types.turn_log_execution_id log
       in
       (* Transcript projections own dispatch and settlement times. Move their
          span to the final opening row, which may be a committed input whose
@@ -2914,37 +2954,42 @@ let render_keeper_message (state : state) =
           (fun block ->
             Option.map (fun span -> block.lb_request_id, span)
               (List.find_map
-                 (fun (entry : Message_layout.entry) -> entry.span_clock)
+                 (fun item -> item.le_entry.span_clock)
                  block.lb_entries))
           blocks
       in
-      let first = Hashtbl.create 8 and last = Hashtbl.create 8 in
-      List.iteri
-        (fun index (tag, _) ->
-          let request_id = request_of tag in
-          if List.exists (String.equal request_id) block_requests then begin
-            if not (Hashtbl.mem first request_id) then
-              Hashtbl.replace first request_id index;
-            Hashtbl.replace last request_id index
-          end)
-        merged;
+      let edges = Hashtbl.create 16 in
+      let close_run ~at_tail request_id indices =
+        let remains_open = at_tail && List.mem request_id open_request_ids in
+        match List.rev indices with
+        | [] -> ()
+        | [only] -> Hashtbl.replace edges only (if remains_open then Turn_opens else Turn_alone)
+        | first :: rest ->
+            Hashtbl.replace edges first Turn_opens;
+            List.iteri (fun i index ->
+              Hashtbl.replace edges index
+                (if i = List.length rest - 1 && not remains_open then Turn_closes else Turn_continues)) rest
+      in
+      let current = ref None and indices = ref [] in
+      List.iteri (fun index (tag, _) ->
+        let request_id = request_of tag in
+        if request_id <> "" then begin
+          if !current <> Some request_id then begin
+            Option.iter (fun id -> close_run ~at_tail:false id !indices) !current;
+            current := Some request_id;
+            indices := []
+          end;
+          indices := index :: !indices
+        end) merged;
+      Option.iter (fun id -> close_run ~at_tail:true id !indices) !current;
+      let span_seen = Hashtbl.create 8 in
       List.mapi
         (fun index ((tag, (entry : Message_layout.entry)) as item) ->
           let request_id = request_of tag in
-          match Hashtbl.find_opt first request_id, Hashtbl.find_opt last request_id with
-          | Some opens_at, Some closes_at ->
-              let opens = opens_at = index in
-              let closes =
-                closes_at = index
-                && not (List.exists (String.equal request_id) open_request_ids)
-              in
-              let edge : Masc_tui_types.turn_edge =
-                match opens, closes with
-                | true, true -> Turn_alone
-                | true, false -> Turn_opens
-                | false, true -> Turn_closes
-                | false, false -> Turn_continues
-              in
+          match Hashtbl.find_opt edges index with
+          | Some edge when List.mem request_id block_requests ->
+              let opens = not (Hashtbl.mem span_seen request_id) in
+              Hashtbl.replace span_seen request_id ();
               let siding =
                 match tag with
                 | Tagged_row message -> siding_of_message message
@@ -2959,7 +3004,7 @@ let render_keeper_message (state : state) =
                     if opens then List.assoc_opt request_id request_spans
                     else None
                 } )
-          | Some _, None | None, Some _ | None, None -> item)
+          | Some _ | None -> item)
         merged
     in
     let tagged_layout_entries =
@@ -3145,7 +3190,7 @@ let render_keeper_message (state : state) =
        long preview status loses its tail rather than the keys after it. *)
     List.iter
       (fun (row : Masc_tui_answering.chat_activity_row) ->
-        let keys = match state.msg_tool_visibility, state.msg_live with
+        let keys = match state.msg_tool_visibility, Masc_tui_types.keeper_message_status_log state with
           | (Tools_compact | Tools_results), Some live
             when state.msg_target_keeper_name = Some (Masc_tui_types.turn_log_keeper_name live)
               && Masc_tui_types.keeper_message_folded_status_count state live.tl_transcript
@@ -3231,7 +3276,7 @@ let render_keeper_message (state : state) =
            box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
              "  Older load failed · /errors"
        | None -> ());
-    (match state.msg_live with
+    (match Masc_tui_types.keeper_message_status_log state with
      | Some live
        when state.msg_target_keeper_name
             = Some (Masc_tui_types.turn_log_keeper_name live) ->

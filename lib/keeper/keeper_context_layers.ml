@@ -18,6 +18,7 @@ type layer_id =
   | Own_board_posts
   | Board_activity
   | Own_recent_actions
+  | Recent_work
   | Fleet_messages
 
 (* Prefix-cache ordering: emit larger, more stable sections first so providers
@@ -48,6 +49,7 @@ let ordered =
   ; Own_board_posts
   ; Board_activity
   ; Own_recent_actions
+  ; Recent_work
   ; Fleet_messages
   ]
 ;;
@@ -73,7 +75,8 @@ let order_index = function
   | Own_board_posts -> 14
   | Board_activity -> 15
   | Own_recent_actions -> 16
-  | Fleet_messages -> 17
+  | Recent_work -> 17
+  | Fleet_messages -> 18
 ;;
 
 let assemble ~content_of = ordered |> List.filter_map content_of |> String.concat ""

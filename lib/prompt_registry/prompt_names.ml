@@ -688,3 +688,7 @@ let candle_appraiser_grade = "candle_appraiser_grade"
 let candle_appraiser_relation = "candle_appraiser_relation"
 
 let candle_appraiser_weights = "candle_appraiser_weights"
+
+let keeper_world_recent_work = "keeper.world.recent_work"
+
+let keeper_world_recent_work_preview = "keeper.world.recent_work.preview"

@@ -3436,6 +3436,7 @@
  ; masc.
  (libraries
   alcotest
+  masc.string_util
   fmt
   masc
   masc.agent_core

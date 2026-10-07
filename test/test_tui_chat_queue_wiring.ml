@@ -1168,19 +1168,22 @@ let test_new_input_preserves_running_output () =
     Tui_types.turn_log_add ~now:3. queued.log ~seq:(Some 2)
       (Live.Batch_bound {operation_id=queued.sent_request.request_id; execution_id});
     assert_old ();
+    Tui_types.turn_log_add ~now:3.5 old.log ~seq:None
+      (Live.Text "OLD_REPLY_STRETCH");
     Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 3)
       (Live.Reply_details {reply="OLD_FINAL_REPLY";
         turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="trace-1#1"});
     Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 4) Live.Run_finished;
     Tui_types.settle_turn_log state old;
     state.msg_inflight <- [queued];
-    (* RFC-0412 §2.1: settling is a replace, not an append. The live view
-       with its running output is replaced by the settled turn's reply row,
-       so the text the operator reads changes here by contract. *)
+    (* Settlement replaces the terminal text stretch; progress before the
+       tool round remains part of the turn's visible work. *)
     let settled_screen = screen () in
-    check bool "settling replaces the running output with the reply" true
+    check bool "settling replaces the terminal stretch with the reply" true
       (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" settled_screen
-       && not (Astring.String.is_infix ~affix:"OLD_RUNNING_TEXT" settled_screen));
+       && not (Astring.String.is_infix ~affix:"OLD_REPLY_STRETCH" settled_screen));
+    check bool "settling preserves progress before the tool round" true
+      (Astring.String.is_infix ~affix:"OLD_RUNNING_TEXT" settled_screen);
     check bool "complete older batch log stays authoritative" true
       (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" settled_screen);
     state.keeper_turns <-
@@ -1721,7 +1724,7 @@ let drawn_skills_of (log : Tui_types.turn_log) =
       | Keeper_chat_transcript.Drawn_skill skills -> skills
       | Keeper_chat_transcript.Drawn_thinking _ | Keeper_chat_transcript.Drawn_tools _
       | Keeper_chat_transcript.Drawn_text _ | Keeper_chat_transcript.Drawn_reply _
-      | Keeper_chat_transcript.Drawn_status _ ->
+      | Keeper_chat_transcript.Drawn_status _ | Keeper_chat_transcript.Drawn_error _ ->
           [])
     (Keeper_chat_transcript.drawn log.Tui_types.tl_transcript)
 ;;
@@ -2146,7 +2149,7 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       let settled_span =
         running_span ^ Masc_tui_render_chat.keeper_message_clock 49.
       in
-      let check_output stage span =
+      let check_output ?(ended = false) stage span =
         let screen = frame () in
         List.iter (fun marker -> check int (stage ^ ": " ^ marker) 1
           (count marker screen))
@@ -2154,7 +2157,10 @@ let test_promoted_live_output_survives_settlement_and_replay () =
         check bool (stage ^ ": tool remains visible") true
           (count "read_file" screen > 0);
         check int (stage ^ ": one request span") 1 (count running_span screen);
-        check int (stage ^ ": transcript timing") 1 (count span screen)
+        check int (stage ^ ": transcript timing") 1 (count span screen);
+        Option.iter (fun message ->
+          check int (stage ^ ": failure appears once after settlement")
+            (if ended then 1 else 0) (count message screen)) failure
       in
       check_output "still running" running_span;
       (* A run that finished records its reply first (KEEPER_REPLY_DETAILS),
@@ -2171,7 +2177,7 @@ let test_promoted_live_output_survives_settlement_and_replay () =
         terminal;
       Tui_types.settle_turn_log state entry;
       state.msg_inflight <- [];
-      check_output "settled" settled_span;
+      check_output ~ended:true "settled" settled_span;
       (* A durable page overlaps already streamed text. The frame must keep
          each source once, including after cancellation or a failed run. *)
       let replay : Masc.Keeper_chat_event_log.journaled_event list =
@@ -2180,7 +2186,13 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       in
       let _ = Tui_types.turn_log_add_journaled entry.log replay in
       let _ = Tui_types.turn_log_add_journaled entry.log replay in
-      check_output "overlapping replay" settled_span;
+      check_output ~ended:true "overlapping replay" settled_span;
+      Option.iter (fun message ->
+        state.msg_history <- state.msg_history @
+          [chat_entry ~request_id:entry.sent_request.request_id
+             ~role:Tui_types.Message_error ~text:message ~at:49. ()];
+        check_output ~ended:true "session error is not duplicated" settled_span)
+        failure;
       (* A fresh history-only view has no transcript timing authority. *)
       state.msg_live <- None;
       state.msg_settled_logs <- [];
@@ -2191,6 +2203,113 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       check int "durable history does not invent a running span" 0
         (count running_span (frame ())))
       [None; Some "provider failed"; Some "operator interrupted the turn"])
+;;
+
+(* A cold pane knows only the accepted user row and the operation journal.
+   A failure before the first token must still close that conversation with a
+   visible error; partial text remains above the same terminal on replay. *)
+let test_replayed_chat_failure_is_visible_without_a_history_error () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 120);
+    List.iter (fun partial ->
+      let state = Tui_types.create_state
+        ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+      state.msg_target_keeper_name <- Some "alpha";
+      state.msg_loaded_keeper <- Some "alpha";
+      state.msg_loaded <-
+        [chat_entry ~request_id:"cancelled-replay"
+           ~role:(Tui_types.Message_user
+             (Tui_types.Sent_by_operator {surface=None}))
+           ~text:"QUESTION_AWAITING_REPLY" ~at:42. ()];
+      let log = Tui_types.turn_log_create ~keeper_name:"alpha"
+        ~request_id:"cancelled-replay" ~started_at:42. in
+      let events =
+        [Masc.Keeper_chat_events.Run_started
+           {run_id="cancelled-run"; thread_id="keeper:alpha"}]
+        @ (if partial then [Masc.Keeper_chat_events.Text_delta "PARTIAL_REPLY"] else [])
+        @ [Masc.Keeper_chat_events.Event_error
+             {message="operator interrupted the turn"}]
+      in
+      let journal : Masc.Keeper_chat_event_log.journaled_event list =
+        List.mapi
+          (fun seq event ->
+            {Masc.Keeper_chat_event_log.seq = seq; ts=42. +. float_of_int seq; event})
+          events
+      in
+      let _ = Tui_types.turn_log_add_journaled log journal in
+      Log.commit log.tl_log;
+      Tui_types.hold_settled_log state log;
+      let count needle text =
+        List.length (Astring.String.cuts ~sep:needle text) - 1
+      in
+      let check_frame stage =
+        let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+        let screen = String.concat "\n" frame.Masc_tui_frame_presenter.lines in
+        check int (stage ^ ": accepted question remains") 1
+          (count "QUESTION_AWAITING_REPLY" screen);
+        check int (stage ^ ": partial text remains") (if partial then 1 else 0)
+          (count "PARTIAL_REPLY" screen);
+        check int (stage ^ ": the failure is visible exactly once") 1
+          (count "operator interrupted the turn" screen);
+        check int (stage ^ ": the failure uses the error role") 1
+          (count "ERROR" screen)
+      in
+      check_frame "cold replay";
+      let _ = Tui_types.turn_log_add_journaled log journal in
+      check_frame "same journal replayed again";
+      state.msg_loaded <- state.msg_loaded @
+        [chat_entry ~request_id:"cancelled-replay" ~role:Tui_types.Message_error
+           ~text:"operator interrupted the turn" ~at:45. ()];
+      check_frame "history error arrives afterwards")
+      [false; true])
+;;
+
+let test_failed_live_sibling_stays_visible_when_focus_changes () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 120);
+    let state = Tui_types.create_state
+      ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let failed = inflight_with_log ~keeper_name:"alpha" ~started_at:42.
+      [Live.Run_started; Live.Run_failed {message="SIBLING_FAILED"}] in
+    let other = inflight_with_log ~keeper_name:"alpha" ~started_at:43.
+      [Live.Run_started] in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_inflight <- [failed; other];
+    state.msg_history <- List.map (fun (item : Tui_types.inflight) ->
+      chat_entry ~request_id:item.sent_request.request_id
+        ~role:(Tui_types.Message_user
+          (Tui_types.Sent_by_operator {surface=None}))
+        ~text:"queued question" ~at:item.submitted_at ()) [failed; other];
+    let check_failure stage =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      let screen = String.concat "\n" frame.Masc_tui_frame_presenter.lines in
+      check int stage 1
+        (List.length (Astring.String.cuts ~sep:"SIBLING_FAILED" screen) - 1)
+    in
+    state.msg_live <- Some failed.log;
+    check_failure "focused failure appears once in the live status";
+    state.msg_live <- Some other.log;
+    check_failure "focus change reveals the sibling failure in its transcript";
+    state.msg_live <- Some failed.log;
+    check_failure "focus return does not duplicate the failure")
 ;;
 
 (* An Execute call under tools:full: how the command ended and what it
@@ -4427,6 +4546,10 @@ let () =
             test_a_journal_built_log_holds_its_turn_in_the_timeline
         ; test_case "promoted live output survives settlement and replay" `Quick
             test_promoted_live_output_survives_settlement_and_replay
+        ; test_case "replayed chat failure is visible without a history error" `Quick
+            test_replayed_chat_failure_is_visible_without_a_history_error
+        ; test_case "failed live sibling stays visible when focus changes" `Quick
+            test_failed_live_sibling_stays_visible_when_focus_changes
         ; test_case "a journal revision draws its facts in columns" `Quick
             test_a_journal_revision_draws_its_facts_in_columns
         ; test_case "a failing librarian is named on the header" `Quick

@@ -31,6 +31,20 @@ type board_error =
         to a 403-class rejection rather than a generic input error. *)
   [@@deriving show]
 
+(* What a Board read answers when it has no row to give. Reads are served from
+   the in-memory store, so none of them answers an I/O failure; persistence
+   failures come from writes, as [board_error]. *)
+type board_read_error =
+  | Read_invalid_id of string
+  | Read_post_not_found of string
+  | Read_comment_not_found of string
+  [@@deriving show]
+
+let board_error_of_read_error = function
+  | Read_invalid_id detail -> Invalid_id detail
+  | Read_post_not_found post_id -> Post_not_found post_id
+  | Read_comment_not_found comment_id -> Comment_not_found comment_id
+
 (** {1 Safe ID Module - Parse Don't Validate} *)
 
 (* Shared regex for alphanumeric ID validation (Post_id, Board_id, Sub_board_id).
@@ -41,6 +55,7 @@ let alphanumeric_id_re = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
 module Post_id : sig
   type t
   val of_string : string -> (t, board_error) result
+  val of_string_for_read : string -> (t, board_read_error) result
   val to_string : t -> string
   val generate : unit -> t
   val json_schema_pattern : string
@@ -56,11 +71,14 @@ end = struct
 
   let json_schema_pattern = Printf.sprintf "^[a-zA-Z0-9_-]{1,%d}$" max_len
 
-  let of_string s =
+  let parse s =
     let s = String.trim s in
     let len = String.length s in
     if len >= 1 && len <= max_len && Re.execp valid_pattern s then Ok s
-    else Error (Invalid_id (Printf.sprintf "Invalid post_id: %s" s))
+    else Error (Printf.sprintf "Invalid post_id: %s" s)
+
+  let of_string s = Result.map_error (fun detail -> Invalid_id detail) (parse s)
+  let of_string_for_read s = Result.map_error (fun detail -> Read_invalid_id detail) (parse s)
 
   let to_string t = t
 
@@ -70,6 +88,7 @@ end
 module Comment_id : sig
   type t
   val of_string : string -> (t, board_error) result
+  val of_string_for_read : string -> (t, board_read_error) result
   val to_string : t -> string
   val generate : unit -> t
   val accepted_format : string
@@ -90,16 +109,18 @@ end = struct
   let json_schema_pattern = Printf.sprintf "^%s[0-9a-f]{%d}$" prefix hex_length
   let valid_pattern = Re.Pcre.re json_schema_pattern |> Re.compile
 
-  let of_string s =
+  let parse s =
     let s = String.trim s in
     if Re.execp valid_pattern s then Ok s
     else
       Error
-        (Invalid_id
-           (Printf.sprintf
-              "Invalid comment_id %S; expected %s, the id masc_board_post_get \
-               and masc_board_comment return"
-              s accepted_format))
+        (Printf.sprintf
+           "Invalid comment_id %S; expected %s, the id masc_board_post_get \
+            and masc_board_comment return"
+           s accepted_format)
+
+  let of_string s = Result.map_error (fun detail -> Invalid_id detail) (parse s)
+  let of_string_for_read s = Result.map_error (fun detail -> Read_invalid_id detail) (parse s)
 
   let to_string t = t
 

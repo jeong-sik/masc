@@ -305,8 +305,8 @@ export async function dispatchKeeperInterjectAction(command: KeeperInterjectComm
   if (!keeperName) throw new Error('INTERJECT requires an active keeper.')
 
   if (command.kind === 'send') {
-    const message = command.message?.trim() ?? ''
-    if (!message) throw new Error('INTERJECT send requires a message.')
+    const message = command.message ?? ''
+    if (!message.trim()) throw new Error('INTERJECT send requires a message.')
     await sendKeeperThreadMessage(keeperName, message, {
       surfaceContext: command.surfaceContext,
     })
@@ -939,24 +939,29 @@ function deriveUserBlocks(
   attachments: KeeperConversationAttachment[] | undefined,
 ): KeeperUserInputBlock[] | undefined {
   const blocks = attachments?.map(attachmentToUserInputBlock) ?? []
-  const text = prompt.trim()
-  if (text) blocks.push({ type: 'text', text })
+  if (prompt.trim()) blocks.push({ type: 'text', text: prompt })
   return blocks.length > 0 ? blocks : undefined
 }
 
 function fallbackMessageForUserBlocks(blocks: KeeperUserInputBlock[]): string {
   const text = blocks
     .filter((block): block is Extract<KeeperUserInputBlock, { type: 'text' }> => block.type === 'text')
-    .map(block => block.text.trim())
-    .filter(Boolean)
+    .map(block => block.text)
+    .filter(text => text.trim().length > 0)
     .join('\n\n')
   if (text) return text
 
   const media = blocks.filter(block => block.type !== 'text')
   if (media.length === 0) return ''
+  const describeMedia = (block: KeeperUserInputBlock): string => {
+    if (block.type === 'text') return ''
+    if ('url' in block) return block.url
+    if ('fileId' in block) return `file_id ${block.fileId}`
+    return block.name
+  }
   const names = media
     .slice(0, 3)
-    .map(block => ('url' in block ? block.url : 'fileId' in block ? `file_id ${block.fileId}` : block.name).trim())
+    .map(block => describeMedia(block).trim())
     .filter(Boolean)
     .join(', ')
   const suffix = media.length > 3 ? ` 외 ${media.length - 3}개` : ''
@@ -985,7 +990,7 @@ export async function sendKeeperThreadMessage(
       ? options.userBlocks
       : deriveUserBlocks(prompt, attachments)
   const blocks = options.blocks && options.blocks.length > 0 ? options.blocks : undefined
-  const message = prompt.trim() || fallbackMessageForUserBlocks(userBlocks ?? [])
+  const message = prompt.trim() ? prompt : fallbackMessageForUserBlocks(userBlocks ?? [])
   if (!keeperName || !message) return
   const sendKeys = keeperThreadMessageSendKeys(keeperName, [
     options.clientActionId,
@@ -1133,7 +1138,8 @@ export async function sendKeeperThreadMessage(
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     const finalEntry =
       (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId) ?? null
-    const finalText = finalEntry?.text.trim() ?? ''
+    const finalText = finalEntry?.text ?? ''
+    const hasFinalText = finalText.trim().length > 0
 
     if (!outcome.terminal) {
       if (operationAccepted) {
@@ -1177,7 +1183,7 @@ export async function sendKeeperThreadMessage(
       )) === true
     )
     if (
-      !finalText
+      !hasFinalText
       && !toolCallEnded
       && !hasContinuationStatus
     ) {
@@ -1204,7 +1210,7 @@ export async function sendKeeperThreadMessage(
     }
 
     finalizeAssistantEntry(keeperName, assistantId, {
-      text: finalText || emptyTerminalText,
+      text: hasFinalText ? finalText : emptyTerminalText,
       delivery: finalDelivery,
       streamState: null,
       timestamp: new Date().toISOString(),

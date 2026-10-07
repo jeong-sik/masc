@@ -23,7 +23,6 @@ type cancellation_stage =
   | Quarantine_settlement
   | After_quarantine
   | After_verification
-  | Snapshot_refresh
 
 type recovery_cause =
   | Recovery_operation_failed of string

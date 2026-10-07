@@ -253,6 +253,16 @@ let keeper_chat_event_to_json event =
       "tool_call_end"
       ([ "occurrence", occurrence_to_json occurrence ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Native_tool_start tool ->
+    type_tag "native_tool_start"
+      ([ "occurrence", occurrence_to_json tool.occurrence ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
+  | Native_tool_end tool ->
+    type_tag "native_tool_end"
+      ([ "occurrence", occurrence_to_json tool.occurrence ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
   | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
     type_tag
       "tool_approval_requested"
@@ -460,6 +470,15 @@ let keeper_chat_event_of_json json =
            { occurrence
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            })
+    | ("native_tool_start" | "native_tool_end") as tag ->
+      let* occurrence = occurrence_of_json (json |> member "occurrence") in
+      let tool =
+        { occurrence
+        ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+        ; tool_call_name = json |> member "tool_call_name" |> to_string_option
+        }
+      in
+      Ok (if String.equal tag "native_tool_start" then Native_tool_start tool else Native_tool_end tool)
     | "tool_approval_requested" ->
       Ok
         (Tool_approval_requested
@@ -590,6 +609,7 @@ let sanitize_segment = Workspace_utils_backend_setup.sanitize_namespace_segment
    consistency audit's sweep, and the retention pruner all derive their paths
    from it. *)
 let events_dirname = "keeper_chat_events"
+let turn_events_dirname = "keeper_turn_events"
 
 let events_dir ~base_dir =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) events_dirname
@@ -603,8 +623,7 @@ let journal_path ~base_dir ~keeper_name ~operation_id =
 
 (* Fail-open at construction too: a directory we cannot create must not abort
    the turn; the per-event append below then logs each failure. *)
-let open_journal ~base_dir ~keeper_name ~operation_id () =
-  let path = journal_path ~base_dir ~keeper_name ~operation_id in
+let open_path path =
   (try Fs_compat.mkdir_p (Filename.dirname path) with
    | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
    | exn ->
@@ -613,6 +632,22 @@ let open_journal ~base_dir ~keeper_name ~operation_id () =
        path
        (Printexc.to_string exn));
   { path }
+;;
+
+let open_journal ~base_dir ~keeper_name ~operation_id () =
+  open_path (journal_path ~base_dir ~keeper_name ~operation_id)
+;;
+
+let turn_journal_path ~base_dir ~keeper_name ~turn_ref =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) turn_events_dirname)
+       (sanitize_segment keeper_name))
+    (sanitize_segment (Ids.Turn_ref.to_string turn_ref) ^ ".jsonl")
+;;
+
+let open_turn_journal ~base_dir ~keeper_name ~turn_ref () =
+  open_path (turn_journal_path ~base_dir ~keeper_name ~turn_ref)
 ;;
 
 (* A non-finite float (NaN/inf) would serialize to a bare NaN/Infinity token —
@@ -632,50 +667,46 @@ let event_floats_are_finite = function
   | _ -> true
 ;;
 
-(* Fail-open by contract: stage 1 dual-writes next to keeper_chat_store, which
-   remains the durable record of record. A journal failure is logged, never
-   raised into the live path. The umbrella is required: the Fs_compat result
-   type covers only torn-tail cut/write/fsync/rollback failures, while mkdir,
-   openfile, fchmod, fsync_parent_directory, and lockf raise raw
-   [Unix.Unix_error]. *)
-let append journal ~seq ~ts event =
+(* The result covers raw filesystem exceptions too: mkdir/open/lock failures
+   can occur before the Fs_compat transaction produces its typed outcome. *)
+let append_result journal ~seq ~ts event =
   try
     if (not (float_is_finite ts)) || not (event_floats_are_finite event)
     then
-      Log.Keeper.error
-        "keeper_chat_event_log: refusing to journal non-finite float path=%s seq=%d"
-        journal.path
-        seq
+      Error (Printf.sprintf
+        "refusing to journal non-finite float path=%s seq=%d" journal.path seq)
     else begin
       let line = journaled_event_to_string { seq; ts; event } ^ "\n" in
       match Fs_compat.append_private_jsonl_durable_locked_result journal.path line with
-      | Fs_compat.Private_file_succeeded () -> ()
+      | Fs_compat.Private_file_succeeded () -> Ok ()
       | Fs_compat.Private_file_succeeded_with_cleanup_failure
           { value = (); cleanup_failure } ->
         Log.Keeper.error
           "keeper_chat_event_log: append succeeded with descriptor settlement failure path=%s: %s"
           journal.path
-          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+        Ok ()
       | Fs_compat.Private_file_failed error ->
-        Log.Keeper.error
-          "keeper_chat_event_log: journal append failed path=%s: %s"
-          journal.path
-          (Fs_compat.private_jsonl_append_error_to_string error)
+        Error (Fs_compat.private_jsonl_append_error_to_string error)
       | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-        Log.Keeper.error
-          "keeper_chat_event_log: journal append failed path=%s: %s; descriptor settlement failed: %s"
-          journal.path
+        Error (Printf.sprintf "%s; descriptor settlement failed: %s"
           (Fs_compat.private_jsonl_append_error_to_string error)
-          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
     end
   with
   | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
-  | exn ->
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let append journal ~seq ~ts event =
+  match append_result journal ~seq ~ts event with
+  | Ok () -> ()
+  | Error detail ->
     Log.Keeper.error
-      "keeper_chat_event_log: journal append raised path=%s seq=%d: %s"
+      "keeper_chat_event_log: journal append failed path=%s seq=%d: %s"
       journal.path
       seq
-      (Printexc.to_string exn)
+      detail
 ;;
 
 type read_failure =
@@ -762,8 +793,14 @@ let read_journal_rows_path path = read_complete_rows ~allow_torn_tail:true path
 let read_journal_path_result path = read_journal_path ~allow_torn_tail:true path
 let read_journal journal = read_journal_path_result journal.path
 
-let next_sequence ?(require_existing = false) journal =
-  match read_journal_path ~allow_torn_tail:false journal.path with
+(* [allow_torn_tail] only changes which bytes count as rows: a fragment after
+   the last newline is not one either way. A producer resuming a segment must
+   refuse it (the cursor may sit past a frame a live reader already holds), so
+   [next_sequence] keeps it false. Recovery that ends the journal after a
+   crash passes true and derives the cursor from the complete rows; the append
+   that follows cuts the fragment. *)
+let sequence_after_complete_rows ~allow_torn_tail ~require_existing journal =
+  match read_journal_path ~allow_torn_tail journal.path with
   | Error Journal_missing when not require_existing -> Ok 0
   | Error (Journal_missing | Journal_unreadable _ | Journal_corrupt _) as error -> error
   | Ok entries ->
@@ -786,6 +823,34 @@ let next_sequence ?(require_existing = false) journal =
          let highest = Option.fold ~none:(-1) ~some:(fun entry -> entry.seq) latest in
          if highest = max_int then Error (Journal_corrupt "journal sequence space exhausted")
          else Ok (highest + 1))
+;;
+
+let next_sequence ?(require_existing = false) journal =
+  sequence_after_complete_rows ~allow_torn_tail:false ~require_existing journal
+;;
+
+type terminal_error_receipt =
+  | Recorded_terminal_error of { seq : int; ts : float }
+  | Existing_terminal_error of { seq : int; ts : float; message : string }
+
+let record_terminal_error journal ~ts ~message =
+  let ( let* ) = Result.bind in
+  let read_error = function
+    | Journal_missing -> "operation journal disappeared during settlement"
+    | Journal_unreadable detail | Journal_corrupt detail -> detail in
+  let* seq =
+    sequence_after_complete_rows ~allow_torn_tail:true ~require_existing:false journal
+    |> Result.map_error read_error in
+  let* entries = match read_journal journal with
+    | Ok entries -> Ok entries
+    | Error Journal_missing -> Ok []
+    | Error error -> Error (read_error error) in
+  match List.rev entries with
+  | { event = Keeper_chat_events.Event_error { message }; seq; ts } :: _ ->
+    Ok (Existing_terminal_error { seq; ts; message })
+  | _ ->
+    let* () = append_result journal ~seq ~ts (Keeper_chat_events.Event_error { message }) in
+    Ok (Recorded_terminal_error { seq; ts })
 ;;
 
 (** {1 Replay position} *)

@@ -174,6 +174,46 @@ let test_rate_limit_lifecycle_reaches_the_tui () =
   assert_state "success clears a stated wait before expiry" false None (project ~now:0.)
 ;;
 
+(* The failed attempt the lane walk orders by reaches the runtime detail, with
+   the Keeper that saw it, and an answer takes it away again. *)
+let test_failed_attempt_reaches_the_tui () =
+  with_runtimes @@ fun () ->
+  let runtime =
+    match Runtime.get_runtime_by_id "usage_claude.sonnet" with
+    | Some runtime -> runtime
+    | None -> fail "fixture runtime missing"
+  in
+  let candidate = runtime.Runtime_instance.candidate_backpressure in
+  let project () =
+    let json =
+      Server_dashboard_runtime_resolved_json.build_at ~now:0.
+        ~generated_at_iso:"2026-10-07T00:00:00Z"
+        ~config:(Workspace.default_config (Filename.get_temp_dir_name ()))
+    in
+    match Tui_decode.decode_runtime_resolved json with
+    | Error detail -> fail detail
+    | Ok (rows, _) ->
+      (List.find (fun (row : Tui_decode.runtime_option) -> String.equal row.ro_id runtime.id) rows)
+        .Tui_decode.ro_failed_attempt
+  in
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  check bool "clear before any failure" true (Option.is_none (project ()));
+  Runtime_candidate_backpressure.note_failed_attempt ~candidate
+    ~failure:Runtime_candidate_backpressure.Provider_timeout
+    ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"alpha");
+  (match project () with
+   | Some
+       { Tui_decode.rfa_failure =
+           Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout
+       ; rfa_recorded_by = "alpha"
+       ; _
+       } -> ()
+   | Some _ -> fail "the failed attempt lost its kind or its recorder"
+   | None -> fail "the failed attempt did not reach the resolved document");
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  check bool "an answer clears it" true (Option.is_none (project ()))
+;;
+
 let test_reports_reach_the_resolved_document () =
   with_runtimes @@ fun () ->
   let claude_scope = scope_of "usage_claude.sonnet" in
@@ -737,15 +777,27 @@ let test_kimi_coding_usages () =
 ;;
 
 let test_ollama_balance () =
-  check (list string) "windows"
-    [ "limit=- label \"session\" fraction 0.25 resets=1790838000 role=gates"
-    ; "limit=- seven_day fraction 0.6 resets=1791158400 role=gates"
+  check (list string) "a purchased balance pays past both windows"
+    [ "limit=- label \"session\" fraction 0.25 resets=1790838000 role=other"
+    ; "limit=- seven_day fraction 0.6 resets=1791158400 role=other"
     ]
     (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance" ollama_balance_response);
+  check (list string) "without a purchased balance both windows refuse model calls"
+    [ "limit=- label \"session\" fraction 0.1614 resets=1791360000 role=gates"
+    ; "limit=- seven_day fraction 0.9919 resets=1791763200 role=gates"
+    ]
+    (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance"
+       {|{"included":{"session":{"remaining_percent":83.86,"resets_at":"2026-10-07T08:00:00Z"},"weekly":{"remaining_percent":0.81,"resets_at":"2026-10-12T00:00:00Z"}},"purchased":{"balance_usd":0}}|});
   check (list string) "nothing left is a spent window; a missing entry is no window"
     [ "limit=- seven_day fraction 1 resets=- role=gates" ]
     (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance"
-       {|{"included":{"weekly":{"remaining_percent":0}}}|});
+       {|{"included":{"weekly":{"remaining_percent":0}},"purchased":{"balance_usd":0}}|});
+  check string "a missing purchased balance is refused" "ollama-balance.purchased is missing"
+    (refused Usage.decode_ollama_balance {|{"included":{"weekly":{"remaining_percent":0}}}|});
+  check string "a negative purchased balance is refused"
+    "ollama-balance.purchased.balance_usd must be 0 or more"
+    (refused Usage.decode_ollama_balance
+       {|{"included":{"weekly":{"remaining_percent":0}},"purchased":{"balance_usd":-1}}|});
   check string "a missing included object is refused" "ollama-balance.included is missing"
     (refused Usage.decode_ollama_balance {|{"range":"7d","totals":{"request_count":1}}|});
   check string "a credit plan's balance is refused by name"
@@ -754,11 +806,12 @@ let test_ollama_balance () =
        {|{"included":{"balance_usd":72.5,"allowance_usd":100,"period":{"from":"2026-09-15T09:30:00Z","until":"2026-10-15T09:30:00Z"}},"purchased":{"balance_usd":25}}|});
   check string "more than 100 percent left is refused"
     "ollama-balance.included.weekly.remaining_percent must be within 0..100"
-    (refused Usage.decode_ollama_balance {|{"included":{"weekly":{"remaining_percent":101}}}|});
+    (refused Usage.decode_ollama_balance
+       {|{"included":{"weekly":{"remaining_percent":101}},"purchased":{"balance_usd":0}}|});
   check string "an unreadable reset time is refused"
     "ollama-balance.included.session.resets_at must be an RFC 3339 timestamp"
     (refused Usage.decode_ollama_balance
-       {|{"included":{"session":{"remaining_percent":5,"resets_at":"soon"}}}|})
+       {|{"included":{"session":{"remaining_percent":5,"resets_at":"soon"}},"purchased":{"balance_usd":0}}|})
 ;;
 
 (* agy 1.2.11's answer to [agy -p "/usage" --output-format json], taken on
@@ -991,6 +1044,14 @@ let test_only_gating_windows_explain_a_refusal () =
     "no window spent"
     (refusal_read Usage.decode_openrouter_key
        {|{"data":{"limit":100,"limit_remaining":40,"free_model_daily_requests":{"used":50,"limit":50}}}|});
+  check string "a spent Ollama weekly window with no purchased balance rests until its reset"
+    "spent until 1791763200"
+    (refusal_read Usage.decode_ollama_balance
+       {|{"included":{"session":{"remaining_percent":83.86,"resets_at":"2026-10-07T08:00:00Z"},"weekly":{"remaining_percent":0,"resets_at":"2026-10-12T00:00:00Z"}},"purchased":{"balance_usd":0}}|});
+  check string "a spent Ollama window that the purchased balance pays past is not a spent quota"
+    "no window spent"
+    (refusal_read Usage.decode_ollama_balance
+       {|{"included":{"session":{"remaining_percent":0,"resets_at":"2026-10-07T08:00:00Z"},"weekly":{"remaining_percent":0,"resets_at":"2026-10-12T00:00:00Z"}},"purchased":{"balance_usd":4.5}}|});
   check string "a spent OpenRouter credit limit states no reset"
     "spent without reset"
     (refusal_read Usage.decode_openrouter_key
@@ -1301,6 +1362,8 @@ let () =
     [ ( "resolved"
       , [ test_case "rate-limit lifecycle reaches the TUI" `Quick
             test_rate_limit_lifecycle_reaches_the_tui
+        ; test_case "failed attempt reaches the TUI" `Quick
+            test_failed_attempt_reaches_the_tui
         ; test_case "reports reach the resolved document" `Quick
             test_reports_reach_the_resolved_document
         ; test_case "malformed window is a typed error" `Quick

@@ -2216,7 +2216,7 @@ let test_browser_screenshot_reaches_vision_reader () =
           let connect suffix browser =
             let raw = "30000000-0000-4000-8000-" ^ suffix in
             let client_id = Result.get_ok (Browser_lane.client_id_of_string raw) in
-            let info : Browser_lane.client_info = {client_id;browser;version="fixture";engine_version="155.0.1"} in
+            let info : Browser_lane.client_info = {client_id;browser;version="fixture";transport=Browser_lane.Web_extension; engine_version="155.0.1"} in
             Eio.Switch.on_release sw (fun () ->
               ignore (Browser_lane.disconnect_client ~client_id));
             let initial = Browser_lane.take_command ~client_info:info ~window_sec:0.001 in

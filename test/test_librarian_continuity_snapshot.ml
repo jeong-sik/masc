@@ -79,6 +79,48 @@ let test_identity_rejections () =
        (history @ [msg T.User "new"]) snapshot)
 ;;
 
+let test_digest_matches_checkpoint_array () =
+  let request = T.make_message ~role:T.User
+    ~metadata:["source", `Assoc ["quoted", `String "\"한글\\\n"; "enabled", `Bool true]]
+    [T.Text "검토: \"path\\name\"\n\t\000"] in
+  let call = T.make_message ~role:T.Assistant
+    [T.ToolUse {id = "read-1"; name = "read_file";
+      input = `Assoc ["path", `String "문서/수정.json"; "lines", `List [`Int 1; `Int 2]]}] in
+  let result body =
+    { (T.make_message ~role:T.Tool
+         [T.ToolResult {tool_use_id = "read-1"; content = body;
+           outcome = T.Tool_succeeded; json = Some (`Assoc ["answer", `Null]);
+           content_blocks = None}]) with tool_call_id = Some "read-1" } in
+  let answer = result "결과\n\"quoted\"\\escaped" in
+  let injected = msg T.System "Pinned context between an assistant and its tool." in
+  let messages = [pinned; request; call; injected; answer] in
+  let lines = [1, boundary messages] in
+  let array_digest prefix =
+    let json = `List (List.map Agent_core.Checkpoint.message_to_json prefix) in
+    Digestif.SHA256.(digest_string (Yojson.Safe.to_string json) |> to_hex) in
+  let check_prefix end_atom prefix remaining =
+    let expected = array_digest prefix in
+    let snapshot = S.capture_checkpoint_prefix ~end_atom ~catch_up_end_atom:None
+      ~trace_id ~lines ~messages ~working_state:state () |> require in
+    check string "stored digest matches checkpoint array bytes" expected snapshot.prefix_sha256;
+    let saved = match S.to_json snapshot with
+      | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+          key, if key = "prefix_sha256" then `String expected else value) fields)
+      | _ -> fail "snapshot object" in
+    let loaded = S.of_json saved |> require in
+    let restored = S.restore ~trace_id ~lines ~messages loaded |> require in
+    check bool "array-digested snapshot restores exact suffix and pinned context" true
+      (restored.messages = remaining)
+  in
+  check_prefix 1 [request] [pinned; call; injected; answer];
+  check_prefix 2 [request; call; answer] [pinned; injected];
+  let snapshot = S.capture ~trace_id ~lines ~messages ~working_state:state |> require in
+  (match S.restore ~trace_id ~lines
+     ~messages:[pinned; request; call; injected; result "changed result"] snapshot with
+   | Error S.Prefix_changed -> ()
+   | Ok _ | Error _ -> fail "modified tool result must invalidate the whole-prefix digest")
+;;
+
 let test_capture_requires_witness () =
   expect_error "baseline substituted for captured work"
     (S.capture ~trace_id ~lines:[1, boundary ~fresh:false history]
@@ -222,6 +264,7 @@ let () = run "offline continuity snapshot"
             test_case "earlier generation end vs current start state" `Quick test_earlier_generation_end_does_not_hide_the_current_start_state;
             test_case "append and complete prefix" `Quick test_restore_append_and_all_covered;
             test_case "source identities" `Quick test_identity_rejections;
+            test_case "checkpoint array digest and restore" `Quick test_digest_matches_checkpoint_array;
             test_case "restart witness required" `Quick test_capture_requires_witness;
             test_case "strict codec" `Quick test_exact_codec;
             test_case "catch-up target codec" `Quick test_catch_up_target_codec;

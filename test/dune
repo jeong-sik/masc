@@ -64,7 +64,7 @@
  (name test_keeper_librarian_absorb_gate)
  (modules test_keeper_librarian_absorb_gate)
  (deps fixtures/librarian_statements_golden.json)
- (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+ (libraries alcotest masc masc_test_deps exact_output_fixture eio_main mtime.clock.os))
 
 (test
  (name test_keeper_librarian_cancellation)
@@ -167,7 +167,9 @@
 (test
  (name test_workspace_memory_curator_lane)
  (modules test_workspace_memory_curator_lane)
- (deps ../config/prompts/workspace_memory_curator.md)
+ (deps ../config/prompts/workspace_memory_curator.md
+       ../config/prompts/workspace_memory_briefing.md
+       ../config/prompts/keeper.md)
  (libraries alcotest masc masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
 
 (test
@@ -382,7 +384,6 @@
   test_domain_pool
   test_sse
   test_graphql_api
-  test_subscriptions
   test_session
   test_progress
   test_validation
@@ -742,7 +743,6 @@
   test_domain_pool
   test_sse
   test_graphql_api
-  test_subscriptions
   test_session
   test_progress
   test_validation
@@ -2881,6 +2881,9 @@
 (include stanzas/test_tui_account_login_removal_pty.inc)
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 (include stanzas/test_runtime_agent_streaming_capability.inc)
+(include stanzas/test_runtime_agent_execution_restart.inc)
+(include stanzas/test_keeper_native_result_retention.inc)
+(include stanzas/test_keeper_native_context_resume.inc)
 
 (include stanzas/test_runtime_model_temperature_toml.inc)
 
@@ -3288,7 +3291,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_link_preview masc_tui_image_preview
+ (libraries masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -3305,6 +3308,7 @@
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_history
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_selection
@@ -3347,7 +3351,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries masc_tui_identity_model masc_tui_surface_navigation
+ (libraries masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -3396,6 +3400,14 @@
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_tui_autonomous_journal)
+ (modules test_tui_autonomous_journal)
+ (libraries alcotest masc masc.masc_types masc_tui_types masc_tui_observer
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
+  masc_tui_keeper_chat_history masc_tui_render_chat
+  masc_tui_frame_presenter masc_tui_ansi masc_tui_render_schedule masc_tui_roster_pane astring yojson))
 
 (test
  (name test_tui_keeper_chat_log)
@@ -3614,7 +3626,7 @@
  (modules test_tui_observer)
  ; masc for the routing table the decoder classifies by: the test quantifies
  ; over the same vocabulary rather than restating it.
- (libraries alcotest masc masc.sse_event agent_core masc_tui_observer yojson))
+ (libraries alcotest masc masc.masc_types masc.sse_event agent_core masc_tui_observer yojson))
 
 (test
  (name test_tui_clipboard)
@@ -3737,6 +3749,11 @@
  masc_tui_message_layout
  masc_tui_types
  unix))
+
+(test
+ (name test_tui_message_input)
+ (modules test_tui_message_input)
+ (libraries alcotest masc_tui_message_input masc_tui_message_layout))
 
 (test
  (name test_tui_message_layout)
@@ -3894,7 +3911,7 @@
 (test
  (name test_tui_composer_projection)
  (modules test_tui_composer_projection)
- (libraries
+ (libraries masc_tui_message_input
  alcotest
 
  masc
@@ -6150,15 +6167,21 @@
   astring
   masc
   masc.runtime
+  masc_tui_ansi
   masc_tui_answering
-  masc_tui_message_layout))
+  masc_tui_frame
+  masc_tui_message_layout
+  masc_tui_render_prim
+  masc_tui_render_schedule
+  masc_tui_types
+  unix))
 
 (test
  (name test_tui_chat_activity)
  (modules test_tui_chat_activity)
  (libraries alcotest astring masc_tui_answering masc_tui_types masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue
-  masc_tui_keeper_chat_transcript
+  masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
   masc_tui_roster_pane masc_tui_frame masc_tui_message_layout))
 
 (test
@@ -6769,6 +6792,40 @@
  (modules test_tui_identity_tab)
  (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
 
+(rule
+ (alias runtest-test_tui_identity_login_poll_pty)
+ (deps test_tui_identity_login_poll_pty.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
+ (action
+  (run python3 %{dep:test_tui_identity_login_poll_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_identity_login_poll_pty)))
+
 (test
  (name test_tui_log_channel_column)
  (modules test_tui_log_channel_column)
@@ -6963,7 +7020,7 @@
 (test
  (name test_tui_browser_lane_text)
  (modules test_tui_browser_lane_text)
- (libraries yojson masc masc.browser_lane masc_tui_types masc_tui_message_layout))
+ (libraries masc_tui_message_input yojson masc masc.browser_lane masc_tui_types masc_tui_message_layout))
 
 (include stanzas/test_browser_downloads.inc)
 (include stanzas/test_browser_bidi_lifecycle.inc)
@@ -7995,12 +8052,17 @@
 (test
  (name test_workspace_memory_ledger)
  (modules test_workspace_memory_ledger)
- (libraries alcotest digestif yojson masc))
+ (libraries alcotest digestif yojson masc masc.fs_compat masc.prompt_registry))
 
 (test
  (name test_keeper_memory_search_index)
  (modules test_keeper_memory_search_index)
  (libraries alcotest masc masc_core eio eio_main))
+
+(test
+ (name test_workspace_memory_briefing)
+ (modules test_workspace_memory_briefing)
+ (libraries alcotest yojson masc unix))
 
 (test
  (name test_workspace_memory_request)
@@ -8553,6 +8615,19 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tool_results_pty)))
+
+(rule
+ (alias runtest-test_tui_chat_replay_failure_pty)
+ (deps
+  test_tui_chat_replay_failure_pty.py
+  tui_keyboard_harness.py
+  ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_chat_replay_failure_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_chat_replay_failure_pty)))
 
 (rule
  (alias runtest-test_tui_account_login_pty)
@@ -9648,6 +9723,20 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_memory_workspace_pty)))
+
+(rule
+ (alias runtest-test_tui_chat_progress_clock_pty)
+ (deps
+  test_tui_chat_progress_clock_pty.py
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py
+  ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_chat_progress_clock_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_chat_progress_clock_pty)))
 
 (executable
  (name test_h3_working_state_meaning)

@@ -378,11 +378,17 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
               ~raw_trace_run
               ~phase:`Started
               observation;
-            let index = !next_tool_index in
-            incr next_tool_index;
-            Option.iter
-              (fun identity -> Hashtbl.replace native_tool_indexes identity index)
-              observation.identity;
+            let index =
+              match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
+              | Some index -> index
+              | None ->
+                  let index = !next_tool_index in
+                  incr next_tool_index;
+                  Option.iter
+                    (fun identity -> Hashtbl.add native_tool_indexes identity index)
+                    observation.identity;
+                  index
+            in
             emit
               (Agent_core.Types.ContentBlockStart
                  { index

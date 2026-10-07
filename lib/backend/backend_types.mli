@@ -10,8 +10,6 @@ type error =
   | AlreadyExists of string
   | IOError of string
   | InvalidKey of string
-  | ConnectionFailed of string
-  | BackendNotSupported of string
 [@@deriving show]
 
 (** Result alias pinned to [error]. *)

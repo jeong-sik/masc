@@ -5555,15 +5555,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (let inherited =
            Option.map
              (fun (modes : Tui_decode.gate_lane_modes) ->
-               gate_mode_word_of_wire modes.Tui_decode.glm_workspace)
+               gate_mode_reading_word modes.Tui_decode.glm_workspace)
              state.gate_modes
          in
          match List.assoc_opt k.k_name state.keeper_gate_modes with
-         | Some mode when not (String.equal mode "workspace") ->
+         | Some mode ->
              (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             ^ Terminal_text.single_line (gate_mode_word_of_wire mode)
+             ^ Terminal_text.single_line (gate_mode_reading_word mode)
              ^ Ansi.reset
-         | Some _ | None ->
+         | None ->
              Ansi.dim ^ "workspace"
              ^ (match inherited with
                 | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
@@ -9717,7 +9717,15 @@ let runtime_detail_lines state target ~width =
           Masc_tui_runtime_evidence.lines evidence ~runtime_id:runtime.ro_id
           |> List.concat_map (fun (label, value) ->
             runtime_detail_field ~width ~style:Ansi.reset label value) in
-      fields @ candidate @ evidence_lines @ usage_lines @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
+      let failed_attempt =
+        match runtime.ro_failed_attempt with
+        | None -> []
+        | Some attempt ->
+          runtime_detail_field ~width ~style:(Theme.warn ()) "Last failure"
+            (Terminal_text.single_line (runtime_failed_attempt_text attempt))
+      in
+      fields @ candidate @ evidence_lines @ usage_lines @ quota @ rate_limit @ failed_attempt
+      @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -10704,6 +10712,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_composite_changed _
       | Masc_tui_observer.Keeper_chat_appended _
       | Masc_tui_observer.Keeper_chat_stream_frame _
+      | Masc_tui_observer.Keeper_turn_stream_frame _
       | Masc_tui_observer.Keeper_waiting_inventory_changed _
       | Masc_tui_observer.Fusion_run_status _
       | Masc_tui_observer.Internal_agent_runs_changed

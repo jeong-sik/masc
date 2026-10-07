@@ -94,6 +94,7 @@ val librarian_working_context : string
 val librarian_working_contexts_rule : string
 
 val workspace_memory_curator : string
+val workspace_memory_briefing : string
 
 val fusion_judge : string
 val fusion_judge_refine : string
@@ -174,8 +175,8 @@ val keeper_context_approval_authority_footer : string
 
 (** {1 keeper.world.* — unified turn frame section prose}
 
-    One group file per section under [config/prompts/keeper.world.<group>.md];
-    each [### marker] slot registers as [keeper.world.<group>.<marker>]. The
+    One marker group per section in [config/prompts/keeper.md]; each
+    [### world.<group>.<marker>] slot registers as [keeper.world.<group>.<marker>]. The
     bare [keeper.world] key is a historical dashboard name only, never a
     prompt key. *)
 
@@ -351,7 +352,6 @@ val keeper_tool_filesystem_offset_not_1_based : string
 val keeper_tool_filesystem_limit_not_positive : string
 val keeper_tool_filesystem_available_cwds_partial : string
 val keeper_tool_filesystem_checkout_scan_failed : string
-val keeper_tool_filesystem_cwd_not_directory : string
 val keeper_tool_filesystem_offset_beyond_window : string
 val keeper_tool_filesystem_capability_unavailable : string
 val keeper_tool_filesystem_publication_failed : string
@@ -397,7 +397,6 @@ val exec_policy_cwd_existing_siblings_hint : string
 
 val subset_rewrite_move_to_field : string
 val subset_rewrite_call_this_instead : string
-val subset_rewrite_spell_it_as : string
 
 (** tool_guidance.* — generic cross-domain tool-result guidance, one arm of
     [Tool_guidance.t] per key. *)
@@ -426,9 +425,17 @@ val agent_core_handoff_prompt_param_description : string
 val agent_core_agent_tool_prompt_param_description : string
 val keeper_context_workspace_memory_available : string
 val keeper_context_workspace_memory_unavailable : string
+val keeper_context_workspace_memory_briefing_current : string
+val keeper_context_workspace_memory_briefing_stale : string
+val keeper_context_workspace_memory_briefing_pending : string
+val keeper_context_workspace_memory_briefing_unavailable : string
 
 val candle_appraiser_grade : string
 
 val candle_appraiser_relation : string
 
 val candle_appraiser_weights : string
+
+val keeper_world_recent_work : string
+
+val keeper_world_recent_work_preview : string

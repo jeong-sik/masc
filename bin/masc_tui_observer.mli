@@ -193,6 +193,10 @@ type event =
           carries one. A reply of any length sends one of these per token, so
           the Acting filter treats them as noise the way it treats
           heartbeats. *)
+  | Keeper_turn_stream_frame of
+      { keeper : string; turn_ref : Ids.Turn_ref.t; seq : int; at : float }
+      (** Autonomous journal growth notification. Its ordered contents are read
+          from the turn endpoint; this notification carries no display payload. *)
   | Keeper_waiting_inventory_changed of
       { keeper : string; queue_kind : string option; at : float }
       (** The keeper's waiting queue changed. Names the keeper in

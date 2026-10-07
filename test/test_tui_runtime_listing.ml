@@ -25,7 +25,8 @@ let runtime id : Masc.Tui_decode.runtime_option =
     ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
     ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None; ro_quota_scope_id = None;
-    ro_rate_limited = false; ro_rate_limit_resets_at = None }
+    ro_rate_limited = false; ro_rate_limit_resets_at = None;
+    ro_failed_attempt = None }
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 
@@ -1760,6 +1761,27 @@ let test_short_viewport_preserves_selected_list_row () =
       (runtime_selection_summary_lines ~cols state)
       (runtime_selection_summary_for_viewport ~rows:100 ~cols state)) [80; 132]
 
+
+(* The detail row says what the failure was, who saw it, and what the lane
+   walk does with it; a failure name this build does not know is drawn as the
+   server wrote it. *)
+let test_failed_attempt_row_names_the_failure_and_its_keeper () =
+  let at = 1790000000. in
+  let text failure =
+    runtime_failed_attempt_text
+      { Masc.Tui_decode.rfa_noted_at = at; rfa_failure = failure; rfa_recorded_by = "alpha" }
+  in
+  let has affix text = Astring.String.is_infix ~affix text in
+  let known =
+    text (Masc.Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout)
+  in
+  Alcotest.(check bool) "names the failure" true (has "timeout at " known);
+  Alcotest.(check bool) "names the Keeper that saw it" true (has "seen by alpha" known);
+  Alcotest.(check bool) "says what the walk does" true
+    (has "other Keepers try it after the ones that answered" known);
+  Alcotest.(check bool) "an unknown failure keeps its name" true
+    (has "quota_drift at " (text (Masc.Tui_decode.Unrecognised_attempt_failure "quota_drift")))
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [ Alcotest.test_case "dismissed commit stays dismissed after reread" `Quick test_dismissed_commit_stays_dismissed_after_reread;
        Alcotest.test_case "commit application survives successful and failed rereads" `Quick test_commit_application_survives_reread;
@@ -1834,4 +1856,6 @@ let () = Alcotest.run "runtime list geometry"
         test_schema_less_client_is_refused_only_for_exact_lane
         ;Alcotest.test_case "HTTP slot without a body deadline is refused for an exact lane" `Quick
           test_http_slot_without_body_deadline_is_refused_for_exact_lane
+        ;Alcotest.test_case "failed attempt row names the failure and its Keeper" `Quick
+          test_failed_attempt_row_names_the_failure_and_its_keeper
 ]]

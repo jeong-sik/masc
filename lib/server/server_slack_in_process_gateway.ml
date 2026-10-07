@@ -561,10 +561,9 @@ let handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
   | Ok None ->
     Slack_observability.record_ambient Slack_observability.Ambient_dropped_unbound
   | Ok (Some keeper_name) ->
-    let trimmed = String.trim text in
-    if String.equal trimmed "" then
+    if String.equal (String.trim text) "" then
       Slack_observability.record_ambient Slack_observability.Ambient_dropped_empty
-    else if String.length trimmed > Channel_gate.max_content_length () then
+    else if String.length text > Channel_gate.max_content_length () then
       (* Same inbound bound the turn path enforces
          ([Channel_gate.handle_inbound] validation): a message this size cannot
          become a turn either; it is rejected, not truncated. *)
@@ -579,12 +578,12 @@ let handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
       in
       let attention_event_id =
         record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
-          ~channel_name ~thread_ts ~ts ~user_id ~user_name ~content:trimmed
+          ~channel_name ~thread_ts ~ts ~user_id ~user_name ~content:text
           ~mentions_bot
           ~route:"ambient" ~urgency:Keeper_external_attention.Ambient
       in
       Keeper_chat_store.append_user_message
-        ~base_dir ~keeper_name ~content:trimmed
+        ~base_dir ~keeper_name ~content:text
         ~surface:
           (Surface_ref.Slack
              { team_id; channel_id; channel_name; thread_ts })

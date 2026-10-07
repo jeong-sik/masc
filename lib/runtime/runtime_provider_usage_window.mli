@@ -12,8 +12,8 @@
     time MASC heard it.
 
     It is an observation.  Routing, candidate ordering, admission and retry
-    do not read this table (an HTTP 403 usage read can separately rest its
-    scope through {!Runtime_provider_usage_read.read_after_account_refusal}
+    do not read this table (a usage read after an HTTP 403, or after a 429
+    that states no wait, can separately rest its scope through {!Runtime_provider_usage_read.read_after_account_refusal}
     on {!Runtime_quota_window}). Codex reads preserve the refusal observation
     because the rejected bucket is not attributed: codex-cli 0.156.0's protocol schema says clients must not
     infer recovery from percentages or reset times, so no availability is
@@ -64,12 +64,15 @@ type window_role =
   | Gates_model_calls
       (** Spending it refuses model calls on the account: Claude and Codex
           windows, OpenRouter's credit limit, Z.AI's TOKENS_LIMIT, both Kimi
-          counts, Ollama's session and weekly allowance, Antigravity's 5-hour and
-          weekly buckets, Muse Code's rolling and weekly windows. *)
+          counts, Ollama's session and weekly allowance while its purchased
+          balance is zero, Antigravity's 5-hour and weekly buckets, Muse
+          Code's rolling and weekly windows. *)
   | Counts_other_use
       (** It counts something a model call does not need: Z.AI's
           TIME_LIMIT (MCP and tool calls), OpenRouter's free-model daily
-          requests, and uncapped credit usage totals. *)
+          requests, uncapped credit usage totals, and Ollama's session and
+          weekly allowance while its purchased balance pays for calls past
+          them. *)
   | Unclassified_limit
       (** A Z.AI limit type this decoder does not know. *)
 
@@ -183,7 +186,10 @@ val decode_ollama_balance : Yojson.Safe.t -> (report, decode_error) result
     [included] is required; [included.session] is a {!Provider_label}
     "session" window and [included.weekly] a {!Seven_day} window, each a
     {!Fraction} of [1 - remaining_percent / 100] with [remaining_percent]
-    within [0..100], and [resets_at] read as RFC 3339 when present. A credit
+    within [0..100], and [resets_at] read as RFC 3339 when present.
+    [purchased.balance_usd] is required, 0 or more: above zero both windows
+    are {!Counts_other_use}, because Ollama pays a call past a spent window
+    from that balance; at zero they are {!Gates_model_calls}. A credit
     plan's [included.balance_usd] is refused: its calls go on against
     purchased credits, so no window alone says when a call is refused. *)
 

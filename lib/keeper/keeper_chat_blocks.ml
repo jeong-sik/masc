@@ -108,8 +108,7 @@ let connector_projection ~turn_outcome ~reply =
   | Keeper_turn_outcome.Terminal_effect_settled, _ ->
     Connector_no_visible_reply
   | Keeper_turn_outcome.Visible_reply, Some reply ->
-    let reply = String.trim reply in
-    if String.equal reply ""
+    if String.equal (String.trim reply) ""
     then Connector_no_visible_reply
     else Connector_text reply
   | Keeper_turn_outcome.Visible_reply, None ->

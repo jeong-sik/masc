@@ -666,6 +666,91 @@ status: reference
   (RFC-0468 §3.2). 접수 응답은 실행 완료를 뜻하지 않는다.
   → [Keeper_chat_operation_payload](../../lib/keeper/keeper_chat_operation_payload.mli)
 
+**Keeper Turn Slot Admission Priority (키퍼 턴 슬롯 진입 우선순위)**
+: 한 Keeper 파이버(`Owner` fiber)의 단일 실행 슬롯(`turn slot`)이 해제되었을 때, 큐에 대기 중인
+  청구 가능한 직접 입력(`claimable queued chat operation`)이 자율 턴(`autonomous turn`)보다
+  항상 먼저 슬롯을 획득하는 엄격한 우선순위 규칙(#41654). 자율 레인이 바쁜 슬롯을 반복
+  관측하더라도 진입 순서는 바뀌지 않으며, 이전 RFC-0373 방향(direction 2)의 유예 부채
+  한도(`autonomous_deferral_debt_cap`) 메커니즘은 폐기되었다. 러너가 준비되지 않은 Queued
+  chat은 자율 진입을 막지 않으며, 이전에 슬롯을 거절당한 자율 레인은 청구 가능한 직접 오퍼레이션이
+  슬롯을 가져가지 않고 슬롯이 여전히 미청구(`unclaimed`) 상태일 때 `notify_turn_slot_released`
+  신호로 깨어나 실행을 재개한다.
+  → [Keeper_owner](../../lib/keeper/keeper_owner.mli)
+
+**Cancelled Chat Terminal Retention (취소된 채팅 종단 보존)**
+: Keeper 채팅 오퍼레이션이 취소되거나 실패했을 때, 라이브 SSE 스트림 구독자의 연결 여부와
+  무관하게 종단 에러 이벤트(`Keeper_chat_events.Event_error`)의 동기 저널 기록을
+  시도(`Journal.append_result`)하는 계약(#41657). 기록에 성공하면 재연결 클라이언트의 replay에
+  보존되어 취소 상태를 확정적으로 재생할 수 있고, 저널 기록에 실패하면 `seq` 없는 live 오류
+  이벤트(`Ag_ui.Run_error`, code는 failure kind)로 투영된다.
+  → [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
+  [Server_routes_http_keeper_stream](../../lib/server/server_routes_http_keeper_stream.mli)
+
+**Keeper Direct Native Call (키퍼 직접 네이티브 호출)**
+: 한 직접 Keeper 채팅 오퍼레이션(`Keeper_chat_operation`) 안에서 실행되는 단일
+  네이티브 Agent API 호출 단위(#41655). 입력 접수(`input admission`) 직후이자
+  도구/효과 실행 전에 포착된 정확한 체크포인트를 불변의 시드(`seed_checkpoint`)로
+  보존한다. 상태 전이는 `No_native_call` → `Active` → `Terminal_unacknowledged`를
+  따르며, 진행 중인 호출의 새 체크포인트는 시드를 보존한 채 전진(`advance`)한다.
+  서버 재시작 복구 시 durable Core scope에서 활성 호출을 복원하거나, 저널이 이미
+  종료된 경우 미확인 종단 영수증(`Terminal_unacknowledged`)으로 정산하여 유실된
+  응답을 지어내지 않는다. 알 수 없거나 보존되지 않은 효과가 있는 호출은 제공자
+  재시도(fallback)가 격리(fencing)된다.
+  → [Keeper_native_call](../../lib/keeper_chat_operations/keeper_native_call.mli) ·
+  [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli)
+
+**Native Result Retention (네이티브 실행 결과 보존)**
+: 네이티브 API 호출의 정규 결과(canonical results)를 해당 호출의 transcript와
+  대조·검증하는 제약 계약(#41655). 접수된 정확한 시드(`seed_checkpoint`) 이전의
+  메시지나 결과는 이후의 호출을 해소(discharge)할 수 없으며, transcript에 보존된
+  각 결과 발생(occurrence)은 최대 하나의 정규 결과만 해소할 수 있다. 도구 시도가
+  접수된 후의 재시작 복구에서는 정규 정산된(settled) 루트 도구 결과를 모두 보존하고
+  transcript를 엄격히 결속하며, 예외는 확인된 퇴역 이력 절단(`retired_history_cut`)뿐이다.
+  → [Keeper_native_result_retention](../../lib/keeper/keeper_native_result_retention.mli) ·
+  [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli)
+
+**Keeper Chat Event Timeline (키퍼 채팅 이벤트 타임라인)**
+: 직접 채팅 오퍼레이션(`/chat/events`)과 자율 턴(`/turns/:turn_ref/events`,
+  `masc.keeper_turn_events.v1`) 양쪽의 정규화된 이벤트(`keeper_chat_event`)
+  스트림을 시간축으로 통합 소비·표현하는 인터페이스 계약(#41661, #41667).
+  라이브 SSE 스트림과 저널 리플레이 모두 서버의 epoch-seconds 시계를
+  보존하여, 클라이언트의 연결 시점이나 리플레이 여부에 관계없이 타임라인
+  이벤트의 시계열 순서와 타이밍을 유지한다. 옵서버 증분 알림은 알림 자체의
+  페이로드를 추가하지 않고 마지막 수락 시퀀스 이후의 저널을 읽어 일관성을
+  유지한다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Pending Chat Input Separation (대기 채팅 입력 분리)**
+: 사용자의 입력이 로컬 디스패치(`local dispatch`), 미확인 전송(`unconfirmed transport`),
+  서버 큐 접수(`server queue admission`) 단계를 거치는 동안 확정된 대화 이력과
+  분리된 별도 대기 영역(`pending area`)에 머무는 상태 계약(#41661, #41667).
+  `Run_started` 이벤트 또는 영속화된 권위적 입력 확인이 도착하기 전까지는
+  처리가 시작된 것으로 간주하지 않으며, 검증된 거절(refusal) 시 원본 회상 텍스트를
+  보존한 채 실패로 표시한다. 배치 입력의 경우 단일 공유 응답에 앞서 모든 묶인
+  입력 식별자가 차례대로 보존된다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Thinking Stream Index Separation (사고 스트림 인덱스 분리)**
+: 프로바이더 런타임(Codex, Claude, GLM 등)의 추론/사고 스트림(`ThinkingDelta` /
+  `Agent_core_thinking_delta`)이 공개 텍스트 답변(`TextDelta`)의 콘텐츠 인덱스(`content index`)를
+  점유하거나 오염시키지 않도록 식별자와 블록 인덱스를 엄격히 분리하는 경계 계약(#41661, #41667).
+  완료된 추론 블록은 누락된 접미사(suffix)만 기여하며, 불투명 서명(opaque signatures)이나
+  비공개 페이로드는 공개 텍스트로 노출하지 않는다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Native Tool Observed Occurrence (네이티브 도구 관측 출현)**
+: 공식 클라이언트나 네이티브 런타임의 내장 도구 시작/종료 관측(`tool_stream_occurrence`,
+  `native_tool`)은 관측된 실행 생애주기일 뿐, MASC 도구 실행 영수증(`MASC execution receipts`)이나
+  도구 성공 실행을 증명하지 않는다는 경계 규약(#41661, #41667).
+  같은 진행 중 출현(`in-flight occurrence`) 범위 안에서 동일한 프로바이더 도구 식별자의
+  반복 관측은 단일 콘텐츠 인덱스를 유지하며, 이후의 종료 관측이 최초 출현을 닫고
+  어댑터의 식별자 매핑을 정리한다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
 **Speaker Authority (화자 권한)**
 : Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
   추측하지 않고 진입 경로와 Keeper 레지스트리 대조로 구조적으로 결정한다(RFC-0223 §3,
@@ -2991,6 +3076,13 @@ status: reference
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
 
+**World Curator / Workspace Curator (공유 맥락 합성)**
+: 여러 Keeper가 같은 원문을 반복해서 읽지 않도록 공유 맥락을 합성하는 단독 모델 레인. 코드의 `Workspace_curator`는 Keeper Memory의 변경 사실을 공유 주장·충돌로 분류한 뒤, 그 본문을 의미를 보존한 공유 요약으로 합성한다. 새 사실은 이전 요약에 합치고, 삭제·수정된 사실이나 합성 프롬프트 변경이 있으면 현재 자료로 다시 만든다. 동일한 자료의 완성본은 Keeper들이 재사용한다. 요약은 현재 작업공간의 모든 운영 상태나 검증된 사실을 뜻하지 않으며, 원본 Memory를 덮어쓰지 않는다.
+
+**Shared Briefing (공유 요약)**
+: World Curator가 만든 재사용 가능한 공유 맥락. 원장 ID 순서로 잘라낸 목록이 아니라 모델이 중복·관계·불확실성을 종합한 본문이다. 완성본과 그 자료의 식별자를 함께 보존한다. 새 합성이 진행되거나 실패한 동안에는 이전 완성본을 갱신 대기로 표시하고, 아직 첫 완성본이 없으면 준비 중임을 알린다. 제공자 입력 한도로 여러 회차가 필요하면 작성 중 상태를 저장하지만 Keeper에게는 완성본만 전달한다. 자료와 합성 계약이 같으면 모델을 다시 부르지 않는다. 중단된 추가 자료가 삭제되어 이전 완성본의 자료만 남으면, 모델 호출 없이 작성 중 상태의 원문과 부분 요약을 지우고 저장한다. 이 결속은 의미 보존을 자동 증명하지 않는다.
+  → [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli) · [server_workspace_memory_curator](../../lib/server/server_workspace_memory_curator.ml)
+
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
   한 파일. 설명 절반은 Working State이고, 범위 절반은 완료된 History 구간이다.
@@ -3027,6 +3119,21 @@ status: reference
   카운터는 그 셋을 따른다([`keeper_official_client_host.ml`](../../lib/keeper/keeper_official_client_host.ml)).
   요약이 빠져도 turn은 거절하지 않고 WARN으로 알린다.
   → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
+
+**Recent Work Context (최근 작업 발췌)**
+: 자율 턴(`autonomous turn`)이 직전 직접 대화의 요청과 이전 자율 턴의 결론을
+  이어받아 작업할 수 있도록 제공하는 유계된 이력 발췌(#41675). 직접 대화
+  이력(`conversation`)과 최신 내부 어시스턴트 메시지(`autonomous_reply`)를
+  독립적으로 수집하여, 자율 루프의 긴 반복 실행이 사용자의 원래 요청을 밀어내지
+  (`displace`) 않도록 돕는다. 단, 물리 창 생략(`Physical window omission`)은
+  명시적으로 보존되나 창 밖 대화의 무손실 보존이나 작업 완료 여부까지 증명하지는
+  않는다. 인라인 표시 한도를 넘는 큰 발췌는 현재 도구 표면이 정규 아티팩트
+  판독기(`keeper_artifact_read`)를 제공할 때만 내용 주소화된 아티팩트
+  (`Evidence of string`)로 결속되며, 판독기 부재나 저장 실패 시 인라인으로
+  되돌리지 않고 누락(`Unavailable`) 상태를 명시한다. 이 발췌는 불완전할 수 있는
+  역사적 발췌일 뿐이며, 완료 상태를 증명하거나 새로운 할 일 목록·열린 의무를 규정하지 않는다.
+  → [Keeper_recent_work](../../lib/keeper/keeper_recent_work.mli) ·
+  [Keeper Unified Prompt](../../lib/keeper/keeper_unified_prompt.mli)
 
 **Extra System Context (턴별 문맥)**
 : Keeper hook이 매 turn 새로 조립해 provider 지시 표면에 얹는 `System` 메시지.

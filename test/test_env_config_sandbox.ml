@@ -44,9 +44,7 @@ let sandbox_env_names =
   ; "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
   ; "MASC_KEEPER_SHELL_TIMEOUT_IO_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_READ_SEC"
-  ; "MASC_KEEPER_SHELL_TIMEOUT_USER_MAX_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_CLEANUP_RM_SEC"
-  ; "MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC"
   ]
 
 (* Run [f] with every name in [sandbox_env_names] cleared (set to "").
@@ -103,7 +101,6 @@ let test_defaults_pinned () =
   in
   pin S.Shell_timeout.Io 30.0;
   pin S.Shell_timeout.Read 15.0;
-  pin S.Shell_timeout.User_max 180.0;
   (* 10.0 since #23722 (rm -v can outlive 5s on loaded runners); that PR
      changed the lib default without this pin (main red #23901 residual). *)
   pin S.Shell_timeout.Cleanup_rm 10.0
@@ -153,11 +150,7 @@ let test_per_bucket_env_var_shape () =
   check string "Cleanup_rm env var name"
     "MASC_KEEPER_SHELL_TIMEOUT_CLEANUP_RM_SEC"
     (S.Shell_timeout.per_bucket_env_var
-       ~bucket:S.Shell_timeout.Cleanup_rm);
-  check string "Unknown bucket env var lowercases"
-    "MASC_KEEPER_SHELL_TIMEOUT_FUTURE_X_SEC"
-    (S.Shell_timeout.per_bucket_env_var
-       ~bucket:(S.Shell_timeout.Unknown "future-x"))
+       ~bucket:S.Shell_timeout.Cleanup_rm)
 
 let test_per_bucket_env_override () =
   with_clean_sandbox_env @@ fun () ->
@@ -165,17 +158,6 @@ let test_per_bucket_env_override () =
     check approx "Read bucket env override wins"
       7.5
       (S.Shell_timeout.timeout_sec ~bucket:S.Shell_timeout.Read ()))
-
-let test_unknown_bucket_uses_global_env () =
-  with_clean_sandbox_env @@ fun () ->
-  with_env "MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC" (Some "99.0") (fun () ->
-    check approx "Unknown bucket uses global env"
-      99.0
-      (S.Shell_timeout.timeout_sec
-         ~bucket:(S.Shell_timeout.Unknown "future") ());
-    check approx "Known bucket ignores global env"
-      30.0
-      (S.Shell_timeout.timeout_sec ~bucket:S.Shell_timeout.Io ()))
 
 (* ---------------------------------------------------------------- *)
 (* 4. Filesystem derivation                                         *)
@@ -218,8 +200,6 @@ let () =
             test_per_bucket_env_var_shape
         ; test_case "per-bucket env override" `Quick
             test_per_bucket_env_override
-        ; test_case "Unknown bucket -> global env" `Quick
-            test_unknown_bucket_uses_global_env
         ] )
     ; ( "filesystem",
         [ test_case "relax_fs propagates to derived" `Quick

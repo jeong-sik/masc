@@ -505,8 +505,7 @@ let content_with_attachments ~content ~attachments =
   match attachment_lines attachments with
   | [] -> content
   | lines ->
-    let body = String.trim content in
-    String.concat "\n" (if body = "" then lines else body :: lines)
+    String.concat "\n" (if String.trim content = "" then lines else content :: lines)
 
 let decode_inbound_attachments payload =
   match assoc_opt "attachments" payload with

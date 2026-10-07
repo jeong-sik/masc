@@ -221,8 +221,10 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
           in
           let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
             Workspace_memory_ledger.observe ~base_path:config.base_path) in
+          let recent_work = Keeper_recent_work.collect ~config ~meta:m
+            |> Keeper_recent_work.preview ~base_path:config.base_path in
           Keeper_unified_prompt.build_prompt_preview ~current_task ~active_goal_summaries
-            ~task_skill_surfaces ~workspace_memory ~repository_freshness ~observation ()
+            ~task_skill_surfaces ~workspace_memory ~repository_freshness ~recent_work ~observation ()
         in
         ( parts.Keeper_unified_prompt.world_state,
           parts.Keeper_unified_prompt.user_message )

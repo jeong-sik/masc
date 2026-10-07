@@ -131,7 +131,8 @@ let write_frame stdout json =
    port it names only once that address answers the lane. *)
 type destination = Fixed | Workspace of string
 type config = { destination : destination; server : Uri.t; token_file : string; client_id : string }
-type browser_info = { browser : string; version : string; engine_version : string }
+type browser_info = { browser : string; version : string; engine_version : string;
+  transport : Browser_lane.live_transport }
 let browser_info json =
   let* envelope = object_fields json in
   if List.assoc_opt "ok" envelope <> Some (`Bool true) then Error "browser metadata unavailable"
@@ -145,9 +146,10 @@ let browser_info json =
     let* engine_version = version fields "version" in
     match List.assoc_opt "zen" fields with
     | Some (`Assoc zen) ->
-      let* version = version zen "version" in Ok {browser="zen"; version; engine_version}
+      let* version = version zen "version" in
+      Ok {browser="zen"; version; engine_version; transport=Browser_lane.Web_extension}
     | None when List.assoc_opt "name" fields = Some (`String "Firefox") ->
-      Ok {browser="firefox"; version=engine_version; engine_version}
+      Ok {browser="firefox"; version=engine_version; engine_version; transport=Browser_lane.Web_extension}
     | Some _ | None -> Error "unsupported browser metadata"
 
 let loopback_origin raw =
@@ -289,7 +291,8 @@ let post ~clock ~client ~server ~config ~info ~token path json =
               ~headers:(Cohttp.Header.of_list
                 [ "Content-Type", "application/json"; "x-lane", Browser_lane.Lane_name.(to_wire Live); "x-lane-token", token;
                   "x-browser-client-id", config.client_id; "x-browser-name", info.browser;
-                  "x-browser-version", info.version; "x-browser-engine-version", info.engine_version ])
+                  "x-browser-version", info.version; "x-browser-engine-version", info.engine_version;
+                  "x-browser-transport", Browser_lane.live_transport_to_string info.transport ])
               ~body:(Cohttp_eio.Body.of_string (Yojson.Safe.to_string json))
               (endpoint server path)
           in
@@ -502,7 +505,7 @@ let run_bidi env config url =
     let* version=match within ~clock extension_timeout_sec (fun ()->Masc.Browser_bidi_peer.metadata peer) with
       | Some version->version
       | None->Error "BiDi metadata deadline exceeded" in
-    let info={browser="firefox";version;engine_version=version} in
+    let info={browser="firefox";version;engine_version=version;transport=Browser_lane.Webdriver_bidi} in
     Eio.Switch.run (fun sw ->
       Eio.Switch.on_release sw (fun ()->
         match read_token config.token_file with

@@ -368,7 +368,8 @@ let replace_keeper_rows ~preserve_on_error (state : state)
         (match state.msg_target_keeper_name with
          | Some keeper_name ->
              Keeper_selection.Message_keeper
-               { keeper_name; cursor = state.keeper_cursor }
+               { keeper_name; cursor = state.keeper_cursor;
+                 return_keeper = state.keeper_message_return }
          | None -> Keeper_selection.List_cursor state.keeper_cursor)
     | Some Keeper_list
     (* The picker rides the list cursor: its own cursor points into the
@@ -404,6 +405,8 @@ let replace_keeper_rows ~preserve_on_error (state : state)
   (* A roster change no longer dismisses an action notice: the notice answers
      the operator's last action, and a refresh tick would otherwise wipe it
      before it is read. User actions still clear it. *)
+  if current_keeper_mode <> Some Keeper_message then
+    state.keeper_message_return <- None;
   if state.detail_focus_recovery <> None && keepers_error <> None then ()
   else (match
      Keeper_selection.reconcile ~current_ids:current_keeper_ids
@@ -430,8 +433,9 @@ let replace_keeper_rows ~preserve_on_error (state : state)
    | Keeper_selection.Calls_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_calls
-   | Keeper_selection.Message_keeper { cursor; _ } ->
+   | Keeper_selection.Message_keeper { cursor; return_keeper; _ } ->
        state.keeper_cursor <- cursor;
+       state.keeper_message_return <- return_keeper;
        state.view <- Keepers Keeper_message);
 
   let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
@@ -1398,7 +1402,7 @@ let load_dashboard_gate ~(host : string) ~(port : int) :
 
 (** Load the durable per-keeper Gate settings. *)
 let load_keeper_gate_settings ~(host : string) ~(port : int) :
-    ((string * string) list * Tui_decode.keeper_exact_lane_first list, string) result =
+    ((string * Tui_decode.gate_mode) list * Tui_decode.keeper_exact_lane_first list, string) result =
   match fetch_keeper_gate_settings ~host ~port with
   | Error err -> Error ("keeper Gate settings load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_gate_settings json

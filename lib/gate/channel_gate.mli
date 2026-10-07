@@ -84,7 +84,7 @@ val handle_inbound :
   dispatch:dispatch_fn ->
   inbound_message ->
   (outbound_message, gate_error) result
-(** Validate, dispatch to keeper, return response.
+(** Validate, dispatch the original message content to keeper, return response.
     The only non-deterministic step is the keeper turn itself
     (which is on the other side of the [dispatch] boundary). *)
 

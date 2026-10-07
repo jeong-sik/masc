@@ -4,10 +4,9 @@
     AG-UI sits at Layer 1 (Agent↔User) complementing MCP (Layer 2) and A2A (Layer 3).
 
     Event categories:
-    - Lifecycle: RUN_STARTED, RUN_FINISHED, RUN_ERROR, STEP_STARTED, STEP_FINISHED
+    - Lifecycle: RUN_STARTED, RUN_FINISHED, RUN_ERROR
     - Text: TEXT_MESSAGE_START, TEXT_MESSAGE_CONTENT, TEXT_MESSAGE_END
     - Tool: TOOL_CALL_START, TOOL_CALL_ARGS, TOOL_CALL_END
-    - State: STATE_SNAPSHOT, STATE_DELTA
     - Custom: CUSTOM (MASC-specific events)
 
     @see https://docs.ag-ui.com/concepts/events
@@ -18,16 +17,12 @@ type event_type =
   | Run_started
   | Run_finished
   | Run_error
-  | Step_started
-  | Step_finished
   | Text_message_start
   | Text_message_content
   | Text_message_end
   | Tool_call_start
   | Tool_call_args
   | Tool_call_end
-  | State_snapshot
-  | State_delta
   | Custom
 [@@deriving show, eq]
 
@@ -35,16 +30,12 @@ let event_type_to_string = function
   | Run_started -> "RUN_STARTED"
   | Run_finished -> "RUN_FINISHED"
   | Run_error -> "RUN_ERROR"
-  | Step_started -> "STEP_STARTED"
-  | Step_finished -> "STEP_FINISHED"
   | Text_message_start -> "TEXT_MESSAGE_START"
   | Text_message_content -> "TEXT_MESSAGE_CONTENT"
   | Text_message_end -> "TEXT_MESSAGE_END"
   | Tool_call_start -> "TOOL_CALL_START"
   | Tool_call_args -> "TOOL_CALL_ARGS"
   | Tool_call_end -> "TOOL_CALL_END"
-  | State_snapshot -> "STATE_SNAPSHOT"
-  | State_delta -> "STATE_DELTA"
   | Custom -> "CUSTOM"
 
 (** AG-UI message role *)
@@ -65,13 +56,12 @@ type event = {
   message_id: string option;
   role: role option;
   delta: string option;            (** Text chunk or tool args fragment *)
-  step_name: string option;
   tool_call_id: string option;
   tool_call_name: string option;
   tool_stream_scope: int option;
   provider_message_id: string option;
   tool_call_block_index: int option;
-  snapshot: Yojson.Safe.t option;  (** Full state for STATE_SNAPSHOT *)
+  snapshot: Yojson.Safe.t option;  (** Accumulated tool-call arguments for TOOL_CALL_ARGS *)
   message: string option;          (** Required top-level RUN_ERROR message *)
   code: string option;             (** Optional top-level RUN_ERROR code *)
   custom_name: string option;      (** Custom event name *)
@@ -81,7 +71,7 @@ type event = {
 
 (** Create an event with defaults *)
 let make_event ?(timestamp = Time_compat.now ()) ?(run_id=None) ?(message_id=None) ?(role=None)
-    ?(delta=None) ?(step_name=None) ?(tool_call_id=None)
+    ?(delta=None) ?(tool_call_id=None)
     ?(tool_call_name=None) ?(tool_stream_scope=None)
     ?(provider_message_id=None) ?(tool_call_block_index=None) ?(snapshot=None)
     ?(message=None) ?(code=None)
@@ -100,16 +90,12 @@ let make_event ?(timestamp = Time_compat.now ()) ?(run_id=None) ?(message_id=Non
         invalid_arg "AG-UI RUN_ERROR cannot use the Custom name/value envelope")
    | ( Run_started
      | Run_finished
-     | Step_started
-     | Step_finished
      | Text_message_start
      | Text_message_content
      | Text_message_end
      | Tool_call_start
      | Tool_call_args
      | Tool_call_end
-     | State_snapshot
-     | State_delta
      | Custom ) ->
      (match message, code with
       | None, None -> ()
@@ -122,7 +108,6 @@ let make_event ?(timestamp = Time_compat.now ()) ?(run_id=None) ?(message_id=Non
     message_id;
     role;
     delta;
-    step_name;
     tool_call_id;
     tool_call_name;
     tool_stream_scope;
@@ -160,7 +145,6 @@ let event_to_json (e : event) : Yojson.Safe.t =
     @ optional "messageId" (fun s -> `String s) e.message_id
     @ optional "role" (fun r -> `String (role_to_string r)) e.role
     @ optional "delta" (fun s -> `String s) e.delta
-    @ optional "stepName" (fun s -> `String s) e.step_name
     @ optional "toolCallId" (fun s -> `String s) e.tool_call_id
     @ optional "toolCallName" (fun s -> `String s) e.tool_call_name
     @ optional "toolStreamScope" (fun value -> `Int value) e.tool_stream_scope

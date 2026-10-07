@@ -96,18 +96,7 @@ val claude_code_tools_arg : posture -> string
 (** Value for the [--tools] flag: [""] disables the built-in set,
     ["default"] enables all of it, otherwise a comma-separated allowlist. *)
 
-(** Which Claude Code settings layers the CLI may load ([--setting-sources]).
-    The empty list — the default everywhere — keeps the historical no-layer
-    stance, so skills, hooks, subagents, and CLAUDE.md from disk stay off
-    unless a keeper profile opts in (and admission requires the yolo approval
-    mode: a loaded settings layer can execute code outside the MASC gate). *)
-type claude_setting_source =
-  | Settings_user
-  | Settings_project
-  | Settings_local
-
-
-
-val claude_setting_sources_arg : claude_setting_source list -> string
-(** The complete [--setting-sources=...] argv token; the empty list renders
-    the historical [--setting-sources=]. *)
+val claude_setting_sources_arg : string
+(** The [--setting-sources=] argv token naming no settings layer: the CLI
+    loads no skills, hooks, subagents, or CLAUDE.md from disk. A loaded layer
+    could carry code that runs outside the MASC approval gate. *)

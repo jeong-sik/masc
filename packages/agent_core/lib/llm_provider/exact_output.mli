@@ -305,6 +305,9 @@ type execution_error_cause =
               refusal carried a parseable one; [None] for every other
               refusal. Not part of flow evidence. *)
       }
+  | Output_limit_reached
+      (** The normalized provider stop reason is [Types.MaxTokens]. No JSON
+          output was accepted; distinct from refusal and other incomplete stops. *)
   | Incomplete_output
   | Missing_output
   | Ambiguous_output of int

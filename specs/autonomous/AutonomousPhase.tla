@@ -2,10 +2,8 @@
 \* Cycle 27 / Tier B5 catch-up spec.
 \*
 \* Models the 8-phase autonomous loop taxonomy and 19 legal
-\* transitions encoded in lib/autonomous/autonomous_phase.{mli,ml}.
-\* Each transition is constructed via a 2-parameter GADT in OCaml
-\* (Transition.t : ('from, 'to_) t); illegal transitions cannot be
-\* constructed at compile time.
+\* transitions listed in lib/autonomous/autonomous_phase.mli
+\* (Autonomous_phase.tag and Autonomous_phase.Transition.tag).
 \*
 \* Phases (8):
 \*   idle perceiving intending planning executing
@@ -89,12 +87,8 @@ BoundedHistory == Len(history) <= MaxHistory
 
 \* ── Bug model (RFC-Q2-2) ────────────────────────────────────────
 \*
-\* Models the bug class where an illegal phase transition slips past
-\* the OCaml-side GADT guard and reaches the runtime history. The
-\* GADT in [Autonomous_phase.Transition.t : ('from, 'to_) t] makes
-\* this unconstructible at the type level, but the spec verifies
-\* that even if the constraint were lifted (e.g. via Obj.magic or a
-\* serialisation round-trip), [OnlyLegalTransitions] catches it.
+\* Models the bug class where an illegal phase transition reaches the
+\* runtime history. [OnlyLegalTransitions] must catch it.
 
 IllegalStep(next_phase) ==
     /\ next_phase \in Phases

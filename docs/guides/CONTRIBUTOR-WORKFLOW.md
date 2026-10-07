@@ -141,6 +141,12 @@ addressing reviews, and accurately describing the evidence. Identify what was
 checked, by whom or by which agent, and what remains unverified. Generated output
 and self-review alone do not establish runtime behavior or independent approval.
 
+Keeper messages and delegation requests are visible to the operator in chat.
+Write them with the same readable word spacing, punctuation and paragraph breaks
+as a reply to the user, including natural Korean spacing. To shorten a request,
+remove repetition or rewrite sentences; do not concatenate words. Preserve quoted
+source text, code, paths and identifiers exactly.
+
 **Commit boundary.** If `.githooks` is active, code commits run a local Dune
 build in pre-commit. An external coding session following the no-local-build
 rule uses `git -c core.hooksPath=/dev/null commit -m "your message"` for that

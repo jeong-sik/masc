@@ -42,7 +42,6 @@ type trajectory_outcome =
   | Completed
   | Failed of string
   | Timeout
-  | CostExceeded
   | Gated of string  (** rejected by pre-execution gate *)
 
 type trajectory = {
@@ -96,14 +95,12 @@ let outcome_to_json = function
   | Completed -> `String "completed"
   | Failed msg -> `Assoc [("status", `String "failed"); ("reason", `String msg)]
   | Timeout -> `String "timeout"
-  | CostExceeded -> `String "cost_exceeded"
   | Gated reason -> `Assoc [("status", `String "gated"); ("reason", `String reason)]
 
 let outcome_to_string = function
   | Completed -> "completed"
   | Failed msg -> Printf.sprintf "failed: %s" msg
   | Timeout -> "timeout"
-  | CostExceeded -> "cost_exceeded"
   | Gated reason -> Printf.sprintf "gated: %s" reason
 
 (** Default truncation limit for result text in JSONL persistence. *)

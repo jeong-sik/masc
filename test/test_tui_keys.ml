@@ -1038,7 +1038,8 @@ let test_dashboard_and_work_task_footers () =
   in
   let dashboard = Masc_tui_keys.footer_hints Overview in
   check str "Dashboard names destination keys and the shared keys"
-    "j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit" dashboard;
+    "Left:Keepers  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit"
+    dashboard;
   List.iter
     (fun item ->
       Alcotest.(check bool) ("Dashboard offers no task key " ^ item) false
@@ -1957,6 +1958,8 @@ let test_runtime_footer_is_the_tables () =
     ; "a:new lane"; "x:drop candidate"; "J/K:move candidate"; "D:remove lane" ];
   Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
   Alcotest.(check bool) "and offer no failover to append" false (has all "e:add candidate");
+  Alcotest.(check bool) "all runtimes offer the selected model settings" true (has all "e:model settings");
+  Alcotest.(check bool) "keeper lanes keep their candidate action" false (has lanes "e:model settings");
   List.iter
     (fun piece ->
       Alcotest.(check bool) ("all runtimes offer no lane edit " ^ piece) false (has all piece))
@@ -1971,7 +1974,8 @@ let test_runtime_footer_is_the_tables () =
   in
   Alcotest.(check (list string)) "the sheet names the p walk once"
     [ "keeper lanes / all runtimes / service lanes" ] (labels "p");
-  Alcotest.(check (list string)) "and lists failover" [ "add candidate" ] (labels "e")
+  Alcotest.(check (list string)) "and names both mode-specific actions"
+    [ "model settings"; "add candidate" ] (labels "e")
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* The newest/oldest ends and f still belong to Acting. Logs owns the server

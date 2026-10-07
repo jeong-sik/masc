@@ -730,10 +730,6 @@ val capability_directory_sync_error_to_string
     this module. Exposed for tests and recovery sweeps. *)
 val is_atomic_orphan_name : string -> bool
 
-type atomic_orphan_cleanup_scope =
-  | Directory_only
-  | Directory_and_immediate_subdirectories
-
 type atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
   | Read_cleanup_directory
@@ -774,17 +770,15 @@ val atomic_orphan_cleanup_failure_to_string
   :  atomic_orphan_cleanup_failure
   -> string
 
-(** No-follow orphan cleanup. [Directory_only] is bounded by the named
-    staging inventory. The broader scope also scans real immediate child
-    directories. Every failed mutation or unexpected orphan-shaped entry is
-    returned in the typed report. The caller must own stable directory
-    identities and quiesce the matching temp namespace; see
+(** No-follow orphan cleanup, bounded by the named staging inventory: it
+    scans exactly [base_path]. Every failed mutation or unexpected
+    orphan-shaped entry is returned in the typed report. The caller must own
+    stable directory identities and quiesce the matching temp namespace; see
     {!Atomic_write.cleanup_atomic_orphans} for the OCaml 5.4 dirfd
     limitation. *)
 val cleanup_atomic_orphans
   :  ownership_root:string
   -> base_path:string
-  -> scope:atomic_orphan_cleanup_scope
   -> unit
   -> atomic_orphan_cleanup_report
 
@@ -1109,6 +1103,40 @@ val read_private_jsonl_rows_locked_result :
   string ->
   ( Private_jsonl_rows.t
   , Private_jsonl_rows.error )
+  private_file_transaction_outcome
+
+module Private_jsonl_tail : sig
+  type t =
+    | Tail_missing
+    | Tail_present of
+        { rows : string
+        ; prefix_omitted : bool
+        ; incomplete_tail : bool
+        ; end_offset : int
+        }
+
+  type error =
+    | Invalid_max_bytes of int
+    | Read_error of Private_jsonl_rows.error
+
+  val error_to_string : error -> string
+end
+
+(** Read a bounded observational tail under the same locks and descriptor
+    validation as {!read_private_jsonl_rows_locked_result}. [max_bytes] must
+    be positive. Reads at most [max_bytes] trailing bytes plus one boundary
+    lookbehind byte; it never scans farther to find a row or matching content.
+    Only complete rows are returned. A leading partial row is discarded;
+    [prefix_omitted] means older bytes were outside the window, so an empty
+    [rows] value does not establish absence in the full store. A final fragment
+    is discarded and reported by [incomplete_tail]. [end_offset] is the locked
+    file length, not a durable consumer cursor. Missing stores and descriptor
+    cleanup failures retain the full reader's distinct outcomes. *)
+val read_private_jsonl_tail_locked_result :
+  string ->
+  max_bytes:int ->
+  ( Private_jsonl_tail.t
+  , Private_jsonl_tail.error )
   private_file_transaction_outcome
 
 type private_jsonl_transaction_success =

@@ -121,8 +121,8 @@ type keeper_chat_stream_request = {
           or an integer [>= 0]; anything else fails the parse. *)
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
-    [message] is the text fallback used by the existing direct keeper
-    path; [user_blocks] preserves semantic text/media input for the
+    [message] retains the nonblank request text verbatim, or uses a text fallback
+    when it is blank; [user_blocks] preserves semantic text/media input for the
     block-aware runtime path. [turn_instructions] and [surface_context]
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]
@@ -452,11 +452,13 @@ module For_testing : sig
   val take_operation_wire_stream :
     operation_id:string -> operation_wire_stream option
   val synthesize_wire_terminal_on_settle :
+    base_path:string ->
     keeper_name:string ->
     operation_id:string ->
     execution:Keeper_owner.operation_execution ->
     unit
   val on_operation_execution_settled :
+    base_path:string ->
     keeper_name:string ->
     claimed_operation_id:Keeper_owner.Chat_operation.Operation_id.t option ->
     execution:Keeper_owner.operation_execution ->

@@ -809,7 +809,6 @@ export type TlcResultStatus =
   | 'passed'
   | 'violated'
   | 'running'
-  | 'queued'
   | 'error'
   | 'not_run'
 

@@ -59,6 +59,69 @@ let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh) name 
   | Error e -> Alcotest.fail e
 ;;
 
+let test_prompt_metrics_follow_request_tool_projection () =
+  let meta = make_meta "request-tool-projection-metrics" in
+  let system_prompt = "system instructions" in
+  let user_message = "continue the requested review" in
+  let reader = Agent_core.Tool.create ~name:"keeper_artifact_read"
+      ~description:"read saved evidence" ~parameters:[]
+      (fun _ -> Ok { Agent_core.Types.content = ""; content_blocks = None; _meta = None }) in
+  let project tools =
+    match tools with
+    | [] -> "Recent work: unavailable reader"
+    | [_] -> "Recent work: retrievable artifact abc123, next inspect consumer"
+    | _ -> fail "unexpected offered surface"
+  in
+  let world_bytes () = Otel_metric_store_core.get_metric_value
+      Keeper_metrics.(to_string PromptSegmentBytes)
+      ~labels:["keeper",meta.name; "segment","world_state"] () in
+  let instruction_hash () = Otel_metric_store_core.get_metric_value
+      Keeper_metrics.(to_string KeeperTurnInstructionHash)
+      ~labels:["keeper",meta.name] () in
+  let prepare ?(turn_kind = Turn_record.Autonomous) ?(post_tool_round = false)
+      ?(projection = project) tools =
+    Masc.Keeper_run_tools_hooks.prepare_request_dynamic_context
+      ~meta ~turn_kind ~system_prompt ~user_message ~post_tool_round
+      ~dynamic_context:"unprojected placeholder"
+      ~dynamic_context_for_tools:(Some projection) tools in
+  let check_metric text =
+    check (option (float 0.)) "world bytes describe returned request body"
+      (Some (Float.of_int (String.length text))) (world_bytes ());
+    let hex = Digestif.SHA256.(digest_string (system_prompt ^ text ^ user_message) |> to_hex) in
+    let expected = Int32.to_float (Int32.of_string ("0x" ^ String.sub hex 0 8)) in
+    check (option (float 0.)) "instruction hash describes returned request body"
+      (Some expected) (instruction_hash ());
+    List.iter (fun (segment, body) ->
+      check (option (float 0.)) (segment ^ " matches request input")
+        (Some (Float.of_int (String.length body)))
+        (Otel_metric_store_core.get_metric_value
+           Keeper_metrics.(to_string PromptSegmentBytes)
+           ~labels:["keeper",meta.name; "segment",segment] ()))
+      ["system_prompt",system_prompt; "user_message",user_message]
+  in
+  let projected, emit = prepare [reader] in
+  check string "actual offered reader selects evidence" (project [reader]) projected;
+  check bool "projection alone is not a prepared request" true (world_bytes () = None);
+  emit ();
+  check_metric projected;
+  let unavailable, emit = prepare [] in
+  check string "another request uses its own tool surface" (project []) unavailable;
+  emit ();
+  check_metric unavailable;
+  let exception Projection_failed in
+  let fail_projection _ = raise Projection_failed in
+  (match prepare ~projection:fail_projection [reader] with
+   | exception Projection_failed -> ()
+   | _ -> fail "failed projection unexpectedly produced a request");
+  check_metric unavailable;
+  let _, emit = prepare ~post_tool_round:true ~projection:fail_projection [reader] in
+  emit ();
+  check_metric unavailable;
+  let _, emit = prepare ~turn_kind:Turn_record.Direct [reader] in
+  emit ();
+  check_metric unavailable
+;;
+
 (* #23469: relative tool paths anchor at the keeper's playground sandbox
    root, mirroring the file tools' own resolution; absolute paths pass
    through. masc#28582: a pathless call answers [None] — it names no
@@ -2074,6 +2137,10 @@ let () =
     "keeper_run_tools_hooks"
     [ ( "post_tool_round"
       , [ test_case
+            "prompt metrics measure offered-tool projection at request assembly"
+            `Quick
+            test_prompt_metrics_follow_request_tool_projection
+        ; test_case
             "the predicate is positional, not containment"
             `Quick
             test_ends_with_tool_results_is_positional

@@ -5111,7 +5111,7 @@ export function ChatComposer({
         size: att.size,
       })
     }
-    let text = draft.trim()
+    let text = draft.trim() ? draft : ''
     if (voiceDraft) {
       const voiceText = voiceDraft.transcript
       text = text ? `${voiceText}\n\n${text}` : voiceText

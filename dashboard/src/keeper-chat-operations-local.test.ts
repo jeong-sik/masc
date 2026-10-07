@@ -40,6 +40,17 @@ describe('keeper chat operation tracking', () => {
     ])
   })
 
+  it('preserves authored message text through storage and rejects blank messages', () => {
+    const message = '    들여쓰기\nSKILL.md 설명\n\n\n끝  \n'
+    const base = { keeperName: 'echo', submittedAt: 1_780_000_000 }
+    upsertTrackedKeeperChatOperation({ ...base, operationId: 'kmsg-1', message })
+    upsertTrackedKeeperChatOperation({ ...base, operationId: 'kmsg-2', message: 'next' })
+    upsertTrackedKeeperChatOperation({ ...base, operationId: 'kmsg-blank', message: ' \n' })
+    const restored = trackedKeeperChatOperationsForKeeper('echo')
+    expect(restored.map(operation => operation.operationId)).toEqual(['kmsg-1', 'kmsg-2'])
+    expect(restored[0]?.message).toBe(message)
+  })
+
   it('preserves the in-flight assistant draft for page reload recovery', () => {
     upsertTrackedKeeperChatOperation({
       operationId: 'kmsg_echo_1',

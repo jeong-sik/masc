@@ -83,6 +83,14 @@ describe('Keeper operation stream projection', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.text).toBe(chunks.join(''))
     expect(entry?.rawText).toBe(chunks.join(''))
+    const reply = '    완료\nSKILL.md 설명\n\n\n끝  \n'
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply, turn_ref: 'turn-1', turn_outcome: 'visible_reply' },
+    })).toBeNull()
+    const completed = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(completed?.text).toBe(reply)
+    expect(completed?.rawText).toBe(reply)
   })
 
   it.each([

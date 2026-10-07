@@ -23,10 +23,8 @@ type runtime = {
     after [init] has published the runtime on the main domain. *)
 let runtime_state : runtime option Atomic.t = Atomic.make None
 
-(** Origin at which an [Eio.Time.with_timeout_exn] budget was exhausted.
-
-    The vocabulary is centralized in [Timeout_origin].  [Process_eio] only
-    emits [Slot_wait], [Spawn], and [Command] origins. *)
+(** Origin at which an [Eio.Time.with_timeout_exn] budget was exhausted:
+    [Timeout_origin.Spawn] or [Timeout_origin.Command]. *)
 
 (** Observability hook: invoked when an Eio process call hits its
     [timeout_sec] budget.  Default no-op so the lower [masc_process]
@@ -35,8 +33,8 @@ let runtime_state : runtime option Atomic.t = Atomic.make None
 
     Cardinality: callers should pass [program = Filename.basename argv0]
     (~10-20 distinct programs fleet-wide); [timeout_sec] is the per-call
-    budget (a few discrete values: 15.0, 60.0, ...); [origin] is restricted
-    to [Timeout_origin.process_origins] — total label cardinality is bounded
+    budget (a few discrete values: 15.0, 60.0, ...); [origin] is
+    [Spawn] or [Command] — total label cardinality is bounded
     by [program × bucket × origin]. *)
 let process_timeout_observer_fn :
     (program:string -> timeout_sec:float -> origin:Timeout_origin.t -> unit) Atomic.t =
@@ -293,12 +291,7 @@ let spawn_refusal_to_string = function
 let in_spawn_phase phase_ref =
   match !phase_ref with
   | Timeout_origin.Spawn -> true
-  | Timeout_origin.Slot_wait
-  | Timeout_origin.Command
-  | Timeout_origin.Llm_response
-  | Timeout_origin.Dashboard_refresh
-  | Timeout_origin.Health_probe
-  | Timeout_origin.Other _ -> false
+  | Timeout_origin.Command -> false
 
 let empty_argv_exn = Invalid_argument "Process_eio: argv is empty"
 

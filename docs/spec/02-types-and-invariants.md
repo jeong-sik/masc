@@ -325,11 +325,7 @@ end
 module System_error : sig
   type t =
     | NotInitialized
-    | AlreadyInitialized
-    | InvalidJson of string
     | IoError of string
-    | InvalidFilePath of string
-    | StorageError of string
     | ValidationError of string
     | LockContention of { key : string; attempts : int }
   val to_string : t -> string

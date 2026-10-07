@@ -899,10 +899,6 @@ let test_masc_error_not_initialized () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized) in
   check bool "contains not initialized" true (String.length s > 0)
 
-let test_masc_error_already_initialized () =
-  let s = Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.AlreadyInitialized) in
-  check bool "contains already" true (String.length s > 0)
-
 let test_masc_error_agent_not_found () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.Agent (Masc_domain.Agent_error.NotFound "claude")) in
   check bool "contains claude" true
@@ -1324,10 +1320,6 @@ let test_masc_error_task_invalid_state () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.InvalidState "cancelled")) in
   check bool "nonempty" true (String.length s > 0)
 
-let test_masc_error_invalid_json () =
-  let s = Masc_domain.masc_error_to_string (Masc_domain.System (Masc_domain.System_error.InvalidJson "bad json")) in
-  check bool "nonempty" true (String.length s > 0)
-
 let test_masc_error_io_error () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.System (Masc_domain.System_error.IoError "read failed")) in
   check bool "nonempty" true (String.length s > 0)
@@ -1338,10 +1330,6 @@ let test_masc_error_invalid_agent_name () =
 
 let test_masc_error_invalid_task_id () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.InvalidId "bad id")) in
-  check bool "nonempty" true (String.length s > 0)
-
-let test_masc_error_invalid_file_path () =
-  let s = Masc_domain.masc_error_to_string (Masc_domain.System (Masc_domain.System_error.InvalidFilePath "bad path")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_unauthorized () =
@@ -1895,7 +1883,6 @@ let () =
     ];
     "masc_error_to_string", [
       test_case "not initialized" `Quick test_masc_error_not_initialized;
-      test_case "already initialized" `Quick test_masc_error_already_initialized;
       test_case "agent not found" `Quick test_masc_error_agent_not_found;
       test_case "task not found" `Quick test_masc_error_task_not_found;
       test_case "task already claimed" `Quick test_masc_error_task_already_claimed;
@@ -1963,11 +1950,9 @@ let () =
       test_case "agent invalid name" `Quick test_masc_error_agent_invalid_name;
       test_case "task not claimed" `Quick test_masc_error_task_not_claimed;
       test_case "task invalid state" `Quick test_masc_error_task_invalid_state;
-      test_case "invalid json" `Quick test_masc_error_invalid_json;
       test_case "io error" `Quick test_masc_error_io_error;
       test_case "invalid agent name" `Quick test_masc_error_invalid_agent_name;
       test_case "invalid task id" `Quick test_masc_error_invalid_task_id;
-      test_case "invalid file path" `Quick test_masc_error_invalid_file_path;
       test_case "unauthorized" `Quick test_masc_error_unauthorized;
       test_case "forbidden" `Quick test_masc_error_forbidden;
       test_case "token expired" `Quick test_masc_error_token_expired;

@@ -53,11 +53,7 @@ end
 module System_error : sig
   type t =
     | NotInitialized
-    | AlreadyInitialized
-    | InvalidJson of string
     | IoError of string
-    | InvalidFilePath of string
-    | StorageError of string
     | ValidationError of string
     | LockContention of { key : string; attempts : int }
       (** Distributed lock acquire budget exhausted under transient
@@ -134,8 +130,8 @@ val is_retryable : t -> bool
        errors — replaying changes nothing).}
     {- [Auth (TokenExpired _)]: [true] (clears once
        [masc_auth_refresh] runs); other [Auth] variants: [false].}
-    {- [System (IoError _ | StorageError _)]: [true] (transient
-       FS / backend); other [System] variants: [false]
+    {- [System (IoError _ | LockContention _)]: [true] (transient
+       FS / backend / lock contention); other [System] variants: [false]
        (caller-provided invariants).}
     {- [RateLimitExceeded _]: [true] (replays after the
        advertised wait).}

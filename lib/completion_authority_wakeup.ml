@@ -117,11 +117,7 @@ let release_failure_is_permanent (error : Masc_domain.masc_error) =
         acknowledgement that would end the obligation fails with it. *)
      | Masc_domain.System_error.NotInitialized
      | Masc_domain.System_error.IoError _
-     | Masc_domain.System_error.StorageError _
-     | Masc_domain.System_error.LockContention _
-     | Masc_domain.System_error.InvalidJson _
-     | Masc_domain.System_error.InvalidFilePath _
-     | Masc_domain.System_error.AlreadyInitialized -> false)
+     | Masc_domain.System_error.LockContention _ -> false)
   | Masc_domain.Task task ->
     (match task with
      | Masc_domain.Task_error.InvalidId _ -> true

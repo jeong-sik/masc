@@ -290,17 +290,6 @@ let test_apply_crash_restart_lifecycle () =
   check phase_t "-> Running" SM.Running tr2.new_phase
 ;;
 
-let test_apply_credential_archived_to_crashed () =
-  let tr =
-    apply_ok
-      ~current_phase:SM.Running
-      ~conditions:running_conditions
-      ~event:SM.Credential_archived
-  in
-  check phase_t "credential archived -> Crashed" SM.Crashed tr.new_phase;
-  check bool "credential archived latched" true tr.updated_conditions.credential_archived
-;;
-
 (* ── Transition coverage tests (#5273) ────────────────── *)
 
 let test_apply_failing_to_draining () =
@@ -1147,13 +1136,11 @@ let test_invariant_derive_matches_matrix () =
     ; SM.Turn_failed { consecutive = 3 }
     ; SM.Operator_pause
     ; SM.Operator_resume
-    ; SM.Operator_stop { remove_meta = false }
     ; SM.Stop_requested
     ; SM.Drain_complete
     ; SM.Fiber_started
     ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; SM.Supervisor_restart_attempt { attempt = 1 }
-    ; SM.Credential_archived
     ]
   in
   let non_terminal_phases =
@@ -1323,13 +1310,11 @@ let test_setclear_coverage () =
           } )
     ; "Operator_pause", SM.Operator_pause
     ; "Operator_resume", SM.Operator_resume
-    ; "Operator_stop", SM.Operator_stop { remove_meta = true }
     ; "Stop_requested", SM.Stop_requested
     ; "Drain_complete", SM.Drain_complete
     ; "Fiber_started", SM.Fiber_started
     ; "Fiber_terminated", SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; "Supervisor_restart_attempt", SM.Supervisor_restart_attempt { attempt = 1 }
-    ; "Credential_archived", SM.Credential_archived
     ; ( "Operator_clear_requested"
       , SM.Operator_clear_requested { preserve_system = true; reason = "test" } )
     ]
@@ -1367,7 +1352,9 @@ let test_setclear_coverage () =
   (* Fields managed outside the ordinary FSM event loop are exempt. *)
   let exempt_from_clearer = [ "credential_archived" ] in
   let exempt_from_setter =
-    [ "launch_pending" (* set externally before Fiber_started *) ]
+    [ "launch_pending" (* set externally before Fiber_started *)
+    ; "credential_archived" (* no event sets it; the composite JSON still carries the key *)
+    ]
   in
   (* Print coverage report for diagnostics *)
   let buf = Buffer.create 512 in
@@ -1469,13 +1456,11 @@ let all_representative_events : SM.event list =
   ; SM.Turn_failed { consecutive = 3 }
   ; SM.Operator_pause
   ; SM.Operator_resume
-  ; SM.Operator_stop { remove_meta = false }
   ; SM.Stop_requested
   ; SM.Drain_complete
   ; SM.Fiber_started
   ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
   ; SM.Supervisor_restart_attempt { attempt = 1 }
-  ; SM.Credential_archived
   ; SM.Operator_clear_requested { preserve_system = true; reason = "test" }
   ]
 ;;
@@ -1615,10 +1600,6 @@ let () =
             "crash -> restart -> Running"
             `Quick
             test_apply_crash_restart_lifecycle
-        ; test_case
-            "credential archived -> Crashed"
-            `Quick
-            test_apply_credential_archived_to_crashed
         ; test_case "Failing + stop -> Draining" `Quick test_apply_failing_to_draining
         ; test_case
             "Restarting + fiber death -> Crashed"

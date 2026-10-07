@@ -106,9 +106,8 @@ val put_addressed : addressed -> Tool_output.t
 
 val put_durable : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
 (** Strict variant of {!put}. The payload and its parent directory must both
-    fsync successfully before the typed content address is returned. Unlike
-    {!put}, the return type cannot represent an inline payload. This is the
-    producer boundary for a durable record that will outlive the current
+    fsync successfully before the typed content address is returned. This is
+    the producer boundary for a durable record that will outlive the current
     process and point back to the blob.
 
     Cancellation propagates. Other write or sync failures raise [Sys_error]

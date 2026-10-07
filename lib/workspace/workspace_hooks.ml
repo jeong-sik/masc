@@ -179,11 +179,6 @@ let operator_pending_confirm_remove_fn
       Error "operator pending-confirm callback is not connected")
 
 
-(** Auto-subscribe agent to messages on session binding — wraps Subscriptions.SubscriptionStore. *)
-let subscribe_messages_fn
-  : (subscriber:string -> unit) Atomic.t
-  = Atomic.make (fun ~subscriber:_ -> ())
-
 (** #9645: distributed lock acquire failure observability.
 
     [Workspace_utils_ops.with_distributed_lock] / [..._r] raise

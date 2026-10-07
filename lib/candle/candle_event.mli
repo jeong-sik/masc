@@ -90,6 +90,10 @@ type body =
       ; item : Keeper_portrait_item.t
       ; amount_milli : int
       }
+  | Granted of { keeper : string; amount_milli : int; reason : string }
+      (** An operator gift outside any Goal: the reason names the occasion and
+          is the duplicate key with the keeper. A zero or negative amount and
+          a blank keeper or reason fail the decode. *)
   | Equipped of { keeper : string; slot : Keeper_portrait_item.slot; choice : equipment_choice }
   | Payout_failed of { goal_id : string; request_id : string; verification_run_id : string; due_date : string }
 

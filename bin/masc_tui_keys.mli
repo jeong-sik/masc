@@ -140,6 +140,10 @@ val footer_hints_board_compose_writing : string
 (** The Board draft while it takes letters: a literal "type to write" and the
     keys that are not letters. *)
 
+val footer_hints_goal_drop_reason : string
+(** A Goal drop reason while it takes letters: a literal "type why" and the
+    keys that are not letters. *)
+
 val footer_hints_board_compose_armed : reply:bool -> string
 (** The Board draft's send menu after Esc. [reply] drops the hearth cycle a
     comment has no use for. *)

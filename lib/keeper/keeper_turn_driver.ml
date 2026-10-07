@@ -2574,6 +2574,7 @@ let run_named
               on_request_attribution
           in
           Keeper_antigravity_runtime.run
+            ?on_tool_execution
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture
@@ -2700,6 +2701,7 @@ let run_named
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
           | Ok (workspace_root, native_context) ->
           Keeper_muse_runtime.run
+            ?on_tool_execution
             ?composed_context:official_client_composed_context
             ~prompt_capacity:(Runtime_instance.muse_prompt_capacity runtime)
             ~configured_reasoning_effort:runtime.model.reasoning_effort
@@ -2822,6 +2824,7 @@ let run_named
               on_request_attribution
           in
           Keeper_claude_code_runtime.run
+            ?on_tool_execution
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture

@@ -115,9 +115,12 @@ let dispatch_transition_must_succeed (ctx : Tool_workspace.context) ~goal_id ~ac
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
-            [ "goal_id", `String goal_id
-            ; "action", `String action
-            ])
+            ([ "goal_id", `String goal_id
+             ; "action", `String action
+             ]
+             (* A drop must say why. *)
+             @ if String.equal action "drop"
+               then [ "note", `String "scenario no longer needs this Goal" ] else []))
   with
   | Some result when (Tool_result.is_success result) -> ()
   | Some result ->

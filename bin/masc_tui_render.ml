@@ -1329,7 +1329,7 @@ let planning_confirmation_view (state : state) ~goal_id =
   | Planning_detail.Submitting (submitted_goal, _) when String.equal submitted_goal goal_id -> `Submitting
   | Planning_detail.Submitting _ -> `Inspect Absent
 
-let planning_detail_action_rows ~cols ~armed (goal : planning_goal) =
+let planning_detail_action_rows ~cols ~armed ~drop_reason (goal : planning_goal) =
   let item action =
     let key = planning_action_key action and label = planning_action_label action in
     let text = Printf.sprintf "[%s] %s" key label in
@@ -1351,6 +1351,13 @@ let planning_detail_action_rows ~cols ~armed (goal : planning_goal) =
            Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
              (Printf.sprintf "ARMED: %s [%s] -- press again to submit; other keys cancel"
                 (planning_action_label action) (planning_action_key action))
+           |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
+  |> fun rows -> rows @ (match drop_reason with
+       | None -> []
+       | Some reason ->
+           Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+             (Printf.sprintf "DROP REASON: %s_ -- Enter drops the Goal and cancels its unclaimed Tasks"
+                (Terminal_text.single_line reason))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
 
 let planning_proof_rows ~width lines =
@@ -1463,7 +1470,8 @@ let planning_detail_viewport (state : state) =
       (match List.find_opt (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id) snapshot.pl_goals with
        | None -> 0, max 1 (rows - framed_chrome_rows)
        | Some goal ->
-           let action_rows = List.length (planning_detail_action_rows ~cols ~armed:(goal_action_armed_for state goal_id) goal) in
+           let action_rows = List.length (planning_detail_action_rows ~cols ~armed:(goal_action_armed_for state goal_id)
+             ~drop_reason:(goal_drop_reason_for state goal_id) goal) in
            let count = List.length (planning_detail_lines state ~cols goal
              ~confirmation:(planning_confirmation_view state ~goal_id)) in
            let header_rows = List.length (planning_detail_header_rows state ~cols goal) in
@@ -1477,7 +1485,8 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
   box_top buf cols;
   List.iter (box_line buf cols) headers;
   box_divider buf cols;
-  let actions = planning_detail_action_rows ~cols ~armed goal in
+  let actions = planning_detail_action_rows ~cols ~armed
+      ~drop_reason:(goal_drop_reason_for state goal.pg_id) goal in
   List.iter (box_line buf cols) actions;
   let lines = planning_detail_lines state ~confirmation ~cols goal in
   let count = List.length lines in
@@ -1514,7 +1523,8 @@ let render_planning_detail (state : state)
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let detail_cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
-  let action_rows = List.length (planning_detail_action_rows ~cols:detail_cols ~armed goal) in
+  let action_rows = List.length (planning_detail_action_rows ~cols:detail_cols ~armed
+      ~drop_reason:(goal_drop_reason_for state goal.pg_id) goal) in
   let count = List.length (planning_detail_lines state ~confirmation ~cols:detail_cols goal) in
   let header_rows = List.length (planning_detail_header_rows state ~cols:detail_cols goal) in
   if not (planning_detail_fits ~rows ~header_rows ~action_rows ~count) then begin
@@ -1578,7 +1588,9 @@ let render_planning_detail (state : state)
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints ~detail_open:true state.view));
+         (match goal_drop_reason_for state goal.pg_id with
+          | Some _ -> Masc_tui_keys.footer_hints_goal_drop_reason
+          | None -> Masc_tui_keys.footer_hints ~detail_open:true state.view));
   finish_surface state ~clamped:(Planning_confirmation_scroll (scroll, seen))
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
   end
@@ -9931,12 +9943,17 @@ let render_runtime (state : state) =
        List.iter
          (fun line -> c.push_styled ~style:(Theme.recede ()) ("  " ^ line))
          (Masc_tui_types.runtime_default_route_lines ~cols state);
-       c.push_styled ~style:(Theme.recede ())
-         (Printf.sprintf "  %s %s   %s"
-            (runtime_column runtime_lane_width "media_failover")
-            (runtime_column runtime_candidate_width media_text)
-            (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
-       c.push_divider ());
+       (* A short viewport folds the media_failover row and its divider away so
+          the table header and the selected row keep a place (#41143's rule for
+          the status column, applied to height). *)
+       if not (Masc_tui_types.runtime_media_row_folded ~rows ~cols state) then begin
+         c.push_styled ~style:(Theme.recede ())
+           (Printf.sprintf "  %s %s   %s"
+              (runtime_column runtime_lane_width "media_failover")
+              (runtime_column runtime_candidate_width media_text)
+              (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
+         c.push_divider ()
+       end);
   let table_cells = runtime_table_cells ~cols ~status_cells ~mode:state.runtime_mode in
   c.push_styled ~style:(Theme.recede ())
     ("  " ^ Masc_tui_table.header_row

@@ -480,7 +480,8 @@ let prepare_agent_setup
          | Some Runtime_execution.Official_client ->
            (* Official clients execute dynamic tools without an Agent Core
               pre-admission source sidecar. This callback cannot join them.
-              Codex separately emits its producer-bound Official_tool_result.
+              Each official client emits its producer-bound
+              Official_tool_result through Keeper_official_client_tool_receipts.
               The owner comes from the exact resolved candidate attempt,
               including heterogeneous lane fallbacks. *)
            ()

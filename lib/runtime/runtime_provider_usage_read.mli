@@ -5,8 +5,10 @@
     in [Runtime_provider_usage_window] for the operator projection. Routing
     and admission do not read that observation table. An HTTP account read
     after a 403 ({!read_after_account_refusal}) can also rest a
-    spent scope on {!Runtime_quota_window}. A Muse [usage/read] after a model error records
-    only provider-stated exhaustion there, not a usage-window report.
+    spent scope on {!Runtime_quota_window}. A Muse [usage/read] records the
+    account's rolling and weekly windows in [Runtime_provider_usage_window]
+    ({!Runtime_muse_usage.observe}), and a provider-stated exhausted window
+    with a future reset also rests [scope] on {!Runtime_quota_window}.
 
     Codex answers [account/rateLimits/read] after account admission, with no
     thread or turn. The Antigravity CLI answers a print-mode [/usage] in a
@@ -40,9 +42,10 @@ val read_muse :
   scope:Runtime_quota_window.scope ->
   Runtime_muse_serve.config ->
   (unit, string) result
-(** Read [usage/read] without a model turn. Only a provider-stated exhausted
+(** Read [usage/read] without a model turn and record its windows under
+    [scope] ({!Runtime_muse_usage.observe}). Only a provider-stated exhausted
     window with a future reset rests [scope]; an absent or unspent report
-    changes no routing state. *)
+    changes no routing state, and an absent report records nothing. *)
 
 type http_error
 (** Why one HTTP read recorded nothing. *)

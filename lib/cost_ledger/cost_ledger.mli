@@ -30,10 +30,14 @@ type source =
 
     [Resolved_attempt_delta reading] is the spend of one reading of one
     attempt that no decision record describes: an attempt of a failed turn,
-    or one a later attempt replaced. It is a spend like [Resolved_delta] and
-    adds to it. *)
+    one a later attempt replaced, or one whose server stopped before the turn
+    committed. It is a spend like [Resolved_delta] and adds to it. *)
 type attempt_reading =
-  { lane_attempt_index : int
+  { routing_run_id : string
+        (** The run that made the attempt. A server that restarts during a
+            turn runs that turn's attempts again from index 0, so the lane
+            index alone does not name an attempt. *)
+  ; lane_attempt_index : int
   ; reading_index : int
         (** The reading's position in its attempt. An official client can
             number two client turns of one attempt alike, so the ordinal

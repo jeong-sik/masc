@@ -4905,6 +4905,14 @@ type runtime_catalog_reading =
   | Runtime_catalog_read
   | Runtime_catalog_failed of string
 
+(* A goal lifecycle request the detail view holds before sending it. Most
+   actions arm for a second keypress. A drop instead collects the reason it
+   must state, because the Tasks it cancels tell their authors that sentence:
+   typing it is the confirmation, Enter sends it and Esc cancels. *)
+type goal_action_pending =
+  | Goal_action_armed of { goal_id : string; action : Goal_phase.Public_action.t }
+  | Goal_drop_reason of { goal_id : string; reason : string }
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5725,11 +5733,11 @@ type state = {
      refetch. *)
   mutable planning_filter: planning_filter;
   mutable planning_sort: planning_sort;
-  (* A goal lifecycle request armed for a second keypress, and what the last
-     one answered. Arming rather than pressing keeps the detail view's plain
-     letters safe: c/x/o are lifecycle only once, and any other key disarms. *)
-  mutable goal_action_armed:
-    (string * Goal_phase.Public_action.t) option;
+  (* A goal lifecycle request waiting for the operator, and what the last one
+     answered. Arming rather than pressing keeps the detail view's plain
+     letters safe: c/x/o are lifecycle only once, and any other key disarms.
+     A drop waits for its typed reason instead. *)
+  mutable goal_action_pending: goal_action_pending option;
   mutable goal_action_error: string option;
   mutable goal_confirmation_presented : Masc_tui_planning_detail.confirmation option;
   mutable goal_confirmation:
@@ -6760,6 +6768,7 @@ type text_input_target =
   | Text_keeper_runtime_picker_filter
   | Text_identity_app_form
   | Text_identity_filter
+  | Text_goal_drop_reason
   | Text_github_token
   | Text_board_draft
 
@@ -6800,6 +6809,14 @@ let text_input_target (state : state) ~compact_viewport =
   in
   if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
   else if state.keeper_deletions_open then None
+  (* A drop reason takes every key on the goal detail it was opened on, so
+     its letters never reach the lifecycle keys under it. *)
+  else if
+    state.view = Planning && not compact_viewport
+    && (match state.planning_mode, state.goal_action_pending with
+        | Planning_detail goal_id, Some (Goal_drop_reason entry) -> String.equal goal_id entry.goal_id
+        | (Planning_detail _ | Planning_list), _ -> false)
+  then Some Text_goal_drop_reason
   else if
     state.view = Config
     && state.config_pane = Config_presets
@@ -6883,7 +6900,7 @@ let quit_key_allowed_for = function
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
-      | Text_board_draft ) ->
+      | Text_board_draft | Text_goal_drop_reason ) ->
       false
   | None -> true
 ;;
@@ -8000,10 +8017,16 @@ let lanes_inventory_count state = List.length (lane_inventory_rows state)
     [Terminal_text] -- the sanitize guard counts every access, comparison
     included. *)
 let goal_action_armed_for (state : state) (goal_id : string) =
-  match state.goal_action_armed with
-  | Some (armed_goal, armed_action) when String.equal armed_goal goal_id ->
-      Some armed_action
-  | Some _ | None -> None
+  match state.goal_action_pending with
+  | Some (Goal_action_armed armed) when String.equal armed.goal_id goal_id ->
+      Some armed.action
+  | Some (Goal_action_armed _ | Goal_drop_reason _) | None -> None
+
+let goal_drop_reason_for (state : state) (goal_id : string) =
+  match state.goal_action_pending with
+  | Some (Goal_drop_reason entry) when String.equal entry.goal_id goal_id ->
+      Some entry.reason
+  | Some (Goal_action_armed _ | Goal_drop_reason _) | None -> None
 
 (* A compact Home never grows a feed just because the terminal grew. An
    explicit reader choice still applies on Home and survives surface changes. *)
@@ -8587,7 +8610,7 @@ let create_state
   planning_mode = Planning_list;
   planning_filter = Planning_filter_active;
   planning_sort = Planning_sort_phase_priority;
-  goal_action_armed = None;
+  goal_action_pending = None;
   goal_action_error = None;
   goal_confirmation_presented = None;
   goal_confirmation = Masc_tui_planning_detail.Inspecting Masc_tui_fetched.initial;
@@ -11538,7 +11561,7 @@ let runtime_selection_summary_lines ~cols state =
             (Masc.Tui_terminal_text.sanitize_terminal_text line))
       |> List.map (fun line -> "  " ^ line)
 
-let runtime_surface_base_chrome ~cols state =
+let runtime_surface_base_chrome_with ~cols state ~route_rows =
   runtime_listing_chrome
     ~cols
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
@@ -11548,10 +11571,7 @@ let runtime_surface_base_chrome ~cols state =
     ~prompt:(Option.is_some (runtime_lane_prompt state))
     (* The wrapped default route, media_failover and divider sit above the
        lane table. The key geometry counts the same default lines as render. *)
-    ~route_rows:
-      (match state.runtime_mode with
-       | Runtime_lanes -> List.length (runtime_default_route_lines ~cols state) + 2
-       | Runtime_all -> 0)
+    ~route_rows
     ~editor_rows:
       (match state.slot_editor with
        | Some { se_target = Media_failover_slots; _ } ->
@@ -11564,18 +11584,43 @@ let runtime_surface_base_chrome ~cols state =
       (runtime_picker_projection state))
     ()
 
+(* The route block (the wrapped default route, the media_failover row and its
+   divider) sits above the lane table. A short viewport cannot hold the block
+   and the table header plus the selected row at once, and a cursor on a hidden
+   row is a bug in itself -- the same rule #41143 applied to the status column.
+   So the media_failover row and its divider fold away first when the frame
+   would otherwise leave no data row; the route line itself stays. *)
+let runtime_media_row_folded ~rows ~cols state =
+  match state.runtime_mode with
+  | Runtime_all -> false
+  | Runtime_lanes ->
+      let route_lines = List.length (runtime_default_route_lines ~cols state) in
+      let base_without = runtime_surface_base_chrome_with ~cols state ~route_rows:0 in
+      rows - (base_without + route_lines + 2) < 1
+
+let runtime_surface_base_chrome ~rows ~cols state =
+  let route_rows =
+    match state.runtime_mode with
+    | Runtime_all -> 0
+    | Runtime_lanes ->
+        let route_lines = List.length (runtime_default_route_lines ~cols state) in
+        if runtime_media_row_folded ~rows ~cols state then route_lines
+        else route_lines + 2
+  in
+  runtime_surface_base_chrome_with ~cols state ~route_rows
+
 (* The selected row must keep a place in the list. Full account/status facts
    remain in Enter's detail reading when a short viewport cannot fit both. *)
 let runtime_selection_summary_for_viewport ~rows ~cols state =
   let lines = runtime_selection_summary_lines ~cols state in
-  let spare = rows - runtime_surface_base_chrome ~cols state - 1 in
+  let spare = rows - runtime_surface_base_chrome ~rows ~cols state - 1 in
   if lines = [] || List.length lines + 1 <= spare then lines
   else if spare >= 2 then ["  Enter: full connection and status details"]
   else []
 
 let runtime_surface_listing_chrome ~rows ~cols state =
   let selection_rows = runtime_selection_summary_for_viewport ~rows ~cols state in
-  runtime_surface_base_chrome ~cols state
+  runtime_surface_base_chrome ~rows ~cols state
   + (if selection_rows = [] then 0 else List.length selection_rows + 1)
 
 (* The Runtime listing's bound. Its chrome depends on the viewport size, so

@@ -544,6 +544,10 @@ let test_measurement_requires_current_criterion_and_evidence () =
 ;;
 
 let transition ctx goal_id ?note ?evidence action =
+  (* A drop must say why; a test that does not care gets this sentence. *)
+  let note = match note with
+    | None when String.equal action "drop" -> Some "scenario no longer needs this Goal"
+    | Some _ | None -> note in
   let args =
     [ "goal_id", `String goal_id; "action", `String action ]
     @ (match note with

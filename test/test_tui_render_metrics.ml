@@ -296,6 +296,41 @@ let test_a_span_reads_the_one_ladder () =
   check bool "and not one unit with a tenth" false (contains output "1.0h")
 ;;
 
+(* The Usage pane's retained-task lines concatenated [state.tasks_error]
+   straight into the frame, while every other surface runs the same error
+   through [Terminal_text.single_line] first (masc_tui_render.ml:687). A
+   control byte in a Tasks read error could therefore reach the terminal from
+   this pane alone. The renderer now sanitizes both the no-snapshot line and
+   the snapshot warning; this pins that neither path emits the raw sequence. *)
+let test_tasks_error_is_sanitized () =
+  let control = "\027[2J" in
+  let error = "boom " ^ control ^ " wiped" in
+  let state = make_state () in
+  state.task_flow <- None;
+  state.tasks_error <- Some error;
+  let output =
+    String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state)
+  in
+  check bool "the no-snapshot line does not carry the raw control sequence" false
+    (contains output control);
+  check bool "the no-snapshot line escapes it instead" true
+    (contains output "\\x1B[2J");
+  check bool "the error text is still visible" true (contains output "boom");
+  let flow =
+    Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived:[] []
+  in
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  state.tasks_error <- Some error;
+  let output =
+    String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state)
+  in
+  check bool "the snapshot warning does not carry the raw control sequence" false
+    (contains output control);
+  check bool "the snapshot warning escapes it instead" true
+    (contains output "\\x1B[2J")
+;;
+
 let test_assignee_work_and_daily_flow () =
   let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
   let task id created_at status = domain_task ~id ~created_at ~status in
@@ -1017,6 +1052,8 @@ let () =
             test_one_word_for_a_source_nothing_came_back_from
         ; test_case "a span reads the one ladder" `Quick
             test_a_span_reads_the_one_ladder
+        ; test_case "a Tasks read error is sanitized before it is drawn" `Quick
+            test_tasks_error_is_sanitized
         ; test_case "all_sections" `Quick test_render_metrics_body_all_sections
         ] )
     ]

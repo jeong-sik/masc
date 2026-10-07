@@ -793,7 +793,9 @@ let test_refused_turn_reports_its_spend_to_the_keeper () =
    output 2. *)
 let test_real_two_request_turn_routes_spend_and_occupancy_apart () =
   let frames =
-    In_channel.with_open_bin "fixtures/claude_code/cc-2.1.280-two-request-turn.jsonl"
+    In_channel.with_open_bin
+      (Masc_test_deps.source_path
+         "test/fixtures/claude_code/cc-2.1.280-two-request-turn.jsonl")
       In_channel.input_all
     |> String.split_on_char '\n'
     |> List.filter (fun line -> String.trim line <> "")

@@ -390,8 +390,11 @@ def main() -> None:
             # Run only the existing real purchase/equip/router scenario.
             # Its export is reached after all product assertions succeed.
             # The dedicated suite keeps the consumer aimed at this case even
-            # when future fixture cases are inserted into "router", and the
-            # manifest check names what actually failed if that ever moves.
+            # when future fixture cases are inserted: positional selectors
+            # rot -- the Gate test landed at index 3 in #40393 and silently
+            # left this consumer running "strict auth", whose pass produced
+            # no manifest. The manifest check below names what failed if
+            # this ever moves again.
             result = subprocess.run([fixture, "test", "router-ledger-export"],
                 env=environment, capture_output=True, timeout=60, check=False)
             (evidence / "native-fixture.log").write_bytes(result.stdout + result.stderr)

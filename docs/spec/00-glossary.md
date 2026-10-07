@@ -232,7 +232,9 @@ status: reference
   verifier·HITL auto judge·board attention 레인이 `Priority`다
   (`Standalone_lane.admission_class`). 이 값은 그 provider에서 `max-concurrent`를
   선언한 binding에만 붙는다. 그런 binding이 없거나 공식 클라이언트 provider이면
-  설정을 읽을 때 거절한다.
+  설정을 읽을 때 거절한다. 실행 중인 서버는 계정이 처음 받은 칸 수와 연속 한도를
+  재시작할 때까지 쓰므로, 허가 중인 계정의 두 값을 바꾸는 설정 저장과
+  `masc runtime-resume`은 거절된다.
   기다림은 제공자가 보낸 429 관측인 Runtime Rate Limit이나 후보 실패 분류의
   `Binding Admission`과 다른 단계다.
   → [Provider_admission](../../packages/agent_core/lib/llm_provider/provider_admission.mli) ·
@@ -893,8 +895,10 @@ status: reference
     식별할 수 없으므로 단일 버킷도 휴식 시각으로 쓰지 않고 기존 `Observed`를 유지한다(#39997).
     HTTP 403 뒤 읽기는 과거 리셋으로 거절 증거를 지우지 않는다.
     Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
-    `Runtime_quota_window`에만 기록한다(#39810). 이 읽기는 사용량 관측값을 이 표에
-    추가하지 않고 실패한 turn도 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
+    `Runtime_quota_window`에 기록하고, 같은 보고가 실은 롤링·주간 두 창을 이 표에
+    기록한다(#39810, #41360). `usage/changed`와 `usage/read`는 같은 두 창을 말하므로
+    한 출처(`muse.subscription_usage`)이고, 어느 쪽이든 완전한 보고는 다른 쪽의 행을
+    대체한다. 실패한 turn은 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
     가용성을 추론하는 것은 아니다.
   - **비영속·프로세스 로컬**: 프로세스 메모리에만 존재하며 저장소에 남지 않는다. 프로세스
     기동 후 통보가 한 번도 없었던 scope는 0이나 빈 창으로 꾸며내지 않고
@@ -1408,6 +1412,21 @@ status: reference
   [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
   [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.ml),
   [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
+
+**Lane activity (레인 활동 설정)**
+: exact lane·machine·Browser 표·package Add-on이 새 작업을 받을지 정하는 `enabled`
+  플래그. TUI는 exact lane을 "Exact activity", machine을 "Machine activity"로 읽는다.
+  `[runtime.exact_output_lanes.<id>]`·`[machines.msx]`·`[machines.dos]`·
+  `[browser.automation]`·`[browser.stagehand]`·`[browser.live]` 표와 package 설치
+  선언의 `enabled` 키가 그 값이고, 키를 빼면 `true`다. `false`는 새 작업의 진입만 막고
+  선언된 후보·경로·설정과 이미 잡은 실행 스냅샷은 그대로 둔다 — package Add-on은 소유
+  worker의 정리를 요청한다. Required exact lane(Board Attention·HITL auto-judge)은 끌 수
+  없다(`Standalone_lane.obligation`·`Runtime_exact_output_registry.admit_publication`).
+  위의 **Lane 활동 피드 (Lane Activity)**(DOS에서 누가 무엇을 했는지의 흐름)와 다른 층이다
+  — 이쪽은 작업 진입을 여닫는 구성값이다.
+  → [Runtime_schema.exact_output_lane_decl](../../lib/runtime/runtime_schema.mli),
+  [Machine_configuration](../../lib/machine_configuration/machine_configuration.mli),
+  [Browser_configuration](../../lib/browser_configuration/browser_configuration.mli)
 
 **Agent Core Hook**
 : Agent 실행의 정해진 시점에 호스트가 등록한 동기 판단 콜백. `hook_event`

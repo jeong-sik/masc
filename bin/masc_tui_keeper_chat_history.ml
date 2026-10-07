@@ -1330,7 +1330,10 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                   { at
                   ; structural_id = structural_id_of_fields fields "failure"
                   ; turn_sequence
-                  ; turn_id
+                  ; turn_id =
+                      (match turn_id with
+                       | Some _ -> turn_id
+                       | None -> origin_request_id)
                   ; (* The failure is the operation's: the key it was stored
                        under names it even when the row carries no transcript
                        slot for the provenance reader. *)

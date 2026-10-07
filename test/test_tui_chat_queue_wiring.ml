@@ -1168,19 +1168,22 @@ let test_new_input_preserves_running_output () =
     Tui_types.turn_log_add ~now:3. queued.log ~seq:(Some 2)
       (Live.Batch_bound {operation_id=queued.sent_request.request_id; execution_id});
     assert_old ();
+    Tui_types.turn_log_add ~now:3.5 old.log ~seq:None
+      (Live.Text "OLD_REPLY_STRETCH");
     Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 3)
       (Live.Reply_details {reply="OLD_FINAL_REPLY";
         turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="trace-1#1"});
     Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 4) Live.Run_finished;
     Tui_types.settle_turn_log state old;
     state.msg_inflight <- [queued];
-    (* RFC-0412 §2.1: settling is a replace, not an append. The live view
-       with its running output is replaced by the settled turn's reply row,
-       so the text the operator reads changes here by contract. *)
+    (* Settlement replaces the terminal text stretch; progress before the
+       tool round remains part of the turn's visible work. *)
     let settled_screen = screen () in
-    check bool "settling replaces the running output with the reply" true
+    check bool "settling replaces the terminal stretch with the reply" true
       (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" settled_screen
-       && not (Astring.String.is_infix ~affix:"OLD_RUNNING_TEXT" settled_screen));
+       && not (Astring.String.is_infix ~affix:"OLD_REPLY_STRETCH" settled_screen));
+    check bool "settling preserves progress before the tool round" true
+      (Astring.String.is_infix ~affix:"OLD_RUNNING_TEXT" settled_screen);
     check bool "complete older batch log stays authoritative" true
       (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" settled_screen);
     state.keeper_turns <-

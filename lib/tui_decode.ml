@@ -5153,6 +5153,11 @@ let decode_preset_saved json =
   | preset -> decode_preset_manifest preset
 ;;
 
+let decode_preset_deleted json =
+  let* () = preset_ok json in
+  required_string_field json "deleted"
+;;
+
 let decode_preset_part json key =
   match member key json with
   | `Null -> Error (Printf.sprintf "restore report has no %s part" key)

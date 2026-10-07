@@ -4894,6 +4894,13 @@ type goal_action_pending =
   | Goal_action_armed of { goal_id : string; action : Goal_phase.Public_action.t }
   | Goal_drop_reason of { goal_id : string; reason : string }
 
+(* The Config presets pane's writes that wait for a second press of their
+   key: [u] restores the selected preset, [D] deletes it. One value, so
+   arming one disarms the other. *)
+type preset_arm =
+  | Restore_armed of string
+  | Delete_armed of string
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5249,7 +5256,7 @@ type state = {
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
   (* Prompt presets (#32777). The pane holds the listing, the name being
-     typed for a save, the preset armed for a restore, and the last report —
+     typed for a save, the preset armed for a restore or delete, and the last report —
      which stays on screen because it is the only place the skipped keys and
      the runtime.toml outcome are said. *)
   mutable presets_snapshot: Tui_decode.presets_snapshot option;
@@ -5263,7 +5270,7 @@ type state = {
      waiting", which is the state this pane spends its first moments in. *)
   mutable preset_detail: (string, Tui_decode.preset_detail) Masc_tui_fetched.t;
   mutable preset_save_draft: string option;
-  mutable preset_restore_armed: string option;
+  mutable preset_armed: preset_arm option;
   mutable preset_report: Tui_decode.preset_restore_report option;
   mutable preset_busy: bool;
   (* Rows of coloured segments, the shape the Code surface keeps, so the two
@@ -8366,7 +8373,7 @@ let create_state
   presets_cursor = 0;
   preset_detail = Masc_tui_fetched.initial;
   preset_save_draft = None;
-  preset_restore_armed = None;
+  preset_armed = None;
   preset_report = None;
   preset_busy = false;
   prompts_show_fragments = false;

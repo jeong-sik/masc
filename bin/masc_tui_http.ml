@@ -3175,6 +3175,12 @@ let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
     | Ok json -> Ok json
     | Error message -> Error (`Refused message))
 
+(** POST /api/v1/presets/delete — body {name}: the server removes that preset
+    directory, whether or not it loads. *)
+let post_preset_delete ~(host : string) ~(port : int) ~(name : string) : post_outcome =
+  post_json_outcome ~host ~port ~path:"/api/v1/presets/delete"
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("name", `String name) ]))
+
 (** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
 let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)
     ~(body_json : string) : (Yojson.Safe.t, string) result =

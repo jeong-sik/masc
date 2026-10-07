@@ -12038,10 +12038,15 @@ let render_presets (state : state) =
     (fun index (manifest : Tui_decode.preset_manifest) ->
       if index >= first && index < first + preset_rows then begin
         incr drawn;
-        let armed =
-          state.preset_restore_armed = Some manifest.Tui_decode.pm_name
+        let name = manifest.Tui_decode.pm_name in
+        let mark =
+          match state.preset_armed with
+          | Some (Restore_armed armed) when String.equal armed name ->
+              Theme.warn () ^ "r" ^ Ansi.reset
+          | Some (Delete_armed armed) when String.equal armed name ->
+              Theme.bad () ^ "D" ^ Ansi.reset
+          | Some (Restore_armed _ | Delete_armed _) | None -> " "
         in
-        let mark = if armed then Theme.warn () ^ "r" ^ Ansi.reset else " " in
         let label =
           row_with_field ~cols ~lead:(" " ^ mark ^ " ")
             ~field:(Terminal_text.single_line (Masc_tui_preset_text.pane_row manifest))

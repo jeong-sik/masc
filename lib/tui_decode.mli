@@ -1515,6 +1515,9 @@ val decode_preset_saved : Yojson.Safe.t -> (preset_manifest, string) result
 val decode_preset_restore : Yojson.Safe.t -> (preset_restore_report, string) result
 (** POST /api/v1/presets/restore — the per-surface report. *)
 
+val decode_preset_deleted : Yojson.Safe.t -> (string, string) result
+(** POST /api/v1/presets/delete — the name of the preset the server removed. *)
+
 val decode_latest_librarian_run_id : Yojson.Safe.t -> (string, string) result
 (** Read the first Librarian row from the newest-first exact-lane summary. The
     summary has no payload; callers use this id for one lazy detail read. *)

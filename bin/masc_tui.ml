@@ -6287,6 +6287,51 @@ let launch_keeper_chat_copy state ~mailbox ~keeper_name =
     (fun () -> Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name)
 ;;
 
+let read_keeper_chat_operation state ~mailbox ~authority ~identity
+    ~keeper_name ~operation_id =
+  let host = server_peer_host and port = state.port in
+  try
+    let ( let* ) = Result.bind in
+    let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+    let path = Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
+      (Masc_tui_http.percent_encode_path_segment keeper_name)
+      (Masc_tui_http.percent_encode_path_segment operation_id) in
+    let* json = Masc_tui_http.get_json ~host ~port ~path in
+    Keeper_chat_log.decode_operation_state ~operation_id json
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let apply_keeper_chat_operation_state state ~journal_id log = function
+  | Ok observed ->
+      Keeper_chat_log.observe_operation_state log.tl_log observed;
+      Option.iter (Keeper_chat_transcript.reconcile_operation log.tl_transcript)
+        (Keeper_chat_log.operation_state log.tl_log)
+  | Error detail ->
+      Keeper_chat_log.observe_operation_state log.tl_log None;
+      add_event state "error"
+        (Printf.sprintf "operation for %s not loaded: %s"
+           (Keeper_chat.compact_request_id journal_id)
+           (Keeper_chat.terminal_safe_text detail))
+;;
+
+let launch_unavailable_journal_operations state ~mailbox ~keeper_name =
+  let targets = unavailable_journal_operation_targets state keeper_name in
+  match targets, Eio_context.get_switch_opt () with
+  | [], (Some _ | None) | _ :: _, None -> ()
+  | _ :: _, Some sw ->
+      let enqueue_async = workspace_enqueue state in
+      let authority = state.workspace_authority and identity = state.server_identity in
+      List.iter (journal_read_started state) targets;
+      fork_workspace_job state ~sw (fun () ->
+        List.iter (fun operation_id ->
+          let operation_state = read_keeper_chat_operation state ~mailbox ~authority ~identity
+            ~keeper_name ~operation_id in
+          enqueue_async mailbox
+            (Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state})) targets)
+;;
+
 (* One fiber per load, reading the journals one after another in the order
    the targets came -- newest turn first -- each from where the session's
    record of it ends, and handing each turn's lines to the mailbox as they
@@ -6317,18 +6362,8 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
       match source with
       | Keeper_chat_log.Autonomous_turn _ -> Ok None
       | Keeper_chat_log.Operation operation_id ->
-          (try
-             let ( let* ) = Result.bind in
-             let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
-             let path = Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
-               (Masc_tui_http.percent_encode_path_segment keeper_name)
-               (Masc_tui_http.percent_encode_path_segment operation_id) in
-             let* json = Masc_tui_http.get_json ~host ~port ~path in
-             let* state = Keeper_chat_log.decode_operation_state ~operation_id json in
-             Ok (Some state)
-           with
-           | Eio.Cancel.Cancelled _ as exn -> raise exn
-           | exn -> Error (Printexc.to_string exn))
+          read_keeper_chat_operation state ~mailbox ~authority ~identity
+            ~keeper_name ~operation_id |> Result.map Option.some
     in
     let read_journal () =
       try
@@ -16266,7 +16301,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         state.msg_loaded_keeper <- Some keeper_name;
         launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
           !journal_targets;
-        launch_current_autonomous_journals state ~mailbox ~keeper_name
+        launch_current_autonomous_journals state ~mailbox ~keeper_name;
+        launch_unavailable_journal_operations state ~mailbox ~keeper_name
+  | Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state} ->
+      journal_read_finished state operation_id;
+      Option.iter (fun log ->
+        apply_keeper_chat_operation_state state ~journal_id:operation_id log
+          (Result.map Option.some operation_state))
+        (settled_log_for_request state ~keeper_name operation_id)
   | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state } -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever
@@ -16293,17 +16335,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                   [ (source, started_at, since_seq) ])
       in
       let reconcile_operation log =
-        match operation_state with
-        | Ok observed ->
-            Keeper_chat_log.observe_operation_state log.tl_log observed;
-            Option.iter (Keeper_chat_transcript.reconcile_operation log.tl_transcript)
-              (Keeper_chat_log.operation_state log.tl_log)
-        | Error detail ->
-            Keeper_chat_log.observe_operation_state log.tl_log None;
-            add_event state "error"
-              (Printf.sprintf "operation for %s not loaded: %s"
-                 (Keeper_chat.compact_request_id journal_id)
-                 (Keeper_chat.terminal_safe_text detail))
+        apply_keeper_chat_operation_state state ~journal_id log operation_state
       in
       (* The operation record remains authoritative when its journal cannot
          be read. Settle the retained transcript before classifying the
@@ -17161,7 +17193,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               page.Keeper_chat_history.has_more
               && Option.is_some page.Keeper_chat_history.next_before;
             state.msg_older_error <- None;
-            launch_keeper_chat_journal_loads state ~mailbox ~keeper_name journal_targets
+            launch_keeper_chat_journal_loads state ~mailbox ~keeper_name journal_targets;
+            launch_unavailable_journal_operations state ~mailbox ~keeper_name
         | Error detail ->
             (* The cursor is kept so the same page can be asked for again;
                what is on screen is untouched. *)

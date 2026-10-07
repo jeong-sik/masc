@@ -192,6 +192,25 @@ let test_operation_and_journal_read_order () =
   check bool "journal absence cannot erase the exact failure" true
     (observed = Ok (Some terminal) && journal = Error Log.Journal_pruned)
 
+let test_failed_operation_recheck_keeps_the_working_observation () =
+  let open Keeper_chat_operation in
+  List.iter (fun refreshed ->
+    List.iter (fun initial ->
+      let states = ref [Ok (Some initial); refreshed] in
+      let first = [line 0 1.0 (E.Text_delta "retained working output")] in
+      let reads = ref 0 in
+      let read_operation () = match !states with
+        | x :: xs -> states := xs; x
+        | [] -> fail "unexpected operation read" in
+      let read_journal () = incr reads; Ok first in
+      let observed, journal = Log.read_with_operation_state ~read_operation ~read_journal in
+      check bool "failed refresh cannot erase the exact earlier observation" true
+        (observed = Ok (Some initial));
+      check bool "working output survives the failed refresh" true (journal = Ok first);
+      check int "unavailable recheck does not refetch a successful journal" 1 !reads)
+      [Queued; Running {started_at=2.}])
+    [Error "operation endpoint temporarily unavailable"; Ok None]
+
 let test_decode_exact_operation_state () =
   let body fields = `Assoc (["schema", `String "masc.keeper_chat_operation.v1";
     "operation_id", `String "exact"] @ fields) in
@@ -872,7 +891,9 @@ let () =
             test_a_blank_reason_is_not_a_reason
         ] )
     ; ( "v2 page"
-      , [ test_case "operation and journal observation order" `Quick test_operation_and_journal_read_order
+      , [ test_case "failed operation recheck retains observed state" `Quick
+            test_failed_operation_recheck_keeps_the_working_observation
+        ; test_case "operation and journal observation order" `Quick test_operation_and_journal_read_order
         ; test_case "decode exact operation state" `Quick test_decode_exact_operation_state
         ; test_case "decode events page" `Quick test_decode_events_page
         ; test_case "add_journaled holds undrawn positions" `Quick

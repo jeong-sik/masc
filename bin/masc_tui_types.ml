@@ -7043,6 +7043,33 @@ let journal_held_request_ids state keeper_name =
   @ state.msg_journal_inflight
 ;;
 
+(* A journal's permanent failure says nothing about the exact operation
+   endpoint. On a later history refresh, retained partial direct logs still
+   need that endpoint until it records an ending. Reuse the source read's
+   inflight exclusion; the operation-only read never advances a journal cursor.
+   Autonomous turns have no operation record, and pane-owned requests settle
+   through their own subscription. *)
+let unavailable_journal_operation_targets state keeper_name =
+  state.msg_settled_logs
+  |> List.filter_map (fun log ->
+      let request_id = turn_log_request_id log in
+      let journal_unavailable = state.msg_journal_reads_refused
+        || List.mem request_id state.msg_journal_unavailable in
+      let read_inflight = List.mem request_id state.msg_journal_inflight in
+      let owned = List.exists (fun (entry : inflight) ->
+        String.equal entry.sent_request.request_id request_id) state.msg_inflight in
+      let terminal = Option.exists Keeper_chat_operation.is_terminal
+        (Masc_tui_keeper_chat_log.operation_state log.tl_log) in
+      match Masc_tui_keeper_chat_log.source log.tl_log with
+      | Operation operation_id
+        when String.equal (turn_log_keeper_name log) keeper_name
+             && journal_unavailable && not read_inflight && not owned && not terminal
+             && not (turn_log_holds_the_turn log) ->
+          Some operation_id
+      | Operation _ | Autonomous_turn _ -> None)
+  |> List.sort_uniq String.compare
+;;
+
 (* A settled log takes its place among the others by when its turn started,
    so a turn rebuilt from its journal sits where a turn settled live would
    have. A request already held by a log that stands for its turn is not

@@ -572,7 +572,8 @@ let read_with_operation_state ~read_operation ~read_journal =
        | _, Ok (Some (Keeper_chat_operation.Succeeded _ | Failed _ | Cancelled _)) ->
            reread refreshed
        | Ok (Some Queued), Ok (Some (Running _)) -> reread refreshed
-       | _, (Ok (Some (Queued | Running _)) | Ok None | Error _) -> refreshed, journal)
+       | _, Ok (Some (Queued | Running _)) -> refreshed, journal
+       | _, (Ok None | Error _) -> operation, journal)
   | Ok (Some (Succeeded _ | Failed _ | Cancelled _)) | Ok None | Error _ ->
       operation, journal
 ;;

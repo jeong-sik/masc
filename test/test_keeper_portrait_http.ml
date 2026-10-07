@@ -967,8 +967,8 @@ let () =
       ; test_case "400 and 404" `Quick test_router_refusals
       ; test_case "Gate operator revisions bypass shared metadata cache" `Quick test_gate_account_revision_uses_current_candle_reading
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token
-      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched
-      ; test_case "purchase equip reset and remote portrait share one ledger" `Quick test_purchase_equip_and_remote_portrait ]
+      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched ]
+    (* The shared-ledger fixture case runs once under "router-ledger-export"; do not duplicate it here. *)
     (* A suite of its own for the remote TUI consumer: it selects by suite
        name, so a fixture case inserted into "router" can no longer silently
        re-aim the consumer at the wrong case. *)

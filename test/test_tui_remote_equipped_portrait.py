@@ -162,7 +162,8 @@ def remote_portrait(binary: str, evidence: Path) -> None:
     equipped = (evidence / "equipped-icon.png").read_bytes()
     assert manifest["pixel_size"] == 160
     assert rgba_png(before)[:2] == rgba_png(equipped)[:2] == (80, 80), \
-        "fixture icon exports must match the Info band's 4x20px box"    assert rgba_png(before) != rgba_png(equipped), "fixture did not change the portrait"
+        "fixture icon exports must match the Info band's 4x20px box"
+    assert rgba_png(before) != rgba_png(equipped), "fixture did not change the portrait"
     roster = Roster((evidence / "before-roster.json").read_bytes(),
                     (evidence / "equipped-roster.json").read_bytes())
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()

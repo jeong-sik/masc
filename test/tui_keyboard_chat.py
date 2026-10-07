@@ -2698,28 +2698,11 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             composer_showing(b"alpha-draft"),
         )
 
-        # Wide chat shows the roster by default. Leave that preference
-        # untouched while checking the selected Keeper and draft handoff.
-        wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
-
+        # A nonempty draft keeps Left for editing. The dedicated next-Keeper
+        # key still switches without losing either conversation's draft.
         beta_start = len(output)
-        # A drawn roster is an input pane: Left focuses it, Down moves its
-        # cursor, and Enter opens that Keeper without changing the draft.
-        send_and_wait(process, master_fd, output, b"\x1b[D", b"Enter:open")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\x1b[B",
-            b"\x1b[7m \xc2\xb7 beta",
-        )
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\r",
-            b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
-        )
+        send_and_wait(process, master_fd, output, b"\x07",
+                      b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         wait_for_output(
             process,
             master_fd,

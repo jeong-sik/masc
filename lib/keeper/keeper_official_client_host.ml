@@ -1458,15 +1458,24 @@ let repeated_call_abort_threshold = 3
    [None] delivers [content], [Some blocks] delivers the blocks and never
    [content]. Hashing both let a tool whose unused flat receipt carries a
    timestamp or a duration look like progress on every identical call, so the
-   repeated-call abort never fired on it. The shape tag keeps a text-only
-   result and a block result from colliding on the same bytes. *)
+   repeated-call abort never fired on it. A text result whose tool reads an
+   answer out of it hashes that answer, for the same reason inside the text:
+   a receipt that stamps a revision or a clock on every identical call
+   ({!Keeper_tool_answer}). The shape tag keeps a text-only result, an answer
+   and a block result from colliding on the same bytes. *)
 let dynamic_tool_fingerprint ~tool_name ~input result =
   let open Digestif.SHA256 in
   let context = feed_string empty tool_name in
   let context = feed_string context (input |> Yojson.Safe.sort |> Yojson.Safe.to_string) in
   let context = feed_string context (if result.success then "success" else "failure") in
   let context = match result.content_blocks with
-    | None -> feed_string (feed_string context "text-only") result.content
+    | None ->
+      (match Keeper_tool_answer.answer ~tool_name ~output_text:result.content with
+       | Some answer ->
+         feed_string
+           (feed_string context "answer")
+           (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string)
+       | None -> feed_string (feed_string context "text-only") result.content)
     | Some blocks ->
       feed_string
         (feed_string context "content-blocks")

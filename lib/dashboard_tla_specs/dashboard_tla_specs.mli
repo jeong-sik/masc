@@ -53,7 +53,6 @@ type tlc_status =
   | Tlc_passed
   | Tlc_violated
   | Tlc_running
-  | Tlc_queued
   | Tlc_error
   | Tlc_not_run
 

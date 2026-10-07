@@ -4,7 +4,7 @@ let file_name = "candle-ledger.jsonl"
 
 let path ~base_path =
   Filename.concat
-    (Workspace_utils_paths_backend.masc_dir_from_base_path ~base_path)
+    (Common.masc_dir_from_base_path ~base_path)
     file_name
 ;;
 
@@ -112,7 +112,7 @@ let record_goal (event : Candle_event.t) =
   | Candle_event.Unattributed u -> Some u.goal_id
   | Candle_event.Payout_failed f -> Some f.goal_id
   | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _
-  | Candle_event.Granted _ -> None
+  | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> None
 ;;
 
 let remember records event =
@@ -137,7 +137,7 @@ let validate_record records (event : Candle_event.t) =
       Candle_payout.validate_record preceding event.body
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
     | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _
-    | Candle_event.Granted _ -> Ok () in
+    | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> Ok () in
   Result.map (fun () -> remember records event) admission
 ;;
 
@@ -237,7 +237,7 @@ let encode ~preceding events =
         | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
         | Candle_event.Unattributed _ | Candle_event.Payout_failed _
         | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Equipped _
-        | Candle_event.Granted _ -> Ok () in
+        | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> Ok () in
       Result.bind arithmetic (fun () ->
         Result.bind (validate_record records event) (fun records ->
           Result.bind (Candle_event.to_line event) (fun line ->

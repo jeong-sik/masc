@@ -82,7 +82,7 @@ let keeper_roster_marquee_target (state : state) ~cols =
   if not (keeper_roster_pane_shown state ~cols) then None
   else
     match state.view, selected_keeper state with
-    | Keepers (Keeper_detail | Keeper_message), Some keeper ->
+    | (Overview | Keepers (Keeper_detail | Keeper_message)), Some keeper ->
         let name = Terminal_text.single_line keeper.k_name in
         if Message_layout.display_width name > keeper_roster_name_cells then
           Some name
@@ -275,7 +275,15 @@ let overview_header (state : state) =
     (connection_badge state)
 
 let render_overview (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
+  let terminal_rows, full_cols = get_terminal_size () in
+  let sidebar =
+    if state.keeper_navigation_open then
+      Some (keeper_roster_pane_cols,
+        fun ~rows buf -> keeper_roster_pane ~focused:true state
+          ~rows:(rows + 1) ~cols:keeper_roster_pane_cols buf)
+    else None
+  in
+  let cols = full_cols - (match sidebar with None -> 0 | Some (width, _) -> width) in
   let all_decisions = Masc_tui_home.home_decision_rows state in
   let continuation = Masc_tui_home.home_continue_rows state in
   let selected = Masc_tui_home.home_selected_action state in
@@ -320,10 +328,11 @@ let render_overview (state : state) =
           Printf.sprintf " Work: %d currently done in the last 24h · details in Work"
             flow.Masc_tui_task_flow.recent.completed
   in
-  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
+  surface_chrome ~overflow:Fits ?sidebar state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
     ~title:(overview_header state)
     ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-    ~hints:(Masc_tui_keys.footer_hints Overview)
+    ~hints:(if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
+            else Masc_tui_keys.footer_hints Overview)
     ~body:(fun ~budget c ->
       c.push
         (" " ^ pressable (Press_surface Approvals)
@@ -5546,15 +5555,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (let inherited =
            Option.map
              (fun (modes : Tui_decode.gate_lane_modes) ->
-               gate_mode_word_of_wire modes.Tui_decode.glm_workspace)
+               gate_mode_reading_word modes.Tui_decode.glm_workspace)
              state.gate_modes
          in
          match List.assoc_opt k.k_name state.keeper_gate_modes with
-         | Some mode when not (String.equal mode "workspace") ->
+         | Some mode ->
              (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             ^ Terminal_text.single_line (gate_mode_word_of_wire mode)
+             ^ Terminal_text.single_line (gate_mode_reading_word mode)
              ^ Ansi.reset
-         | Some _ | None ->
+         | None ->
              Ansi.dim ^ "workspace"
              ^ (match inherited with
                 | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
@@ -12038,10 +12047,15 @@ let render_presets (state : state) =
     (fun index (manifest : Tui_decode.preset_manifest) ->
       if index >= first && index < first + preset_rows then begin
         incr drawn;
-        let armed =
-          state.preset_restore_armed = Some manifest.Tui_decode.pm_name
+        let name = manifest.Tui_decode.pm_name in
+        let mark =
+          match state.preset_armed with
+          | Some (Restore_armed armed) when String.equal armed name ->
+              Theme.warn () ^ "r" ^ Ansi.reset
+          | Some (Delete_armed armed) when String.equal armed name ->
+              Theme.bad () ^ "D" ^ Ansi.reset
+          | Some (Restore_armed _ | Delete_armed _) | None -> " "
         in
-        let mark = if armed then Theme.warn () ^ "r" ^ Ansi.reset else " " in
         let label =
           row_with_field ~cols ~lead:(" " ^ mark ^ " ")
             ~field:(Terminal_text.single_line (Masc_tui_preset_text.pane_row manifest))
@@ -13059,7 +13073,20 @@ let render_about (state : state) =
           ]
       |> List.iter c.push)
 
+let render_keeper_navigation (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let buf = Buffer.create 2048 in
+  keeper_roster_pane ~focused:true state ~rows:terminal_rows ~cols buf;
+  Buffer.add_string buf (footer_line state ~max_cells:cols
+    ~hints:Masc_tui_keys.keeper_navigation_hints);
+  finish_frame_beside_acting_pane state ~surface_key:"keeper-navigation"
+    ~cursor:Frame_presenter.Hidden ~rows:terminal_rows ~cols buf
+
 let render_surface (state : state) =
+  let _, cols = get_terminal_size () in
+  if state.keeper_navigation_open && cols < keeper_split_threshold_cols then
+    render_keeper_navigation state
+  else
   match state.view with
   | Overview -> render_overview state
   | Keepers Keeper_list ->

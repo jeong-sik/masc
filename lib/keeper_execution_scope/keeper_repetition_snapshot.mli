@@ -1,6 +1,6 @@
 (** Immutable repetition evidence shared by durable operation journals and
     runtime adapters. No context, tool-result, provider, or storage effects. *)
-type admission = Fresh of Keeper_execution_scope_id.t | Resume of Keeper_execution_scope_id.t
+type admission = Fresh of Keeper_execution_scope_id.t
 type observation = private
   { tool_name : string
   ; input_fingerprint : string option
@@ -21,8 +21,8 @@ val active : t -> Keeper_execution_scope_id.t option
 val scope_ids : t -> Keeper_execution_scope_id.t list
 (** All admitted identities, sorted by the identity comparator. *)
 val admit : t -> admission -> (t, error) result
-(** Fresh on an existing identity preserves evidence. Resume requires an
-    admitted identity. Admitting another scope retains every prior scope. *)
+(** Fresh on an existing identity preserves its evidence and makes it active
+    again. Admitting another scope retains every prior scope. *)
 val record : t -> scope:Keeper_execution_scope_id.t -> observation -> (t, error) result
 (** Records a new observation, newest first. Not replay-safe ingestion. *)
 val observations : t -> scope:Keeper_execution_scope_id.t -> (observation list, error) result

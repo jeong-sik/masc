@@ -24,7 +24,6 @@ type config =
   ; system_prompt : string option
   ; admission_timeout_s : float
   ; native : Runtime_native_tools.posture
-  ; setting_sources : Runtime_native_tools.claude_setting_source list
   ; timeout_s : float option
   ; output_schema : Yojson.Safe.t option
   }
@@ -47,7 +46,6 @@ let default_config ~cwd =
   ; model = None
   ; system_prompt = None
   ; native = Runtime_native_tools.claude_code_default
-  ; setting_sources = []
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   ; output_schema = None
@@ -550,7 +548,7 @@ let parse_subscription json =
   let* fields = assoc_at stage json in
   let* logged_in = required_bool stage "loggedIn" fields in
   if not logged_in then
-    Error (Subscription_required "No supported CLI credential is available with the configured settings isolation. Export the CLI credential/routing variables or sign in with the CLI; settings-only apiKeyHelper credentials require an explicitly admitted settings source.")
+    Error (Subscription_required "No supported CLI credential is available with the configured settings isolation. Export the CLI credential/routing variables or sign in with the CLI; the CLI loads no settings layer, so a settings-only apiKeyHelper credential is not read.")
   else
     let* method_name = required_string stage "authMethod" fields in
     let* authentication = match method_name with
@@ -575,7 +573,7 @@ let read_subscription ~mgr ~cwd config =
       ~cwd
       ~env:(client_environment config.account_home)
       [ config.cli_path
-      ; Runtime_native_tools.claude_setting_sources_arg config.setting_sources
+      ; Runtime_native_tools.claude_setting_sources_arg
       ; "auth"; "status"; "--json" ]
     |> String.trim
     |> parse_json ~stage:"auth status"
@@ -1760,11 +1758,7 @@ let command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session
     @ (match mcp_config dynamic_tools with
        | None -> []
        | Some value -> [ "--mcp-config"; value; "--strict-mcp-config" ])
-    (* Empty renders the historical [--setting-sources=]: no settings layer,
-       so disk-level skills/hooks/subagents/CLAUDE.md stay off. A non-empty
-       list arrives only through keeper-profile opt-in gated on the yolo
-       approval mode ([Keeper_official_client_host.admit_claude_setting_sources]). *)
-    @ [ Runtime_native_tools.claude_setting_sources_arg config.setting_sources ]
+    @ [ Runtime_native_tools.claude_setting_sources_arg ]
     @ reasoning_args
     @ (match config.output_schema with
        | None -> []

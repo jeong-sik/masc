@@ -529,6 +529,26 @@ let all =
       ~category:"memory"
       "Maximum rendered current facts bytes per Keeper"
   ; setting
+      ~range:(int_range ~min:1 ())
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMemoryOs.category_cap ())))
+      ~env_name:Env_config_keeper.KeeperMemoryOs.category_cap_env_key
+      ~exposure:(Toml_and_env "memory.category_cap")
+      ~value_kind:Integer
+      ~default:"30"
+      ~consumers:[ "Keeper_librarian"; "Keeper_tool_memory_runtime" ]
+      ~category:"memory"
+      "Ordinary current category count target, including custom categories; advisory"
+  ; setting
+      ~range:(int_range ~min:1 ())
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMemoryOs.facts_per_category_cap ())))
+      ~env_name:Env_config_keeper.KeeperMemoryOs.facts_per_category_cap_env_key
+      ~exposure:(Toml_and_env "memory.facts_per_category_cap")
+      ~value_kind:Integer
+      ~default:"30"
+      ~consumers:[ "Keeper_librarian"; "Keeper_tool_memory_runtime" ]
+      ~category:"memory"
+      "Ordinary current items per category target; advisory, not a token budget"
+  ; setting
       ~reload_class:Next_turn
       ~effective:
         (Reader

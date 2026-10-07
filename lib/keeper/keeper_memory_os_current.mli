@@ -296,6 +296,23 @@ type removal_lookup =
 val find_removal :
   keepers_dir:string -> keeper_id:string -> string -> removal_lookup
 
+type archived_fact =
+  { original : Keeper_memory_os_types.fact
+  ; removal : removal
+  }
+
+val read_dropped :
+  keepers_dir:string -> keeper_id:string ->
+  current_facts:Keeper_memory_os_types.fact list ->
+  (archived_fact list, string) result
+(** Historical originals from committed journal removals with explicit drop
+    reasons, latest removal per identity, excluding current identities and
+    later re-additions or absorptions. Scans the complete journal in an IO pool
+    job; a malformed or unreadable journal is an error, not an empty archive.
+    This is historical evidence, never current-fact or restoration authority.
+    Ordinary journal writes are best-effort, so absence is not proof that a
+    fact was never stored or removed. *)
+
 val source_kind_to_string : source_kind -> string
 
 (** Dashboard projection of the last [limit] lines. Every row carries a

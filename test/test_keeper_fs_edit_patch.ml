@@ -17,7 +17,7 @@ module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 
 (* The mode=patch guidance this suite asserts moved out of the .ml sources
-   into config/prompts/keeper.tool_filesystem.md, rendered through the
+   into the [tool_filesystem.*] slots of config/prompts/keeper.md, rendered through the
    prompt registry at result-construction time. *)
 let () =
   Masc.Prompt_defaults.init ()

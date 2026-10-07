@@ -8,8 +8,8 @@
 
    [Fs_compat.cleanup_atomic_orphans] is a boot-time sweep:
    - zero-byte orphans are deleted;
-   - non-zero orphans are MOVED (not deleted) to a provenance-preserving
-     subtree under [<base_path>/.recovered/] so operators can forensically
+   - non-zero orphans are MOVED (not deleted) to
+     [<base_path>/.recovered/root/] so operators can forensically
      inspect data-loss events.
 
    These tests pin that contract so a future refactor can't
@@ -47,9 +47,9 @@ let write_file ~path ~content =
 
 let touch path = write_file ~path ~content:""
 
-let cleanup ?ownership_root ?(scope = Fs_compat.Directory_only) base_path =
+let cleanup ?ownership_root base_path =
   let ownership_root = Option.value ownership_root ~default:base_path in
-  Fs_compat.cleanup_atomic_orphans ~ownership_root ~base_path ~scope ()
+  Fs_compat.cleanup_atomic_orphans ~ownership_root ~base_path ()
 
 let check_no_failures report =
   match report.Fs_compat.failures with
@@ -123,29 +123,6 @@ let test_nonzero_orphan_preserved_in_recovered () =
   Alcotest.(check string) "payload survived"
     payload content
 
-(* Orphans in subdirs are found too.  #10130 evidence was mostly
-   under base_path/keepers/. *)
-let test_orphans_in_subdirs_found () =
-  with_temp_base @@ fun base_path ->
-  let subdir = Filename.concat base_path "keepers" in
-  Unix.mkdir subdir 0o755;
-  touch (Filename.concat subdir ".atomic_zeroKeeper.tmp");
-  write_file ~path:(Filename.concat subdir ".atomic_dataKeeper.tmp")
-    ~content:"alpha data";
-  let report =
-    cleanup
-      ~scope:Fs_compat.Directory_and_immediate_subdirectories
-      base_path
-  in
-  check_no_failures report;
-  Alcotest.(check int) "1 deleted from subdir" 1 report.deleted;
-  Alcotest.(check int) "1 preserved from subdir" 1 report.preserved;
-  Alcotest.(check bool) "child provenance preserved" true
-    (Sys.file_exists
-       (Filename.concat
-          base_path
-          ".recovered/children/keepers/.atomic_dataKeeper.tmp"))
-
 (* Non-orphan files must NOT be touched.  Matches the
    [is_atomic_orphan_name] predicate strictly. *)
 let test_non_orphan_files_untouched () =
@@ -192,43 +169,6 @@ let test_mixed_batch () =
   Alcotest.(check int) "13 inspected" 13 report.inspected;
   Alcotest.(check int) "10 deleted" 10 report.deleted;
   Alcotest.(check int) "3 preserved" 3 report.preserved
-
-(* .recovered/ dir itself must be skipped on recursion so we
-   don't loop on any orphan someone moved there by hand. *)
-let test_recovered_dir_skipped_on_rescan () =
-  with_temp_base @@ fun base_path ->
-  let recovered = Filename.concat base_path ".recovered" in
-  Unix.mkdir recovered 0o755;
-  (* Drop an orphan-shaped name into .recovered/ directly.  A
-     rescan must not touch it. *)
-  write_file ~path:(Filename.concat recovered ".atomic_seed.tmp")
-    ~content:"already forensic";
-  let report =
-    cleanup
-      ~scope:Fs_compat.Directory_and_immediate_subdirectories
-      base_path
-  in
-  check_no_failures report;
-  Alcotest.(check int) "0 deleted" 0 report.deleted;
-  Alcotest.(check int) "0 preserved (recovered/ not re-scanned)"
-    0 report.preserved;
-  Alcotest.(check bool) ".recovered/ seed file untouched" true
-    (Sys.file_exists (Filename.concat recovered ".atomic_seed.tmp"))
-
-let test_symlink_child_is_not_followed () =
-  with_temp_base @@ fun base_path ->
-  with_temp_base @@ fun outside ->
-  let outside_orphan = Filename.concat outside ".atomic_external.tmp" in
-  write_file ~path:outside_orphan ~content:"outside";
-  Unix.symlink outside (Filename.concat base_path "linked");
-  let report =
-    cleanup
-      ~scope:Fs_compat.Directory_and_immediate_subdirectories
-      base_path
-  in
-  check_no_failures report;
-  Alcotest.(check bool) "external orphan untouched" true
-    (Sys.file_exists outside_orphan)
 
 let test_symlink_ancestor_is_rejected () =
   with_temp_base @@ fun ownership_root ->
@@ -318,18 +258,12 @@ let () =
             test_zero_byte_orphan_at_base_deleted;
           Alcotest.test_case "non-zero: preserved in .recovered/" `Quick
             test_nonzero_orphan_preserved_in_recovered;
-          Alcotest.test_case "orphans in subdirs found" `Quick
-            test_orphans_in_subdirs_found;
           Alcotest.test_case "non-orphan files untouched" `Quick
             test_non_orphan_files_untouched;
           Alcotest.test_case "idempotent: second call is noop" `Quick
             test_idempotent;
           Alcotest.test_case "mixed batch (prod-shaped)" `Quick
             test_mixed_batch;
-          Alcotest.test_case ".recovered/ skipped on rescan" `Quick
-            test_recovered_dir_skipped_on_rescan;
-          Alcotest.test_case "symlink child is not followed" `Quick
-            test_symlink_child_is_not_followed;
           Alcotest.test_case "symlink ancestor is rejected" `Quick
             test_symlink_ancestor_is_rejected;
           Alcotest.test_case "symlink recovery directory rejected" `Quick

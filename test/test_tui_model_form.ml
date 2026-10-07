@@ -222,8 +222,40 @@ let test_effort_replaces_uncontrolled_reasoning () =
         check bool "copy preserves original model reasoning mode" true original.reasoning_uncontrolled)
     [F.Edit;F.Copy]
 
+let test_context_presets_keep_custom_and_operator_name () =
+  let context form =
+    let parsed = config (apply form source) in
+    let binding = List.find (fun (b:Runtime_schema.binding) -> b.model_id="luna.6") parsed.bindings in
+    binding.max_context in
+  let form = F.create ~source_revision:"source-one" F.Edit (row source) in
+  let form = List.fold_left (fun form expected ->
+    let form = edit form "right" in
+    check (option int) "preset changes binding context" (Some expected) (context form);
+    form) form [500000;750000;1000000;272000] in
+  let custom = set form "333333" in
+  let preset = edit custom "right" in
+  check (option int) "custom advances to first preset" (Some 272000) (context preset);
+  let restored = edit preset "left" in
+  check (option int) "custom text survives cycling" (Some 333333) (context restored);
+  check (option string) "presets retain the opening revision" (Some "source-one") (F.source_revision restored);
+  let copy = F.create F.Copy (row source) |> fun f -> edit f "tab" |> fun f -> edit f "right" in
+  let parsed = config (apply copy source) in
+  let copied = List.find (fun (b:Runtime_schema.binding) -> b.model_id="luna.6-c500k") parsed.bindings in
+  check string "preset copy retains account" "codex1" copied.provider_id;
+  check (option int) "preset copy has selected context" (Some 500000) copied.max_context;
+  check bool "preset copy cannot steal default" false copied.wizard_default;
+  check bool "generated copy name still refuses collisions" true (Result.is_error (F.apply copy (apply copy source)));
+  let custom_copy = set copy "333333" |> fun form -> config (apply form source) in
+  let custom_binding = List.find (fun (b:Runtime_schema.binding) -> b.model_id="luna.6-c333333") custom_copy.bindings in
+  check (option int) "custom input keeps the suggested name accurate" (Some 333333) custom_binding.max_context;
+  let copy = edit copy "up" |> fun f -> set f "operator-name" |> fun f -> edit f "tab" |> fun f -> edit f "right" in
+  let parsed = config (apply copy source) in
+  let copied = List.find (fun (b:Runtime_schema.binding) -> b.model_id="operator-name") parsed.bindings in
+  check (option int) "editing the name stops preset renaming" (Some 750000) copied.max_context
+
 let () = run "Account model variants" ["model editing", [
   test_case "explicit effort replaces uncontrolled reasoning in edit and copy" `Quick test_effort_replaces_uncontrolled_reasoning;
+  test_case "context presets preserve custom input and copy identity" `Quick test_context_presets_keep_custom_and_operator_name;
   test_case "copy retains account, API model and settings" `Quick test_copy_variant;
   test_case "edit context and cancel" `Quick test_edit_and_cancel;
   test_case "inline copy refusal is visible" `Quick test_inline_refusal_and_visible_error;

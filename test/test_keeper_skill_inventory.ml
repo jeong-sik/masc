@@ -388,7 +388,6 @@ let active_capability_descriptor_ids surface =
     | Refused_by_sandbox _
     | Node_tools_outside_surface _
     | Invalid_definition
-    | Missing_task_skill
     | Missing_configured_skill -> None)
 ;;
 

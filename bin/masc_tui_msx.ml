@@ -74,7 +74,7 @@ let fit_line width s = String.sub s 0 (min (String.length s) (max width 1))
 
 (* The activity sidebar (RFC machine-spectating-goes-through-lanes §2.1's
    [activity] field, drawn here for the first time): a fixed-width column of
-   "when who did-what" on the right, one row per entry. [Lane_activity.cap]
+   "when who did-what" on the right, one row per entry. [Machine_action_feed.cap]
    (20) was already sized for a column, not a wall of text, so one entry is
    always one row here. *)
 let sidebar_cols = 28

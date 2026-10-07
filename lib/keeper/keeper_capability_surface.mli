@@ -26,9 +26,6 @@ type capability_availability =
           the executable catalog; see
           {!Keeper_skill_catalog.withhold_compositions_outside}. *)
   | Invalid_definition
-  | Missing_task_skill
-      (** Reserved for an exact Task Skill reference that Task resolution
-          proves absent. Configured name misses never use this constructor. *)
   | Missing_configured_skill
 
 type skill_exposure =

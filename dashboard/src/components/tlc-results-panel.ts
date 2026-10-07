@@ -38,7 +38,6 @@ const STATUS_ORDER: TlcResultStatus[] = [
   'violated',
   'error',
   'running',
-  'queued',
   'not_run',
   'passed',
 ]
@@ -77,8 +76,6 @@ function tlcStatusLabel(status: TlcResultStatus): string {
       return '위반'
     case 'running':
       return '실행 중'
-    case 'queued':
-      return '대기'
     case 'error':
       return '오류'
     case 'not_run':
@@ -96,7 +93,6 @@ function tlcStatusTone(status: TlcResultStatus): 'ok' | 'warn' | 'bad' | 'info' 
       return 'info'
     case 'error':
       return 'warn'
-    case 'queued':
     case 'not_run':
       return 'neutral'
   }

@@ -214,7 +214,7 @@ EOF
 
 harness_prompt_asset() {
   local name="$1"
-  local path="${ROOT_DIR}/config/prompts/${name}.txt"
+  local path="${ROOT_DIR}/scripts/harness/prompts/${name}.txt"
   if [[ ! -r "${path}" ]]; then
     echo "missing required harness prompt asset: ${path}" >&2
     return 1
@@ -226,13 +226,13 @@ benchmark_instructions() {
   local keeper_profile="$1"
   case "${keeper_profile}" in
     bench-analyst)
-      harness_prompt_asset "harness.tool_quality.analyst"
+      harness_prompt_asset "tool_quality.analyst"
       ;;
     bench-executor)
-      harness_prompt_asset "harness.tool_quality.executor"
+      harness_prompt_asset "tool_quality.executor"
       ;;
     bench-verifier)
-      harness_prompt_asset "harness.tool_quality.verifier"
+      harness_prompt_asset "tool_quality.verifier"
       ;;
     *)
       echo "unknown benchmark keeper profile: ${keeper_profile}" >&2

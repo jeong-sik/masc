@@ -299,7 +299,7 @@ let with_activity source json =
   | Machine_lane.Dos ->
       (match json with
        | `Assoc fields ->
-           `Assoc (fields @ [ "activity", Lane_activity.to_json_list (Dos_lane.recent_activity ()) ])
+           `Assoc (fields @ [ "activity", Machine_action_feed.to_json_list (Dos_lane.recent_activity ()) ])
        | other -> other)
 
 let live_json source ~since : Yojson.Safe.t =

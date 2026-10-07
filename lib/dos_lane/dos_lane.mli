@@ -453,8 +453,8 @@ val lookup_autosave : dir:string -> autosave_lookup
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)
 
-val recent_activity : unit -> Lane_activity.entry list
-(** The last {!Lane_activity.cap} things a Keeper did to this Lane -- load,
+val recent_activity : unit -> Machine_action_feed.entry list
+(** The last {!Machine_action_feed.cap} things a Keeper did to this Lane -- load,
     step, press, click, type, save, restore, pass and eject, newest first --
     for a spectator, not for replay: unlike {!ledger} this is not scoped to
     the current machine. It spans a [load] or [restore] (one more line on the

@@ -13,16 +13,12 @@ type event_type =
   | Run_started
   | Run_finished
   | Run_error
-  | Step_started
-  | Step_finished
   | Text_message_start
   | Text_message_content
   | Text_message_end
   | Tool_call_start
   | Tool_call_args
   | Tool_call_end
-  | State_snapshot
-  | State_delta
   | Custom
 [@@deriving show, eq]
 
@@ -47,14 +43,13 @@ type event = private {
   role : role option;
   delta : string option;
       (** Text chunk or tool args fragment. *)
-  step_name : string option;
   tool_call_id : string option;
   tool_call_name : string option;
   tool_stream_scope : int option;
   provider_message_id : string option;
   tool_call_block_index : int option;
   snapshot : Yojson.Safe.t option;
-      (** Full state for [State_snapshot]. *)
+      (** Accumulated tool-call arguments for [Tool_call_args]. *)
   message : string option;
       (** Required top-level error message for [Run_error]. *)
   code : string option;
@@ -70,7 +65,6 @@ val make_event :
   ?message_id:string option ->
   ?role:role option ->
   ?delta:string option ->
-  ?step_name:string option ->
   ?tool_call_id:string option ->
   ?tool_call_name:string option ->
   ?tool_stream_scope:int option ->

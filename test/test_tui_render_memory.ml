@@ -2273,9 +2273,9 @@ let test_event_sidecar_read_error_is_visible () =
     (List.exists (contains "events sidecar: permission denied") !styled)
 ;;
 
-(* #39831: the classifier the default Memory block reads. A reading that did
-   not come back is an action, never a zero; zeros and ledger coordinates wait
-   behind the [d] detail toggle. *)
+(* #39831: the classifier the default Memory block reads for its Librarian
+   clauses. A reading that did not come back is an action, never a zero; zeros
+   wait behind the [d] detail toggle. *)
 let test_memory_row_visibility () =
   let shown kind =
     match Render_memory.memory_row_visibility kind with
@@ -2284,20 +2284,11 @@ let test_memory_row_visibility () =
   in
   List.iter
     (fun (label, kind, expected) -> check bool label expected (shown kind))
-    [ "the state is shown", Render_memory.Row_state, true
-    ; "the last save is shown", Render_memory.Row_last_saved, true
-    ; "an unread lag is shown, not folded to zero", Render_memory.Row_lag None, true
+    [ "an unread lag is shown, not folded to zero", Render_memory.Row_lag None, true
     ; "a lag of 3 is shown", Render_memory.Row_lag (Some 3), true
     ; "a lag of 0 waits for detail", Render_memory.Row_lag (Some 0), false
     ; "3 Librarian failures are shown", Render_memory.Row_librarian_failures 3, true
     ; "0 Librarian failures wait for detail", Render_memory.Row_librarian_failures 0, false
-    ; "0 vision errors wait for detail", Render_memory.Row_vision_errors 0, false
-    ; "vision errors stay off the action list", Render_memory.Row_vision_errors 2, false
-    ; "ledger coordinates wait for detail", Render_memory.Row_ledger, false
-    ; "a stall is shown", Render_memory.Row_stalled, true
-    ; "a pass-end cause is shown", Render_memory.Row_cause, true
-    ; "a read error is shown", Render_memory.Row_read_error, true
-    ; "a server alert is shown", Render_memory.Row_alert, true
     ]
 ;;
 

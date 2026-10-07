@@ -39,6 +39,83 @@ let path_of_string raw =
 
 module String_histogram = Map.Make (String)
 
+(* Mirrors the observed-affordance writer labels
+   (Keeper_unified_metrics_support.observed_affordances_of_observation).
+   The writer spells these as call-site literals with no label function,
+   so they are pinned here like the turn outcomes; a new writer label
+   parses to None and its occurrences count as unrecognized. *)
+type affordance =
+  | Board_post_or_comment
+  | Board_curation
+  | Message_sweep
+  | Task_claim
+  | Task_audit
+  | Schedule_dispatch_monitor
+
+let affordance_to_string = function
+  | Board_post_or_comment -> "board_post_or_comment"
+  | Board_curation -> "board_curation"
+  | Message_sweep -> "message_sweep"
+  | Task_claim -> "task_claim"
+  | Task_audit -> "task_audit"
+  | Schedule_dispatch_monitor -> "schedule_dispatch_monitor"
+;;
+
+let affordance_of_string raw =
+  match raw with
+  | "board_post_or_comment" -> Some Board_post_or_comment
+  | "board_curation" -> Some Board_curation
+  | "message_sweep" -> Some Message_sweep
+  | "task_claim" -> Some Task_claim
+  | "task_audit" -> Some Task_audit
+  | "schedule_dispatch_monitor" -> Some Schedule_dispatch_monitor
+  | _ -> None
+;;
+
+module Affordance_map = Map.Make (struct
+    type t = affordance
+
+    let compare = compare
+  end)
+
+(* How the turns that offered one affordance resolved: the turn-mode mix
+   and the outcome mix over exactly those turns. A turn offering two
+   affordances answers for both. *)
+type affordance_response =
+  { offered : int
+  ; resp_tool_use : int
+  ; resp_text_response : int
+  ; resp_skip_text : int
+  ; resp_noop : int
+  ; resp_mode_absent : int
+  ; resp_success : int
+  ; resp_checkpoint : int
+  ; resp_input_required : int
+  ; resp_error : int
+  }
+
+let empty_response =
+  { offered = 0
+  ; resp_tool_use = 0
+  ; resp_text_response = 0
+  ; resp_skip_text = 0
+  ; resp_noop = 0
+  ; resp_mode_absent = 0
+  ; resp_success = 0
+  ; resp_checkpoint = 0
+  ; resp_input_required = 0
+  ; resp_error = 0
+  }
+;;
+
+(* The keeper's declared stance, for reading the practice against: a Manual
+   keeper is expected to hold no autonomous turns, while an Autonomous one
+   that only noops practices nothing. *)
+type role =
+  { activation_mode : string
+  ; paused : bool
+  }
+
 type accumulator =
   { tail_rows : int
   ; malformed_lines : int
@@ -59,6 +136,8 @@ type accumulator =
   ; terminal_codes : int String_histogram.t
   ; triggers : int String_histogram.t
   ; tools : int String_histogram.t
+  ; affordance_response : affordance_response Affordance_map.t
+  ; unrecognized_affordance_labels : int
   ; tool_calls_total : int
   ; latency_ms_total : int
   ; latency_ms_count : int
@@ -87,6 +166,8 @@ let empty_accumulator =
   ; terminal_codes = String_histogram.empty
   ; triggers = String_histogram.empty
   ; tools = String_histogram.empty
+  ; affordance_response = Affordance_map.empty
+  ; unrecognized_affordance_labels = 0
   ; tool_calls_total = 0
   ; latency_ms_total = 0
   ; latency_ms_count = 0
@@ -98,6 +179,7 @@ let empty_accumulator =
 
 type summary =
   { keeper_name : string
+  ; role : role option
   ; acc : accumulator
   }
 
@@ -173,6 +255,17 @@ let string_list_member key json =
   | _ -> []
 ;;
 
+(* Raw labels for the closed affordance vocabulary: no trim, no empty-drop.
+   An empty or padded label reaches the exact-match parser and counts as
+   unrecognized. Non-string items are malformed input and read as absent,
+   like [string_list_member] drops them. *)
+let raw_string_list_member key json =
+  match Json_util.assoc_member_opt key json with
+  | Some (`List items) ->
+    List.filter_map (function `String s -> Some s | _ -> None) items
+  | _ -> []
+;;
+
 let extend_window acc ts =
   let since_unix =
     match acc.since_unix with
@@ -193,6 +286,33 @@ let fold_window_ts acc json =
   | Some ts -> extend_window acc ts
 ;;
 
+let record_affordance_response acc mode outcome affordance =
+  let prev =
+    match Affordance_map.find_opt affordance acc.affordance_response with
+    | None -> empty_response
+    | Some response -> response
+  in
+  let mode_bump response =
+    match mode with
+    | Some Turn_mode_codec.Tool_use -> { response with resp_tool_use = response.resp_tool_use + 1 }
+    | Some Turn_mode_codec.Text_response ->
+      { response with resp_text_response = response.resp_text_response + 1 }
+    | Some Turn_mode_codec.Skip_text ->
+      { response with resp_skip_text = response.resp_skip_text + 1 }
+    | Some Turn_mode_codec.Noop -> { response with resp_noop = response.resp_noop + 1 }
+    | None -> { response with resp_mode_absent = response.resp_mode_absent + 1 }
+  in
+  let outcome_bump response =
+    match outcome with
+    | Success -> { response with resp_success = response.resp_success + 1 }
+    | Checkpoint -> { response with resp_checkpoint = response.resp_checkpoint + 1 }
+    | Input_required -> { response with resp_input_required = response.resp_input_required + 1 }
+    | Error -> { response with resp_error = response.resp_error + 1 }
+  in
+  let next = outcome_bump (mode_bump { prev with offered = prev.offered + 1 }) in
+  { acc with affordance_response = Affordance_map.add affordance next acc.affordance_response }
+;;
+
 let fold_autonomous_turn acc json outcome =
   let acc = { acc with autonomous_turns = acc.autonomous_turns + 1 } in
   let acc =
@@ -202,16 +322,29 @@ let fold_autonomous_turn acc json outcome =
     | Input_required -> { acc with outcome_input_required = acc.outcome_input_required + 1 }
     | Error -> { acc with outcome_error = acc.outcome_error + 1 }
   in
+  let mode =
+    Option.bind (raw_string_member_opt "turn_mode" json) Turn_mode_codec.turn_mode_of_string
+  in
   let acc =
-    match
-      Option.bind (raw_string_member_opt "turn_mode" json) Turn_mode_codec.turn_mode_of_string
-    with
+    match mode with
     | Some Turn_mode_codec.Tool_use -> { acc with mode_tool_use = acc.mode_tool_use + 1 }
     | Some Turn_mode_codec.Text_response ->
       { acc with mode_text_response = acc.mode_text_response + 1 }
     | Some Turn_mode_codec.Skip_text -> { acc with mode_skip_text = acc.mode_skip_text + 1 }
     | Some Turn_mode_codec.Noop -> { acc with mode_noop = acc.mode_noop + 1 }
     | None -> { acc with mode_absent = acc.mode_absent + 1 }
+  in
+  let acc =
+    List.fold_left
+      (fun acc raw ->
+        match affordance_of_string raw with
+        | Some affordance -> record_affordance_response acc mode outcome affordance
+        | None ->
+          { acc with
+            unrecognized_affordance_labels = acc.unrecognized_affordance_labels + 1
+          })
+      acc
+      (raw_string_list_member "observed_affordances" json)
   in
   let acc =
     match outcome with
@@ -265,7 +398,7 @@ let fold_turn_row acc json =
      | Some outcome -> fold_window_ts (fold_autonomous_turn acc json outcome) json)
 ;;
 
-let summarize_rows ~keeper_name rows =
+let summarize_rows ~keeper_name ?role rows =
   let acc =
     List.fold_left
       (fun acc json ->
@@ -274,7 +407,13 @@ let summarize_rows ~keeper_name rows =
       empty_accumulator
       rows
   in
-  { keeper_name; acc }
+  { keeper_name; role; acc }
+;;
+
+let role_of_meta (meta : Keeper_meta_contract.keeper_meta) =
+  { activation_mode = Keeper_activation_mode.to_string meta.activation_mode
+  ; paused = meta.paused
+  }
 ;;
 
 let float_opt_json = function
@@ -294,10 +433,62 @@ let label_list_json histogram =
        (sorted_histogram histogram))
 ;;
 
-let to_json { keeper_name; acc } =
+let affordance_response_json response =
   `Assoc
-    [ "schema", `String "keeper.practice.v1"
+    [ "offered", `Int response.offered
+    ; ( "modes"
+      , `Assoc
+          [ "tool_use", `Int response.resp_tool_use
+          ; "text_response", `Int response.resp_text_response
+          ; "skip_text", `Int response.resp_skip_text
+          ; "noop", `Int response.resp_noop
+          ; "absent", `Int response.resp_mode_absent
+          ] )
+    ; ( "outcomes"
+      , `Assoc
+          [ "success", `Int response.resp_success
+          ; "checkpoint", `Int response.resp_checkpoint
+          ; "input_required", `Int response.resp_input_required
+          ; "error", `Int response.resp_error
+          ] )
+    ]
+;;
+
+let all_affordances =
+  [ Board_post_or_comment
+  ; Board_curation
+  ; Message_sweep
+  ; Task_claim
+  ; Task_audit
+  ; Schedule_dispatch_monitor
+  ]
+;;
+
+let affordance_response_json_of_acc acc =
+  `Assoc
+    (List.map
+       (fun affordance ->
+         let response =
+           match Affordance_map.find_opt affordance acc.affordance_response with
+           | None -> empty_response
+           | Some response -> response
+         in
+         affordance_to_string affordance, affordance_response_json response)
+       all_affordances)
+;;
+
+let role_json = function
+  | None -> `Null
+  | Some role ->
+    `Assoc
+      [ "activation_mode", `String role.activation_mode; "paused", `Bool role.paused ]
+;;
+
+let to_json { keeper_name; role; acc } =
+  `Assoc
+    [ "schema", `String "keeper.practice.v2"
     ; "keeper", `String keeper_name
+    ; "role", role_json role
     ; ( "window"
       , `Assoc
           [ "tail_rows", `Int acc.tail_rows
@@ -333,6 +524,8 @@ let to_json { keeper_name; acc } =
           ; "terminal_code_absent_on_error", `Int acc.terminal_code_absent_on_error
           ; "terminal_codes", label_list_json acc.terminal_codes
           ; "triggers", label_list_json acc.triggers
+          ; "affordance_response", affordance_response_json_of_acc acc
+          ; "unrecognized_affordance_labels", `Int acc.unrecognized_affordance_labels
           ; ( "tools"
             , `Assoc
                 [ "total_calls", `Int acc.tool_calls_total
@@ -350,9 +543,10 @@ let to_json { keeper_name; acc } =
 
 let summarize_keeper ~config ~(meta : Keeper_meta_contract.keeper_meta) ?(limit = 200) () =
   let limit = k2_feed_limit limit in
+  let role = role_of_meta meta in
   let path = Keeper_types_support.keeper_decision_log_path config meta.name in
   if not (Fs_compat.file_exists path)
-  then summarize_rows ~keeper_name:meta.name []
+  then summarize_rows ~keeper_name:meta.name ~role []
   else (
     let lines =
       Dashboard_http_helpers.keeper_tail_lines_or_empty
@@ -370,7 +564,7 @@ let summarize_keeper ~config ~(meta : Keeper_meta_contract.keeper_meta) ?(limit 
         ([], 0)
         lines
     in
-    let summary = summarize_rows ~keeper_name:meta.name (List.rev rows) in
+    let summary = summarize_rows ~keeper_name:meta.name ~role (List.rev rows) in
     { summary with acc = { summary.acc with malformed_lines } })
 ;;
 

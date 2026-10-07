@@ -687,25 +687,15 @@ let set_tool_usage_entry ~base_path ~name ~tool_name (e : tool_call_entry) =
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)
 
 
-(* Entry-action dispatch observability helpers
-   (execute_entry_action_observability / followup_event_of_entry_action /
-   record_followup_dispatch_rejection) moved to
-   Keeper_registry_entry_action_dispatch. *)
 let execute_entry_action_observability =
   Keeper_registry_entry_action_dispatch.execute_observability
-;;
-let followup_event_of_entry_action =
-  Keeper_registry_entry_action_dispatch.followup_event_of_action
-;;
-let record_followup_dispatch_rejection =
-  Keeper_registry_entry_action_dispatch.record_dispatch_rejection
 ;;
 
 
 (** Registry mutation is still non-yielding (StringMap lookup + CAS).
-    Entry actions run only after [install_entry_if_current], so any
-    observability or follow-up state transitions happen after the registry
-    state is consistent. *)
+    Entry actions run only after [install_entry_if_current], so their
+    observability side effects happen after the registry state is
+    consistent. *)
 let rec dispatch_event_with_audit_internal
           ~base_path
           ?lifecycle_token
@@ -905,69 +895,6 @@ let rec dispatch_event_with_audit_internal
           List.iter
             (execute_entry_action_observability ~name ~phase:tr.new_phase ~ts_unix:now)
             tr.entry_actions;
-          List.iter
-            (fun followup_event ->
-               match
-                 dispatch_event_with_audit_internal
-                   ~base_path
-                   ?lifecycle_token
-                   ?expected_lane
-                   name
-                   followup_event
-               with
-            | Ok _ -> ()
-            | Error
-                (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason })
-              ->
-              record_followup_dispatch_rejection followup_event;
-              let from_phase_str = Keeper_state_machine.phase_to_string from_phase in
-              let to_phase_str = Keeper_state_machine.phase_to_string to_phase in
-              Log.Keeper.emit
-                Log.Error
-                ~category:Log.Fsm
-                ~details:
-                  (`Assoc
-                    [ "from_phase", `String from_phase_str
-                    ; "to_phase", `String to_phase_str
-                    ; "reason", `String reason
-                    ])
-                (Printf.sprintf
-                   "registry(%s): followup dispatch failed: %s -> %s (%s)"
-                   name
-                   from_phase_str
-                   to_phase_str
-                   reason)
-            | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-              record_followup_dispatch_rejection followup_event;
-              let current_phase_str = Keeper_state_machine.phase_to_string current in
-              Log.Keeper.emit
-                Log.Warn
-                ~category:Log.Fsm
-                ~details:
-                  (`Assoc
-                    [ "current_phase", `String current_phase_str
-                    ; "attempted_event", `String attempted_event
-                    ])
-                (Printf.sprintf
-                   "registry(%s): followup skipped, already terminal: %s (event: %s)"
-                   name
-                   current_phase_str
-                   attempted_event)
-            | Error (Keeper_state_machine.Precondition_violation { event = ev; reason })
-              ->
-              record_followup_dispatch_rejection followup_event;
-              Log.Keeper.emit
-                Log.Warn
-                ~category:Log.Fsm
-                ~details:(`Assoc [ "event", `String ev; "reason", `String reason ])
-                (Printf.sprintf
-                   "registry(%s): followup skipped, precondition violated: %s (%s)"
-                   name
-                   ev
-                   reason))
-            (List.filter_map
-               (followup_event_of_entry_action ~phase:tr.new_phase)
-               tr.entry_actions);
           (* Composite-lifecycle SSE envelope — RFC-0003 §6.
              The body carries only the keeper name and observation timestamp;
              subscribers re-fetch [/api/v1/keepers/:name/composite] for the

@@ -987,63 +987,64 @@ let test_runtime_transitions_append_then_startup_compacts () =
    partition whose candidate is still non-terminal keeps its receipt:
    replaying that candidate must find the settled root, not re-mint a Ready
    root and re-run the judgment. *)
+let settle_root ~base_path ~id ~recorded_at ~consume_candidate =
+  let row = recorded_candidate ~id ~recorded_at () in
+  (match A.record ~base_path row with
+   | A.Recorded _ -> ()
+   | A.Duplicate _ | A.Record_error _ -> Alcotest.fail "fixture candidate was not recorded");
+  ignore (roots ~base_path [ row ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:2.0 in
+  let proof = provenance () in
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:claimed
+      ~provenance:proof
+    |> ok ("bind " ^ id)
+    |> fsynced ("bind " ^ id)
+  in
+  let completed =
+    P.complete
+      ~now:3.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:bound
+      ~item:{ candidate_id = row.candidate_id; judgment = judgment proof }
+    |> ok ("complete " ^ id)
+    |> fsynced ("complete " ^ id)
+  in
+  let confirmed =
+    P.confirm_completed ~base_path ~partition:completed
+    |> ok ("confirm " ^ id)
+    |> fsynced ("confirm " ^ id)
+  in
+  ignore (ok ("settle " ^ id) (P.settle ~now:4.0 ~base_path ~partition:confirmed) : P.t);
+  if consume_candidate
+  then
+    (match
+       A.apply_judgment_and_deliver
+         ~base_path
+         ~keeper_name:"alpha"
+         ~candidate_id:row.candidate_id
+         ~judgment:(judgment proof)
+     with
+     | Ok (A.Delivered delivered) -> (
+       match delivered.A.status with
+       | A.Consumed _ -> ()
+       | A.Pending _ | A.Judged _ | A.Quarantine _ ->
+         Alcotest.fail ("candidate " ^ id ^ " did not reach Consumed"))
+     | Ok A.Candidate_absent | Error _ ->
+       Alcotest.fail ("candidate " ^ id ^ " could not be consumed"));
+  row.candidate_id
+;;
+
 let test_startup_recovery_drops_settled_receipts_of_terminal_candidates () =
   with_temp_base "board-attention-partition-settled-receipt-gate" @@ fun base_path ->
-  let settle_root ~id ~recorded_at ~consume_candidate =
-    let row = recorded_candidate ~id ~recorded_at () in
-    (match A.record ~base_path row with
-     | A.Recorded _ -> ()
-     | A.Duplicate _ | A.Record_error _ -> Alcotest.fail "fixture candidate was not recorded");
-    ignore (roots ~base_path [ row ] : P.t list);
-    let owner = P.Worker_epoch.generate () in
-    let claimed = claim ~base_path ~worker_epoch:owner ~now:2.0 in
-    let proof = provenance () in
-    let bound =
-      P.bind_before_dispatch
-        ~worker_epoch:owner
-        ~base_path
-        ~partition:claimed
-        ~provenance:proof
-      |> ok ("bind " ^ id)
-      |> fsynced ("bind " ^ id)
-    in
-    let completed =
-      P.complete
-        ~now:3.0
-        ~worker_epoch:owner
-        ~base_path
-        ~partition:bound
-        ~item:{ candidate_id = row.candidate_id; judgment = judgment proof }
-      |> ok ("complete " ^ id)
-      |> fsynced ("complete " ^ id)
-    in
-    let confirmed =
-      P.confirm_completed ~base_path ~partition:completed
-      |> ok ("confirm " ^ id)
-      |> fsynced ("confirm " ^ id)
-    in
-    ignore (ok ("settle " ^ id) (P.settle ~now:4.0 ~base_path ~partition:confirmed) : P.t);
-    if consume_candidate
-    then
-      (match
-         A.apply_judgment_and_deliver
-           ~base_path
-           ~keeper_name:"alpha"
-           ~candidate_id:row.candidate_id
-           ~judgment:(judgment proof)
-       with
-       | Ok (A.Delivered delivered) -> (
-         match delivered.A.status with
-         | A.Consumed _ -> ()
-         | A.Pending _ | A.Judged _ | A.Quarantine _ ->
-           Alcotest.fail ("candidate " ^ id ^ " did not reach Consumed"))
-       | Ok A.Candidate_absent | Error _ ->
-         Alcotest.fail ("candidate " ^ id ^ " could not be consumed"));
-    row.candidate_id
-  in
-  ignore (settle_root ~id:"candidate-consumed" ~recorded_at:1.0 ~consume_candidate:true : string);
+  ignore (settle_root ~base_path ~id:"candidate-consumed" ~recorded_at:1.0 ~consume_candidate:true : string);
   let pending_id =
-    settle_root ~id:"candidate-pending" ~recorded_at:2.0 ~consume_candidate:false
+    settle_root ~base_path ~id:"candidate-pending" ~recorded_at:2.0 ~consume_candidate:false
   in
   Alcotest.(check int)
     "two settled roots before the restart"
@@ -1065,6 +1066,44 @@ let test_startup_recovery_drops_settled_receipts_of_terminal_candidates () =
     Alcotest.failf
       "expected the non-terminal candidate's settled receipt, got %d rows"
       (List.length rows)
+;;
+
+(* An unreadable candidate ledger, or one holding rows the decoder refused,
+   may hide a Pending candidate, so startup recovery keeps every settled
+   receipt even when the visible candidate is Consumed. *)
+let test_startup_recovery_keeps_settled_receipts_when_candidates_are_unreadable () =
+  let settled_receipt_survives ~name ~damage =
+    with_temp_base ("board-attention-partition-receipt-keep-" ^ name) @@ fun base_path ->
+    let candidate_id =
+      settle_root
+        ~base_path
+        ~id:("candidate-" ^ name)
+        ~recorded_at:1.0
+        ~consume_candidate:true
+    in
+    damage (A.ledger_path ~base_path ~keeper_name:"alpha");
+    Alcotest.(check int)
+      (name ^ ": recovery returns no execution")
+      0
+      (ok
+         ("restart with " ^ name)
+         (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"alpha"));
+    match ok "load after restart" (P.load ~base_path ~keeper_name:"alpha") with
+    | [ ({ P.state = P.Settled _; _ } as kept) ] ->
+      Alcotest.(check string)
+        (name ^ ": the settled receipt stays")
+        candidate_id
+        kept.P.candidate_id
+    | rows ->
+      Alcotest.failf "%s: expected one settled receipt, got %d rows" name (List.length rows)
+  in
+  settled_receipt_survives ~name:"rejected-row" ~damage:(fun ledger_path ->
+    let out = open_out_gen [ Open_append ] 0o600 ledger_path in
+    output_string out "not a candidate row\n";
+    close_out out);
+  settled_receipt_survives ~name:"unreadable-ledger" ~damage:(fun ledger_path ->
+    Sys.remove ledger_path;
+    Sys.mkdir ledger_path 0o700)
 ;;
 
 let test_ready_confirmations_survive_requeue_deferral_and_restart () =
@@ -1908,6 +1947,10 @@ let () =
             "startup recovery drops settled receipts of terminal candidates"
             `Quick
             test_startup_recovery_drops_settled_receipts_of_terminal_candidates
+        ; Alcotest.test_case
+            "startup recovery keeps settled receipts when candidates are unreadable"
+            `Quick
+            test_startup_recovery_keeps_settled_receipts_when_candidates_are_unreadable
         ; Alcotest.test_case
             "Ready confirmations survive requeue, deferral, and restarts"
             `Quick

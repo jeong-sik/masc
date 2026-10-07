@@ -1289,6 +1289,48 @@ let test_fibers_on_one_domain_share_the_ledger_lock () =
        !read_answers)
 ;;
 
+(* A comment's replay coordinate pairs its creation time with the parent post
+   id, as signal_after_cursor does. At an equal timestamp the parent post
+   decides: a comment on a post after the cursor stays even when its own
+   comment id sorts before the cursor's post id. *)
+let test_prune_compares_comment_by_parent_post_id () =
+  with_temp_base "board-attention-candidate-prune-comment" @@ fun base_path ->
+  let consumed_comment ~post_id =
+    let base = signal post_id in
+    let comment_signal =
+      { base with
+        updated_at = Some 10.0
+      ; kind =
+          Masc.Board_dispatch.Board_comment_added
+            { comment_id = comment_id "c-00000000000000000000000000000001"
+            ; parent_id = None
+            }
+      }
+    in
+    { (candidate comment_signal) with
+      status =
+        A.Consumed
+          { judgment = judgment J.Not_relevant
+          ; delivery = A.Not_relevant
+          ; consumed_at = 11.0
+          }
+    }
+  in
+  let behind = consumed_comment ~post_id:"post-a" in
+  let ahead = consumed_comment ~post_id:"post-z" in
+  List.iter (fun one -> ignore (record ~base_path one : A.candidate)) [ behind; ahead ];
+  Alcotest.(check int)
+    "only the comment whose parent post is at or before the cursor is pruned"
+    1
+    (ok
+       "prune"
+       (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" (10.0, Some "post-m")));
+  Alcotest.(check bool)
+    "the comment on the later post survives"
+    true
+    (ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha") = [ ahead ])
+;;
+
 (* #41422: the prune is the replay gate mirrored — it removes a Consumed row
    exactly when the replay gate (signal_after_cursor's strict token compare)
    can never re-mint its signal: post_created with its creation coordinate,
@@ -1487,6 +1529,10 @@ let () =
             "prune removes consumed rows the replay gate cannot re-mint"
             `Quick
             test_prune_consumed_behind_cursor
+        ; Alcotest.test_case
+            "prune compares a comment by its parent post id"
+            `Quick
+            test_prune_compares_comment_by_parent_post_id
         ] )
     ]
 ;;

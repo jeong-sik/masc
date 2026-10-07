@@ -1774,6 +1774,17 @@ let schedule_form_refusal_rows (state : state) ~cols =
         (Terminal_text.single_line (sfr_action ^ ": " ^ sfr_detail))
   | Some _ | None -> []
 
+(* Rows the Schedules page spends around its list, counted once so the
+   refusal budget and the list height read the same numbers: the request
+   count, next due and its divider; the column names and their rule; the two
+   delivery rows. *)
+let schedule_summary_rows = 3
+let schedule_column_header_rows = 2
+let schedule_delivery_rows = 2
+
+let schedule_rows_around_list =
+  schedule_summary_rows + schedule_column_header_rows + schedule_delivery_rows
+
 (** Render the Schedules surface: the scheduled-automation list, with an
     armed cancel. The server sorts active rows first by due time and caps the
     list at its own limit; [scs_truncated] and [scs_request_count] say what
@@ -1805,7 +1816,8 @@ let render_schedule_list (state : state) =
           + (if Option.is_some state.schedule_cancel_error then 1 else 0) in
         let selected = Option.is_some (List.nth_opt snapshot.scs_rows state.schedule_cursor) in
         selected, warning + cancel +
-          (if snapshot.scs_rows = [] then 3 else 3 + 2 + 2 + 1)
+          (if snapshot.scs_rows = [] then schedule_summary_rows
+           else schedule_rows_around_list + 1)
     | Some _ | None -> false, 1
   in
   let room = max 0 (budget - reserved_rows) in
@@ -1925,12 +1937,11 @@ let render_schedule_list (state : state) =
            c.push_divider ();
            (* The column names and the rule under them, the two rows every
               other list on this screen already spends to say what it draws. *)
-           let header_rows = 2 in
            (* The body outside the list: the source warning, the request count,
               next due and its divider, the column names and their rule, the
               two delivery rows, and the cancel rows. *)
            let content_height =
-             max 1 (budget - List.length refusal_rows - warning_rows - 3 - header_rows - 2 - cancel_rows)
+             max 1 (budget - List.length refusal_rows - warning_rows - schedule_rows_around_list - cancel_rows)
            in
            let scroll_offset =
              if state.schedule_cursor >= content_height then

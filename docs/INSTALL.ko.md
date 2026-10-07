@@ -486,10 +486,10 @@ Keeper의 `sandbox_image`로 지정합니다.
 맞추므로 직접 편집하지 마세요. 편집기에서 저장한 내용은
 `.masc/prompt_overrides.json`에 보관되며, 이후 구성하는 프롬프트에 적용됩니다.
 업그레이드해도 유효한 override가 있으면 배포본보다 우선하므로, 새 기본 지침을
-쓰려면 편집기에서 해당 언어를 다시 선택해 저장하거나 override를 해제하세요.
+쓰려면 override를 해제하세요.
 `keeper.identity` 같은 슬롯 override도 별도 항목입니다.
 
-언어만 바꾸려고 전체 프리셋을 복원할 필요는 없습니다. 프리셋은 여러 Keeper의
+프리셋은 여러 Keeper의
 역할·프롬프트·모델 배정을 함께 저장하고 되돌릴 때 사용하세요.
 `constitution.xml`은 개발 계약이며 Keeper의 시스템 프롬프트가 아닙니다.
 

@@ -540,11 +540,9 @@ aligns it with the embedded copy at start, so do not edit it directly. What
 you save in the editor is kept in `.masc/prompt_overrides.json` and applied
 to the prompts composed from then on. A valid override takes precedence over
 the distributed copy even after an upgrade, so to use the new default
-guidance, choose that language again in the editor and save, or clear the
-override. A slot override such as `keeper.identity` is a separate entry too.
+guidance, clear the override. A slot override such as `keeper.identity` is a separate entry too.
 
-There is no need to restore a whole preset just to change the language. Use
-presets to save and restore the roles, prompts, and model assignments of
+Use presets to save and restore the roles, prompts, and model assignments of
 several Keepers together. `constitution.xml` is a development contract, not a
 Keeper's system prompt.
 

@@ -288,9 +288,12 @@ def run(executable: str, scenario: str) -> None:
             frame = bytes(output[start:])
             screen = _keyboard_harness.screen_text(bytes(output))
             assert b'"field-63"' in screen, screen
-            # Home returns the pane to its first row.
+            # Home returns the pane to its first row, and j steps one row down.
             _keyboard_harness.send_and_wait(
                 process, master, output, b"\x1b[H", b"FIELD_00_START"
+            )
+            _keyboard_harness.send_and_wait(
+                process, master, output, b"j", re.compile(rb"RUN RESULT\s+2-\d+/\d+")
             )
         elif scenario == "many-labels":
             assert b'"field-00000"' in screen and b"VALUE_00000" in screen, screen

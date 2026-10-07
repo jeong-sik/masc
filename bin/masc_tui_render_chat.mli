@@ -12,8 +12,8 @@ val keeper_message_find_scroll :
   Masc_tui_types.state ->
   keeper_name:String.t ->
   needle:String.t ->
-  older_than:Masc_tui_types.msg_anchor option ->
-  (int * Masc_tui_types.msg_anchor) option
+  older_than:Masc_tui_types.chat_search_cursor option ->
+  (int * Masc_tui_types.chat_search_cursor) option
 
 val render_keeper_message :
   Masc_tui_types.state ->

@@ -998,6 +998,13 @@ stays in expanded diagnostics, and timestamps stay in the gutter or heading.
 Working means the turn is in progress. The progress row says `THINKING` or
 `STREAMING` only after receiving the corresponding signal.
 
+`/find <text>` searches the conversation that is drawn, including replies and
+activity retained in live or settled journals. `/find` repeats toward older
+matches using record identity, so incoming messages and history backfill do
+not restart the search. Hidden reasoning is excluded. Editable pending inputs
+and replaceable polled excerpts contribute to scroll positioning but are not
+conversation search candidates.
+
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did. Reasoning starts folded with a `THINKING`
 label; tool calls start as a compact activity row labelled `TOOLS`.

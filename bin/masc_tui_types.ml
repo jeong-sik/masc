@@ -813,6 +813,24 @@ type msg_anchor =
           Other rows remain identity-only anchors. *)
   }
 
+(* Search walks the same history and journal rows that the pane draws. A
+   surviving journal stretch keeps its origin when reasoning is folded or a
+   final reply replaces its streamed text. *)
+type chat_search_anchor =
+  | Search_history of msg_anchor
+  | Search_journal of {
+      source : Masc_tui_keeper_chat_log.journal_source;
+      origin : Masc_tui_keeper_chat_transcript.drawn_origin;
+    }
+
+type chat_search_cursor = {
+  search_keeper : string;
+  matched_anchor : chat_search_anchor;
+  older_anchors : chat_search_anchor list;
+    (** Nearest older first. If reconciliation removes the matched stretch,
+        continue at a surviving older row instead of restarting at the tail. *)
+}
+
 let chat_turn_phase_of_role = function
   | Message_user _ -> Turn_input
   | Message_status | Message_thinking | Message_memory | Message_skill _ ->
@@ -5680,7 +5698,7 @@ type state = {
       (** What [/find] was last given on this pane, or [""] before it is used.
           Kept so the arg-less form continues the same search instead of
           asking for the text again. *)
-  mutable msg_find_at: msg_anchor option;
+  mutable msg_find_at: chat_search_cursor option;
       (** Structural identity of the message [/find] last landed on. The next
           search resolves it in the current causal timeline and starts
           strictly older. An index cannot survive a broadcast or Journal

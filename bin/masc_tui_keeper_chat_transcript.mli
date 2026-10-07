@@ -470,11 +470,12 @@ val drawn : t -> drawn_item list
 (** The trail flattened -- a superseded block's rows in place, tagged with
     their attempt -- and reconciled with the recorded reply. Without a reply,
     the trail as it is. The recorded reply is the terminal message's text, not
-    the whole turn's, so with a [Visible_reply] it stands for the current
-    attempt's last text stretch only: that one stretch is replaced by one
-    [Drawn_reply] carrying the record's text (appended when nothing
-    streamed); earlier stretches -- the turn's earlier rounds -- stay as they
-    streamed. The reply is this turn's because the log this transcript
+    the whole turn's, so with a [Visible_reply] it stands for the text
+    stretch that streamed after the current attempt's last tool or skill
+    round: that one stretch is replaced by one [Drawn_reply] carrying the
+    record's text, and the reply is appended when nothing streamed after that
+    round. Text that streamed before a round is progress and stays as it
+    streamed, like the stretches of the turn's earlier rounds. The reply is this turn's because the log this transcript
     projects is one operation's and both the stream and the journal reach it
     by that id; the two texts are not compared. With a blank [Visible_reply]
     or any control outcome, one [Drawn_status] is appended and the streamed

@@ -673,6 +673,135 @@ let test_batch_retraction_recovers_exact_reason_evidence () =
     (List.length (read_journal_lines ~keepers_dir))
 ;;
 
+let test_ordinary_removals_preserve_archive_until_journal_recovery () =
+  let successor = fact ~claim:"replacement rule" () in
+  let producers =
+    [ ( "librarian"
+      , "no longer needed"
+      , fun ~keepers_dir ~target ~reason ->
+          apply_disposition ~keepers_dir
+            ~dropped_statements:[ { Types.memory_id = Types.memory_id target; reason } ]
+            () |> require_ok )
+    ; ( "explicit retraction"
+      , "keeper withdrew this claim"
+      , fun ~keepers_dir ~target ~reason ->
+          match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+              ~source:(source Current.Explicit_retract)
+              ~memory_id:(Types.memory_id target) ~reason () with
+          | Ok snapshot -> snapshot
+          | Error _ -> fail "ordinary retraction lost its committed outcome" )
+    ; ( "supersession"
+      , "superseded_by " ^ Types.memory_id successor
+      , fun ~keepers_dir ~target ~reason:_ ->
+          match Current.supersede_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+              ~source:(source Current.Explicit_write)
+              ~superseded_memory_id:(Types.memory_id target) successor with
+          | Ok (snapshot, _) -> snapshot
+          | Error _ -> fail "supersession lost its committed outcome" )
+    ]
+  in
+  List.iter (fun (label, reason, remove) ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let target = fact ~claim:(label ^ " original with its complete conditions") () in
+    ignore (replace ~keepers_dir ~facts:[ target ] () |> require_ok);
+    let journal_path =
+      Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    in
+    Fs_compat.invalidate_cached_writer journal_path;
+    Sys.remove journal_path;
+    Unix.mkdir journal_path 0o700;
+    let committed = remove ~keepers_dir ~target ~reason in
+    check int (label ^ " snapshot committed") 2 committed.revision;
+    let read () =
+      Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+      |> require_ok |> require_some
+    in
+    check bool (label ^ " original survives in committed snapshot") true
+      ((read ()).change.removed = [ target ]);
+    let receipt_path =
+      Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper"
+    in
+    let receipt_bytes = Fs_compat.load_file receipt_path in
+    let receipt = Yojson.Safe.from_string receipt_bytes in
+    let open Yojson.Safe.Util in
+    check bool "ordinary removal claims no exact batch plan" true
+      (member "plan_id" receipt = `Null);
+    check string "pending receipt preserves exact reason" reason
+      (receipt |> member "dropped" |> to_list |> List.hd |> member "reason" |> to_string);
+    let next_write () =
+      Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+        ~source:(source Current.Explicit_write) (fact ~claim:"unrelated later memory" ())
+    in
+    (match next_write () with
+     | Error (Current.Upsert_persistence_failed _) -> ()
+     | Error _ | Ok _ -> fail "next writer overwrote unresolved removal evidence");
+    check int "failed recovery keeps removed originals' snapshot" committed.revision
+      (read ()).revision;
+    (* Missing journal after restart must not be reported as an empty archive.
+       Reading is observational: it leaves preparation for a writer to settle. *)
+    Unix.rmdir journal_path;
+    (match Current.read_dropped ~keepers_dir ~keeper_id:"keeper"
+        ~current_facts:(read ()).facts with
+     | Error _ -> ()
+     | Ok _ -> fail "pending archive was reported complete");
+    check string "archive read leaves the receipt untouched" receipt_bytes
+      (Fs_compat.load_file receipt_path);
+    let next = next_write () |> require_upsert_ok in
+    check int "recovery precedes the next update" 3 next.revision;
+    check bool "successful finalization clears preparation" false
+      (Sys.file_exists receipt_path);
+    let archived = Current.read_dropped ~keepers_dir ~keeper_id:"keeper"
+        ~current_facts:next.facts |> require_ok in
+    (match archived with
+     | [ row ] ->
+       check bool "archive restores the complete historical original" true
+         (row.original = target);
+       check (option string) "archive restores its exact reason" (Some reason)
+         row.removal.drop_reason
+     | _ -> fail "recovery did not expose exactly one historical original");
+    ignore (next_write () |> require_upsert_ok);
+    let recovered = read_journal_lines ~keepers_dir
+      |> List.filter (fun line -> to_int (member "revision" line) = 2) in
+    check int "restart finalizes the removal once" 1 (List.length recovered))
+    producers
+;;
+
+let test_removal_receipt_write_failure_preserves_current_fact () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"must remain if archive preparation fails" () in
+  let seeded = replace ~keepers_dir ~facts:[ target ] () |> require_ok in
+  with_denied_mode keepers_dir 0o500 (fun () ->
+    match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+        ~source:(source Current.Explicit_retract)
+        ~memory_id:(Types.memory_id target) ~reason:"obsolete" () with
+    | Error (Current.Retract_persistence_failed detail) ->
+      check bool "failure occurred at receipt preparation" true
+        (String_util.contains_substring detail "retraction plan receipt write failed")
+    | Error _ | Ok _ -> fail "removal proceeded without preparing its archive");
+  let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok |> require_some in
+  check bool "preparation failure changes no current fact" true (current = seeded);
+  check int "preparation failure records no removal commit" 1
+    (List.length (read_journal_lines ~keepers_dir))
+;;
+
+let test_stale_drop_statements_prepare_no_removal_receipt () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let kept = fact ~claim:"still current" () in
+  let stale = fact ~claim:"already absent" () in
+  let seeded = replace ~keepers_dir ~facts:[ kept ] () |> require_ok in
+  let current = apply_disposition ~keepers_dir
+      ~dropped_statements:[ { Types.memory_id = Types.memory_id stale; reason = "obsolete" } ]
+      () |> require_ok in
+  check int "stale drop does not rewrite the snapshot" seeded.revision current.revision;
+  check bool "stale drop leaves no prepared removal" false
+    (Sys.file_exists (Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper"));
+  check int "stale drop invents no archived fact" 0
+    (Current.read_dropped ~keepers_dir ~keeper_id:"keeper" ~current_facts:current.facts
+     |> require_ok |> List.length)
+;;
+
 let test_alternate_support_path_keeps_derived_fact_current () =
   with_temp_keepers @@ fun keepers_dir ->
   let primary = fact ~claim:"primary approval" () in
@@ -2873,6 +3002,18 @@ let () =
             "batch retraction recovers exact reason evidence"
             `Quick
             test_batch_retraction_recovers_exact_reason_evidence
+        ; test_case
+            "ordinary removals preserve archive until journal recovery"
+            `Quick
+            test_ordinary_removals_preserve_archive_until_journal_recovery
+        ; test_case
+            "receipt write failure preserves current fact"
+            `Quick
+            test_removal_receipt_write_failure_preserves_current_fact
+        ; test_case
+            "stale drop statements prepare no receipt"
+            `Quick
+            test_stale_drop_statements_prepare_no_removal_receipt
         ; test_case
             "reverse-ordered support chain reaches fixed point"
             `Quick

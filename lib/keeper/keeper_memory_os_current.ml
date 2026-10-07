@@ -1292,9 +1292,9 @@ let quarantined_outcome = "quarantined"
 (* [dropped_statements = None] means the writer makes no drop-reason
    statements (explicit keeper writes, upserts); [Some list] is the
    librarian's own account of the drops this commit carried out, possibly
-   empty ([dropped_by_commit]). Statements live only on the journal line:
-   the snapshot codec stays frozen, so existing on-disk snapshots keep
-   parsing unchanged. *)
+   empty ([dropped_by_commit]). Statements live on the journal line and its
+   pending removal receipt; the snapshot's [change.removed] preserves the
+   originals until finalization. *)
 let journal_entry_to_json ~dropped_statements snapshot =
   `Assoc
     ([ "outcome", `String committed_outcome
@@ -1323,10 +1323,10 @@ let journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present =
     ]
 ;;
 
-(* Ordinary producers retain the historical observation-only behavior: their
-   snapshot already reached disk, so append failure warns. The destructive
-   batch boundary below uses [append_journal_line_strict] plus a prepared plan
-   receipt instead; its exact reasons are part of that API's success contract.
+(* Lines without actual reason-bearing removals are observations: their
+   snapshot already reached disk, so append failure warns. Destructive
+   removals below use [append_journal_line_strict] and a prepared receipt so
+   their originals and reasons survive failed journal finalization.
    Cancellation is never absorbed. *)
 let append_journal_line ~keepers_dir ~keeper_id json =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
@@ -1570,7 +1570,9 @@ let journal_entry_of_json = function
 ;;
 
 type retraction_plan_receipt =
-  { plan_id : string
+  { plan_id : string option
+      (* [Some id] belongs to the exact batch API. [None] preserves an
+         ordinary removal without claiming an operator-approved plan. *)
   ; prior_revision : int
   ; prior_snapshot_sha256 : string
   ; target_revision : int
@@ -1581,7 +1583,7 @@ type retraction_plan_receipt =
 let retraction_plan_receipt_to_json receipt =
   `Assoc
     [ "state", `String "prepared"
-    ; "plan_id", `String receipt.plan_id
+    ; "plan_id", (match receipt.plan_id with None -> `Null | Some id -> `String id)
     ; "prior_revision", `Int receipt.prior_revision
     ; "prior_snapshot_sha256", `String receipt.prior_snapshot_sha256
     ; "target_revision", `Int receipt.target_revision
@@ -1615,19 +1617,25 @@ let retraction_plan_receipt_of_json = function
        , List.assoc_opt "target_snapshot_sha256" fields
        , List.assoc_opt "dropped" fields )
      with
-     | ( Some (`String plan_id)
+     | ( Some plan_id_json
        , Some (`String "prepared")
        , Some (`Int prior_revision)
        , Some (`String prior_snapshot_sha256)
        , Some (`Int target_revision)
        , Some (`String target_snapshot_sha256)
        , Some (`List dropped_json) )
-       when String.trim plan_id <> ""
-            && String.equal plan_id (String.trim plan_id)
-            && prior_revision > 0
+       when prior_revision > 0
             && target_revision = prior_revision + 1
             && String_util.is_lowercase_sha256_hex prior_snapshot_sha256
             && String_util.is_lowercase_sha256_hex target_snapshot_sha256 ->
+       let* plan_id =
+         match plan_id_json with
+         | `Null -> Ok None
+         | `String plan_id
+           when String.trim plan_id <> ""
+                && String.equal plan_id (String.trim plan_id) -> Ok (Some plan_id)
+         | _ -> Error "retraction plan identity is invalid"
+       in
        let rec decode_dropped index seen acc = function
          | [] -> Ok (List.rev acc)
          | json :: rest ->
@@ -1693,8 +1701,10 @@ let read_retraction_plan_receipt ~keepers_dir ~keeper_id =
 
 let write_retraction_plan_receipt ~keepers_dir ~keeper_id receipt =
   let path = retraction_plan_receipt_path ~keepers_dir ~keeper_id in
+  let json = retraction_plan_receipt_to_json receipt in
+  let* _ = retraction_plan_receipt_of_json json in
   Fs_compat.save_file_atomic_strict path
-    (Yojson.Safe.to_string (retraction_plan_receipt_to_json receipt))
+    (Yojson.Safe.to_string json)
   |> Result.map_error (fun detail ->
        Printf.sprintf
          "retraction plan receipt write failed path=%s: %s"
@@ -1742,6 +1752,20 @@ let append_journal_line_strict ~keepers_dir ~keeper_id json =
          path
          (Fs_compat.private_jsonl_append_error_to_string error)
          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+;;
+
+let append_removal_journal_and_clear_receipt
+      ~keepers_dir ~keeper_id ~snapshot receipt
+  =
+  let* () =
+    append_journal_line_strict
+      ~keepers_dir
+      ~keeper_id
+      (journal_entry_to_json
+         ~dropped_statements:(Some receipt.dropped_statements)
+         snapshot)
+  in
+  remove_retraction_plan_receipt ~keepers_dir ~keeper_id
 ;;
 
 let journal_contains_entry ~keepers_dir ~keeper_id expected =
@@ -1799,14 +1823,15 @@ let reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot =
        when current.revision = receipt.target_revision
             && String.equal (sha256 content) receipt.target_snapshot_sha256 ->
       let* () =
-        match current.source with
-        | { kind = Explicit_retract; trace_id }
-          when String.equal trace_id receipt.plan_id -> Ok ()
+        match receipt.plan_id, current.source with
+        | None, _ -> Ok ()
+        | Some plan_id, { kind = Explicit_retract; trace_id }
+          when String.equal trace_id plan_id -> Ok ()
         | _ ->
           Error
             (Printf.sprintf
-               "retraction plan target snapshot has another source plan_id=%s"
-               receipt.plan_id)
+               "retraction plan target snapshot has another source target_revision=%d"
+               receipt.target_revision)
       in
       let journal_entry =
         Journal_committed
@@ -1823,23 +1848,15 @@ let reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot =
           ~keeper_id
           journal_entry
       in
-      let* () =
-        if present
-        then Ok ()
-        else
-          append_journal_line_strict
-            ~keepers_dir
-            ~keeper_id
-            (journal_entry_to_json
-               ~dropped_statements:(Some receipt.dropped_statements)
-               current)
-      in
-      remove_retraction_plan_receipt ~keepers_dir ~keeper_id
+      if present
+      then remove_retraction_plan_receipt ~keepers_dir ~keeper_id
+      else
+        append_removal_journal_and_clear_receipt
+          ~keepers_dir ~keeper_id ~snapshot:current receipt
      | None | Some _ ->
       Error
         (Printf.sprintf
-           "retraction plan receipt conflicts with current snapshot plan_id=%s prior_revision=%d target_revision=%d"
-           receipt.plan_id
+           "retraction plan receipt conflicts with current snapshot prior_revision=%d target_revision=%d"
            receipt.prior_revision
            receipt.target_revision))
 ;;
@@ -1938,6 +1955,17 @@ type archived_fact =
 let read_dropped ~keepers_dir ~keeper_id ~current_facts =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   Domain_pool_ref.submit_io_or_inline (fun () ->
+    let* receipt = read_retraction_plan_receipt ~keepers_dir ~keeper_id in
+    let* () =
+      match receipt with
+      | None -> Ok ()
+      | Some receipt ->
+        Error
+          (Printf.sprintf
+             "memory archive journal finalization pending keeper=%s target_revision=%d; a writer must reconcile the preserved removal before the archive can be read"
+             keeper_id
+             receipt.target_revision)
+    in
     let seen = ref (Set_util.StringSet.of_list (List.map memory_id current_facts)) in
     let archived = ref [] in
     let visit = function
@@ -2275,37 +2303,45 @@ let update_locked_with_output
            | Some write -> write ~previous ~next
          in
          let snapshot_sha256 = sha256 content in
-         let* retraction_receipt =
+         let committed_dropped =
+           Option.map (dropped_by_commit ~previous ~next) dropped_statements
+         in
+         let* () =
            match retraction_plan with
-           | None -> Ok None
+           | None -> Ok ()
            | Some (plan_id, _) ->
-             (match snapshot, dropped_statements with
-              | Some (prior, prior_content), Some ((_ :: _) as reasons) ->
-                (match next.source with
-                 | { kind = Explicit_retract; trace_id }
-                   when String.equal trace_id plan_id ->
-                   let receipt =
-                     { plan_id
-                     ; prior_revision = prior.revision
-                     ; prior_snapshot_sha256 = sha256 prior_content
-                     ; target_revision = next.revision
-                     ; target_snapshot_sha256 = snapshot_sha256
-                     ; dropped_statements = reasons
-                     }
-                   in
-                   let+ () =
-                     write_retraction_plan_receipt
-                       ~keepers_dir
-                       ~keeper_id
-                       receipt
-                     |> Result.map_error store_error
-                   in
-                   Some receipt
-                 | _ ->
-                   Error
-                     (store_error
-                        "retraction plan source must be an exact explicit-retract plan"))
-              | None, _ | _, None | _, Some [] ->
+             (match next.source with
+              | { kind = Explicit_retract; trace_id }
+                when String.equal trace_id plan_id -> Ok ()
+              | _ ->
+                Error
+                  (store_error
+                     "retraction plan source must be an exact explicit-retract plan"))
+         in
+         let* retraction_receipt =
+           match snapshot, committed_dropped with
+           | Some (prior, prior_content), Some ((_ :: _) as reasons) ->
+             let receipt =
+               { plan_id = Option.map fst retraction_plan
+               ; prior_revision = prior.revision
+               ; prior_snapshot_sha256 = sha256 prior_content
+               ; target_revision = next.revision
+               ; target_snapshot_sha256 = snapshot_sha256
+               ; dropped_statements = reasons
+               }
+             in
+             let+ () =
+               write_retraction_plan_receipt
+                 ~keepers_dir
+                 ~keeper_id
+                 receipt
+               |> Result.map_error store_error
+             in
+             Some receipt
+           | None, _ | _, None | _, Some [] ->
+             (match retraction_plan with
+              | None -> Ok None
+              | Some _ ->
                 Error
                   (store_error
                      "retraction plan requires one existing snapshot and non-empty exact reasons"))
@@ -2335,25 +2371,37 @@ let update_locked_with_output
                  append_journal_entry
                    ~keepers_dir
                    ~keeper_id
-                   ~dropped_statements:
-                     (Option.map (dropped_by_commit ~previous ~next) dropped_statements)
+                   ~dropped_statements:committed_dropped
                    next;
                  Ok ()
-               | Some receipt, Some (_, evidence_error) ->
-                 reconcile_retraction_plan_receipt
-                   ~keepers_dir
-                   ~keeper_id
-                   ~snapshot:(Some (next, content))
+               | Some receipt, Some (plan_id, evidence_error) ->
+                 (* This commit has not appended its line yet. Only restart
+                    reconciliation needs to scan the historical journal. *)
+                 append_removal_journal_and_clear_receipt
+                   ~keepers_dir ~keeper_id ~snapshot:next receipt
                  |> Result.map_error (fun detail ->
                       evidence_error
-                        ~plan_id:receipt.plan_id
+                        ~plan_id
                         ~snapshot_revision:receipt.target_revision
                         ~snapshot_sha256:receipt.target_snapshot_sha256
                         ~detail)
-               | Some _, None ->
-                 Error
-                   (store_error
-                      "retraction receipt was prepared without an owning plan")
+               | Some receipt, None ->
+                 (* The snapshot committed. Preserve that outcome for the
+                    producer while retaining the receipt and the removed
+                    originals in [next.change]. Every later writer must
+                    finalize their journal before replacing this snapshot. *)
+                 (match
+                    append_removal_journal_and_clear_receipt
+                      ~keepers_dir ~keeper_id ~snapshot:next receipt
+                  with
+                  | Ok () -> ()
+                  | Error detail ->
+                    Log.Keeper.warn
+                      ~keeper_name:keeper_id
+                      "memory snapshot committed revision=%d; archive journal finalization pending; removal receipt and originals remain preserved: %s"
+                      receipt.target_revision
+                      detail);
+                 Ok ()
              in
              (match ranges with
               | [] -> ()

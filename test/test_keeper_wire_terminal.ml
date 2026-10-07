@@ -382,6 +382,33 @@ let test_record_terminal_error_writes_once () =
   check int "one terminal in the journal" 1
     (List.length (error_entries (read_journal ~base_path ~keeper_name ~operation_id)))
 
+(* A restart can cut an append between its write and its newline. The terminal
+   still has to land: the next sequence comes from the complete rows, and the
+   append cuts the fragment before it writes. *)
+let test_record_terminal_error_cuts_a_torn_tail () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-torn" and operation_id = "op-terminal-torn" in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  let append seq event =
+    match Journal.append_result journal ~seq ~ts:1.0 event with
+    | Ok () -> ()
+    | Error detail -> fail detail in
+  append 0 (Events.Run_started { run_id = "run-torn"; thread_id = "keeper:terminal-torn" });
+  append 1 (Events.Text_delta "partial");
+  let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
+  let oc = open_out_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path in
+  output_string oc "{\"v\":1,\"seq\":2,\"ts\":1.5,\"event\":{\"type\":\"text_del";
+  close_out oc;
+  (match Journal.record_terminal_error journal ~ts:2.0 ~message:"cut by restart" with
+   | Ok (Journal.Recorded_terminal_error { seq; _ }) ->
+     check int "appended after the last complete row" 2 seq
+   | Ok (Journal.Existing_terminal_error _) -> fail "a torn fragment stood in for a terminal"
+   | Error detail -> fail ("the torn journal refused its terminal: " ^ detail));
+  let entries = read_journal ~base_path ~keeper_name ~operation_id in
+  check (list int) "the fragment is gone and the rows are in order" [ 0; 1; 2 ]
+    (List.map (fun (entry : Journal.journaled_event) -> entry.seq) entries);
+  check int "one terminal in the journal" 1 (List.length (error_entries entries))
+
 let test_record_terminal_error_creates_a_missing_journal () =
   with_workspace @@ fun base_path ->
   let keeper_name = "terminal-missing" and operation_id = "op-terminal-missing" in
@@ -420,6 +447,8 @@ let () =
             test_journal_failure_keeps_live_error_without_cursor
         ; test_case "record_terminal_error writes once" `Quick
             test_record_terminal_error_writes_once
+        ; test_case "record_terminal_error cuts a torn tail" `Quick
+            test_record_terminal_error_cuts_a_torn_tail
         ; test_case "record_terminal_error creates a missing journal" `Quick
             test_record_terminal_error_creates_a_missing_journal
         ] )

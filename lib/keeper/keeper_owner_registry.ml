@@ -206,6 +206,26 @@ let record_restart_terminal ~base_dir ~keeper_name ~operation_id =
    evidence for the operator, not the keeper's utterance, so it does not
    advance the lane watermark. A row that cannot be written is logged and
    does not stop the owner from starting. *)
+(* The store settles a running shared batch as one execution and fails its
+   members with it, but it hands back only the execution leader. The run
+   journaled to every member, and a client may reopen any of them, so each
+   member needs the terminal and the failure row the leader gets. A batch that
+   cannot be read keeps the leader alone and says so. *)
+let restart_interrupted_with_batch_members ~keeper_name owner =
+  List.concat_map
+    (fun (leader : Keeper_owner.Chat_operation.t) ->
+       match Keeper_owner.batch_operations owner leader.operation_id with
+       | Ok members -> members
+       | Error error ->
+         Log.Keeper.warn
+           ~keeper_name
+           "restart-interrupted operation %s: its batch members could not be read, so only the execution leader is ended: %s"
+           (Keeper_owner.Chat_operation.Operation_id.to_string leader.operation_id)
+           (Keeper_owner.error_to_string error);
+         [ leader ])
+    (Keeper_owner.restart_interrupted_operations owner)
+;;
+
 let record_restart_interruptions pool ~keeper_name owner =
   let base_dir = pool.config.Workspace.base_path in
   List.iter
@@ -259,7 +279,7 @@ let record_restart_interruptions pool ~keeper_name owner =
               "restart-interrupted operation %s left no failure row: %s"
               operation_id
               detail))
-    (Keeper_owner.restart_interrupted_operations owner)
+    (restart_interrupted_with_batch_members ~keeper_name owner)
 ;;
 
 let start_owner pool ~keeper_name ~initial_meta =

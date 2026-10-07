@@ -3309,6 +3309,122 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
         | rows -> failf "expected one transport-failure row, got %d" (List.length rows)))
 ;;
 
+(* A shared chat batch runs once and journals to every member. The restart
+   settles the whole batch, so every member's journal needs the terminal, not
+   only the execution leader's. *)
+let test_registry_start_ends_every_batch_member_journal_after_a_restart () =
+  let base_path = Filename.temp_dir "keeper-owner-restart-batch" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      remove_tree base_path)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "restart-batch-owner" in
+       (match Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
+        | Ok () -> ()
+        | Error detail -> fail ("persist keeper meta: " ^ detail));
+       let leader = operation_id "kmsg-restart-batch-leader" in
+       let follower = operation_id "kmsg-restart-batch-follower" in
+       let source =
+         Keeper_chat_operation_payload.source_to_json
+           ~submitted_by:"masc-tui"
+           ~thread_id:("keeper:" ^ keeper_name)
+           ~continuation_channel:
+             (Keeper_continuation_channel.dashboard ~thread_id:("keeper:" ^ keeper_name)
+              |> Result.get_ok)
+           ~surface:(Surface_ref.Dashboard { session_id = None })
+           ~channel:""
+           ~channel_user_id:""
+           ~channel_user_name:""
+           ~channel_workspace_id:""
+           ~conversation_id:None
+           ~external_message_id:None
+           ~workspace_id:None
+           ~extra_mentions:[]
+           ~sender_keeper:None
+           ~user_row_origin:Keeper_chat_store.Needs_append
+         |> Result.get_ok
+       in
+       let store_path =
+         Keeper_chat_operation_store.path_for_keeper
+           ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+           ~keeper_name
+       in
+       (try Unix.mkdir (Filename.dirname store_path) 0o755 with
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+       let seed =
+         Keeper_chat_operation_store.open_or_create ~path:store_path
+         |> Result.map_error Keeper_chat_operation_store.error_to_string
+         |> Result.get_ok
+       in
+       List.iter
+         (fun (operation_id, text) ->
+            Keeper_chat_operation_store.submit
+              seed
+              ~now:10.0
+              ~operation_id
+              ~source
+              ~input:(operation_input text)
+            |> Result.get_ok
+            |> ignore)
+         [ leader, "first of the batch"; follower, "second of the batch" ];
+       let batch _head _candidates =
+         Ok
+           (Some
+              { Keeper_chat_operation_store.members = [ leader; follower ]
+              ; input = operation_input "shared batch"
+              })
+       in
+       Keeper_chat_operation_store.claim_next ~batch seed ~now:11.0
+       |> Result.get_ok
+       |> ignore;
+       check int "the batch has two members" 2
+         (List.length
+            (Keeper_chat_operation_store.batch_operations seed ~operation_id:leader
+             |> Result.get_ok));
+       Keeper_chat_operation_store.close seed |> Result.get_ok;
+       let journal_of operation_id =
+         Keeper_chat_event_log.open_journal
+           ~base_dir:base_path
+           ~keeper_name
+           ~operation_id:(Chat_operation.Operation_id.to_string operation_id)
+           ()
+       in
+       List.iter
+         (fun operation_id ->
+            match
+              Keeper_chat_event_log.append_result (journal_of operation_id) ~seq:0 ~ts:10.0
+                (Keeper_chat_events.Run_started
+                   { run_id = "restart-batch-run"; thread_id = "keeper:" ^ keeper_name })
+            with
+            | Ok () -> ()
+            | Error detail -> fail ("seed journal: " ^ detail))
+         [ leader; follower ];
+       Eio.Switch.run @@ fun sw ->
+       (match
+          Owner_registry.install_from_store
+            ~sw
+            ~operation_runner:None
+            ~on_turn_slot_released:None
+            config
+        with
+        | Ok count -> check int "one owner installed" 1 count
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       List.iter
+         (fun (label, operation_id) ->
+            match Keeper_chat_event_log.read_journal (journal_of operation_id) with
+            | Ok entries ->
+              (match List.rev entries with
+               | { Keeper_chat_event_log.event = Keeper_chat_events.Event_error _; _ } :: _ -> ()
+               | _ -> failf "the %s journal does not end with a terminal error" label)
+            | Error _ -> failf "the %s journal could not be read" label)
+         [ "leader", leader; "follower", follower ])
+;;
+
 let test_startup_queued_waits_for_runner_readiness () =
   Eio_main.run @@ fun _env ->
   let path = Filename.temp_file "keeper-owner-ready-" ".sqlite3" in
@@ -5298,6 +5414,10 @@ let () =
             "registry start leaves a failure row for a restart-interrupted request"
             `Quick
             test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request
+        ; test_case
+            "registry start ends every batch member journal after a restart"
+            `Quick
+            test_registry_start_ends_every_batch_member_journal_after_a_restart
         ; test_case
             "startup Queued waits for runner readiness"
             `Quick

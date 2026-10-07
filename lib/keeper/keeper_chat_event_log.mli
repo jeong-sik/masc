@@ -151,7 +151,10 @@ val record_terminal_error :
     Every settlement path that has no live stream to carry its terminal
     (Owner settlement, restart recovery) records it here, so a reader that
     reopens the operation finds the terminal the settled record already holds.
-    [Error] names a journal that could not be read or appended; the caller
+    A fragment after the last newline (an append the crash cut) is not a row:
+    the terminal takes the sequence after the last complete row and the append
+    cuts the fragment, so a crashed append does not leave the journal without
+    its terminal. [Error] names a journal that could not be read or appended; the caller
     decides whether that blocks anything. [ts] is the caller's clock, as for
     {!append}. *)
 

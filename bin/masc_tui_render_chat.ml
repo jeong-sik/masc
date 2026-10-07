@@ -202,21 +202,17 @@ let cached_chat_markdown ~link_previews_mode ~theme =
   match entry.markdown_source with
   | Message_layout.Markdown_stable
       { keeper_name; request_id; observed_at; entry_index } ->
-      let source =
-        Markdown_cache.Stable_source
-          { identity =
-              { cmi_style = entry.style;
-                cmi_keeper_name = keeper_name;
-                cmi_request_id = request_id;
-                cmi_observed_at = Some observed_at;
-                cmi_entry_index = entry_index;
-              };
-            text = body;
-          }
-      in
       Markdown_cache.render chat_markdown_cache
         ~theme_revision:chat_markdown_theme_revision
-        ~palette_generation ~width ~renderer:(chat_markdown ~context) ~source
+        ~palette_generation ~width ~renderer:(chat_markdown ~context)
+        ~identity:
+          { cmi_style = entry.style;
+            cmi_keeper_name = keeper_name;
+            cmi_request_id = request_id;
+            cmi_observed_at = Some observed_at;
+            cmi_entry_index = entry_index;
+          }
+        ~text:body
   | Message_layout.Markdown_growing
       { keeper_name; request_id; entry_index } ->
       Markdown_cache.render_growing chat_markdown_cache

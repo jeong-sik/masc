@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- `keeper_candle_gift` now works on the MCP endpoint and registered-tool dispatch, with the donor bound to the authenticated Keeper identity (#41562).
 - Home and other open surfaces reload after workspace identity confirmation. A temporary identity read failure preserves open Keeper chats, drafts, attachments and queues (#41518, #41520).
 - Browser login completion is checked across TUI surfaces, and removed providers end pending consent polling (#41523).
 - TUI chat preserves streamed text across tool rounds; Candle displays distinguish booting and unconfirmed workspaces (#41499, #41511).

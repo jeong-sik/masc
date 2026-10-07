@@ -42,6 +42,7 @@ skip_build=false
 keep_build=false
 custom_build_dir=false
 base_path=""
+workspace_root=""
 install_args=("$@")
 case "$(uname -s)" in
   Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
@@ -118,7 +119,6 @@ else
     exit 1
   fi
   workspace_state=""
-  workspace_root=""
   workspace_source=""
   while IFS='=' read -r key value; do
     case "$key" in
@@ -242,18 +242,20 @@ PY
 
 # Installed binaries and browser hosts now hold their own copies. Clean only
 # the default output this invocation built, never externally supplied input.
-# A prefix placed inside the build tree would be removed by Dune's clean.
+# Installed destinations and the selected workspace must survive Dune's clean.
 if [ "$skip_build" = false ] && [ "$keep_build" = false ] \
     && [ "$custom_build_dir" = false ] && [ -z "${DUNE_BUILD_DIR:-}" ] \
     && [ ! -L "$repo/_build" ] \
     && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
-  if python3 - "$repo/_build" "$prefix" "$manifest_dir" <<'PY'
+  if python3 - "$repo/_build" "$prefix" "$manifest_dir" "$workspace_root" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-build, prefix, manifests = (Path(arg).resolve() for arg in sys.argv[1:])
+build, prefix, manifests = (Path(arg).resolve() for arg in sys.argv[1:4])
 destinations = [prefix, manifests]
+if sys.argv[4]:
+    destinations.append(Path(sys.argv[4]).resolve())
 if manifests.is_dir():
     for manifest in manifests.glob("*.json"):
         try:
@@ -264,7 +266,7 @@ if manifests.is_dir():
         if isinstance(declared, dict) and isinstance(declared.get("path"), str):
             destinations.append(Path(declared["path"]).resolve())
 if any(path == build or build in path.parents for path in destinations):
-    print("install-local-build: retaining output: an installed destination is inside _build")
+    print("install-local-build: retaining output: an installed destination or selected workspace is inside _build")
     sys.exit(1)
 PY
   then

@@ -83,6 +83,67 @@ def workspace(root):
 
 
 class LocalBuildInstall(unittest.TestCase):
+    def test_cleanup_protects_selected_workspace_state(self):
+        for location in ("inside", "build_root", "symlink_inside", "outside", "none"):
+            for explicit in (False, True) if location != "none" else (False,):
+                with self.subTest(location=location, explicit=explicit), \
+                        tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary).resolve()
+                    checkout = root / "checkout"
+                    scripts = checkout / "scripts"
+                    scripts.mkdir(parents=True)
+                    shutil.copy2(SCRIPT, scripts / SCRIPT.name)
+                    build_root = checkout / "_build"
+                    build = build_root / "default/bin"
+                    build.mkdir(parents=True)
+                    binaries(build)
+                    artifact = build_root / "cache-artifact"
+                    artifact.write_text("regenerable")
+                    if location == "build_root":
+                        selected = build_root
+                    elif location == "outside":
+                        selected = root / "live workspace"
+                    else:
+                        selected = build_root / "live workspace"
+                    if location != "none":
+                        (selected / ".masc").mkdir(parents=True)
+                        state = selected / ".masc/durable-state"
+                        state.write_text("operator state")
+                    if location == "symlink_inside":
+                        alias = root / "workspace alias"
+                        alias.symlink_to(selected, target_is_directory=True)
+                        selected = alias
+                    preflight_helper(build, unnamed_workspace=None if location == "none"
+                                     else (selected, "persisted_default"))
+                    executable(scripts / "check-runtime-deployment-preflight.sh", "fixture-preflight")
+                    wrapper = scripts / "dune-local.sh"
+                    wrapper.write_text(
+                        "#!/bin/sh\n"
+                        'repo=$(cd "$(dirname "$0")/.." && pwd -P)\n'
+                        'printf "%s\\n" "$1" >> "$repo/calls"\n'
+                        'if [ "$1" = clean ]; then rm -rf "$repo/_build"; fi\n')
+                    wrapper.chmod(0o755)
+                    prefix = root / "prefix"
+                    command = ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix),
+                               "--manifest-dir", str(root / "absent-manifests")]
+                    if explicit:
+                        command += ["--base-path", str(selected)]
+                    env = {key: value for key, value in unnamed_env(root).items()
+                           if key not in ("DUNE_BUILD_DIR", "MASC_DUNE_DRY_RUN")}
+                    env["MASC_DUNE_LOCK_HELD"] = "1"
+                    result = subprocess.run(command, cwd=root, env=env,
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue((prefix / "masc").is_file())
+                    if location != "none":
+                        self.assertIn(f"checking runtime.toml of {selected}", result.stdout)
+                        self.assertTrue(state.exists(), "successful installation removed workspace state")
+                        self.assertEqual(state.read_text(), "operator state")
+                    protected = location in ("inside", "build_root", "symlink_inside")
+                    self.assertEqual(artifact.exists(), protected)
+                    self.assertEqual((checkout / "calls").read_text().splitlines(),
+                                     ["build"] if protected else ["build", "clean"])
+
     def test_successful_default_install_cleans_only_its_own_build(self):
         for flags, expected_clean, fail_build in (
                 ([], True, False), (["--keep-build"], False, False),

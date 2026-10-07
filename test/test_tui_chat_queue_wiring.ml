@@ -2145,7 +2145,7 @@ let test_live_gutter_clock_matches_its_causal_frontier () =
     check bool "keeper heading does not revert to dispatch clock" false
       (List.exists (fun line ->
         Astring.String.is_suffix ~affix:old_clock (String.trim line)) output_heading);
-    check bool "dispatch time remains in running span" true
+    check bool "dispatch span is never prepended to speech" false
       (List.exists (Astring.String.is_infix ~affix:(old_clock ^ "→")) plain))
 ;;
 
@@ -2204,8 +2204,8 @@ let test_promoted_live_output_survives_settlement_and_replay () =
           ["PROMOTED_QUESTION"; "EARLY_ANSWER"; "LATER_ANSWER"];
         check bool (stage ^ ": tool remains visible") true
           (count "read_file" screen > 0);
-        check int (stage ^ ": one request span") 1 (count running_span screen);
-        check int (stage ^ ": transcript timing") 1 (count span screen);
+        check int (stage ^ ": no request span added to speech") 0 (count running_span screen);
+        check int (stage ^ ": no timing added to speech") 0 (count span screen);
         Option.iter (fun message ->
           check int (stage ^ ": failure appears once after settlement")
             (if ended then 1 else 0) (count message screen)) failure
@@ -4161,7 +4161,9 @@ let test_batch_reply_follows_all_original_inputs () =
       log in
     let owner = member "batch-owner" 1. in
     let second = member "batch-second" 2. in
-    let follower = member "batch-third" 3. in
+    let follower = Tui_types.turn_log_create ~keeper_name:"alpha"
+        ~request_id:"batch-third" ~started_at:1. in
+    Tui_types.turn_log_add ~now:3. follower ~seq:(Some 0) Live.Run_started;
     let user request_id text at =
       chat_entry ~request_id
         ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
@@ -4171,16 +4173,29 @@ let test_batch_reply_follows_all_original_inputs () =
        user "batch-second" "REPEATED_ORIGINAL_INPUT" 2.;
        user "batch-third" "REPEATED_ORIGINAL_INPUT" 3.];
     state.msg_settled_logs <- [follower; second; owner];
+    let layouts () = Masc_tui_render_chat.keeper_message_layout_entries state
+        ~keeper_name:"alpha" ~chat_cols:140 in
+    let before_binding = layouts () in
+    Tui_types.turn_log_add ~now:3. follower ~seq:(Some 1)
+      (Live.Batch_bound {operation_id="batch-third"; execution_id="batch-owner"});
+    check bool "binding without output invalidates layout identity" false
+      (before_binding == layouts ());
     let verify_bound_inputs () =
+      let entries = layouts () in
+      check (list string) "all bound inputs use the full canonical grouping key"
+        ["batch-owner"; "batch-owner"; "batch-owner"]
+        (List.map (fun (entry : Masc_tui_message_layout.entry) -> entry.request_label) entries);
+      check bool "unchanged aliases preserve layout identity" true (entries == layouts ());
       let frame, _ = Masc_tui_render_chat.render_keeper_message state in
       let screen = String.concat "\n"
           (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
-      check bool "batch is identified before output exists" true
-        (Astring.String.is_infix ~affix:"입력 3건" screen);
-      check int "every bound input is reflected before output exists" 3
-        (List.length (Astring.String.cuts ~sep:"입력 반영됨" screen) - 1);
-      check int "one canonical request heading" 1
-        (List.length (Astring.String.cuts ~sep:"요청 batch-owner" screen) - 1);
+      check int "first bound input keeps its original body" 1
+        (List.length (Astring.String.cuts ~sep:"FIRST_ORIGINAL_INPUT" screen) - 1);
+      check int "separate identical bound inputs both remain" 2
+        (List.length (Astring.String.cuts ~sep:"REPEATED_ORIGINAL_INPUT" screen) - 1);
+      List.iter (fun metadata -> check bool "batch metadata is not speech" false
+        (Astring.String.is_infix ~affix:metadata screen))
+        ["입력 반영됨"; "요청 batch-owner"; "입력 3건"];
       check bool "raw invalid binding cannot rename the group" false
         (Astring.String.is_infix ~affix:"forged-owner" screen)
     in
@@ -4696,8 +4711,15 @@ let test_verified_rejection_is_visible_without_mutating_original_input () =
   Log.commit log.tl_log;
   Tui_types.hold_settled_log state log;
   let projected = Tui_types.chat_rows_for state "alpha" in
-  check (list string) "refused input does not claim successful delivery"
-    ["전송 거절됨\nOriginal request"] (List.map (fun (row : Tui_types.msg_entry) -> row.me_text) projected);
+  check (list string) "refused input remains original speech"
+    ["Original request"] (List.map (fun (row : Tui_types.msg_entry) -> row.me_text) projected);
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.msg_target_keeper_name <- Some "alpha";
+  state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+  let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+  check bool "rejection remains an explicit error" true
+    (List.exists (fun line -> Astring.String.is_infix ~affix:"HTTP 401"
+       (Masc_tui_theme.strip_sgr line)) frame.Masc_tui_frame_presenter.lines);
   check string "recall keeps the operator's original text" "Original request"
     (List.hd state.msg_history).me_text
 ;;
@@ -4716,7 +4738,7 @@ let test_delivery_states_and_observed_work_are_identifiable () =
       state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
       state.msg_target_keeper_name <- Some "alpha";
       let entry, item = preflight_input () in
-      let request = {entry.sent_request with Keeper_chat.message = "DISTINCT_INPUT"} in
+      let request = {entry.sent_request with Keeper_chat.message = "아니야 진행해"} in
       let entry = {entry with Tui_types.sent_request = request} in
       let input = chat_entry ~request_id:request.request_id
           ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
@@ -4733,29 +4755,50 @@ let test_delivery_states_and_observed_work_are_identifiable () =
       let has text needle = Astring.String.is_infix ~affix:needle text in
       let count text needle = List.length (Astring.String.cuts ~sep:needle text) - 1 in
       let pending label =
-        List.iter (fun origin ->
+        List.iter (fun tools ->
+          state.msg_tool_visibility <- tools;
+          List.iter (fun origin ->
           state.msg_origin_display <- origin;
           let text = screen () in
-          check int "pending input is displayed exactly once" 1 (count text "DISTINCT_INPUT");
+          check int "pending input is displayed exactly once" 1 (count text "아니야 진행해");
           check bool "pending area is explicit" true (has text "대기 입력 1건");
           check bool "delivery state is explicit" true (has text label);
-          check bool "pending is never claimed as reflected" false (has text "입력 반영됨"))
-          [Layout.Origin_inline; Origin_bare; Origin_row] in
-      pending "아직 보내지 않음";
+          check bool "pending is never claimed as reflected" false (has text "입력 반영됨");
+          let bodies = Masc_tui_render_chat.chat_tail_entries state ~keeper_name:"alpha"
+              ~role_label_column:20
+            |> List.filter_map (fun (entry : Layout.entry) ->
+                if entry.style = Layout.Local then Some entry.body else None) in
+          check (list string) "pending body stays exactly as typed" ["아니야 진행해"] bodies;
+          if tools = Tui_types.Tools_compact then
+            check bool "technical id is not displayed" false (has text request.request_id))
+          [Layout.Origin_inline; Origin_bare; Origin_row])
+          [Tui_types.Tools_compact; Tools_full];
+        state.msg_tool_visibility <- Tui_types.Tools_compact in
+      pending "전송 대기";
       entry.phase <- Tui_types.Turn_streaming;
-      pending "서버 접수 확인 전";
+      pending "전송 중";
       Tui_types.turn_log_add ~now:2. entry.log ~seq:None
         (Live.Accepted {admission=Queued; queue_length=1; interactive=None});
-      pending "턴 반영 대기";
+      pending "처리 대기";
       entry.phase <- Tui_types.Turn_reconciling;
-      pending "결과 미확인";
+      pending "전송 확인 중";
       entry.phase <- Tui_types.Turn_streaming;
       Tui_types.turn_log_add ~now:3. entry.log ~seq:(Some 0) Live.Run_started;
+      List.iter (fun origin ->
+        state.msg_origin_display <- origin;
+        let started = screen () in
+        check int "run start promotes original input exactly once" 1 (count started "아니야 진행해");
+        check bool "conversation does not add a receipt to speech" false (has started "입력 반영됨");
+        check bool "started input leaves pending area" false (has started "대기 입력 1건");
+        check bool "started turn has broad work status" true (has started "기존 작업 처리 중");
+        List.iter (fun activity -> check bool "work alone does not invent a provider activity" false
+          (has started activity)) ["THINKING"; "STREAMING"];
+        let bodies = Masc_tui_render_chat.keeper_message_layout_entries state
+            ~keeper_name:"alpha" ~chat_cols:columns in
+        check (list string) "conversation body is original input" ["아니야 진행해"]
+          (List.map (fun (entry : Layout.entry) -> entry.body) bodies))
+        [Layout.Origin_inline; Origin_bare; Origin_row];
       state.msg_origin_display <- Layout.Origin_inline;
-      let started = screen () in
-      check int "run start promotes the original input exactly once" 1 (count started "DISTINCT_INPUT");
-      check bool "run start with no visible output still confirms input" true (has started "입력 반영됨");
-      check bool "started input leaves pending area" false (has started "대기 입력 1건");
       Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 1) (Live.Thinking "OBSERVED_THOUGHT");
       let thought = screen () in
       check bool "default reasoning lane has its name" true (has thought "THINKING");
@@ -4768,22 +4811,117 @@ let test_delivery_states_and_observed_work_are_identifiable () =
       let streaming = screen () in
       List.iter (fun marker -> check bool ("default work label: " ^ marker) true (has streaming marker))
         ["THINKING"; "TOOLS"; "STREAMING"; "OBSERVED_ANSWER"];
-      check string "display annotations do not alter recall" "DISTINCT_INPUT"
+      check string "display annotations do not alter recall" "아니야 진행해"
         (List.hd state.msg_history).me_text)
       [80; 140])
 ;;
 
-let test_search_counts_visible_request_annotations () =
+let test_speech_keeps_original_words_across_metadata_and_retry () =
+  let module Layout = Masc_tui_message_layout in
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous = Masc_tui_ansi.get_terminal_size () in
   let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
-    set_size (24, 120);
+    List.iter (fun columns ->
+      set_size (60, columns);
+      List.iter (fun origin ->
+        let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+        state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+        state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+        state.msg_target_keeper_name <- Some "alpha";
+        state.msg_origin_display <- origin;
+        let first_id = "tui-12-first-345678901234" in
+        let second_id = "tui-12-second-345678901234" in
+        let user = Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}) in
+        let bodies = ["엉..."; "계속할게요."; "아니야 진행해";
+          "요청 tui-원문\n입력 반영됨\nTURN #123"] in
+        let ids = [first_id; first_id; second_id; second_id] in
+        state.msg_history <- List.mapi (fun index text ->
+          let row = chat_entry ~request_id:(List.nth ids index)
+              ~role:(if index mod 2 = 0 then user else Tui_types.Message_keeper)
+              ~turn_sequence:(index / 2 + 1) ~text ~at:(100. +. float_of_int index) () in
+          {row with Tui_types.me_identity=Persisted_row (Printf.sprintf "original-%d" index)}) bodies;
+        let entries = Masc_tui_render_chat.keeper_message_layout_entries state
+            ~keeper_name:"alpha" ~chat_cols:columns in
+        check (list string) "recorded speech is exact, including diagnostic-looking words"
+          bodies (List.map (fun (entry : Layout.entry) -> entry.body) entries);
+        check (list string) "visually similar ids retain distinct full grouping keys"
+          ids (List.map (fun (entry : Layout.entry) -> entry.request_label) entries);
+        let live = inflight_with_log ~keeper_name:"alpha" ~started_at:110.
+            [ Live.Run_started
+            ; Live.Runtime_attempt_started {runtime_id=Some "codex-original"; attempt_index=Some 0}
+            ; Live.Text "처음 답변 그대로"
+            ; Live.Runtime_attempt_started {runtime_id=Some "claude-retry"; attempt_index=Some 1}
+            ; Live.Text "이어서 답변 그대로" ] in
+        state.msg_inflight <- [live];
+        state.msg_live <- Some live.log;
+        let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+        let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+        let screen = String.concat "\n" plain in
+        let count needle = List.length (Astring.String.cuts ~sep:needle screen) - 1 in
+        List.iter (fun body ->
+          List.iter (fun line -> check int ("exact original screen text: " ^ line) 1 (count line))
+            (String.split_on_char '\n' body))
+          (bodies @ ["처음 답변 그대로"; "이어서 답변 그대로"]);
+        List.iter (fun metadata -> check int "no generated metadata in speech" 0 (count metadata))
+          [first_id; second_id; "TURN #1 ·"; "TURN #2 ·"; "attempt 1:"];
+        let pending_request = Keeper_chat.create_request ~keeper_name:"alpha"
+            ~message:"요청 문구도 원문\n입력 반영됨도 원문" () in
+        (match Masc_tui_keeper_chat_queue.push state.msg_queued ~submitted_at:111. pending_request with
+         | Error detail -> fail detail
+         | Ok (queue, _) -> state.msg_queued <- queue);
+        let pending = Masc_tui_render_chat.chat_tail_entries state ~keeper_name:"alpha"
+            ~role_label_column:(Layout.chat_role_label_width ~pane_cells:columns) in
+        check (list string) "pending diagnostic-looking words are not removed"
+          [pending_request.message]
+          (List.filter_map (fun (entry : Layout.entry) ->
+            if entry.style = Layout.Local then Some entry.body else None) pending);
+        let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+        let screen = String.concat "\n"
+            (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+        List.iter (fun line -> check int "pending literal original is drawn once" 1
+          (List.length (Astring.String.cuts ~sep:line screen) - 1))
+          (String.split_on_char '\n' pending_request.message);
+        state.msg_history <- [];
+        state.msg_inflight <- [];
+        state.msg_live <- None;
+        state.msg_queued <- Masc_tui_keeper_chat_queue.empty;
+        state.keeper_turns <- [{Tui_decode.ktr_keeper_name="alpha"; ktr_chat_control_token=None;
+          ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
+            interrupt_token="preview-stop"; turn_ref=None;
+            preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
+              ktp_text_tail="관측 답변 원문"; ktp_last_tool=None}}}];
+        let preview = Masc_tui_render_chat.polled_turn_output_entries state ~keeper_name:"alpha"
+            ~role_label_column:(Layout.chat_role_label_width ~pane_cells:columns) in
+        check (list string) "polled speech separates its observation status"
+          ["관측 답변 원문"]
+          (List.filter_map (fun (entry : Layout.entry) ->
+            if entry.style = Layout.Keeper then Some entry.body else None) preview);
+        let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+        let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+        check int "polled original appears once" 1
+          (List.length (List.filter (Astring.String.is_infix ~affix:"관측 답변 원문") plain));
+        check bool "polled observation retains its separate status" true
+          (List.exists (Astring.String.is_infix ~affix:"최근 출력 발췌") plain))
+        [Layout.Origin_inline; Origin_bare; Origin_row])
+      [80; 140])
+;;
+
+let test_search_measures_original_message_rows () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    List.iter (fun columns ->
+    set_size (24, columns);
+    List.iter (fun origin ->
     let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- origin;
     state.msg_history <- List.init 24 (fun index ->
       let id = Printf.sprintf "search-%d" index in
       let row = chat_entry ~request_id:id
@@ -4796,7 +4934,7 @@ let test_search_counts_visible_request_annotations () =
       [{row with Tui_types.me_identity=Persisted_row id};
        {reply with Tui_types.me_identity=Persisted_row (id ^ "-reply")}]) |> List.concat;
     let newest, _ = Masc_tui_render_chat.render_keeper_message state in
-    check bool "turn number arriving after its input is visible" true
+    check bool "turn metadata is not added to speech" false
       (List.exists (fun line -> Astring.String.is_infix ~affix:"TURN #24"
           (Masc_tui_theme.strip_sgr line)) newest.Masc_tui_frame_presenter.lines);
     match Masc_tui_render_chat.keeper_message_find_scroll state ~keeper_name:"alpha"
@@ -4805,15 +4943,20 @@ let test_search_counts_visible_request_annotations () =
     | Some (scroll, _) ->
         state.msg_scroll <- scroll;
         let frame, _ = Masc_tui_render_chat.render_keeper_message state in
-        check bool "request headings and receipt rows do not push the search result offscreen" true
+        check bool "search uses the same original message rows as the frame" true
           (List.exists (fun line -> Astring.String.is_infix ~affix:"SEARCH_TARGET"
               (Masc_tui_theme.strip_sgr line)) frame.Masc_tui_frame_presenter.lines))
+      [Masc_tui_message_layout.Origin_inline; Origin_bare; Origin_row])
+      [80; 140])
 ;;
 
 let () =
   run
     "tui_chat_queue_wiring"
-    [ ( "visible delivery", [test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable; test_case "search counts annotations" `Quick test_search_counts_visible_request_annotations] )
+    [ ( "visible delivery",
+        [ test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable
+        ; test_case "speech preserves original words" `Quick test_speech_keeps_original_words_across_metadata_and_retry
+        ; test_case "search measures original rows" `Quick test_search_measures_original_message_rows ] )
     ; ( "rejected input", [test_case "refusal preserves original input" `Quick test_verified_rejection_is_visible_without_mutating_original_input] )
     ; ( "status ownership",
         [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post

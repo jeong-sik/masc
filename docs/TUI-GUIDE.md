@@ -984,13 +984,19 @@ That separator is a viewport projection, not a transcript row, and remains
 readable under `NO_COLOR`.
 
 Inputs waiting to enter a turn appear under `대기 입력` with the local `›` mark.
-Each input distinguishes unsent (`대기`), sending (`전송 중`), accepted by the
-server (`접수됨`), and unconfirmed delivery (`미확인`). Acceptance alone does not
-mean the Keeper has processed it. The conversation marks `입력 반영됨` only when
-the input is persisted or its bound execution has reported `Run_started`.
-Request headings connect inputs and responses; a shared batch states its input
-count. `TURN #N` appears where a recorded turn number is available. The progress
-row says `THINKING` or `STREAMING` only after receiving the corresponding signal.
+The label beside each original input distinguishes unsent (`전송 대기`), sending
+(`전송 중`), accepted and waiting to be processed (`처리 대기`), and unconfirmed
+delivery (`전송 확인 중`). Acceptance alone does not mean the Keeper has processed
+it. A persisted input or one whose bound execution reports `Run_started` moves
+into the conversation once. Rejection details appear separately as an error.
+
+User and Keeper speech keeps the recorded text. Request IDs, turn numbers,
+delivery receipts, attempt details and clock spans are never prepended to the
+body. Literal words such as `요청` or `입력 반영됨` in a message remain untouched.
+Full request IDs still group inputs and responses internally; technical identity
+stays in expanded diagnostics, and timestamps stay in the gutter or heading.
+Working means the turn is in progress. The progress row says `THINKING` or
+`STREAMING` only after receiving the corresponding signal.
 
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did. Reasoning starts folded with a `THINKING`

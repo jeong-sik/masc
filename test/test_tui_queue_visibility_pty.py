@@ -385,9 +385,9 @@ def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_prior
             pending = _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=80,
                 needle="내 메시지 2건 대기".encode(), controls=(_keyboard_harness.FULL_REDRAW,))
             text = _keyboard_harness.screen_text(pending)
-            assert "다음 순서로 접수됨".encode() not in text, "unconfirmed priority shown as confirmed"
+            assert "다음 순서로 전달 대기".encode() not in text, "unconfirmed priority shown as confirmed"
             priority_release.set()
-            expected = "다음 순서 확인 불가" if fail_priority else "다음 순서로 접수됨"
+            expected = "다음 순서 확인 불가" if fail_priority else "다음 순서로 전달 대기"
             _keyboard_harness.wait_for_output(process, fd, output, expected.encode(), start=0, timeout=10)
             # A changed geometry owns a redraw; repeated 80x30 does not.
             _keyboard_chat.resize_and_wait(process, fd, output, rows=30, columns=100,

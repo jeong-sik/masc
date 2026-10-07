@@ -4832,8 +4832,8 @@ let test_attachment_caption_whitespace_reaches_chat_rows () =
     check bool "the production projection uses stable Markdown" true
       (match entry.Layout.markdown_source with Markdown_stable _ -> true | _ -> false);
     let markdown = Render.cached_chat_markdown ~link_previews_mode:`Off ~theme in
-    Layout.rows_of_entry ~markdown ~origin:Layout.Origin_bare ~inner_width:120
-      ~previous:None entry
+    Layout.visible_rows ~markdown ~origin:Layout.Origin_bare ~inner_width:120
+      ~height:100 [entry]
     |> List.filter_map (fun (row : Layout.row) -> match row.kind with
       | Layout.Body -> Some (Masc_tui_theme.strip_sgr row.text)
       | Layout.Metadata _ | Layout.Viewport_gap _ -> None) in

@@ -1174,15 +1174,20 @@ let test_new_input_preserves_running_output () =
     Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 4) Live.Run_finished;
     Tui_types.settle_turn_log state old;
     state.msg_inflight <- [queued];
-    (* RFC-0412 §2.1: settling is a replace, not an append. The live view
-       with its running output is replaced by the settled turn's reply row,
-       so the text the operator reads changes here by contract. *)
+    (* Text before a tool remains progress evidence. The final reply replaces
+       only a trailing text stretch; here the tool separates that progress
+       from the final answer, so settlement preserves their causal order. *)
     let settled_screen = screen () in
-    check bool "settling replaces the running output with the reply" true
-      (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" settled_screen
-       && not (Astring.String.is_infix ~affix:"OLD_RUNNING_TEXT" settled_screen));
-    check bool "complete older batch log stays authoritative" true
-      (Astring.String.is_infix ~affix:"OLD_FINAL_REPLY" settled_screen);
+    let position needle =
+      match Astring.String.find_sub ~sub:needle settled_screen with
+      | Some at -> at
+      | None -> fail ("settled turn lost " ^ needle)
+    in
+    let progress_at = position "OLD_RUNNING_TEXT" in
+    let tool_at = position "read_file" in
+    let reply_at = position "OLD_FINAL_REPLY" in
+    check bool "settlement keeps progress, tool, then final reply" true
+      (progress_at < tool_at && tool_at < reply_at);
     state.keeper_turns <-
       [{Tui_decode.ktr_chat_control_token=None; ktr_keeper_name="alpha";
         ktr_state=Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=1.;

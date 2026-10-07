@@ -129,8 +129,12 @@ def run(executable):
         h.resize_and_wait(process, fd, output, rows=18, columns=20,
                           needle=b"Goal detail needs", final_cursor=b"\x1b[?25l")
         assert b"Actions:" not in screen(output), screen(output)
+        # These keys change nothing on the too-small frame, and the presenter
+        # writes nothing for a frame identical to the last one, so each press
+        # is judged once the TUI has gone quiet rather than by a new frame.
         for key in (b"c", b"x", b"o", b"a"):
-            h.press_and_settle(process, fd, output, key)
+            os.write(fd, key)
+            h.drain_until_quiet(process, fd, output)
         assert not posted, "hidden actions dispatched through the too-small frame"
         h.resize_and_wait(process, fd, output, rows=400, columns=80,
                           needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")

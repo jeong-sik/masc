@@ -534,7 +534,9 @@ let context_pass_needed ~keepers_dir ~keeper_name
    and continuity passes read turns that may predate that task, so their
    current Goal context stays [No_task]. Historical durable context is separate;
    continuity admission provenance is not yet transported. *)
-let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta) ~current
+(* The working-context pass organizes pending sources only and reads no
+   Memory, so its input carries no current selection. *)
+let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta)
     ~working_context : Keeper_librarian.input =
   { keeper_id
   ; turn_ref = Ids.Turn_ref.make
@@ -543,7 +545,7 @@ let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta) ~c
   ; historical_task_contexts = []; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
       Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
   ; keeper_instructions = meta.instructions
-  ; current
+  ; current = None
   ; working_context
   ; messages = []; tool_observations = []; counterpart_observations = [] }
 
@@ -570,19 +572,13 @@ let run_with_readers ~durable ~continuity ~base_path ~keeper_name =
     let working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
       Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
     if context_pass_needed ~keepers_dir ~keeper_name working_context then (
-      match Domain_pool_ref.submit_io_or_inline (fun () ->
-        Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) with
-      | Error detail -> Log.Keeper.warn ~keeper_name "queue Librarian memory unavailable: %s" detail
-      | Ok current ->
-        let current_selection = Option.map (fun (s : Keeper_memory_os_current.t) ->
-          {Keeper_librarian.facts = s.facts}) current in
-        let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
-            ~current:current_selection ~working_context in
-        Keeper_librarian_runtime.run_best_effort
-          ~write_scope:Keeper_librarian_runtime.Context_only
-          ~on_context_committed:(remember_context_pass ~keepers_dir ~keeper_name working_context)
-          ~base_path ~keepers_dir ~keeper_id:keeper_name
-          ~expected_revision:(Option.map (fun (s : Keeper_memory_os_current.t) -> s.revision) current) inp)
+      let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
+          ~working_context in
+      Keeper_librarian_runtime.run_best_effort
+        ~write_scope:Keeper_librarian_runtime.Context_only
+        ~on_context_committed:(remember_context_pass ~keepers_dir ~keeper_name working_context)
+        ~base_path ~keepers_dir ~keeper_id:keeper_name
+        ~expected_revision:None inp)
   | (Disabled | Invalid), _
   | Enabled, (Owner_absent | Owner_projection {meta = None; _}
              | Owner_projection {stopping = true; _}) -> ()

@@ -971,7 +971,8 @@ Waiting for confirmation and confirmed acceptance remain distinct. If a priority
 reply is unavailable, the status says confirmation is unavailable and retains
 the diagnostic detail; it does not claim the priority change was refused. Full mode
 (`Ctrl-D` twice from compact, or `/tools full`) shows execution IDs, elapsed
-time, individual queue states, and priority receipt details. Failures, approval
+time and priority receipt details. Each pending input already shows its own
+delivery state in the default view. Failures, approval
 requests, and explicit stop targets remain visible in the concise modes.
 Auto-next requests priority for your message; current work continues until it
 finishes or yields. Use the explicit interrupt controls to stop current work.
@@ -981,6 +982,15 @@ heading (or inline opening) and latest rows with an explicit
 `⋯ N hidden · PgUp` separator.
 That separator is a viewport projection, not a transcript row, and remains
 readable under `NO_COLOR`.
+
+Inputs waiting to enter a turn appear under `대기 입력` with the local `›` mark.
+Each input distinguishes unsent (`대기`), sending (`전송 중`), accepted by the
+server (`접수됨`), and unconfirmed delivery (`미확인`). Acceptance alone does not
+mean the Keeper has processed it. The conversation marks `입력 반영됨` only when
+the input is persisted or its bound execution has reported `Run_started`.
+Request headings connect inputs and responses; a shared batch states its input
+count. `TURN #N` appears where a recorded turn number is available. The progress
+row says `THINKING` or `STREAMING` only after receiving the corresponding signal.
 
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did. Reasoning starts folded with a `THINKING`

@@ -45,3 +45,16 @@ The current memory recall path already supplies a discovery notice and on-demand
 retrieval, rather than injecting all stored facts. Lower counts can reduce the
 memory presented to the Librarian; they do not by themselves prove fewer model
 tokens. Measure actual inputs and recall quality before claiming a saving.
+
+Historical lookup uses `keeper_memory_search(source="dropped")` for journaled
+removals, or `source="absorbed"` for originals merged into newer claims.
+`source="all"` includes both. Dropped results carry their original basis,
+removal time, source and reason and are explicitly non-current. Retrieval does
+not promote them. Revalidate original evidence before an explicit memory write;
+the normal write path retains identity deduplication and truth maintenance.
+
+The dropped corpus is derived from the complete removal journal, with latest
+mentions and current membership excluding re-added facts. A broken journal
+produces a retrieval failure (or partial-read metadata alongside other `all`
+results), not a clean miss. Ordinary journal appends are best-effort: this search
+recovers recorded originals but does not establish lossless archival durability.

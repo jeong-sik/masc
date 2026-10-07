@@ -197,9 +197,13 @@ let step_fraction d =
    machine (RFC-0439 3.3), and the size keys are intercepted before that. *)
 let adjust_size d = step_fraction d
 
-let footer () =
-  Printf.sprintf " Esc: back  +/-: %d%%  F6: save quick  F7: restore quick  F8: disk"
-    (int_of_float (!screen_fraction *. 100.0))
+let footer interaction =
+  let mode = match interaction with
+    | Masc_tui_types.Observe_machine -> "Watching only · F5: control"
+    | Control_machine -> "Controlling · F5: watch  F6: save quick  F7: restore quick  F8: disk"
+  in
+  Printf.sprintf " Esc: back  +/-: %d%%  %s"
+    (int_of_float (!screen_fraction *. 100.0)) mode
 
 (* A watched machine other than MSX takes no keys from this screen: only
    leaving and sizing. *)
@@ -341,10 +345,11 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
 ;;
 
 let render ~(write : string -> unit)
-    ~(connection : Masc_tui_types.connection_status) ~live ?notice
+    ~(connection : Masc_tui_types.connection_status) ~live
+    ?(interaction = Masc_tui_types.Observe_machine) ?notice
     (frame : Masc_tui_types.msx_frame option)
     (surface : Masc_tui_interactive.frame option) =
-  draw ~write ~title:(title_of ~connection ~live frame) ~footer:(footer ())
+  draw ~write ~title:(title_of ~connection ~live frame) ~footer:(footer interaction)
     ~retain:(Option.is_some frame) ?notice surface
 
 let render_live ~(write : string -> unit)
@@ -390,7 +395,7 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
     (* Any other key just repaints the latest frame the poll cached: a
        spectator does not drive the machine. *)
     render ~write ?notice:state.msx_notice ~connection:state.Masc_tui_types.connection_status
-      ~live:state.msx_live state.msx_frame (last_surface ());
+      ~live:state.msx_live ~interaction:state.machine_interaction state.msx_frame (last_surface ());
     true
   end
 

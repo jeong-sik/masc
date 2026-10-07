@@ -31,7 +31,6 @@ let constructor_cases : (string * T.t) list =
   ; "of_code/unknown", T.of_code "totally_unmapped"
   ; "of_code/empty", T.of_code ""
   ; "of_code/turn_wall_clock", T.of_code "turn_wall_clock_timeout"
-  ; "of_code/turn_overflow_failure", T.of_code "turn_overflow_failure"
   ]
 ;;
 

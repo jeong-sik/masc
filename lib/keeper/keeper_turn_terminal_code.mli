@@ -21,16 +21,10 @@ type t =
   | Healthy
   (** Turn ended without error and reached the configured terminal
           runtime. *)
-  | Stale_termination_storm
-  (** Read from a stored ["stale_termination_storm"] wire: the stale
-          watchdog's cohort window reached its escalation threshold. *)
   | Provider_runtime_error of string
   (** [Keeper_registry.Provider_runtime_error]: payload is the
           original [code] field. *)
   | Fiber_unresolved (** [Keeper_registry.Fiber_unresolved]. *)
-  | Turn_overflow_failure
-  (** Read from a stored ["turn_overflow_failure"] wire: the turn's
-          request exceeded the context window. *)
   | Operator_interrupt
   (** [Keeper_registry.Operator_interrupt]: the current turn was cancelled
           by an explicit operator request, typically from the dashboard

@@ -72,8 +72,6 @@ let to_wire = function
 let of_termination_code (c : Code.t) : t =
   match c with
   | Code.Healthy -> Success
-  | Code.Stale_termination_storm
-  | Code.Turn_overflow_failure
   | Code.Operator_interrupt
   | Code.Provider_runtime_error _
   | Code.Fiber_unresolved

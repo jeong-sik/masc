@@ -3458,22 +3458,24 @@ let test_chat_header_resolves_the_effective_modes () =
     Tui_types.keeper_chat_mode_labels ~yolo ~keeper_gate_mode:keeper
       ~workspace_gate_mode:workspace
   in
+  let mode m = Tui_decode.Gate_mode m in
   (* The words are the chooser's, not the wire's: [w] offers "manual, Auto
      Judge or allow-all" and this row names the stance it left behind. *)
   check (pair string (option string)) "defaults are explicit"
     ("AUTO", Some "Auto Judge")
-    (labels ~workspace:"auto_judge" false);
+    (labels ~workspace:(mode Masc.Keeper_gate_mode.Auto_judge) false);
   check (pair string (option string)) "YOLO does not hide inherited Gate mode"
     ("YOLO", Some "manual")
-    (labels ~keeper:"workspace" ~workspace:"manual" true);
+    (labels ~workspace:(mode Masc.Keeper_gate_mode.Manual) true);
   check (pair string (option string)) "Keeper override wins"
     ("AUTO", Some "allow-all")
-    (labels ~keeper:"always_allow" ~workspace:"manual" false);
+    (labels ~keeper:(mode Masc.Keeper_gate_mode.Always_allow)
+       ~workspace:(mode Masc.Keeper_gate_mode.Manual) false);
   (* A stance this build does not know keeps the server's spelling; only an
      unobserved one answers [None], which the header draws as "(not loaded)". *)
   check (pair string (option string)) "an unknown stance is shown as sent"
     ("AUTO", Some "escalate_to_human")
-    (labels ~workspace:"escalate_to_human" false);
+    (labels ~workspace:(Tui_decode.Unrecognised_gate_mode "escalate_to_human") false);
   check (pair string (option string)) "unread Gate mode is not a stance"
     ("AUTO", None) (labels false)
 ;;

@@ -954,9 +954,15 @@ function fallbackMessageForUserBlocks(blocks: KeeperUserInputBlock[]): string {
 
   const media = blocks.filter(block => block.type !== 'text')
   if (media.length === 0) return ''
+  const describeMedia = (block: KeeperUserInputBlock): string => {
+    if (block.type === 'text') return ''
+    if ('url' in block) return block.url
+    if ('fileId' in block) return `file_id ${block.fileId}`
+    return block.name
+  }
   const names = media
     .slice(0, 3)
-    .map(block => ('url' in block ? block.url : 'fileId' in block ? `file_id ${block.fileId}` : block.name).trim())
+    .map(block => describeMedia(block).trim())
     .filter(Boolean)
     .join(', ')
   const suffix = media.length > 3 ? ` 외 ${media.length - 3}개` : ''

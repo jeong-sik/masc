@@ -10954,19 +10954,6 @@ let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mai
     drain_queued_message state ~base_path ~mailbox
   end
 
-let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox results =
-  if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
-  let was_unavailable =
-    state.workspace_identity <> Workspace_identity_match
-    || Option.is_some state.keepers_error
-  in
-  let previous_items = visible_item_revision state in
-  apply_http_scoped_surfaces state ~currency_authority results;
-  refresh_changed_keeper_items state ~mailbox
-    ~roster_refreshed:(Option.fold ~none:false ~some:Result.is_ok results.http_keeper_roster) previous_items;
-  resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
-  end
-
 let apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket err =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
     apply_server_identity_reading state (Error err);
@@ -11148,6 +11135,121 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
     | _ -> ()
   end
 ;;
+
+let current_surface_needs state =
+  Masc_tui_types.surface_needs ~about_open:state.about_open
+    ~keeper_pane_drawn:
+      (not (Masc_tui_render.acting_pane_suppressed state))
+    state.view
+
+(* The reads a full refresh tick sends beside its surface bundle. They go out
+   while the bundle is still on the wire, so a bundle that moves the read
+   authority withdraws them; [resume_reads_after_authority_change] sends
+   them again from this same list. *)
+let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
+  (* The chat pane's history comes down its own generation-guarded path, not
+     in the surface bundle, so the tick asks for it here. Without this the
+     pane read once on open and a message that arrived after that waited for
+     the operator to leave and come back. *)
+  (if
+     needs.Masc_tui_types.needs_keeper_chat
+     (* Not while reading back: the reload replaces the transcript with the
+        newest window, which throws away every older page the operator
+        fetched and snaps the view to the bottom mid-read. The next tick
+        after scroll returns to 0 catches the pane up. *)
+     && state.msg_scroll = 0
+   then
+     match state.msg_target_keeper_name with
+     | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
+     | None -> ());
+  (* An operator who consented in a browser is standing in front of a tab
+     that does not know it happened: the callback lands on the server, not
+     here. So while a login this TUI started is still outstanding, the tick
+     asks again. It stops as soon as the answer says attached, so this is
+     not a poll that runs forever -- it runs exactly as long as somebody is
+     waiting for it. Same shape as the chat reload above, and for the same
+     reason: a pane that read once on open showed a fact that had since
+     changed. *)
+  (if
+     state.view = Keepers Keeper_detail
+     && state.detail_tab = Detail_identity
+   then
+     match selected_keeper state with
+     | Some keeper when identity_login_recovery_poll_ready state keeper.k_name ->
+         Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
+     | Some _ | None -> ());
+  (* The "answering now" badge rides every tick for the same reason as the
+     held approvals: it is drawn from every surface, and its whole point is
+     the operator who walked away from the chat pane. *)
+  launch_keeper_turns_load state ~mailbox;
+  (* The schedule list rides for the same reason, now that the agenda strip
+     names the next wake from every surface. Fetched only on the Schedules
+     surface it was empty everywhere else, and a strip that says nothing is
+     scheduled while thirteen wakes are queued is worse than no strip.
+
+     Measured on this workspace before it was added: 12.4 kB gzipped, 2.1 ms
+     to serve, against a two-second cadence. The projection sorts the active
+     rows ahead of the settled ones and cuts at twenty, so the earliest wake
+     is in the payload whether or not the tail is. *)
+  launch_schedules_load state ~mailbox
+;;
+
+(* The two tokens a read is admitted under. Applying a server identity
+   reading moves the workspace one when the workspace changes (the first
+   reading at boot is one) and cancels every read it admitted; it revokes
+   the detail one when the item authority changes, as when a booting server
+   becomes ready. *)
+type read_authority =
+  { read_workspace : Masc_tui_types.workspace_authority
+  ; read_detail : unit ref
+  }
+
+let read_authority state =
+  { read_workspace = state.workspace_authority; read_detail = state.detail_read_authority }
+
+(* A read sent under an authority that a refresh then withdrew never lands:
+   its completion carries the old authority and is dropped. A full or scoped
+   refresh ends here once it is applied, so each read the move withdrew is
+   sent again in one place instead of waiting a tick (2026-10-07: after boot
+   the Answering surface said "not loaded yet" and an open chat showed no
+   running turn until the next tick). It runs after the whole refresh
+   because the focused detail needs the roster that refresh brought. *)
+let resume_reads_after_authority_change state ~mailbox ~(before : read_authority) =
+  let moved =
+    before.read_workspace <> state.workspace_authority
+    || before.read_detail != state.detail_read_authority
+  in
+  (* The detail goes first: it restores the remembered Keeper focus and
+     marks its identity read pending, so the side reads below neither poll
+     the same login again nor ask about the Keeper the cursor fell on. *)
+  refresh_visible_detail_after_authority_recovery state ~mailbox
+    ~previous_authority:before.read_detail;
+  if moved && server_authority_ready state then begin
+    (* Under the same condition the tick sends them: a server that is not
+       booting, whether or not its workspace is this checkout's. *)
+    launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
+    (* Navigation can precede the first confirmed identity, and its Lane
+       read was cancelled with the old authority. The loader keeps its own
+       in-flight guard. *)
+    if state.workspace_identity = Workspace_identity_match && state.view = Lanes
+    then launch_lanes_load state ~mailbox
+  end
+;;
+
+let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox results =
+  if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
+  let was_unavailable =
+    state.workspace_identity <> Workspace_identity_match
+    || Option.is_some state.keepers_error
+  in
+  let previous_items = visible_item_revision state in
+  let authority = read_authority state in
+  apply_http_scoped_surfaces state ~currency_authority results;
+  refresh_changed_keeper_items state ~mailbox
+    ~roster_refreshed:(Option.fold ~none:false ~some:Result.is_ok results.http_keeper_roster) previous_items;
+  resume_reads_after_authority_change state ~mailbox ~before:authority;
+  resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
+  end
 
 (* Entering a Keeper detail tab, by [ / ] or by a press on its name in the
    title strip: one way in, so a press reads what the key reads. The scroll
@@ -11549,44 +11651,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let needs =
       (* This newer bundle supersedes an inflight scoped read, so it must
          replace every dataset currently drawn rather than omit that read. *)
-      Masc_tui_types.surface_needs ~about_open:state.about_open
-        ~keeper_pane_drawn:
-          (not (Masc_tui_render.acting_pane_suppressed state))
-        state.view
+      current_surface_needs state
     in
-    (* The chat pane's history comes down its own generation-guarded path, not
-       in the surface bundle, so the tick asks for it here. Without this the
-       pane read once on open and a message that arrived after that waited for
-       the operator to leave and come back. *)
-    (if
-       (not was_booting)
-       && needs.Masc_tui_types.needs_keeper_chat
-       (* Not while reading back: the reload replaces the transcript with the
-          newest window, which throws away every older page the operator
-          fetched and snaps the view to the bottom mid-read. The next tick
-          after scroll returns to 0 catches the pane up. *)
-       && state.msg_scroll = 0
-     then
-       match state.msg_target_keeper_name with
-       | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
-       | None -> ());
-    (* An operator who consented in a browser is standing in front of a tab
-       that does not know it happened: the callback lands on the server, not
-       here. So while a login this TUI started is still outstanding, the tick
-       asks again. It stops as soon as the answer says attached, so this is
-       not a poll that runs forever -- it runs exactly as long as somebody is
-       waiting for it. Same shape as the chat reload above, and for the same
-       reason: a pane that read once on open showed a fact that had since
-       changed. *)
-    (if
-       (not was_booting)
-       && state.view = Keepers Keeper_detail
-       && state.detail_tab = Detail_identity
-     then
-       match selected_keeper state with
-       | Some keeper when identity_login_recovery_poll_ready state keeper.k_name ->
-           Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
-       | Some _ | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
        there would be worse than none. The payload is a handful of rows. The
@@ -11595,20 +11661,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        badge is how an operator finds out. The server caches the snapshot. *)
     (* Held approvals and Gate reads start after this refresh validates
        workspace identity in Http_refresh_done. *)
-    (* The "answering now" badge rides every tick for the same reason as the
-       approvals above: it is drawn from every surface, and its whole point
-       is the operator who walked away from the chat pane. *)
-    if not was_booting then launch_keeper_turns_load state ~mailbox;
-    (* The schedule list rides for the same reason, now that the agenda strip
-       names the next wake from every surface. Fetched only on the Schedules
-       surface it was empty everywhere else, and a strip that says nothing is
-       scheduled while thirteen wakes are queued is worse than no strip.
-
-       Measured on this workspace before it was added: 12.4 kB gzipped, 2.1 ms
-       to serve, against a two-second cadence. The projection sorts the active
-       rows ahead of the settled ones and cuts at twenty, so the earliest wake
-       is in the payload whether or not the tail is. *)
-    if not was_booting then launch_schedules_load state ~mailbox;
+    if not was_booting then launch_tick_side_reads state ~mailbox ~needs;
 
     let run_refresh () =
       try
@@ -13786,16 +13839,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         state.workspace_identity <> Workspace_identity_match
         || Option.is_some state.keepers_error
       in
-      let was_unconfirmed = state.workspace_identity <> Workspace_identity_match in
-      let previous_authority = state.detail_read_authority in
+      let authority = read_authority state in
       apply_http_surfaces state ~mailbox results;
-      (* Navigation can precede the first confirmed identity. Its cancelled
-         Lane read belongs to the old authority; start a fresh read now that
-         the visible surface can use this workspace. Steady refreshes do not
-         repeat it, and the loader retains its existing in-flight guard. *)
-      if was_unconfirmed && state.workspace_identity = Workspace_identity_match
-         && state.view = Lanes then launch_lanes_load state ~mailbox;
-      refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_authority;
+      resume_reads_after_authority_change state ~mailbox ~before:authority;
       resume_authorized_input_after_refresh state
         ~was_unavailable:dispatch_was_unavailable ~base_path ~mailbox;
       (* The local roster is trustworthy only after a workspace-matched read.

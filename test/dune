@@ -9737,3 +9737,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_chat_progress_clock_pty)))
+
+(test
+ (name test_h2_composition_resume)
+ (modules test_h2_composition_resume)
+ (libraries masc_test_deps))

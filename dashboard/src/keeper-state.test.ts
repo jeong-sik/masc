@@ -621,6 +621,20 @@ describe('thread history merge & persistence', () => {
     expect(ids).toEqual(['hist-1', 'local-1'])
   })
 
+  it('preserves authored content when hydrating user and assistant history', () => {
+    const content = '    들여쓰기\nSKILL.md 설명\n\n\n끝  \n\n'
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content, ts: 1_780_000_000 },
+      { role: 'assistant', content, ts: 1_780_000_001 },
+      { role: 'assistant', content: '   \n', ts: 1_780_000_002 },
+    ])
+    expect(entries).toHaveLength(2)
+    for (const entry of entries) {
+      expect(entry.text).toBe(content)
+      expect(entry.rawText).toBe(content)
+    }
+  })
+
   it('converts REST chat history into entries with chained sources', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'hi', ts: 1_780_000_000 },

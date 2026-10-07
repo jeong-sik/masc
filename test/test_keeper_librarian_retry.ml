@@ -1289,6 +1289,10 @@ let test_removed_contract_fields_reject () =
 
 let test_prompt_contains_exact_current_selection () =
   let variables = Librarian.prompt_variables (input ()) in
+  let limits = List.assoc "memory_limits" variables |> Yojson.Safe.from_string in
+  check int "operator category cap reaches the actual memory prompt"
+    (Env_config.KeeperMemoryOs.category_cap ())
+    Yojson.Safe.Util.(member "category_cap" limits |> to_int);
   check bool "facts budget reaches the Librarian" true
     (String_util.contains_substring
        (List.assoc "facts_budget" variables)

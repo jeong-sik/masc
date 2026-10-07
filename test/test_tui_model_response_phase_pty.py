@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import threading
+import time
 
 import tui_keyboard_chat as chat
 import tui_keyboard_harness as h
@@ -22,13 +23,19 @@ def run(executable):
             return ("data: " + json.dumps({
                 "type": "CUSTOM", "threadId": "keeper:alpha",
                 "runId": "keeper-operation-run-" + request["request_id"],
-                "timestamp": 1.0, "name": name, "value": value,
+                "timestamp": time.time(), "name": name, "value": value,
             }) + "\n\n").encode()
 
         def chunks():
             original = response.chunks()
             try:
-                yield next(original)
+                prefix = []
+                for block in next(original).split(b"\n\n"):
+                    if block:
+                        value = json.loads(block.removeprefix(b"data: "))
+                        value["timestamp"] = time.time()
+                        prefix.append(("data: " + json.dumps(value)).encode())
+                yield b"\n\n".join(prefix) + b"\n\n"
                 assert stop_answer.wait(timeout=15), "answer stop was not released"
                 yield event("KEEPER_STREAM_MESSAGE_STOP", None)
                 assert resume_reasoning.wait(timeout=15), "next response was not released"
@@ -75,6 +82,12 @@ def run(executable):
             start = len(output)
             stop_reasoning.set()
             observe("reasoning-ended", b"model response ended", (b"STREAMING", b"THINKING"), start=start)
+            fixture.release.set()
+            fixture.release_interrupt.set()
+            h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
+            h.send_and_wait(process, fd, output, b"\x11", b"Info")
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            os.write(fd, b"q")
         finally:
             stop_answer.set()
             resume_reasoning.set()

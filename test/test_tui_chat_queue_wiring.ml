@@ -3152,11 +3152,11 @@ let test_thinking_folds_only_when_it_saves_rows () =
         ~inner_width:(Masc_tui_ansi.framed_inner_width columns) initial in
       let context = Masc_tui_ansi.Chat_theme.body_context
         (Masc_tui_ansi.Chat_theme.snapshot ()) Layout.Thinking in
-      let height text = List.length (Render.chat_markdown ~context ~width text) in
+      let height text = List.length (Render.For_testing.chat_markdown ~context ~width text) in
       state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
       List.iter (fun body ->
         let original = { initial with Layout.body } in
-        let folded = Render.fold_thinking_entry state ~chat_cols:columns original in
+        let folded = Render.For_testing.fold_thinking_entry state ~chat_cols:columns original in
         check bool "folded mode never adds terminal rows" true
           (height folded.body <= height body);
         if not (String.equal folded.body body) then
@@ -3166,7 +3166,7 @@ let test_thinking_folds_only_when_it_saves_rows () =
       if width < 20 then
         let body = String.make (width + 1) 'x' in
         check string "two short wrapped rows are not replaced by a taller summary" body
-          (Render.fold_thinking_entry state ~chat_cols:columns {initial with Layout.body}).body)
+          (Render.For_testing.fold_thinking_entry state ~chat_cols:columns {initial with Layout.body}).body)
       [Layout.Origin_inline; Origin_row; Origin_bare])
     [40; 80; 140]
 ;;
@@ -3190,18 +3190,18 @@ let test_thinking_measurement_keeps_the_growing_draw_cache () =
   let theme = Masc_tui_ansi.Chat_theme.snapshot () in
   let context = Masc_tui_ansi.Chat_theme.body_context theme Layout.Thinking in
   state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
-  let first = Render.fold_thinking_entry state ~chat_cols:80 initial in
+  let first = Render.For_testing.fold_thinking_entry state ~chat_cols:80 initial in
   let drawn = Render.cached_chat_markdown ~link_previews_mode:`Off ~theme ~entry:first ~width in
-  let next = Render.fold_thinking_entry state ~chat_cols:80
+  let next = Render.For_testing.fold_thinking_entry state ~chat_cols:80
     {initial with Layout.body=initial.body ^ " more"} in
   check string "a growing thought retains the same compact summary" first.body next.body;
   (* The same production cache key must still own the summary. A renderer
      call here means measurement replaced it with the growing raw thought. *)
-  let identity : Render.chat_markdown_identity =
+  let identity : Render.For_testing.chat_markdown_identity =
     {cmi_style=Layout.Thinking; cmi_keeper_name="alpha";
      cmi_request_id="growing-fold-cache"; cmi_observed_at=None; cmi_entry_index=0} in
-  let retained = Cache.render_growing Render.chat_markdown_cache
-    ~theme_revision:Render.chat_markdown_theme_revision
+  let retained = Cache.render_growing Render.For_testing.chat_markdown_cache
+    ~theme_revision:Render.For_testing.chat_markdown_theme_revision
     ~palette_generation:context.palette_generation ~width ~identity ~text:next.body
     ~renderer:(fun ~width:_ _ -> fail "fold measurement evicted the drawn summary") in
   check (list string) "the next draw reuses the retained summary" drawn retained

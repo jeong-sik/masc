@@ -3885,3 +3885,19 @@ let render_keeper_message (state : state) =
              { row = input_row; column = cursor_column })
       ~rows ~cols buf
     end
+
+(* Regression access to the real draw cache: measuring a thought must not
+   evict its displayed summary. Keep cache internals out of the normal API. *)
+module For_testing = struct
+  type nonrec chat_markdown_identity = chat_markdown_identity =
+  { cmi_style : Message_layout.style;
+    cmi_keeper_name : string;
+    cmi_request_id : string;
+    cmi_observed_at : float option;
+    cmi_entry_index : int;
+  }
+  let chat_markdown = chat_markdown
+  let fold_thinking_entry = fold_thinking_entry
+  let chat_markdown_cache = chat_markdown_cache
+  let chat_markdown_theme_revision = chat_markdown_theme_revision
+end

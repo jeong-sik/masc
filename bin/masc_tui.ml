@@ -4263,8 +4263,8 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   let generation = state.lane_addons_generation in
   state.lane_addons_reading <- (match request with
-    | Addons.Inspect | Observe _ | Slice _ | Action_status _ -> Some generation
-    | Attach _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> None);
+    | Addons.Inspect | Slice _ | Action_status _ -> Some generation
+    | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> None);
   let last_action, action_receipt = match request with
     | Addons.Act action -> Some action, None
     | Addons.Action_status action -> Some action, view.action_receipt
@@ -4408,8 +4408,8 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
   in
   launch_workspace_request
     ~operation:(match request with
-      | Addons.Inspect | Observe _ | Slice _ | Action_status _ -> false
-      | Attach _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> true)
+      | Addons.Inspect | Slice _ | Action_status _ -> false
+      | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> true)
     state ~mailbox
     ~boundary_error:(lane_addons_failure_for_request request)
     ~deliver:(fun result -> Lane_addons_loaded (generation, initial_detail, result))

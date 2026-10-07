@@ -983,20 +983,25 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
   const cache = isRecord(raw.cache) ? raw.cache : null
   const cacheState = cache?.state
   const age = asNumber(cache?.age_s)
+  const cacheAge = age != null && age >= 0 ? age : null
   const cacheRead: DashboardRuntimeModelMetricsResponse['cache'] =
     cacheState === 'fresh' || cacheState === 'stale_refreshing' || cacheState === 'warming'
-      ? { state: cacheState, age_s: age != null && age >= 0 ? age : null,
+      ? { state: cacheState, age_s: cacheAge,
           last_error: asNullableString(cache?.last_error) }
       : null
-  const costLedgerRead: RuntimeCostLedgerRead | null = ledger?.state === 'pending'
-    ? { state: 'pending' }
-    : ledger?.state === 'available'
-    ? { state: 'available', malformed_rows: asNumber(ledger.malformed_rows) ?? null,
-        schema_violation_rows: asNumber(ledger.schema_violation_rows) ?? null,
-        identity_conflict_rows: asNumber(ledger.identity_conflict_rows) ?? null }
-    : ledger?.state === 'unavailable'
-      ? { state: 'unavailable', detail: asNullableString(ledger.detail) }
-      : null
+  const costLedgerRows = (field: 'malformed_rows' | 'schema_violation_rows' | 'identity_conflict_rows'): number | null =>
+    asNumber(ledger?.[field]) ?? null
+  const costLedgerDetail = asNullableString(ledger?.detail)
+  let costLedgerRead: RuntimeCostLedgerRead | null = null
+  if (ledger?.state === 'available') {
+    costLedgerRead = { state: 'available', malformed_rows: costLedgerRows('malformed_rows'),
+      schema_violation_rows: costLedgerRows('schema_violation_rows'),
+      identity_conflict_rows: costLedgerRows('identity_conflict_rows') }
+  } else if (ledger?.state === 'unavailable') {
+    costLedgerRead = { state: 'unavailable', detail: costLedgerDetail }
+  } else if (ledger?.state === 'pending') {
+    costLedgerRead = { state: 'pending' }
+  }
   return {
     cache: cacheRead,
     cost_ledger_read: costLedgerRead,

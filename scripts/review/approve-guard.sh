@@ -5,7 +5,7 @@ GH="${GUARD_GH:-gh}"
 here="$(cd "$(dirname "$0")" && pwd)"
 repo=""; pr=""; head=""; body=""; run=""; replace_cr=""
 review_base=""; review_diff=""
-check_only=0; merge_check=0; receipt_json=0
+check_only=0; merge_check=0; receipt_json=0; print_footer=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo|--pr|--head|--body|--run|--replace-own-cr|--review-base|--review-diff)
@@ -18,6 +18,7 @@ while [ $# -gt 0 ]; do
     --review-base) review_base="$2"; shift 2;; --review-diff) review_diff="$2"; shift 2;;
     --check) check_only=1; shift;; --merge-check) merge_check=1; shift;;
     --receipt-json) receipt_json=1; shift;;
+    --print-footer) print_footer=1; shift;;
     *) echo "approve-guard: unknown argument $1" >&2; exit 1;;
   esac
 done
@@ -26,11 +27,31 @@ done
 [ -z "$replace_cr" ] || [[ "$replace_cr" =~ ^[1-9][0-9]*$ ]] || exit 2
 [ "$check_only" -eq 0 ] || [ "$merge_check" -eq 0 ] || exit 2
 [ "$receipt_json" -eq 0 ] || [ "$merge_check" -eq 1 ] || exit 2
+[ "$print_footer" -eq 0 ] || { [ "$check_only" -eq 0 ] && [ "$merge_check" -eq 0 ] && [ -z "$body" ]; } || exit 2
 source "$here/ci-checks.sh"
 source "$here/review-verdict.sh"
 refuse() { echo "REFUSED #$pr head $head: $*" >&2; exit 2; }
+# Diagnostic detail for refusals: one line per failed test, never consulted for admission.
+refusal_detail=""
+refuse_detail() {
+  echo "REFUSED #$pr head $head: $*" >&2
+  [ -z "$refusal_detail" ] || printf '%s' "$refusal_detail" >&2
+  exit 2
+}
+compute_scope() {
+  python3 -c 'import json,sys; s=json.loads(sys.argv[3]); print(json.dumps({"base_ref":sys.argv[1],"base_sha":sys.argv[2],"stack":None if s is None else {"number":s["number"],"position":s["position"],"base_ref":s["base"]["ref"]}},separators=(",",":")))' "$pr_base" "$pr_base_sha" "$pr_stack"
+}
 read_current_pr
 current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || refuse "complete review diff unavailable"
+if [ "$print_footer" -eq 1 ]; then
+  # Read-only: print the exact lines a reviewer appends for this head, base and diff.
+  check_current_ci
+  footer_line=$(printf 'approve-guard: head `%s` · %s review' "$head" "$review_policy")
+  [ -z "$release_run" ] || footer_line="$footer_line · release run $release_run"
+  printf 'review-scope: %s\n%s · reviewed base `%s` · diff sha256 `%s`\n' \
+    "$(compute_scope)" "$footer_line" "$pr_base_sha" "$current_diff"
+  exit 0
+fi
 # Read-only candidate admission uses repository review evidence; Actions
 # installation tokens cannot query /user. Review/check paths still require
 # the caller identity for self-approval and owned change-request rules.
@@ -45,6 +66,16 @@ verdict_pattern="^verdict: PASS head: ${head} by: [A-Za-z0-9._-]+$"
 [ "$review_policy" != release ] || verdict_pattern="^verdict: PASS head: ${head} run: [1-9][0-9]* by: [A-Za-z0-9._-]+$"
 approval_head_jq="((.body // \"\" | split(\"\\n\") | first) | test(\"${verdict_pattern}\")) and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | startswith(\"${footer_prefix}\"))"
 approval_head_jq="$approval_head_jq and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | test(\" · reviewed base [\`][0-9a-f]{40}[\`] · diff sha256 [\`]${current_diff}[\`]$\"))"
+# Diagnostic only: append why review $1 by $2 failed the textual admission test.
+explain_unbound() {
+  local why
+  why=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$1" '.' 2>/dev/null |
+    python3 "$here/review-refusal.py" --head "$head" --policy "$review_policy" --base-sha "$pr_base_sha" \
+      --current-diff "$current_diff" --release-run "${release_run:-}" 2>/dev/null | sed 's/^/    - /') || why=""
+  refusal_detail="$refusal_detail  review $1 by $2: not admitted
+$why
+"
+}
 review_rows() {
   ci_gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv' |
     sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++'
@@ -52,7 +83,7 @@ review_rows() {
 check_reviews() {
   local rows who rid state bound scope_status
   rows=$(review_rows) || return 1
-  approvals=""; replaced=""; own_approval=""
+  approvals=""; replaced=""; own_approval=""; refusal_detail=""
   while IFS=$'\t' read -r who rid state; do
     [ -n "$who" ] || continue
     if [ "$state" = CHANGES_REQUESTED ]; then
@@ -61,12 +92,20 @@ check_reviews() {
     fi
     if [ "$state" = APPROVED ] && [ "$who" != "$pr_author" ]; then
       bound=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select(.state == \"APPROVED\" and (.author_association == \"OWNER\" or .author_association == \"MEMBER\" or .author_association == \"COLLABORATOR\") and ($approval_head_jq)) | .id") || return 1
+      if [ -z "$bound" ]; then
+        # Name the failing test(s); the admission decision above is unchanged.
+        explain_unbound "$rid" "$who" || true
+      fi
       if [ -n "$bound" ]; then
         scope_status=0
         ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" '.' |
           python3 "$here/review-scope.py" --repo "$repo" --head "$head" \
             --base-ref "$pr_base" --base-sha "$pr_base_sha" --stack "$pr_stack" --gh "$GH" || scope_status=$?
-        if [ "$scope_status" -eq 2 ]; then continue; fi
+        if [ "$scope_status" -eq 2 ]; then
+          refusal_detail="$refusal_detail  review $rid by $who: footer is bound, but its review-scope stamp does not match this PR base/stack (expected review-scope: $(compute_scope))
+"
+          continue
+        fi
         [ "$scope_status" -eq 0 ] || return 1
         approvals="$approvals $bound"
         [ "$who" != "$me" ] || own_approval="$bound"
@@ -84,7 +123,7 @@ check_verdict() {
 check_reviews
 check_verdict
 if [ "$merge_check" -eq 1 ]; then
-  [ -n "$approvals" ] || refuse "no trusted non-author approval bound to this head and complete diff"
+  [ -n "$approvals" ] || refuse_detail "no trusted non-author approval bound to this head and complete diff"
   read_current_pr
   check_reviews
   [ -n "$approvals" ] || refuse "approval changed during merge check"
@@ -144,7 +183,7 @@ check_verdict
 if [ "$check_only" -eq 1 ]; then echo "WOULD APPROVE #$pr head $head policy $review_policy"; exit 0; fi
 # Bind the reviewed base and native stack position to the approval itself.
 # Main may advance later when the reviewed diff base remains identical.
-scope=$(python3 -c 'import json,sys; s=json.loads(sys.argv[3]); print(json.dumps({"base_ref":sys.argv[1],"base_sha":sys.argv[2],"stack":None if s is None else {"number":s["number"],"position":s["position"],"base_ref":s["base"]["ref"]}},separators=(",",":")))' "$pr_base" "$pr_base_sha" "$pr_stack")
+scope=$(compute_scope)
 footer=$(printf '\n\n---\nreview-scope: %s\napprove-guard: head `%s` · %s review' "$scope" "$head" "$review_policy")
 if [ -n "$own_approval" ]; then
   previous_scope=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$own_approval" '.body | split("\n") | map(select(startswith("review-scope: "))) | if length == 1 then .[0] else "" end')

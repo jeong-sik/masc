@@ -64,6 +64,32 @@ missing or skipped required job is not evidence of full verification.
 native stack scope admission or non-native parent waits. It reads full CI
 evidence only for release heads.
 
+## Reading a refusal
+
+When a non-author APPROVED review exists but is not admitted, the
+`no trusted non-author approval bound to this head and complete diff` refusal
+(from `approve-guard.sh --merge-check`, and so from `merge-guard.sh`) now lists,
+per review, which textual test failed (author association, first-line verdict,
+footer prefix, `reviewed base`/`diff sha256` tail, a stale diff hash, or the
+`review-scope` stamp) and prints the exact last line to copy. The detail is
+diagnostic only: admission is still decided by the same tests as before.
+
+To get the footer for the current head, base and complete diff without
+approving anything:
+
+```sh
+bash scripts/review/approve-guard.sh --print-footer --repo O/R --pr N --head HEAD_SHA
+```
+
+It prints the `review-scope:` line and the `approve-guard:` footer line that
+the guard would append. A reviewer who writes the approval by hand must end the
+body with that footer line (backticked head, ` · source review`, then
+` · reviewed base `<40hex>` · diff sha256 `<64hex>``). `--print-footer` cannot be
+combined with `--check`, `--merge-check` or `--body`.
+
+Offline checks: `python3 -I scripts/review/test_review_refusal.py` and
+`python3 -I scripts/review/test_approve_guard_refusal.py`.
+
 ## Preparing an approved candidate
 
 `prepare-approved-batch.py` combines explicitly selected, directly main-based

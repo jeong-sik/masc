@@ -246,8 +246,8 @@ let a_cut_reply_names_the_read_path () =
       queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker
       |> List.map (fun (stimulus, _) ->
              match WO.pending_board_event_of_stimulus ~meta stimulus with
-             | Error detail ->
-               fail ("the answer must project without a Board read: " ^ detail)
+             | Error _ ->
+               fail "the answer must project without a Board read"
              | Ok None -> fail "the answer projects to nothing the turn can read"
              | Ok (Some event) -> event)
     in

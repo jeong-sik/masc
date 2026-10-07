@@ -11428,9 +11428,7 @@ let open_lane_inventory_selection state ~mailbox =
       | Machine Masc.Machine_lane.Msx -> open_msx_spectator state ~mailbox
       | Machine Masc.Machine_lane.Dos -> open_dos_screen state ~mailbox
       | Declaration path -> open_addon (fun view ->
-          let view = {view with screen=Addons.Overview; focus=Addons.Configurations;
-            current_selection=Addons.Selection (Addons.Declaration_anchor path);
-            scroll=0; error=None; editor_ready=false; presentation=Addons.Technical} in
+          let view = Addons.open_declaration view path in
           state.lane_addons <- Some view;
           (* Reopen a local draft before issuing another read. Enter inspects;
              E is the explicit external-editor action, s is the only save. *)

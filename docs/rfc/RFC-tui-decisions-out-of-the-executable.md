@@ -15,7 +15,7 @@ related: []
 ## 0. 요약
 
 TUI 가 "무엇을 거절하고, 무엇을 보내고, 어디로 가는가"를 정하는 코드는 대부분
-`bin/masc_tui.ml`(27,548줄)과 `bin/masc_tui_render.ml`(14,218줄)에 있다. 두 파일은
+`bin/masc_tui.ml`(27,691줄)과 `bin/masc_tui_render.ml`(14,218줄)에 있다. 두 파일은
 실행 파일 `masc_tui` 에 묶여 있어서(`bin/dune` 의 `(executable (name masc_tui) …)`)
 단위 테스트가 가져다 쓸 수 없다. 그래서 이 결정은 진짜 TUI 를 가짜 터미널(PTY)에
 띄우는 테스트로만 확인한다.
@@ -38,8 +38,8 @@ PTY 테스트는 느리고, 머신 부하에 따라 결과가 바뀌고, 화면�
 | v0.50.0 RC 에서 실패한 테스트 파일 | 21개 | run `37547627776`, `test-suite.log` |
 | 그 21개 중 P0·P1 제품 결함 | 0개 | 아래 판정 |
 | 그 21개 중 지금 바로 지울 수 있는 것 | 0개 | 아래 판정 |
-| `masc_tui.ml` 에 복사된 작업공간 신원 확인(다르면 거절) | 20곳 | `workspace_identity <> Workspace_identity_match`, main `2b8d72c580` |
-| 같은 확인을 반대로 쓴 곳(같으면 진행) | 19곳 | `Workspace_identity_match, Some …`, `= Workspace_identity_match` |
+| `masc_tui.ml` 에 복사된 작업공간 신원 확인(다르면 거절) | 21곳 | `workspace_identity <> (Masc_tui_types.)Workspace_identity_match`, main `8fa67783cb` |
+| 같은 확인을 반대로 쓴 곳(같으면 진행) | 25곳 | `workspace_identity = Workspace_identity_match` 17곳, `\| Workspace_identity_match, …` 패턴 8곳, 같은 main |
 | `masc_tui.ml` 에 복사된 Task 상세 스크롤 초기화 | 10곳 (열기 6, 비우기 4) | `task_detail_scroll <- 0` |
 
 RC 실패 21개를 하나씩 읽은 결과다.
@@ -65,7 +65,7 @@ RC 실패 21개를 하나씩 읽은 결과다.
 
 1. **결정이 실행 파일 안에 있다.** 단위 테스트가 닿지 못하니, 한 줄짜리 판단도
    TUI 전체를 띄워서 확인한다.
-2. **같은 결정이 복사돼 있다.** 신원 확인 39곳(두 가지 모양), Task 상세 스크롤 초기화 10곳.
+2. **같은 결정이 복사돼 있다.** 신원 확인 46곳(모양이 여럿), Task 상세 스크롤 초기화 10곳.
    한 곳을 고치면 나머지는 그대로 남는다. PTY 는 그중 몇 경로만 지난다.
 3. **PTY 테스트는 화면 출력에 묶여 있다.** 보호하려는 동작(예: "신원이 확인되지
    않으면 POST 하지 않는다")은 멀쩡한데, 그 앞의 "새 프레임을 기다림"이 깨져서
@@ -152,15 +152,15 @@ val decision_authority
 | 2 | Home: `masc_tui_home` 의 순수 함수(`home_decision_rows`, `home_selected_action`, `home_decision_window`, `reconcile_home_request_detail`)에 `test_tui_home.ml` 추가 | 없음 | `home_decision_cards` 의 선택·창·중복 주장 |
 | 3 | Answering: `overlay ~width` 에 긴 이름·CJK 단위 테스트 | 없음 | `answering_layout` 의 너비 주장 |
 | 4 | Runtime: 권한 칸이 4줄인 픽스처로 짧은 화면 단위 테스트(#41452 가 고친 결함의 재발 방지) | 없음 | `runtime_status` 의 선택 줄 주장 |
-| 5 | 신원을 확인하는 자리를 모양과 상관없이 모두 찾아(지금 39곳) `decision_authority` 하나로. 메시지·Task 를 보내는 경로(`launch_keeper_request`, `launch_task_dispatch`, 대기 입력 재개)가 먼저 | 있음(39곳) | `home_identity_decision`, 여러 파일의 "신원 미확인이면 거절" 주장 |
+| 5 | 신원을 확인하는 자리를 모양과 상관없이 모두 찾아(지금 46곳. 5번을 시작할 때 `rg` 로 다시 센다) `decision_authority` 하나로. 메시지·Task 를 보내는 경로(`launch_keeper_request`, `launch_task_dispatch`, 대기 입력 재개)가 먼저 | 있음 | `home_identity_decision`, 여러 파일의 "신원 미확인이면 거절" 주장 |
 | 6 | Task 상세 열기 6곳을 `open_task_detail` 로, 비우기 4곳을 `clear_task_detail` 로. 빈 사유 취소 결정 꺼내기 | 있음 | `task_metadata_viewport` 의 따라가기·빈 사유 주장 |
 | 7 | Goal 두 번 누르기(확인 뒤 POST 한 번) 결정 꺼내기 | 있음 | `goal_detail_viewport` 의 POST 주장 |
 | 8 | Answering·Home 키 처리 단계를 순수 step 함수로 | 있음 | `answering_layout`, `home_*` 의 키 주장 |
 | 9 | Keeper 만들기: `decide`·`after_receipt` 꺼내기 | 있음 | `keeper_create_journey` |
 | 10 | 상세 화면 그리기 함수를 라이브러리로 옮기고 너비별 단위 테스트 | 있음(`masc_tui_render.ml`) | `measurement`, `review_verdict_layout`, `task_metadata`, `goal_detail` 의 "다 보인다" 주장 |
 
-5번 이후는 지금 열려 있는 신원 관련 PR(#41518, #41520)이 들어간 뒤에 시작한다.
-같은 줄을 고치기 때문이다.
+5번 이후는 `masc_tui.ml` 을 같이 고치는 다른 PR 과 같은 줄에서 부딪히므로, 시작할 때 열린 PR 을 먼저 찾는다.
+신원 읽기 실패 때 채팅이 닫히던 결함(#41518, #41520)은 이미 main 에 들어가 있다.
 
 ## 6. 정할 것
 

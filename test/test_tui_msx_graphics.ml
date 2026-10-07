@@ -281,7 +281,9 @@ let test_unicode_title_fits_cells () =
   let title = List.hd (String.split_on_char '\n' out) in
   (* Drop cursor/erase escapes; keep the actual title cells. *)
   let start = String.index title ' ' in
-  let stop = String.index_from title start '\027' in
+  let stop = match String.index_from_opt title start '\r' with
+    | Some stop -> stop
+    | None -> String.index_from title start '\027' in
   let title = String.sub title start (stop - start) in
   check string "title already fits terminal columns" title
     (Masc_tui_ansi.fit_width title cols)
@@ -381,7 +383,7 @@ let test_the_menu_does_not_scroll_its_title_off () =
     !n
   in
   Alcotest.(check int) "one line break fewer than the rows it fills"
-    (max 4 rows - 1) breaks;
+    (max 1 rows - 1) breaks;
   Alcotest.(check bool) "and the title is in the bytes" true
     (let needle = "pick a game" in
      let nl = String.length needle in

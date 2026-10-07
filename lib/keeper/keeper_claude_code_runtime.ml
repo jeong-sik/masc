@@ -630,10 +630,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~default:Runtime_native_tools.claude_code_default
         ~none_supported:(Runtime_execution.supports_native_none (Claude_code config))
     in
-    (* The keeper TOML surface no longer declares setting sources — the
-       fleet never used the field. The safe value the old admission rule
-       degraded to is now the only value. *)
-    let setting_sources = [] in
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256
@@ -783,7 +779,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; cwd = base_path
       ; model = config.model
       ; native = native_posture
-      ; setting_sources
       ; system_prompt
       ; admission_timeout_s = config.timeout_s
       ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s

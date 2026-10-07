@@ -1243,11 +1243,11 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         in
         recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
         (match
-           (* A tool boundary does not report whether Codex compacted the
-              thread. Re-send context on the next Resume rather than treating
-              an unobserved copy as held. *)
+           (* The stream already invalidates these receipts when Codex reports
+              compaction. A host stop preserves the same observed holdings as
+              an ordinary completion. *)
            Keeper_official_client_session_store.settle_holding
-             ~held_context:[]
+             ~held_context:!settled_held_context
              ~base_path
              ~keeper_name
              ~expected:!session_state

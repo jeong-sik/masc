@@ -9,7 +9,7 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item =
+let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~tool_on_first_resume =
   let capture = Filename.concat root "requests.jsonl" in
   write capture "";
   let command = Filename.concat root "codex-fixture" in
@@ -25,6 +25,7 @@ overflow_resume = %s
 hold_first_resume = %s
 compact_resume = %s
 compact_item = %s
+tool_on_first_resume = %s
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -70,6 +71,13 @@ for line in sys.stdin:
             for last in ((request_usage,) if compact_item else (estimate, request_usage)):
                 emit({'method':'thread/tokenUsage/updated','params':{'threadId':'context-thread','turnId':turn_id,
                      'tokenUsage':{'last':last,'total':request_usage,'modelContextWindow':400000}}})
+        if tool_on_first_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.tool-called'):
+            with open(capture+'.tool-called', 'w') as out:
+                out.write('host boundary requested')
+            emit({'id':'held-context-tool','method':'item/tool/call',
+                  'params':{'threadId':'context-thread','turnId':turn_id,
+                            'callId':'held-context-call','tool':'masc_probe','arguments':{}}})
+            continue
         item = {'type':'agentMessage','id':'answer','text':'CONTEXT_RECEIVED','phase':'final_answer'}
         emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,'completedAtMs':1,'item':item}})
         emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[item],'status':'completed'}}})
@@ -77,11 +85,12 @@ for line in sys.stdin:
     (if overflow_resume then "True" else "False")
     (if hold_first_resume then "True" else "False")
     (if compact_resume then "True" else "False")
-    (if compact_item then "True" else "False"));
+    (if compact_item then "True" else "False")
+    (if tool_on_first_resume then "True" else "False"));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?catalog_context_window test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?(tool_on_first_resume = false) ?catalog_context_window test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let previous_pool = Domain_pool_ref.get () in
   Eio.Switch.on_release sw (fun () ->
@@ -104,7 +113,7 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~tool_on_first_resume in
   let config_path = Filename.concat root "runtime.toml" in
   let write_catalog max_context =
     write config_path (Printf.sprintf {|
@@ -133,7 +142,7 @@ default = "codex.context"
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
-      ?official_client_continuation ?on_event
+      ?official_client_continuation ?on_event ?(tools = []) ?on_official_client_tool_boundary
       ?(goal="Continue from current World State.") ~instructions ~world () =
     let composed_context = ref None in
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
@@ -155,7 +164,7 @@ default = "codex.context"
       ?carried_front_seed ?librarian_front
       ?on_model_input_window_observation
       ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation
-      ~goal_blocks:None ~system_prompt:instructions ~tools:[]
+      ~goal_blocks:None ~system_prompt:instructions ~tools ?on_official_client_tool_boundary
       ~initial_messages
       ~model_input_projection ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
       ~hooks:(Some hooks) ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
@@ -432,6 +441,56 @@ let test_compaction_receipt_survives_later_request_usage () =
 
 let test_compaction_item_invalidates_recall_without_usage_estimate () =
   check_compaction_receipt_survives_later_request_usage ~compact_item:true ()
+
+let check_host_stop_context_receipts ~compacted () =
+  with_fixture ~tool_on_first_resume:true ~compact_resume:compacted ~compact_item:true
+  @@ fun ~run ~capture ~reports:_ ->
+  let calls = ref 0 in
+  let tool =
+    Agent_core.Tool.create
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor
+        ~call_effect:(fun _ -> Agent_core.Tool.Read_only) Agent_core.Tool_contract.Serial)
+      ~name:"masc_probe" ~description:"Read at a host-stop boundary" ~parameters:[]
+      (fun _ ->
+        incr calls;
+        Ok { Agent_core.Types.content = "fixture read"; content_blocks = None; _meta = None })
+  in
+  let on_official_client_tool_boundary () =
+    Ok (Some (Keeper_official_client_host.Repeated_tool_call
+      { tool_name = "masc_probe"; repeated_count = 3 }))
+  in
+  (* The second turn ends inside the real dynamic-tool bridge. The next
+     resume must retain unchanged blocks unless that turn observed compaction;
+     after a resend, the following resume must remember them again. *)
+  List.iteri (fun index recall_expected ->
+    let prompt_blocks =
+      [ Prompt_block_id.Memory_os_recall, "RECALL_HOST_STOP"
+      ; Prompt_block_id.Temporal_summary, Printf.sprintf "HOST_STOP_TICK_%d" index ] in
+    let before = List.length (read_requests capture) in
+    let attempt = run ~tools:[tool] ~on_official_client_tool_boundary
+      ~instructions:"Keeper instructions" ~prompt_blocks
+      ~world:(String.concat "\n\n" (List.map snd prompt_blocks)) () in
+    successful attempt;
+    if index = 1 then (
+      match attempt.Keeper_codex_runtime.result with
+      | Ok { Runtime_agent.stop_reason =
+          Yielded_after_repeated_tool_call { tool_name = "masc_probe"; repeated_count = 3; _ }; _ } -> ()
+      | Ok _ | Error _ -> fail "fixture did not settle through the host-stop branch");
+    let rows = read_requests capture |> List.filteri (fun i _ -> i >= before) in
+    let sent = if index = 0 then Yojson.Safe.to_string (`List rows) else turn_text rows in
+    check bool "resume uses the holdings settled at the host boundary"
+      recall_expected (String_util.contains_substring sent "RECALL_HOST_STOP");
+    if index > 0 then
+      check int "host stop keeps the same vendor thread resumable" 1
+        (List.length (List.filter (fun row -> member "method" row = `String "thread/resume") rows)))
+    [true; false; compacted; false];
+  check int "the host-stop tool ran once" 1 !calls
+
+let test_host_stop_preserves_held_context () =
+  check_host_stop_context_receipts ~compacted:false ()
+
+let test_host_stop_preserves_compaction_invalidation () =
+  check_host_stop_context_receipts ~compacted:true ()
 
 let test_recall_lifecycle_across_native_ticks () =
   with_fixture @@ fun ~run ~capture ~reports:_ ->
@@ -991,6 +1050,8 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "selected context window survives catalog reload on start and resume" `Quick test_captured_context_window_survives_catalog_reload;
   test_case "compaction item invalidates recall without usage estimate" `Quick test_compaction_item_invalidates_recall_without_usage_estimate;
   test_case "compaction invalidates recall despite later request usage" `Quick test_compaction_receipt_survives_later_request_usage;
+  test_case "host stop preserves unchanged context across resumes" `Quick test_host_stop_preserves_held_context;
+  test_case "host stop preserves compaction invalidation across resumes" `Quick test_host_stop_preserves_compaction_invalidation;
   test_case "resume delivers only changed blocks and pending operator note" `Quick test_resume_deduplicates_context_blocks;
   test_case "fresh overflow retry receives and remembers recall" `Quick test_context_blocks_survive_fresh_retry;
   test_case "memory changes, clears, fails and recovers across native ticks" `Quick test_recall_lifecycle_across_native_ticks;

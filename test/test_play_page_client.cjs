@@ -73,6 +73,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token' } = {}) {
     navigator: { getGamepads: () => [] },
     requestAnimationFrame() {},
     atob,
+    crypto: require('node:crypto').webcrypto,
     performance: { now: () => now },
     setTimeout: fn => timers.push(fn),
     fetch: async (url, init) => {
@@ -88,6 +89,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token' } = {}) {
     get reloads() { return reloads; },
     get hash() { return location.hash; },
     navigateFragment(hash) { context.location.hash = hash; windowHandlers.get('hashchange')?.(); },
+    restoreFromCache() { windowHandlers.get('pageshow')?.({ persisted: true }); },
     get clears() { return clears; },
     async poll(elapsed = 5000) {
       now += elapsed;
@@ -759,7 +761,7 @@ test('a lost move response cannot forget a credential before the server acquires
   const reply = request => {
     if (request.url === '/api/v1/play/seat') return response({ ...seat, controller: holder });
     if (request.method === 'POST') {
-      assert.equal(storage.get('masc.play.pending'), 'fixture-token', 'persist before dispatch');
+      assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token', 'persist before dispatch');
       throw new Error('response lost while the server is still waiting for the lane');
     }
     return normalReply(request);
@@ -771,7 +773,7 @@ test('a lost move response cannot forget a credential before the server acquires
   await page.settle();
   await page.get('leave').handlers.click();
   assert.equal(storage.get('masc.play.invite'), 'fixture-token');
-  assert.equal(storage.get('masc.play.pending'), 'fixture-token');
+  assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
   assert.equal(page.get('text').value, '123');
   page.padButton.handlers.click();
   await page.settle();
@@ -783,7 +785,7 @@ test('a lost move response cannot forget a credential before the server acquires
   await recovered.get('leave').handlers.click();
   assert.equal(recovered.requests.some(r => r.method === 'POST'), false);
   assert.ok(recovered.requests.every(r => r.authorization === 'Bearer fixture-token'));
-  assert.equal(storage.get('masc.play.pending'), 'fixture-token');
+  assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
   holder = 'minsu';
   await recovered.poll();
   assert.equal(recovered.padButton.disabled, true);
@@ -801,19 +803,19 @@ test('reload during an unresolved fetch retains the outstanding operation', asyn
   await reloaded.settle();
   await reloaded.get('leave').handlers.click();
   assert.equal(reloaded.requests.some(r => r.method === 'POST'), false);
-  assert.equal(storage.get('masc.play.pending'), 'fixture-token');
+  assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
 });
 
 for (const status of [401, 403, 503]) {
   test(`HTTP ${status} on a later read cannot settle an earlier lost write`, async () => {
     const storage = new Map([
-      ['masc.play.invite', 'fixture-token'], ['masc.play.pending', 'fixture-token'],
+      ['masc.play.invite', 'fixture-token'], ['masc.play.pending', JSON.stringify({ token: 'fixture-token', operation: 'previous' })],
     ]);
     const page = fixture(() => response({ auth_error_code: 'invalid_token', error: 'unavailable' }, status), { storage, hash: '' });
     await page.settle();
     await page.get('leave').handlers.click();
     assert.equal(storage.get('masc.play.invite'), 'fixture-token');
-    assert.equal(storage.get('masc.play.pending'), 'fixture-token');
+    assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
     assert.equal(page.requests.some(r => r.method === 'POST'), false);
   });
 }
@@ -858,6 +860,61 @@ test('a malformed mutation response remains unknown rather than enabling a retry
   page.padButton.handlers.click();
   await page.settle();
   await page.get('leave').handlers.click();
-  assert.equal(storage.get('masc.play.pending'), 'fixture-token');
+  assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
+  assert.equal(page.requests.filter(r => r.method === 'POST').length, 1);
+});
+
+for (const action of ['disconnect', 'input', 'auth failure']) {
+  test(`a restored older document cannot clear a newer unknown write via ${action}`, async () => {
+    const storage = new Map();
+    let authFails = false;
+    const reply = request => authFails ? response({}, 401)
+      : request.url === '/api/v1/play/seat' ? response({ ...seat, controller: null }) : normalReply(request);
+    const cached = fixture(reply, { storage });
+    await cached.settle();
+    const newer = fixture(request => request.method === 'POST'
+      ? Promise.reject(new Error('lost response')) : reply(request), { storage, hash: '' });
+    await newer.settle();
+    newer.padButton.handlers.click();
+    await newer.settle();
+    const marker = storage.get('masc.play.pending');
+    cached.restoreFromCache();
+    assert.equal(cached.reloads, 1, 'bfcache restoration reloads its identity');
+    // Boundary guards also work before the requested reload has completed.
+    if (action === 'disconnect') await cached.get('leave').handlers.click();
+    else if (action === 'input') { cached.padButton.handlers.click(); await cached.settle(); }
+    else { authFails = true; await cached.poll(); }
+    assert.equal(cached.requests.some(r => r.method === 'POST'), false);
+    assert.equal(storage.get('masc.play.pending'), marker);
+    assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  });
+}
+
+test('an old document cannot forget a replacement identity', async () => {
+  const storage = new Map();
+  const cached = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, controller: null }) : normalReply(request), { storage });
+  await cached.settle();
+  storage.set('masc.play.invite', 'replacement-token');
+  await cached.get('leave').handlers.click();
+  assert.equal(storage.get('masc.play.invite'), 'replacement-token');
+  assert.equal(cached.requests.some(r => r.method === 'POST'), false);
+});
+
+test('an old acknowledgement cannot remove a different operation marker', async () => {
+  const storage = new Map();
+  let acknowledge;
+  const page = fixture(request => request.method === 'POST'
+    ? new Promise(resolve => { acknowledge = () => resolve(response({ ok: true })); }) : normalReply(request), { storage });
+  await page.settle();
+  page.padButton.handlers.click();
+  await page.settle();
+  const replacement = JSON.stringify({ token: 'fixture-token', operation: 'different-operation' });
+  storage.set('masc.play.pending', replacement);
+  acknowledge();
+  await page.settle();
+  assert.equal(storage.get('masc.play.pending'), replacement);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
   assert.equal(page.requests.filter(r => r.method === 'POST').length, 1);
 });

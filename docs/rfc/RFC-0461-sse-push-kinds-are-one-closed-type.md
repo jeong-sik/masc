@@ -49,7 +49,7 @@ RFC-0004 는 SSE 의 `type` 구분자를 "각 경계에서 닫힌 어휘"로 두
 | `Mcp_server.sse_broadcast` | 4 | `Sse.broadcast` 로 이어진다(`server_runtime_bootstrap.ml:769`). 예: `mcp_tool_runtime_board.ml:295` 의 `"masc/board_post"` |
 | `Progress` 콜백 | 콜백 하나 | `Sse.broadcast` 로 이어진다(`server_bootstrap_loops.ml:1404`) |
 | `Subscriptions.push_event_to_sessions` | 5 (+ `Tool_task_handlers.push_event_to_sessions_fn` 1) | 에이전트 세션 큐로 가는 `type` 프레임. 예: `verification_protocol.ml:267` |
-| 세션 레지스트리 `push_fn` 직접 호출 | `subscriptions.ml:207` (`"masc/notification"`), `session.ml:178` (`"masc/message"`) | 에이전트 세션 큐로 가는 `type` 프레임 |
+| 세션 레지스트리 `push_fn` 직접 호출 | `session.ml:178` (`"masc/message"`) | 에이전트 세션 큐로 가는 `type` 프레임 |
 
 범위 밖이고 이유가 있는 것:
 

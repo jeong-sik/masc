@@ -178,6 +178,12 @@ it('does not interpret an empty initial cache as zero usage', async () => {
   expect(view.queryByRole('table')).toBeNull()
   expect(view.getByText('비용 원장 읽기 상태 미보고')).toBeTruthy()
 })
+it.each([{ state: 'draining' }, {}])('keeps an unrecognized ledger state %j as unreported, not pending', async ledger => {
+  vi.mocked(get).mockResolvedValue({ window_minutes: 60, total_entries: 0, cost_ledger_read: ledger, models: [] })
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => expect(view.getByText('비용 원장 읽기 상태 미보고')).toBeTruthy())
+  expect(view.queryByText(/서버가 첫 집계를 준비/)).toBeNull()
+})
 it.each([{}, { models: [null] }, { models: [{}] }])('rejects malformed inventories: %j', async value => {
   vi.mocked(get).mockResolvedValue(value)
   const view = render(html`<${OverviewRuntimeStats} />`)

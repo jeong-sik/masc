@@ -75,7 +75,7 @@ let () =
   state.view <- Keepers Keeper_message;
   state.search <- Some "retained search";
   state.composer_focused <- true;
-  Buffer.add_string state.msg_input "unsent draft";
+  Masc_tui_message_input.insert state.msg_input "unsent draft";
   show_browser_lane state;
   release_composer_for_browser_reader state;
   let view = Option.get state.browser_lane in
@@ -84,7 +84,7 @@ let () =
   hide_browser_lane state;
   assert (state.view = Keepers Keeper_message);
   assert (state.search = Some "retained search" && state.composer_focused);
-  assert (Buffer.contents state.msg_input = "unsent draft");
+  assert (Masc_tui_message_input.contents state.msg_input = "unsent draft");
   assert (browser_lane_on_screen state = None);
   (* A reply can settle while hidden without showing the reader or losing
      its scroll. It is the retained model's request, not the visible surface's. *)

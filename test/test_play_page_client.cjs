@@ -57,6 +57,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
   const requests = [];
   const windowHandlers = new Map();
   let reloads = 0;
+  let now = 0;
   const location = { hash, pathname: '/play', search: '', reload() { reloads += 1; } };
   const context = vm.createContext({
     document: {
@@ -78,6 +79,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     AbortController,
     requestAnimationFrame() {},
     atob,
+    performance: { now: () => now },
     setTimeout: fn => timers.push(fn),
     fetch: async (url, init) => {
       const request = { url, authorization: init.headers.Authorization, method: init.method, body: init.body && JSON.parse(init.body) };
@@ -97,8 +99,10 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     get reloads() { return reloads; },
     get hash() { return location.hash; },
     navigateFragment(hash) { context.location.hash = hash; windowHandlers.get('hashchange')?.(); },
+    restoreFromCache() { windowHandlers.get('pageshow')?.({ persisted: true }); },
     get clears() { return clears; },
-    async poll() {
+    async poll(elapsed = 5000) {
+      now += elapsed;
       assert.equal(timers.length, 1, 'the page keeps one next poll');
       await timers.shift()();
       await settle();
@@ -257,6 +261,69 @@ test('public chat preserves a Korean IME composition on Enter', async () => {
   assert.equal(page.roomRequests.some(request => request.body.action === 'say'), false);
 });
 
+test('an unsettled game write still permits public conversation without clearing its receipt', async () => {
+  const marker = JSON.stringify({ token:'fixture-token', operation:'unconfirmed' });
+  const storage = new Map([['masc.play.invite', 'fixture-token'], ['masc.play.pending', marker]]);
+  const page = fixture(gameReply, { storage, hash:'' });
+  await page.settle();
+  assert.equal(page.padButton.disabled, true);
+  assert.equal(page.get('chat-text').disabled, false);
+  page.get('chat-text').value = '입력 결과를 확인해 주세요';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  assert.equal(page.roomRequests.find(request => request.body.action === 'say').body.text, '입력 결과를 확인해 주세요');
+  assert.equal(page.get('chat-text').value, '');
+  assert.equal(storage.get('masc.play.pending'), marker);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  assert.equal(page.requests.some(request => request.method === 'POST'), false);
+});
+
+test('an old room document cannot send or overwrite a replacement invitation draft', async () => {
+  const storage = new Map();
+  const page = fixture(gameReply, { storage });
+  await page.settle();
+  const replacement = JSON.stringify({ token:'replacement-token', text:'new draft', pending:null });
+  storage.set('masc.play.invite', 'replacement-token');
+  storage.set('masc.play.room.draft', replacement);
+  page.restoreFromCache();
+  page.get('chat-text').value = 'old document';
+  page.get('chat-text').handlers.input();
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  await page.get('leave').handlers.click();
+  assert.equal(page.reloads, 1);
+  assert.equal(page.roomRequests.some(request => request.body.action === 'say'), false);
+  assert.equal(storage.get('masc.play.room.draft'), replacement);
+  assert.equal(storage.get('masc.play.invite'), 'replacement-token');
+  assert.equal(page.get('chat-text').disabled, true);
+});
+
+test('a late room acknowledgment and disconnect cannot erase a newer document draft', async () => {
+  const storage = new Map();
+  let acknowledge;
+  const first = fixture(normalReply, { storage, roomReply: ({ body }) => body.action === 'say'
+    ? new Promise(resolve => { acknowledge = () => resolve(response(emptyRoom)); }) : response(emptyRoom) });
+  await first.settle();
+  first.get('chat-text').value = 'first message';
+  first.get('chat-send').handlers.click();
+  await first.settle();
+  const newer = fixture(normalReply, { storage, hash:'' });
+  await newer.settle();
+  newer.get('chat-text').value = 'newer draft';
+  newer.get('chat-text').handlers.input();
+  const saved = storage.get('masc.play.room.draft');
+  acknowledge();
+  await first.settle();
+  await first.get('leave').handlers.click();
+  assert.equal(storage.get('masc.play.room.draft'), saved);
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  assert.equal(first.requests.some(request => request.method === 'POST'), false);
+  assert.match(first.get('room-status').textContent, /새로고침/);
+  await newer.get('leave').handlers.click();
+  assert.equal(storage.size, 0, 'the current document may explicitly clear its own draft on disconnect');
+});
+
 for (const [name, refusal, control] of [
   ['changed program', { code: 'program_changed', error: '게임이 바뀌었어요. 패드를 다시 확인해 주세요.' }, 'pad'],
   ['denied handoff', { ok: false, message: '초대된 참여자에게만 넘길 수 있어요.' }, 'pass'],
@@ -293,6 +360,9 @@ test('a failed seat read retries without a new move and restores playable contro
   });
   await page.settle();
   assert.match(page.get('status').textContent, /자리/);
+  await page.poll();
+  assert.equal(seatReads, 2);
+  assert.equal(page.padButton.disabled, true);
   await page.poll();
   assert.equal(seatReads, 3, 'retry the same activity after the seat recovers');
   assert.match(page.get('turn').textContent, /내 차례/);
@@ -432,7 +502,7 @@ test('choosing a handoff discovers an invite added while the machine stays idle'
   const select = page.get('pass-to');
   select.value = 'operator';
   invited = true;
-  await page.poll();
+  await page.poll(300);
   assert.equal(select.options.some(option => option.value === 'newplayer'), false);
   select.handlers.focus?.();
   await page.settle();
@@ -640,10 +710,10 @@ test('another controller permits observation but no keyboard, pad or handoff mut
 });
 
 for (const [name, mutation] of [
-  ['refused', () => response({ error: 'not your turn' }, 409)],
+  ['refused', () => response({ ok: false, error: 'not your turn' }, 409)],
   ['unknown', () => { throw new Error('connection lost after write'); }],
 ]) {
-  test(`text remains editable after a ${name} send outcome`, async () => {
+  test(`text is retained after a ${name} send outcome`, async () => {
     const page = fixture(request => request.method === 'POST' ? mutation() : normalReply(request));
     await page.settle();
     page.get('text').value = '123';
@@ -735,7 +805,11 @@ for (const [name, release] of [
     assert.ok(recovered.requests.every(request => request.authorization === 'Bearer fixture-token'));
     await recovered.get('leave').handlers.click();
     assert.equal(recovered.requests.some(request => request.method === 'POST'), false);
-    assert.equal(storage.size, 0);
+    assert.equal(storage.size, name === 'unknown' ? 2 : 0);
+    if (name === 'unknown') {
+      assert.match(recovered.get('status').textContent, /운영자에게 초대 회수/);
+      assert.equal(recovered.padButton.disabled, true);
+    }
   });
 }
 
@@ -879,4 +953,242 @@ test('opening the same invitation while connected reloads without changing its i
   assert.equal(page.reloads, 1);
   assert.equal(storage.get('masc.play.invite'), 'fixture-token');
   assert.equal(page.requests.some(request => request.method === 'POST'), false);
+});
+
+test('full-document invitation navigation preserves an existing controller identity', async () => {
+  const storage = new Map([['masc.play.invite', 'existing-token']]);
+  const page = fixture(normalReply, { storage, hash: '#replacement-token' });
+  await page.settle();
+  assert.equal(storage.get('masc.play.invite'), 'existing-token');
+  assert.ok(page.requests.every(request => request.authorization === 'Bearer existing-token'));
+  assert.equal(page.hash, '');
+  assert.match(page.get('status').textContent, /현재 연결을 먼저 끊은 뒤/);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.size, 0);
+});
+
+test('spectator frame polling does not repeatedly scan the seat inventory', async () => {
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, controller: 'operator' }) : normalReply(request));
+  await page.settle();
+  const seats = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
+  const initial = seats();
+  for (let i = 0; i < 16; i++) await page.poll(300);
+  assert.equal(seats(), initial, 'frame polls within the seat interval only read frames');
+  await page.poll(300);
+  assert.equal(seats(), initial + 1, 'the independent seat interval still detects departures');
+});
+
+test('new machine activity and target selection refresh seats within the idle scan interval', async () => {
+  let currentActivity = activity;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, controller:'operator' })
+    : request.url.includes('/lane-addons/live') ? response({ ...frame, activity:currentActivity }) : normalReply(request));
+  await page.settle();
+  const seats = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
+  const initial = seats();
+  currentActivity = [{ at:2, who:'operator', action:'pass minsu' }];
+  await page.poll(300);
+  assert.equal(seats(), initial + 1, 'new machine activity immediately refreshes authority');
+  await page.poll(300);
+  assert.equal(seats(), initial + 1, 'an unchanged activity does not bypass the scan interval');
+  page.get('pass-to').handlers.focus();
+  await page.settle();
+  assert.equal(seats(), initial + 2, 'target selection also refreshes immediately');
+});
+
+test('a lost move response cannot forget a credential before the server acquires its seat', async () => {
+  const storage = new Map();
+  let holder = null;
+  const reply = request => {
+    if (request.url === '/api/v1/play/seat') return response({ ...seat, controller: holder });
+    if (request.method === 'POST') {
+      assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token', 'persist before dispatch');
+      throw new Error('response lost while the server is still waiting for the lane');
+    }
+    return normalReply(request);
+  };
+  const page = fixture(reply, { storage });
+  await page.settle();
+  page.get('text').value = '123';
+  page.get('send-text').handlers.click();
+  await page.settle();
+  await page.get('leave').handlers.click();
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
+  assert.equal(page.get('text').value, '123');
+  page.padButton.handlers.click();
+  await page.settle();
+  assert.equal(page.requests.filter(r => r.method === 'POST').length, 1);
+
+  // Even a free seat on reload is not a receipt for the delayed request.
+  const recovered = fixture(reply, { storage, hash: '#new-token' });
+  await recovered.settle();
+  await recovered.get('leave').handlers.click();
+  assert.equal(recovered.requests.some(r => r.method === 'POST'), false);
+  assert.ok(recovered.requests.every(r => r.authorization === 'Bearer fixture-token'));
+  assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
+  holder = 'minsu';
+  await recovered.poll();
+  assert.equal(recovered.padButton.disabled, true);
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token', 'retain the late controller identity');
+  assert.match(recovered.get('status').textContent, /운영자에게 초대 회수/);
+});
+
+test('reload during an unresolved fetch retains the outstanding operation', async () => {
+  const storage = new Map();
+  const page = fixture(request => request.method === 'POST' ? new Promise(() => {}) : normalReply(request), { storage });
+  await page.settle();
+  page.padButton.handlers.click();
+  await page.settle();
+  const reloaded = fixture(normalReply, { storage, hash: '' });
+  await reloaded.settle();
+  await reloaded.get('leave').handlers.click();
+  assert.equal(reloaded.requests.some(r => r.method === 'POST'), false);
+  assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
+});
+
+for (const status of [401, 403, 503]) {
+  test(`HTTP ${status} on a later read cannot settle an earlier lost write`, async () => {
+    const storage = new Map([
+      ['masc.play.invite', 'fixture-token'], ['masc.play.pending', JSON.stringify({ token: 'fixture-token', operation: 'previous' })],
+    ]);
+    const page = fixture(() => response({ auth_error_code: 'invalid_token', error: 'unavailable' }, status), { storage, hash: '' });
+    await page.settle();
+    await page.get('leave').handlers.click();
+    assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+    assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
+    assert.equal(page.requests.some(r => r.method === 'POST'), false);
+  });
+}
+
+test('unavailable tab storage prevents dispatch instead of losing reload recovery', async () => {
+  const storage = new Map();
+  const page = fixture(normalReply, { storage });
+  await page.settle();
+  storage.set = () => { throw new Error('storage denied'); };
+  page.padButton.handlers.click();
+  await page.settle();
+  assert.equal(page.requests.some(r => r.method === 'POST'), false);
+  assert.match(page.get('status').textContent, /입력을 보내지 않았어요/);
+});
+
+for (const [name, reply] of [
+  ['success', response({ ok: true })],
+  ['DOS refusal', response({ ok: false, message: 'not your turn' }, 409)],
+  ['pad refusal', response({ code: 'program_changed', error: 'game changed' }, 409)],
+]) {
+  test(`an acknowledged ${name} clears its own marker before a failing seat read`, async () => {
+    const storage = new Map();
+    let sent = false;
+    const page = fixture(request => {
+      if (request.method === 'POST') { sent = true; return reply; }
+      if (sent && request.url === '/api/v1/play/seat') throw new Error('seat unavailable');
+      return normalReply(request);
+    }, { storage });
+    await page.settle();
+    page.padButton.handlers.click();
+    await page.settle();
+    assert.equal(storage.has('masc.play.pending'), false);
+    assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+    assert.doesNotMatch(page.get('status').textContent, /운영자에게 초대 회수/);
+  });
+}
+
+test('a malformed mutation response remains unknown rather than enabling a retry', async () => {
+  const storage = new Map();
+  const page = fixture(request => request.method === 'POST' ? response({}, 502) : normalReply(request), { storage });
+  await page.settle();
+  page.padButton.handlers.click();
+  await page.settle();
+  await page.get('leave').handlers.click();
+  assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
+  assert.equal(page.requests.filter(r => r.method === 'POST').length, 1);
+});
+
+for (const action of ['disconnect', 'input', 'auth failure']) {
+  test(`a restored older document cannot clear a newer unknown write via ${action}`, async () => {
+    const storage = new Map();
+    let authFails = false;
+    const reply = request => authFails ? response({}, 401)
+      : request.url === '/api/v1/play/seat' ? response({ ...seat, controller: null }) : normalReply(request);
+    const cached = fixture(reply, { storage });
+    await cached.settle();
+    const newer = fixture(request => request.method === 'POST'
+      ? Promise.reject(new Error('lost response')) : reply(request), { storage, hash: '' });
+    await newer.settle();
+    newer.padButton.handlers.click();
+    await newer.settle();
+    const marker = storage.get('masc.play.pending');
+    cached.restoreFromCache();
+    assert.equal(cached.reloads, 1, 'bfcache restoration reloads its identity');
+    // Boundary guards also work before the requested reload has completed.
+    if (action === 'disconnect') await cached.get('leave').handlers.click();
+    else if (action === 'input') { cached.padButton.handlers.click(); await cached.settle(); }
+    else { authFails = true; await cached.poll(); }
+    assert.equal(cached.requests.some(r => r.method === 'POST'), false);
+    assert.equal(storage.get('masc.play.pending'), marker);
+    assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  });
+}
+
+test('an old document cannot forget a replacement identity', async () => {
+  const storage = new Map();
+  const cached = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, controller: null }) : normalReply(request), { storage });
+  await cached.settle();
+  storage.set('masc.play.invite', 'replacement-token');
+  await cached.get('leave').handlers.click();
+  assert.equal(storage.get('masc.play.invite'), 'replacement-token');
+  assert.equal(cached.requests.some(r => r.method === 'POST'), false);
+});
+
+test('an old acknowledgement cannot remove a different operation marker', async () => {
+  const storage = new Map();
+  let acknowledge;
+  const page = fixture(request => request.method === 'POST'
+    ? new Promise(resolve => { acknowledge = () => resolve(response({ ok: true })); }) : normalReply(request), { storage });
+  await page.settle();
+  page.padButton.handlers.click();
+  await page.settle();
+  const replacement = JSON.stringify({ token: 'fixture-token', operation: 'different-operation' });
+  storage.set('masc.play.pending', replacement);
+  acknowledge();
+  await page.settle();
+  assert.equal(storage.get('masc.play.pending'), replacement);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  assert.equal(page.requests.filter(r => r.method === 'POST').length, 1);
+});
+
+test('late auth failure after disconnect cannot clear a later invitation', async () => {
+  const storage = new Map();
+  let deferred = false, completeSeat;
+  const page = fixture(request => {
+    if (deferred && request.url === '/api/v1/play/seat') {
+      deferred = false;
+      return new Promise(resolve => { completeSeat = resolve; });
+    }
+    return request.url === '/api/v1/play/seat'
+      ? response({ ...seat, controller: null }) : normalReply(request);
+  }, { storage });
+  await page.settle();
+  deferred = true;
+  page.get('pass-to').handlers.focus();
+  await page.settle();
+  await page.get('leave').handlers.click();
+  assert.equal(storage.size, 0);
+  storage.set('masc.play.invite', 'later-token');
+  completeSeat(response({}, 401));
+  await page.settle();
+  assert.equal(storage.get('masc.play.invite'), 'later-token');
+});
+
+test('failure to load a retained credential never deletes the unread identity', async () => {
+  const storage = new Map([['masc.play.invite', 'unread-token']]);
+  storage.get = () => { throw new Error('storage read unavailable'); };
+  const page = fixture(normalReply, { storage, hash: '' });
+  await page.settle();
+  assert.equal(page.requests.length, 0);
+  assert.equal(Map.prototype.get.call(storage, 'masc.play.invite'), 'unread-token');
 });

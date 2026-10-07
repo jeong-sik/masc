@@ -303,7 +303,7 @@ start_live_server() {
 
 harness_prompt_asset() {
   local name="$1"
-  local path="${ROOT_DIR}/config/prompts/${name}.txt"
+  local path="${ROOT_DIR}/scripts/harness/prompts/${name}.txt"
   if [[ ! -r "${path}" ]]; then
     echo "missing required harness prompt asset: ${path}" >&2
     return 1
@@ -312,7 +312,7 @@ harness_prompt_asset() {
 }
 
 coding_keeper_instructions() {
-  harness_prompt_asset "harness.coding_keeper"
+  harness_prompt_asset "coding_keeper"
 }
 
 keeper_tool_call_names() {

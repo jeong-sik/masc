@@ -180,7 +180,6 @@ let test_artifact_route_enforces_admin_token () =
     let sha256 =
       match B.put store ~bytes:payload ~mime:"text/plain" with
       | O.Stored { sha256; _ } -> sha256
-      | O.Inline _ -> Alcotest.fail "expected stored artifact"
     in
     let saved_state = Server_auth.For_testing.snapshot_server_state () in
     Fun.protect
@@ -208,7 +207,6 @@ let test_artifact_route_enforces_admin_token () =
          let binary_sha =
            match B.put store ~bytes:binary ~mime:"application/octet-stream" with
            | O.Stored { sha256; _ } -> sha256
-           | O.Inline _ -> Alcotest.fail "expected stored binary artifact"
          in
          let raw_path = "/api/v1/artifact-bytes/" ^ binary_sha in
          let anonymous_raw = dispatch router (http_request ~path:raw_path ()) in
@@ -270,8 +268,7 @@ let test_hit_returns_envelope () =
            | `Int n ->
                Alcotest.(check int) "byte count"
                  (String.length payload) n
-           | _ -> Alcotest.fail "bytes field missing")
-      | O.Inline _ -> Alcotest.fail "expected Stored")
+           | _ -> Alcotest.fail "bytes field missing"))
 
 let () =
   Alcotest.run "artifacts_endpoint"

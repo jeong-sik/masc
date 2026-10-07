@@ -3689,16 +3689,13 @@ supports_native_streaming = true
 reasoning_streaming_format = "delta:reasoning_content"
 reasoning_replay = "latest_user_turn_tool_calls"
 
-# ollama.com's glm-5.3-flash. /api/show context_length 1048576. The other
-# capabilities come from the ollama_cloud_v1 base, except the replay contract:
-# that belongs to the model, as on the glm-5.3 row. Without it the /v1 wire sent
-# no reasoning back, and on 2026-10-06 a sangsu turn thought 13 times in its
-# first 48 steps and never again over the next 1,579 tool calls.
+# ollama.com's glm-5.3-flash. /api/show context_length 1048576. Declares the
+# window only; the rest of the capabilities, the replay contract included, come
+# from the ollama_cloud bases.
 [[models]]
 id_prefix = "glm-5.3-flash"
 provider_name = "ollama_cloud"
 max_context_tokens = 1048576
-reasoning_replay = "latest_user_turn_tool_calls"
 
 # Ollama GET /v1/models listed deepseek-v4.1-flash on 2026-09-26.
 # ollama.com serves this model under both the bare name and a ":cloud" suffix.

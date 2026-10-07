@@ -1,29 +1,18 @@
 (** Plan Tool Handlers
 
     Extracted from mcp_server_eio.ml for testability.
-    11 tools: plan_init, plan_update, note_add, deliver, plan_get,
-              error_add, error_resolve, plan_set_task, plan_get_task, plan_clear_task
+    3 tools: plan_set_task, plan_get_task, plan_clear_task
 *)
 
 module Planning_eio = Task.Planning_eio
 
-(** Plan action outcome — closed sum for the [status] field.
-    Previously a separate module; inlined because tool_plan.ml is the
-    sole consumer. *)
+(** Plan action outcome — closed sum for the [status] field. *)
 module Plan_action_outcome = struct
   type t =
-    | Initialized
-    | Updated
-    | Added
-    | Delivered
     | Set
     | Cleared
 
   let to_label = function
-    | Initialized -> "initialized"
-    | Updated -> "updated"
-    | Added -> "added"
-    | Delivered -> "delivered"
     | Set -> "set"
     | Cleared -> "cleared"
   ;;

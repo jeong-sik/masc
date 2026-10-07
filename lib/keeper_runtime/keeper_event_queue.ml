@@ -486,20 +486,10 @@ let payload_kind_label = function
   | Composition_completed _ -> "keeper_composition_completed"
   | Task_outcome _ -> "task_outcome"
 
-let is_board_signal = function
-  | Board_signal _ | Board_attention _ -> true
-  | Bootstrap | Fusion_completed _
-  | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-  | Ask_answered _
-  | Completion_authority_rejected _
-  | Task_cancelled _ | Workspace_message _ | Delegate_completed _
-  | Composition_completed _ | Task_outcome _ ->
-    false
-
 (* RFC-0377: the batch-intake predicate needs the routed channel without
-   repeating the payload match at every call site. Exhaustive on purpose,
-   like [is_board_signal] above: a new payload kind must decide here at
-   compile time whether it carries a conversation channel. *)
+   repeating the payload match at every call site. Exhaustive on purpose:
+   a new payload kind must decide here at compile time whether it carries a
+   conversation channel. *)
 let connector_attention_channel = function
   | Connector_attention { channel; _ } -> Some channel
   (* [Ask_answered] carries a channel but answers [None] here on purpose. This
@@ -512,12 +502,6 @@ let connector_attention_channel = function
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
   | Delegate_completed _ | Composition_completed _ | Task_outcome _ ->
     None
-
-let drain_board_all (queue : t) : stimulus list * t =
-  let board, rest =
-    List.partition (fun s -> is_board_signal s.payload) (to_list queue)
-  in
-  (to_list (sort_by_urgency (of_list board)), of_list rest)
 
 let summary (queue : t) : string =
   Printf.sprintf "%d stimulus%s pending"

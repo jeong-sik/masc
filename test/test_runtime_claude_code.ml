@@ -2450,41 +2450,21 @@ let stub_dynamic_tool =
   }
 ;;
 
-(* The settings layers are part of the same argv contract: empty renders the
-   historical bare [--setting-sources=] so nothing loads, and a declared list
-   renders comma-joined in declaration order. *)
-let test_setting_sources_render_in_argv () =
-  let argv sources =
-    let config =
-      { (Runtime_claude_code.default_config ~cwd:"/tmp") with
-        setting_sources = sources
-      }
-    in
-    match
-      Runtime_claude_code.command ~system_prompt_file:None
-        config
-        ~dynamic_tools:[]
-        ~reasoning_effort:None
-        ~session_mode:Runtime_claude_code.Start
-        ~session_id:"11111111-1111-4111-8111-111111111111"
-    with
-    | Ok argv -> argv
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-  in
-  check bool "default keeps the bare no-layer token" true
-    (List.mem "--setting-sources=" (argv []));
-  check bool "declared layers render comma-joined in order" true
-    (List.mem
-       "--setting-sources=project,user"
-       (argv
-          [ Runtime_native_tools.Settings_project
-          ; Runtime_native_tools.Settings_user
-          ]));
-  check bool "a declared list drops the bare token" true
-    (not
-       (List.mem
-          "--setting-sources="
-          (argv [ Runtime_native_tools.Settings_local ])))
+(* The CLI loads no settings layer: the argv always carries the bare
+   [--setting-sources=] token. *)
+let test_command_loads_no_settings_layer () =
+  match
+    Runtime_claude_code.command ~system_prompt_file:None
+      (Runtime_claude_code.default_config ~cwd:"/tmp")
+      ~dynamic_tools:[]
+      ~reasoning_effort:None
+      ~session_mode:Runtime_claude_code.Start
+      ~session_id:"11111111-1111-4111-8111-111111111111"
+  with
+  | Ok argv ->
+    check bool "argv carries the bare no-layer token" true
+      (List.mem "--setting-sources=" argv)
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
 ;;
 
 (* A Resume leaves out carried context the session already holds, which
@@ -2602,9 +2582,9 @@ let () =
             `Quick
             test_native_posture_selects_tools_flag
         ; Alcotest.test_case
-            "setting sources render in argv"
+            "command loads no settings layer"
             `Quick
-            test_setting_sources_render_in_argv
+            test_command_loads_no_settings_layer
         ; test_case "system prompt snapshot is pinned on" `Quick
             test_system_prompt_snapshot_is_pinned_on
         ; test_case "large system context uses file argv" `Quick test_system_file_keeps_large_context_off_argv

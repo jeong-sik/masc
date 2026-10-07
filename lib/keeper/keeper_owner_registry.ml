@@ -175,8 +175,9 @@ let restart_interrupted_reply = "Keeper request failed: " ^ restart_interrupted_
    and its stream died with the process. A client that reopens the operation
    replays that journal and then finds the operation settled, so the journal
    needs the terminal the stream would have carried. Recorded through the same
-   helper the Owner's settlement uses, so a second start on the same store
-   finds the terminal already there and writes nothing. A journal that cannot
+   helper the Owner's settlement uses. The operation store returns each newly
+   interrupted segment only once, so another start does not append it again.
+   An earlier segment's error cannot stand in for this restart. A journal that cannot
    be written is logged and does not stop the owner from starting. *)
 let record_restart_terminal ~base_dir ~keeper_name ~operation_id =
   let journal =
@@ -184,7 +185,7 @@ let record_restart_terminal ~base_dir ~keeper_name ~operation_id =
   in
   match
     Keeper_chat_event_log.record_terminal_error
-      journal
+      ~segment:Keeper_chat_event_log.Newly_settled_segment journal
       ~ts:(Time_compat.now ())
       ~message:restart_interrupted_summary
   with

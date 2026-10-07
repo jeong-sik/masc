@@ -1594,14 +1594,6 @@ let workspace_enqueue state =
   let reading = if server_authority_ready state then Some state.workspace_read_authority else None in
   fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, reading, message))
 
-(* A refused request or a discarded bundle may still have read the server's
-   identity. A reading that names a workspace is what the screen follows -- a
-   different workspace withdraws, the same one confirms; anything else leaves
-   the refusal to keep the match unconfirmed. *)
-let identity_after_refusal ~detail = function
-  | Some (Ok _ as reading) -> reading
-  | Some (Error _) | None -> Error detail
-
 let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
   if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
   else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
@@ -3651,12 +3643,9 @@ let ensure_preset_detail state ~mailbox =
   | None -> ()
   | Some (m : Tui_decode.preset_manifest) ->
     let name = m.Tui_decode.pm_name in
-    (match
-       Masc_tui_fetched.start ~equal:String.equal state.preset_detail ~key:name
-     with
-     | Masc_tui_fetched.Already_loading -> ()
-     | Masc_tui_fetched.Started (next, request) ->
-       state.preset_detail <- next;
+    (match begin_preset_detail_read state ~name with
+     | None -> ()
+     | Some request ->
        launch_preset_call state ~mailbox
          ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
          ~wrap:(fun result -> Preset_detail_loaded (request, result)))
@@ -11289,6 +11278,10 @@ let apply_server_identity_reading state reading =
        | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _ ), _ -> ());
     apply_confirmed_server_identity_reading state reading
 
+let apply_refused_workspace_identity state ~detail latest =
+  let reading = retire_refused_workspace_readings state ~detail latest in
+  apply_server_identity_reading state reading
+
 (* Scoped navigation reads carry the identity observed before their datasets.
    A successful older full refresh cannot authorize a same-port replacement. *)
 let apply_http_scoped_surfaces state ~currency_authority results =
@@ -11322,7 +11315,7 @@ let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mai
 
 let apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket ~latest err =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
-    apply_server_identity_reading state (identity_after_refusal ~detail:err latest);
+    apply_refused_workspace_identity state ~detail:err latest;
     Option.iter
       (fun ao_ticket ->
          apply_approval_observation state { ao_ticket; ao_result = Error err })
@@ -11379,7 +11372,7 @@ let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
   end
 
 let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity =
-  apply_server_identity_reading state (identity_after_refusal ~detail (Some latest_identity));
+  apply_refused_workspace_identity state ~detail (Some latest_identity);
   (* The Candle surface says why it has no reading rather than looking
      unread. *)
   state.candle_observation <- Some (Error detail);
@@ -13874,7 +13867,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
   | Workspace_identity_unconfirmed { detail; latest } ->
       let authority = read_authority state in
-      apply_server_identity_reading state (identity_after_refusal ~detail (Some latest));
+      apply_refused_workspace_identity state ~detail (Some latest);
       resume_reads_after_authority_change state ~mailbox
         ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
@@ -18470,13 +18463,16 @@ let main
   in
   let start_harness_label ~notes_hash ~(verdict : [ `Approve | `Reject ])
       ~reason ~described =
+    let check = capture_workspace_check state ~mailbox:async_messages in
+    let enqueue_async = workspace_enqueue state in
     let host = server_peer_host in
     let port = state.port in
     let run () =
       let result =
         match
-          Masc_tui_http.post_harness_label ~host ~port ~notes_hash ~verdict
-            ~reason
+          Result.bind (check ()) (fun () ->
+            Masc_tui_http.post_harness_label ~host ~port ~notes_hash ~verdict
+              ~reason)
         with
         | Error err -> Error err
         | Ok _json -> Ok described
@@ -18484,7 +18480,7 @@ let main
       enqueue_async async_messages (Harness_label_done result)
     in
     with_async_switch state ~action:"Harness label" (fun sw ->
-      Eio.Fiber.fork ~sw run)
+      fork_workspace_job state ~sw run)
   in
   let handle_harness_agree () =
     match harness_cursor_verdict () with
@@ -18948,9 +18944,11 @@ and is loaded on demand through keeper_skill.
 |} skill_template_placeholder_name
   in
   let handle_skill_create ~composition () =
+    let check = capture_workspace_check state ~mailbox:async_messages in
     let host = server_peer_host in
     let port = state.port in
-    match Masc_tui_http.fetch_skill_editor_sources ~host ~port with
+    match Result.bind (check ()) (fun () ->
+      Masc_tui_http.fetch_skill_editor_sources ~host ~port) with
     | Error detail -> report_action state "error" ("Skill sources failed: " ^ detail)
     | Ok [] -> report_action state "error" "no ready read-write Skill source"
     | Ok (source_id :: _) ->
@@ -18991,12 +18989,9 @@ and is loaded on demand through keeper_skill.
                   report_action state "error" (Masc.Keeper_skill_catalog.error_to_string error)
                 | Ok _ ->
                (match
-                  Masc_tui_http.post_skill_editor_create
-                    ~host
-                    ~port
-                    ~source_id
-                    ~package_id
-                    ~source_text
+                  Result.bind (check ()) (fun () ->
+                    Masc_tui_http.post_skill_editor_create
+                      ~host ~port ~source_id ~package_id ~source_text)
                 with
                 | Error detail -> report_action state "error" ("Skill create failed: " ^ detail)
                 | Ok json ->
@@ -19101,6 +19096,7 @@ and is loaded on demand through keeper_skill.
        | Ok json -> state.tools_skill_evidence <- Some (key, json))
   in
   let handle_skill_edit () =
+    let check = capture_workspace_check state ~mailbox:async_messages in
     match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
@@ -19108,10 +19104,8 @@ and is loaded on demand through keeper_skill.
       let host = server_peer_host in
       let port = state.port in
       (match
-         Masc_tui_http.post_skill_editor_read
-           ~host
-           ~port
-           profile.esp_reference
+         Result.bind (check ()) (fun () ->
+           Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference)
        with
        | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
        | Ok loaded when not (String.equal loaded.sel_access "read_write") ->
@@ -19134,21 +19128,17 @@ and is loaded on demand through keeper_skill.
                report_action state "system" (name ^ " unchanged")
              | Ok edited ->
                (match
-                  Masc_tui_http.post_skill_editor_preview
-                    ~host
-                    ~port
-                    ~reference:loaded.sel_reference
-                    ~source_text:edited
+                  Result.bind (check ()) (fun () ->
+                    Masc_tui_http.post_skill_editor_preview ~host ~port
+                      ~reference:loaded.sel_reference ~source_text:edited)
                 with
                 | Error detail ->
                   report_action state "error" ("Skill preview rejected: " ^ detail)
                 | Ok _ ->
                   (match
-                     Masc_tui_http.post_skill_editor_save
-                       ~host
-                       ~port
-                       ~reference:loaded.sel_reference
-                       ~source_text:edited
+                     Result.bind (check ()) (fun () ->
+                       Masc_tui_http.post_skill_editor_save ~host ~port
+                         ~reference:loaded.sel_reference ~source_text:edited)
                    with
                    | Error detail ->
                      report_action state "error" ("Skill save failed: " ^ detail)
@@ -19197,6 +19187,7 @@ and is loaded on demand through keeper_skill.
           ~prompt_key:row.Tui_decode.pr_key
   in
   let handle_prompt_edit () =
+    let check = capture_workspace_check state ~mailbox:async_messages in
     match selected_prompt () with
     | None -> report_action state "error" "prompts not loaded yet; r to reload"
     | Some row -> (
@@ -19216,8 +19207,9 @@ and is loaded on demand through keeper_skill.
             abort
         | Ok edited ->
           (match
-             Masc_tui_http.post_prompt_override ~host:server_peer_host
-               ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited
+             Result.bind (check ()) (fun () ->
+               Masc_tui_http.post_prompt_override ~host:server_peer_host
+                 ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited)
            with
            | Ok _ ->
              report_action state "system" (row.Tui_decode.pr_key ^ ": prompt saved");
@@ -19229,6 +19221,7 @@ and is loaded on demand through keeper_skill.
   (* Clearing is not editing to empty: it returns the prompt to the file's
      words, which is a different outcome from an override holding "". *)
   let handle_prompt_clear () =
+    let check = capture_workspace_check state ~mailbox:async_messages in
     match selected_prompt () with
     | None -> report_action state "error" "prompts not loaded yet; r to reload"
     | Some row -> (
@@ -19238,8 +19231,9 @@ and is loaded on demand through keeper_skill.
           (row.Tui_decode.pr_key ^ ": no override to clear")
       | Tui_decode.Prompt_override -> (
         match
-          Masc_tui_http.post_prompt_clear ~host:server_peer_host
-            ~port:state.port ~key:row.Tui_decode.pr_key
+          Result.bind (check ()) (fun () ->
+            Masc_tui_http.post_prompt_clear ~host:server_peer_host
+              ~port:state.port ~key:row.Tui_decode.pr_key)
         with
         | Ok _ ->
           report_action state "system"
@@ -19367,7 +19361,10 @@ and is loaded on demand through keeper_skill.
      and the reply is surfaced. Reuses the same config POST the Settings edit
      uses, then refreshes the Sandbox view so the new backend shows. *)
   let set_sandbox_backend ~profile =
-    match selected_keeper state with
+    let check = capture_workspace_check state ~mailbox:async_messages in
+    match check () with
+    | Error detail -> report_action state "error" detail
+    | Ok () -> match selected_keeper state with
     | None -> report_action state "system" no_keeper_under_cursor
     | Some keeper -> (
       let patch = `Assoc [ ("sandbox_profile", `String profile) ] in
@@ -19506,6 +19503,7 @@ and is loaded on demand through keeper_skill.
      names every field the route reads, with the two that have no sensible
      default left empty. *)
   let handle_repository_add () =
+    let check = capture_workspace_check state ~mailbox:async_messages in
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error"
@@ -19543,8 +19541,9 @@ and is loaded on demand through keeper_skill.
             "declaration needs non-empty \"name\" and \"url\" strings; nothing was added"
         else
           match
-            Masc_tui_http.post_repository_add ~host ~port
-              ~declaration_json:declaration
+            Result.bind (check ()) (fun () ->
+              Masc_tui_http.post_repository_add ~host ~port
+                ~declaration_json:declaration)
           with
           | Ok _ ->
             report_action state "system" (name ^ ": repository added");
@@ -20000,6 +19999,7 @@ and is loaded on demand through keeper_skill.
            invalidate_msx_poll ()
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
        | None, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) -> ());
+      let check_msx_write = capture_workspace_check state ~mailbox:async_messages in
       (match msx_key with
       | None -> ()
       | Some name when state.msx_menu_open -> (
@@ -20038,10 +20038,11 @@ and is loaded on demand through keeper_skill.
           | (Load cart | Swap_disk cart) as choice -> (
               state.msx_notice <- None;
               match
-                (match choice with
-                 | Swap_disk _ -> Masc_tui_http.post_msx_change_disk
-                     ~host:server_peer_host ~port:state.port ~disk:cart
-                 | _ -> Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port ~cart)
+                Result.bind (check_msx_write ()) (fun () ->
+                  match choice with
+                  | Swap_disk _ -> Masc_tui_http.post_msx_change_disk
+                      ~host:server_peer_host ~port:state.port ~disk:cart
+                  | _ -> Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port ~cart)
               with
               | Ok () ->
                   (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
@@ -20068,8 +20069,9 @@ and is loaded on demand through keeper_skill.
           Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
       | Some (("f6" | "f7") as name) ->
           let restore = name = "f7" in
-          let result = Masc_tui_http.post_msx_checkpoint
-              ~host:server_peer_host ~port:state.port ~restore ~slot:"quick" in
+          let result = Result.bind (check_msx_write ()) (fun () ->
+              Masc_tui_http.post_msx_checkpoint
+                ~host:server_peer_host ~port:state.port ~restore ~slot:"quick") in
           state.msx_notice <- Some (match result with
             | Ok () -> if restore then "Restored quick checkpoint" else "Saved quick checkpoint"
             | Error message -> "Checkpoint failed: " ^ message);
@@ -20096,8 +20098,9 @@ and is loaded on demand through keeper_skill.
           match Masc_tui_msx.server_key name with
           | Some server_key ->
               (match
-                 Masc_tui_http.post_msx_press ~host:server_peer_host
-                   ~port:state.port ~keys:[ server_key ]
+                 Result.bind (check_msx_write ()) (fun () ->
+                   Masc_tui_http.post_msx_press ~host:server_peer_host
+                     ~port:state.port ~keys:[ server_key ])
                with
                | Ok _ -> observe_msx_frame ~clear_notice:true state
                | Error detail -> state.msx_notice <- Some detail);

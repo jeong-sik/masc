@@ -524,10 +524,53 @@ let test_unknown_voice_save_read_retirement () =
   suspend_voice_wizard_read state;
   check_retired ()
 
+let test_discarded_bundle_retires_readings_before_reconfirming_a () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let authority = state.workspace_authority in
+  let reading = Some state.workspace_read_authority in
+  Masc_tui_message_input.insert state.msg_input "retained draft";
+  (* The refresh crossed B, but its final probe already sees A again. *)
+  let latest = retire_refused_workspace_readings state ~detail:"mixed workspace bundle"
+      (Some (Ok (identity "/workspace/a"))) in
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path latest;
+  Alcotest.(check bool) "A is confirmed again" true (server_authority_ready state);
+  Alcotest.(check bool) "independent B response cannot enter the reconfirmed A screen" false
+    (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation);
+  Alcotest.(check bool) "A's admitted operation receipt is retained" true
+    (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_operation_outcome);
+  Alcotest.(check string) "draft survives discarded bundle" "retained draft"
+    (Masc_tui_message_input.contents state.msg_input)
+
+let test_preset_selection_waits_without_owning_an_unconfirmed_read () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- next_workspace_identity ~previous:Workspace_identity_match
+      ~local_base_path:state.local_base_path (Error "health unavailable");
+  Alcotest.(check bool) "unconfirmed selection does not start a read" true
+    (Option.is_none (begin_preset_detail_read state ~name:"selected-preset"));
+  Alcotest.(check bool) "no stuck Loading owner is created" true
+    (Option.is_none (Masc_tui_fetched.current_request state.preset_detail));
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "same preset can load once A is confirmed" true
+    (Option.is_some (begin_preset_detail_read state ~name:"selected-preset"));
+  Alcotest.(check bool) "an admitted read is still deduplicated" true
+    (Option.is_none (begin_preset_detail_read state ~name:"selected-preset"))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "operation receipt outlives queued follow-up read" `Quick
+      , [ Alcotest.test_case "discarded bundle retires readings before reconfirming A" `Quick
+            test_discarded_bundle_retires_readings_before_reconfirming_a
+        ; Alcotest.test_case "preset selection waits without an unconfirmed read" `Quick
+            test_preset_selection_waits_without_owning_an_unconfirmed_read
+        ; Alcotest.test_case "operation receipt outlives queued follow-up read" `Quick
             test_operation_receipt_outlives_queued_followup_read
         ; Alcotest.test_case "unknown voice save read retirement" `Quick
             test_unknown_voice_save_read_retirement

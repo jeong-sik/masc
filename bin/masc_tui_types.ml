@@ -6570,6 +6570,15 @@ let suspend_workspace_readings state =
   state.msx_live_in_flight <- None;
   state.dos_live_in_flight <- None
 
+(* A discarded bundle proves its observation interval was inconsistent,
+   even when its last probe sees the original workspace again. Retire that
+   interval before allowing the last identity to confirm a new reading. *)
+let retire_refused_workspace_readings state ~detail latest =
+  suspend_workspace_readings state;
+  match latest with
+  | Some (Ok _ as reading) -> reading
+  | Some (Error _) | None -> Error detail
+
 let begin_keeper_deletions_read state =
   if not (server_authority_ready state) || state.keeper_deletions_loading then None
   else (
@@ -6607,6 +6616,15 @@ let write_authority_refusal state authority =
   if authority <> state.workspace_authority then Some "Workspace authority withdrawn"
   else if not (server_authority_ready state) then Some "Workspace identity is unconfirmed"
   else None
+
+let begin_preset_detail_read state ~name =
+  if not (server_authority_ready state) then None
+  else
+    match Masc_tui_fetched.start ~equal:String.equal state.preset_detail ~key:name with
+    | Masc_tui_fetched.Already_loading -> None
+    | Masc_tui_fetched.Started (next, request) ->
+        state.preset_detail <- next;
+        Some request
 
 (* The one definition of "same workspace" used to admit a held expectation
    back into the poll after authority is restored. Same answer as the screen

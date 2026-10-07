@@ -788,6 +788,12 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   match message with
   | Workspace_operation inner ->
       Workspace_operation (project_workspace_operation_reply state ~authority ~reading inner)
+  | Approval_decision_done (approval, decision, receipt, generation, observation) ->
+      let receipt, observation = project receipt observation in
+      Approval_decision_done (approval, decision, receipt, generation, observation)
+  | Ask_answer_done (label, receipt, observation) ->
+      let receipt, observation = project receipt observation in
+      Ask_answer_done (label, receipt, observation)
   | Keeper_queue_loaded (keeper, control, action, Ok reply) ->
       Keeper_queue_loaded (keeper, control, action,
         Ok (workspace_operation_reply state ~authority ~reading reply))

@@ -268,16 +268,6 @@ val validate_decision_transition
   -> to_:decision_stage_active
   -> unit
 
-module Decision_transition : sig
-  type ('from, 'to_) t =
-    | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
-    | Undecided_to_tool_policy_selected : (decision_undecided, decision_tool_policy_selected) t
-    | Guard_ok_to_tool_policy_selected : (decision_guard_ok, decision_tool_policy_selected) t
-    | Tool_policy_selected_to_guard_ok : (decision_tool_policy_selected, decision_guard_ok) t
-
-  val to_tag : ('from, 'to_) t -> string
-end
-
 type turn_attempt_state = {
   turn_id : int;
   attempts : int;

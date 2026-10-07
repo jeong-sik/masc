@@ -259,7 +259,65 @@ let test_waiting_invite_listing_is_cancellable ~invalid_expiry () =
   | true, Error (Invite.Invalid_expiry (D.Credential_expiry.Invalid_timestamp "invalid-expiry")) -> ()
   | _ -> fail "the next listing must retain the authoritative invite or expiry refusal"
 
+type controller_holder = Live_holder | Expired_holder | Removed_holder | Stopped_keeper
+
+let test_seat_reports_controller_recovery holder =
+  with_workspace @@ fun base_path state operator ->
+  let _, guest, _ = seed_guest base_path D.Player in
+  ignore (dos_ok (Dos_lane.pass ~who:"operator" ~to_:(Some "guest") ~announce:ignore));
+  (match holder with
+   | Live_holder -> ()
+   | Expired_holder ->
+     Auth.save_credential base_path { guest with expires_at = Some "2000-01-01T00:00:00Z" }
+   | Removed_holder -> Auth.delete_credential base_path "guest"
+   | Stopped_keeper ->
+     let meta = match Masc_test_deps.meta_of_json_fixture
+       (`Assoc [ "name", `String "guest"; "activation_mode", `String "manual" ]) with
+       | Ok meta -> meta | Error error -> fail error in
+     (match Masc.Keeper_meta_store.replace_snapshot (Masc.Mcp_server.workspace_config state) meta with
+      | Ok () -> () | Error error -> fail error));
+  let recoverable = match holder with
+    | Live_holder -> false
+    | Expired_holder | Removed_holder | Stopped_keeper -> true in
+  let answer = dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
+  check int "the current seat can be observed" 200 (status answer);
+  check bool "departure is reported from authoritative holder state" true
+    (member "controller_recoverable" (json answer) = Some (`Bool recoverable));
+  check (option string) "observing departure never releases the controller" (Some "guest") (controller ());
+  let moved = dispatch ~state ~token:operator ~meth:"POST" ~target:"/api/v1/dos/step"
+    ~body:{|{"steps":1,"until_ready":false}|} in
+  check int "only an actual move can recover a departed controller" (if recoverable then 200 else 400) (status moved);
+  check (option string) "the authoritative move retains or recovers the expected holder"
+    (Some (if recoverable then "operator" else "guest")) (controller ())
+
+let test_recovery_eligibility_is_rechecked_before_move () =
+  with_workspace @@ fun base_path state operator ->
+  let _, guest, _ = seed_guest base_path D.Player in
+  ignore (dos_ok (Dos_lane.pass ~who:"operator" ~to_:(Some "guest") ~announce:ignore));
+  Auth.save_credential base_path { guest with expires_at = Some "2000-01-01T00:00:00Z" };
+  let answer = dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
+  check int "the departed holder can be observed" 200 (status answer);
+  check bool "the observed controller can be recovered" true
+    (member "controller_recoverable" (json answer) = Some (`Bool true));
+  Auth.save_credential base_path guest;
+  let moved = dispatch ~state ~token:operator ~meth:"POST" ~target:"/api/v1/dos/step"
+    ~body:{|{"steps":1,"until_ready":false}|} in
+  check int "a renewed holder rejects the move despite an older recoverable seat" 400 (status moved);
+  check (option string) "the renewed holder keeps the controller" (Some "guest") (controller ())
+
 let () = run "Play current named authority" [ "routes", [
+  test_case "a newer credential invalidates observed recovery eligibility" `Quick
+    test_recovery_eligibility_is_rechecked_before_move;
+  test_case "seat keeps a live holder observation-only" `Quick
+    (fun () -> test_seat_reports_controller_recovery Live_holder);
+  test_case "seat exposes expired-holder recovery without mutating it" `Quick
+    (fun () -> test_seat_reports_controller_recovery Expired_holder);
+  test_case "seat exposes revoked-holder recovery without mutating it" `Quick
+    (fun () -> test_seat_reports_controller_recovery Removed_holder);
+  test_case "seat exposes stopped-Keeper recovery without mutating it" `Quick
+    (fun () -> test_seat_reports_controller_recovery Stopped_keeper);
   test_case "listing completes after credential publication in Eio" `Quick test_invite_listing_completes_after_credential_publication;
   test_case "current-owner listing admission is cancellable" `Quick
     (test_waiting_invite_listing_is_cancellable ~invalid_expiry:false);

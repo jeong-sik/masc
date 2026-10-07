@@ -1,0 +1,25 @@
+# Play client service repair evidence
+
+The Node test runs the JavaScript embedded in `server_routes_http_routes_play_page.ml` through its actual poll and input handlers. All 37 cases passed, including same-tab reload, revoked credential removal, another controller's turn, failed/unknown text submission, duplicate submission while a request is pending, departed-controller recovery, acknowledged disconnect, queued-input and stale-live races, same-tab invitation reopening, and protected identity replacement. See `client-test.txt`.
+
+`browser-fixture.json` records the candidate page source digest and Chromium version. The rendered page exercises real DOM, canvas, focus, buttons and session storage against controlled HTTP replies. The verification script reconstructs every HTML fragment, including the agent guide note and script opening tag. It verifies temporary seat/frame recovery, reload, pad input, handoff, observer controls, ejection and disconnect. The screenshots are fixture images, not an emulator session.
+
+Before the later controller-lifecycle repair added the required `controller_recoverable` seat field, a local browser run connected that earlier candidate page to the current running server and observed the live 640x480 DOS game, same-tab reload, disabled controls while another participant held the controller, and explicit disconnect. Its read-only receipt and screenshots are retained in the operator's local `reports/play-service-20261007/live-proof/` directory. No game input or machine load/reset was sent. The server commit was `5f442ddeea667e4451331d1bf66fa03e847f034c`. This historical page/API pairing is not execution proof for the final client contract.
+
+The operator subsequently authorized a bounded local build of this candidate's server, TUI and related tests. Both executables built. Native checks passed: current credential authority 12, play card 9, text-input ownership 29, quit-key ownership 3, and CSI decoding 16. The Collab PTY, existing chat play-invite PTY, MSX retained-tick and MSX background-poll scenarios passed. Execution found and repaired a terminal-text namespace error and the missing F5 input decoding. Test synchronization now waits for an actual selected invite and a held HTTP request; the machine fixture changes its snapshot explicitly instead of advancing on GET.
+
+The candidate server also ran in a temporary workspace on a separate port. HTTP checks passed for readiness, anonymous denial, invite issuance/listing, candidate page delivery, Player seat access, denied Player administration, revocation and rejection of the revoked credential. The shared server and games were not changed by that run.
+
+During the final live TUI check another operation replaced the shared server with commit `d02e54a9c5e802fece71b0b798ea802cb12958e4`. Both live machine routes then reported `no_machine`; the TUI displayed that state. This final observation cannot establish live TUI pixel rendering. The earlier live browser game capture and the PTY fixture pixel checks remain separate evidence.
+
+These results do not claim installation of these changes, external-phone access, or a complete CI cycle.
+
+Session storage semantics were checked against [MDN's sessionStorage documentation](https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage): page reloads preserve the tab session, and access can throw when storage is blocked. The client handles denied storage without stopping the original fragment-based login.
+
+F5 terminal encodings were checked against the [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/#functional-key-definitions).
+
+Review-response verification: 17 native current-credential/controller-authority cases passed (including expired, removed and stopped holders and credential renewal before a move), and all 5 public-page/guide/seat cases passed. The guide tests require the repository's `DUNE_SOURCEROOT` prompt fixture when run directly. Final Chromium fixture proof adds an actual controller disconnect POST before credential removal and same-tab invitation reopening.
+
+Final TUI response execution passed: Collab request ownership 3 cases, card/overlay state 8, and text-input ownership 29. The five Collab PTY scenarios cover frame observation and invite lifecycle, early F5, pending revoke notices and reopening, pending issuance and cross-view serialization, and workspace identity loss/recovery/change with retained-card isolation. The existing chat-invite PTY also passed after issue/revoke serialization. Native controller/page (17+5) plus these TUI cases total 62 focused response-verification cases. Earlier card/quit/CSI checks are reported separately above.
+
+The public-address probe used an isolated candidate with `MASC_HTTP_BASE_URL=https://masc.crying.pictures`: configured Host accepted, unrelated Host rejected, expected link origin, Player administration refused with exact403, and revoked credentials refused with exact401. The selected origin is saved in the operator's ignored launch `.env`; the shared process has not adopted it yet.

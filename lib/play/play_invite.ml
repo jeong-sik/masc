@@ -120,7 +120,7 @@ type list_error =
   | Credentials_unavailable of Masc_domain.masc_error
   | Invalid_expiry of Masc_domain.Credential_expiry.error
 
-let list_blocking ~base_path ~now =
+let list ~base_path ~now =
   let ( let* ) = Result.bind in
   let rec collect invites = function
     | [] -> Ok (List.sort (fun a b -> String.compare a.invite_name b.invite_name) invites)
@@ -147,19 +147,17 @@ let list_blocking ~base_path ~now =
         else invalid_named_player rest
     | Ok _ :: rest | Error _ :: rest -> invalid_named_player rest
   in
-  let* () = invalid_named_player (Auth.list_credential_results base_path) in
-  let* credentials = Auth.list_current_credentials base_path
-    |> Result.map_error (fun error -> Credentials_unavailable error) in
+  (* Batch the file reads without moving transaction admission to a blocking
+     thread. A cancelled HTTP request must stop waiting for a publisher; the
+     admitted transaction then protects its read and release as before. *)
+  let diagnostics = Eio_guard.run_in_systhread ~label:"play-invite-diagnostics"
+      (fun () -> Auth.list_credential_results base_path) in
+  let* () = invalid_named_player diagnostics in
+  let* credentials = Auth.with_credential_transaction base_path (fun transaction ->
+      Eio_guard.run_in_systhread ~label:"play-invite-current-credentials" (fun () ->
+        Auth.list_current_credentials_in_transaction transaction))
+    |> Result.join |> Result.map_error (fun error -> Credentials_unavailable error) in
   collect [] credentials |> Result.map_error (fun error -> Invalid_expiry error)
-
-let list ~base_path ~now =
-  (* Both inventories perform only file I/O and credential-lock operations,
-     whose helpers support non-Eio callers. Keep them in one system-thread
-     call: yielding back to the HTTP domain for every stat/read makes a busy
-     server's invite page wait on hundreds of scheduler round trips. Current
-     named authority and its transaction remain in [list_blocking]. *)
-  Eio_guard.run_in_systhread ~label:"play-invite-list" (fun () ->
-    list_blocking ~base_path ~now)
 
 type revoked =
   | Deleted

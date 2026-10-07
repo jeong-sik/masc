@@ -230,8 +230,41 @@ let test_invite_listing_completes_after_credential_publication () =
     (Option.map Yojson.Safe.to_string (member "invites" (json response)));
   check (option string) "listing never changes the machine controller" (Some "operator") (controller ())
 
+let test_waiting_invite_listing_is_cancellable ~invalid_expiry () =
+  with_workspace @@ fun base_path _state _operator ->
+  let _, guest, _uuid = seed_guest base_path D.Player in
+  if invalid_expiry then
+    Auth.save_credential base_path { guest with expires_at = Some "invalid-expiry" };
+  let lock_path = Filename.concat (Unix.realpath (Auth.auth_dir base_path)) ".credentials.lock" in
+  let cancelled = auth_ok (Auth.with_credential_transaction base_path (fun _transaction ->
+    let cancelled = Eio.Fiber.first
+      (fun () -> ignore (Invite.list ~base_path ~now:(Time_compat.now ())); false)
+      (fun () ->
+        let rec await_listing () =
+          if File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 2 then true
+          else (Eio.Fiber.yield (); await_listing ()) in
+        await_listing ()) in
+    (* The publisher still owns this transaction. Cancellation must remove the
+       listing's waiter before this callback releases it, without a worker
+       remaining blocked in a non-Eio mutex or process lock. *)
+    check int "only the publisher remains after request cancellation" 1
+      (File_lock_eio.For_testing.holders_and_waiters ~lock_path);
+    cancelled)) in
+  check bool "the waiting listing is cancelled" true cancelled;
+  check bool "cancellation preserves the invite" true
+    (Sys.file_exists (Auth.credential_file base_path "guest"));
+  let next = Invite.list ~base_path ~now:(Time_compat.now ()) in
+  match invalid_expiry, next with
+  | false, Ok [ { Invite.invite_name = "guest"; _ } ] -> ()
+  | true, Error (Invite.Invalid_expiry (D.Credential_expiry.Invalid_timestamp "invalid-expiry")) -> ()
+  | _ -> fail "the next listing must retain the authoritative invite or expiry refusal"
+
 let () = run "Play current named authority" [ "routes", [
   test_case "listing completes after credential publication in Eio" `Quick test_invite_listing_completes_after_credential_publication;
+  test_case "current-owner listing admission is cancellable" `Quick
+    (test_waiting_invite_listing_is_cancellable ~invalid_expiry:false);
+  test_case "invalid-expiry recheck admission is cancellable" `Quick
+    (test_waiting_invite_listing_is_cancellable ~invalid_expiry:true);
   test_case "invalid stale UUID cannot override current Worker" `Quick test_stale_invalid_expiry_does_not_override_current_worker;
   test_case "removed Player keeps data but loses seat and invite" `Quick (fun () -> test_surviving_data ~role:D.Player Removed);
   test_case "replaced Player uses current Worker authority" `Quick (fun () -> test_surviving_data ~role:D.Player Worker);

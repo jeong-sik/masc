@@ -43,7 +43,7 @@ let apply_entries (state : state) request result =
 
 ;;
 
-let apply_file (state : state) request result = (
+let apply_file ?(intent = Open_code_file) (state : state) request result = (
   let path = Masc_tui_fetched.request_key request in
   (* An answer for a file the operator has moved past describes bytes
      that are no longer on screen, and everything below resets the
@@ -54,6 +54,12 @@ let apply_file (state : state) request result = (
   else
   match result with
   | Ok content ->
+      (* Recovery retains the selected file even if its first read did not
+         finish. Its sibling reads restart independently; this completion
+         must preserve their owners and any answers that arrived first. *)
+      let preserve_view = match intent with
+        | Refresh_code_file -> true
+        | Open_code_file -> false in
       (* Lex once at load: comment and string state crosses rows, so a
          window could not answer. Past the budget the file draws plain
          rather than slowly. *)
@@ -76,14 +82,27 @@ let apply_file (state : state) request result = (
       (* The jump that asked for this file may have named a line; the
          reset and the jump live together so neither overwrites the
          other. Consumed once -- the next plain open starts at the top. *)
-      state.code_file_scroll <-
+      if preserve_view then begin
+        let last_line = max 0 (List.length rows - 1) in
         (match state.code_target_line with
-         | Some line -> max 0 (line - 1)
-         | None -> 0);
-      state.code_file_cursor <- state.code_file_scroll;
-      state.code_lsp_note <- None;
-      state.code_target_line <- None;
-      state.code_file_hscroll <- 0;
+         | Some line ->
+             let target = max 0 (min (line - 1) last_line) in
+             state.code_file_scroll <- target;
+             state.code_file_cursor <- target
+         | None ->
+             state.code_file_scroll <- min state.code_file_scroll last_line;
+             state.code_file_cursor <- min state.code_file_cursor last_line);
+        state.code_target_line <- None
+      end else begin
+        state.code_file_scroll <-
+          (match state.code_target_line with
+           | Some line -> max 0 (line - 1)
+           | None -> 0);
+        state.code_file_cursor <- state.code_file_scroll;
+        state.code_lsp_note <- None;
+        state.code_target_line <- None;
+        state.code_file_hscroll <- 0
+      end;
       (* The widest row is the horizontal clamp; measured here, once,
          not on every l press over ten thousand rows. *)
       state.code_file_max_width <-
@@ -97,7 +116,10 @@ let apply_file (state : state) request result = (
             in
             max widest row_width)
           0 rows;
+      state.code_file_hscroll <- min state.code_file_hscroll
+        (max 0 (state.code_file_max_width - 1));
       state.code_memos <- Masc_tui_memo.of_file ~path rows;
+      if not preserve_view then begin
       state.code_focus_file <- Right_pane;
       (* A new file starts on its content; the old file's history or
          diff would caption the wrong bytes. *)
@@ -112,6 +134,7 @@ let apply_file (state : state) request result = (
       state.code_notes_open <- false;
       state.code_notes_scroll <- 0;
       state.code_blame <- Masc_tui_fetched.clear state.code_blame
+      end
   | Error detail ->
       state.code_memos <- [];
       state.code_file <-

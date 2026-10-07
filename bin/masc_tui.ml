@@ -8941,7 +8941,7 @@ let prepare_remote_image_bytes url =
    so the domain keeps rendering; the loading line is shown at once so the
    keypress is not silent. terminal_draws_images = false skips the download and
    opens the page in a browser instead. *)
-let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_url =
+let launch_image_render _state ~mailbox ~notice ~title ~caption ~page_url image_url =
   if !terminal_draws_images = Some false then
     let url =
       Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
@@ -12212,8 +12212,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
          let deliver = workspace_enqueue state mailbox in
          let host = server_peer_host in
          let lsp = Masc_tui_fetched.current_key state.code_lsp_query in
-         Option.iter (fun path -> Masc_tui_code_requests.launch_file_load state ~host ~deliver ~path)
-           (Masc_tui_fetched.current_key state.code_file);
+         Option.iter (fun path -> Masc_tui_code_requests.launch_file_load ~intent:Refresh_code_file
+           state ~host ~deliver ~path) (Masc_tui_fetched.current_key state.code_file);
          if state.code_history_open then Option.iter (fun (_,path) ->
            Masc_tui_code_requests.launch_history_load state ~host ~deliver ~path)
            (Masc_tui_fetched.current_key state.code_history);
@@ -15624,8 +15624,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_config_view_error <- Some detail)
   | Code_entries_loaded (request, result) ->
       Code_results.apply_entries state request result
-  | Code_file_loaded (request, result) ->
-      Code_results.apply_file state request result
+  | Code_file_loaded (intent, request, result) ->
+      Code_results.apply_file ~intent state request result
   | Code_blame_loaded (request, result) ->
       Code_results.apply_blame state request result
   | Code_lsp_answered (request, result) ->

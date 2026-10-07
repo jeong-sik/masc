@@ -3140,6 +3140,8 @@ type inflight =
    through its own query axis: a keeper's playground via [?keeper=] (where a
    Changes row's clone-relative path lives), a registered repository via
    [?repo_id=] (what a Repositories row names). *)
+type code_file_load_intent = Open_code_file | Refresh_code_file
+
 type code_workspace_scope =
   | Code_scope_project
   | Code_scope_keeper of string

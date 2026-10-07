@@ -515,7 +515,7 @@ type async_msg =
   | Code_entries_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_tree_node list, string) result
-  | Code_file_loaded of string Masc_tui_fetched.request * (string, string) result
+  | Code_file_loaded of code_file_load_intent * string Masc_tui_fetched.request * (string, string) result
   | Code_history_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc_tui_types.code_history_listing, string) result

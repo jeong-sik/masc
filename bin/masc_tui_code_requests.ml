@@ -46,7 +46,7 @@ let launch_entries_load state ~host ~deliver =
 
 ;;
 
-let launch_file_load state ~host ~deliver ~path =
+let launch_file_load ?(intent = Open_code_file) state ~host ~deliver ~path =
   if server_authority_ready state then begin
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
@@ -54,7 +54,7 @@ let launch_file_load state ~host ~deliver ~path =
     state.code_file <- next;
     let port = state.port in
     Masc_tui_async_read.launch
-      ~deliver:(fun result -> deliver (Code_file_loaded (request, result)))
+      ~deliver:(fun result -> deliver (Code_file_loaded (intent, request, result)))
       (fun () ->
          let keeper, repo = code_scope_axes state in
          Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ())

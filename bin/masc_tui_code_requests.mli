@@ -12,7 +12,8 @@ val launch_entries_load
 
 (** Start the path request and deliver its whole-file response with its request key. *)
 val launch_file_load
-  :  Masc_tui_types.state
+  :  ?intent:Masc_tui_types.code_file_load_intent
+  -> Masc_tui_types.state
   -> host:string
   -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
   -> path:string

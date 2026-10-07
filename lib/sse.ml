@@ -94,7 +94,6 @@ type session_kind = Transport_metrics.sse_session_kind =
 type broadcast_target =
   | All          (** Every connected session (backward-compatible default) *)
   | Observers    (** Only [Observer] sessions *)
-  | Agent_streams (** Only [Agent_stream] sessions *)
   | Presence_only (** Only [Presence] sessions; never replay-buffered *)
 
 type delivery_audience =
@@ -365,7 +364,6 @@ let session_kind_matches_target target ~jsonrpc_payload kind =
       | Agent_stream -> jsonrpc_payload
       | Presence -> false)
   | Observers -> kind = Observer
-  | Agent_streams -> kind = Agent_stream && jsonrpc_payload
   | Presence_only -> kind = Presence
 
 let event_matches_session ~session_id ~kind event =
@@ -997,8 +995,7 @@ let broadcast_is_unobservable target ~buffer ~notify_external =
        keeps the skip and the delivery on one predicate: if [Presence_only]
        ever widens, this stops skipping instead of silently dropping the
        broadcast for the sessions it just gained. [jsonrpc_payload] is unused
-       on this arm — it only gates [All] and [Agent_streams], which are handled
-       below. *)
+       on this arm — it only gates [All], which is handled below. *)
     let state = Atomic.get clients in
     state.count = 0
     || not
@@ -1012,7 +1009,7 @@ let broadcast_is_unobservable target ~buffer ~notify_external =
   (* Not skipped: these arms need [jsonrpc_payload], which costs a filter pass
      over the payload, so the check would no longer be the O(1) it has to be on
      this path. *)
-  | All | Observers | Agent_streams -> false
+  | All | Observers -> false
 
 (* What a broadcast carries: a value to encode in the frame, or a value encoded
    already, whose text the frame is written from. *)
@@ -1033,7 +1030,6 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
   let target_label = match target with
     | All -> "all"
     | Observers -> "observers"
-    | Agent_streams -> "agent_streams"
     | Presence_only -> "presence"
   in
   let delivery, failed =
@@ -1144,8 +1140,7 @@ let broadcast json = broadcast_impl All (Value json)
 
 (** Broadcast event to sessions matching [target].
     - [All]: every session (same as [broadcast])
-    - [Observers]: dashboard / read-only viewers only
-    - [Agent_streams]: MCP agent sessions only *)
+    - [Observers]: dashboard / read-only viewers only *)
 let broadcast_to target json = broadcast_impl target (Value json)
 
 let broadcast_encoded_to target encoded = broadcast_impl target (Encoded encoded)

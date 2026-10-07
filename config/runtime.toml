@@ -1765,6 +1765,9 @@ context-low-water-tokens = 70000
 [models.minimax-m3]
 reasoning-uncontrolled = true
 api-name = "minimax-m3"
+# The MiniMax-M3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true
@@ -1864,6 +1867,9 @@ supports-multimodal-inputs = false
 [models.ollama-cloud-gemma4-31b]
 reasoning-uncontrolled = true
 api-name = "gemma4:31b"
+# The Gemma 4 31B model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 262144
 tools-support = true
 thinking-support = true
@@ -1875,21 +1881,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-gemma4-31b]
-
-[models.ollama-cloud-glm-5-1]
-reasoning-uncontrolled = true
-api-name = "glm-5.1"
-max-context = 202752
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-glm-5-1.capabilities]
-thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-glm-5-1]
 
 [models.ollama-cloud-glm-5-2]
 reasoning-uncontrolled = true
@@ -1913,6 +1904,9 @@ supports-multimodal-inputs = false
 [models.ollama-cloud-glm-5-3]
 reasoning-uncontrolled = true
 api-name = "glm-5.3"
+# The GLM-5.3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 1048576
 tools-support = true
 thinking-support = true
@@ -1937,6 +1931,9 @@ supports-multimodal-inputs = false
 [models.ollama-cloud-glm-5-3-flash]
 reasoning-uncontrolled = true
 api-name = "glm-5.3-flash"
+# The GLM-5.3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 1048576
 tools-support = true
 thinking-support = true
@@ -1961,6 +1958,9 @@ wizard-default = true
 [models.ollama-cloud-gpt-oss-20b]
 reasoning-uncontrolled = true
 api-name = "gpt-oss:20b"
+# The gpt-oss model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 131072
 tools-support = true
 thinking-support = true
@@ -1976,6 +1976,9 @@ supports-multimodal-inputs = false
 [models.ollama-cloud-gpt-oss-120b]
 reasoning-uncontrolled = true
 api-name = "gpt-oss:120b"
+# The gpt-oss model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 131072
 tools-support = true
 thinking-support = true
@@ -2028,6 +2031,9 @@ supports-multimodal-inputs = true
 [models.ollama-cloud-kimi-k3]
 reasoning-uncontrolled = true
 api-name = "kimi-k3"
+# The Kimi-K3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 1048576
 tools-support = true
 thinking-support = true
@@ -2102,6 +2108,9 @@ supports-multimodal-inputs = false
 [models.ollama-cloud-nemotron-3-ultra]
 reasoning-uncontrolled = true
 api-name = "nemotron-3-ultra"
+# The Nemotron 3 Ultra model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 262144
 tools-support = true
 thinking-support = true
@@ -2113,30 +2122,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-nemotron-3-ultra]
-
-[models.ollama-cloud-qwen3-5-397b]
-reasoning-uncontrolled = true
-api-name = "qwen3.5:397b"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-qwen3-5-397b.capabilities]
-# ollama.com exposes this binding through its OpenAI-compatible /v1 endpoint.
-# Reasoning is inherent/default-on and no explicit thinking-control field is
-# accepted on this wire. The native provider keeps the catalog's Ollama control.
-thinking-control-format = "none"
-# Measured 2026-08-25 against ollama.com/v1/chat/completions with stream=true:
-# the delta keys are content / reasoning / role. The field is "reasoning", not
-# "reasoning_content", so the previous value read a key the server never sends
-# and this runtime's thinking arrived empty. Nothing failed loudly because
-# delta.content is unaffected.
-reasoning-streaming-format = "delta:reasoning"
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-qwen3-5-397b]
 
 [ollama.gemma4-26b-a4b-qat]
 wizard-default = true

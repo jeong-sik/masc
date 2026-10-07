@@ -174,8 +174,8 @@ val keeper_context_approval_authority_footer : string
 
 (** {1 keeper.world.* — unified turn frame section prose}
 
-    One group file per section under [config/prompts/keeper.world.<group>.md];
-    each [### marker] slot registers as [keeper.world.<group>.<marker>]. The
+    One marker group per section in [config/prompts/keeper.md]; each
+    [### world.<group>.<marker>] slot registers as [keeper.world.<group>.<marker>]. The
     bare [keeper.world] key is a historical dashboard name only, never a
     prompt key. *)
 

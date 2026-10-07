@@ -214,6 +214,8 @@ let controllerError = null;
 let machine = false;
 let since = null;
 let lastActivityKey = null;
+let observedActivityKey = '';
+let nextReconnectAt = 0;
 let latestSeatRequest = null;
 let nextSeatPollAt = 0;
 let handoffRead = null;
@@ -409,6 +411,7 @@ function renderPassTargets(participants) {
 }
 
 async function refreshSeat() {
+  if (ended || disconnecting) return null;
   // Only a successful read may acknowledge the activity that prompted it.
   // A failed read after sending a move must be retried by the poll as well.
   lastActivityKey = null;
@@ -454,7 +457,8 @@ async function refreshSeat() {
   // Only observed connection, successful reconnect, or ending it settles it.
   if (initialConnectIntent && controllerError === null && !disconnecting) {
     if (connected) initialConnectIntent = false;
-    else if (connectionSettled()) {
+    else if (performance.now() >= nextReconnectAt && connectionSettled()) {
+      nextReconnectAt = performance.now() + SEAT_POLL_MS;
       connecting = mutate(SESSION_PATH, { connected:true });
       const joined = await connecting;
       if (!ended && joined?.status === 200 && joined.json?.ok === true && joined.json.connected === true) {
@@ -619,8 +623,11 @@ async function poll() {
     // Expiry and Keeper stops need not move the machine. An observer must
     // still discover that its holder departed, so a real move can recover it.
     const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
-    if (performance.now() >= nextSeatPollAt && (key !== lastActivityKey || waitingForController || initialConnectIntent)
-        && await refreshSeat()) lastActivityKey = key;
+    const activityChanged = key !== observedActivityKey;
+    observedActivityKey = key;
+    const recoveryDue = performance.now() >= nextSeatPollAt
+      && (key !== lastActivityKey || waitingForController || initialConnectIntent);
+    if ((activityChanged || recoveryDue) && await refreshSeat()) lastActivityKey = key;
     await syncPad();
   }
 }
@@ -633,7 +640,12 @@ function send(path, body) {
     const applied = r.status >= 200 && r.status < 300 && r.json && r.json.ok === true;
     if (!applied) setStatus('action', (r.json && (r.json.message || r.json.error)) || ('요청이 거절됐어요 (' + r.status + ')'));
     else setStatus('action', '');
-    await refreshSeat();
+    // The response settles the write. A projection read cannot hold its
+    // receipt, the input queue, or disconnect hostage if that read stalls.
+    if (!disconnecting) refreshSeat().catch(() => {
+      if (!ended && !disconnecting)
+        setStatus('seat', '요청 뒤 자리 정보를 읽지 못했어요. 다시 읽고 있어요.');
+    });
     return applied ? r.json : null;
   }).catch(() => {
     setStatus('action', '요청 뒤 화면을 갱신하지 못했어요. 다시 읽고 있어요.');

@@ -2040,7 +2040,9 @@ status: reference
   동기화된다. Config의 presets 패널과 채팅의 `/preset` 명령으로 저장·목록·복원한다. 복원은
   현재 상태를 `_autosave` 프리셋 하나에 덮어써 보존한 뒤 표면별로 적용한다 — prompt overrides는 바로,
   Keeper instructions는 각 Keeper의 다음 기상 때, runtime routing은 `runtime.toml`에 기록한다.
-  `_autosave`는 마지막 복원 직전 상태만 담는다. 이걸 복원하면 마지막 복원이 되돌아간다.
+  `_autosave`는 마지막 복원 직전 상태만 담는다. 이걸 복원하면 prompt overrides와 Keeper
+  assignments는 마지막 복원 전으로 돌아간다. Keeper instructions와 lane은 프리셋에 든 것만
+  다시 쓰므로, instructions가 없던 Keeper나 마지막 복원이 새로 더한 lane은 그대로 남는다.
   → [Prompt_preset](../../lib/prompt_preset.mli),
   [Preset commands](../../bin/masc_tui_command.mli), [TUI 안내](../TUI-GUIDE.md)
 

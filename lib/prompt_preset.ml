@@ -462,53 +462,71 @@ let instruction_file dir keeper =
   Filename.concat (Filename.concat dir instructions_dir) (keeper ^ instructions_extension)
 ;;
 
-(* A re-save under the same name must not leave a previous keeper's file
-   behind, or [load] would hand it back as part of the preset. *)
-let clear_instruction_files dir =
-  let instructions = Filename.concat dir instructions_dir in
-  if Sys.file_exists instructions && Sys.is_directory instructions
-  then
-    Fs_compat.read_dir instructions
-    |> List.iter (fun file ->
-      if Filename.check_suffix file instructions_extension
-      then Sys.remove (Filename.concat instructions file))
+let remove_quietly dir =
+  match guard (fun () -> Ok (Fs_compat.remove_tree dir)) with
+  | Ok () | Error _ -> ()
 ;;
 
-(* The manifest goes last and the old one goes first, so a save that stops
-   midway leaves a directory without a manifest — unreadable to [load] and
-   listed under [unreadable] — never an old manifest over new files. *)
+(* Holders for presets being written, beside [presets/] so the list never
+   reads one and on the same file system so a holder's directory can be
+   renamed into [presets/]. *)
+let staging_dir ~base_path =
+  Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging"
+;;
+
+(* Every file of [s] into [dir], which does not exist yet. *)
+let write_preset_files dir (s : snapshot) =
+  let* () = mkdir_p (Filename.concat dir instructions_dir) in
+  let* () =
+    Override.save ~path:(Filename.concat dir overrides_file) s.prompt_overrides
+    |> Result.map_error Override.error_to_string
+  in
+  let* () =
+    Fs_compat.save_file_atomic
+      (Filename.concat dir runtime_file)
+      (Yojson.Safe.pretty_to_string
+         (runtime_to_json ~assignments:s.assignments ~lanes:s.lanes)
+       ^ "\n")
+  in
+  let* () =
+    List.fold_left
+      (fun acc (keeper, text) ->
+        let* () = acc in
+        Fs_compat.save_file_atomic (instruction_file dir keeper) text)
+      (Ok ())
+      s.instructions
+  in
+  Fs_compat.save_file_atomic
+    (Filename.concat dir manifest_file)
+    (Yojson.Safe.pretty_to_string (manifest_to_json (manifest_of_snapshot s)) ^ "\n")
+;;
+
+(* The preset is written whole into a fresh holder, then put in place in one
+   step: renamed in when the name is new, exchanged with the old directory
+   when it is not. A save that stops midway leaves the preset it was
+   replacing as it was, which matters most for the autosave, the one copy of
+   the state from before a restore. The holder goes afterwards, and with it
+   the directory that was replaced. *)
 let save ~base_path (s : snapshot) =
   if not (is_valid_name s.name)
   then Error ("invalid preset name: " ^ s.name)
   else
     guard (fun () ->
-    let dir = preset_dir ~base_path s.name in
-    let* () = mkdir_p (Filename.concat dir instructions_dir) in
-    let manifest = Filename.concat dir manifest_file in
-    if Sys.file_exists manifest then Sys.remove manifest;
-    clear_instruction_files dir;
-    let* () =
-      Override.save ~path:(Filename.concat dir overrides_file) s.prompt_overrides
-      |> Result.map_error Override.error_to_string
-    in
-    let* () =
-      Fs_compat.save_file_atomic
-        (Filename.concat dir runtime_file)
-        (Yojson.Safe.pretty_to_string
-           (runtime_to_json ~assignments:s.assignments ~lanes:s.lanes)
-         ^ "\n")
-    in
-    let* () =
-      List.fold_left
-        (fun acc (keeper, text) ->
-          let* () = acc in
-          Fs_compat.save_file_atomic (instruction_file dir keeper) text)
-        (Ok ())
-        s.instructions
-    in
-    Fs_compat.save_file_atomic
-      manifest
-      (Yojson.Safe.pretty_to_string (manifest_to_json (manifest_of_snapshot s)) ^ "\n"))
+      let target = preset_dir ~base_path s.name in
+      let* () = mkdir_p (presets_dir ~base_path) in
+      let* () = mkdir_p (staging_dir ~base_path) in
+      let holder = Filename.temp_dir ~temp_dir:(staging_dir ~base_path) (s.name ^ "-") "" in
+      let staged = Filename.concat holder s.name in
+      let published =
+        let* () = write_preset_files staged s in
+        guard (fun () ->
+          if Sys.file_exists target
+          then Fs_compat.exchange_paths staged target
+          else Fs_compat.rename_noreplace staged target;
+          Ok ())
+      in
+      remove_quietly holder;
+      published)
 ;;
 
 let read_manifest dir =

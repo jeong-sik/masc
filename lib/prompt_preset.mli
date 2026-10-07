@@ -81,8 +81,12 @@ val list : base_path:string -> listing
 val restore : base_path:string -> string -> (restore_report, string) result
 (** Loads the named preset, saves the current state as {!autosave_name}
     over the previous one, then applies the loaded preset surface by surface.
-    Restoring {!autosave_name} itself puts back the state from before the
-    latest restore, and the autosave then holds the state it replaced.
+    Restoring {!autosave_name} undoes the latest restore for the prompt
+    overrides and the runtime assignments, which a restore sets exactly.
+    Keeper instructions and exact-output lanes are written only for the
+    keepers and lanes a preset holds, so a keeper that had no instructions
+    keeps what the latest restore gave it, and a lane that restore added
+    stays. The autosave then holds the state the undo replaced.
     Only the load and the autosave can fail the whole call; each surface
     reports what it applied and what it skipped. An override that no
     longer renders under the prompt's current contract is skipped with that

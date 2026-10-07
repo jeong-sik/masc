@@ -1141,9 +1141,11 @@ when it was saved; a directory whose manifest does not read gets a `!` line.
 `/preset save <name> [description]` snapshots the live state under that name.
 `/preset restore <name>` saves the live state first as `_autosave`, replacing
 the one the previous restore left, then applies the preset surface by surface
-and reports each one. Restoring `_autosave` undoes the latest restore:
-prompt overrides take effect at once, keeper instructions at each keeper's
-next up, and runtime routing through a runtime.toml commit. Every skipped key
+and reports each one: prompt overrides take effect at once, keeper
+instructions at each keeper's next up, and runtime routing through a
+runtime.toml commit. `/preset restore _autosave` undoes the latest restore's
+prompt overrides and runtime assignments; a keeper that had no instructions,
+or a lane that restore added, stays as it left them. Every skipped key
 is listed with its reason, and a restore that skipped anything or whose
 commit failed is shown as an error. The three answers land in the chat pane
 of the keeper selected when the command was typed.

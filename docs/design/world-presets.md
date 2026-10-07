@@ -140,8 +140,10 @@ TUI 에서:
 ```
 
 `restore` 는 덮어쓰기 전에 현재 상태를 `_autosave` 에 먼저 저장한다. 이전 `_autosave` 는
-덮어쓴다. `/preset restore _autosave` 로 마지막 restore 를 되돌린다. 그보다 오래된 상태가
-필요하면 restore 전에 `/preset save` 로 이름을 붙여 둔다. 스냅샷이 담는 것은 prompt override, keeper instructions, runtime
+덮어쓴다. `/preset restore _autosave` 로 마지막 restore 의 prompt override 와 runtime 배정을
+되돌린다. keeper instructions 와 lane 은 프리셋에 든 것만 다시 쓰므로, instructions 가 없던
+keeper 나 마지막 restore 가 더한 lane 은 남는다. 그보다 오래된 상태가 필요하면 restore 전에
+`/preset save` 로 이름을 붙여 둔다. 스냅샷이 담는 것은 prompt override, keeper instructions, runtime
 배정, exact-output lane 네 가지다 (`lib/prompt_preset.mli`).
 
 instructions 는 각 keeper 의 **다음 up 에서** 반영된다. 즉시 반영이 아니다.

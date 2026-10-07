@@ -401,6 +401,39 @@ let test_a_second_restore_replaces_the_autosave () =
       "Evening override." (List.hd autosave.Preset.prompt_overrides).Override.value)
 ;;
 
+(* A save that fails partway leaves the preset it was replacing whole. The
+   autosave is the one copy of the state from before a restore, so a restore
+   whose autosave fails must not cost the previous one. The instruction file
+   for a keeper name longer than a file name may be fails after the overrides
+   and runtime files are written. *)
+let test_a_failed_save_keeps_the_preset_it_was_replacing () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    set_override ~base_path "Morning override.";
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    let broken =
+      { morning with
+        Preset.prompt_overrides = []
+      ; instructions = [ String.make 300 'k', "Never written." ]
+      }
+    in
+    (match Preset.save ~base_path broken with
+     | Ok () -> fail "an instruction file with a 304-byte name was written"
+     | Error _ -> ());
+    let kept = or_fail (Preset.load ~base_path "morning") in
+    check string "the saved override is still there" "Morning override."
+      (List.hd kept.Preset.prompt_overrides).Override.value;
+    check (list (pair string string)) "the saved instructions are still there"
+      morning.Preset.instructions kept.Preset.instructions;
+    let listing = Preset.list ~base_path in
+    check (list string) "only the saved preset is listed" [ "morning" ]
+      (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
+    check (list string) "nothing is unreadable" [] (List.map fst listing.Preset.unreadable);
+    let staging = Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging" in
+    check (array string) "no holder is left behind" [||] (Sys.readdir staging))
+;;
+
 (* Restoring the autosave undoes the latest restore: the state from before it
    comes back, and the autosave then holds the state the undo replaced. *)
 let test_restoring_the_autosave_undoes_the_latest_restore () =
@@ -644,6 +677,8 @@ let () =
             test_override_that_cannot_render_is_skipped_with_the_reason
         ; Alcotest.test_case "a second restore replaces the autosave" `Quick
             test_a_second_restore_replaces_the_autosave
+        ; Alcotest.test_case "a failed save keeps the preset it was replacing" `Quick
+            test_a_failed_save_keeps_the_preset_it_was_replacing
         ; Alcotest.test_case "restoring the autosave undoes the latest restore" `Quick
             test_restoring_the_autosave_undoes_the_latest_restore
         ] )

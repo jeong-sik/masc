@@ -360,6 +360,24 @@ def task_cancel_previous_workspace_receipt(executable):
                 state["foreign"] = True
                 h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
                 h.drain_until_quiet(process, fd, output)
+                # The same key is the TUI's manual refresh, so pressing it to
+                # observe the mismatch starts a revalidation pass, and its
+                # scoped follow-up chains a second one. Both end with a
+                # trailing identity re-read; settle on that trailing read
+                # before opening the receipt window, so the window measures
+                # the receipt path alone and not the refresh tail.
+                for _ in range(4):
+                    before_settling = (state["health_reads"], state["history_reads"])
+                    h.drain_until_quiet(process, fd, output)
+                    time.sleep(0.5)
+                    h.drain_until_quiet(process, fd, output)
+                    after_settling = (state["health_reads"], state["history_reads"])
+                    if before_settling == after_settling:
+                        break
+                else:
+                    raise AssertionError(
+                        "refresh tail did not settle: "
+                        + repr((state["health_reads"], state["history_reads"])))
                 before = (state["health_reads"], state["history_reads"])
                 start = len(output)
                 release.set()

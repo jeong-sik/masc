@@ -355,6 +355,12 @@ a highlighted cursor row. While selecting, the lower panel identifies the
 Keeper, its observed health and runtime; it labels the current conversation
 separately. Short viewports give those detail rows back to the list.
 
+The same list treatment is used beside Work, Tasks, Board, Approvals, Schedules,
+Task Review, Verdicts and Fusion details. Titles and counts sit apart, label
+columns stay aligned, and only the pane holding keyboard focus reverses the
+selected row. The [layout language](design/tui/LAYOUT-LANGUAGE.md) records the
+shared direction and which custom surfaces still have separate renderers.
+
 ### The Activity pane
 
 Home keeps the Recent pane closed by default even on a wide terminal. An

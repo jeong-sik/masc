@@ -166,8 +166,7 @@ let test_decode_exact_operation_state () =
   List.iter (fun json ->
     check bool "malformed or mismatched authority cannot settle a journal" true
       (Result.is_error (Log.decode_operation_state ~operation_id:"exact" json)))
-    [ `Null
-    ; `List []
+    [ `Null; `Bool false; `List []; `String "not an operation"
     ; body ["state", `String "surprise"]
     ; body ["state", `String "Cancelled"; "completed_at", `Float nan]
     ; body ["state", `String "Failed"; "completed_at", `Float 4.]

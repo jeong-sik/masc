@@ -1,0 +1,1 @@
+- Record the chat complexity audit, source-backed event-order and identity findings, repaired scopes, and exact executed evidence.

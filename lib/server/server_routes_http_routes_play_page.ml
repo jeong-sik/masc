@@ -258,12 +258,15 @@ function connectionSettled() {
 }
 
 function end(text) {
+  if (ended) return;
   // Check storage at the forget boundary too, including authentication
   // failures delivered to a restored document with an older cached state.
   if (token !== '' && !connectionSettled()) return;
   ended = true;
+  if (token !== '') {
+    try { sessionStorage.removeItem(SESSION_KEY); } catch (_) { /* Storage can be disabled. */ }
+  }
   token = '';
-  try { sessionStorage.removeItem(SESSION_KEY); } catch (_) { /* Storage can be disabled. */ }
   setStatus('disconnect', '');
   setStatus('invitation', '');
   setControlsEnabled(false);

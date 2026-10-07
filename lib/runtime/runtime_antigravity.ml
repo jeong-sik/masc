@@ -167,7 +167,7 @@ type stream_event =
       ; text : string
       }
   | Native_tool_started of Runtime_native_tools.observation
-  | Native_tool_finished of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
   | Usage_reported of
       { conversation_id : string
       ; model : string
@@ -814,8 +814,14 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
            match step_state with
            | Active ->
              emit_stream_event on_stream_event (Native_tool_started observation)
-           | Done | Step_error ->
-             emit_stream_event on_stream_event (Native_tool_finished observation));
+           | Done ->
+             emit_stream_event on_stream_event
+               (Native_tool_finished {observation;
+                 completion={outcome=Runtime_native_tools.Completion_reported; exit_code=None}})
+           | Step_error ->
+             emit_stream_event on_stream_event
+               (Native_tool_finished {observation;
+                 completion={outcome=Runtime_native_tools.Error_reported; exit_code=None}}));
          Ok
            { state with
              tool_steps =

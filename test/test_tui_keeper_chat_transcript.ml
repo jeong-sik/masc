@@ -2806,7 +2806,7 @@ let test_native_tools_are_observations_without_execution_receipts () =
     | [call] -> call | calls -> failf "expected one native step, got %d" (List.length calls) in
   check tool_outcome "provider step runs; arguments are not inferred" Transcript.Native_running (call ()).outcome;
   feed t [Live.Native_tool_started {occurrence;tool_name=Some "Read"};
-          Live.Native_tool_ended {occurrence}; Live.Native_tool_ended {occurrence}];
+          Live.Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed}; Live.Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed}];
   check tool_outcome "provider end is not a result receipt" Transcript.Native_ended (call ()).outcome;
   check (option string) "no invented physical execution" None (call ()).execution_id;
   feed t [Live.Tool_result {occurrence; execution_id="wrong-authority"}];
@@ -2816,7 +2816,7 @@ let test_native_tools_are_observations_without_execution_receipts () =
      exercises the compact group's summary without inventing a MASC receipt. *)
   let second = {occurrence with block_index=8; tool_call_id=Some "native-8"} in
   feed t [Live.Native_tool_started {occurrence=second;tool_name=Some "Search"};
-          Live.Native_tool_ended {occurrence=second}];
+          Live.Native_tool_ended {occurrence=second; completion=Runtime_native_tools.end_observed}];
   let rows = Transcript.project_tool_block Transcript.Compact
       (Transcript.tool_block (Transcript.tool_calls t)) in
   check tool_outcome "collapsed tools retain native outcome" Transcript.Native_ended
@@ -2830,7 +2830,7 @@ let test_response_boundaries_preserve_origins () =
     "tool round", [Live.Text "COMMENTARY"] @ read_file_call;
     "native tool round", [Live.Text "COMMENTARY";
       Live.Native_tool_started {occurrence=occurrence "native";tool_name=Some "Read"};
-      Live.Native_tool_ended {occurrence=occurrence "native"}];
+      Live.Native_tool_ended {occurrence=occurrence "native"; completion=Runtime_native_tools.end_observed}];
     "provider response", [Live.Text "COMMENTARY";
       Live.Stream_model_started {message_id=Some "new";model="glm";usage=None}];
     "retry", [Live.Text "COMMENTARY";

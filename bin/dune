@@ -433,7 +433,7 @@
  (name masc_tui_keeper_chat_projection)
  (wrapped false)
  (modules masc_tui_keeper_chat_projection)
- (libraries
+ (libraries masc.runtime
   masc.sse_wire
   masc
   masc.string_util
@@ -464,7 +464,7 @@
  (name masc_tui_keeper_chat_live)
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
- (libraries masc masc.masc_types masc_tui_keeper_chat_projection
+ (libraries masc.runtime masc masc.masc_types masc_tui_keeper_chat_projection
   masc.sse_wire yojson))
 
 (library
@@ -645,7 +645,7 @@
  (name masc_tui_keeper_chat_transcript)
  (wrapped false)
  (modules masc_tui_keeper_chat_transcript)
- (libraries
+ (libraries masc.runtime
   masc
   masc.keeper_tool_name
   masc_tui_keeper_chat_live
@@ -1824,7 +1824,7 @@
  (name masc_tui_render_chat)
  (wrapped false)
  (modules masc_tui_render_chat)
- (libraries masc_tui_message_input
+ (libraries masc.runtime masc_tui_message_input
   masc.masc_types
   masc_tui_keeper_chat_live
   masc.keeper_portrait

@@ -1649,6 +1649,7 @@ type keeper_stream_worker_event =
       * string
       * int
   | Stream_event of int * Agent_core.Types.sse_event
+  | Stream_native_tool_completion of int * int * string option * Runtime_native_tools.completion
   | Stream_chat_event of Keeper_chat_events.keeper_chat_event
   | Stream_client_disconnected
   | Stream_terminal of
@@ -1863,7 +1864,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       Atomic.set client_disconnected true;
       let (_ : bool) = Eio.Promise.try_resolve client_disconnect_resolver () in
       ()
-    | (Stream_runtime_attempt_started _ | Stream_event _ | Stream_chat_event _) as event ->
+    | (Stream_runtime_attempt_started _ | Stream_event _ | Stream_native_tool_completion _ | Stream_chat_event _) as event ->
         if !closed
         then observe_stream_event_cutoff "writer_closed"
         else if Atomic.get terminal_pushed
@@ -2040,6 +2041,10 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
           ~tool_source_map
+      | Keeper_hooks_agent_core.Native_tool_completion {block_index; tool_call_id; completion} ->
+        push_worker_event (Stream_native_tool_completion
+          (Keeper_stream_tool_accum.current_stream_scope worker_tool_accum, block_index, tool_call_id, completion));
+        Ok ()
       | Keeper_hooks_agent_core.Official_tool_result { block_index; tool_call_id; execution_id } ->
         (match Keeper_stream_tool_accum.record_official_execution_id worker_tool_accum
                  ~block_index ~tool_call_id ~execution_id with
@@ -2761,6 +2766,12 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
             ~runtime_id ~attempt_index ~previous_scope
             (publish_held_stream_text bridge_state)
         in
+        List.iter (Keeper_chat_events.publish events) translated.chat_events;
+        consume_worker_events translated.bridge_state
+    | `Worker_event (Stream_native_tool_completion (stream_scope, block_index, tool_call_id, completion)) ->
+        let translated = Keeper_chat_agent_core_stream_bridge.finish_native_tool
+          ~redact_text ~stream_scope ~block_index ~tool_call_id completion
+          (publish_held_stream_text bridge_state) in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
     | `Worker_event (Stream_chat_event event) ->

@@ -86,7 +86,7 @@ let continuation_checkpoint_to_json ~redact_text
      @ json_opt "request_id"
          (Option.map (fun value -> `String value) event.request_id))
 
-let native_tool_to_json (tool : Keeper_chat_events.native_tool) =
+let native_tool_to_json ?completion (tool : Keeper_chat_events.native_tool) =
   `Assoc
     ([ "toolStreamScope", `Int tool.occurrence.stream_scope
      ; "toolCallBlockIndex", `Int tool.occurrence.block_index
@@ -96,7 +96,8 @@ let native_tool_to_json (tool : Keeper_chat_events.native_tool) =
      @ json_opt "toolCallId"
          (Option.map (fun value -> `String value) tool.tool_call_id)
      @ json_opt "toolCallName"
-         (Option.map (fun value -> `String value) tool.tool_call_name))
+         (Option.map (fun value -> `String value) tool.tool_call_name)
+     @ json_opt "completion" (Option.map Runtime_native_tools.completion_to_json completion))
 
 let project ~timestamp ~redact_text ~redact_json state event =
   let open Keeper_chat_events in
@@ -222,8 +223,9 @@ let project ~timestamp ~redact_text ~redact_json state event =
                      (continuation_checkpoint_to_json ~redact_text event))
   | Native_tool_start tool ->
       state, Some (custom ~timestamp ~redact_json state Native_tool_start (native_tool_to_json tool))
-  | Native_tool_end tool ->
-      state, Some (custom ~timestamp ~redact_json state Native_tool_end (native_tool_to_json tool))
+  | Native_tool_end (tool, completion) ->
+      let value = native_tool_to_json ~completion tool in
+      state, Some (custom ~timestamp ~redact_json state Native_tool_end value)
   | Tool_call_start { occurrence; tool_call_id; tool_call_name } ->
       ( state
       , Some

@@ -1,0 +1,1 @@
+- Keep Codex native tool status and exit code, Claude tool-result error flags, and Antigravity completion/error observations in the Keeper chat journal and Tools rows without treating them as MASC execution receipts.

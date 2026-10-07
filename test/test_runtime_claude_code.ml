@@ -1264,7 +1264,7 @@ let test_api_diagnostic_preserves_native_effects () =
             | [ Native_tool_started
                   { identity = Some (Runtime_native_tools.Call_id "native-call-1"); _ }
               ; Native_tool_finished
-                  { identity = Some (Runtime_native_tools.Call_id "native-call-1"); _ }
+                  { observation = { identity = Some (Runtime_native_tools.Call_id "native-call-1"); _ }; completion = _ }
               ] -> ()
             | _ -> fail "diagnostic lost native tool start or completion"))
     [ [ Emit native_tool_assistant; Emit native_tool_result; Emit api_error_assistant ], 1
@@ -1925,10 +1925,10 @@ let test_stream_events_preserve_native_tool_origin () =
               ; origin = Runtime_native_tools.Built_in
               }
           ; Native_tool_finished
-              { identity = Some (Runtime_native_tools.Call_id "native-call-1")
+              { observation = { identity = Some (Runtime_native_tools.Call_id "native-call-1")
               ; tool_name = Some "Read"
               ; origin = Runtime_native_tools.Built_in
-              }
+              }; completion = _ }
           ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
           ; Turn_finished { text = "MASC_CLAUDE_OK" }
           ] -> ()

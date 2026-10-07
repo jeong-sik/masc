@@ -43,7 +43,8 @@ type delta =
   | Thinking of string
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
-  | Native_tool_ended of { occurrence : tool_occurrence }
+  | Native_tool_ended of
+      { occurrence : tool_occurrence; completion : Runtime_native_tools.completion }
   | Tool_started of
       { occurrence : tool_occurrence
       ; tool_name : string
@@ -204,7 +205,13 @@ let custom_deltas_unvalidated fields =
            | Ok occurrence ->
                if event = "KEEPER_NATIVE_TOOL_START" then
                  [Native_tool_started {occurrence; tool_name = string_field value "toolCallName"}]
-               else [Native_tool_ended {occurrence}])
+               else
+                 (match List.assoc_opt "completion" value with
+                  | None -> [Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed}]
+                  | Some json ->
+                      match Runtime_native_tools.completion_of_json json with
+                      | Ok completion -> [Native_tool_ended {occurrence; completion}]
+                      | Error detail -> [Undecodable (event ^ ": " ^ detail)]))
   | Some "KEEPER_THINKING_DELTA" -> (
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_THINKING_DELTA value is not an object" ]

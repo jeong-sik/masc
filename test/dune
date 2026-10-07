@@ -3291,7 +3291,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries masc.runtime masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -3401,7 +3401,7 @@
 (test
  (name test_tui_keeper_chat_transcript)
  (modules test_tui_keeper_chat_transcript)
- (libraries
+ (libraries masc.runtime
   alcotest
   fmt
   masc
@@ -9741,3 +9741,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_memory_workspace_pty)))
+
+(library
+ (name native_tool_outcome_fixture)
+ (wrapped false)
+ (modules native_tool_outcome_fixture)
+ (libraries alcotest astring yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_tui_native_tool_outcomes)
+ (modules test_tui_native_tool_outcomes)
+ (libraries alcotest yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui native_tool_outcome_fixture
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))

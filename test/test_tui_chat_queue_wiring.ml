@@ -4932,7 +4932,7 @@ let test_delivery_states_and_observed_work_are_identifiable () =
         {stream_scope=0; block_index=1; provider_message_id=None; tool_call_id=Some "native-read"} in
       Tui_types.turn_log_add ~now:5. entry.log ~seq:(Some 2)
         (Live.Native_tool_started {occurrence; tool_name=Some "Read"});
-      Tui_types.turn_log_add ~now:6. entry.log ~seq:(Some 3) (Live.Native_tool_ended {occurrence});
+      Tui_types.turn_log_add ~now:6. entry.log ~seq:(Some 3) (Live.Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed});
       Tui_types.turn_log_add ~now:7. entry.log ~seq:(Some 4) (Live.Text "OBSERVED_ANSWER");
       let streaming = screen () in
       List.iter (fun marker -> check bool ("default work label: " ^ marker) true (has streaming marker))

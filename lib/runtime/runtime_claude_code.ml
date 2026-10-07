@@ -270,7 +270,7 @@ type stream_event =
       }
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
-  | Native_tool_finished of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
   | Usage_windows_reported of Runtime_provider_usage_window.report
   | Conversation_compacted
   | Usage_reported of
@@ -1160,7 +1160,7 @@ let parse_assistant ~expected_session_id ~tools fields =
     Ok (origin, uuid, model, blocks, message_id, usage)
 ;;
 
-let native_tool_result_ids ~expected_session_id fields =
+let native_tool_results ~expected_session_id fields =
   let stage = "user message" in
   let* session_id = optional_string stage "session_id" fields in
   let* () =
@@ -1173,14 +1173,21 @@ let native_tool_result_ids ~expected_session_id fields =
   | Some (`Assoc message_fields) ->
     (match List.assoc_opt "content" message_fields with
      | Some (`List blocks) ->
-       let rec loop ids = function
-         | [] -> Ok (List.rev ids)
+       let rec loop results = function
+         | [] -> Ok (List.rev results)
          | `Assoc block_fields :: rest ->
            (match List.assoc_opt "type" block_fields with
             | Some (`String "tool_result") ->
               let* call_id = optional_string stage "tool_use_id" block_fields in
-              loop (Option.to_list (non_blank call_id) @ ids) rest
-            | Some (`String _) | None -> loop ids rest
+              let* is_error = match List.assoc_opt "is_error" block_fields with
+                | None -> Ok None
+                | Some (`Bool value) -> Ok (Some value)
+                | Some _ -> protocol_error stage "tool_result is_error must be a boolean"
+              in
+              let completion : Runtime_native_tools.completion =
+                {outcome=Result_received {is_error}; exit_code=None} in
+              loop (Option.to_list (Option.map (fun id -> id, completion) (non_blank call_id)) @ results) rest
+            | Some (`String _) | None -> loop results rest
             | Some _ -> protocol_error stage "content block type must be a string")
          | _ :: _ -> protocol_error stage "user content block must be an object"
        in
@@ -1666,15 +1673,15 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ; usage
       }
   | "user" ->
-    let* finished_ids = native_tool_result_ids ~expected_session_id fields in
+    let* finished = native_tool_results ~expected_session_id fields in
     List.iter
-      (fun call_id ->
+      (fun (call_id, completion) ->
          match Hashtbl.find_opt native_tool_calls call_id with
          | None -> ()
          | Some observation ->
            Hashtbl.remove native_tool_calls call_id;
-           emit_stream_event on_stream_event (Native_tool_finished observation))
-      finished_ids;
+           emit_stream_event on_stream_event (Native_tool_finished {observation; completion}))
+      finished;
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed

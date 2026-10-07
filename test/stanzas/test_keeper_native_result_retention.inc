@@ -1,4 +1,4 @@
 (test
  (name test_keeper_native_result_retention)
  (modules test_keeper_native_result_retention)
- (libraries masc alcotest))
+ (libraries masc masc.agent_core alcotest))

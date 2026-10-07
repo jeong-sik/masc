@@ -686,6 +686,17 @@ status: reference
   → [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
   [Server_routes_http_keeper_stream](../../lib/server/server_routes_http_keeper_stream.mli)
 
+**Keeper Quiet Final (키퍼 조용한 종료)**
+: 새 입력 없는 자율 wake(예정 깨움) 턴에서, 모델이 명시적으로 빈 텍스트 final(`EndTurn`)로
+  닫는 것을 완성으로 인정하는 응답 정책(#41747). `completion_policy`가 `Require_progress`
+  (직접 대화의 기본)일 때는 보이는 텍스트나 도구 진행이 필요하지만, 결과 전달이 예정되지
+  않은 Schedule_due 사건만 있거나 사건이 없고 대기 메시지가 비어 있으면 `Allow_quiet_final`
+  로 완성을 허용한다. 일반 Board 게시글·댓글 등 다른 모든 사건은 진행을 요구한다.
+  경계: 내용 결손, 숨은 추론만의 종료, 중단된 출력, 프로바이더 실패는 조용한 종료가
+  아니며 엄격히 오류로 남는다 — 문장을 해석해 침묵을 완성으로 읽지 않는다.
+  → [Keeper_tooling.Response](../../lib/keeper_tooling/response.mli) ·
+  [Keeper_agent_run](../../lib/keeper/keeper_agent_run.ml)
+
 **Keeper Direct Native Call (키퍼 직접 네이티브 호출)**
 : 한 직접 Keeper 채팅 오퍼레이션(`Keeper_chat_operation`) 안에서 실행되는 단일
   네이티브 Agent API 호출 단위(#41655). 입력 접수(`input admission`) 직후이자
@@ -1493,6 +1504,19 @@ status: reference
 : 서버가 관리하는 브라우저 세션. Keeper 는 `masc_browser_*` 도구로 탭을 읽고
   조작한다. Lane Add-on의 `browser_document` 원천이 이 세션을 관측한다.
   → [Browser_lane](../../lib/browser_lane/browser_lane.ml)
+
+**Trusted Hover (신뢰 호버)**
+: 브라우저 연결에서 클릭 없이 포인터를 올리는 `hover_at` 조작이, 관측된 URL과 뷰포트
+  (`expectedUrl`·`viewport`) 가드를 통과한 뒤에만 실행되는 계약(#41620). 첨부된 live
+  Firefox BiDi 탭과 자동화 레인에서 동작하며, 가드가 낡은 URL이나 뷰포트에서 실패하면
+  입력을 보내기 전에 `Rejected_before_effect`로 거절한다 — 포인터 움직임도 효과이므로
+  조용한 실패 대신 거절 사유를 남긴다. WebExtension 경로의 hover는 서버에서 큐잉 전에
+  거절한다. 경계: 가드 검증과 입력 주입은 원자적 트랜잭션이 아니어서 검증 직후 조작자가
+  페이지를 변경할 수 있고, 결과 불확실(`unknown outcome`) 시 재시도(write replay) 없이
+  클라이언트를 중단한다.
+  → [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
+  [Browser_interaction](../../lib/browser_interaction.mli) ·
+  [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)
 
 **Machine Change Mark (기계 변경 표식)**
 : MSX Lane·DOS Lane 기계의 화면이 바뀌었는지 싸게 묻기 위한 표식. 변경 횟수(`count`)와

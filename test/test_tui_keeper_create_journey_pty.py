@@ -229,6 +229,13 @@ def creation_preserves_retained_queue(executable):
             interact=interact, http_fixtures=fixture.fixtures,
             prepare_workspace=prepare,
             extra_env={"EDITOR": f"{shlex.quote(sys.executable)} {shlex.quote(str(editor))}"},
+            # Boot reads the workspace identity several times, and each
+            # change withdraws the turns rows the chat status is drawn from;
+            # they come back on the next refresh. At the 60s default that is
+            # past open_atomic_chat's wait, so the running turn's status
+            # never shows. Every other open_atomic_chat scenario runs a short
+            # cadence for the same reason (#41164).
+            refresh=0.2,
         )
 
 

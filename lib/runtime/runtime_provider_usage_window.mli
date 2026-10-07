@@ -12,8 +12,8 @@
     time MASC heard it.
 
     It is an observation.  Routing, candidate ordering, admission and retry
-    do not read this table (an HTTP 403 usage read can separately rest its
-    scope through {!Runtime_provider_usage_read.read_after_account_refusal}
+    do not read this table (a usage read after an HTTP 403, or after a 429
+    that states no wait, can separately rest its scope through {!Runtime_provider_usage_read.read_after_account_refusal}
     on {!Runtime_quota_window}). Codex reads preserve the refusal observation
     because the rejected bucket is not attributed: codex-cli 0.156.0's protocol schema says clients must not
     infer recovery from percentages or reset times, so no availability is

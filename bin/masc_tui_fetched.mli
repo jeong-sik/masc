@@ -42,7 +42,8 @@ val start : equal:('k -> 'k -> bool) -> ('k, 'a) t -> key:'k -> ('k, 'a) start_r
 
 val clear : ('k, 'a) t -> ('k, 'a) t
 val suspend : ('k, 'a) t -> ('k, 'a) t
-(** Retire a pending read while retaining its last completed value. *)
+(** Retire a pending read while retaining its key and last completed value.
+    Initial reads become [Failed]; previous values become explicitly [Stale]. *)
 val request_key : 'k request -> 'k
 val same_request : equal:('k -> 'k -> bool) -> 'k request -> 'k request -> bool
 val is_current : equal:('k -> 'k -> bool) -> ('k, 'a) t -> 'k request -> bool

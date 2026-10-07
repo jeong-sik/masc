@@ -11,7 +11,7 @@ val apply_file : Masc_tui_types.state -> string Masc_tui_fetched.request ->
   (string, string) result -> unit
 val apply_blame : Masc_tui_types.state -> string Masc_tui_fetched.request ->
   (Masc.Tui_decode.blame_block list, string) result -> unit
-val start_lsp_question : Masc_tui_types.state -> question:string -> symbol:string ->
+val start_lsp_question : ?line:int -> Masc_tui_types.state -> question:string -> symbol:string ->
   Masc_tui_types.code_lsp_query Masc_tui_fetched.request option
 (** Capture the source file and scope. Identical in-flight questions are
     suppressed; a different question owns a new request identity. *)

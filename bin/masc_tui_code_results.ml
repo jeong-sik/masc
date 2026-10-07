@@ -132,13 +132,13 @@ let apply_blame (state : state) request result =
 
 ;;
 
-let start_lsp_question (state : state) ~question ~symbol =
+let start_lsp_question ?line (state : state) ~question ~symbol =
   match Masc_tui_fetched.current_request state.code_file with
   | None -> None
   | Some file ->
       let key = { clq_scope = state.code_scope; clq_file = file;
                   clq_question = question; clq_symbol = symbol;
-                  clq_line = state.code_file_cursor + 1 } in
+                  clq_line = Option.value ~default:(state.code_file_cursor + 1) line } in
       (match Masc_tui_fetched.start ~equal:code_lsp_query_equal state.code_lsp_query ~key with
        | Masc_tui_fetched.Already_loading -> None
        | Masc_tui_fetched.Started (next, request) ->

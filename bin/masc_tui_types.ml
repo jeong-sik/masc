@@ -3291,6 +3291,14 @@ let runtime_param_edit_clear edit =
   { edit with rpe_draft = ""; rpe_replace_on_type = false }
 
 
+type task_handoff = {
+  th_workspace : Tui_decode.server_identity;
+  th_keeper : string;
+  th_task_id : string;
+  th_title : string;
+  th_body : string;
+}
+
 (* Assigning a voice to one keeper. Separate from the wizard because it is
    shaped differently: the wizard walks questions to write one endpoint, this
    walks two lists to write one line of [voice.tts.agent_voices].
@@ -3310,6 +3318,7 @@ type voice_agent_session =
             the way the wizard carries it. *)
   ; vas_status : string option
   ; vas_saving : bool
+  ; vas_lookup : (string * string option) option
   }
 
 let voice_agent_open ~agents ~revision =
@@ -3320,6 +3329,7 @@ let voice_agent_open ~agents ~revision =
   ; vas_revision = revision
   ; vas_status = None
   ; vas_saving = false
+  ; vas_lookup = None
   }
 
 (* The two axes move on their own keys -- the keeper under up and down, the
@@ -5004,6 +5014,7 @@ type state = {
   mutable help_open: bool;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
+  mutable keeper_deletions_retry_receipt: (int * string) option;
   mutable keeper_deletions_generation: int;
   mutable keeper_deletions_cursor: int;
   mutable keeper_deletions_scroll: int;
@@ -5285,6 +5296,8 @@ type state = {
   (* The keeper-voice screen, drawn instead of the voice pane while it is
      open. Never both this and the wizard: each is a whole surface. *)
   mutable voice_agent_voices: voice_agent_session option;
+  mutable task_handoffs_pending: task_handoff list;
+  mutable lane_installer_read_resume: (int * Masc_tui_lane_installer.read) option;
   (* The number the next wizard save is sent under. Never reused, so a reply
      for a save made by a session that has since closed cannot match the one
      open now. *)
@@ -6358,6 +6371,7 @@ type state = {
   mutable msg_older_cursor: float option;
   mutable msg_older_exist: bool;
   mutable msg_older_loading: bool;
+  mutable msg_older_resume: (string * float) option;
   mutable msg_older_error: string option;
   (* Presentation-only defaults come from the CLI and can be changed in the
      pane without mutating the transcript. *)
@@ -6520,9 +6534,11 @@ let suspend_workspace_readings state =
         {view with load=Browser_lane_view.Idle; refresh_pending=None}
     | _ -> view) state.browser_lane;
   let suspend_lane (view : Masc_tui_lane_addons.t) =
-    if state.lane_addons_reading = Some view.generation then
+    if state.lane_addons_reading = Some view.generation then begin
+      Option.iter (fun read -> state.lane_installer_read_resume <- Some (view.generation, read))
+        (Option.bind view.installer Masc_tui_lane_installer.pending_read);
       {view with loading=false; installer=Option.map Masc_tui_lane_installer.suspend_read view.installer}
-    else view in
+    end else view in
   state.lane_addons <- Option.map suspend_lane state.lane_addons;
   state.lane_addons_cached <- suspend_lane state.lane_addons_cached;
   state.lane_addons_reading <- None;
@@ -6587,6 +6603,11 @@ let suspend_workspace_readings state =
   state.msg_file_changes_loading <- false;
   state.msg_file_changes_refresh_pending <- false;
   state.msg_history_inflight <- None;
+  if state.msg_older_loading then
+    state.msg_older_resume <-
+      (match state.msg_target_keeper_name, state.msg_older_cursor with
+       | Some keeper, Some before -> Some (keeper, before)
+       | _ -> None);
   state.msg_older_loading <- false;
   state.msg_journal_inflight <- [];
   state.context_inspector_loading <- false;
@@ -6622,6 +6643,10 @@ let apply_keeper_deletions_read state ~generation
       match result with
       | Error _ -> ()
       | Ok inventory ->
+        (match state.keeper_deletions_retry_receipt with
+         | Some (received_at, _) when generation > received_at ->
+             state.keeper_deletions_retry_receipt <- None
+         | _ -> ());
         let same_operation row = match selected with
           | None -> false
           | Some previous -> Masc.Keeper_shutdown_types.Operation_id.equal
@@ -8564,6 +8589,7 @@ let create_state
   help_open = false;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;
+  keeper_deletions_retry_receipt = None;
   keeper_deletions_generation = 0;
   keeper_deletions_cursor = 0;
   keeper_deletions_scroll = 0;
@@ -8677,6 +8703,8 @@ let create_state
   voice_setup_error = None;
   voice_wizard = None;
   voice_agent_voices = None;
+  task_handoffs_pending = [];
+  lane_installer_read_resume = None;
   voice_wizard_requests = 0;
   resources_list = None;
   resources_error = None;
@@ -9218,6 +9246,7 @@ let create_state
   msg_older_cursor = None;
   msg_older_exist = false;
   msg_older_loading = false;
+  msg_older_resume = None;
   msg_older_error = None;
   msg_reasoning_visibility = reasoning_visibility;
   (* Chat opens on the answer, not its bookkeeping. The gutter still carries

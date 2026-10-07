@@ -602,10 +602,34 @@ let test_preset_selection_waits_without_owning_an_unconfirmed_read () =
   Alcotest.(check bool) "an admitted read is still deduplicated" true
     (Option.is_none (begin_preset_detail_read state ~name:"selected-preset"))
 
+let test_pending_nested_reader_intents_survive_repeated_suspension () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_older_cursor <- Some 42.;
+  state.msg_older_loading <- true;
+  let loading, _ = match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:"src/a.ml" with
+    | Started (reading, request) -> reading, request
+    | Already_loading -> Alcotest.fail "unexpected initial file owner" in
+  state.code_file <- loading;
+  let installer = Masc_tui_lane_installer.browse () in
+  let installer = Result.get_ok (Masc_tui_lane_installer.begin_catalog ~request_id:7 ~directory:(Some "packages") installer) in
+  state.lane_addons <- Some {state.lane_addons_cached with generation=7; loading=true; installer=Some installer};
+  state.lane_addons_reading <- Some 7;
+  suspend_workspace_readings state;
+  suspend_workspace_readings state;
+  Alcotest.(check (option (pair string (float 0.)))) "older page cursor survives" (Some ("alpha",42.)) state.msg_older_resume;
+  Alcotest.(check (option string)) "pending file key survives" (Some "src/a.ml") (Masc_tui_fetched.current_key state.code_file);
+  Alcotest.(check bool) "package catalog parameters survive" true
+    (state.lane_installer_read_resume = Some (7, Masc_tui_lane_installer.Read_catalog (Some "packages")))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "nested read owners retire without losing selection" `Quick
+      , [ Alcotest.test_case "nested reader intents survive repeated suspension" `Quick
+            test_pending_nested_reader_intents_survive_repeated_suspension
+        ; Alcotest.test_case "nested read owners retire without losing selection" `Quick
             test_nested_read_owners_retire_without_losing_selection
         ; Alcotest.test_case "discarded bundle retires readings before reconfirming A" `Quick
             test_discarded_bundle_retires_readings_before_reconfirming_a

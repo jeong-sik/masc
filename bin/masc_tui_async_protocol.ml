@@ -129,6 +129,7 @@ type async_msg =
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool * string option
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
+  | Keeper_deletion_retry_done of string * (unit, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_msx_tick.response, string) result
   | Msx_activity_loaded of msx_poll_request
@@ -664,7 +665,6 @@ let rec workspace_message_is_read = function
   | Runtime_catalog_loaded _
   | Keeper_tool_approvals_loaded _
   | Sent_image_ready _
-  | Image_render_ready _
   | Keeper_turns_loaded _
   | Gate_snapshot_loaded _
   | Keeper_gate_settings_loaded _
@@ -745,6 +745,7 @@ let rec workspace_message_is_read = function
   | Surface_tool_approval_answered _
   | Keeper_tool_mode_set _
   | Keeper_chat_dispatch_blocked _
+  | Keeper_deletion_retry_done _
   | Keeper_action_done _
   | Board_new_post_done _
   | Board_vote_done _
@@ -777,6 +778,7 @@ let rec workspace_message_is_read = function
   | Github_token_saved _
   | Task_dispatched _
   | Task_dispatch_failed _
+  | Image_render_ready _
     -> false
 
 let workspace_message_admitted state ~authority ~reading message =

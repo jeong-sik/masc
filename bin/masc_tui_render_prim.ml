@@ -5040,6 +5040,8 @@ let context_split_pane_height ~content_height ~common_len =
 ;;
 
 let keeper_deletions_lines (state : state) ~cols =
+  let receipt = Option.fold ~none:[] ~some:(fun (_, message) -> [message])
+      state.keeper_deletions_retry_receipt in
   let lines = match state.keeper_deletions with
     | None -> ["삭제 기록을 불러오는 중입니다."]
     | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail]
@@ -5076,7 +5078,7 @@ let keeper_deletions_lines (state : state) ~cols =
   in
   List.concat_map (fun line ->
     Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
-      (Terminal_text.single_line line)) lines
+      (Terminal_text.single_line line)) (receipt @ lines)
 
 (* The deletion overlay's keys for what it shows. [j/k] steps between records
    and [t] retries the selected record only when it can be retried
@@ -5097,7 +5099,8 @@ let keeper_deletions_hints (state : state) ~scrollable =
     ((if operations > 1 then [ "j/k:작업" ] else [])
      @ (if scrollable then [ "J/K/PgUp/PgDn:원문" ] else [])
      @ [ "r:조회" ]
-     @ (if can_retry then [ "t:정리 재시도" ] else [])
+     @ (if can_retry && Option.is_none state.keeper_deletions_retry_receipt
+        then [ "t:정리 재시도" ] else [])
      @ [ "Esc:닫기" ])
 
 ;;

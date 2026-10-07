@@ -102,9 +102,10 @@ let clear state = { state with status = Status_absent }
 
 let suspend state =
   let status = match state.status with
-    | Status_loading _ -> Status_absent
-    | Status_refreshing (request, value, None) -> Status_ready (request, value)
-    | Status_refreshing (request, value, Some error) -> Status_stale (request, value, error)
+    | Status_loading request ->
+        Status_failed (request, "Reading suspended; waiting for workspace identity.")
+    | Status_refreshing (request, value, _) ->
+        Status_stale (request, value, "Reading suspended; waiting for workspace identity.")
     | (Status_absent | Status_ready _ | Status_stale _ | Status_failed _) as status -> status
   in
   { state with status }

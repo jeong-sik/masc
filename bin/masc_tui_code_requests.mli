@@ -49,7 +49,8 @@ val launch_blame_load
     Cancellation propagates; a missing switch delivers
     the existing error response instead of blocking on the request. *)
 val start_lsp_question
-  :  Masc_tui_types.state
+  :  ?line:int
+  -> Masc_tui_types.state
   -> host:string
   -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
   -> report:(string -> string -> unit)

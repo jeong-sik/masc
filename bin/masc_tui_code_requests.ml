@@ -212,6 +212,7 @@ let launch_blame_load state ~host ~deliver ~path =
    question rides the surface's workspace axes, so a keeper checkout and a
    repository ask about their own bytes. *)
 let start_lsp_question
+      ?line
       state
       ~host
       ~deliver
@@ -223,7 +224,7 @@ let start_lsp_question
   match Masc_tui_fetched.current_key state.code_file with
   | None -> report "error" "no file is open on the Code surface"
   | Some path ->
-    (match Masc_tui_code_results.start_lsp_question state ~question ~symbol with
+    (match Masc_tui_code_results.start_lsp_question ?line state ~question ~symbol with
      | None -> ()
      | Some request ->
        let query = Masc_tui_fetched.request_key request in

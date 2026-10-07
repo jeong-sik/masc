@@ -2948,13 +2948,26 @@ let test_keeper_stream_bridge_preserves_native_tool_origin () =
         ; tool_call_id = Some "native-1"
         ; tool_call_name = Some "commandExecution"
         }
+    ; Native_tool_start native_start
     ; Agent_core_content_block_stop { index = 7 }
+    ; Native_tool_end native_end
     ] ->
     check string
       "typed native content origin"
       Runtime_native_tools.stream_content_type
-      content_type
-  | _ -> fail "native tool origin was rejected or promoted to a MASC tool"
+      content_type;
+    List.iter
+      (fun (label, (tool : Keeper_chat_events.native_tool)) ->
+        check int (label ^ " stream scope") 0 tool.occurrence.stream_scope;
+        check (option string) (label ^ " provider message id") None
+          tool.occurrence.provider_message_id;
+        check int (label ^ " block index") 7 tool.occurrence.block_index;
+        check (option string) (label ^ " tool id") (Some "native-1")
+          tool.tool_call_id;
+        check (option string) (label ^ " tool name") (Some "commandExecution")
+          tool.tool_call_name)
+      [ "native start", native_start; "native end", native_end ]
+  | _ -> fail "expected native lifecycle observations around the content block"
 
 let test_keeper_stream_bridge_rejects_tool_args_without_start () =
   let open Agent_core.Types in

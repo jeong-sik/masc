@@ -255,6 +255,8 @@ let since = null;
 let lastActivityKey = null;
 let observedActivityKey = null;
 let latestSeatRequest = null;
+let frameSeatRequest = null;
+let framePadRequest = null;
 let nextSeatPollAt = 0;
 let handoffRead = null;
 let ended = false;
@@ -283,7 +285,6 @@ let roomBefore = null;
 let roomSnapshot = null;
 let roomMessagesKey = null;
 let pendingChat = null;
-let roomAbort = null;
 let roomReadAbort = null;
 let roomReadRequest = null;
 let roomDetached = false;
@@ -540,9 +541,7 @@ function roomRequest(body) {
     sessionStorage.setItem(ROOM_CLIENTS_KEY, JSON.stringify([...roomClients]));
     const abort = new AbortController();
     if (body.action === 'read') roomReadAbort = abort;
-    else roomAbort = abort;
     return api('POST', ROOM_PATH, body, abort.signal).finally(() => {
-      if (roomAbort === abort) roomAbort = null;
       if (roomReadAbort === abort) roomReadAbort = null;
     });
   };
@@ -910,9 +909,39 @@ function restartFrames() {
   if (frameAbort) frameAbort.abort();
   if (frameTimer !== null) clearTimeout(frameTimer);
   frameTimer = null;
+  frameSeatRequest = null;
+  framePadRequest = null;
   const abort = new AbortController();
   frameAbort = abort;
   void tick(viewRevision, abort);
+}
+
+function refreshFramePad(revision, signal) {
+  if (framePadRequest !== null || seatSavesName === padFor) return;
+  const request = {};
+  framePadRequest = request;
+  void syncPad(signal).catch(() => {
+    if (!ended && !signal.aborted && revision === viewRevision)
+      setStatus('pad', '패드 배치를 읽지 못했어요. 다시 읽고 있어요.');
+  }).finally(() => {
+    if (framePadRequest === request) framePadRequest = null;
+  });
+}
+
+function refreshFrameSeat(revision, signal, activityKey) {
+  if (frameSeatRequest !== null) return;
+  const request = {};
+  frameSeatRequest = request;
+  void refreshSeat(signal).then(result => {
+    if (ended || signal.aborted || revision !== viewRevision) return;
+    if (result) lastActivityKey = activityKey;
+    refreshFramePad(revision, signal);
+  }).catch(() => {
+    if (!ended && !signal.aborted && revision === viewRevision)
+      setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.');
+  }).finally(() => {
+    if (frameSeatRequest === request) frameSeatRequest = null;
+  });
 }
 
 async function tick(revision, abort) {
@@ -968,10 +997,9 @@ async function poll(revision, signal) {
       const activityChanged = key !== observedActivityKey && (observedActivityKey !== null || key !== '');
       observedActivityKey = key;
       const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
-      if ((activityChanged || (performance.now() >= nextSeatPollAt && (key !== lastActivityKey || waitingForController || initialConnectIntent)))
-          && await refreshSeat(signal)) lastActivityKey = key;
-      if (signal.aborted || revision !== viewRevision) return;
-      await syncPad(signal);
+      if (activityChanged || (performance.now() >= nextSeatPollAt && (key !== lastActivityKey || waitingForController || initialConnectIntent)))
+        refreshFrameSeat(revision, signal, key);
+      refreshFramePad(revision, signal);
     }
   }
 }
@@ -1005,7 +1033,6 @@ async function disconnect() {
     return;
   }
   disconnecting = true;
-  if (roomAbort) roomAbort.abort();
   if (roomReadAbort) roomReadAbort.abort();
   initialConnectIntent = false;
   setControlsEnabled(false);
@@ -1163,8 +1190,7 @@ if (token === '') {
 } else {
   tickRoom();
   starting = refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.'));
-  // A selected machine begins observing immediately even if this initial
-  // seat never answers. Its eventual completion must not create a second loop.
+  // Frame observation does not depend on controller authority being readable.
   restartFrames();
 }
 </script>

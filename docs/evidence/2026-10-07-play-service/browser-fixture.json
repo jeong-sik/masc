@@ -1,6 +1,6 @@
 {
   "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
-  "source_sha256": "781547244f7568281aa2c5f61272886380ff70cf1f8d2010c566d925f1d34094",
+  "source_sha256": "9fb299a6ac0936d58eab8f0042d1464654419c94fae531b75a10f1fb7742e69f",
   "browser_version": "149.0.7827.55",
   "seat_reads": 16,
   "frame_reads": 23,
@@ -118,14 +118,14 @@
       "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
     },
     {
-      "method": "POST",
-      "path": "/api/v1/play/room",
-      "query": ""
-    },
-    {
       "method": "GET",
       "path": "/api/v1/lane-addons/live",
       "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
     },
     {
       "method": "GET",
@@ -319,12 +319,12 @@
     },
     {
       "method": "GET",
-      "path": "/api/v1/play/seat",
+      "path": "/api/v1/play/pad",
       "query": ""
     },
     {
       "method": "GET",
-      "path": "/api/v1/play/pad",
+      "path": "/api/v1/play/seat",
       "query": ""
     },
     {

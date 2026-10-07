@@ -184,6 +184,11 @@ test('an uncertain public message preserves its exact receipt and draft through 
   const reloaded = fixture(gameReply, { storage, hash:'', roomReply });
   await reloaded.settle();
   assert.equal(reloaded.get('chat-text').value, 'Only once');
+  const saved = storage.get('masc.play.room.draft');
+  await reloaded.get('leave').handlers.click();
+  assert.equal(storage.get('masc.play.room.draft'), saved, 'disconnect preserves the unknown receipt after reload');
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  assert.equal(reloaded.requests.some(request => request.method === 'POST'), false);
   reloaded.get('chat-send').handlers.click();
   await reloaded.settle();
   assert.deepEqual(sends[1], sends[0]);
@@ -325,22 +330,25 @@ test('a late DOS frame cannot repaint the selected MSX view', async () => {
   assert.equal(page.rendered.length, 2, 'only the replacement poll loop remains');
 });
 
-test('machine selection begins frames while the initial seat request is still pending', async () => {
+test('default DOS frames keep updating and can switch machines while seat reads stay pending', async () => {
   let finishSeat;
   const page = fixture(request => request.url === '/api/v1/play/seat'
     ? new Promise(resolve => { finishSeat = () => resolve(response(seat)); }) : gameReply(request));
   await page.settle();
-  assert.equal(page.rendered.length, 1);
+  assert.equal(page.rendered.length, 1, 'default DOS starts without a seat response');
+  assert.equal(page.padButton.disabled, true, 'unread ownership does not authorize game inputs');
+  await page.poll();
+  assert.equal(page.rendered.length, 2, 'a hung observer seat read does not hold the next frame');
   page.get('machine-view').value = 'msx';
   page.get('machine-view').handlers.change();
   await page.settle();
   assert.ok(page.requests.some(request => request.url.includes('msx_capture')));
-  assert.equal(page.rendered.length, 2);
+  assert.equal(page.rendered.length, 3);
   finishSeat();
   await page.settle();
-  assert.equal(page.rendered.length, 2, 'late initialization does not restart the selected view');
+  assert.equal(page.rendered.length, 3, 'late initialization does not restart the selected view');
   await page.poll();
-  assert.equal(page.rendered.length, 3);
+  assert.equal(page.rendered.length, 4);
 });
 
 test('the first observed handoff refreshes controller authority before the idle interval', async () => {
@@ -1903,3 +1911,56 @@ for (const ledger of ['{broken', '[null]', '{}']) {
     assert.equal(storage.size, 0);
   });
 }
+
+
+test('revocation cannot forget an earlier unknown public send receipt', async () => {
+  const storage = new Map();
+  let revoked = false;
+  const page = fixture(request => revoked ? response({}, 401) : gameReply(request), {
+    storage, roomReply: ({ body }) => {
+      if (body.action === 'say') throw new Error('receipt lost');
+      return response(emptyRoom);
+    },
+  });
+  await page.settle();
+  page.get('chat-text').value = 'unknown before revocation';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  const saved = storage.get('masc.play.room.draft');
+  revoked = true;
+  await page.poll();
+  assert.equal(page.get('chat-send').disabled, true);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.get('masc.play.room.draft'), saved);
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+});
+
+
+test('frames keep polling while a pad read hangs', async () => {
+  let padReads = 0;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/pad') { padReads += 1; return new Promise(() => {}); }
+    return gameReply(request);
+  });
+  await page.settle();
+  await page.poll();
+  await page.poll();
+  assert.equal(page.rendered.length, 3);
+  assert.equal(padReads, 1, 'frame polling does not duplicate a pending pad read');
+});
+
+
+test('an empty-activity frame retries a failed pad without requiring new seat activity', async () => {
+  let padReads = 0;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/pad') return ++padReads === 1 ? response({}, 503) : response(layout);
+    if (request.url.includes('dos_capture')) return response({ ...frame, activity:[] });
+    return gameReply(request);
+  });
+  await page.settle();
+  assert.equal(padReads, 1);
+  assert.equal(page.get('pad').hidden, true);
+  await page.poll(300);
+  assert.equal(padReads, 2);
+  assert.equal(page.get('pad').hidden, false);
+});

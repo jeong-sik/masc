@@ -20,14 +20,17 @@ const layout = { saves_name: 'game', buttons: [
   { button: 'BTN_SOUTH', label: '결정', keys: ['return'] },
 ] };
 const response = (json, status = 200) => ({ status, json: async () => json });
+const emptyRoom = { messages:[], members:[], has_more:false, presence_seconds:60 };
+const roomMessage = (id, text, who = 'keeper-a') => ({ id, text, who, at:1, speaker:'keeper', machine:'dos' });
+const gameReply = ({ url }) => response(url === '/api/v1/play/seat' ? seat : url === '/api/v1/play/pad' ? layout : frame);
 
-function fixture(reply, { storage = new Map(), hash = '#fixture-token' } = {}) {
+function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomReply = () => response(emptyRoom) } = {}) {
   const nodes = new Map();
   function element() {
     return { textContent: '', className: '', value: '', hidden: false,
       disabled: false, children: [], dataset: {}, handlers: {},
       addEventListener(name, fn) { this.handlers[name] = fn; },
-      append(node) { this.children.push(node); },
+      append(...nodes) { this.children.push(...nodes); },
       replaceChildren() { this.children = []; },
       get options() { return this.children; },
       focus() {},
@@ -61,7 +64,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token' } = {}) {
       createElement: element,
       querySelectorAll: selector => {
         if (selector === '#pad button[data-button]') return [padButton];
-        if (selector === 'button, input, select') return [padButton, get('text'), get('send-text'), get('pass-to'), get('pass')];
+        if (selector === '#game-controls button, #game-controls input, #game-controls select') return [padButton, get('text'), get('send-text'), get('pass-to'), get('pass')];
         return [];
       },
     },
@@ -70,19 +73,27 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token' } = {}) {
     history: { replaceState(_state, _title, url) { const at = url.indexOf('#'); location.hash = at < 0 ? '' : url.slice(at); } },
     window: { addEventListener(name, handler) { windowHandlers.set(name, handler); } },
     navigator: { getGamepads: () => [] },
+    crypto: require('node:crypto').webcrypto,
+    TextEncoder,
+    AbortController,
     requestAnimationFrame() {},
     atob,
     setTimeout: fn => timers.push(fn),
     fetch: async (url, init) => {
       const request = { url, authorization: init.headers.Authorization, method: init.method, body: init.body && JSON.parse(init.body) };
       requests.push(request);
+      if (url === '/api/v1/play/room') return roomReply(request);
       return reply(request);
     },
   });
   vm.runInContext(script, context);
   const settle = () => new Promise(resolve => setImmediate(resolve));
   return {
-    get, padButton, rendered, requests, settle,
+    get, padButton, rendered, settle,
+    // Existing cases assert game requests; room traffic has its own assertions.
+    get requests() { return requests.filter(request => request.url !== '/api/v1/play/room'); },
+    get roomRequests() { return requests.filter(request => request.url === '/api/v1/play/room'); },
+    async roomPoll() { vm.runInContext('roomNextRead = 0; refreshRoom();', context); await settle(); },
     get reloads() { return reloads; },
     get hash() { return location.hash; },
     navigateFragment(hash) { context.location.hash = hash; windowHandlers.get('hashchange')?.(); },
@@ -94,6 +105,127 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token' } = {}) {
     },
   };
 }
+
+test('a spectator can speak with several Keepers without moving another controller', async () => {
+  const messages = [roomMessage(1, 'ready'), roomMessage(2, 'watching', 'keeper-b')];
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, controller:'operator' }) : gameReply(request), {
+    roomReply: ({ body }) => {
+      if (body.action === 'say') messages.push(roomMessage(3, body.text, 'minsu'));
+      return response({ ...emptyRoom, messages, members:[
+        { name:'keeper-a', speaker:'keeper', machine:'dos', seen_at:1 },
+        { name:'keeper-b', speaker:'keeper', machine:'msx', seen_at:1 }] });
+    }
+  });
+  await page.settle();
+  assert.match(page.get('room-members').textContent, /keeper-a.*keeper-b/);
+  assert.equal(page.get('send-text').disabled, true);
+  assert.equal(page.get('chat-text').disabled, false);
+  page.get('chat-text').value = '같이 볼게요';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  assert.equal(page.get('chat-text').value, '');
+  assert.equal(page.get('room-messages').children.length, 3);
+  assert.equal(page.requests.some(request => request.method === 'POST'), false);
+});
+
+test('an uncertain public message preserves its exact receipt and draft through reload', async () => {
+  const storage = new Map();
+  const sends = [];
+  const roomReply = ({ body }) => {
+    if (body.action === 'say') {
+      sends.push(body);
+      if (sends.length === 1) throw new Error('acknowledgment lost');
+      return response({ ...emptyRoom, messages:[roomMessage(1, body.text, 'minsu')] });
+    }
+    return response(emptyRoom);
+  };
+  const first = fixture(gameReply, { storage, roomReply });
+  await first.settle();
+  first.get('chat-text').value = 'Only once';
+  first.get('chat-send').handlers.click();
+  await first.settle();
+  assert.equal(first.get('chat-text').value, 'Only once');
+  assert.match(first.get('room-status').textContent, /확인하지 못/);
+  const reloaded = fixture(gameReply, { storage, hash:'', roomReply });
+  await reloaded.settle();
+  assert.equal(reloaded.get('chat-text').value, 'Only once');
+  reloaded.get('chat-send').handlers.click();
+  await reloaded.settle();
+  assert.deepEqual(sends[1], sends[0]);
+  assert.equal(reloaded.get('chat-text').value, '');
+  assert.notEqual(first.roomRequests[0].body.client_id, reloaded.roomRequests[0].body.client_id);
+});
+
+test('public chat reserves one send while preserving edits made during its acknowledgment', async () => {
+  let finish;
+  const page = fixture(gameReply, { roomReply: ({ body }) => body.action === 'say'
+    ? new Promise(resolve => { finish = () => resolve(response(emptyRoom)); }) : response(emptyRoom) });
+  await page.settle();
+  page.get('chat-text').value = 'first';
+  page.get('chat-send').handlers.click();
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  page.get('chat-text').value = 'second';
+  finish();
+  await page.settle();
+  assert.equal(page.roomRequests.filter(request => request.body.action === 'say').length, 1);
+  assert.equal(page.get('chat-text').value, 'second');
+});
+
+test('MSX observation uses the same room and never takes the DOS controller', async () => {
+  const page = fixture(request => request.url.includes('msx_capture')
+    ? response({ state:'no_machine' }) : gameReply(request));
+  await page.settle();
+  page.get('machine-view').value = 'msx';
+  page.get('machine-view').handlers.change();
+  await page.poll();
+  assert.match(page.get('turn').textContent, /MSX/);
+  assert.equal(page.get('game-controls').hidden, true);
+  assert.ok(page.requests.some(request => request.url.includes('msx_capture')));
+  page.get('chat-text').value = 'MSX에서도 같이';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  assert.equal(page.roomRequests.find(request => request.body.action === 'say').body.machine, 'msx');
+  assert.equal(page.requests.some(request => request.method === 'POST'), false);
+});
+
+test('a late DOS frame cannot repaint the selected MSX view', async () => {
+  let finish;
+  const page = fixture(request => request.url.includes('dos_capture')
+    ? new Promise(resolve => { finish = () => resolve(response(frame)); }) : gameReply(request));
+  await page.settle();
+  page.get('machine-view').value = 'msx';
+  page.get('machine-view').handlers.change();
+  finish();
+  await page.settle();
+  assert.deepEqual(page.rendered, []);
+  await page.poll();
+  assert.equal(page.rendered.length, 1);
+});
+
+test('public-room failure does not prevent controller release and disconnect', async () => {
+  const storage = new Map();
+  let released = false;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/dos/pass') { released = true; return response({ ok:true }); }
+    return gameReply(request);
+  }, { storage, roomReply: () => { throw new Error('room unavailable'); } });
+  await page.settle();
+  await page.get('leave').handlers.click();
+  await page.settle();
+  assert.equal(released, true);
+  assert.equal(storage.get('masc.play.invite'), undefined);
+});
+
+test('public chat preserves a Korean IME composition on Enter', async () => {
+  const page = fixture(gameReply);
+  await page.settle();
+  page.get('chat-text').value = '한글';
+  page.get('chat-text').handlers.keydown({ key:'Enter', isComposing:true, preventDefault() { throw new Error('composition consumed'); } });
+  await page.settle();
+  assert.equal(page.roomRequests.some(request => request.body.action === 'say'), false);
+});
 
 for (const [name, refusal, control] of [
   ['changed program', { code: 'program_changed', error: '게임이 바뀌었어요. 패드를 다시 확인해 주세요.' }, 'pad'],

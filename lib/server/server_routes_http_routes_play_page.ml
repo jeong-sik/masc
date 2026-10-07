@@ -40,8 +40,19 @@ let page_style =
 :root { color-scheme: dark; --bg:#111418; --panel:#1b2027; --ink:#e8ecf1; --dim:#9aa4b2; --mine:#2e7d4f; --line:#2c333d; }
 * { box-sizing: border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; }
-main { max-width: 760px; min-width:0; margin: 0 auto; padding: 12px 16px 32px; display:flex; flex-direction:column; gap:12px; overflow-wrap:anywhere; }
-main > *, .row > * { min-width:0; max-width:100%; }
+main { max-width:1120px; min-width:0; margin:0 auto; padding:12px 16px 32px; display:flex; flex-direction:column; gap:12px; overflow-wrap:anywhere; }
+main > *, .row > *, #play-layout > *, #game-pane > *, #room-pane > * { min-width:0; max-width:100%; }
+#play-layout { display:grid; grid-template-columns:minmax(0, 1.7fr) minmax(0, 1fr); gap:20px; }
+#game-pane, #game-controls, #room-pane { display:flex; flex-direction:column; gap:12px; }
+@media (max-width:800px) { #play-layout { grid-template-columns:minmax(0, 1fr); } }
+#room-pane { border:1px solid var(--line); border-radius:8px; padding:12px; }
+#room-messages { list-style:none; margin:0; padding:0; min-height:120px; max-height:460px; overflow:auto; }
+#room-messages li { margin:0 0 14px; }
+#room-messages p { margin:3px 0 0; white-space:pre-wrap; }
+#room-members, #room-status, .room-meta, .room-note { font-size:13px; color:var(--dim); }
+#room-members { margin:0; }
+.room-meta { display:block; }
+textarea { resize:vertical; min-width:0; width:100%; }
 #turn { padding:10px 12px; border-radius:8px; background:var(--panel); font-weight:600; }
 #turn.mine { background:var(--mine); }
 #screen-wrap { background:#000; border-radius:8px; overflow:hidden; outline:none; }
@@ -50,7 +61,7 @@ canvas { display:block; width:100%; height:auto; image-rendering: pixelated; ima
 #status { color:var(--dim); min-height:1.5em; }
 #agent, #agent a { color:var(--dim); font-size:13px; }
 .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-button, input, select { font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; }
+button, input, select, textarea { font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; }
 button { cursor:pointer; min-width:44px; min-height:44px; }
 button:disabled, input:disabled, select:disabled { opacity:.5; cursor:default; }
 input { flex:1; min-width:0; }
@@ -81,10 +92,15 @@ h2 { font-size:13px; color:var(--dim); margin:4px 0; font-weight:600; }
 </head>
 <body>
 <main>
-  <div class="row"><strong>DOS · 같이 하기</strong><button id="leave" type="button">연결 끊기</button></div>
+  <div class="row"><strong>MASC · 같이 보기</strong>
+    <select id="machine-view" aria-label="관전할 게임"><option value="dos">DOS</option><option value="msx">MSX</option></select>
+    <button id="leave" type="button">연결 끊기</button></div>
+  <div id="play-layout">
+  <section id="game-pane" aria-label="게임 관전">
   <div id="turn">연결하는 중이에요</div>
   <div id="screen-wrap" tabindex="0" aria-label="게임 화면. 누르고 키보드로 조작해요"><canvas id="screen" width="320" height="200"></canvas></div>
   <div id="status"></div>
+  <div id="game-controls">
   <div id="pad" hidden aria-label="masc 패드">
     <div class="shoulders"><button data-button="BTN_TL"></button><button data-button="BTN_TR"></button></div>
     <div class="body">
@@ -113,8 +129,21 @@ h2 { font-size:13px; color:var(--dim); margin:4px 0; font-weight:600; }
     <select id="pass-to"></select>
     <button id="pass">차례 넘기기</button>
   </div>
+  </div>
   <h2>최근 기록</h2>
   <ol id="activity"></ol>
+  </section>
+  <section id="room-pane" aria-label="공용 게임 대화">
+    <h2>공용 게임 대화</h2>
+    <p class="room-note">이 방에 보낸 말은 Keeper와 초대된 참여자 모두에게 보여요.</p>
+    <p id="room-members">참여자를 읽고 있어요.</p>
+    <div class="row"><button id="room-older" type="button" disabled>이전 대화</button><button id="room-latest" type="button" hidden>최근 대화</button></div>
+    <ol id="room-messages" aria-label="대화 기록" aria-live="polite"></ol>
+    <div id="room-status" role="status"></div>
+    <textarea id="chat-text" rows="2" aria-label="공용 대화 입력" placeholder="함께 보는 사람에게 말해요. Enter로 전송, Shift+Enter로 줄바꿈"></textarea>
+    <button id="chat-send" type="button">대화 보내기</button>
+  </section>
+  </div>
 |play}
 
 (* An agent that fetches the link reads this page without running its script.
@@ -136,9 +165,10 @@ let page_script =
 // The TUI reads the same live route every 0.3 s.
 const POLL_MS = 300;
 const ACTIVITY_SHOWN = 8;
-const LIVE_PATH = '/api/v1/lane-addons/live?source_kind=dos_capture';
+const LIVE_PATH = '/api/v1/lane-addons/live?source_kind=';
 const SEAT_PATH = '/api/v1/play/seat';
 const PAD_PATH = '/api/v1/play/pad';
+const ROOM_PATH = '/api/v1/play/room';
 
 // A physical gamepad in the standard mapping (W3C Gamepad, "Remapping") ->
 // the masc pad's buttons. Pads in any other mapping are not read.
@@ -197,6 +227,23 @@ let ended = false;
 let disconnecting = false;
 let sending = Promise.resolve();
 let textSending = false;
+let viewMachine = 'dos';
+let viewRevision = 0;
+function roomId() {
+  return [...crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+// A new page gets a separate presence lease, including duplicated tabs.
+const roomClient = roomId();
+let roomSending = Promise.resolve();
+let roomBusy = false;
+let chatSending = false;
+let roomBefore = null;
+let roomSnapshot = null;
+let roomMessagesKey = null;
+let roomNextRead = 0;
+let pendingChat = null;
+let roomAbort = null;
+const ROOM_DRAFT_KEY = 'masc.play.room.draft';
 // The saves name the seat last reported (null: nothing loaded), and the one
 // the pad on screen was read for (undefined: not read yet, or the last read
 // failed). The pad is read again while the two differ.
@@ -214,16 +261,22 @@ function setStatus(source, text) {
 }
 
 function setControlsEnabled(enabled) {
-  for (const node of document.querySelectorAll('button, input, select')) {
-    if (node.id !== 'leave') node.disabled = !enabled;
+  for (const node of document.querySelectorAll('#game-controls button, #game-controls input, #game-controls select')) {
+    node.disabled = !enabled;
   }
+  el('game-controls').hidden = viewMachine !== 'dos';
+  el('machine-view').disabled = ended || disconnecting;
   el('leave').disabled = ended || disconnecting;
+  setRoomControls();
 }
 
 function end(text) {
   ended = true;
   token = '';
-  try { sessionStorage.removeItem(SESSION_KEY); } catch (_) { /* Storage can be disabled. */ }
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(ROOM_DRAFT_KEY);
+  } catch (_) { /* Storage can be disabled. */ }
   setStatus('disconnect', '');
   setStatus('invitation', '');
   setControlsEnabled(false);
@@ -232,8 +285,9 @@ function end(text) {
   el('turn').textContent = text;
 }
 
-async function api(method, path, body) {
+async function api(method, path, body, signal) {
   const init = { method, headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', credentials: 'omit' };
+  if (signal) init.signal = signal;
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
@@ -245,15 +299,164 @@ async function api(method, path, body) {
   return { status: response.status, json };
 }
 
+function setRoomControls() {
+  const closed = ended || disconnecting;
+  el('chat-text').disabled = closed;
+  el('chat-send').disabled = closed || chatSending || el('chat-text').value.trim() === '';
+  el('room-older').disabled = closed || roomBusy || !roomSnapshot || !roomSnapshot.has_more;
+  el('room-latest').disabled = closed || roomBusy;
+  el('room-latest').hidden = roomBefore === null;
+}
+
+function saveRoomDraft() {
+  try {
+    sessionStorage.setItem(ROOM_DRAFT_KEY, JSON.stringify({ token, text:el('chat-text').value, pending:pendingChat }));
+  } catch (_) { /* The visible draft and receipt still survive a failed send. */ }
+}
+
+function restoreRoomDraft() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(ROOM_DRAFT_KEY) || 'null');
+    if (!saved || saved.token !== token || typeof saved.text !== 'string') return;
+    el('chat-text').value = saved.text;
+    const p = saved.pending;
+    if (p && typeof p.client_id === 'string' && typeof p.message_id === 'string'
+        && typeof p.text === 'string' && (p.machine === 'msx' || p.machine === 'dos')) pendingChat = p;
+  } catch (_) { /* A malformed saved draft is not a message to send. */ }
+}
+
+function validRoom(snapshot) {
+  const machine = value => value === 'msx' || value === 'dos';
+  const speaker = value => value === 'keeper' || value === 'participant';
+  return snapshot && typeof snapshot.has_more === 'boolean'
+    && Array.isArray(snapshot.messages) && snapshot.messages.every(message =>
+      Number.isSafeInteger(message.id) && message.id > 0 && Number.isFinite(message.at)
+      && typeof message.who === 'string' && typeof message.text === 'string'
+      && machine(message.machine) && speaker(message.speaker))
+    && Array.isArray(snapshot.members) && snapshot.members.every(member =>
+      typeof member.name === 'string' && Number.isFinite(member.seen_at)
+      && machine(member.machine) && speaker(member.speaker));
+}
+
+function renderRoom(snapshot, showMessages = true) {
+  el('room-members').textContent = snapshot.members.length === 0 ? '현재 참여한 사람이 없어요.'
+    : '참여 중 · ' + snapshot.members.map(member => member.name + ' (' + member.machine.toUpperCase() + ')').join(', ');
+  if (!showMessages) return;
+  roomSnapshot = snapshot;
+  const messageKey = JSON.stringify([me, roomBefore, snapshot.messages]);
+  if (messageKey === roomMessagesKey) { setRoomControls(); return; }
+  roomMessagesKey = messageKey;
+  const list = el('room-messages');
+  const atBottom = list.scrollHeight - list.clientHeight - list.scrollTop < 24;
+  const previousTop = list.scrollTop;
+  list.replaceChildren();
+  for (const message of snapshot.messages) {
+    const item = document.createElement('li');
+    const meta = document.createElement('span');
+    meta.className = 'room-meta';
+    const mark = message.who === me ? '▶' : message.speaker === 'keeper' ? '●' : '◀';
+    meta.textContent = mark + ' ' + message.who + ' · ' + message.machine.toUpperCase()
+      + ' · ' + new Date(message.at * 1000).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+    const body = document.createElement('p');
+    body.textContent = message.text;
+    item.append(meta, body);
+    list.append(item);
+  }
+  if (snapshot.messages.length === 0) {
+    const empty = document.createElement('li');
+    empty.textContent = '아직 대화가 없어요. 먼저 말을 걸어 보세요.';
+    list.append(empty);
+  }
+  list.scrollTop = atBottom && roomBefore === null ? list.scrollHeight : previousTop;
+  setRoomControls();
+}
+
+function roomRequest(body) {
+  roomSending = roomSending.catch(() => {}).then(() => {
+    if (ended || disconnecting) return null;
+    const abort = new AbortController();
+    roomAbort = abort;
+    return api('POST', ROOM_PATH, body, abort.signal).finally(() => {
+      if (roomAbort === abort) roomAbort = null;
+    });
+  });
+  return roomSending;
+}
+
+function refreshRoom() {
+  if (ended || disconnecting || roomBusy || Date.now() < roomNextRead) return;
+  roomBusy = true;
+  setRoomControls();
+  const before = roomBefore, revision = viewRevision;
+  // While reading an older page, keep it stable and renew presence separately.
+  const body = { action:'read', client_id:roomClient, machine:viewMachine };
+  if (before !== null) body.before = before;
+  roomRequest(body).then(result => {
+    if (ended || !result) return;
+    if (result.status === 200 && validRoom(result.json)) {
+      renderRoom(result.json, before === roomBefore);
+      if (!pendingChat) el('room-status').textContent = '';
+    } else el('room-status').textContent = '공용 대화를 읽지 못했어요 (' + result.status + '). 다시 읽고 있어요.';
+  }).catch(() => {
+    if (!ended) el('room-status').textContent = '공용 대화 연결이 끊겼어요. 다시 읽고 있어요.';
+  }).finally(() => {
+    roomBusy = false;
+    roomNextRead = before === roomBefore && revision === viewRevision ? Date.now() + 2000 : 0;
+    setRoomControls();
+  });
+}
+
+function sendChat() {
+  const text = el('chat-text').value;
+  if (ended || disconnecting || chatSending || text.trim() === '') return;
+  if (new TextEncoder().encode(text).length > 4096) {
+    el('room-status').textContent = '대화 한 번은 UTF-8 4096바이트까지 보낼 수 있어요.';
+    return;
+  }
+  if (!pendingChat || pendingChat.text !== text) {
+    pendingChat = { client_id:roomClient, message_id:roomId(), machine:viewMachine, text };
+  }
+  const request = pendingChat;
+  chatSending = true;
+  saveRoomDraft();
+  setRoomControls();
+  roomRequest({ action:'say', ...request }).then(result => {
+    if (ended || !result) return;
+    if (result.status === 200 && validRoom(result.json)) {
+      pendingChat = null;
+      if (el('chat-text').value === request.text) el('chat-text').value = '';
+      roomBefore = null;
+      renderRoom(result.json);
+      el('room-messages').scrollTop = el('room-messages').scrollHeight;
+      el('room-status').textContent = '';
+    } else if (result.status >= 400 && result.status < 500) {
+      pendingChat = null;
+      el('room-status').textContent = (result.json && result.json.error) || '대화 전송이 거절됐어요. 초안은 남겨 두었어요.';
+    } else {
+      el('room-status').textContent = '전송 결과를 확인하지 못했어요. 다시 보내면 같은 메시지를 확인해요.';
+    }
+    saveRoomDraft();
+  }).catch(() => {
+    if (!ended) el('room-status').textContent = '전송 결과를 확인하지 못했어요. 다시 보내면 같은 메시지를 확인해요.';
+  }).finally(() => {
+    chatSending = false;
+    roomNextRead = 0;
+    setRoomControls();
+  });
+}
+
 function canMove() {
-  return machine && controllerError === null && !ended && !disconnecting
+  return viewMachine === 'dos' && machine && controllerError === null && !ended && !disconnecting
     && (controller === null || controller === me || controllerRecoverable);
 }
 
 function renderTurn() {
   const turn = el('turn');
   setControlsEnabled(canMove());
-  if (!machine) {
+  if (viewMachine === 'msx') {
+    turn.className = '';
+    turn.textContent = 'MSX · 관전 중이에요. 공용 대화에 함께 참여할 수 있어요.';
+  } else if (!machine) {
     turn.className = '';
     turn.textContent = '지금 켜진 게임이 없어요.';
   } else if (controllerError !== null) {
@@ -454,9 +657,11 @@ async function tick() {
 
 async function poll() {
   if (ended) return;
+  refreshRoom();
+  const watched = viewMachine, revision = viewRevision;
   const query = since === null ? '' : '&since=' + since.count + '&incarnation=' + encodeURIComponent(since.incarnation);
-  const r = await api('GET', LIVE_PATH + query);
-  if (ended) return;
+  const r = await api('GET', LIVE_PATH + watched + '_capture' + query);
+  if (ended || revision !== viewRevision) return;
   if (r.status !== 200 || !r.json) {
     setStatus('connection', '연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
   } else {
@@ -464,15 +669,17 @@ async function poll() {
     const live = r.json;
     if (live.state === 'no_machine') {
       since = null;
-      latestSeatRequest = null;
-      machine = false;
-      controller = null;
-      controllerRecoverable = false;
-      seatSavesName = null;
+      if (watched === 'dos') {
+        latestSeatRequest = null;
+        machine = false;
+        controller = null;
+        controllerRecoverable = false;
+        seatSavesName = null;
+      }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       setStatus('frame', '지금 켜진 게임이 없어요.');
       renderTurn();
-      showPad(null, []);
+      if (watched === 'dos') showPad(null, []);
     } else if (live.state === 'changed') {
       if (draw(live.screen)) {
         since = { count: live.change_count, incarnation: live.incarnation };
@@ -486,9 +693,11 @@ async function poll() {
     const key = activity.length === 0 ? '' : JSON.stringify(activity[0]) + '#' + activity.length;
     // Expiry and Keeper stops need not move the machine. An observer must
     // still discover that its holder departed, so a real move can recover it.
-    const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
-    if ((key !== lastActivityKey || waitingForController) && await refreshSeat()) lastActivityKey = key;
-    await syncPad();
+    if (watched === 'dos') {
+      const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
+      if ((key !== lastActivityKey || waitingForController) && await refreshSeat()) lastActivityKey = key;
+      await syncPad();
+    }
   }
 }
 
@@ -512,12 +721,14 @@ function send(path, body) {
 async function disconnect() {
   if (ended || disconnecting) return;
   disconnecting = true;
+  if (roomAbort) roomAbort.abort();
   setControlsEnabled(false);
   setStatus('disconnect', '조종권을 확인하고 연결을 끊고 있어요.');
   try {
     // A previously admitted move can acquire a formerly free controller.
     // Drain it before observing/releasing our seat, and admit no new moves.
     await sending;
+    await roomSending.catch(() => {});
     if (ended) return;
     const seat = await refreshSeat();
     if (ended) return;
@@ -533,6 +744,9 @@ async function disconnect() {
         return;
       }
     }
+    // A lost leave response only leaves presence until its lease expires.
+    // It cannot leave a controller behind after the release above succeeded.
+    await api('POST', ROOM_PATH, { action:'leave', client_id:roomClient, machine:viewMachine }).catch(() => null);
     end('연결을 끊었어요. 다시 들어오려면 받은 초대 링크를 열어 주세요.');
   } catch (_) {
     if (!ended) setStatus('disconnect', '조종권 반납 결과를 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
@@ -598,7 +812,38 @@ el('pass').addEventListener('click', () => {
   send('/api/v1/dos/pass', to === RELEASE_OPTION ? {} : { to });
 });
 el('leave').addEventListener('click', disconnect);
+el('machine-view').addEventListener('change', () => {
+  const selected = el('machine-view').value;
+  if (ended || disconnecting || (selected !== 'msx' && selected !== 'dos')) return;
+  viewMachine = selected;
+  viewRevision += 1;
+  since = null;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  setStatus('frame', '화면을 읽고 있어요.');
+  roomNextRead = 0;
+  renderTurn();
+});
+el('chat-send').addEventListener('click', sendChat);
+el('chat-text').addEventListener('input', () => { saveRoomDraft(); setRoomControls(); });
+el('chat-text').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    sendChat();
+  }
+});
+el('room-older').addEventListener('click', () => {
+  if (roomBusy || !roomSnapshot || !roomSnapshot.has_more || roomSnapshot.messages.length === 0) return;
+  roomBefore = roomSnapshot.messages[0].id;
+  roomNextRead = 0;
+  refreshRoom();
+});
+el('room-latest').addEventListener('click', () => {
+  roomBefore = null;
+  roomNextRead = 0;
+  refreshRoom();
+});
 
+restoreRoomDraft();
 setControlsEnabled(false);
 if (token === '') {
   end('링크에 초대 토큰이 없어요. 받은 링크를 그대로 열어 주세요.');

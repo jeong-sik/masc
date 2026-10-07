@@ -27,6 +27,11 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
   const requests = [], errors = [];
   let seatReads = 0, frameReads = 0, passed = false, ejected = false, padPressed = false, invited = false, released = false;
+  const messages = [
+    { id:1, at:1, who:'keeper-a', speaker:'keeper', machine:'dos', text:'같이 보고 있어요.' },
+    { id:2, at:2, who:'keeper-b', speaker:'keeper', machine:'msx', text:'다음 차례에 무엇을 할까요?' }
+  ];
+  const members = ['keeper-a', 'keeper-b', 'minsu'].map(name => ({ name, speaker:name === 'minsu' ? 'participant' : 'keeper', machine:'dos', seen_at:2 }));
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     page.on('pageerror', error => errors.push(error.message));
@@ -36,7 +41,11 @@ async function main() {
       if (url.pathname === '/play') return route.fulfill({ contentType: 'text/html', body: html });
       assert.equal(request.headers().authorization, 'Bearer fixture-token');
       let json;
-      if (url.pathname === '/api/v1/play/seat') {
+      if (url.pathname === '/api/v1/play/room') {
+        const body = request.postDataJSON();
+        if (body.action === 'say') messages.push({ id:messages.length + 1, at:3, who:'minsu', speaker:'participant', machine:body.machine, text:body.text });
+        json = { messages, members, has_more:false, presence_seconds:60 };
+      } else if (url.pathname === '/api/v1/play/seat') {
         seatReads += 1;
         if (seatReads <= 2) return route.fulfill({ status: 503, json: { error: 'fixture-unavailable' } });
         json = { name: 'minsu', machine: !ejected, controller: ejected || released ? null : passed ? 'operator' : 'minsu',
@@ -80,6 +89,27 @@ async function main() {
     assert.deepEqual(await pixel(), [255, 0, 0, 255]);
     assert.ok(seatReads >= 3);
     assert.equal(new URL(page.url()).hash, '');
+    await page.waitForFunction(() => document.getElementById('room-messages').textContent.includes('다음 차례'));
+    await page.locator('#chat-text').fill('Keeper 둘과 함께 관전합니다.');
+    await page.locator('#chat-send').click();
+    await page.waitForFunction(() => document.getElementById('chat-text').value === '');
+    assert.equal(messages.length, 3);
+    await page.locator('#machine-view').selectOption('msx');
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('MSX'));
+    assert.equal(await page.locator('#game-controls').isVisible(), false);
+    await page.locator('#chat-text').fill('MSX도 같은 방입니다.');
+    await page.locator('#chat-text').press('Enter');
+    await page.waitForFunction(() => document.getElementById('chat-text').value === '');
+    assert.equal(messages.at(-1).machine, 'msx');
+    await page.locator('#machine-view').selectOption('dos');
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례'));
+    await page.waitForFunction(() => document.getElementById('status').textContent === '');
+    for (const width of [320, 390, 900, 1440]) {
+      await page.setViewportSize({ width, height:844 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);
+    }
+    await page.screenshot({ path:resolve(output, 'play-room-desktop.png'), fullPage:true });
+    await page.setViewportSize({ width:390, height:844 });
     await page.screenshot({ path: resolve(output, 'play-recovered-mobile.png'), fullPage: true });
     await page.reload();
     await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례'));
@@ -116,6 +146,8 @@ async function main() {
       source_sha256: createHash('sha256').update(source).digest('hex'),
       browser_version: browser.version(), seat_reads: seatReads, frame_reads: frameReads,
       checks: ['seat recovers without machine activity', 'failed frame is fetched again',
+        'several Keepers share public conversation', 'guest sends public message',
+        'one viewport switches DOS and MSX without splitting conversation', 'room layout fits phone and desktop',
         'same-tab reload reconnects', 'pad click sends input', 'reopening focused selector discovers idle invite',
         'pass updates controller and disables input', 'eject clears pixels', 'disconnect removes tab credential',
         'controller disconnect releases before forgetting the credential'],

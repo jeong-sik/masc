@@ -2611,25 +2611,28 @@ let launch_voice_config_load state ~mailbox =
 ;;
 
 let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
-  if Option.is_none state.msx_live_in_flight then begin
-  let request = { live_view = !msx_poll_view; live_port = state.port } in
-  let since = Masc_tui_machine_live.since state.msx_live in
-  state.msx_live_in_flight <- Some request;
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Msx_live_loaded (request, result))
-    (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
-      ~port:request.live_port Masc.Machine_lane.Msx ~since)
-  end
+  match state.msx_live_in_flight with
+  | Some pending
+    when pending.live_view == !msx_poll_view && pending.live_port = state.port -> ()
+  | Some _ | None ->
+    let request = { live_view = !msx_poll_view; live_port = state.port } in
+    let since = Masc_tui_machine_live.since state.msx_live in
+    state.msx_live_in_flight <- Some request;
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Msx_live_loaded (request, result))
+      (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
+        ~port:request.live_port Masc.Machine_lane.Msx ~since)
 ;;
 
 let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
   match state.msx_live, state.msx_live_in_flight with
-  | _, Some _ -> ()
+  | _, Some pending
+    when pending.live_view == !msx_poll_view && pending.live_port = state.port -> ()
   (* F5 can replace the view while its first observation is still pending.
-     Once that old read settles, obtain a frame for the new owner before
+     Obtain a frame for the new owner without waiting for the old read before
      enabling its clock; Unread must not become a permanent idle state. *)
-  | (Masc_tui_machine_live.Unread | Failed _), None -> launch_msx_live_read state ~mailbox
-  | (Not_loaded | Showing _), None ->
+  | (Masc_tui_machine_live.Unread | Failed _), (Some _ | None) -> launch_msx_live_read state ~mailbox
+  | (Not_loaded | Showing _), (Some _ | None) ->
   match !msx_pending_poll with
   | Poll_observing (request,refusal) when request.poll_view != !msx_poll_view
       || request.poll_port <> state.port || request.poll_authority <> state.workspace_authority ->
@@ -8306,6 +8309,7 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
    [&] opens Collab, whose watch actions go directly to observation. *)
 let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   invalidate_msx_poll ();
+  state.machine_interaction <- Observe_machine;
   (* The spectator takes ownership from any image preview. A pending async
      preview must not keep its old surface alive underneath the game. *)
   state.image_request_generation <- state.image_request_generation + 1;

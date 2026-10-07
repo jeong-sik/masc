@@ -152,6 +152,23 @@ let test_other_workspace_discards_quarantined_cards () =
   Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:(Some b);
   check (list string) "direct A to B also discards A's cards" [] (kept_names state)
 
+let test_retained_chat_origin_recovers_quarantined_cards () =
+  let state = fresh () in
+  let a = workspace "a" in
+  store state "minsu";
+  store state "reviewer";
+  Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:None;
+  (* A retained chat supplies A as [previous] both while health is unread and
+     when A is confirmed again, even though live cards have been withdrawn. *)
+  Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:None;
+  check (list string) "unread identity keeps the live store empty" [] (kept_names state);
+  Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:(Some a);
+  check (list string) "chat retention cannot erase either one-time card"
+    ["reviewer"; "minsu"] (kept_names state);
+  check (option string) "reconfirmation leaves restored cards closed" None (shown_name state);
+  check bool "restored cards leave no second quarantine copy" true
+    (Option.is_none state.Types.play_invite_quarantine)
+
 let test_moving_marks_share_one_pace () =
   check (float 1e-9) "not started" 0.0 (Types.motion_elapsed_seconds (-1));
   check (float 1e-9) "the first step" 0.0 (Types.motion_elapsed_seconds 0);
@@ -176,6 +193,8 @@ let () =
             test_unknown_workspace_quarantines_cards
         ; test_case "confirmed different workspace discards quarantined cards" `Quick
             test_other_workspace_discards_quarantined_cards
+        ; test_case "retained chat origin recovers quarantined cards" `Quick
+            test_retained_chat_origin_recovers_quarantined_cards
         ] )
     ; ( "motion"
       , [ test_case "moving marks share one pace" `Quick test_moving_marks_share_one_pace ] )

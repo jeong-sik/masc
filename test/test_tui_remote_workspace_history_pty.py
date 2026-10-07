@@ -1681,7 +1681,12 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output)
                 release.set()
                 assert _keyboard_harness.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-                _keyboard_harness.send_and_wait(process, fd, output, b"r", b"resource-b")
+                # Authority recovery already starts B's inventory read. Its
+                # unchanged row can be retained without another paint or GET.
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                    lambda: ("b", "resources/list") in calls, timeout=WAIT_SECONDS), calls
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                    lambda: b"resource-b" in screen(output), timeout=WAIT_SECONDS), screen(output)
                 _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)
                 if held_method == "initialize":

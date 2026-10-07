@@ -394,14 +394,14 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
     # legitimately alter the conversation destination but never the request window.
     baseline = {}
     def core_rows(output):
-        # Compare Home decision rows, preserving request identities. The footer
-        # also says m:Usage, but its separately seeded HTTP port is not a body
-        # fact and differs between the off/disabled/error/ready scenarios.
+        # Compare Home decision rows, preserving request identities. Locate
+        # the navigation footer by its actions; workspace diagnostics belong
+        # to the header and are not part of the decision-row projection.
         end = output.rfind(h.FRAME_END)
         assert end >= 0, "Dashboard projection has no complete frame"
         rows = h.screen_rows(bytes(output[:end + len(h.FRAME_END)]))
         footer = h.screen_row_of(rows, b"q:quit")
-        assert footer > 1 and b"Port:" in rows[footer], rows
+        assert footer > 1 and b"Enter:open" in rows[footer], rows
         markers = (b"Approval", b"Question", b"Needs your decision",
                    b"Continue", b"Home destinations")
         return tuple(line for row, line in sorted(rows.items())

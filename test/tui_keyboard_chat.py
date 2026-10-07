@@ -2491,12 +2491,46 @@ def message_origin_badge_interaction(
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    # Restore only the foreground after the accented prompt. A full reset
-    # would erase the input surface background; accepting arbitrary SGR here
-    # could instead leave the draft tinted or clear its background with 49m.
-    if b"\x1b[96m  > \x1b[39mdraft-neutral" not in draft_frame:
+    # The prompt recedes (dim without a known palette). Reset its foreground
+    # and weight before the draft, restoring the exact same input background
+    # when one was projected. A missing restore, tint or dim leak must fail.
+    def text_style(prefix):
+        foreground, background, weight = None, None, 0
+        for match in re.finditer(rb"\x1b\[([0-9;]*)m", prefix):
+            codes = [int(part or b"0") for part in match[1].split(b";")]
+            index = 0
+            while index < len(codes):
+                code = codes[index]
+                if code == 0:
+                    foreground, background, weight = None, None, 0
+                elif code in (1, 2, 22):
+                    weight = 0 if code == 22 else code
+                elif code == 39:
+                    foreground = None
+                elif code == 49:
+                    background = None
+                elif 30 <= code <= 37 or 90 <= code <= 97:
+                    foreground = (code,)
+                elif 40 <= code <= 47 or 100 <= code <= 107:
+                    background = (code,)
+                elif code in (38, 48):
+                    width = {2: 5, 5: 3}[codes[index + 1]]
+                    color = tuple(codes[index:index + width])
+                    if code == 38:
+                        foreground = color
+                    else:
+                        background = color
+                    index += width - 1
+                index += 1
+        return foreground, background, weight
+
+    row = next(row for row in screen_rows(draft_frame, preserve_styles=True).values()
+               if b"draft-neutral" in row)
+    prompt_style = text_style(row[:row.index(b"  > ")])
+    draft_style = text_style(row[:row.index(b"draft-neutral")])
+    if draft_style != (None, prompt_style[1], 0):
         raise AssertionError(
-            f"chat composer did not restore default foreground while preserving its background: {draft_frame!r}"
+            f"chat composer did not restore neutral draft text and its background: {draft_frame!r}"
         )
     escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")

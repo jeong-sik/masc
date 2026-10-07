@@ -1164,6 +1164,7 @@ def run_runtime_roster_model_settings(executable: str) -> None:
     assert isinstance(store.body["runtimes"], list)
     store.body["runtimes"][0] = selected
     store.body["default_runtime"] = selected
+    store.body["default_route"] = runtime_id
     for lane in store.lanes:
         lane["runtime_ids"] = [runtime_id if value == "runtime-a" else value for value in lane["runtime_ids"]]
     fixtures = _keyboard_harness.overview_event_http_fixtures()

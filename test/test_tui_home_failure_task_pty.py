@@ -360,14 +360,19 @@ def task_cancel_previous_workspace_receipt(executable):
                 state["foreign"] = True
                 h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
                 h.drain_until_quiet(process, fd, output)
-                before = (state["health_reads"], state["history_reads"])
+                history_before_receipt = state["history_reads"]
                 start = len(output)
                 release.set()
                 h.wait_for_output(process, fd, output,
                                   ("task " + TASK_A + " cancelled in the previous workspace").encode(),
                                   start=start, timeout=10)
                 h.drain_until_quiet(process, fd, output)
-                assert (state["health_reads"], state["history_reads"]) == before, state
+                # Identity probes can run independently of this receipt. The
+                # accepted A write must not reload scoped Task history in B.
+                assert state["history_reads"] == history_before_receipt, state
+                current_screen = h.screen_text(bytes(output))
+                assert b"[workspace mismatch]" in current_screen, current_screen
+                assert b"current workspace unchanged" in current_screen, current_screen
                 assert len(transitions) == 1, transitions
                 os.write(fd, b"q")
             finally:

@@ -231,7 +231,6 @@ type capability_write_stage =
   | Sync_parent
   | Remove_staging_directory
   | Close_staging_directory
-  | Discharge_prepared_recovery_obligation
   | Discharge_bound_recovery_obligation
   | Cleanup_close
   | Cleanup_verify_identity
@@ -277,9 +276,6 @@ type capability_write_failure =
   }
 
 type capability_recovery_phase =
-  | Recovery_validate_owner
-  | Recovery_open_registry
-  | Recovery_open_store
   | Recovery_prepare
   | Recovery_preserve_unbound
   | Recovery_bind
@@ -587,10 +583,6 @@ end
     contract — #10205 finding 2. *)
 val is_atomic_orphan_name : string -> bool
 
-type atomic_orphan_cleanup_scope =
-  | Directory_only
-  | Directory_and_immediate_subdirectories
-
 type atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
   | Read_cleanup_directory
@@ -633,9 +625,7 @@ val atomic_orphan_cleanup_failure_to_string
 
 (** #10130: no-follow boot-time cleanup for canonical [.atomic_*.tmp] orphans.
 
-    [Directory_only] scans exactly [base_path].
-    [Directory_and_immediate_subdirectories] additionally scans only real
-    immediate child directories; symbolic links are never followed.
+    The sweep scans exactly [base_path]; symbolic links are never followed.
 
     [ownership_root] is the canonical process-owned ancestor of [base_path].
     Every existing component from that root through [base_path] is inspected
@@ -643,7 +633,7 @@ val atomic_orphan_cleanup_failure_to_string
     non-directory component, or a lexical path outside [ownership_root]
     produces a typed failure before the inventory is read.
 
-    The caller must keep every scanned directory identity process-owned and
+    The caller must keep the scanned directory identity process-owned and
     stable, and must ensure no writer creates a matching atomic-temp name
     concurrently. Unrelated entries may change. OCaml 5.4's portable [Unix]
     API has no dirfd-relative [openat]/[unlinkat] operations, so the
@@ -653,15 +643,13 @@ val atomic_orphan_cleanup_failure_to_string
     this ownership boundary.
 
     Zero-byte regular files are unlinked. Non-empty regular files are
-    preserved without overwrite under
-    [<base_path>/.recovered/{root,children/<child>}/]. The preservation path
-    retains source provenance, uses a hard-link-then-unlink protocol, and
-    fsyncs both directory sides. Orphan-shaped non-regular entries and every
+    preserved without overwrite under [<base_path>/.recovered/root/]. The
+    preservation path uses a hard-link-then-unlink protocol and fsyncs both
+    directory sides. Orphan-shaped non-regular entries and every
     filesystem failure remain in [report.failures]; cancellation is re-raised.
     A missing [base_path] is an empty inventory, not a failure. *)
 val cleanup_atomic_orphans
   :  ownership_root:string
   -> base_path:string
-  -> scope:atomic_orphan_cleanup_scope
   -> unit
   -> atomic_orphan_cleanup_report

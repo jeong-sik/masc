@@ -7,6 +7,7 @@
 |---|---|---|
 | `verifier_steps.py` → `verifier_steps.json` | `<base>/.masc/verification-runs.jsonl` | verifier 한 건의 도구 시간, 첫 도구까지 시간, 모델 단계 수와 단계 간격 |
 | `account_admission.py` → `account_admission.json` | `<base>/.masc/agent-core-events/2026-10/06.jsonl` | 한 계정의 요청이 다른 호출이 끝나는 순간에 나간 비율, 4칸이 다 찬 시간 비율(하한) |
+| `admission_waits.py` | `<base>/.masc/agent-core-events/<YYYY-MM>/<DD>.jsonl` | 줄을 선 요청의 대기 시간을 provider·등급·결과별로 센 값(p50, p90, 최대). RFC 3단계 배포 뒤에 쌓이는 `masc:provider_admission:waited` 행을 읽는다 |
 
 재현:
 

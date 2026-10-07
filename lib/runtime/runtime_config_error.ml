@@ -29,11 +29,6 @@ type resolution_failure =
   ; runtime_count : int
   }
 
-type admitted_allowance_change =
-  { runtime_id : string
-  ; change : Llm_provider.Provider_admission_state.conflict
-  }
-
 (* One exact-output lane slot whose HTTP provider declares no
    [exact-body-timeout-s] (rule 3 of RFC-runtime-two-layers, #38779). *)
 type exact_slot_body_deadline_gap =
@@ -95,7 +90,8 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
-  | Admitted_allowances_changed of admitted_allowance_change list
+  | Admission_allowances_disagree of
+      Llm_provider.Provider_admission.allowance_disagreement list
   | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
   | Context_marks_exceed_max_context of
       { runtime_id : string
@@ -251,7 +247,7 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       (Runtime_muse_prompt_capacity.error_to_string
          (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }))
-  | Admitted_allowances_changed changes ->
+  | Admission_allowances_disagree disagreements ->
     let allowance_text (allowance : Llm_provider.Provider_admission_state.allowance) =
       match allowance.priority_run_limit with
       | None -> Printf.sprintf "%s = %d" max_concurrent_key allowance.max
@@ -264,22 +260,20 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
           limit
     in
     Printf.sprintf
-      "%s: this change gives %d runtime(s) an admission allowance their account \
-       is not running under. The server keeps an account's first %s and %s \
-       until it restarts and refuses every request that declares other \
-       values, so the change is not applied. Stop the server, edit the file, \
-       and start it again:\n%s"
+      "%s: runtimes on one provider account declare different admission \
+       allowances. An account admits requests under one %s and %s, so give \
+       every runtime on it the same values:\n%s"
       config_path
-      (List.length changes)
       max_concurrent_key
       Runtime_schema.admission_priority_run_limit_key
-      (changes
-       |> List.map (fun { runtime_id; change } ->
-         Printf.sprintf
-           "  %s: the server runs this account under %s; this change declares %s"
-           runtime_id
-           (allowance_text change.authoritative)
-           (allowance_text change.declared))
+      (disagreements
+       |> List.map (fun (disagreement : Llm_provider.Provider_admission.allowance_disagreement) ->
+         Printf.sprintf "  %s account at %s:" disagreement.kind disagreement.base_url
+         :: List.map
+              (fun (runtime_id, allowance) ->
+                 Printf.sprintf "    %s: %s" runtime_id (allowance_text allowance))
+              disagreement.declarations
+         |> String.concat "\n")
        |> String.concat "\n")
   | Exact_slot_body_deadlines_absent gaps ->
     Printf.sprintf
@@ -343,7 +337,7 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Max_context_absent _
   | Context_marks_exceed_max_context _
   | Muse_window_below_host_overhead _
-  | Admitted_allowances_changed _
+  | Admission_allowances_disagree _
   | Exact_slot_body_deadlines_absent _
   | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure
 ;;

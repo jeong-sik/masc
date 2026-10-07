@@ -917,6 +917,23 @@ beanie = %d
        Fs_compat.mkdir_p evidence;
        Fs_compat.save_file (Filename.concat evidence "before.png") before.body;
        Fs_compat.save_file (Filename.concat evidence "equipped.png") after.body;
+       (* The remote TUI consumer replays these receipts through the Info
+          tab, whose icon band draws Masc_tui_keeper_portrait.shown:
+          Draw.render_icon's face framing at View.min_pixel_rows cell rows
+          (4 * 20 px at the consumer's 10x20 cell reply), never the full
+          scene this endpoint serves. Export the same renderer at the same
+          framing and edge so the consumer compares like with like instead
+          of a full portrait against a face-framed icon. *)
+       let icon equipment =
+         let image = Keeper_portrait_draw.render_icon
+             (Keeper_portrait_look.body_of_name keeper) equipment
+             (Option.get (Keeper_portrait_draw.size_of_int 80)) in
+         require_ok Fun.id
+           (Rgb_png.encode_rgba ~width:image.Keeper_portrait_draw.edge
+              ~height:image.Keeper_portrait_draw.edge
+              ~rgba:image.Keeper_portrait_draw.rgba) in
+       Fs_compat.save_file (Filename.concat evidence "before-icon.png") (icon starting);
+       Fs_compat.save_file (Filename.concat evidence "equipped-icon.png") (icon expected);
        Fs_compat.save_file (Filename.concat evidence "before-roster.json")
          (Yojson.Safe.pretty_to_string before_roster);
        Fs_compat.save_file (Filename.concat evidence "equipped-roster.json")
@@ -950,5 +967,11 @@ let () =
       ; test_case "400 and 404" `Quick test_router_refusals
       ; test_case "Gate operator revisions bypass shared metadata cache" `Quick test_gate_account_revision_uses_current_candle_reading
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token
-      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched
-      ; test_case "purchase equip reset and remote portrait share one ledger" `Quick test_purchase_equip_and_remote_portrait ] ]
+      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched ]
+    (* The shared-ledger fixture case runs once under "router-ledger-export"; do not duplicate it here. *)
+    (* A suite of its own for the remote TUI consumer: it selects by suite
+       name, so a fixture case inserted into "router" can no longer silently
+       re-aim the consumer at the wrong case. *)
+    ; "router-ledger-export",
+      [ test_case "purchase equip reset and remote portrait share one ledger"
+          `Quick test_purchase_equip_and_remote_portrait ] ]

@@ -791,6 +791,59 @@ let test_view_gap_does_not_fabricate_a_turn_total () =
     ; "another-turn", false, true; "another-turn", true, true ]
 ;;
 
+(* The turn keeps its newest call's own counts: that request's counted-once
+   prompt is the context it carried. Another session's frame is not the
+   turn's, and a view gap after the newest call may hide a later one. *)
+let test_turn_keeps_its_newest_call_usage () =
+  let frame ?(session = "s-1") ~cursor ~prompt ~output () = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "method", `String "session/tokenUsage";
+        "params", `Assoc
+          [ "sessionId", `String session; "turnId", `String "t-1"
+          ; "viewCursor", `String cursor; "promptTokens", `Int prompt
+          ; "totalTokens", `Int (prompt + output)
+          ; "usage", `Assoc
+              [ "inputTokens", `Int prompt; "outputTokens", `Int output
+              ; "cachedTokens", `Int 0; "reasoningTokens", `Int 0 ] ] ]) in
+  let gap = Yojson.Safe.to_string (`Assoc
+    [ "jsonrpc", `String "2.0"; "method", `String "view/gap"
+    ; "params", `Assoc ["after", `String "v:5"; "next", `String "v:9";
+                        "sessionId", `String "s-1"] ]) in
+  List.iter (fun (name, frames, expected) ->
+    run_scripted
+      (handshake_and_session ~granted:[] @ List.map (fun frame -> Write frame) frames
+       @ [Write agent_completed; Write turn_completed])
+      (fun result _ ->
+        match result with
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok turn ->
+          check (option (pair int int)) name expected
+            (Option.map (fun (usage : Msp.token_usage) ->
+               Option.value usage.prompt_tokens ~default:(-1), usage.output_tokens)
+               turn.last_call_usage)))
+    [ "no call reported", [], None
+    ; "the newest of two calls",
+      [ frame ~cursor:"v:5" ~prompt:150 ~output:7 ()
+      ; frame ~cursor:"v:8" ~prompt:400 ~output:9 () ],
+      Some (400, 9)
+    ; "another session's later frame is not the turn's",
+      [ frame ~cursor:"v:5" ~prompt:150 ~output:7 ()
+      ; frame ~session:"s-2" ~cursor:"v:6" ~prompt:999 ~output:1 () ],
+      Some (150, 7)
+    ; "a repeated cursor does not replace the newest call",
+      [ frame ~cursor:"v:5" ~prompt:150 ~output:7 ()
+      ; frame ~cursor:"v:8" ~prompt:400 ~output:9 ()
+      ; frame ~cursor:"v:5" ~prompt:150 ~output:7 () ],
+      Some (400, 9)
+    ; "a gap after the newest call hides it",
+      [ frame ~cursor:"v:5" ~prompt:150 ~output:7 (); gap ],
+      None
+    ; "a call after the gap is the newest",
+      [ frame ~cursor:"v:5" ~prompt:150 ~output:7 (); gap
+      ; frame ~cursor:"v:9" ~prompt:500 ~output:11 () ],
+      Some (500, 11)
+    ]
+;;
+
 let test_turn_lists_the_models_its_calls_ran_on () =
   let token_usage ?(session_id = "s-1") ?(cursor = "v:5") model = Yojson.Safe.to_string
       (`Assoc ["jsonrpc", `String "2.0"; "method", `String "session/tokenUsage";
@@ -1063,6 +1116,7 @@ let () =
             test_turn_lists_the_models_its_calls_ran_on
         ; test_case "call usage counted once in its turn" `Quick test_call_usage_is_counted_once_in_its_turn
         ; test_case "view gap does not fabricate a turn total" `Quick test_view_gap_does_not_fabricate_a_turn_total
+        ; test_case "turn keeps its newest call usage" `Quick test_turn_keeps_its_newest_call_usage
         ; test_case "effective approval mode is verified before admission" `Quick test_session_approval_mode_is_verified_before_admission
         ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused

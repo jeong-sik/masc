@@ -628,18 +628,29 @@ let test_ensure_keeper_meta_preserves_live_usage_during_reconcile () =
              Masc.Keeper_owner_registry.apply_meta
                ~base_path:config.base_path
                ~keeper_name:name
-               (Masc.Keeper_owner_reducer.Add_usage
-                  { turns = 0
-                  ; input_tokens = 0
-                  ; output_tokens = 0
-                  ; total_tokens = 0
-                  ; cost_usd = 0.0
-                  ; last_turn_ts = stale.runtime.usage.last_turn_ts
-                  ; last_input_tokens = 123
-                  ; last_output_tokens = 4
-                  ; last_total_tokens = 127
-                  ; last_usage_reported_at = Some 1_700_000_000.0
-                  ; last_latency_ms = stale.runtime.usage.last_latency_ms
+               (Masc.Keeper_owner_reducer.Commit_turn_runtime
+                  { expected_trace_id = stale.runtime.trace_id
+                  ; usage =
+                      { turns = 0
+                      ; input_tokens = 0
+                      ; output_tokens = 0
+                      ; total_tokens = 0
+                      ; cost_usd = 0.0
+                      ; last_turn_ts = stale.runtime.usage.last_turn_ts
+                      ; last_input_tokens = 123
+                      ; last_output_tokens = 4
+                      ; last_total_tokens = 127
+                      ; last_usage_reported_at = Some 1_700_000_000.0
+                      ; last_latency_ms = stale.runtime.usage.last_latency_ms
+                      }
+                  ; counters = { proactive_count = 0; proactive_visible_count = 0 }
+                  ; next_keeper_id = stale.keeper_id
+                  ; next_trace_id = stale.runtime.trace_id
+                  ; proactive_observation = Unchanged
+                  ; usage_cursor = Unchanged
+                  ; last_usage_resolution = Unchanged
+                  ; message_scope_ack_id = Unchanged
+                  ; updated_at = stale.updated_at
                   })
            with
            | Ok (Some _) -> ()

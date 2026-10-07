@@ -469,6 +469,13 @@ let context_flow_uses_declared_connections () =
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
     output={rows=[];coverage=[]};complete=None} in
   let view = {UI.initial with focus=UI.Connections;presentation=UI.Flow;snapshot=Some snapshot} in
+  (* The Lane inventory opens the second declaration while the cursor still
+     names the first: the actions must follow the opened document. *)
+  let opened = UI.open_declaration {view with configuration_cursor=0} "/config/project-metric.toml" in
+  check (option string) "an opened declaration is the action target" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance opened));
+  check int "a declaration the snapshot does not list names no row" (-1)
+    (UI.open_declaration view "/config/absent.toml").configuration_cursor;
   check bool "flow exposes the selected action target" true
     (List.mem "Action target: Project observer · source-worker" (UI.lines ~width:160 view));
   let links = UI.lines ~width:160 {view with presentation=UI.Summary;

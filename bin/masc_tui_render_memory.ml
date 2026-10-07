@@ -204,36 +204,22 @@ let memory_input_lines ~cols ~unit reading =
   | Stale (snapshot, detail) ->
       wrap [label ^ ": stale · " ^ Terminal_text.single_line detail] @ values snapshot
 
-(* #39831: what the block under the selected keeper draws before the operator
-   asks for detail. The operator's first question is whether this keeper's
-   memory can be used now and whether there is something to do; the ledger
-   coordinates (revision, atoms, trace, recall size, source-bound snapshot,
-   the context cycle) answer a developer's question and wait behind [d].
-   A reading that did not come back is an action, never a zero: an unread lag
-   and a read error stay on the default view. *)
+(* #39831: the Librarian clauses the block under the selected keeper draws
+   before the operator asks for detail. A clause is an action: a lag or a
+   failure count above zero. A lag that could not be read is an action too,
+   never a zero. Zeros wait behind [d]. *)
 type memory_row_kind =
-  | Row_state
-  | Row_last_saved
-  | Row_ledger
   | Row_lag of int option
   | Row_librarian_failures of int
-  | Row_vision_errors of int
-  | Row_stalled
-  | Row_cause
-  | Row_read_error
-  | Row_alert
 
 type memory_row_visibility =
   | Shown_by_default
   | Detail_only
 
 let memory_row_visibility = function
-  | Row_state | Row_last_saved | Row_stalled | Row_cause | Row_read_error | Row_alert ->
-    Shown_by_default
   | Row_lag None -> Shown_by_default
   | Row_lag (Some behind) -> if behind > 0 then Shown_by_default else Detail_only
   | Row_librarian_failures failed -> if failed > 0 then Shown_by_default else Detail_only
-  | Row_ledger | Row_vision_errors _ -> Detail_only
 
 let shown_by_default kind =
   match memory_row_visibility kind with

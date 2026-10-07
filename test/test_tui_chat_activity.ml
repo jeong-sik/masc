@@ -25,7 +25,7 @@ let live ?(keeper_name = "alpha") ?(request_id = "request-1") state admission =
       (Live.Accepted { admission; queue_length = 3; interactive = None })) admission;
   state.Tui.msg_live <- Some live;
   state.msg_inflight <- [{ Tui.sent_request = { Chat.request_id; keeper_name; message = "request"; attachments = []; references = [] };
-    submitted_at = 2.; sent_at = 2.; control_generation = 0; origin = Tui.Direct_submission; phase = Tui.Turn_streaming; log = live }];
+    submitted_at = 2.; sent_at = 2.; control_generation = 0; phase = Tui.Turn_streaming; log = live }];
   live
 
 let texts rows = List.map Masc_tui_answering.chat_activity_row_text rows
@@ -41,7 +41,6 @@ let inflight ?(keeper_name = "alpha") ~request_id ~at () =
   ; submitted_at = at
   ; sent_at = at
   ; control_generation = 0
-  ; origin = Tui.Direct_submission
   ; phase = Tui.Turn_streaming
   ; log
   }
@@ -54,7 +53,7 @@ let test_the_band_does_not_repeat_the_admission () =
   List.iter (fun (admission, queue_rows) ->
     let state = state () in
     ignore (live state admission);
-    check (list string) "only queued admission contributes a pending request" queue_rows
+    check (list string) "pending rows follow the admission" queue_rows
       (texts (Tui.keeper_message_activity_rows state));
     state.keeper_turns <- [running Turn_lane_autonomous];
     match Tui.keeper_message_activity_rows state with
@@ -69,7 +68,8 @@ let test_the_band_does_not_repeat_the_admission () =
            Astring.String.is_infix ~affix:needle (Masc_tui_answering.chat_activity_row_text row))
            [ "Your message"; "Your request"; "queued at the server" ])
     | rows -> fail (String.concat " | " (texts rows)))
-    [ None, []; Some Live.Running, []; Some Live.Settled, []
+    [ None, ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 awaiting receipt"]
+    ; Some Live.Running, []; Some Live.Settled, []
     ; Some Live.Queued,
         ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"] ]
 

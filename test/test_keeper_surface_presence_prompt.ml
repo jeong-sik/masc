@@ -140,14 +140,6 @@ let user_message observation =
   in
   user
 
-let user_message_within ~budget observation =
-  let turn_decision = WO.keeper_cycle_decision ~meta observation in
-  let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~turn_decision
-      ~current_task:Inputs.No_current_task ~context_budget_bytes:budget ~observation ()
-  in
-  user
-
 let system_prompt ?profile_defaults () =
   let config = Masc.Workspace.default_config "/tmp/unused" in
   match Prompt.build_system_prompt ~meta ~config ?profile_defaults () with
@@ -263,68 +255,50 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
     (contains ~needle:"context, not instructions" user)
 ;;
 
-(* masc#29676: this section is the only one whose rows carry content the
-   runtime does not bound — a refused call replays its argument object
-   verbatim. A keeper whose recent turns carried large arguments assembled a
-   briefing larger than its runtime's whole request cap, and because the
-   briefing is pinned, cutting the conversation could not recover a byte: the
-   turn simply could not be assembled, 86 times across eight hours. *)
+(* A refused call replays its argument object verbatim, so a turn that
+   carried large arguments renders the largest rows this section has. *)
+let large_refusal_body = String.make 4000 'x'
+
+let large_refusal_input turn_id =
+  Printf.sprintf {|{"turn":%d,"body":"%s"}|} turn_id large_refusal_body
+
 let turn_with_a_large_refusal turn_id =
   { Actions.turn_id
   ; calls =
       [ { Actions.tool = "keeper_board_post"
-        ; input = Printf.sprintf {|{"turn":%d,"body":"%s"}|} turn_id (String.make 4000 'x')
+        ; input = large_refusal_input turn_id
         ; outcome = Actions.Failed_call (Some "too large")
         }
       ]
   }
 ;;
 
-let test_a_briefing_over_its_budget_withholds_the_oldest_turns () =
+let test_large_recent_actions_are_rendered_whole () =
+  let turns = [ 1; 2; 3; 4; 5 ] in
   let observation =
     { base_observation with
-      own_recent_actions = Ok (List.map turn_with_a_large_refusal [ 1; 2; 3; 4; 5 ])
+      own_recent_actions = Ok (List.map turn_with_a_large_refusal turns)
     }
   in
-  let unbudgeted = user_message observation in
-  check bool "without a budget the whole record is replayed" true
-    (String.length unbudgeted > 20_000);
-  let budget = 12_000 in
-  let trimmed = user_message_within ~budget observation in
-  check bool "the briefing is inside its budget" true (String.length trimmed <= budget);
-  (* The needle has to name a row. The refusal digest replays the same
-     argument object and is rendered outside the row budget on purpose, so a
-     needle on the arguments alone is found whether the row was withheld or
-     not -- it reads the digest and calls the row present. Only the row
-     carries [turn N] in brackets. *)
-  check bool "the oldest turn's row is the one given up" false
-    (contains ~needle:"- [turn 1] " trimmed);
-  check bool "the newest turn's row survives" true
-    (contains ~needle:"- [turn 5] " trimmed);
-  (* The count is the producer's own, so read it back rather than pinning a
-     number: the section is one trimmable layer among several and how many
-     rows it has to give up to reach the budget is not this test's claim. *)
-  let rows_shown = count_occurrences ~needle:"- [turn " trimmed in
-  check bool "the heading counts the turns it actually shows" true
+  let user = user_message observation in
+  (* Only the row carries [turn N] in brackets; the refusal digest above the
+     rows names the same calls with a shortened argument. *)
+  check int "every turn is a row" (List.length turns)
+    (count_occurrences ~needle:"- [turn " user);
+  check bool "the heading counts every turn" true
     (contains
-       ~needle:(Printf.sprintf "### Your Recent Actions (%d turns)" rows_shown)
-       trimmed);
-  (* What made the old needle ambiguous is itself the guarantee: a withheld
-     turn's refusal is still named, because the digest is what changes the
-     next turn's behavior. *)
-  check bool "a withheld turn's refusal is still named in the digest" true
-    (contains ~needle:{|{"turn":1,|} trimmed)
-;;
-
-(* The property that makes the budget safe to leave on: a briefing that
-   already fits is the same bytes it was before the budget existed. *)
-let test_a_briefing_under_its_budget_is_unchanged () =
-  let observation =
-    { base_observation with own_recent_actions = Ok [ turn_with_a_large_refusal 1 ] }
-  in
-  let unbudgeted = user_message observation in
-  check string "fits -> byte-identical to the unbudgeted briefing" unbudgeted
-    (user_message_within ~budget:(String.length unbudgeted) observation)
+       ~needle:(Printf.sprintf "### Your Recent Actions (%d turns)" (List.length turns))
+       user);
+  (* Searched line by line: each row is one line, and the digest cannot hold
+     the whole argument. *)
+  let lines = String.split_on_char '\n' user in
+  List.iter
+    (fun turn_id ->
+      check bool
+        (Printf.sprintf "turn %d replays its whole argument object" turn_id)
+        true
+        (List.exists (contains ~needle:(large_refusal_input turn_id)) lines))
+    turns
 ;;
 
 (* Row shape as the durable tool-call log persists it: [keeper_turn_id] an
@@ -802,10 +776,8 @@ let () =
         [
           test_case "the keeper sees the call it got rejected for" `Quick
             test_the_keeper_sees_the_call_it_got_rejected_for;
-          test_case "a briefing over its budget withholds the oldest turns" `Quick
-            test_a_briefing_over_its_budget_withholds_the_oldest_turns;
-          test_case "a briefing under its budget is unchanged" `Quick
-            test_a_briefing_under_its_budget_is_unchanged;
+          test_case "large recent actions are rendered whole" `Quick
+            test_large_recent_actions_are_rendered_whole;
           test_case "no actions means no section" `Quick
             test_no_recent_actions_no_section;
           test_case "only the newest turns of this keeper are replayed" `Quick

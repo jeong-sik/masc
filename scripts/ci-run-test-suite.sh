@@ -146,6 +146,20 @@ print_alcotest_outputs() {
 deadline="${MASC_TEST_SUITE_DEADLINE:-5400}"
 tmp="${RUNNER_TEMP:-/tmp}"
 log="$tmp/test-suite.log"
+# Dune's own timing of every process (compile, link, test run). The log says
+# what failed; this says where the step's time went. The trace records dune's
+# whole environment, so only its summary is kept: the workflow uploads
+# $timing and the trace is removed as soon as it has been read.
+trace="$tmp/test-suite-trace.csexp"
+timing="$tmp/test-suite-timing.json"
+
+summarise_trace() {
+  if [ -s "$trace" ]; then
+    python3 "$repo_root/scripts/ci/dune-trace-summary.py" "$trace" --out "$timing" \
+      || echo "[test-suite] the dune trace could not be summarised; no timing is uploaded"
+  fi
+  rm -f "$trace"
+}
 tree_at_deadline="$tmp/test-suite-tree-at-deadline.txt"
 running_at_deadline="$tmp/test-suite-running-at-deadline.txt"
 alcotest_outputs_at_deadline_file="$tmp/test-suite-alcotest-outputs-at-deadline.txt"
@@ -162,7 +176,7 @@ sandbox_root="_build/.sandbox"
 # while the sandboxes exist, and the whole tree gets TERM, then KILL after a
 # grace period; rc is 124 as before.
 run_suite_under_deadline() {
-  opam exec -- dune build --root . "$alias_target" > "$log" 2>&1 &
+  opam exec -- dune build --root . --trace-file "$trace" "$alias_target" > "$log" 2>&1 &
   local dune_pid=$!
   local exited
   local now
@@ -191,6 +205,7 @@ echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
 started=$(date +%s)
 run_suite_under_deadline
 echo "[test-suite] finished in $(( $(date +%s) - started ))s with exit ${rc}"
+summarise_trace
 
 if [ "$rc" = 124 ]; then
   echo "[test-suite] FAIL - the suite did not finish inside ${deadline}s"

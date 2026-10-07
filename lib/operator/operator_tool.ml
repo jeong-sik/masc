@@ -121,10 +121,9 @@ let board_attention_quarantine_requeue_result
 let task_recovery_failure_class = function
   | Masc_domain.Task _ | Masc_domain.Agent _ -> Tool_result.Workflow_rejection
   | Masc_domain.Auth _ -> Tool_result.Policy_rejection
-  | Masc_domain.System (Masc_domain.System_error.LockContention _)
-  | Masc_domain.RateLimitExceeded _ ->
+  | Masc_domain.System (Masc_domain.System_error.LockContention _) ->
     Tool_result.Dependency_unavailable
-  | Masc_domain.System _ | Masc_domain.CacheError _ -> Tool_result.Runtime_failure
+  | Masc_domain.System _ -> Tool_result.Runtime_failure
 ;;
 
 let task_recovery_result ~tool_name ~start_time (ctx : _ context) args =

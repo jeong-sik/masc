@@ -49,7 +49,7 @@ type source =
   | Openrouter_key_read  (** OpenRouter [GET /api/v1/key]. *)
   | Zai_quota_limit_read  (** Z.AI [GET /api/monitor/usage/quota/limit]. *)
   | Kimi_coding_usages_read  (** Kimi [GET /coding/v1/usages]. *)
-  | Ollama_usage_read  (** Ollama [GET https://ollama.com/api/usage]. *)
+  | Ollama_balance_read  (** Ollama [GET https://ollama.com/api/balance]. *)
   | Antigravity_usage_read
       (** Antigravity [agy -p "/usage" --output-format json], no turn. *)
   | Muse_subscription_usage
@@ -64,12 +64,15 @@ type window_role =
   | Gates_model_calls
       (** Spending it refuses model calls on the account: Claude and Codex
           windows, OpenRouter's credit limit, Z.AI's TOKENS_LIMIT, both Kimi
-          counts, Ollama's session and weekly usage, Antigravity's 5-hour and
-          weekly buckets, Muse Code's rolling and weekly windows. *)
+          counts, Ollama's session and weekly allowance while its purchased
+          balance is zero, Antigravity's 5-hour and weekly buckets, Muse
+          Code's rolling and weekly windows. *)
   | Counts_other_use
       (** It counts something a model call does not need: Z.AI's
           TIME_LIMIT (MCP and tool calls), OpenRouter's free-model daily
-          requests, and uncapped credit usage totals. *)
+          requests, uncapped credit usage totals, and Ollama's session and
+          weekly allowance while its purchased balance pays for calls past
+          them. *)
   | Unclassified_limit
       (** A Z.AI limit type this decoder does not know. *)
 
@@ -178,12 +181,17 @@ val decode_kimi_coding_usages : Yojson.Safe.t -> (report, decode_error) result
     "usage (provider resetTime)": it states no length, only its
     [resetTime].  [usages.*.used_ratio] is not read. *)
 
-val decode_ollama_usage : Yojson.Safe.t -> (report, decode_error) result
-(** Ollama [GET https://ollama.com/api/usage].  [limits] is required;
-    [limits.session.usage] is a {!Provider_label} "session" window and
-    [limits.weekly.usage] a {!Seven_day} window, each a {!Fraction} that
-    must be within [0..1].  No
-    reset time is stated. *)
+val decode_ollama_balance : Yojson.Safe.t -> (report, decode_error) result
+(** Ollama [GET https://ollama.com/api/balance], a legacy plan's answer.
+    [included] is required; [included.session] is a {!Provider_label}
+    "session" window and [included.weekly] a {!Seven_day} window, each a
+    {!Fraction} of [1 - remaining_percent / 100] with [remaining_percent]
+    within [0..100], and [resets_at] read as RFC 3339 when present.
+    [purchased.balance_usd] is required, 0 or more: above zero both windows
+    are {!Counts_other_use}, because Ollama pays a call past a spent window
+    from that balance; at zero they are {!Gates_model_calls}. A credit
+    plan's [included.balance_usd] is refused: its calls go on against
+    purchased credits, so no window alone says when a call is refused. *)
 
 val decode_antigravity_usage : Yojson.Safe.t -> (report, decode_error) result
 (** The whole JSON answer of [agy -p "/usage" --output-format json] (agy

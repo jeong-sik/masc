@@ -87,22 +87,14 @@ let test_classify_io_error () =
         "IoError should classify as Io_error, got %s"
         (Aek.to_string other)
 
-let test_classify_invalid_json () =
-  match Aek.classify (Masc_domain.System (Masc_domain.System_error.InvalidJson "x")) with
-  | Aek.Invalid_json -> ()
-  | other ->
-      Alcotest.failf
-        "InvalidJson should classify as Invalid_json, got %s"
-        (Aek.to_string other)
-
 let test_classify_unmodelled_falls_to_other () =
-  (* StorageError is not auth-relevant and intentionally falls through
+  (* ValidationError is not auth-relevant and intentionally falls through
      to [Other]. *)
-  match Aek.classify (Masc_domain.System (Masc_domain.System_error.StorageError "disk")) with
+  match Aek.classify (Masc_domain.System (Masc_domain.System_error.ValidationError "bad field")) with
   | Aek.Other -> ()
   | other ->
       Alcotest.failf
-        "StorageError should classify as Other, got %s"
+        "ValidationError should classify as Other, got %s"
         (Aek.to_string other)
 
 let test_label_set_stable () =
@@ -132,7 +124,6 @@ let suite =
   ; test_case "classify SameOriginBlocked" `Quick test_classify_same_origin_blocked
   ; test_case "classify AgentNotFound" `Quick test_classify_agent_not_found
   ; test_case "classify IoError" `Quick test_classify_io_error
-  ; test_case "classify InvalidJson" `Quick test_classify_invalid_json
   ; test_case "classify unmodelled → Other" `Quick test_classify_unmodelled_falls_to_other
   ; test_case "label set stable" `Quick test_label_set_stable
   ]

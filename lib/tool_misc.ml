@@ -183,7 +183,8 @@ let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args
   | Some (Tool_schemas_misc.Misc_portrait_read
       | Tool_schemas_misc.Misc_candle_balance | Tool_schemas_misc.Misc_candle_catalog
       | Tool_schemas_misc.Misc_candle_purchase
-      | Tool_schemas_misc.Misc_candle_equip) -> None
+      | Tool_schemas_misc.Misc_candle_equip
+      | Tool_schemas_misc.Misc_candle_gift) -> None
   | Some Tool_schemas_misc.Misc_lane_action_status ->
       Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Action_status args with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
@@ -340,6 +341,7 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_candle_balance
   | Tool_schemas_misc.Misc_candle_purchase
   | Tool_schemas_misc.Misc_candle_equip
+  | Tool_schemas_misc.Misc_candle_gift
   | Tool_schemas_misc.Misc_lane_updates -> false
   | Tool_schemas_misc.Misc_lane_action_status
   | Tool_schemas_misc.Misc_lane_inspect

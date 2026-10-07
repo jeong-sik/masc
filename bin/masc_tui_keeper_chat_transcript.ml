@@ -2385,11 +2385,19 @@ let drawn t =
      not the whole turn's: a turn that said "Let me check." before its tool
      round and "Done." after records "Done.". So only the last stretch of the
      current attempt is the one the reply stands for; the stretches before it
-     are the turn's earlier rounds and stay as they streamed. *)
+     are the turn's earlier rounds and stay as they streamed. A tool or skill
+     round of the current attempt ends the stretch before it: text that
+     streamed before the round is progress, and a turn that streamed nothing
+     after it has no stretch for the reply to stand for. *)
   let last_text =
     List.fold_left
       (fun (index, last) item ->
-        (index + 1, if current_text item then Some index else last))
+        let last =
+          match item.superseded, item.drawn with
+          | None, (Drawn_tools _ | Drawn_skill _) -> None
+          | _ -> if current_text item then Some index else last
+        in
+        (index + 1, last))
       (0, None) items
     |> snd
   in

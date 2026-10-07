@@ -388,8 +388,8 @@ let test_browser_reader_chrome_scope () =
     check bool "reader owns its context row" true
       (Option.is_some (Tui_types.browser_lane_on_screen state));
     check int "reader highlights its Runtime family"
-      (Masc_tui_surface_navigation.visible_surface_ring_index state Tui_types.Runtime)
-      (Masc_tui_surface_navigation.visible_surface_ring_index state state.Tui_types.view);
+      (Masc_tui_surface_navigation.surface_ring_index state Tui_types.Runtime)
+      (Masc_tui_surface_navigation.surface_ring_index state state.Tui_types.view);
     state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
     check bool "retained browser does not hide Keeper chrome" true
       (Option.is_none (Tui_types.browser_lane_on_screen state)))
@@ -399,8 +399,8 @@ let test_browser_reader_chrome_scope () =
   check bool "connector routing retains Keeper context" true
     (Option.is_none (Tui_types.browser_lane_on_screen state));
   check int "connector routing keeps its existing navigation family"
-    (Masc_tui_surface_navigation.visible_surface_ring_index state (Tui_types.Keepers Tui_types.Keeper_list))
-    (Masc_tui_surface_navigation.visible_surface_ring_index state Tui_types.Connectors)
+    (Masc_tui_surface_navigation.surface_ring_index state (Tui_types.Keepers Tui_types.Keeper_list))
+    (Masc_tui_surface_navigation.surface_ring_index state Tui_types.Connectors)
 ;;
 
 let test_reader_discards_active_and_queued_voice () =
@@ -410,7 +410,7 @@ let test_reader_discards_active_and_queued_voice () =
   state.Tui_types.voice_continuous <- Some "analyst";
   state.Tui_types.voice_floor <- Some (-50.);
   state.Tui_types.voice_level_db <- Some (-20.);
-  Buffer.add_string state.Tui_types.msg_input "reviewed draft";
+  Masc_tui_message_input.insert state.Tui_types.msg_input "reviewed draft";
   Tui_types.release_composer_for_browser_reader state;
   check bool "composer releases input" false state.Tui_types.composer_focused;
   check (option string) "continuous capture stops" None state.Tui_types.voice_continuous;
@@ -430,7 +430,7 @@ let test_reader_discards_active_and_queued_voice () =
   check bool "duplicate completion has no owner" true
     (Tui_types.settle_voice_capture state ~keeper:"analyst" = None);
   check string "existing draft survives reader entry" "reviewed draft"
-    (Buffer.contents state.Tui_types.msg_input);
+    (Masc_tui_message_input.contents state.Tui_types.msg_input);
   (* A fresh capture explicitly started after returning remains usable. *)
   state.Tui_types.voice_capture <- Some "analyst";
   state.Tui_types.voice_stop_requested <- None;
@@ -471,7 +471,7 @@ let test_workspace_withdrawal_discards_queued_voice () =
     check (option string) "completion cannot restart continuous mode"
       None state.Tui_types.voice_continuous;
     check string "withdrawn draft stays empty" ""
-      (Buffer.contents state.Tui_types.msg_input))
+      (Masc_tui_message_input.contents state.Tui_types.msg_input))
     [false; true]
 ;;
 

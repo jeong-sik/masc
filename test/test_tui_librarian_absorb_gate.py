@@ -91,17 +91,24 @@ def run_case(executable: str, fixture_path: Path) -> None:
         )
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"j/k:move")
         _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"1 loaded / 1 retained")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"absorb_gate")
+        # The run detail opens with the JEV evidence folded (#40795): the
+        # model, probabilities and 원문 실행 증거 -- and with them the gate
+        # report -- sit behind the pane's own `d` toggle. Unfold before
+        # reading the report.
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", "d: 모델·확률·원문 펼치기".encode())
+        _keyboard_harness.send_and_wait(process, fd, output, b"d", b"context_write")
         _keyboard_harness.drain_until_quiet(process, fd, output)
         first_screen = _keyboard_harness.screen_text(bytes(output))
         status = cast(str, run["status"]).encode()
-        for needle in (b"absorb_gate", gate["status"].encode(), b"RUN  " + status):
+        for needle in (b"RUN  " + status,):
             if needle not in first_screen:
                 raise AssertionError(f"{scenario} first frame omitted {needle!r}")
+        if "d: 모델·확률·원문 펼치기".encode() in first_screen:
+            raise AssertionError(f"{scenario} JEV evidence stayed folded after d")
         if gate["status"] not in ("skipped", "incomplete"):
             boundary = f'"conveyed_boundary": {gate["conveyed_boundary"]}'.encode()
-            if boundary not in first_screen:
-                raise AssertionError(f"{scenario} first frame omitted {boundary!r}")
+        else:
+            boundary = None
         if detail_reads != [run_id]:
             raise AssertionError(f"wrong detail reads: {detail_reads!r}")
 
@@ -169,6 +176,12 @@ def run_case(executable: str, fixture_path: Path) -> None:
                     f'"revision": {run["output"]["after"]["revision"]}'.encode(),
                 ]
             )
+        # The gate report is part of the unfolded evidence, so it is reached by
+        # walking the output pane rather than read off the first frame.
+        needles.append(b"absorb_gate")
+        needles.append(gate["status"].encode())
+        if boundary is not None:
+            needles.append(boundary)
         if gate["status"] != "skipped":
             needles.append(
                 cast(
@@ -209,7 +222,10 @@ def run_case(executable: str, fixture_path: Path) -> None:
             if b"EXACT_OUTPUT_TAIL" in first_screen:
                 raise AssertionError("the fixture did not exercise the bounded preview")
             _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[F", b"truncated, total")
-            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"absorb_gate")
+            # Home returns the pane to its first row, which now carries the
+            # preflight summary ahead of the report; the report's own first
+            # field is the marker that it is back at the top.
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"context_write")
 
         print(
             "LIBRARIAN_ABSORB_GATE_PTY_EVIDENCE "

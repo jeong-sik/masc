@@ -126,9 +126,17 @@ let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun or
   let settled = find state "MATCH_REPLY" in
   (match settled.matched_anchor, latest.matched_anchor with
    | T.Search_journal settled, T.Search_journal latest ->
-       check bool "canonical replacement preserves the matched stretch identity" true
-         (settled.origin = latest.origin && settled.source = latest.source)
+       check bool "multi-stretch final has separate authority in the same source" true
+         (settled.canonical_reply && settled.origin <> latest.origin
+          && settled.source = latest.source)
    | _ -> fail "journal reply lost its source anchor");
+  let observed = find ~older:settled state "MATCH_REPLY" in
+  (match observed.matched_anchor, latest.matched_anchor with
+   | T.Search_journal observed, T.Search_journal latest ->
+       check bool "the observed stretch keeps its identity after the final arrives" true
+         (not observed.canonical_reply && observed.origin = latest.origin
+          && observed.source = latest.source)
+   | _ -> fail "observed response lost its source anchor");
   check bool "hidden reasoning cannot be found as visible speech" true
     (Option.is_none (Render.keeper_message_find_scroll state ~keeper_name:"alpha"
        ~needle:"MATCH_REASONING" ~older_than:None)))

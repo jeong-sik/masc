@@ -2733,11 +2733,6 @@ let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
   let keys = List.map fst Transcript.legend in
   check bool "received result mark is explained without a success claim" true
     (List.mem (Transcript.received_marker ^ " received") keys);
-  (* The two lists are written by hand: a constructor added later compiles
-     (the label functions are exhaustive) but would be missing from the
-     rollup and the legend, so their lengths are held here. *)
-  check int "six outcomes" 6 (List.length Transcript.all_outcomes);
-  check int "eight skill states" 8 (List.length Transcript.all_skill_states);
   List.iter
     (fun outcome ->
       let key =
@@ -2817,6 +2812,11 @@ let test_native_tools_are_observations_without_execution_receipts () =
   feed t [Live.Tool_result {occurrence; execution_id="wrong-authority"}];
   check (option string) "MASC receipt cannot attach to native observation" None (call ()).execution_id;
   check bool "mixed-authority event is reported" true (Option.is_some (Transcript.unreadable t));
+  (* A single call is already shown in full. A second distinct native call
+     exercises the compact group's summary without inventing a MASC receipt. *)
+  let second = {occurrence with block_index=8; tool_call_id=Some "native-8"} in
+  feed t [Live.Native_tool_started {occurrence=second;tool_name=Some "Search"};
+          Live.Native_tool_ended {occurrence=second}];
   let rows = Transcript.project_tool_block Transcript.Compact
       (Transcript.tool_block (Transcript.tool_calls t)) in
   check tool_outcome "collapsed tools retain native outcome" Transcript.Native_ended

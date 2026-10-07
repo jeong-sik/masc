@@ -197,10 +197,15 @@ def scenario(binary, outcome):
             h.wait_for_output(process, fd, output, b"account-one.model (quota_exhausted)", start=start, timeout=20.0)
             h.wait_for_output(process, fd, output, "아직 사용할 수 없습니다".encode(), start=start, timeout=20.0)
             assert "검증하고 저장했습니다".encode() not in output[start:]
-        # A successful state's refresh remains read-only.
+        # A successful state's refresh remains read-only. The diff frame
+        # presenter emits no bytes when the refresh changes nothing, so the
+        # refresh is observed through its fixture event and the active
+        # receipt is asserted to persist instead of waiting for a repaint.
         refreshed["inventory"].clear()
-        h.send_and_wait(process, fd, output, b"r", ACTIVE)
-        assert h.wait_for_fixture_event(process, fd, output, refreshed["inventory"], timeout=5.0)
+        os.write(fd, b"r")
+        assert h.wait_for_fixture_event(process, fd, output, refreshed["inventory"], timeout=5.0), "r did not reload the saved inventory"
+        h.drain_until_quiet(process, fd, output)
+        assert ACTIVE in output[start:], "refresh after a successful activation left the runtime inactive"
         assert len(saves) == 1 and len(activations) == (2 if outcome in ("refused", "lost", "incomplete", "close_failed") else 1)
         h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")

@@ -2,20 +2,14 @@ open Alcotest
 module Store = Keeper_chat_operation_store
 module Execution = Keeper_semantic_execution
 module Operation = Keeper_chat_operation
-module Scope = Keeper_execution_scope_id
 module Sweep = Masc.Keeper_retained_checkpoint_sweep
 
 let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error)
-let execution_ok = function Ok value -> value | Error error -> fail (Store.semantic_error_to_string error)
 let string_ok = function Ok value -> value | Error detail -> fail detail
-let uuid n =
-  match Uuidm.of_string (Printf.sprintf "00000000-0000-4000-8000-%012d" n) with
-  | Some id -> id | None -> fail "invalid fixture UUID"
 let checkpoint bytes =
   let trace_id = Keeper_id.Trace_id.of_string "sweep-trace" |> string_ok in
   match Keeper_checkpoint_ref.create ~trace_id ~turn_count:3 ~canonical_checkpoint_bytes:bytes with
   | Ok reference -> reference | Error _ -> fail "checkpoint fixture rejected"
-let fixture_input = `Assoc ["kind", `String "test_turn"; "message", `String "continue"]
 
 let rec remove_tree path =
   match Unix.lstat path with
@@ -45,13 +39,21 @@ let retained root ~session (reference : Keeper_checkpoint_ref.t) =
   List.fold_left Filename.concat (Masc.Keeper_fs.session_store_path_for_runtime_root root)
     (session @ [Masc.Keeper_checkpoint_store.retained_dirname; reference.sha256 ^ ".json"])
 
-let apply store execution action = Store.semantic_apply store ~expected:execution ~now:20. action |> execution_ok
-let running store n =
-  let prepared = match Store.semantic_prepare ~input:fixture_input store
-      ~id:(Scope.autonomous_admission (uuid n)) ~sources:[] ~now:10. |> execution_ok with
-    | Store.Semantic_created execution -> execution
-    | Store.Semantic_existing _ -> fail "new identity unexpectedly replayed" in
-  apply store (apply store prepared Execution.Confirm_sources) Execution.Begin_execution
+let claimed_direct store name =
+  let operation_id = Operation.Operation_id.of_string name |> string_ok in
+  let input = match Operation.canonical_json (`Assoc ["message", `String "continue"]) with
+    | Ok input -> input | Error _ -> fail "invalid canonical input fixture" in
+  ignore (Store.submit store ~now:10. ~operation_id
+            ~source:(`Assoc ["channel", `String "dashboard"]) ~input |> store_ok);
+  match Store.claim_next store ~now:11. |> store_ok with
+  | Some operation -> operation | None -> fail "direct operation was not queued"
+
+let defer_direct_checkpoint store name reference =
+  let operation = claimed_direct store name in
+  ignore (Store.defer_direct_checkpoint store ~now:12. ~operation_id:operation.operation_id
+            ~execution_digest:operation.execution_digest ~checkpoint:(Execution.Agent_core reference)
+          |> store_ok);
+  operation.operation_id
 
 let defer_direct_retry store reference =
   let operation_id = Operation.Operation_id.of_string "sweep-direct" |> string_ok in
@@ -89,9 +91,9 @@ let test_removes_only_what_no_unsettled_execution_names () = with_root (fun root
   let suspended = checkpoint "suspended" and settled = checkpoint "settled"
   and retried = checkpoint "retried" in
   with_open (keeper_store root "alpha") (fun store ->
-    ignore (apply store (running store 1) (Execution.Suspend suspended));
-    let released = apply store (running store 2) (Execution.Suspend settled) in
-    ignore (apply store released (Execution.Settle Execution.Cancelled)));
+    let released = defer_direct_checkpoint store "sweep-settled" settled in
+    ignore (Store.cancel_queued store ~now:13. ~operation_id:released |> store_ok);
+    ignore (defer_direct_checkpoint store "sweep-suspended" suspended));
   with_open (keeper_store root "beta") (fun store -> defer_direct_retry store retried);
   let kept_suspended = retained root ~session:["scope"; "sweep-trace"] suspended in
   let kept_retried = retained root ~session:["sweep-trace"] retried in
@@ -131,11 +133,11 @@ let test_symlinked_keeper_directories_are_read () =
     let keepers_dir = Filename.concat root Common.keepers_runtime_dirname in
     (if link_keepers_dir then begin
        with_open (keeper_store elsewhere "delta") (fun store ->
-         ignore (apply store (running store 1) (Execution.Suspend held)));
+         ignore (defer_direct_checkpoint store "sweep-held" held));
        Unix.symlink (Filename.concat elsewhere Common.keepers_runtime_dirname) keepers_dir
      end else begin
        with_open (keeper_store elsewhere "delta") (fun store ->
-         ignore (apply store (running store 1) (Execution.Suspend held)));
+         ignore (defer_direct_checkpoint store "sweep-held" held));
        mkdir_p keepers_dir;
        Unix.symlink
          (Filename.concat (Filename.concat elsewhere Common.keepers_runtime_dirname) "delta")

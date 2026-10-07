@@ -12,15 +12,6 @@ val source_member :
   post_id:string -> admitted_revision:int64 -> checkpoint_retentions:int ->
   source_sha256:string -> (source_member, string) result
 
-type source_projection = private
-  { original : source_member
-  ; observed : source_member
-  ; bound_scope : Keeper_execution_scope_id.t
-  }
-val source_projection : original:source_member -> observed:source_member ->
-  bound_scope:Keeper_execution_scope_id.t -> (source_projection, string) result
-(** Caller re-reads the selected queue entry and verifies its durable binding.
-    The original admission stays immutable when queue priority/revision changes. *)
 type runtime_retry = private
   { checkpoint : Keeper_checkpoint_ref.t
   ; assignment_id : string
@@ -120,10 +111,8 @@ type error =
 type action =
   | Confirm_sources
   | Begin_execution
-  | Recheck_sources of source_projection list
   | Resume_checkpoint of Keeper_checkpoint_ref.t
   | Resume_official_checkpoint of official_client_checkpoint
-  | Record_observation of Keeper_repetition_snapshot.observation
   | Require_reconciliation of string
   | Suspend of Keeper_checkpoint_ref.t
   | Suspend_official_checkpoint of official_client_checkpoint
@@ -158,12 +147,7 @@ val create : id:Keeper_execution_scope_id.t -> input:Yojson.Safe.t -> sources:so
     during waiting/recovery and is released only at semantic settlement. The
     immutable digest remains part of admission identity after release. *)
 val apply : now:float -> action -> t -> (t, error) result
-(** Recheck_sources carries a complete, caller-verified projection of the
-    original batch's current queue entries and their durable scope bindings.
-    It recovers only undispatched phases; new generations retain initial
-    membership and update current_sources without resetting the frame.
-
-    Resume_checkpoint requires that the caller re-read and validate the exact
+(** Resume_checkpoint requires that the caller re-read and validate the exact
     canonical checkpoint named by Suspended/Checkpointed. The journal owns
     this accepted continuation, so original attention may already be ACKed.
     Cancellation must settle this journal before withdrawing its queue source.

@@ -3536,13 +3536,13 @@ let test_canonical_reply_payload_redacts_reply_and_preserves_evidence () =
           ("runtime_class", `String "keeper");
           ("turn_outcome", `String "visible_reply");
           ("turn_ref", Ids.Turn_ref.to_yojson turn_ref);
-          ("reply", `String "api_key=secret Done.");
+          ("reply", `String "    api_key=secret Done.  \n\n");
           ("tool_call_evidence", tool_evidence);
           ("runtime_note", `String "must not be user-visible");
         ])
   in
   let redact_text = function
-    | "api_key=secret Done." -> "api_key=[redacted] Done."
+    | "    api_key=secret Done.  \n\n" -> "    api_key=[redacted] Done.  \n\n"
     | text -> text
   in
   match
@@ -3554,8 +3554,16 @@ let test_canonical_reply_payload_redacts_reply_and_preserves_evidence () =
       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
          error)
   | Ok canonical ->
-    check string "visible reply is redacted once" "api_key=[redacted] Done."
+    check string "visible reply is redacted without changing whitespace"
+      "    api_key=[redacted] Done.  \n\n"
       canonical.visible_reply;
+    check string "poll reply keeps the same redacted text"
+      canonical.visible_reply
+      (json_string_field "reply" (Some (Yojson.Safe.from_string canonical.poll_body)));
+    check string "stream chunk reassembly keeps the same redacted text"
+      canonical.visible_reply
+      (String.concat "" (Server_routes_http_keeper_stream.split_keeper_reply_chunks
+         canonical.visible_reply));
     check bool "turn_ref identity is preserved" true
       (Ids.Turn_ref.equal turn_ref canonical.turn_ref);
     check string "turn outcome label is unchanged" "visible_reply"

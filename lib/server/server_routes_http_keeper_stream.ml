@@ -1133,9 +1133,6 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
   Ok { payload; source }
 ;;
 
-let strip_keeper_visible_reply (reply : string) =
-  String.trim reply
-
 let split_keeper_reply_chunks (text : string) : string list =
   let len = String.length text in
   if len = 0 then
@@ -1501,7 +1498,7 @@ let canonical_reply_payload_of_body ~redact_text body =
   let visible_reply =
     match public_reply_of_outcome ~turn_outcome ~reply:reply_raw with
     | None -> "" (* The public wire requires a reply string beside its typed outcome. *)
-    | Some reply -> strip_keeper_visible_reply reply |> redact_text |> String.trim
+    | Some reply -> redact_text reply
   in
   let payload_json =
     `Assoc (assoc_replace "reply" (`String visible_reply) fields)
@@ -2349,7 +2346,10 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                    | Error detail -> Error detail
                    | Ok (Some _) -> persist_tool_calls_only () |> delivered_after_persist
                    | Ok None ->
-                   match turn_outcome, String_util.trim_nonempty visible_reply with
+                   let spoken =
+                     if String.trim visible_reply = "" then None else Some visible_reply
+                   in
+                   match turn_outcome, spoken with
                    | ( ( Keeper_turn_outcome.Continuation_checkpoint
                        | Keeper_turn_outcome.Awaiting_gate_approval
                        | Keeper_turn_outcome.Terminal_effect_settled ) as

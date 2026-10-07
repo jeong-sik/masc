@@ -77,7 +77,7 @@ let credential_departure ~transaction ~(config : Workspace.config) ~now holder =
      | Self_declared | Unreadable _ -> None)
 ;;
 
-let holder_left ~transaction ~(config : Workspace.config) ~now holder =
+let keeper_or_credential_left ~transaction ~(config : Workspace.config) ~now holder =
   match Keeper_registry.get_phase ~base_path:config.base_path holder with
   | Some (Paused | Stopped) -> Some Tool_misc_dos_lane.Keeper_stopped
   | Some (Running | Failing | Draining | Restarting | Crashed | Offline) -> None
@@ -88,6 +88,53 @@ let holder_left ~transaction ~(config : Workspace.config) ~now holder =
      | Error _ -> None)
 ;;
 
+let holder_left ~transaction ~(config : Workspace.config) ~now holder =
+  match auth_mode ~config with
+  | Self_declared | Unreadable _ -> keeper_or_credential_left ~transaction ~config ~now holder
+  | Enforced ->
+    (match Play_participation.current ~transaction ~base_path:config.base_path ~name:holder with
+     | Ok Departed -> Some Tool_misc_dos_lane.Participant_departed
+     | Ok Connected -> keeper_or_credential_left ~transaction ~config ~now holder
+     | Error detail ->
+       Log.Auth.warn "DOS controller participation cannot be read: %s" detail;
+       None)
+;;
+
+type participation_error = Credential_changed | Participation_unavailable of string
+
+let set_participation ~config ~who ~token participation =
+  let unavailable detail = Participation_unavailable detail in
+  let result = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
+    Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+      let ( let* ) = Result.bind in
+      let* current = Auth.current_credential_in_transaction transaction who
+        |> Result.map_error (fun error -> unavailable (Masc_domain.masc_error_to_string error)) in
+      let* credential = match current with
+        | Some credential when String.equal credential.Masc_domain.token
+            Digestif.SHA256.(digest_string token |> to_hex)
+            && Masc_domain.has_permission credential.role Masc_domain.CanPlayMachine ->
+          (match Play_invite.expired ~now:(Time_compat.now ()) credential with
+           | Ok false -> Ok credential
+           | Ok true | Error _ -> Error Credential_changed)
+        | Some _ | None -> Error Credential_changed in
+      (* Do not overwrite an unreadable state with an apparently fresh session. *)
+      let* _ = Play_participation.read ~transaction ~base_path:config.base_path credential
+        |> Result.map_error unavailable in
+      let* () = Play_participation.write ~transaction ~base_path:config.base_path credential participation
+        |> Result.map_error unavailable in
+      match participation with
+      | Connected -> Ok ()
+      | Departed ->
+        (match Tool_misc_dos_lane.off_domain (fun () ->
+            Dos_lane.release_left ~holder:who ~announce:(announce ~author:who
+              (Tool_misc_dos_lane.departure_notice who Tool_misc_dos_lane.Participant_departed))) with
+         | Ok (true | false) | Error Dos_lane.No_machine -> Ok ()
+         | Error error -> Error (unavailable (Dos_lane.error_to_string error))))
+    |> Result.map_error (fun error -> unavailable (Masc_domain.masc_error_to_string error))
+    |> Result.join) in
+  Tool_misc_dos_lane.after_announcing result
+;;
+
 let recover_in_transaction ?announce ~transaction ~config ~who () =
   let now = Time_compat.now () in
   Tool_misc_dos_lane.free_left_controller ?announce ~holder_left:(holder_left ~transaction ~config ~now) ~who ()
@@ -96,7 +143,17 @@ let recover_in_transaction ?announce ~transaction ~config ~who () =
 let before_move ~config ~who =
   let released = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
     Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
-      recover_in_transaction ~announce ~transaction ~config ~who ()))
+      let admission = match auth_mode ~config with
+        | Self_declared -> Ok ()
+        | Unreadable detail -> Error (Masc_domain.System (Masc_domain.System_error.IoError detail))
+        | Enforced ->
+          (match Play_participation.current ~transaction ~base_path:config.base_path ~name:who with
+           | Ok Connected -> Ok ()
+           | Ok Departed -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden
+               {agent = who; action = "DOS input after disconnect; reconnect the play session first"}))
+           | Error detail -> Error (Masc_domain.System (Masc_domain.System_error.IoError detail))) in
+      Result.map (fun () -> recover_in_transaction ~announce ~transaction ~config ~who ()) admission))
+    |> Result.join
   in
   (* Board publication must never run while credential writers are excluded. *)
   Tool_misc_dos_lane.after_announcing released

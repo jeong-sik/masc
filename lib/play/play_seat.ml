@@ -21,8 +21,28 @@ let participant_names ~keepers ~now credentials =
   in
   List.sort_uniq String.compare (keepers @ List.filter_map seated credentials)
 
+let connected_credentials ~transaction ~base_path credentials =
+  let ( let* ) = Result.bind in
+  let rec collect found departed = function
+    | [] -> Ok (List.rev found, departed)
+    | credential :: rest ->
+        let* participation = Play_participation.read ~transaction ~base_path credential
+          |> Result.map_error (fun detail -> Masc_domain.System (Masc_domain.System_error.IoError detail)) in
+        (match participation with
+         | Connected -> collect (credential :: found) departed rest
+         | Departed -> collect found (credential.agent_name :: departed) rest) in
+  collect [] [] credentials
+
+let participants_in_transaction ~transaction ~base_path ~keepers ~now =
+  let ( let* ) = Result.bind in
+  let* credentials = Auth.list_current_credentials_in_transaction transaction in
+  let* credentials, departed = connected_credentials ~transaction ~base_path credentials in
+  let keepers = List.filter (fun name -> not (List.mem name departed)) keepers in
+  Ok (participant_names ~keepers ~now credentials)
+
 let participants ~base_path ~keepers ~now =
-  Auth.list_current_credentials base_path |> Result.map (participant_names ~keepers ~now)
+  Auth.with_credential_transaction base_path (fun transaction ->
+    participants_in_transaction ~transaction ~base_path ~keepers ~now) |> Result.join
 
 let hand_to config ~now =
   Result.bind (keeper_names config) (fun keepers ->
@@ -31,6 +51,5 @@ let hand_to config ~now =
 
 let hand_to_in_transaction ~transaction config ~now =
   Result.bind (keeper_names config) (fun keepers ->
-    Auth.list_current_credentials_in_transaction transaction
-    |> Result.map (participant_names ~keepers ~now)
+    participants_in_transaction ~transaction ~base_path:config.Workspace.base_path ~keepers ~now
     |> Result.map_error (fun error -> "cannot list credentials: " ^ Masc_domain.masc_error_to_string error))

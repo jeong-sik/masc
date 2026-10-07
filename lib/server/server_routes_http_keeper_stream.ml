@@ -2346,7 +2346,10 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                    | Error detail -> Error detail
                    | Ok (Some _) -> persist_tool_calls_only () |> delivered_after_persist
                    | Ok None ->
-                   match turn_outcome, String_util.trim_nonempty visible_reply with
+                   let spoken =
+                     if String.trim visible_reply = "" then None else Some visible_reply
+                   in
+                   match turn_outcome, spoken with
                    | ( ( Keeper_turn_outcome.Continuation_checkpoint
                        | Keeper_turn_outcome.Awaiting_gate_approval
                        | Keeper_turn_outcome.Terminal_effect_settled ) as

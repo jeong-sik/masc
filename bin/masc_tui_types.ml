@@ -111,6 +111,19 @@ type workspace_identity =
       ; server_base_path : string
       }
 
+(* A task POST has already succeeded. Only its dependent handoff/reading
+   waits for identity recovery; creating or cancelling the task is never
+   repeated. Authority also prevents A -> B -> A from reviving a handoff. *)
+type task_followup =
+  | Task_handoff of { keeper : string; task_id : string; title : string; body : string }
+  | Task_cancel_refresh of string
+
+type pending_task_followup =
+  { tf_workspace : Tui_decode.server_identity
+  ; tf_authority : workspace_authority
+  ; tf_action : task_followup
+  }
+
 type workspace_input_identity =
   { wi_base_path : string
   ; wi_masc_root : string
@@ -3291,14 +3304,6 @@ let runtime_param_edit_clear edit =
   { edit with rpe_draft = ""; rpe_replace_on_type = false }
 
 
-type task_handoff = {
-  th_workspace : Tui_decode.server_identity;
-  th_keeper : string;
-  th_task_id : string;
-  th_title : string;
-  th_body : string;
-}
-
 (* Assigning a voice to one keeper. Separate from the wizard because it is
    shaped differently: the wizard walks questions to write one endpoint, this
    walks two lists to write one line of [voice.tts.agent_voices].
@@ -5197,6 +5202,7 @@ type state = {
   mutable workspace_identity: workspace_identity;
   mutable workspace_authority: workspace_authority;
   mutable workspace_read_authority: unit ref;
+  mutable pending_task_followups: pending_task_followup list;
   mutable suspended_keeper_inputs: (workspace_input_identity option * suspended_keeper_input) list;
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable workspace_observation_cancellations: (unit ref * (unit -> unit)) list;
@@ -5296,7 +5302,6 @@ type state = {
   (* The keeper-voice screen, drawn instead of the voice pane while it is
      open. Never both this and the wizard: each is a whole surface. *)
   mutable voice_agent_voices: voice_agent_session option;
-  mutable task_handoffs_pending: task_handoff list;
   mutable lane_installer_read_resume: (int * Masc_tui_lane_installer.read) option;
   (* The number the next wizard save is sent under. Never reused, so a reply
      for a save made by a session that has since closed cannot match the one
@@ -6456,6 +6461,38 @@ let server_authority_ready state =
       && not (String.equal identity.sid_base_path "")
       && not (String.equal identity.sid_masc_root "")
   | None -> false
+
+let remember_task_followup state ~expected_workspace action =
+  state.pending_task_followups <- state.pending_task_followups @
+    [{tf_workspace = expected_workspace; tf_authority = state.workspace_authority;
+      tf_action = action}]
+
+(* Consume each ready followup once, leaving unread identity/roster work
+   pending. A comparable foreign workspace retires it even if that workspace
+   has not finished booting. *)
+let take_task_followups state ~ready =
+  let foreign held =
+    held.tf_authority <> state.workspace_authority
+    || match state.server_identity with
+       | Some current when current.Tui_decode.sid_base_path <> ""
+                           && current.sid_masc_root <> "" ->
+           not (String.equal (canonical_path held.tf_workspace.sid_base_path)
+                  (canonical_path current.sid_base_path)
+                && String.equal (canonical_path held.tf_workspace.sid_masc_root)
+                     (canonical_path current.sid_masc_root))
+       | Some _ | None -> false
+  in
+  let run, withdrawn, waiting = List.fold_left (fun (run, withdrawn, waiting) held ->
+    if foreign held then run, held.tf_action :: withdrawn, waiting
+    else if state.workspace_identity = Workspace_identity_match
+            && server_workspace_matches ~expected:(Some held.tf_workspace)
+                 (match state.server_identity with Some id -> Ok id | None -> Error "unread")
+            && ready held.tf_action
+    then held.tf_action :: run, withdrawn, waiting
+    else run, withdrawn, held :: waiting)
+    ([], [], []) state.pending_task_followups in
+  state.pending_task_followups <- List.rev waiting;
+  List.rev run, List.rev withdrawn
 
 let workspace_reply_admitted state ~authority ~reading ~kind =
   authority = state.workspace_authority
@@ -8664,6 +8701,7 @@ let create_state
   workspace_read_authority = ref ();
   workspace_cancellations = [];
   workspace_observation_cancellations = [];
+  pending_task_followups = [];
   suspended_keeper_inputs = [];
   workspace_identity =
     (if String.equal local_base_path ""
@@ -8703,7 +8741,6 @@ let create_state
   voice_setup_error = None;
   voice_wizard = None;
   voice_agent_voices = None;
-  task_handoffs_pending = [];
   lane_installer_read_resume = None;
   voice_wizard_requests = 0;
   resources_list = None;

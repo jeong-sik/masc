@@ -624,11 +624,55 @@ let test_pending_nested_reader_intents_survive_repeated_suspension () =
   Alcotest.(check bool) "package catalog parameters survive" true
     (state.lane_installer_read_resume = Some (7, Masc_tui_lane_installer.Read_catalog (Some "packages")))
 
+let test_task_receipts_wait_for_identity_and_roster () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  let origin = identity "/workspace/a" in
+  state.server_identity <- Some origin;
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "health timed out";
+  let handoff = Task_handoff {keeper="alpha"; task_id="task-9"; title="accepted"; body="body"} in
+  let cancelled = Task_cancel_refresh "task-8" in
+  remember_task_followup state ~expected_workspace:origin handoff;
+  remember_task_followup state ~expected_workspace:origin cancelled;
+  let run, withdrawn = take_task_followups state ~ready:(fun _ -> true) in
+  Alcotest.(check bool) "no sends or foreign-workspace claims while unconfirmed" true
+    (run = [] && withdrawn = [] && List.length state.pending_task_followups = 2);
+  suspend_workspace_readings state;
+  state.workspace_identity <- Workspace_identity_match;
+  let run, withdrawn = take_task_followups state ~ready:(function
+    | Task_handoff _ -> false | Task_cancel_refresh _ -> true) in
+  Alcotest.(check bool) "cancel refresh resumes while handoff waits for roster" true
+    (run = [cancelled] && withdrawn = [] && List.length state.pending_task_followups = 1);
+  let run, withdrawn = take_task_followups state ~ready:(fun _ -> true) in
+  Alcotest.(check bool) "same workspace resumes the original handoff" true
+    (run = [handoff] && withdrawn = []);
+  Alcotest.(check bool) "later refresh cannot send it twice" true
+    (take_task_followups state ~ready:(fun _ -> true) = ([], []));
+  remember_task_followup state ~expected_workspace:origin handoff;
+  state.server_identity <- Some {origin with sid_masc_root="/workspace/other/.masc";
+    sid_state_ready=Some false};
+  state.workspace_identity <- Workspace_identity_unread;
+  let run, withdrawn = take_task_followups state ~ready:(fun _ -> true) in
+  Alcotest.(check bool) "booting foreign root withdraws handoff" true
+    (run = [] && withdrawn = [handoff]);
+  state.server_identity <- Some origin;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "return to A never resurrects withdrawn task" true
+    (take_task_followups state ~ready:(fun _ -> true) = ([], []));
+  remember_task_followup state ~expected_workspace:origin handoff;
+  let Workspace_authority generation = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "A-B-A with unchanged final paths still retires original authority" true
+    (take_task_followups state ~ready:(fun _ -> true) = ([], [handoff]))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
       , [ Alcotest.test_case "nested reader intents survive repeated suspension" `Quick
             test_pending_nested_reader_intents_survive_repeated_suspension
+        ; Alcotest.test_case "task receipts wait for identity and roster" `Quick
+            test_task_receipts_wait_for_identity_and_roster
         ; Alcotest.test_case "nested read owners retire without losing selection" `Quick
             test_nested_read_owners_retire_without_losing_selection
         ; Alcotest.test_case "discarded bundle retires readings before reconfirming A" `Quick

@@ -819,6 +819,60 @@ let test_failed_briefing_keeps_publication_and_request_resumes_same_input () =
       check_delivery ~base_path (current_briefing base_path).text;
       Worker.For_testing.stop ~base_path))
 
+let test_removing_all_sources_erases_publication_and_pending_pass () =
+  with_base (fun base_path _clock ->
+    let first_claim = "Release requires owner review" in
+    let later_claim = "A new release observation awaits verification" in
+    commit base_path first_claim;
+    let classifications, summaries = ref 0, ref 0 in
+    let failing = ref false in
+    let inputs = ref [] in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr classifications; Ok (answer selected, "classify.slot") in
+    let summarize ~batch =
+      incr summaries; inputs := Briefing.input batch :: !inputs;
+      if !failing then Error (Worker.Execution_failed "injected pending-pass failure")
+      else fixture_summarize ~batch in
+    let directory = Ledger.directory ~base_path in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
+      await_idle ~base_path;
+      let previous = current_briefing base_path in
+      failing := true;
+      commit_facts base_path [first_claim; later_claim];
+      await_idle ~base_path;
+      (match observed_briefing base_path with
+       | Briefing.Stale retained ->
+         Alcotest.(check string) "failed pass retains the earlier publication"
+           previous.text retained.text
+       | _ -> Alcotest.fail "fixture did not leave a published summary with pending work");
+      Alcotest.(check bool) "failed pass left durable briefing state" false
+        (Briefing.load ~directory |> require |> Briefing.is_empty);
+      commit_facts base_path [];
+      await_idle ~base_path;
+      Alcotest.(check int) "deleting all evidence requires no new classification" 2 !classifications;
+      Alcotest.(check int) "deleting all evidence requires no semantic model call" 2 !summaries;
+      Alcotest.(check bool) "both publication and pending pass are durably erased" true
+        (Briefing.load ~directory |> require |> Briefing.is_empty);
+      let empty = current_briefing base_path in
+      Alcotest.(check string) "empty ledger exposes no old briefing prose" "" empty.text;
+      Alcotest.(check (list string)) "empty ledger exposes no old source bindings" [] empty.source_ids;
+      failing := false;
+      commit_facts base_path [first_claim; later_claim];
+      await_idle ~base_path;
+      Alcotest.(check int) "reappearing facts are classified afresh" 3 !classifications;
+      Alcotest.(check int) "reappearing evidence gets a new summary" 3 !summaries;
+      let input = List.hd !inputs in
+      Alcotest.check json "reappearance cannot resume the erased prior summary" `Null
+        (field "previous_summary" input);
+      Alcotest.(check (list string)) "reappearance supplies both facts rather than a pending suffix"
+        (List.sort String.compare [first_claim; later_claim])
+        (field "entries" input |> Yojson.Safe.Util.to_list
+         |> List.map (fun entry -> field "text" entry |> string) |> List.sort String.compare);
+      check_current_sources base_path;
+      check_delivery ~base_path (current_briefing base_path).text;
+      Worker.For_testing.stop ~base_path))
+
 let test_in_flight_addition_waits_for_fixed_briefing_pass () =
   with_base (fun base_path _clock ->
     commit base_path "Initial source remains valid";
@@ -1018,6 +1072,8 @@ let () = Alcotest.run "workspace curator lane"
         (fun () -> test_existing_ledger_briefing_survives_new_classification_failure Invalid_decision)
     ; Alcotest.test_case "failed briefing survives and next request resumes unchanged input" `Quick
         test_failed_briefing_keeps_publication_and_request_resumes_same_input
+    ; Alcotest.test_case "all-source deletion erases completed and pending briefing state" `Quick
+        test_removing_all_sources_erases_publication_and_pending_pass
     ; Alcotest.test_case "in-flight additions reuse the completed fixed pass" `Quick
         test_in_flight_addition_waits_for_fixed_briefing_pass
     ; Alcotest.test_case "summary narrows after an explicit provider size refusal" `Quick

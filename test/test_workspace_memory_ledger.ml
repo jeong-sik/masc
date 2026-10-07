@@ -216,10 +216,21 @@ let test_briefing_keeps_claim_and_conflict_namespaces_distinct () =
   Alcotest.(check (list string)) "collection-local IDs remain separate briefing sources"
     ["claim:shared-id"; "conflict:shared-id"]
     (List.map (fun (source : Briefing.source) -> source.id) sources);
-  match Briefing.prepare ~sources ~contract:(Briefing.contract ~template:"fixture")
+  Alcotest.(check (list string)) "raw claim IDs are unchanged" ["shared-id"] (List.map fst (Ledger.claims ledger));
+  Alcotest.(check (list string)) "raw conflict IDs are unchanged" ["shared-id"] (List.map fst (Ledger.conflicts ledger));
+  let contract = Briefing.contract ~template:"fixture" in
+  match Briefing.prepare ~sources ~contract
       ~render:(fun value -> Ok (Yojson.Safe.to_string value)) Briefing.empty with
   | Ok (Some batch) ->
-    Alcotest.(check int) "both complete bodies reach synthesis" 2 (Briefing.selected_count batch)
+    Alcotest.(check int) "both complete bodies reach synthesis" 2 (Briefing.selected_count batch);
+    (match Briefing.accept batch ~text:"Review is pending; the release date is disputed." with
+     | Ok state ->
+       (match Briefing.observe ~sources ~contract state with
+        | Briefing.Current summary ->
+          Alcotest.(check (list string)) "the publication binds both distinct sources"
+            ["claim:shared-id"; "conflict:shared-id"] summary.source_ids
+        | Briefing.Missing | Briefing.Stale _ -> Alcotest.fail "valid cross-kind IDs prevented current publication")
+     | Error detail -> Alcotest.fail detail)
   | Ok None -> Alcotest.fail "populated ledger prepared no briefing"
   | Error detail -> Alcotest.fail detail
 

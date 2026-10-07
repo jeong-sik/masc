@@ -370,7 +370,11 @@ let refresh_briefing ~base_path ~prepare =
   let resolution = Prompt_registry.resolve_prompt key in
   let sha text = Digestif.SHA256.(digest_string text |> to_hex) in
   let contract = Briefing.contract ~template:resolution.effective in
-  if not (Briefing.needs_refresh ~sources ~contract state) then Ok false
+  if sources = [] then
+    let* () = if Briefing.is_empty state then Ok ()
+      else Domain_pool_ref.submit_io_or_inline (fun () -> Briefing.save ~directory Briefing.empty) in
+    Ok false
+  else if not (Briefing.needs_refresh ~sources ~contract state) then Ok false
   else
     let* execution = prepare () in
     let render json = Prompt_registry.render_resolved_prompt_template key resolution

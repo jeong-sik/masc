@@ -8,7 +8,7 @@ let info browser : Lane.client_info =
   incr serial;
   let raw = Printf.sprintf "00000000-0000-4000-8000-%012d" !serial in
   let client_id = match Lane.client_id_of_string raw with Ok id -> id | Error error -> fail error in
-  {client_id; browser; version="1.0"; engine_version="155.0.1"}
+  {client_id; browser; version="1.0"; transport=Browser_lane.Web_extension; engine_version="155.0.1"}
 let target id = match Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some id)) with
   | Ok value -> value | Error error -> fail (Lane.selection_error_code error)
 let with_clients f = Eio_main.run (fun env ->

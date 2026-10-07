@@ -75,7 +75,8 @@ def run(host, firefox, out=None):
                 else:
                     body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 assert self.headers["x-lane-token"] == token
-                metadata.append((self.headers["x-browser-client-id"], self.headers["x-browser-version"]))
+                metadata.append((self.headers["x-browser-client-id"], self.headers["x-browser-version"],
+                                 self.headers["x-browser-transport"]))
                 if self.path.endswith("/poll"):
                     ready.set()
                     try:
@@ -221,6 +222,7 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             unsupported = call("page.elements", {"tabId": first})
             assert not unsupported["ok"] and unsupported["effectPhase"] == "not_started"
             assert len({row[0] for row in metadata}) == 1 and all(row[1] for row in metadata)
+            assert all(row[2] == "webdriver_bidi" for row in metadata), metadata
             outcome.update(passed=True, tabs=matching, version=metadata[0][1])
         except BaseException:
             outcome["error"] = traceback.format_exc()

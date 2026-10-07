@@ -261,7 +261,16 @@ let client_id_of_string value =
   match Uuidm.of_string value with
   | Some id when String.equal (Uuidm.to_string id) value -> Ok id
   | _ -> Error "invalid_client_id"
-type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string }
+type live_transport = Web_extension | Webdriver_bidi
+let live_transport_to_string = function
+  | Web_extension -> "web_extension"
+  | Webdriver_bidi -> "webdriver_bidi"
+let live_transport_of_string = function
+  | "web_extension" -> Ok Web_extension
+  | "webdriver_bidi" -> Ok Webdriver_bidi
+  | _ -> Error "unsupported_browser_transport"
+type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string;
+  transport : live_transport }
 type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
@@ -275,6 +284,7 @@ let command_uuid = Uuidm.v4_gen (Random.State.make_self_init ())
 let lane_connected_window_sec = 120.
 let connected client = not client.closed && not (Monotonic_deadline.passed client.connected_until)
 let same_info left right = left.browser = right.browser
+  && left.transport = right.transport
   && String.equal left.version right.version && String.equal left.engine_version right.engine_version
 let retire_unlocked key client =
   client.closed <- true;
@@ -296,7 +306,8 @@ let active_clients () =
        (client_id_to_string left.client_id) (client_id_to_string right.client_id))
 let client_json info = `Assoc ["clientId", `String (client_id_to_string info.client_id);
   "browser", `String (browser_name info.browser); "version", `String info.version;
-  "engineVersion", `String info.engine_version]
+  "engineVersion", `String info.engine_version;
+  "transport", `String (live_transport_to_string info.transport)]
 let target_client_id = function Automation | Stagehand -> None | Live_client client -> Some client.info.client_id
 let target_lane = function
   | Automation -> Lane_name.Automation

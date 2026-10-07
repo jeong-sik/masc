@@ -19,9 +19,14 @@ button press, on the selected live BiDi tab or the automation lane. Copy the
 observed `expectedUrl`, `viewport` and normalized `point` from a fresh capture.
 Extension-only live clients reject this action before injecting input with
 `trusted_hover_requires_live_bidi_connection`; the operator must explicitly
-attach the already-enabled loopback Remote Agent with `--bidi-url`. This does
-not convert extension tab IDs to BiDi tab IDs: read the attached client's tabs
-and capture again. Stagehand rejects trusted hover before input. This is not an atomic snapshot/input
+attach the already-enabled loopback Remote Agent with `--bidi-url`. Live-client
+discovery reports `transport: "web_extension"` or `"webdriver_bidi"` alongside
+each `clientId`, including the ambiguity response and
+`/api/v1/dashboard/browser-lane/clients`. Select the `webdriver_bidi` client,
+read that client's tabs, and capture again; extension tab IDs are not converted
+to BiDi tab IDs. The host declares its mode with `x-browser-transport`; the
+server rejects a missing or unknown value and a transport change on an existing
+client ID. Stagehand rejects trusted hover before input. This is not an atomic snapshot/input
 transaction: the operator can still change the page after validation. There is
 no write replay. An unknown outcome stops this live client. Reads and interactions
 share the existing host command deadline; connection setup has that same bound.

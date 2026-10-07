@@ -12,18 +12,31 @@ module U = Yojson.Safe.Util
    provider switches and process restarts), not model fidelity. A state
    carries explicit obligation IDs so preservation is judged per ID and
    per status, not by blankness alone. Phases run as separate processes
-   against one shared H3_ROOT so S2 is a real restart. *)
+   against one shared H3_ROOT so S2 is a real restart. The S2 phases run
+   under H3_FIXTURE_MODEL=h3-fixture-b (checkpoint model field, read back
+   from the store), so the provider switch of S2 is bound by assertions,
+   not by a log line. *)
 
 let get = function Ok value -> value | Error error -> fail error
 let trace_id = "h3-working-state-trace"
 let keeper_name = "h3-keeper"
+
+(* Fixture provider identity of THIS process, written into the checkpoint
+   [model] field (serialized and read back by the store) and asserted via a
+   store readback. S1 commit phases run the default [h3-fixture-a]; the S2
+   restart phases run [h3-fixture-b], so the provider switch of S2 is bound
+   by code, not by a log line. *)
+let fixture_model =
+  match Sys.getenv_opt "H3_FIXTURE_MODEL" with
+  | Some model when model <> "" -> model
+  | _ -> "h3-fixture-a"
 
 let message text =
   Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text text]
 
 let checkpoint messages : Agent_core.Checkpoint.t =
   {version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
-   agent_name=keeper_name; model="h3-fixture"; system_prompt=None; messages;
+   agent_name=keeper_name; model=fixture_model; system_prompt=None; messages;
    usage=Agent_core.Types.empty_usage; turn_count=List.length messages; created_at=1000.;
    tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
    top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
@@ -39,6 +52,19 @@ let save messages =
   | Ok (C.Saved _) -> ()
   | Ok (C.Stale_noop _) -> fail "stale h3 fixture"
   | Error detail -> fail detail
+
+(* Identity readback: this process's fixture provider identity must be the
+   one the store holds for the shared trace. Runs first in every phase so a
+   stale root or a lost write shows up as an identity mismatch, not as a
+   confusing downstream failure. *)
+let assert_identity () =
+  let session_dir = Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
+  match C.load_agent_core ~session_dir ~session_id:trace_id with
+  | Ok checkpoint ->
+    let checkpoint : Agent_core.Checkpoint.t = checkpoint in
+    check string "fixture provider identity readback matches this process"
+      fixture_model checkpoint.model
+  | Error error -> fail (C.checkpoint_load_error_to_string error)
 
 let append event =
   B.append ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
@@ -143,7 +169,7 @@ let with_approval = prefix @ [message "Deploy approval arrived; the report is be
 let with_finalize = with_approval @ [message "Report R-77 finalized and filed."]
 
 let phase_s1_commit () =
-  save prefix; boundary ~fresh:true 1 prefix;
+  save prefix; assert_identity (); boundary ~fresh:true 1 prefix;
   let prepared = prepare () in
   check bool "S1 initial prompt has no invented predecessor" true
     (U.member "previous_working_state" (P.prompt_json prepared) = `Null);  let saved = commit prepared state_v1 in
@@ -156,7 +182,7 @@ let phase_s1_commit () =
   print_endline "H3 S1 commit: PASS"
 
 let phase_s1_continue () =
-  save with_approval; boundary ~fresh:false 2 with_approval;
+  save with_approval; assert_identity (); boundary ~fresh:false 2 with_approval;
   let next = prepare () in
   check string "S1 next prompt carries the full previous state (model saw cancelled too)"
     state_v1 (previous_working_state next);
@@ -187,7 +213,7 @@ let save_or_keep messages =
   | Error detail -> fail detail
 
 let phase_s3_lossy () =
-  save_or_keep with_finalize; boundary ~fresh:false 4 with_finalize;
+  save_or_keep with_finalize; assert_identity (); boundary ~fresh:false 4 with_finalize;
   let next = prepare () in
   check string "S3 prompt carried the lossless v2" state_v2 (previous_working_state next);
   record_memory config next;
@@ -204,20 +230,37 @@ let phase_s3_lossy () =
        (previous_working_state after));
   print_endline "H3 S3: ran; outcome recorded in evidence"
 
+(* The S2 phases only run under the switched fixture identity. This is the
+   code binding for "provider switch + restart": the phase refuses to run
+   without [H3_FIXTURE_MODEL=h3-fixture-b], and the checkpoint model field
+   of the shared store must read back as h3-fixture-b in this process. *)
+let assert_s2_env () =
+  if Sys.getenv_opt "H3_FIXTURE_MODEL" <> Some "h3-fixture-b" then
+    fail "S2 phase requires H3_FIXTURE_MODEL=h3-fixture-b (the switched fixture identity)"
+
+let assert_s2_identity () =
+  assert_s2_env (); assert_identity ()
+
 (* S2 preamble (s2_pre phase, run right after s1_continue): advance the
    fixture conversation one more turn WITHOUT touching the continuity
-   snapshot, then close the turn. That new boundary line is what lets the
-   restarted s2_verify process (different fixture provider identity) open a
-   fresh cut. *)
+   snapshot, under the switched fixture provider identity [h3-fixture-b],
+   then close the turn. Save first, then read back: at phase entry the
+   store still holds the S1 commit process's h3-fixture-a checkpoint, so
+   the readback is only the b-write proof after this process has written
+   under b. That new boundary line is what lets the restarted s2_verify
+   process open a fresh cut. *)
 let phase_s2_pre () =
-  save_or_keep with_finalize; boundary ~fresh:false 4 with_finalize;
-  print_endline "H3 S2 pre: new turn boundary committed for the restarted process"
+  assert_s2_env ();
+  save_or_keep with_finalize; assert_identity ();
+  boundary ~fresh:false 4 with_finalize;
+  print_endline "H3 S2 pre: identity h3-fixture-b wrote a new turn boundary for the restarted process"
 
-(* S2: separate process. Reads the snapshot from disk only, with a different
-   fixture provider identity than the S1 commit process, then opens the next
-   cut: obligation IDs and statuses must survive switch + restart. *)
+(* S2: separate process. Reads the snapshot from disk only, under the
+   switched fixture provider identity [h3-fixture-b] (the store readback
+   asserts the switch actually happened), then opens the next cut:
+   obligation IDs and statuses must survive switch + restart. *)
 let phase_s2_verify () =
-  Printf.printf "H3 S2 provider identity: h3-fixture-b (commit process used h3-fixture-a)\n";
+  assert_s2_identity ();
   let snapshot = current_state () in
   let parsed = parse_obligations snapshot.working_state in
   check int "S2 obligations present after restart" 2 (List.length parsed);

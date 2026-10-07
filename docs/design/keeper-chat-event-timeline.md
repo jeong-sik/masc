@@ -43,9 +43,17 @@ visibility and array positions do not define these identities.
 Message-start usage seeds the current provider response's counters. Later sparse
 usage reports replace only present fields, including explicit zero values. A new
 message, retry, or continuation clears the previous counters and stop reason.
-Repetition of the same identified message-start snapshot does not erase subsequent
-usage. Live SSE decoding and journal replay preserve the same message identity and
-usage fields already present in the server events; no new wire format is required.
+The producer bridge suppresses exact message-start prelude replays within its open
+stream scope before journal or SSE publication. Conflicting starts publish only
+protocol errors. Every published start therefore opens a fresh response, even if
+a later sealed scope reuses the provider's message id. Journal/transport replay
+is deduplicated by sequence, not message-id text. Live SSE decoding and journal
+replay preserve the same message identity and usage fields already present in the
+server events; no new wire format is required. Historical journals written before
+this producer normalization may contain distinct-sequence prelude replays. Their
+flat start events carry no stream scope, so replay treats each recorded start as
+a boundary rather than guessing from provider-id equality. This change does not
+claim to reconstruct missing scope provenance in those older journals.
 
 | Runtime | Turn and text events | Thinking | Tools and progress |
 | --- | --- | --- | --- |

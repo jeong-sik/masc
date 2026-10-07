@@ -219,7 +219,6 @@ type t =
         (* First possible stretch id in the response the canonical reply owns.
            Provider message starts and tool rounds advance this frontier;
            reasoning only creates another stretch inside that response. *)
-  ; mutable provider_message_id : string option
   ; mutable next_tool_local_id : int
   ; mutable segment : int
   ; mutable phase : phase
@@ -319,7 +318,6 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; reversed_trail = []
   ; next_stretch_id = 0
   ; response_first_stretch = 0
-  ; provider_message_id = None
   ; next_tool_local_id = 0
   ; segment = 0
   ; phase = Waiting
@@ -1995,7 +1993,6 @@ let apply_delta ~now t (delta : Live.delta) =
         Buffer.clear t.thinking_buffer;
         t.reply <- None;
         t.response_first_stretch <- t.next_stretch_id;
-        t.provider_message_id <- None;
         t.observed_model <- None;
         t.observed_usage <- None;
         t.observed_stop_reason <- None;
@@ -2028,7 +2025,6 @@ let apply_delta ~now t (delta : Live.delta) =
       Buffer.clear t.text_buffer;
       Buffer.clear t.thinking_buffer;
       t.response_first_stretch <- t.next_stretch_id;
-      t.provider_message_id <- None;
       (* Only the nodes since the last boundary fold; earlier superseded
          blocks stay where they are, so blocks are siblings -- one per
          superseded attempt, each keeping its number -- and never nest.
@@ -2071,20 +2067,16 @@ let apply_delta ~now t (delta : Live.delta) =
       (match t.phase with
        | Waiting | Working -> t.phase <- Working
        | Stream_ended | Stream_failed _ -> ())
-  | Live.Stream_model_started { message_id; model; usage } ->
-      (* A duplicate provider start is not a new response or a fresh zero
-         usage snapshot. Absent identity cannot establish a duplicate. *)
-      let same_message = match message_id, t.provider_message_id with
-        | Some incoming, Some held -> String.equal incoming held
-        | Some _, None | None, Some _ | None, None -> false in
-      if not same_message then begin
-        begin_response t;
-        t.provider_message_id <- message_id;
-        t.observed_model <- Some model;
-        t.observed_usage <- usage;
-        t.observed_stop_reason <- None;
-        t.model_signal <- Some (Model_started_at now)
-      end
+  | Live.Stream_model_started { model; usage; _ } ->
+      (* The bridge publishes one start per provider response; exact prelude
+         replays are suppressed there with stream-scope authority. Journal
+         replays retain sequence identity and are deduplicated by the log.
+         A provider id may legally be reused in a later response. *)
+      begin_response t;
+      t.observed_model <- Some model;
+      t.observed_usage <- usage;
+      t.observed_stop_reason <- None;
+      t.model_signal <- Some (Model_started_at now)
   | Live.Stream_details { usage; stop_reason } ->
       (* What the provider reported, not that anything was written, so the
          model-side signal is left as whatever last moved the answer. A field

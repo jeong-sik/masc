@@ -2874,6 +2874,12 @@ let test_usage_resets_only_at_response_boundaries () =
   feed t [Live.Stream_model_started {message_id=Some "next";model="glm";usage=None}];
   check (option string) "new message clears old counters" None (tokens ());
   seed ();
+  feed t [Live.Stream_model_started {message_id=Some "message";model="glm";
+    usage=Some (usage (Some 200) (Some 0))}];
+  check (option string) "a published response boundary may reuse its provider id"
+    (Some "tokens: in 200 · out 0") (tokens ());
+  check (option string) "reused provider id retains only its new usage, not the previous stop reason"
+    (tokens ()) (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
   feed t [Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
   check (option string) "retry clears prior message counters" None (tokens ());
   seed ();

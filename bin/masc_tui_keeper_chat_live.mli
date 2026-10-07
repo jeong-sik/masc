@@ -80,8 +80,10 @@ type delta =
       ; model : string
       ; usage : stream_usage option
       }
-      (** The provider message identity and initial counter snapshot. A known
-          repeated identity is the same message, not a counter reset. *)
+      (** A provider response start and its initial counter snapshot. The
+          producer suppresses exact replays within one open stream scope;
+          every published start opens a new response even when a later scope
+          reuses [message_id]. The id is optional correlation data. *)
   | Stream_details of
       { usage : stream_usage option
       ; stop_reason : string option

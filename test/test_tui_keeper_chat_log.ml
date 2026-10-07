@@ -800,56 +800,105 @@ let test_a_blank_reason_is_not_a_reason () =
 
 let test_response_boundaries_and_usage_survive_wire_and_replay () =
   let module T = Masc_tui_keeper_chat_transcript in
-  let start id usage = E.Agent_core_stream_message_start
-      {provider_message_id=id; model="observed"; usage} in
-  let sparse output = E.Agent_core_stream_message_delta
-      {stop_reason=None; usage=Some {Agent_core.Types.input_tokens=None;
-        output_tokens=Some output; cache_read_input_tokens=None;
-        cache_creation_input_tokens=None}} in
-  let initial = {Agent_core.Types.zero_api_usage with input_tokens=500;
-    cache_read_input_tokens=100} in
-  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1 in
-  let events = [
-    E.Run_started {run_id="run"; thread_id="keeper:keeper.one"};
-    E.Text_message_start {message_id="outer"; role=E.Assistant};
-    start "response-1" (Some initial);
-    E.Text_delta "EARLIER_RESPONSE";
-    start "response-2" (Some initial);
-    E.Text_delta "PREFIX";
-    E.Agent_core_thinking_delta {index=1; delta="REASONING"};
-    sparse 7;
-    start "response-2" (Some initial); (* repeated snapshot cannot erase delta usage *)
-    E.Text_delta "SUFFIX";
-    E.Reply_details {reply="SUFFIX"; turn_outcome=Outcome.Visible_reply; turn_ref};
-    E.Run_finished {run_id="run"}] in
-  let indexed = List.mapi (fun seq event -> seq,event) events in
-  let wire = log () in
-  wire_tagged_deltas indexed |> List.iter (fun (seq,delta) ->
-    ignore (Log.add ~at:1000. wire ~seq delta));
-  let replay = log () in
-  let journal = List.map (fun (seq,event) -> line seq 1000. event) indexed in
-  ignore (Log.add_journaled replay journal);
-  let projected log =
-    let t = T.of_log ~now:2000. log in
-    let speech = T.drawn t |> List.filter_map (fun (item:T.drawn_item) ->
-      match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) in
-    check (list string) "earlier response and observed stretches stay in place"
-      ["EARLIER_RESPONSE"; "PREFIX"; "SUFFIX"] speech;
-    check (option string) "start counters survive sparse output and duplicate start"
-      (Some "tokens: in 500 · out 7 · cache read 100 · cache write 0")
-      (T.stream_tokens_text ~keeper_name:"keeper.one" (Some t));
-    T.drawn t in
-  let wire_items = projected wire and replay_items = projected replay in
-  check bool "wire and replay agree on content and stable origins" true
-    (wire_items = replay_items);
-  ignore (Log.add_journaled replay journal);
-  check bool "overlapping replay leaves origins and content unchanged" true
-    (replay_items = projected replay)
+  let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
+  let module Accum = Masc.Keeper_stream_tool_accum in
+  List.iter (fun provider_id ->
+    let initial = {Agent_core.Types.zero_api_usage with input_tokens=500;
+      cache_read_input_tokens=100} in
+    let next_initial = {Agent_core.Types.zero_api_usage with input_tokens=200} in
+    let start usage = Agent_core.Types.MessageStart
+        {id=provider_id;model="observed";usage=Some usage} in
+    let sparse output = Agent_core.Types.MessageDelta
+        {stop_reason=None;usage=Some {input_tokens=None;output_tokens=Some output;
+          cache_read_input_tokens=None;cache_creation_input_tokens=None}} in
+    let bridge = ref (Bridge.empty_state ()) in
+    let accum = Accum.create () in
+    let reversed = ref [] in
+    let publish event = reversed := event :: !reversed in
+    let send event =
+      Accum.on_event accum event;
+      let translated = Bridge.translate ~redact_text:Fun.id ~base_dir:"/unused-no-media"
+        ~stream_scope:(Accum.current_stream_scope accum) !bridge event in
+      bridge := translated.bridge_state;
+      List.iter publish translated.chat_events in
+    let snapshots () =
+      let indexed = List.mapi (fun seq event -> seq,event) (List.rev !reversed) in
+      let wire = log () and replay = log () in
+      wire_tagged_deltas indexed |> List.iter (fun (seq,delta) ->
+        ignore (Log.add ~at:1000. wire ~seq delta));
+      let journal = List.map (fun (seq,event) -> line seq 1000. event) indexed in
+      ignore (Log.add_journaled replay journal);
+      wire,replay,journal in
+    let tokens log = T.stream_tokens_text ~keeper_name:"keeper.one"
+      (Some (T.of_log ~now:2000. log)) in
+    publish (E.Run_started {run_id="run";thread_id="keeper:keeper.one"});
+    publish (E.Text_message_start {message_id="outer";role=E.Assistant});
+    List.iter send Agent_core.Types.[start initial;
+      ContentBlockDelta {index=0;delta=TextDelta "EARLIER_RESPONSE"};
+      sparse 7;start initial];
+    let wire,replay,_ = snapshots () in
+    List.iter (fun log ->
+      check (option string) "exact open-scope replay cannot erase delta usage"
+        (Some "tokens: in 500 · out 7 · cache read 100 · cache write 0")
+        (tokens log)) [wire;replay];
+    List.iter send Agent_core.Types.[
+      MessageDelta {stop_reason=Some StopToolUse;usage=None};MessageStop];
+    (match Accum.close_turn_without_sources accum ~turn:0 with
+     | Ok () -> () | Error detail -> fail detail);
+    List.iter send Agent_core.Types.[start next_initial;
+      ContentBlockDelta {index=0;delta=TextDelta "PREFIX"};
+      ContentBlockDelta {index=1;delta=ThinkingDelta "REASONING"};
+      sparse 9;start next_initial;
+      ContentBlockDelta {index=2;delta=TextDelta "SUFFIX"};MessageStop];
+    let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1 in
+    publish (E.Reply_details {reply="SUFFIX";turn_outcome=Outcome.Visible_reply;turn_ref});
+    publish (E.Run_finished {run_id="run"});
+    check int "each new sealed scope publishes one start, even with a reused or absent id" 2
+      (List.length (List.filter (function E.Agent_core_stream_message_start _ -> true | _ -> false) !reversed));
+    let wire,replay,journal = snapshots () in
+    let projected log =
+      let t = T.of_log ~now:2000. log in
+      let speech = T.drawn t |> List.filter_map (fun (item:T.drawn_item) ->
+        match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) in
+      check (list string) "earlier response and observed stretches stay in place"
+        ["EARLIER_RESPONSE";"PREFIX";"SUFFIX"] speech;
+      check (option string) "same provider id in a later sealed scope starts fresh usage"
+        (Some "tokens: in 200 · out 9 · cache read 0 · cache write 0") (tokens log);
+      check (option string) "later response has usage without the preceding stop reason"
+        (T.stream_tokens_text ~keeper_name:"keeper.one" (Some t))
+        (T.stream_details_text ~keeper_name:"keeper.one" (Some t));
+      T.drawn t in
+    let wire_items = projected wire and replay_items = projected replay in
+    check bool "wire and replay agree on content and stable origins" true
+      (wire_items = replay_items);
+    ignore (Log.add_journaled replay journal);
+    check bool "overlapping replay leaves origins and content unchanged" true
+      (replay_items = projected replay)) ["reused-provider-id"; ""]
+;;
+
+let test_conflicting_provider_start_cannot_open_a_response () =
+  let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
+  let initial = {Agent_core.Types.zero_api_usage with input_tokens=500} in
+  let conflicting = {initial with input_tokens=900} in
+  let _, events = List.fold_left (fun (state,events) event ->
+    let translated = Bridge.translate ~redact_text:Fun.id ~base_dir:"/unused-no-media"
+      ~stream_scope:0 state event in
+    translated.bridge_state, events @ translated.chat_events)
+    (Bridge.empty_state (), []) Agent_core.Types.[
+      MessageStart {id="same";model="observed";usage=Some initial};
+      ContentBlockDelta {index=0;delta=TextDelta "still first response"};
+      MessageStart {id="same";model="observed";usage=Some conflicting}] in
+  check int "rejected start is not published as a new response" 1
+    (List.length (List.filter (function E.Agent_core_stream_message_start _ -> true | _ -> false) events));
+  check bool "the protocol conflict remains observable" true
+    (List.exists (function
+       | E.Agent_core_stream_protocol_error {kind=E.Tool_message_start_conflict;_} -> true
+       | _ -> false) events)
 ;;
 
 let () =
   run "tui keeper chat log"
-    [ ( "response windows", [test_case "wire/replay boundaries and usage" `Quick test_response_boundaries_and_usage_survive_wire_and_replay])
+    [ ( "response windows", [test_case "wire/replay boundaries and usage" `Quick test_response_boundaries_and_usage_survive_wire_and_replay; test_case "conflicting start is not a response" `Quick test_conflicting_provider_start_cannot_open_a_response])
     ; ( "log"
       , [ test_case "seq dedup, and None never dedupes" `Quick
             test_seq_dedup_and_none_never_dedupes

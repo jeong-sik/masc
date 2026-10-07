@@ -115,6 +115,9 @@ type keeper_chat_event =
       ; model : string
       ; usage : Agent_core.Types.api_usage option
       }
+      (** One new provider response. The bridge suppresses exact open-scope
+          prelude replays before publication; a later scope may legally reuse
+          [provider_message_id]. Journal/transport duplicates retain [seq]. *)
   | Agent_core_stream_message_delta of
       { stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option

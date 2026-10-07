@@ -9450,7 +9450,9 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
             && skill.skill_tool_use_id = shown.skill_tool_use_id
             && skill.turn_ref = shown.turn_ref
             && skill.runtime_id = shown.runtime_id) observed)) row.me_skill_block in
-        if skills = [] then None else Some {row with me_skill_block=skills}
+        if skills = [] then None
+        else Some {row with me_skill_block=skills;
+          me_role=Message_skill (Transcript.skill_block_state skills)}
     | _ -> Some row
   in
   let loaded = List.filter_map remaining_activity loaded in

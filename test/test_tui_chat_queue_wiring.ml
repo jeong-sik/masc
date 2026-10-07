@@ -3556,6 +3556,51 @@ let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
     verify 3 ["FIRST_ACTION"; "SECOND_ACTION"; "UNSEEN_ACTION"])
 ;;
 
+let test_checkpoint_remaining_skill_uses_its_own_state () =
+  List.iter
+    (fun retained_state ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.msg_loaded_keeper <- Some "alpha";
+      let request_id = "checkpoint-skill-state" in
+      let occurrence : Live.tool_occurrence =
+        {stream_scope=0; block_index=1; provider_message_id=None; tool_call_id=Some "covered"} in
+      let log = settled_log ~request_id
+        [Live.Run_started; Live.Tool_started {occurrence; tool_name="keeper_skill"};
+         Live.Tool_ended {occurrence}; Live.Tool_result {occurrence; execution_id="skill-exec"};
+         Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-1#1"};
+         Live.Run_finished] in
+      Tui_types.hold_settled_log state log;
+      let skill id skill_state actions =
+        Keeper_chat_transcript.make_skill_activity ~skill_tool_use_id:id
+          ~turn_ref:"trace-1#1" ~content_revision:"sha256:abc" ~runtime_id:"rt-1"
+          ~skill_name:id ~state:skill_state ~actions () in
+      let covered = skill "covered" Keeper_chat_transcript.Skill_served_only [] in
+      let actions = match retained_state with
+        | Keeper_chat_transcript.Skill_used -> ["read_file"]
+        | _ -> [] in
+      let remaining = skill "remaining" retained_state actions in
+      let skills = [covered; remaining] in
+      let original_state = Keeper_chat_transcript.skill_block_state skills in
+      check bool "the covered undelivered receipt originally needs attention" true
+        (Masc_tui_render_chat.skill_tone_of_state original_state
+         = Masc_tui_message_layout.Skill_attention);
+      state.msg_loaded <-
+        [{ (chat_entry ~request_id ~role:(Tui_types.Message_skill original_state)
+              ~text:"skills" ~at:102. ()) with me_skill_block=skills }];
+      Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" state.msg_loaded;
+      match Tui_types.chat_rows_for state "alpha" with
+      | [{me_role=Message_skill actual_state; me_skill_block=[remaining]; _}] ->
+          check (option string) "only the unseen receipt remains" (Some "remaining")
+            remaining.Keeper_chat_transcript.skill_tool_use_id;
+          check bool "the retained block determines its role" true
+            (actual_state = retained_state);
+          check bool "the remaining receipt draws the settled mark and tone" true
+            (Masc_tui_render_chat.skill_tone_of_state actual_state
+             = Masc_tui_message_layout.Skill_settled)
+      | _ -> fail "expected one retained Skill receipt")
+    [Keeper_chat_transcript.Skill_delivered; Keeper_chat_transcript.Skill_used]
+;;
+
 let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -5265,6 +5310,8 @@ let () =
             test_checkpoint_activities_have_exact_row_authority
         ; test_case "checkpoint Skill receipts retain exact turn scope when ids repeat" `Quick
             test_checkpoint_skill_receipts_stay_in_their_exact_turn
+        ; test_case "checkpoint remaining Skill uses its own state" `Quick
+            test_checkpoint_remaining_skill_uses_its_own_state
         ; test_case "succeeded operation with checkpoint-only journal keeps final history" `Quick
             test_succeeded_operation_with_checkpoint_only_keeps_final_history
         ; test_case "a journal log of the live execution is not observed" `Quick

@@ -6001,6 +6001,67 @@ let enter_theme_filter state filter =
   if Option.is_some state.theme_before_preview then
     preview_theme_under_cursor state
 
+(* What a surface reads on arrival. [goto_surface] asks for it after its
+   navigation resets, and [resume_reads_after_authority_change] asks again
+   for the surface on view when a refresh moves the read authority, so a
+   surface listed here is read again after the move without a second list.
+   Surfaces whose data ride the refresh bundle ([surface_needs]) read
+   nothing here. *)
+let launch_surface_reads state ~mailbox (surface : surface) =
+  match surface with
+  | Lanes -> launch_lanes_load state ~mailbox
+  | Clients -> launch_clients_load state ~mailbox
+  | Keepers Keeper_list -> launch_keeper_lanes_load state ~mailbox
+  | Approvals ->
+      launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
+      launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
+  | Schedules -> launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
+  | Verification | Planning -> launch_verification_load state ~mailbox
+  | Harness -> launch_harness_load state ~mailbox
+  | Fusion ->
+      launch_fusion_runs_load state ~mailbox;
+      (match state.fusion_mode with
+       | Fusion_list -> ()
+       | Fusion_detail run_id ->
+           launch_fusion_detail_load state ~mailbox ~run_id
+       | Fusion_historical_detail reference ->
+           launch_fusion_historical_detail_load state ~mailbox ~reference)
+  | Memory -> launch_memory_health_load state ~mailbox
+  | Repositories -> launch_repositories_load state ~mailbox
+  | Changes -> (
+      match state.changes_keeper with
+      | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
+      | None -> ())
+  | Connectors -> (
+      match browser_lane_on_screen state with
+      | None -> launch_connectors_load state ~mailbox
+      | Some _ -> refresh_browser_lane state ~mailbox)
+  | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
+  | Tools -> launch_tools_load state ~mailbox
+  | Config -> (
+      (* Each pane loads its own source. Named rather than left to an
+         if/else chain: a pane added later should have to say where its data
+         comes from instead of quietly inheriting runtime.toml's. *)
+      match state.config_pane with
+      | Config_prompts -> launch_prompts_load state ~mailbox
+      | Config_presets -> launch_presets_load state ~mailbox
+      | Config_params -> launch_runtime_params_load state ~mailbox
+      | Config_voice -> launch_voice_config_load state ~mailbox
+      | Config_runtime | Config_models | Config_themes ->
+          launch_runtime_config_load state ~mailbox)
+  | Resources -> Masc_tui_resources_requests.launch_list state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox)
+  | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
+  | Metrics ->
+      launch_memory_health_load state ~mailbox;
+      launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
+      launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
+      launch_keeper_tool_modes_load state ~mailbox
+  | Overview | Acting | Board | System_logs
+  | Keepers
+      ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
+      | Keeper_runtime_pick ) ->
+      ()
+
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
    a load the other performs. Surfaces not listed refresh on the periodic
@@ -6034,84 +6095,49 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
     state.slot_editor <- None;
     state.runtime_lane_pick <- None
   end;
+  (* Arriving is also a navigation: these resets belong to the move, not to
+     the reading, so a reread after an authority change leaves them alone. *)
   (match destination with
-   | Lanes -> launch_lanes_load state ~mailbox
-   | Clients -> launch_clients_load state ~mailbox
-   | Keepers Keeper_list -> launch_keeper_lanes_load state ~mailbox
-   | Approvals ->
-       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
-       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
-   | Schedules -> launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
-   | Verification -> launch_verification_load state ~mailbox
    | Planning ->
        (* Work opens on its Goals. The task list is a focus taken with [t],
           or by a jump to one task, which sets it after this returns.
           Inheriting it made every later Tab into Work show only Tasks. *)
        state.task_detail_id <- None;
        state.task_detail_scroll <- 0;
-       state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
-       launch_verification_load state ~mailbox
-   | Harness -> launch_harness_load state ~mailbox
-   | Fusion ->
-       launch_fusion_runs_load state ~mailbox;
-       (match state.fusion_mode with
-        | Fusion_list -> ()
-        | Fusion_detail run_id ->
-            launch_fusion_detail_load state ~mailbox ~run_id
-        | Fusion_historical_detail reference ->
-            launch_fusion_historical_detail_load state ~mailbox ~reference)
-   | Memory -> launch_memory_health_load state ~mailbox
-   | Repositories -> launch_repositories_load state ~mailbox
+       state.task_focus <- Masc_tui_overview_tasks.No_task_focus
    | Changes -> (
        (* The surface follows whoever is selected on Keepers. Arriving with a
           different keeper selected than the one already loaded drops the old
           rows first: showing one keeper's files under another's name for the
           length of a request is the confusion this surface exists to end. *)
        let selected = Option.map (fun (k : keeper) -> k.k_name) (selected_keeper state) in
-       (match selected with
-        | Some name when not (Option.equal String.equal state.changes_keeper (Some name)) ->
-            state.changes_keeper <- Some name;
-            state.changes <- None;
-            state.changes_error <- None;
-            state.changes_cursor <- 0;
-            state.changes_scroll <- 0;
-            state.changes_diff_row <- None;
-            state.changes_diff_scroll <- 0
-        | Some _ | None -> ());
-       match state.changes_keeper with
-       | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
-       | None -> ())
-   | Connectors ->
-       (match browser_lane_on_screen state with
-        | None -> launch_connectors_load state ~mailbox
-        | Some _ ->
-            release_composer_for_browser_reader state;
-            refresh_browser_lane state ~mailbox)
-   | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
-   | Tools -> launch_tools_load state ~mailbox
-   | Config -> (
-       (* Each pane loads its own source. Named rather than left to an
-          if/else chain: a pane added later should have to say where its data
-          comes from instead of quietly inheriting runtime.toml's. *)
-       match state.config_pane with
-       | Config_prompts -> launch_prompts_load state ~mailbox
-       | Config_presets -> launch_presets_load state ~mailbox
-       | Config_params -> launch_runtime_params_load state ~mailbox
-       | Config_voice -> launch_voice_config_load state ~mailbox
-       | Config_runtime | Config_models | Config_themes ->
-           launch_runtime_config_load state ~mailbox)
-   | Resources -> Masc_tui_resources_requests.launch_list state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox)
-   | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
+       match selected with
+       | Some name when not (Option.equal String.equal state.changes_keeper (Some name)) ->
+           state.changes_keeper <- Some name;
+           state.changes <- None;
+           state.changes_error <- None;
+           state.changes_cursor <- 0;
+           state.changes_scroll <- 0;
+           state.changes_diff_row <- None;
+           state.changes_diff_scroll <- 0
+       | Some _ | None -> ())
+   | Connectors -> (
+       match browser_lane_on_screen state with
+       | None -> ()
+       | Some _ -> release_composer_for_browser_reader state)
    | Metrics ->
        (* Usage is the top-level account reading. Explicit telemetry entry
           opts into diagnostics after navigation, rather than inheriting it. *)
        state.usage_telemetry_open <- false;
-       state.metrics_scroll <- 0;
-       launch_memory_health_load state ~mailbox;
-       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
-       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
-       launch_keeper_tool_modes_load state ~mailbox
-   | Overview | Acting | Keepers _ | Board | System_logs -> ());
+       state.metrics_scroll <- 0
+   | Overview | Acting | Memory | Lanes | Clients | Board | Approvals
+   | Schedules | Verification | Harness | Fusion | Repositories | Code
+   | Runtime | Config | Resources | Tools | System_logs
+   | Keepers
+       ( Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+       | Keeper_message | Keeper_runtime_pick ) ->
+       ());
+  launch_surface_reads state ~mailbox destination;
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
      arm did on the Approvals -> Board step. *)
   (match state.view with
@@ -11194,62 +11220,6 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
   launch_schedules_load state ~mailbox
 ;;
 
-(* The two tokens a read is admitted under. Applying a server identity
-   reading moves the workspace one when the workspace changes (the first
-   reading at boot is one) and cancels every read it admitted; it revokes
-   the detail one when the item authority changes, as when a booting server
-   becomes ready. *)
-type read_authority =
-  { read_workspace : Masc_tui_types.workspace_authority
-  ; read_detail : unit ref
-  }
-
-let read_authority state =
-  { read_workspace = state.workspace_authority; read_detail = state.detail_read_authority }
-
-(* A read sent under an authority that a refresh then withdrew never lands:
-   its completion carries the old authority and is dropped. A full or scoped
-   refresh ends here once it is applied, so each read the move withdrew is
-   sent again in one place instead of waiting a tick (2026-10-07: after boot
-   the Answering surface said "not loaded yet" and an open chat showed no
-   running turn until the next tick). It runs after the whole refresh
-   because the focused detail needs the roster that refresh brought. *)
-let resume_reads_after_authority_change state ~mailbox ~(before : read_authority) =
-  let moved =
-    before.read_workspace <> state.workspace_authority
-    || before.read_detail != state.detail_read_authority
-  in
-  (* The detail goes first: it restores the remembered Keeper focus and
-     marks its identity read pending, so the side reads below neither poll
-     the same login again nor ask about the Keeper the cursor fell on. *)
-  refresh_visible_detail_after_authority_recovery state ~mailbox
-    ~previous_authority:before.read_detail;
-  if moved && server_authority_ready state then begin
-    (* Under the same condition the tick sends them: a server that is not
-       booting, whether or not its workspace is this checkout's. *)
-    launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
-    (* Navigation can precede the first confirmed identity, and its Lane
-       read was cancelled with the old authority. The loader keeps its own
-       in-flight guard. *)
-    if state.workspace_identity = Workspace_identity_match && state.view = Lanes
-    then launch_lanes_load state ~mailbox
-  end
-;;
-
-let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox results =
-  if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
-  let was_unavailable =
-    state.workspace_identity <> Workspace_identity_match
-    || Option.is_some state.keepers_error
-  in
-  let previous_items = visible_item_revision state in
-  let authority = read_authority state in
-  apply_http_scoped_surfaces state ~currency_authority results;
-  refresh_changed_keeper_items state ~mailbox
-    ~roster_refreshed:(Option.fold ~none:false ~some:Result.is_ok results.http_keeper_roster) previous_items;
-  resume_reads_after_authority_change state ~mailbox ~before:authority;
-  resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
-  end
 
 (* Entering a Keeper detail tab, by [ / ] or by a press on its name in the
    title strip: one way in, so a press reads what the key reads. The scroll
@@ -11701,7 +11671,77 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
                 ~needs))
   end
 
-let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
+(* The two tokens a read is admitted under. Applying a server identity
+   reading moves the workspace one when the workspace changes (the first
+   reading at boot is one) and cancels every read it admitted; it revokes
+   the detail one when the item authority changes, as when a booting server
+   becomes ready. *)
+type read_authority =
+  { read_workspace : Masc_tui_types.workspace_authority
+  ; read_detail : unit ref
+  }
+
+let read_authority state =
+  { read_workspace = state.workspace_authority; read_detail = state.detail_read_authority }
+
+(* A read sent under an authority that a refresh then withdrew never lands:
+   its completion carries the old authority and is dropped. A full or scoped
+   refresh ends here once it is applied, so each read the move withdrew is
+   sent again in one place instead of waiting a tick (2026-10-07: after boot
+   the Answering surface said "not loaded yet", an open chat showed no
+   running turn, and Home showed no decision cards until the next tick). It
+   runs after the whole refresh because the focused detail needs the roster
+   that refresh brought. *)
+let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup ~(before : read_authority) =
+  let workspace_moved = before.read_workspace <> state.workspace_authority in
+  let moved = workspace_moved || before.read_detail != state.detail_read_authority in
+  (* The detail goes first: it restores the remembered Keeper focus and
+     marks its identity read pending, so the side reads below neither poll
+     the same login again nor ask about the Keeper the cursor fell on. *)
+  refresh_visible_detail_after_authority_recovery state ~mailbox
+    ~previous_authority:before.read_detail;
+  if moved && server_authority_ready state then begin
+    (* Under the same condition the tick sends them: a server that is not
+       booting, whether or not its workspace is this checkout's. *)
+    launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
+    (* The surface on view asks again from the list it reads on arrival.
+       Its request went out under the old authority, and a surface outside
+       the bundle has no tick of its own to recover it. *)
+    launch_surface_reads state ~mailbox state.view;
+    (* The bundle was cut under the old authority too: its approval listing
+       carries the approval_flow generation the move replaced, so the
+       listing and the Home operator summary are refused when it lands. Read
+       it again under the new one. Only a matched workspace draws them;
+       another workspace's bundle withheld nothing a second pass would bring.
+       A pass already on the wire records the intent and runs once it
+       lands. *)
+    if workspace_moved && state.workspace_identity = Workspace_identity_match then
+      start_http_refresh state ~host:server_peer_host ~port:state.port
+        ~intent:Revalidate ~refresh_inflight ~scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox
+  end
+;;
+
+let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox
+    ~refresh_inflight ~scoped_refresh_inflight ~scoped_refresh_followup results =
+  if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
+  let was_unavailable =
+    state.workspace_identity <> Workspace_identity_match
+    || Option.is_some state.keepers_error
+  in
+  let previous_items = visible_item_revision state in
+  let authority = read_authority state in
+  apply_http_scoped_surfaces state ~currency_authority results;
+  refresh_changed_keeper_items state ~mailbox
+    ~roster_refreshed:(Option.fold ~none:false ~some:Result.is_ok results.http_keeper_roster) previous_items;
+  resume_reads_after_authority_change state ~mailbox ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup ~before:authority;
+  resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
+  end
+
+let start_http_scoped_refresh state ~host ~port ~refresh_inflight
+    ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
     ~(needs : Masc_tui_types.surface_needs) =
   let authority = state.workspace_authority in
   if not !refresh_inflight then begin
@@ -11773,7 +11813,10 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
              match read_refresh () with
              | Ok results when authority = state.workspace_authority ->
                  apply_http_scoped_refresh_success state ~currency_authority
-                   ~base_path:state.local_base_path ~mailbox results
+                   ~base_path:state.local_base_path ~mailbox
+                   ~refresh_inflight:full_refresh_inflight
+                   ~scoped_refresh_inflight:refresh_inflight ~scoped_refresh_followup
+                   results
              | Error err when authority = state.workspace_authority ->
                  apply_http_scoped_refresh_failure state
                    ~refresh_ticket ~approval_ticket err
@@ -13841,7 +13884,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       let authority = read_authority state in
       apply_http_surfaces state ~mailbox results;
-      resume_reads_after_authority_change state ~mailbox ~before:authority;
+      resume_reads_after_authority_change state ~mailbox
+        ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
+        ~before:authority;
       resume_authorized_input_after_refresh state
         ~was_unavailable:dispatch_was_unavailable ~base_path ~mailbox;
       (* The local roster is trustworthy only after a workspace-matched read.
@@ -14201,7 +14247,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       http_scoped_refresh_inflight := false;
       if authority = state.workspace_authority
          && Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
-      apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox results;
+      apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox
+        ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
+        results;
       (match state.view with
        | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
@@ -27163,6 +27212,7 @@ and is loaded on demand through keeper_skill.
         if Masc_tui_types.surface_needs_any delta then
           start_http_scoped_refresh state ~host:(server_peer_host)
             ~port:state.port ~refresh_inflight:http_scoped_refresh_inflight
+            ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
             ~mailbox:async_messages ~needs:delta
       end;
 

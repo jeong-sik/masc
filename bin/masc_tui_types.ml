@@ -4429,6 +4429,11 @@ module Browser_history = struct
   type resume = Reload_list | Reload_selection
   type t = { keeper_name : string; content : content; scroll : int; resume : resume option }
   let create keeper_name = {keeper_name;content=Listing;scroll=0;resume=None}
+  let start_read ~reload t =
+    let content = if reload then Listing else match t.content with
+      | Entries entries -> Entries {entries with selection=Loading}
+      | Listing | List_failed _ -> t.content in
+    {t with content; resume=None}
   let suspend t =
     let detail = "Workspace identity is unconfirmed; reading will resume after recovery" in
     match t.content with

@@ -164,6 +164,10 @@ type t =
   | Preset_show of string
       (** [/preset show <name>] — what that preset holds, by kind. *)
   | Preset_show_missing_name  (** [/preset show] with no name. *)
+  | Preset_delete of string
+      (** [/preset delete <name>] — remove that preset, whether or not it
+          loads. *)
+  | Preset_delete_missing_name  (** [/preset delete] with no name. *)
   | Unknown of string  (** A slash word this build does not know, by name. *)
 
 type command_help = {

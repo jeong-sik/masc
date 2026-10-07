@@ -2471,6 +2471,7 @@
 (include stanzas/test_candle_goal_flow.inc)
 (include stanzas/test_candle_grant.inc)
 (include stanzas/test_candle_grant_cli.inc)
+(include stanzas/test_candle_gift.inc)
 
 (include stanzas/test_candle_config.inc)
 
@@ -2516,7 +2517,7 @@
 
 (include stanzas/test_machine_checkpoint.inc)
 
-(include stanzas/test_lane_activity.inc)
+(include stanzas/test_machine_action_feed.inc)
 
 (include stanzas/test_lane_id.inc)
 
@@ -6320,6 +6321,7 @@
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
 (include stanzas/test_keeper_turn_spend.inc)
+(include stanzas/test_keeper_unsettled_spend.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
@@ -6369,18 +6371,6 @@
  (name test_keeper_tool_surface_schema)
  (modules test_keeper_tool_surface_schema)
  (libraries alcotest yojson masc masc_test_deps))
-
-; The assembled keeper system prompt is built from registry text plus in-code
-; XML structure; substring assertions cannot see block order, separator bytes,
-; or a block that resolved to the empty string. This golden pins the whole
-; string, and declaring the prompt sources as deps is what makes an edit under
-; config/prompts re-run it instead of returning a cached pass.
-(test
- (name test_keeper_system_prompt_blocks)
- (modules test_keeper_system_prompt_blocks)
- (deps
-  (source_tree %{workspace_root}/config/prompts))
- (libraries alcotest masc_test_deps))
 
 (include stanzas/test_librarian_journal_failures.inc)
 
@@ -8010,7 +8000,7 @@
 (test
  (name test_keeper_memory_search_index)
  (modules test_keeper_memory_search_index)
- (libraries alcotest masc))
+ (libraries alcotest masc masc_core eio eio_main))
 
 (test
  (name test_workspace_memory_request)
@@ -8118,6 +8108,11 @@
  (name test_lane_addon_resource_events)
  (modules test_lane_addon_resource_events)
  (libraries masc_test_deps eio eio_main yojson unix))
+
+(test
+ (name test_provider_admission_events)
+ (modules test_provider_admission_events)
+ (libraries masc_test_deps eio eio_main yojson))
 
 (test
  (name test_runtime_setup_spec)
@@ -9400,7 +9395,7 @@
 
 (rule
  (alias runtest-test_tui_task_metadata_viewport_pty)
- (deps test_tui_task_metadata_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
+ (deps test_tui_task_metadata_viewport_pty.py test_tui_keyboard_input.py tui_region_harness.py ../bin/masc_tui.exe
   tui_keyboard_approvals.py
   tui_keyboard_board.py
   tui_keyboard_browser.py

@@ -2,7 +2,6 @@
 
 type flusher_outcome =
   | Switch_finished
-  | Cas_exhausted
 
 type observer =
   { observe_persist_lock_acquire_sec : float -> unit

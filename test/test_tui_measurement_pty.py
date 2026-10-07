@@ -335,19 +335,31 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             os.write(master, b"q")
             return
 
-        def submit_command(text: str, needle: bytes) -> None:
-            _keyboard_harness.send_and_wait(process, master, output, b"i", _keyboard_harness.COMPOSER_FOCUSED)
+        def submit_command(text: str, needle: bytes, *, focus_by_paste: bool = False) -> None:
             command = text.encode()
-            _keyboard_harness.send_and_wait(
-                process,
-                master,
-                output,
-                _keyboard_chat.PASTE_START + command + _keyboard_chat.PASTE_END,
-                command,
-            )
+            paste = _keyboard_chat.PASTE_START + command + _keyboard_chat.PASTE_END
+            if focus_by_paste:
+                # Lanes reads inventory issues on i (#41131; docs/TUI-GUIDE.md,
+                # Lanes), so the composer is reached the other documented way:
+                # a paste while the row is idle takes focus for it.
+                start = len(output)
+                _keyboard_harness.send_and_wait(
+                    process, master, output, paste, _keyboard_harness.COMPOSER_FOCUSED
+                )
+                _keyboard_harness.wait_for_output(
+                    process, master, output, command, start=start, timeout=3.0
+                )
+            else:
+                _keyboard_harness.send_and_wait(
+                    process, master, output, b"i", _keyboard_harness.COMPOSER_FOCUSED
+                )
+                _keyboard_harness.send_and_wait(process, master, output, paste, command)
             _keyboard_harness.send_and_wait(process, master, output, b"\r", needle)
 
-        if scenario in ("overlay-lanes", "overlay-palette"):
+        # Whether Lanes is the surface on screen: there i reads inventory
+        # issues instead of focusing the composer.
+        lanes_shown = scenario in ("overlay-lanes", "overlay-palette")
+        if lanes_shown:
             _keyboard_harness.palette_go(process, master, output, b"go lanes", b"MASC Lanes")
         if scenario in (
             "overlay",
@@ -359,9 +371,8 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             # still sees it. The HTTP fixture proves /diff opened that state.
             submit_command(
                 "/diff",
-                _keyboard_harness.FRAME_START
-                if scenario in ("overlay-lanes", "overlay-palette")
-                else b"overlay-file.ml",
+                _keyboard_harness.FRAME_START if lanes_shown else b"overlay-file.ml",
+                focus_by_paste=lanes_shown,
             )
             assert status_requested.wait(2.0), "repository changes were not requested"
         if scenario == "overlay-palette":
@@ -373,6 +384,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             # explicitly before exercising the shared composer again.
             _keyboard_harness.send_and_wait(process, master, output, b"3", b"MASC Keepers")
             _keyboard_harness.select_keeper_row(process, master, output, b"alpha")
+            lanes_shown = False
         if scenario == "theme-preview":
             _keyboard_harness.palette_go(process, master, output, b"go System / themes", b"MASC Themes")
             _keyboard_harness.wait_for_output(
@@ -383,7 +395,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             )
             assert b"\x1b]4;" in preview and b"\x1b]11;" in preview, preview
         before_command = len(output)
-        submit_command("/measurement " + sha, b"MASC Measurement")
+        submit_command("/measurement " + sha, b"MASC Measurement", focus_by_paste=lanes_shown)
         if scenario == "theme-preview":
             transition = bytes(output[before_command:])
             for reset in (b"\x1b]110\x1b\\", b"\x1b]111\x1b\\", b"\x1b]104\x1b\\"):

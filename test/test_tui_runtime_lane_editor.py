@@ -698,7 +698,7 @@ def run_exact_refusal(executable: str) -> None:
     fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
     fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = store.lane_inventory
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
@@ -772,7 +772,7 @@ def run_exact_refusal_crowded(executable: str) -> None:
     fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
     fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = store.lane_inventory
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
@@ -837,7 +837,7 @@ def run_exact_picker_refusal(executable: str) -> None:
     fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
     fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = _keyboard_runtime.runtime_probe_response(fresh=True)
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = store.lane_inventory
     fixtures[ROUTING_PATH] = _keyboard_harness.RequestHttpResponse(store.route)
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: _keyboard_harness.HttpRequests = []
@@ -1530,8 +1530,11 @@ def run_default_route(executable: str) -> None:
         _keyboard_harness.tab_until(process, fd, output, b"MASC System")
         _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=131,
                           needle=b"MASC System", controls=(_keyboard_harness.FULL_REDRAW,))
-        _keyboard_harness.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        # The pane title clips at the 131-column layout ("…Candidate orders
+        # (3 lanes, 4 slo…"), so wait on the clipping-safe head of the title.
+        _keyboard_harness.send_and_wait(process, fd, output, b"9", b"Candidate orders (3 lanes")
         _keyboard_harness.send_and_wait(process, fd, output, b"f", b"primary   lane")
+
         frame = _keyboard_harness.screen_text(bytes(output))
         assert b"Enter replace" in frame, frame
         assert b"primary   lane" in frame, frame

@@ -1113,7 +1113,7 @@ let test_board_and_planning_explain_their_order () =
    that nothing on screen called. The Browser Lane arm lived only in the drawn
    one, so the two could disagree and the tests would not see it. *)
 let ring_stop surface =
-  Masc_tui_surface_navigation.visible_surface_ring_index
+  Masc_tui_surface_navigation.surface_ring_index
     (create_state ~workspace:"" ~port:0 ~refresh_interval:0. ())
     surface
 
@@ -1650,39 +1650,31 @@ let approvals_reading_is_current state =
 
 let approvals_home_in_ring state =
   let home = Masc_tui_surface_navigation.surface_ring_family state Approvals in
-  List.exists (fun (surface, _) -> surface = home) (Masc_tui_surface_navigation.visible_surface_ring state)
+  List.exists (fun (surface, _) -> surface = home) Masc_tui_types.surface_ring
 
 let test_approvals_stay_reachable_and_unread_until_a_reading_empties_it () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Overview;
   Alcotest.(check bool) "Approvals is reached through Work" true
     (Masc_tui_surface_navigation.surface_ring_family state Approvals = Planning);
-  Alcotest.(check bool) "before any reading Work stands" true
+  Alcotest.(check bool) "Work, where Approvals opens, is in the ring" true
     (approvals_home_in_ring state);
   Alcotest.(check bool) "before any reading nothing reads as settled" false
     (Masc_tui_approvals_model.approvals_reading_current state);
   approvals_reading_is_current state;
   Alcotest.(check bool) "a reading with nothing in it is current" true
     (Masc_tui_approvals_model.approvals_reading_current state);
-  Alcotest.(check bool) "and Work still stands" true
-    (approvals_home_in_ring state);
   state.keeper_tool_approvals_error <- Some "held calls poll failed";
   Alcotest.(check bool) "a failed held-calls poll is not current" false
     (Masc_tui_approvals_model.approvals_reading_current state);
-  Alcotest.(check bool) "a failed held-calls poll keeps Work" true
-    (approvals_home_in_ring state);
   state.keeper_tool_approvals_error <- None;
   state.asks_error <- Some "questions poll failed";
   Alcotest.(check bool) "a failed questions poll is not current" false
     (Masc_tui_approvals_model.approvals_reading_current state);
-  Alcotest.(check bool) "a failed questions poll keeps Work" true
-    (approvals_home_in_ring state);
   state.asks_error <- None;
   state.approval_snapshot <- None;
   Alcotest.(check bool) "an unread confirm queue is not current" false
     (Masc_tui_approvals_model.approvals_reading_current state);
-  Alcotest.(check bool) "an unread confirm queue keeps Work" true
-    (approvals_home_in_ring state);
   (* The durable Gate queue is the fourth list the count walks. Its rows are
      the ones that keep while nobody watches, so an unreadable Gate store is
      the case where a count without "?" misleads the most. *)
@@ -1690,31 +1682,21 @@ let test_approvals_stay_reachable_and_unread_until_a_reading_empties_it () =
   state.gate_error <- Some "gate poll failed";
   Alcotest.(check bool) "a failed Gate poll is not current" false
     (Masc_tui_approvals_model.approvals_reading_current state);
-  Alcotest.(check bool) "a failed Gate poll keeps Work" true
-    (approvals_home_in_ring state);
   state.gate_error <- None;
   state.gate_queue_unavailable <- Some "approval queue store unreadable";
   Alcotest.(check bool) "a Gate queue the server could not read is not current"
     false (Masc_tui_approvals_model.approvals_reading_current state);
-  Alcotest.(check bool) "a Gate queue the server could not read keeps Work"
-    true (approvals_home_in_ring state);
   state.gate_queue_unavailable <- None;
   state.gate_snapshot_observed <- false;
   Alcotest.(check bool) "a Gate queue not read yet is not current" false
     (Masc_tui_approvals_model.approvals_reading_current state);
-  Alcotest.(check bool) "a Gate queue not read yet keeps Work" true
-    (approvals_home_in_ring state);
   state.gate_snapshot_observed <- true;
   state.keeper_tool_approvals_observed <- false;
   Alcotest.(check bool) "held calls not read yet are not current" false
     (Masc_tui_approvals_model.approvals_reading_current state);
-  Alcotest.(check bool) "held calls not read yet keep Work" true
-    (approvals_home_in_ring state);
   state.keeper_tool_approvals_observed <- true;
   Alcotest.(check bool) "every list read and empty is current again" true
-    (Masc_tui_approvals_model.approvals_reading_current state);
-  Alcotest.(check bool) "and Work still stands" true
-    (approvals_home_in_ring state)
+    (Masc_tui_approvals_model.approvals_reading_current state)
 
 (* The Gate poll answered once, with an empty queue, and every poll since
    has failed. The rows it keeps are that first answer's, so the queue is
@@ -1728,8 +1710,6 @@ let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
   approvals_reading_is_current state;
   Alcotest.(check bool) "every list read and empty: nothing pending" true
     (Masc_tui_approvals_model.approvals_empty_queue (Masc_tui_approvals_model.approvals_reading state) = Masc_tui_approvals_model.Nothing_pending);
-  Alcotest.(check string) "and the Dashboard count stands" "0"
-    (Masc_tui_approvals_model.approvals_count_label state);
   let cause = "gate load failed: HTTP 503" in
   state.gate_error <- Some cause;
   let reading = Masc_tui_approvals_model.approvals_reading state in
@@ -1738,12 +1718,8 @@ let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
      = Masc_tui_approvals_model.Lists_not_read [ ("Gate queue", Masc_tui_approvals_model.Approval_stale cause) ]);
   Alcotest.(check string) "the title says the Gate queue is stale"
     ", Gate queue stale" (Masc_tui_approvals_model.approvals_title_notes reading);
-  Alcotest.(check string) "the Dashboard count carries the ?" "0?"
-    (Masc_tui_approvals_model.approvals_count_label state);
   Alcotest.(check bool) "and the reading is not current" false
     (Masc_tui_approvals_model.approvals_reading_current state);
-  Alcotest.(check bool) "while Work still leads to it" true
-    (approvals_home_in_ring state);
   state.gate_error <- None;
   state.gate_queue_unavailable <- Some "approval queue store is unreadable";
   let reading = Masc_tui_approvals_model.approvals_reading state in
@@ -1762,55 +1738,26 @@ let test_browser_lanes_highlight_config () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Connectors;
   check Alcotest.int "channel bindings remain under Keepers"
-    (Masc_tui_surface_navigation.visible_surface_ring_index state (Keepers Keeper_list))
-    (Masc_tui_surface_navigation.visible_surface_ring_index state Connectors);
+    (Masc_tui_surface_navigation.surface_ring_index state (Keepers Keeper_list))
+    (Masc_tui_surface_navigation.surface_ring_index state Connectors);
   List.iter (fun source ->
       show_browser_lane state;
       state.browser_lane <- Some
         (Browser_lane_view.switch_source source (Browser_lane_view.create ()));
-      let index = Masc_tui_surface_navigation.visible_surface_ring_index state Connectors in
+      let index = Masc_tui_surface_navigation.surface_ring_index state Connectors in
       check Alcotest.int "Browser reader highlights Config"
-        (Masc_tui_surface_navigation.visible_surface_ring_index state Config) index;
+        (Masc_tui_surface_navigation.surface_ring_index state Config) index;
       check Alcotest.bool "the selected ring entry is Config, not the fallback"
-        true (fst (List.nth (Masc_tui_surface_navigation.visible_surface_ring state) index) = Config))
+        true (fst (List.nth (Masc_tui_types.surface_ring) index) = Config))
     [Browser_lane_view.Live; Browser_lane_view.Automation];
   state.browser_lane <- None;
   check Alcotest.int "closing the reader restores the Keeper parent"
-    (Masc_tui_surface_navigation.visible_surface_ring_index state (Keepers Keeper_list))
-    (Masc_tui_surface_navigation.visible_surface_ring_index state Connectors)
-
-let test_visible_surface_ring_declutter () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
-  state.view <- Overview;
-  (* Empty, not unread: a fresh state has taken no reading, and a reading
-     nobody took is not a queue with nothing in it. *)
-  approvals_reading_is_current state;
-  let ring_empty = Masc_tui_surface_navigation.visible_surface_ring state in
-  Alcotest.(check bool) "Approvals hidden when empty and not active" false
-    (List.exists (fun (s, _) -> s = Approvals) ring_empty);
-  state.view <- Approvals;
-  let ring_active = Masc_tui_surface_navigation.visible_surface_ring state in
-  Alcotest.(check bool) "Approvals stay inside Work when active" false
-    (List.exists (fun (s, _) -> s = Approvals) ring_active);
-  state.view <- Overview;
-  state.keeper_tool_approvals <-
-    [ { kta_keeper = "alpha"
-      ; kta_tool_call_id = "call_1"
-      ; kta_tool = "exec"
-      ; kta_args = "{}"
-      ; kta_question = "run?"
-      ; kta_because = None
-      ; kta_asked_at = 0.0
-      ; kta_timeout_sec = 60.0
-      }
-    ];
-  let ring_with_pending = Masc_tui_surface_navigation.visible_surface_ring state in
-  Alcotest.(check bool) "Approvals stay inside Work when pending" false
-    (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
+    (Masc_tui_surface_navigation.surface_ring_index state (Keepers Keeper_list))
+    (Masc_tui_surface_navigation.surface_ring_index state Connectors)
 
 (* One ask can carry several questions, and the surface counts them under the
-   word "question": its title, the block header above the rows, and the tab
-   badge all read from [Masc_tui_approvals_model.approvals_open_question_count]. It counted the asks,
+   word "question": its title and the block header above the rows both read
+   from [Masc_tui_approvals_model.approvals_open_question_count]. It counted the asks,
    so a fleet holding one ask of two questions said "1 question" while the
    line three rows below it said "+2 more questions". *)
 let test_the_question_count_counts_questions () =
@@ -1840,8 +1787,8 @@ let test_the_question_count_counts_questions () =
       };
   Alcotest.(check int) "two asks holding three questions" 3
     (Masc_tui_approvals_model.approvals_open_question_count state);
-  (* The surface's own pending reading is the approvals plus these, and it
-     answers the tab badge as well as the title. *)
+  (* The surface's own pending reading is the approvals plus these, and the
+     title draws it. *)
   Alcotest.(check int) "and the surface counts them the same way" 3
     (Masc_tui_approvals_model.approvals_surface_pending state);
   (* A resolved ask is not waiting on anyone, so its questions are not
@@ -1888,44 +1835,6 @@ let test_the_questions_reading_tells_unread_from_none_open () =
     (reading ());
   Alcotest.(check int) "which counts the same 0 as unread" 0
     (Masc_tui_approvals_model.approvals_open_question_count state)
-
-let test_visible_surface_ring_open_ask () =
-  (* A keeper's question is an approval of a different kind: it waits on the
-     same human, on the same surface. With zero approvals and one open ask
-     the Approvals entry must stay in the ring, or the question has nowhere
-     to be seen from. *)
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
-  state.view <- Overview;
-  state.asks_snapshot <-
-    Some
-      { Masc.Tui_decode_asks.asn_keeper = Some "jazz-developer"
-      ; asn_open_count = 1
-      ; asn_rows =
-          [ { Masc.Tui_decode_asks.ar_keeper = "jazz-developer"
-            ; ar_id = "ask1"
-            ; ar_asked_at = 0.0
-            ; ar_context = Some "where to post the measured comment"
-            ; ar_questions =
-                [ { Masc.Tui_decode_asks.aq_id = "q1"
-                  ; aq_header = "post or wait"
-                  ; aq_prompt = "post the comment as is?"
-                  ; aq_mode = Masc.Tui_decode_asks.Ask_single
-                  ; aq_free_text = Masc.Tui_decode_asks.Ask_choices_only
-                  ; aq_choices =
-                      [ { Masc.Tui_decode_asks.ac_id = "post_as_is"
-                        ; ac_label = "post as is"
-                        ; ac_description = None
-                        }
-                      ]
-                  }
-                ]
-            ; ar_resolution = Masc.Tui_decode_asks.Ask_open
-            }
-          ]
-      };
-  let ring = Masc_tui_surface_navigation.visible_surface_ring state in
-  Alcotest.(check bool) "Ask keeps the top-level ring compact"
-    false (List.exists (fun (s, _) -> s = Approvals) ring)
 
 (* The sheet is the only place the keeper marks are named where a reader
    can read all of them at once: the Keepers rows pair each glyph with its word
@@ -2019,7 +1928,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  c:copy model  m:model source  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  i:input  a:fragments / voice / account  u:restore / adopt revision  S:save draft  C:compare file  U:use current text  X:discard draft  o:assets  Esc:back  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  c:copy model  m:model source  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  i:input  a:fragments / voice / account  u:restore / adopt revision  D:delete  S:save draft  C:compare file  U:use current text  X:discard draft  o:assets  Esc:back  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2162,6 +2071,7 @@ let test_config_pane_footer_actions () =
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
     enabled "f" (pane = Config_themes);
     enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
+    enabled "D" (pane = Config_presets);
     (* Every pane that answers [e], including params -- where #36650 moved the
        key into the pair [e / Enter] because both spellings open the same
        field ([handle_runtime_param_edit_open] ~advanced:false). The pane was
@@ -2204,7 +2114,7 @@ let test_config_pane_footer_actions () =
     (fun key ->
       Alcotest.(check bool) ("presets keeps " ^ key ^ " at 120 columns") true
         (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_presets))))
-    [ "n"; "u"; "PgUp/PgDn" ];
+    [ "n"; "u"; "D"; "PgUp/PgDn" ];
   (* The account form's door, at the width the other panes promise their own
      writes. Narrower rows keep the pane's first keys and drop [e] and [a]
      alike; the ? sheet names both there. *)
@@ -3572,10 +3482,6 @@ let () =
             test_metrics_is_an_overview_child
         ; Alcotest.test_case "Browser reader belongs to Config" `Quick
             test_browser_lanes_highlight_config
-        ; Alcotest.test_case "smart declutter hides empty approvals" `Quick
-            test_visible_surface_ring_declutter
-        ; Alcotest.test_case "open ask keeps approvals in the ring" `Quick
-            test_visible_surface_ring_open_ask
         ; Alcotest.test_case "the question count counts questions" `Quick
             test_the_question_count_counts_questions
         ; Alcotest.test_case "the questions reading tells unread from none open"

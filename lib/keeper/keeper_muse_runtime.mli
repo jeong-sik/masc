@@ -81,6 +81,11 @@ val run :
   ?on_native_action:(official_turn:int ->
     identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
   ?on_usage_report:(Keeper_client_usage_report.t -> unit) ->
+  ?on_tool_execution:
+    (block_index:int -> tool_call_id:string -> execution_id:Ids.Execution_id.t -> unit) ->
+  (* Each MASC tool call's committed execution id, named by the stream block
+     that opened it. A call answered before the message starts is reported
+     after its held block reaches the stream. *)
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
@@ -137,6 +142,7 @@ module For_testing : sig
         (** The bridge finished that call. *)
 
   val project_stream_inputs :
+    ?receipts:Keeper_official_client_tool_receipts.t ->
     during:(Agent_core.Types.sse_event -> stream_input list) ->
     stream_input list ->
     Agent_core.Types.sse_event list
@@ -144,7 +150,9 @@ module For_testing : sig
       both channels, in the order the viewer records them. [during event]
       names inputs that arrive while [event] is being emitted, as the
       bridge's fiber would when the viewer's callback yields before it
-      records [event]; they are fed before [event] is recorded. *)
+      records [event]; they are fed before [event] is recorded. [receipts]
+      opens and closes with the MASC tool blocks and is released when the
+      held blocks reach the stream. *)
 
   val runtime_error_to_core_error : Runtime_muse_serve.error -> Agent_core.Error.t
 

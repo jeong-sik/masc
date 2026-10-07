@@ -342,13 +342,6 @@ let origin_display_to_string = function
   | Masc_tui_message_layout.Origin_bare -> "off"
 ;;
 
-let origin_display_of_string = function
-  | "row" -> Some Masc_tui_message_layout.Origin_row
-  | "inline" -> Some Masc_tui_message_layout.Origin_inline
-  | "off" -> Some Masc_tui_message_layout.Origin_bare
-  | _ -> None
-;;
-
 (* The chat modes worth a place in the header.
 
    Reasoning starts hidden, tools compact, and the memory journal at its
@@ -2888,8 +2881,6 @@ type scrolled = {
    declared separately in [sc_overflow_takes_row]; a surface whose chrome
    moves has to move the typed layout in the same change. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
-let lanes_listing_chrome ~load_error ~action_error =
-  listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
 (* A listing draws a reading of the selected row under its list, and both are
    paid for out of the same frame. The reading was given exactly one row and
@@ -3509,16 +3500,6 @@ type metrics_section =
   | Section_fleet
   | Section_resources
   | Section_tools
-
-let next_metrics_section = function
-  | Section_fleet -> Section_resources
-  | Section_resources -> Section_tools
-  | Section_tools -> Section_fleet
-
-let prev_metrics_section = function
-  | Section_fleet -> Section_tools
-  | Section_resources -> Section_fleet
-  | Section_tools -> Section_resources
 
 let metrics_section_label = function
   | Section_fleet -> "Engine & Scheduler"
@@ -4913,6 +4894,13 @@ type goal_action_pending =
   | Goal_action_armed of { goal_id : string; action : Goal_phase.Public_action.t }
   | Goal_drop_reason of { goal_id : string; reason : string }
 
+(* The Config presets pane's writes that wait for a second press of their
+   key: [u] restores the selected preset, [D] deletes it. One value, so
+   arming one disarms the other. *)
+type preset_arm =
+  | Restore_armed of string
+  | Delete_armed of string
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5268,7 +5256,7 @@ type state = {
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
   (* Prompt presets (#32777). The pane holds the listing, the name being
-     typed for a save, the preset armed for a restore, and the last report —
+     typed for a save, the preset armed for a restore or delete, and the last report —
      which stays on screen because it is the only place the skipped keys and
      the runtime.toml outcome are said. *)
   mutable presets_snapshot: Tui_decode.presets_snapshot option;
@@ -5282,7 +5270,7 @@ type state = {
      waiting", which is the state this pane spends its first moments in. *)
   mutable preset_detail: (string, Tui_decode.preset_detail) Masc_tui_fetched.t;
   mutable preset_save_draft: string option;
-  mutable preset_restore_armed: string option;
+  mutable preset_armed: preset_arm option;
   mutable preset_report: Tui_decode.preset_restore_report option;
   mutable preset_busy: bool;
   (* Rows of coloured segments, the shape the Code surface keeps, so the two
@@ -8385,7 +8373,7 @@ let create_state
   presets_cursor = 0;
   preset_detail = Masc_tui_fetched.initial;
   preset_save_draft = None;
-  preset_restore_armed = None;
+  preset_armed = None;
   preset_report = None;
   preset_busy = false;
   prompts_show_fragments = false;
@@ -11561,7 +11549,7 @@ let runtime_selection_summary_lines ~cols state =
             (Masc.Tui_terminal_text.sanitize_terminal_text line))
       |> List.map (fun line -> "  " ^ line)
 
-let runtime_surface_base_chrome ~cols state =
+let runtime_surface_base_chrome_with ~cols state ~route_rows =
   runtime_listing_chrome
     ~cols
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
@@ -11571,10 +11559,7 @@ let runtime_surface_base_chrome ~cols state =
     ~prompt:(Option.is_some (runtime_lane_prompt state))
     (* The wrapped default route, media_failover and divider sit above the
        lane table. The key geometry counts the same default lines as render. *)
-    ~route_rows:
-      (match state.runtime_mode with
-       | Runtime_lanes -> List.length (runtime_default_route_lines ~cols state) + 2
-       | Runtime_all -> 0)
+    ~route_rows
     ~editor_rows:
       (match state.slot_editor with
        | Some { se_target = Media_failover_slots; _ } ->
@@ -11587,18 +11572,43 @@ let runtime_surface_base_chrome ~cols state =
       (runtime_picker_projection state))
     ()
 
+(* The route block (the wrapped default route, the media_failover row and its
+   divider) sits above the lane table. A short viewport cannot hold the block
+   and the table header plus the selected row at once, and a cursor on a hidden
+   row is a bug in itself -- the same rule #41143 applied to the status column.
+   So the media_failover row and its divider fold away first when the frame
+   would otherwise leave no data row; the route line itself stays. *)
+let runtime_media_row_folded ~rows ~cols state =
+  match state.runtime_mode with
+  | Runtime_all -> false
+  | Runtime_lanes ->
+      let route_lines = List.length (runtime_default_route_lines ~cols state) in
+      let base_without = runtime_surface_base_chrome_with ~cols state ~route_rows:0 in
+      rows - (base_without + route_lines + 2) < 1
+
+let runtime_surface_base_chrome ~rows ~cols state =
+  let route_rows =
+    match state.runtime_mode with
+    | Runtime_all -> 0
+    | Runtime_lanes ->
+        let route_lines = List.length (runtime_default_route_lines ~cols state) in
+        if runtime_media_row_folded ~rows ~cols state then route_lines
+        else route_lines + 2
+  in
+  runtime_surface_base_chrome_with ~cols state ~route_rows
+
 (* The selected row must keep a place in the list. Full account/status facts
    remain in Enter's detail reading when a short viewport cannot fit both. *)
 let runtime_selection_summary_for_viewport ~rows ~cols state =
   let lines = runtime_selection_summary_lines ~cols state in
-  let spare = rows - runtime_surface_base_chrome ~cols state - 1 in
+  let spare = rows - runtime_surface_base_chrome ~rows ~cols state - 1 in
   if lines = [] || List.length lines + 1 <= spare then lines
   else if spare >= 2 then ["  Enter: full connection and status details"]
   else []
 
 let runtime_surface_listing_chrome ~rows ~cols state =
   let selection_rows = runtime_selection_summary_for_viewport ~rows ~cols state in
-  runtime_surface_base_chrome ~cols state
+  runtime_surface_base_chrome ~rows ~cols state
   + (if selection_rows = [] then 0 else List.length selection_rows + 1)
 
 (* The Runtime listing's bound. Its chrome depends on the viewport size, so

@@ -3722,12 +3722,6 @@ let decode_keeper_secret_projections json =
     items
   |> Result.map List.rev
 
-(* The counts are read with a default rather than required: the server adds
-   fields to this section over time, and a TUI that refuses the whole reading
-   because one counter is new would hide the fleet exactly when it changed.
-   The three that name the fleet's own verdict -- status, blocker, and whether
-   an operator has to act -- are required, because a reading without them says
-   nothing. *)
 let decode_keeper_tool_approval json =
   let* kta_keeper = required_string_field json "keeper" in
   let* kta_tool_call_id = required_string_field json "tool_call_id" in
@@ -3813,6 +3807,11 @@ type gate_pending = {
   gp_execution_sandbox : string option;
   gp_waiting_s : float option;
   gp_phase : gate_pending_phase;
+  gp_judge_advice : Keeper_approval_queue_rules_types.hitl_context_summary option;
+      (** What Auto Judge wrote when it handed the row to a person: its
+          rationale and the questions it wants answered. Present exactly when
+          the phase is [Gate_human_required]; the server sets that phase only
+          from such a summary. *)
   gp_auto_judge_detail : string option;
       (** The durable reason why Auto Judge handed this row back or stopped.
           It is intentionally separate from the phase: [blocked] without its
@@ -4032,6 +4031,25 @@ let gate_auto_judge_detail_of_json json =
   | _, `String detail when String.trim detail <> "" -> Some detail
   | _ -> None
 
+(* The summary is read with the server's own decoder. A row the server put in
+   [human_required] always carries an available summary, so its absence is a
+   wire error, not a row to draw without the judge's reasons. *)
+let gate_judge_advice_of_json ~phase json =
+  match phase with
+  | Gate_human_required ->
+    (match
+       Keeper_approval_queue_rules_types.summary_status_of_yojson_with_error
+         (member "summary_status" json)
+     with
+     | Ok (Keeper_approval_queue_rules_types.Summary_available summary) -> Ok (Some summary)
+     | Ok
+         ( Keeper_approval_queue_rules_types.Summary_not_requested
+         | Keeper_approval_queue_rules_types.Summary_pending
+         | Keeper_approval_queue_rules_types.Summary_failed _ ) ->
+       Error "a human_required gate row carries no Auto Judge summary"
+     | Error detail -> Error ("gate summary_status: " ^ detail))
+  | Gate_queued | Gate_judging | Gate_blocked -> Ok None
+
 (* The server owns the full parser and repeats the compare-and-swap checks.
    The TUI only carries the exact five fields it observed, and only advertises
    rearm for the three dispositions the server explicitly permits. A failed
@@ -4076,6 +4094,7 @@ let decode_gate_pending json =
     | _ -> None
   in
   let* gp_phase = gate_pending_phase_of_json json in
+  let* gp_judge_advice = gate_judge_advice_of_json ~phase:gp_phase json in
   Ok
     {
       gp_id;
@@ -4093,6 +4112,7 @@ let decode_gate_pending json =
         snd (gate_execution_site ~operation:gp_operation input);
       gp_waiting_s;
       gp_phase;
+      gp_judge_advice;
       gp_auto_judge_detail = gate_auto_judge_detail_of_json json;
       gp_retry_request = gate_retry_request_of_json ~id:gp_id json;
     }
@@ -5157,6 +5177,11 @@ let decode_preset_saved json =
   match member "preset" json with
   | `Null -> Error "the save answer carries no preset"
   | preset -> decode_preset_manifest preset
+;;
+
+let decode_preset_deleted json =
+  let* () = preset_ok json in
+  required_string_field json "deleted"
 ;;
 
 let decode_preset_part json key =

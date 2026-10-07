@@ -113,7 +113,10 @@ def run(executable):
             _keyboard_harness.drain_until_quiet(process, master_fd, output)
             assert not any(b"MASC Answering" in row for row in current_rows(output)), current_rows(output)
             # In chat q belongs to the draft. Leave chat before asking to quit.
-            _keyboard_harness.escape_to_keeper_detail(process, master_fd, output, name=target)
+            # The Answering pane opens the chat with return_to=list, so Esc
+            # leaves it for the roster, not the keeper detail.
+            _keyboard_harness.escape_to_keeper_detail(process, master_fd, output, name=target,
+                                      destination=b"MASC Keepers")
             os.write(master_fd, b"q")
 
         _keyboard_harness.run_terminal_scenario(executable,

@@ -1083,6 +1083,9 @@ type gate_pending = {
           changes what the command means. *)
   gp_waiting_s : float option;
   gp_phase : gate_pending_phase;
+  gp_judge_advice : Keeper_approval_queue_rules_types.hitl_context_summary option;
+      (** Auto Judge's rationale and questions for a [Gate_human_required] row.
+          Required there and [None] in every other phase. *)
   gp_auto_judge_detail : string option;
       (** Durable Auto Judge failure or handoff reason, when the server
           recorded one. *)
@@ -1514,6 +1517,9 @@ val decode_preset_saved : Yojson.Safe.t -> (preset_manifest, string) result
 
 val decode_preset_restore : Yojson.Safe.t -> (preset_restore_report, string) result
 (** POST /api/v1/presets/restore — the per-surface report. *)
+
+val decode_preset_deleted : Yojson.Safe.t -> (string, string) result
+(** POST /api/v1/presets/delete — the name of the preset the server removed. *)
 
 val decode_latest_librarian_run_id : Yojson.Safe.t -> (string, string) result
 (** Read the first Librarian row from the newest-first exact-lane summary. The

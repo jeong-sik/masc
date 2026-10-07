@@ -162,12 +162,12 @@ def first_use_frames(executable: str) -> None:
             # differs from the harness and the checks below to force a redraw.
             capture("LOADING", 120, b"Connecting to workspace")
             for columns in (80, 140):
-                # The Home approvals row names each list that was not read
-                # ("confirm queue not fully read; held calls ..."), so the
-                # generic "not fully read" tail no longer follows the colon.
+                # The Home approvals row leads with the aggregate
+                # ("not fully read · confirm queue, held calls, ..."), then
+                # names each list that was not read (#40996).
                 unread = capture(
                     "UNREAD", columns,
-                    b"Approvals and questions: confirm queue not fully read",
+                    b"Approvals and questions: not fully read \xc2\xb7 confirm queue",
                 )
                 if b"Create a Keeper" in unread:
                     raise AssertionError("an unread briefing claimed an empty fleet")

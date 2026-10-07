@@ -954,12 +954,8 @@ def tab_until(
 ) -> bytes:
     """Press Tab until the screen shows [needle], or give up after a lap.
 
-    Name the surface the walk is going to, not one on the way. The ring is
-    not fixed: Masc_tui_surface_navigation.is_surface_active leaves Approvals out of it
-    while nothing is pending, so a walk that stopped there first burned
-    every press on a screen that did not exist. Six scenarios used it as a
-    waypoint to Board, and a seventh fabricated a pending tool approval in
-    its fixtures to keep the waypoint alive.
+    Name the surface the walk is going to, not one on the way: a stop on
+    the way couples the scenario to the ring's order.
     """
     for _ in range(TAB_CYCLE_BOUND):
         read_available(master_fd, output)
@@ -2243,6 +2239,7 @@ def run_terminal_scenario(
     omit_operator_token: bool = False,
     starts_in_chat: bool = False,
     launch_count: int = 1,
+    startup_frame_marker: bytes | None = None,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
@@ -2402,15 +2399,20 @@ def run_terminal_scenario(
                     timeout=30.0,
                 )
                 if not starts_in_chat:
+                    # A narrow viewport can clip the workspace label. Such a
+                    # scenario names a visible surface marker and still waits
+                    # for its complete frame; terminal-control checks below
+                    # and after exit remain independent of label width.
+                    frame_marker = workspace_rendered if startup_frame_marker is None else startup_frame_marker
                     wait_for_output(
                         process,
                         master_fd,
                         output,
-                        workspace_rendered,
+                        frame_marker,
                         start=0,
                         timeout=3.0,
                     )
-                    frame_offset = output.find(workspace_rendered) + len(workspace_rendered)
+                    frame_offset = output.find(frame_marker) + len(frame_marker)
                 else:
                     frame_offset = output.find(startup_needle) + len(startup_needle)
                 wait_for_output(
@@ -2797,6 +2799,7 @@ def escape_to_keeper_detail(
     *,
     name: bytes,
     presses: int = 4,
+    destination: bytes | None = None,
 ) -> None:
     """Leave a keeper's chat for its detail, however many Escapes that takes.
 
@@ -2815,7 +2818,7 @@ def escape_to_keeper_detail(
     The bound is here so a surface that never leaves fails as a test rather
     than hangs. Arriving is the assertion; the number of presses is not.
     """
-    title = b"Keepers \xe2\x96\xb8 \x1b[1m" + name
+    title = destination if destination is not None else b"Keepers \xe2\x96\xb8 \x1b[1m" + name
     for _ in range(presses):
         start = len(output)
         os.write(master_fd, b"\x1b")

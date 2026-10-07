@@ -77,13 +77,6 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = true
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-1"
-    ; api_name = "glm-5.1"
-    ; context = 202752
-    ; tools = true
-    ; thinking = true
-    ; vision = false
-    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-2"
     ; api_name = "glm-5.2"
     ; context = 1048576
@@ -174,13 +167,6 @@ let ollama_cloud_seed_cases =
     ; tools = true
     ; thinking = true
     ; vision = false
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-qwen3-5-397b"
-    ; api_name = "qwen3.5:397b"
-    ; context = 262144
-    ; tools = true
-    ; thinking = true
-    ; vision = true
     }
   ]
 

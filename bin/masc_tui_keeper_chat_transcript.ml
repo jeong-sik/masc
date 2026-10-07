@@ -1764,7 +1764,8 @@ let awaiting_text t =
     t.awaiting
 
 let status_rows ~now t =
-  [ Some (Progress, progress_text ~now t)
+  [ (if awaiting_continuation t then None
+     else Some (Progress, progress_text ~now t))
   ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text t)
   ; Option.map
       (fun settlement ->

@@ -596,6 +596,10 @@ val status_rows : now:float -> t -> (status_kind * string) list
     once went missing while the send hint still read Enter:send
     (see [keeper_message_status_rows]). One list, counted and drawn.
 
+    Between continuation segments there is no progress row: the open
+    request is retained, but no run is starting. Approval and diagnostic rows
+    remain available. A subsequent [Run_started] restores progress.
+
     The progress row carries the turn's age, measured against [now] rather
     than a clock read here so a test can state the instant. A [now] before
     [started_at] drops the age instead of printing a negative one. *)

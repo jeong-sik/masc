@@ -4431,7 +4431,10 @@ let launch_browser_history state ~mailbox ~reload =
   | Some history ->
       state.browser_history_generation <- state.browser_history_generation + 1;
       let generation = state.browser_history_generation in
-      state.browser_history <- Some {history with resume=None};
+      (* A recovered read owns Loading again. A second identity outage must
+         retire and resume this request just like the first one. *)
+      let history = Browser_history.start_read ~reload history in
+      state.browser_history <- Some history;
       let host = server_peer_host and port = state.port in
       let fetch () =
         if reload then Browser_history_list_loaded (generation,

@@ -65,11 +65,16 @@ let test_detail_and_logs_identity_across_replacement () =
        [])
 
 let test_message_target_survives_unavailability () =
-  check navigation "explicit target reindexes even if absent from the old roster"
-    (Selection.Message_keeper { keeper_name = "new-keeper"; cursor = 1 })
+  check navigation "a new chat target preserves the roster return selection"
+    (Selection.Message_keeper { keeper_name = "new-keeper"; cursor = 0 })
     (reconcile [ "haneul" ]
        (Selection.Message_keeper { keeper_name = "new-keeper"; cursor = 0 })
        [ "haneul"; "new-keeper" ]);
+  check navigation "chat target and reordered roster return selection stay independent"
+    (Selection.Message_keeper { keeper_name = "haneul"; cursor = 2 })
+    (reconcile [ "haneul"; "seongsu"; "tukkomi" ]
+       (Selection.Message_keeper { keeper_name = "haneul"; cursor = 1 })
+       [ "tukkomi"; "haneul"; "seongsu" ]);
   check navigation "missing target stays in message mode with a bounded cursor"
     (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 1 })
     (reconcile [ "haneul"; "seongsu"; "tukkomi" ]

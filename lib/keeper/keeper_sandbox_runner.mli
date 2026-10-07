@@ -12,35 +12,6 @@ type command_result =
   ; cwd : string
   }
 
-type command_trust =
-  | User_shell
-  | Trusted_tool
-
-type host_command =
-  { env : string array option
-  ; cwd : string option
-  ; argv : string list
-  }
-
-type backend_command =
-  { route_cwd : string
-  ; cwd : unit -> string
-  ; command_text : string
-  ; network_mode : Keeper_types_profile_sandbox.network_mode
-  ; trust : command_trust
-  }
-
-type routed_result =
-  { status : Unix.process_status
-  ; output : string
-  ; via : string
-  ; backend_error : string option
-  }
-
-type route =
-  | Host
-  | Sandbox_backend
-
 module type Backend = sig
   val effective_sandbox_profile :
     meta:Keeper_meta_contract.keeper_meta ->
@@ -168,30 +139,6 @@ val run_bash :
   network_mode:Keeper_types_profile_sandbox.network_mode ->
   string
 
-val uses_backend :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  bool
-
-val route_label : route -> string
-
-val route_via :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  string
-
-(** Routes the command to the Docker backend or to host execution per the
-    effective sandbox profile. Fails closed with
-    [remote_ssh_dispatch_unavailable] when the effective profile is
-    [Remote_ssh]: [route_for] classifies that profile as "not the Docker
-    backend", which would otherwise be a silent host route (RFC-0001).
-    A remote_ssh keeper dispatches through the SSH runner instead. *)
-val run_command_with_status :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  timeout_sec:float ->
-  host:host_command ->
-  backend:backend_command ->
-  (routed_result, string) result
+(** The ["via"] value a write reports when the turn's sandbox runtime runs
+    it. *)
+val sandbox_backend_via : string

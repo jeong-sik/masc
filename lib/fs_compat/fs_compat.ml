@@ -568,10 +568,6 @@ let capability_directory_sync_error_to_string =
 ;;
 
 let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
-type atomic_orphan_cleanup_scope = Atomic_write.atomic_orphan_cleanup_scope =
-  | Directory_only
-  | Directory_and_immediate_subdirectories
-
 type atomic_orphan_cleanup_operation = Atomic_write.atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
   | Read_cleanup_directory
@@ -612,8 +608,8 @@ let atomic_orphan_cleanup_failure_to_string =
   Atomic_write.atomic_orphan_cleanup_failure_to_string
 ;;
 
-let cleanup_atomic_orphans ~ownership_root ~base_path ~scope () =
-  Atomic_write.cleanup_atomic_orphans ~ownership_root ~base_path ~scope ()
+let cleanup_atomic_orphans ~ownership_root ~base_path () =
+  Atomic_write.cleanup_atomic_orphans ~ownership_root ~base_path ()
 ;;
 
 (** Append string to file.

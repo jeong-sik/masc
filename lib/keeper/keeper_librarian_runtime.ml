@@ -62,7 +62,6 @@ let served_slot_id = function
 
 type extraction_error =
   | Prompt_render_failed of string
-  | Execution_clock_unavailable
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
   | Cli_slots_exhausted of
@@ -83,7 +82,6 @@ type extraction_error =
 let rec extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
   = function
   | Prompt_render_failed _ -> Prompt_render_failure
-  | Execution_clock_unavailable -> Execution_clock_unavailable
   | Exact_setup_failed _ -> Exact_setup_failure
   | Exact_execution_failed _ ->
     Exact_execution_failure
@@ -129,8 +127,6 @@ let exact_setup_error_to_string = function
 
 let rec extraction_error_to_string = function
   | Prompt_render_failed detail -> detail
-  | Execution_clock_unavailable ->
-    "execution clock unavailable"
   | Exact_setup_failed error -> exact_setup_error_to_string error
   | Exact_execution_failed { outward_effect; detail; _ } ->
     Printf.sprintf
@@ -172,7 +168,6 @@ let selected_slot_of_extraction_error = function
   | Absorb_judgment_failed { selected_slot; _ }
   | Memory_snapshot_write_failed { selected_slot; _ } -> Some selected_slot
   | Prompt_render_failed _
-  | Execution_clock_unavailable
   | Exact_setup_failed _
   | Exact_execution_failed _
   | Cli_slots_exhausted _
@@ -614,7 +609,7 @@ let rec extraction_shows_size = function
         | None -> false)
   | Cli_prompt_unavailable { prior_error = Some error } -> extraction_shows_size error
   | Cli_prompt_unavailable { prior_error = None } -> false
-  | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
+  | Prompt_render_failed _ | Exact_setup_failed _
   | No_transport_declared | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> false
 ;;
 
@@ -639,7 +634,7 @@ let extraction_cli_input_limit = function
           then Some observed else selected)
       None failures
   | Exact_execution_failed _
-  | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
+  | Prompt_render_failed _ | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared
   | Domain_output_invalid _ | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> None
 ;;

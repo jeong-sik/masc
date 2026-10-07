@@ -31,12 +31,9 @@ type phase =
   | Projection_configured_keepers
   | Projection_config_resolution
   | Projection_runtime_resolution
-  | Project_snapshot_shell_refresh
   | Project_snapshot_runtime
   | Tools_compute
   | Telemetry_query
-  | Telemetry_filter
-  | Telemetry_summary_per_keeper
   | Telemetry_summary_aggregate
   | Health_build_identity (** Request-local [Build_identity.current]. *)
   | Health_paths (** Request-local base-path diagnostics. *)

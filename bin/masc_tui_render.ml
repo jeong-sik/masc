@@ -5556,15 +5556,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (let inherited =
            Option.map
              (fun (modes : Tui_decode.gate_lane_modes) ->
-               gate_mode_word_of_wire modes.Tui_decode.glm_workspace)
+               gate_mode_reading_word modes.Tui_decode.glm_workspace)
              state.gate_modes
          in
          match List.assoc_opt k.k_name state.keeper_gate_modes with
-         | Some mode when not (String.equal mode "workspace") ->
+         | Some mode ->
              (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             ^ Terminal_text.single_line (gate_mode_word_of_wire mode)
+             ^ Terminal_text.single_line (gate_mode_reading_word mode)
              ^ Ansi.reset
-         | Some _ | None ->
+         | None ->
              Ansi.dim ^ "workspace"
              ^ (match inherited with
                 | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word

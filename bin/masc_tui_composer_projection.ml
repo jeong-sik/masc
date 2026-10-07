@@ -33,6 +33,6 @@ let of_state (state : Masc_tui_types.state) : Composer.t =
   { Composer.target
   ; focus =
       (if state.composer_focused then Composer.Focused else Composer.Unfocused)
-  ; draft = Buffer.contents state.msg_input
+  ; draft = Masc_tui_message_input.contents state.msg_input
   ; staged_images = List.length state.msg_attachments
   }

@@ -2,9 +2,7 @@
     Every accepted event is either executed or reported through [on_failure]
     before the owner is released. *)
 
-type lane =
-  | Keeper_lane of string
-  | Connector_lane of string
+type lane = Keeper_lane of string
 
 type event_id =
   { source : string

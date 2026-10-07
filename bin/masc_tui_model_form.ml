@@ -3,22 +3,63 @@ module Edit_text = Toml_line_editor
 
 type mode = Edit | Copy
 type field = Name | Context | Effort | Temperature | Output
+type context_choice = Preset of int | Custom
+type name_choice = Suggested_name | Context_name | Operator_name
+(* Operator-requested decimal token presets, not advertised model limits.
+   Runtime resolves the effective context and any capability clamp. *)
+let context_presets = [272000; 500000; 750000; 1000000]
+let context_ring = List.map (fun tokens -> Preset tokens) context_presets @ [Custom]
 let fields = [Name; Context; Effort; Temperature; Output]
 type t = { mode : mode; source : Table.row; values : (field * string) list;
-           selected : int; error : string option }
+           selected : int; error : string option; source_revision : string option;
+           context_choice : context_choice; custom_context : string; name_choice : name_choice }
 type outcome = Editing of t | Cancelled | Submit of t
 let text = function None -> "" | Some n -> string_of_int n
-let create mode (source : Table.row) =
-  { mode; source; selected = (match mode with Copy -> 0 | Edit -> 1); error = None;
+let create ?source_revision mode (source : Table.row) =
+  let context = Option.map snd source.context in
+  { mode; source; source_revision;
+    context_choice = (match context with Some tokens when List.mem tokens context_presets -> Preset tokens | _ -> Custom);
+    custom_context = text context; name_choice = Suggested_name; selected = (match mode with Copy -> 0 | Edit -> 1); error = None;
     values = [Name, (source.model ^ (match mode with Copy -> "-copy" | Edit -> ""));
       Context, text (Option.map snd source.context);
       Effort, Option.value ~default:"" source.reasoning_effort;
       Temperature, Option.value ~default:"" source.temperature;
       Output, text source.max_tokens] }
+let source_revision t = t.source_revision
 let value t field = List.assoc field t.values
 let focused t = List.nth fields t.selected
-let put t content = { t with values = List.map (fun (field, old) ->
-  field, if field = focused t then content else old) t.values; error = None }
+let context_name source content =
+  match int_of_string_opt content with
+  | Some tokens when tokens > 0 ->
+      let suffix = if tokens mod 1000000 = 0 then Printf.sprintf "%dm" (tokens / 1000000)
+        else if tokens mod 1000 = 0 then Printf.sprintf "%dk" (tokens / 1000)
+        else string_of_int tokens in
+      Some (source.Table.model ^ "-c" ^ suffix)
+  | Some _ | None -> None
+let put t content =
+  let field = focused t in
+  let t = match field with
+    | Name -> {t with name_choice=Operator_name}
+    | Context -> {t with context_choice=Custom; custom_context=content}
+    | Effort | Temperature | Output -> t in
+  let suggested = if field=Context && t.mode=Copy && t.name_choice=Context_name
+    then context_name t.source content else None in
+  {t with values=List.map (fun (item, old) ->
+    item, if item=field then content else if item=Name then Option.value ~default:old suggested else old) t.values;
+    error=None}
+let step_context t delta =
+  let index = Option.value ~default:(List.length context_ring - 1)
+    (List.find_index ((=) t.context_choice) context_ring) in
+  let choice = List.nth context_ring ((index + delta + List.length context_ring) mod List.length context_ring) in
+  let content = match choice with Preset tokens -> string_of_int tokens | Custom -> t.custom_context in
+  let name_choice = match t.mode, t.name_choice with
+    | Copy, (Suggested_name | Context_name) -> Context_name
+    | _, choice -> choice in
+  let suggested = if t.mode=Copy && name_choice=Context_name then context_name t.source content else None in
+  {t with context_choice=choice; name_choice; error=None;
+    values=List.map (fun (field, old) -> field,
+      match field with Context -> content | Name -> Option.value ~default:old suggested
+      | Effort | Temperature | Output -> old) t.values}
 let refused t error = { t with error = Some error }
 let clean text = String.concat "" (String.split_on_char '\n' text)
   |> String.to_seq |> Seq.filter (fun c -> Char.code c >= 32 && c <> '\127') |> String.of_seq
@@ -28,6 +69,8 @@ let key t key =
   let move delta = Editing { t with selected = max first (min (List.length fields - 1) (t.selected + delta)) } in
   match key with
   | "esc" | "escape" -> Cancelled
+  | "left" when focused t = Context -> Editing (step_context t (-1))
+  | "right" when focused t = Context -> Editing (step_context t 1)
   | "up" -> move (-1)
   | "down" | "tab" | "\t" -> move 1
   | ("enter" | "\r" | "\n") when t.selected = List.length fields - 1 -> Submit t
@@ -46,8 +89,10 @@ let rows ~width ~height t =
   let label = function Name -> "Variant name" | Context -> "Context tokens" | Effort -> "Reasoning effort" | Temperature -> "Temperature" | Output -> "Max output tokens" in
   let field_rows = List.mapi (fun i field ->
     Printf.sprintf "%s %-17s %s" (if i = t.selected then ">" else " ") (label field)
-      (value t field ^ if i = t.selected then "_" else "")) fields in
-  let hint = "Tab/↑/↓ fields · Ctrl-U clear · Enter next/save · Esc cancel" in
+      (value t field ^ (if i = t.selected then "_" else "")
+       ^ (if field=Context then (match t.context_choice with Preset _ -> " [preset]" | Custom -> " [custom]") else ""))) fields in
+  let hint = (if focused t=Context then "←/→ 272k/500k/750k/1M/custom · " else "")
+    ^ "Tab/↑/↓ fields · Ctrl-U clear · Enter next/save · Esc cancel" in
   let notes = (match t.mode with
     | Copy -> "Same account and API model; independent settings. Add the saved variant to a Lane to use it."
     | Edit -> "Context/output apply to this account. Effort/temperature affect every account sharing this model; use Copy for independent settings.") in

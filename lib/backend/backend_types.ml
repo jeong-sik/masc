@@ -13,8 +13,6 @@ type error =
   | AlreadyExists of string
   | IOError of string
   | InvalidKey of string
-  | ConnectionFailed of string
-  | BackendNotSupported of string
 [@@deriving show]
 
 type 'a result = ('a, error) Stdlib.result

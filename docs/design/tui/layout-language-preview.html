@@ -4,16 +4,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MASC · Layout language</title>
 <style>
-:root{color-scheme:dark;--page:#10131a;--surface:#1b1f29;--rail:#202530;--text:#d0d7e3;--muted:#8791a2;--line:#373d49;--accent:#afc8ef;--warn:#e2bd88;--selection:#d0d7e3}
+:root{color-scheme:dark;--page:#15151e;--surface:#1e1e2a;--rail:#22222e;--text:#b8bbc9;--muted:#85899a;--line:#343442;--accent:#a4b4cf;--warn:#c5ae8c;--selection:#363a4a}
 *{box-sizing:border-box}body{margin:0;padding:42px 5vw;background:var(--page);color:var(--text);font:14px/1.7 system-ui,sans-serif}button{font:inherit;color:inherit;cursor:pointer}header{max-width:1360px;margin:0 auto 24px;display:flex;align-items:end;justify-content:space-between;gap:24px}h1{font-size:27px;font-weight:600;letter-spacing:-.7px;line-height:1.3;margin:0 0 7px}header p,.note{margin:0;color:var(--muted);font-size:13px}.controls{display:flex;gap:8px;flex-wrap:wrap}.control{border:1px solid var(--line);border-radius:6px;background:transparent;padding:7px 13px}.control:hover,.control:focus-visible{border-color:var(--accent);outline:none}.control[aria-pressed=true]{background:var(--rail);border-color:var(--muted)}
-.terminal{max-width:1360px;margin:auto;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface);box-shadow:0 24px 80px #0004;font:14px/1.8 "SFMono-Regular",Consolas,"Liberation Mono",monospace}.strip{height:49px;display:flex;align-items:center;gap:26px;padding:0 23px;border-bottom:1px solid var(--line);overflow:auto}.tab{background:none;border:0;padding:0;color:var(--muted);white-space:nowrap;font:inherit}.tab.active{color:var(--text)}.tab.active::before{content:'› ';color:var(--accent)}.tab:focus-visible{outline:1px solid var(--accent);outline-offset:5px}.body{display:flex;min-height:580px}.rail{width:288px;flex:none;display:flex;flex-direction:column;background:var(--rail);border-right:1px solid var(--line);padding-top:22px}.rail-head{margin:0 22px 15px;border-bottom:1px solid var(--line);padding-bottom:13px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--muted);letter-spacing:.6px}.index{list-style:none;margin:0;padding:0;flex:1}.index button{display:flex;gap:8px;align-items:center;width:100%;height:32px;padding:0 17px;border:0;background:none;text-align:left;font:inherit;color:var(--text)}.index .caret{width:10px;flex:none}.index .label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.index button.selected{font-weight:600}.rail.focused .index button.selected{background:var(--selection);color:var(--surface);font-weight:400}.rail-meta{margin:22px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
-.main{min-width:0;flex:1;padding:24px 34px 22px;display:flex;flex-direction:column}.breadcrumb{font-size:12px;color:var(--muted);padding-bottom:20px;border-bottom:1px solid var(--line)}.breadcrumb strong{color:var(--text);font-weight:400}.article{padding:29px 0 35px;flex:1;max-width:880px}.article h2{font-size:20px;line-height:1.5;margin:0 0 11px;font-weight:500;letter-spacing:-.4px}.subhead{color:var(--muted);font-size:12px;margin:0 0 25px}.copy{margin:0 0 27px;line-height:2;max-width:780px}.section{margin:28px 0 15px;font-size:12px;color:var(--muted);font-weight:400;letter-spacing:.4px}.reading{display:grid;grid-template-columns:140px 1fr;gap:14px;padding:9px 0}.reading .key{color:var(--muted)}.reading .value{min-width:0;overflow-wrap:anywhere}.row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}.row .meta{color:var(--muted);font-size:12px}.row .mark{color:var(--accent)}.row .warn{color:var(--warn)}.row .small{display:block;color:var(--muted);font-size:12px;margin-top:3px}.message{display:grid;grid-template-columns:112px 1fr;gap:18px;margin-bottom:27px;line-height:1.9}.speaker{color:var(--muted)}.speaker.user{color:var(--accent)}.work{margin:0 0 28px 130px;color:var(--muted);font-size:12px}.composer{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:14px 0;color:var(--muted)}.telemetry{padding-top:10px;font-size:11px;color:var(--muted)}.footer{border-top:1px solid var(--line);padding:9px 23px;font-size:12px;color:var(--muted);display:flex;gap:23px;min-height:40px;flex-wrap:wrap}kbd{font:inherit;color:var(--text)}.note{max-width:1360px;margin:18px auto 0}.note a{color:var(--muted)}.pill{font-size:12px;color:var(--muted);margin-left:14px}.meter{display:flex;gap:3px;margin:12px 0 8px}.meter i{height:7px;width:13px;background:var(--line);display:block}.meter i.filled{background:var(--accent)}.diff{font:inherit;font-size:13px;color:var(--muted);line-height:1.9;margin:18px 0;white-space:pre-wrap}.diff .add{color:#bed3bd}.overview .rail{display:none}.overview .article{max-width:890px}.overview .main{padding-left:40px}.terminal.narrow{max-width:640px}.narrow .body{min-height:580px}.narrow .rail{width:100%;border-right:0}.narrow.browsing .main{display:none}.narrow:not(.browsing) .rail{display:none}.narrow .main{padding:23px}.narrow .reading{grid-template-columns:105px 1fr}.terminal.mono{--surface:#181818;--rail:#181818;--text:#ddd;--muted:#ddd;--line:#777;--accent:#ddd;--warn:#ddd;--selection:#ddd}.mono .diff .add{color:var(--text)}[hidden]{display:none!important}@media(max-width:750px){body{padding:22px 12px}header{align-items:start;flex-direction:column}.strip{gap:22px}.rail{width:100%;border:0}.browsing .main{display:none}.terminal:not(.browsing) .rail{display:none}.main{padding:22px}.reading{grid-template-columns:100px 1fr}.message{grid-template-columns:90px 1fr}.work{margin-left:108px}.footer{gap:13px;font-size:11px}}
+.terminal{outline:none;max-width:1360px;margin:auto;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface);box-shadow:0 24px 80px #0004;font:14px/1.8 "SFMono-Regular",Consolas,"Liberation Mono",monospace}.strip{height:49px;display:flex;align-items:center;gap:26px;padding:0 23px;border-bottom:1px solid var(--line);overflow:auto}.tab{background:none;border:0;padding:0;color:var(--muted);white-space:nowrap;font:inherit}.tab.active{color:var(--text)}.tab.active::before{content:'› ';color:var(--accent)}.tab:focus-visible{outline:1px solid var(--accent);outline-offset:5px}.body{display:flex;min-height:580px}.rail{width:288px;flex:none;display:flex;flex-direction:column;background:var(--rail);border-right:1px solid var(--line);padding-top:22px}.rail-head{margin:0 22px 15px;border-bottom:1px solid var(--line);padding-bottom:13px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--muted);letter-spacing:.6px}.index{list-style:none;margin:0;padding:0;flex:1}.index button{display:flex;gap:8px;align-items:center;width:100%;height:32px;padding:0 17px;border:0;background:none;text-align:left;font:inherit;color:var(--text)}.index .caret{width:10px;flex:none}.index .label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.index button.selected{font-weight:400}.rail.focused .index button.selected{background:var(--selection);color:var(--text);font-weight:400}.rail-meta{margin:22px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.main{min-width:0;flex:1;padding:24px 34px 22px;display:flex;flex-direction:column}.breadcrumb{font-size:12px;color:var(--muted);padding-bottom:20px;border-bottom:1px solid var(--line)}.breadcrumb strong{color:var(--text);font-weight:400}.article{padding:29px 0 35px;flex:1;max-width:880px}.article h2{font-size:20px;line-height:1.5;margin:0 0 11px;font-weight:500;letter-spacing:-.4px}.subhead{color:var(--muted);font-size:12px;margin:0 0 25px}.copy{margin:0 0 27px;line-height:2;max-width:780px}.section{margin:28px 0 15px;font-size:12px;color:var(--muted);font-weight:400;letter-spacing:.4px}.reading{display:grid;grid-template-columns:140px 1fr;gap:14px;padding:9px 0}.reading .key{color:var(--muted)}.reading .value{min-width:0;overflow-wrap:anywhere}.row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}.row .meta{color:var(--muted);font-size:12px}.row .mark{color:var(--accent)}.row .warn{color:var(--warn)}.row .small{display:block;color:var(--muted);font-size:12px;margin-top:3px}.message{display:grid;grid-template-columns:112px 1fr;gap:18px;margin-bottom:27px;line-height:1.9}.speaker{color:var(--muted)}.speaker.user{color:var(--accent)}.work{margin:0 0 28px 130px;color:var(--muted);font-size:12px}.composer{display:flex;gap:12px;align-items:flex-start;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:14px 0;color:var(--muted)}.composer textarea{display:block;resize:none;flex:1;min-width:0;border:0;outline:0;padding:0;margin:0;background:transparent;color:var(--text);caret-color:var(--text);font:inherit;line-height:1.8;min-height:26px;max-height:130px}.composer textarea::placeholder{color:var(--muted)}.composer textarea:disabled{opacity:1}.telemetry{padding-top:10px;font-size:11px;color:var(--muted)}.footer{border-top:1px solid var(--line);padding:9px 23px;font-size:12px;color:var(--muted);display:flex;gap:23px;min-height:40px;flex-wrap:wrap}kbd{font:inherit;color:var(--text)}.note{max-width:1360px;margin:18px auto 0}.note a{color:var(--muted)}.pill{font-size:12px;color:var(--muted);margin-left:14px}.meter{display:flex;gap:3px;margin:12px 0 8px}.meter i{height:7px;width:13px;background:var(--line);display:block}.meter i.filled{background:var(--accent)}.diff{font:inherit;font-size:13px;color:var(--muted);line-height:1.9;margin:18px 0;white-space:pre-wrap}.diff .add{color:#bed3bd}.terminal:not(.browsing) .rail{display:none}.overview .article{max-width:890px}.overview .main{padding-left:40px}.terminal.narrow{max-width:640px}.narrow .body{min-height:580px}.narrow .rail{width:100%;border-right:0}.narrow.browsing .main{display:none}.narrow:not(.browsing) .rail{display:none}.narrow .main{padding:23px}.narrow .reading{grid-template-columns:105px 1fr}.terminal.mono{--surface:#181818;--rail:#181818;--text:#bdbdbd;--muted:#929292;--line:#383838;--accent:#bdbdbd;--warn:#bdbdbd;--selection:#363636}.mono .diff .add{color:var(--text)}[hidden]{display:none!important}@media(max-width:750px){body{padding:22px 12px}header{align-items:start;flex-direction:column}.strip{gap:22px}.rail{width:100%;border:0}.browsing .main{display:none}.terminal:not(.browsing) .rail{display:none}.main{padding:22px}.reading{grid-template-columns:100px 1fr}.message{grid-template-columns:90px 1fr}.work{margin-left:108px}.footer{gap:13px;font-size:11px}}
 </style>
 <header><div><h1>하나의 작업대, 같은 호흡.</h1><p>얇은 구분선 · 여유 있는 여백 · 지금 읽는 곳에만 강조</p></div><div class="controls"><button class="control" id="width" aria-pressed="false">좁은 화면</button><button class="control" id="mono" aria-pressed="false">흑백</button><button class="control" id="focus">본문 읽기</button></div></header>
 <div class="terminal" id="terminal" tabindex="0" aria-label="TUI layout design preview">
  <nav class="strip" aria-label="Surfaces" id="tabs"></nav>
- <div class="body"><aside class="rail" id="rail"><div class="rail-head"><span id="rail-title"></span><span id="count"></span></div><ul class="index" id="index"></ul><div class="rail-meta">이름은 같은 열에.<br>현재 위치는 선택 표시로.</div></aside><main class="main"><div class="breadcrumb" id="breadcrumb"></div><article class="article" id="article"></article><div class="composer" id="composer" hidden>› 메시지 입력…</div><div class="telemetry" id="telemetry"></div></main></div>
- <div class="footer"><span><kbd>Tab</kbd> 다음 화면</span><span><kbd>↑ ↓</kbd> 선택</span><span><kbd>Enter</kbd> 읽기</span><span><kbd>←</kbd> 목록</span></div>
+ <div class="body"><aside class="rail" id="rail"><div class="rail-head"><span id="rail-title"></span><span id="count"></span></div><ul class="index" id="index"></ul><div class="rail-meta">이름은 같은 열에.<br>현재 위치는 선택 표시로.</div></aside><main class="main"><div class="breadcrumb" id="breadcrumb"></div><article class="article" id="article"></article><div class="composer" id="composer" hidden><span aria-hidden="true">›</span><textarea id="draft" rows="1" aria-label="메시지 입력" spellcheck="false" placeholder="메시지 입력…"></textarea></div><div class="telemetry" id="telemetry"></div></main></div>
+ <div class="footer" id="footer"></div>
 </div>
 <p class="note">디자인 시안 · 모든 내용은 예시 데이터입니다. 실제 TUI 실행 화면이 아닙니다. 공통 목록 틀은 소스에 적용했으며, 이 시안의 화면별 본문 배치 전체를 구현했다는 뜻은 아닙니다. <a href="LAYOUT-LANGUAGE.md">레이아웃 기준과 적용 범위</a></p>
 <script>
@@ -28,9 +28,118 @@ const surfaces=[
  {name:'Workspace',rail:'Repositories',items:['masc','notes','examples'],meta:'경로와 diff가 실제 읽기 공간을 갖습니다.',body:i=>`<h2>${['masc','notes','examples'][i]}</h2><p class="subhead">Repository · feature/layout · 예시</p>${reading('위치','workspace / '+['masc','notes','examples'][i])}${reading('변경','수정된 파일 2개 · 예시')}<h3 class="section">선택한 변경</h3><p class="copy">render_sidebar.ml</p><pre class="diff">  let row = selected_item in\n<span class="add">+ draw_selection row;\n+ draw_content detail;</span>\n  finish_frame ()</pre><p class="subhead">소스·변경 내용이 중심이 되고, 상태 정보는 그 옆에서 보조합니다.</p>`},
  {name:'System',rail:'Settings',items:['Theme','Parameters','Prompts','Accounts'],meta:'값과 설명을 가까이, 세부 진단은 상세에서.',body:i=>`<h2>${['Theme','Parameters','Prompts','Accounts'][i]}</h2><p class="subhead">선택한 설정 · 예시</p>${reading('현재 값',['Terminal native','기본값 사용','workspace prompt','선택한 계정'][i])}${reading('출처','workspace 설정')}${reading('기본값','제품 기본값')}<h3 class="section">설명</h3><p class="copy">현재 값, 기본값, 출처가 같은 문맥에서 읽히도록 정리합니다.<br>편집과 적용 상태는 실제 설정 흐름을 따릅니다.</p>`}
 ];
-let active=0,focused=false;const states=surfaces.map(()=>({cursor:0,opened:0}));const terminal=document.querySelector('#terminal');
-function setFocus(value){focused=value&&surfaces[active].items.length>0;draw()}
-function draw(){let view=surfaces[active],state=states[active];terminal.classList.toggle('overview',view.items.length===0);terminal.classList.toggle('browsing',focused);document.querySelector('#rail').classList.toggle('focused',focused);document.querySelector('#focus').hidden=view.items.length===0;document.querySelector('#focus').textContent=focused?'본문 읽기':'목록 선택';document.querySelector('#tabs').replaceChildren(...surfaces.map((v,i)=>{let b=document.createElement('button');b.className='tab'+(i===active?' active':'');b.textContent=v.name;b.setAttribute('aria-current',i===active?'page':'false');b.onclick=()=>{active=i;focused=false;draw()};return b}));document.querySelector('#rail-title').textContent=view.rail||'';document.querySelector('#count').textContent=String(view.items.length);document.querySelector('#index').replaceChildren(...view.items.map((label,i)=>{let li=document.createElement('li'),b=document.createElement('button');b.className=i===state.cursor?'selected':'';let caret=document.createElement('span');caret.className='caret';caret.textContent=i===state.cursor?'›':'';let name=document.createElement('span');name.className='label';name.textContent=label;b.append(caret,name);b.onclick=()=>{state.cursor=i;focused=true;draw();terminal.focus()};b.ondblclick=()=>{state.opened=i;setFocus(false)};li.append(b);return li}));document.querySelector('#breadcrumb').textContent=view.name+(view.items.length?'  ›  '+view.items[state.opened]:'  /  workspace');document.querySelector('#article').innerHTML=view.body(state.opened);document.querySelector('#telemetry').textContent=view.meta;document.querySelector('#composer').hidden=!view.chat}
-document.querySelector('#width').onclick=e=>{let narrow=terminal.classList.toggle('narrow');e.currentTarget.setAttribute('aria-pressed',String(narrow));e.currentTarget.textContent=narrow?'넓은 화면':'좁은 화면';draw()};document.querySelector('#mono').onclick=e=>{let mono=terminal.classList.toggle('mono');e.currentTarget.setAttribute('aria-pressed',String(mono))};document.querySelector('#focus').onclick=()=>{if(focused)states[active].opened=states[active].cursor;setFocus(!focused);terminal.focus()};terminal.onkeydown=e=>{if(e.target.closest('.strip'))return;if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter','Escape','Tab'].includes(e.key))return;e.preventDefault();let state=states[active],view=surfaces[active];if(e.key==='Tab'){active=(active+(e.shiftKey?surfaces.length-1:1))%surfaces.length;focused=false;draw()}else if(e.key==='ArrowLeft')setFocus(true);else if(e.key==='Escape'||e.key==='ArrowRight')setFocus(false);else if(focused){if(e.key==='Enter'){state.opened=state.cursor;setFocus(false)}else{state.cursor=Math.max(0,Math.min(view.items.length-1,state.cursor+(e.key==='ArrowDown'?1:-1)));draw()}}};draw();
+let active=surfaces.findIndex(view=>view.chat),focused=false;
+const states=surfaces.map(()=>({cursor:0,opened:0}));
+const terminal=document.querySelector('#terminal');
+const keeperSurface=surfaces.findIndex(view=>view.name==='Keepers');
+const drafts=surfaces[keeperSurface].items.map(()=>({text:'',start:0,end:0}));
+const draftInput=document.querySelector('#draft');
+function navigation(){return active===0?surfaces[keeperSurface]:surfaces[active]}
+function focusTerminal(){terminal.focus({preventScroll:true})}
+function saveDraft(){
+  if(surfaces[active].chat&&!focused){
+    const draft=drafts[states[active].opened];
+    draft.text=draftInput.value;draft.start=draftInput.selectionStart;draft.end=draftInput.selectionEnd;
+  }
+}
+function focusContent(){
+  if(surfaces[active].chat&&!focused)draftInput.focus({preventScroll:true});
+  else focusTerminal();
+}
+function setFocus(value){saveDraft();focused=value;draw();focusContent()}
+function selectSurface(index){saveDraft();active=index;focused=false;draw();focusContent()}
+function openSelection(){
+  const index=states[active].cursor;
+  if(active===0)active=keeperSurface;
+  states[active].cursor=index;
+  states[active].opened=index;
+  focused=false;draw();focusContent();
+}
+function draw(){
+  const view=surfaces[active],nav=navigation(),state=states[active];
+  terminal.classList.toggle('overview',active===0);
+  terminal.classList.toggle('browsing',focused);
+  document.querySelector('#rail').classList.toggle('focused',focused);
+  document.querySelector('#focus').textContent=focused?'→ 닫기':'← 목록 열기';
+  document.querySelector('#focus').setAttribute('aria-expanded',String(focused));
+  document.querySelector('#tabs').replaceChildren(...surfaces.map((view,index)=>{
+    const button=document.createElement('button');
+    button.className='tab'+(index===active?' active':'');
+    button.textContent=view.name;
+    button.setAttribute('aria-current',index===active?'page':'false');
+    button.onclick=()=>selectSurface(index);
+    return button;
+  }));
+  document.querySelector('#rail-title').textContent=nav.rail;
+  document.querySelector('#count').textContent=String(nav.items.length);
+  document.querySelector('#index').replaceChildren(...nav.items.map((label,index)=>{
+    const item=document.createElement('li'),button=document.createElement('button');
+    button.className=index===state.cursor?'selected':'';
+    const caret=document.createElement('span');caret.className='caret';caret.textContent=index===state.cursor?'›':'';
+    const name=document.createElement('span');name.className='label';name.textContent=label;
+    button.append(caret,name);
+    button.onclick=()=>{state.cursor=index;draw();focusTerminal()};
+    item.append(button);
+    return item;
+  }));
+  document.querySelector('#breadcrumb').textContent=view.name+(view.items.length?'  ›  '+view.items[state.opened]:'  /  workspace');
+  document.querySelector('#article').innerHTML=view.body(state.opened);
+  document.querySelector('#telemetry').textContent=view.meta;
+  document.querySelector('#composer').hidden=!view.chat;
+  draftInput.disabled=focused;
+  if(view.chat){
+    const draft=drafts[state.opened];
+    draftInput.value=draft.text;
+    draftInput.setSelectionRange(draft.start,draft.end);
+    draftInput.rows=Math.min(5,draft.text.split('\n').length);
+  }
+  document.querySelector('#footer').innerHTML=focused
+    ? '<span><kbd>↑ ↓</kbd> 선택</span><span><kbd>Enter</kbd> 열기</span><span><kbd>→ Esc</kbd> 닫기</span>'
+    : '<span><kbd>←</kbd> '+(view.chat?'빈 입력에서 Keeper 목록 열기':active===0?'Keeper 목록 열기':'목록 열기')+'</span><span><kbd>Tab</kbd> 다음 화면</span>';
+}
+document.querySelector('#width').onclick=event=>{
+  const narrow=terminal.classList.toggle('narrow');
+  event.currentTarget.setAttribute('aria-pressed',String(narrow));
+  event.currentTarget.textContent=narrow?'넓은 화면':'좁은 화면';
+  saveDraft();draw();focusContent();
+};
+document.querySelector('#mono').onclick=event=>{
+  const mono=terminal.classList.toggle('mono');
+  event.currentTarget.setAttribute('aria-pressed',String(mono));
+  focusContent();
+};
+document.querySelector('#focus').onclick=()=>setFocus(!focused);
+draftInput.addEventListener('input',()=>{
+  saveDraft();draftInput.rows=Math.min(5,draftInput.value.split('\n').length);
+});
+draftInput.addEventListener('keydown',event=>{
+  // The browser owns editing. Only the empty composer can yield Left.
+  if(event.key==='ArrowLeft'&&!event.isComposing&&!event.altKey&&!event.ctrlKey
+     &&!event.metaKey&&!event.shiftKey&&draftInput.value.length===0
+     &&draftInput.selectionStart===0&&draftInput.selectionEnd===0){
+    event.preventDefault();event.stopPropagation();setFocus(true);
+  }
+});
+terminal.addEventListener('keydown',event=>{
+  if(event.target.closest('textarea,input,select,[contenteditable=true]'))return;
+  const key=event.key;
+  if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter','Escape','Tab'].includes(key))return;
+  if(event.target!==terminal)return;
+  event.preventDefault();
+  if(key==='Tab')selectSurface((active+(event.shiftKey?surfaces.length-1:1))%surfaces.length);
+  else if(key==='ArrowLeft'){
+    if(!surfaces[active].chat)setFocus(true);
+  }
+  else if(key==='Escape'||key==='ArrowRight')setFocus(false);
+  else if(focused){
+    if(key==='Enter')openSelection();
+    else if(key==='ArrowUp'||key==='ArrowDown'){
+      const state=states[active];
+      state.cursor=Math.max(0,Math.min(navigation().items.length-1,state.cursor+(key==='ArrowDown'?1:-1)));
+      draw();focusTerminal();
+    }
+  }
+});
+draw();focusContent();
 </script>
 </html>

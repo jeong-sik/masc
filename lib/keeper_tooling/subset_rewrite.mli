@@ -51,13 +51,6 @@ type t =
       call : call;
       because : string;
     }  (** a call the caller can make now *)
-  | Spell_it_as of {
-      spelling : string;
-      because : string;
-    }
-      (** the same call, written the way this tool spells it. [&>out] is one
-          operator for something the subset writes as two, and neither the
-          call nor the field changes. *)
   | Unrepresentable of {
       construct : Masc_exec.Parsed.reason_too_complex;
       because : string;

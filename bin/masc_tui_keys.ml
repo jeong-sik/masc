@@ -155,6 +155,7 @@ let config_bindings =
 type runtime_key =
   | Every_reading of binding
   | Keeper_lanes_only of binding
+  | All_runtimes_only of binding
   | Reading_walk
 
 let runtime_reading_walk_help =
@@ -173,6 +174,9 @@ let runtime_keys =
   ; Every_reading
       (b Navigate "c" "clients"
          ~help:"everyone attached to this workspace, off the ring under Runtime")
+  ; All_runtimes_only
+      (b Act "e" "model settings"
+         ~help:"open the selected binding in Config Models; Esc then c copies a variant")
   ; Keeper_lanes_only
       (b Act "e" "add candidate"
          ~help:"append a candidate to the candidate order of the lane under the cursor (keeper lanes only)")
@@ -209,7 +213,7 @@ let runtime_keys =
   ]
 
 let runtime_sheet_binding = function
-  | Every_reading binding | Keeper_lanes_only binding -> binding
+  | Every_reading binding | Keeper_lanes_only binding | All_runtimes_only binding -> binding
   | Reading_walk ->
     b Navigate "p" "keeper lanes / all runtimes / service lanes"
       ~help:runtime_reading_walk_help
@@ -220,6 +224,8 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
     (match mode with
      | Runtime_lanes -> Some binding
      | Runtime_all -> None)
+  | All_runtimes_only binding ->
+    (match mode with Runtime_all -> Some binding | Runtime_lanes -> None)
   | Reading_walk ->
     Some
       (b Navigate "p"
@@ -277,7 +283,7 @@ let global =
       "the MSX screen: the emulator core over the whole terminal (esc: back; \
        also `:` go MSX)"
   ; b Meta roster_toggle_key "show or hide the Keeper roster"
-      ~help:"wide chats show the roster by default; this choice persists \
+      ~help:"the roster starts hidden; this choice persists \
              across navigation and resizing"
   ; b Meta "Ctrl-L"
       "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
@@ -513,7 +519,7 @@ let for_surface = function
       ]
       @ listing_meta
   | Keepers Keeper_message ->
-      [ b Navigate "Left" "roster" ~help:"open and focus the Keeper roster, including when hidden or narrow"
+      [ b Navigate "Left" "roster" ~help:"empty composer: open the Keeper list; with text: move the cursor left"
       ; b Navigate "Right" "chat"
           ~help:"roster focused: return focus to the chat composer"
       ; (* One key, two focuses: the roster when it holds focus, the history

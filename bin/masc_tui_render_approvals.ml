@@ -674,16 +674,20 @@ let render_approvals (state : state) =
      footer key like any other -- it reaches the footer and the [?] help
      through the Approvals row of Masc_tui_keys, which is where it was
      missing until 2026-08-29. *)
+  (* A lane word this build does not know is drawn as the server wrote it,
+     the same spelling the chat header and the Keeper detail draw. *)
+  let lane_mode_label = function
+    | Tui_decode.Gate_mode mode -> Masc_tui_palette.gate_mode_label mode
+    | Tui_decode.Unrecognised_gate_mode raw -> Terminal_text.single_line raw
+  in
   box_line buf cols
     (match state.gate_modes, Terminal_text.optional_single_line state.gate_error with
      | Some modes, _ ->
          Printf.sprintf
            "  %s[w] Workspace: %s  |  [e] Outside services: %s%s"
            (Theme.info ())
-           (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_workspace with
-            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
-           (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
-            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
+           (lane_mode_label modes.Tui_decode.glm_workspace)
+           (lane_mode_label modes.Tui_decode.glm_external)
            Ansi.reset
      (* No prefix: [data_unreliable_row] already opens "(data unreliable: "
         and the loader's message already opens "gate load failed:", so a third

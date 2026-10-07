@@ -38,7 +38,7 @@ let test_listing_names_counts_and_unreadable () =
    than cut it: at 100 and 140 columns every row fits and the whole reason,
    recovery step included, is still on screen. *)
 let test_unreadable_reason_is_folded_not_cut () =
-  let name = "_autosave-20260905T073152Z" in
+  let name = "after-restart-20260903" in
   let reason =
     "prompt_overrides.json has schema_version 1 and this build reads only schema_version 2, so \
      this preset cannot be restored; set its prompts again and save them as a new preset"
@@ -68,7 +68,7 @@ let test_saved_line_carries_the_counts () =
 
 let report ~skipped ~runtime : D.preset_restore_report =
   { D.prr_restored = "morning"
-  ; prr_autosave = "_autosave-20260903T103201Z"
+  ; prr_autosave = "_autosave"
   ; prr_prompt_overrides = { D.pp_effect = "immediate"; pp_applied = [ "keeper" ]; pp_skipped = skipped }
   ; prr_instructions = { D.pp_effect = "keeper_restart"; pp_applied = [ "analyst"; "spruce" ]; pp_skipped = [] }
   ; prr_runtime = runtime
@@ -77,7 +77,7 @@ let report ~skipped ~runtime : D.preset_restore_report =
 let test_restore_lines_show_skips_and_the_runtime_outcome () =
   let clean = report ~skipped:[] ~runtime:D.Preset_runtime_committed in
   check (list string) "clean restore"
-    [ "restored preset morning (the state before it is _autosave-20260903T103201Z)"
+    [ "restored preset morning (the state before it is _autosave)"
     ; "prompt overrides (immediate): applied 1, skipped 0"
     ; "keeper instructions (keeper_restart): applied 2, skipped 0"
     ; "runtime: committed — runtime.toml rewritten, assignments and exact lanes live"
@@ -90,7 +90,7 @@ let test_restore_lines_show_skips_and_the_runtime_outcome () =
       ~runtime:(D.Preset_runtime_failed "invalid runtime TOML")
   in
   check (list string) "a skip and a failed commit are each their own line"
-    [ "restored preset morning (the state before it is _autosave-20260903T103201Z)"
+    [ "restored preset morning (the state before it is _autosave)"
     ; "prompt overrides (immediate): applied 1, skipped 1"
     ; "  - stale: contract revision mismatch"
     ; "keeper instructions (keeper_restart): applied 2, skipped 0"

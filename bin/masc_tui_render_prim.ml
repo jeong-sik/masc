@@ -786,20 +786,16 @@ let overview_pulse_text (state : state) ~now =
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
-     walking. Ten entries make that cost nothing -- it is an array so the
+     walking. Seven entries make that cost nothing -- it is an array so the
      renderer holds no row lookup that walks, with no exception to carry. *)
-  let ring = Array.of_list (Masc_tui_surface_navigation.visible_surface_ring state) in
+  let ring = Array.of_list Masc_tui_types.surface_ring in
   let n = Array.length ring in
-  let active = Masc_tui_surface_navigation.visible_surface_ring_index state state.view in
+  let active = Masc_tui_surface_navigation.surface_ring_index state state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
      badge would be texture, not information. *)
   let badge surface =
     match (surface : surface) with
-    | Approvals ->
-        (match Masc_tui_approvals_model.approvals_surface_pending state with
-         | 0 -> ""
-         | pending -> Printf.sprintf "\xc2\xb7%d" pending)
     | Planning ->
         (match state.verification with
          | Some snapshot when snapshot.Masc.Tui_decode.vs_total > 0 ->
@@ -813,8 +809,8 @@ let surface_strip (state : state) ~cols =
   in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
   let entry_width ~lo i =
-    (* Cells, not bytes: the Approvals badge's middle dot is two bytes and
-       one cell, and a byte count windows the strip one entry early. *)
+    (* Cells, not bytes: the badge's middle dot is two bytes and one cell,
+       and a byte count windows the strip one entry early. *)
     Message_layout.display_width (label i)
     + (if i = active then 1 else 0)
     + (if i > lo then 2 else 0)
@@ -859,18 +855,10 @@ let surface_strip (state : state) ~cols =
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
     let surface, _ = ring.(i) in
-    let is_alert =
-      match surface with
-      | Approvals -> Masc_tui_approvals_model.approvals_surface_pending state > 0
-      | _ -> false
-    in
     let entry =
       if i = active then
-        Ansi.bold
-        ^ (if is_alert then Theme.warn () else Theme.info ())
-        ^ Masc_tui_theme.Glyph.current_entry
+        Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry
         ^ label i ^ Ansi.reset
-      else if is_alert then Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset
       else Ansi.dim ^ label i ^ Ansi.reset
     in
     Buffer.add_string parts (pressable (Press_surface surface) entry)
@@ -2294,12 +2282,21 @@ let planning_phase_color = function
    Verifying and awaiting confirmation are stages only a Goal has, so their
    diamonds are theirs. *)
 let planning_rollup_row ~cols (rollup : planning_rollup) =
-  let total_goals =
-    (* Every phase counts, or the denominator drops the goals waiting on a
-       human and reports a completion share higher than the truth. *)
-    rollup.pr_active + rollup.pr_verifying + rollup.pr_awaiting_confirmation
-    + rollup.pr_done + rollup.pr_dropped
+  (* One list names every phase once: the counters draw from it and the
+     denominator sums it, so a phase on the row cannot be left out of the
+     total. A second, hand-written sum once left Paused and Blocked out and
+     overstated the share done. *)
+  let phases =
+    [ (Goal_phase.Executing, Masc_tui_theme.Glyph.progress_active, "Exec", rollup.pr_active)
+    ; (Goal_phase.Verifying, "◆", "Ver", rollup.pr_verifying)
+    ; (Goal_phase.Awaiting_confirmation, "◇", "Conf", rollup.pr_awaiting_confirmation)
+    ; (Goal_phase.Completed, Masc_tui_theme.Glyph.progress_done, "Done", rollup.pr_done)
+    ; (Goal_phase.Paused Goal_phase.Resume_executing, "Ⅱ", "Pause", rollup.pr_paused)
+    ; (Goal_phase.Blocked Goal_phase.Resume_executing, "!", "Block", rollup.pr_blocked)
+    ; (Goal_phase.Dropped, Masc_tui_theme.Glyph.progress_ended, "Drop", rollup.pr_dropped)
+    ]
   in
+  let total_goals = List.fold_left (fun total (_, _, _, value) -> total + value) 0 phases in
   let count = Printf.sprintf "  Goals: %s%d%s" Ansi.bold total_goals Ansi.reset in
   if total_goals = 0 then count
   else
@@ -2315,14 +2312,7 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
         Ansi.reset
     in
     Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
-      ([ (Goal_phase.Executing, Masc_tui_theme.Glyph.progress_active, "Exec", rollup.pr_active)
-       ; (Goal_phase.Verifying, "◆", "Ver", rollup.pr_verifying)
-       ; (Goal_phase.Awaiting_confirmation, "◇", "Conf", rollup.pr_awaiting_confirmation)
-       ; (Goal_phase.Completed, Masc_tui_theme.Glyph.progress_done, "Done", rollup.pr_done)
-       ; (Goal_phase.Paused Goal_phase.Resume_executing, "Ⅱ", "Pause", rollup.pr_paused)
-       ; (Goal_phase.Blocked Goal_phase.Resume_executing, "!", "Block", rollup.pr_blocked)
-       ; (Goal_phase.Dropped, Masc_tui_theme.Glyph.progress_ended, "Drop", rollup.pr_dropped)
-       ]
+      (phases
        |> List.filter_map (fun (phase, glyph, name, value) ->
               if value = 0 then None else Some (counter phase glyph name value))
        |> String.concat "  ")

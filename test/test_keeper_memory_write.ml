@@ -436,6 +436,69 @@ let test_valid_body_composition () =
    recall reads back. The assertion goes through [read_facts_all] — the same
    reader [Keeper_memory_os_recall] calls — because routing is what this test
    is about and rendering is covered in test_keeper_memory_os. *)
+(* The repeat guard reads a write's answer out of the receipt the tool writes
+   (Keeper_tool_answer). Writing the same claim again re-observes it: the
+   snapshot revision and recorded_at move, nothing else does, so the second
+   and third receipts must give one fingerprint and the insert another. A
+   receipt field renamed on one side and not the other breaks this. *)
+let test_a_rewrite_receipt_has_the_same_answer () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "rewrite-answer" in
+  let args = make_args ~title:"t" ~content:"the deployment region is eu-west-1" in
+  let write () =
+    (Runtime.keeper_memory_write_with_outcome ~config ~meta ~args)
+      .Masc.Keeper_tool_execution.raw_output
+  in
+  let fingerprint receipt =
+    match
+      Masc.Keeper_tool_progress_identity.digest_tool_io
+        ~tool_name:"keeper_memory_write" ~input:args ~output_text:receipt
+    with
+    | Some io -> io.Masc.Keeper_tool_progress_identity.output_fingerprint
+    | None -> Alcotest.fail "no fingerprint for a memory write receipt"
+  in
+  let inserted = write () in
+  let rewrite_a = write () in
+  let rewrite_b = write () in
+  Alcotest.(check string)
+    "first write inserts" "inserted"
+    (string_field "identity_disposition" (Yojson.Safe.from_string inserted));
+  Alcotest.(check string)
+    "second write re-observes" "reobserved"
+    (string_field "identity_disposition" (Yojson.Safe.from_string rewrite_a));
+  Alcotest.(check bool)
+    "the receipts themselves differ (revision moves)" false
+    (String.equal rewrite_a rewrite_b);
+  Alcotest.(check string)
+    "two rewrites: one answer" (fingerprint rewrite_a) (fingerprint rewrite_b);
+  Alcotest.(check bool)
+    "the insert is another answer" false
+    (String.equal (fingerprint inserted) (fingerprint rewrite_a));
+  (* The answer keeps the fields it names, so a field the receipt gains
+     drops out of it unseen. Pinning what the real receipt leaves out makes
+     a new field a decision: answer or stamp. [what_committed] is the prose
+     [identity_disposition] already names. *)
+  let keys = function
+    | `Assoc fields -> List.sort String.compare (List.map fst fields)
+    | _ -> Alcotest.fail "a memory write receipt is a JSON object"
+  in
+  let answer_keys =
+    match
+      Masc.Keeper_tool_answer.answer ~tool_name:"keeper_memory_write"
+        ~output_text:rewrite_a
+    with
+    | Some answer -> keys answer
+    | None -> Alcotest.fail "keeper_memory_write read no answer from its receipt"
+  in
+  Alcotest.(check (list string))
+    "only the stamps are left out of the answer"
+    [ "recorded_at"; "revision"; "rows_written"; "what_committed" ]
+    (List.filter
+       (fun key -> not (List.mem key answer_keys))
+       (keys (Yojson.Safe.from_string rewrite_a)))
+
 let test_write_comes_back_through_recall () =
   with_temp_dir
   @@ fun base_path ->
@@ -3545,6 +3608,12 @@ let () =
     "keeper_memory_write"
     [ ( "commit notification"
       , [ Alcotest.test_case "source writes and invalidations notify after locks" `Quick test_source_snapshot_commit_notifications ] )
+    ; ( "repeat guard answer"
+      , [ Alcotest.test_case
+            "a rewrite receipt has the same answer"
+            `Quick
+            test_a_rewrite_receipt_has_the_same_answer
+        ] )
     ; ( "validation"
       , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
         ; Alcotest.test_case

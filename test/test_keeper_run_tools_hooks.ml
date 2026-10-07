@@ -681,6 +681,69 @@ let test_failed_tool_observer_releases_next_completion () =
 ;;
 
 
+(* Claude Code, Antigravity and Muse answer MASC tools through an MCP server
+   that can run calls concurrently, so receipts are keyed by call id. A
+   held producer's receipts wait for [release] and keep commit order. *)
+let test_official_receipts_hold_and_key_by_call_id () =
+  let module Receipts = Masc.Keeper_official_client_tool_receipts in
+  let module Join = Masc.Keeper_execution_join in
+  Fun.protect ~finally:Join.For_testing.clear @@ fun () ->
+  Eio_main.run @@ fun _env ->
+  let received = ref [] in
+  let receipts = Receipts.create ~delivery:Receipts.Held_until_released
+      ~notify:(fun ~block_index ~tool_call_id ~execution_id ->
+        received :=
+          Printf.sprintf "%d %s %s" block_index tool_call_id
+            (Ids.Execution_id.to_string execution_id) :: !received) in
+  let hooks = Receipts.hooks receipts Agent_core.Hooks.empty in
+  let invoke hook event = match hook with
+    | Some hook -> ignore (hook event) | None -> fail "receipt hook missing" in
+  let invocation call_id = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:call_id ~turn:1
+      ~completion:Agent_core.Tool_contract.Continue_after_success
+      ~schedule:{planned_index=0; batch_index=0; batch_size=1;
+                 execution_mode=Agent_core.Tool_contract.Serial} in
+  let pre invocation = invoke hooks.pre_tool_use (Agent_core.Hooks.PreToolUse {
+      invocation; tool_name="Read"; input=`Assoc []; accumulated_cost_usd=0. }) in
+  let commit invocation execution_id =
+    Join.record ~invocation ~execution_id;
+    invoke hooks.post_tool_use (Agent_core.Hooks.PostToolUse {
+      invocation; tool_name="Read"; input=`Assoc [];
+      output=Ok {Agent_core.Types.content="ok"; content_blocks=None; _meta=None};
+      result_bytes=2; duration_ms=1. }) in
+  let delivered () = List.rev !received in
+  Receipts.start receipts ~call_id:"call-a" ~block_index:1;
+  Receipts.start receipts ~call_id:"call-b" ~block_index:2;
+  let a = invocation "call-a" and b = invocation "call-b" in
+  pre a;
+  pre b;
+  commit b "exec-b";
+  check (list string) "a held receipt waits for release" [] (delivered ());
+  Receipts.release receipts;
+  check (list string) "release delivers the waiting receipt" ["2 call-b exec-b"] (delivered ());
+  commit a "exec-a";
+  check (list string) "after release a receipt is delivered at commit"
+    ["2 call-b exec-b"; "1 call-a exec-a"] (delivered ());
+  Receipts.release receipts;
+  check int "a second release delivers nothing again" 2 (List.length (delivered ()));
+  check bool "an open call id cannot open a second block" true
+    (match Receipts.start receipts ~call_id:"call-a" ~block_index:3 with
+     | () -> false
+     | exception Failure _ -> true);
+  Receipts.finish receipts ~call_id:"call-a";
+  Receipts.finish receipts ~call_id:"call-b";
+  check bool "a closed call id has no block to close" true
+    (match Receipts.finish receipts ~call_id:"call-a" with
+     | () -> false
+     | exception Failure _ -> true);
+  Receipts.start receipts ~call_id:"call-a" ~block_index:3;
+  let again = invocation "call-a" in
+  pre again;
+  commit again "exec-a2";
+  check (list string) "a reused call id reports its new block"
+    ["2 call-b exec-b"; "1 call-a exec-a"; "3 call-a exec-a2"] (delivered ())
+;;
+
 (* A call refused before the handler runs used to leave only a counter. The
    keeper's own history showed nothing, so it repeated the same malformed call
    every turn. An executed failure must still be written once, not twice:
@@ -688,7 +751,7 @@ let test_failed_tool_observer_releases_next_completion () =
 let test_codex_receipts_reach_live_and_cancelled_history () =
   with_temp_base_path @@ fun base_path ->
   let module Log = Masc.Keeper_tool_call_log in
-  let module Receipts = Masc.Keeper_codex_tool_receipts in
+  let module Receipts = Masc.Keeper_official_client_tool_receipts in
   let module Accum = Masc.Keeper_stream_tool_accum in
   let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
   let module Events = Masc.Keeper_chat_events in
@@ -713,7 +776,7 @@ let test_codex_receipts_reach_live_and_cancelled_history () =
       in
       feed (Agent_core.Types.MessageStart { id="codex-turn"; model="fixture"; usage=None });
       let received = ref [] in
-      let receipts = Receipts.create ~notify:(fun ~block_index ~tool_call_id ~execution_id ->
+      let receipts = Receipts.create ~delivery:Receipts.Immediate ~notify:(fun ~block_index ~tool_call_id ~execution_id ->
         let rows = match Log.read_recent ~keeper_name:"codex-receipts" () with
           | Ok rows -> rows | Error (Log.Index_unavailable detail) -> fail detail in
         check bool "receipt only after readable log commit" true
@@ -1349,7 +1412,7 @@ let test_validation_rejection_notifies_after_exact_log_commit () =
 let test_codex_cancelled_hooks_only_report_committed_rows () =
   with_temp_base_path @@ fun base_path ->
   let module Log = Masc.Keeper_tool_call_log in
-  let module Receipts = Masc.Keeper_codex_tool_receipts in
+  let module Receipts = Masc.Keeper_official_client_tool_receipts in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_execution_join.For_testing.clear ();
@@ -1360,7 +1423,7 @@ let test_codex_cancelled_hooks_only_report_committed_rows () =
       List.iter (fun validation ->
         List.iter (fun commit ->
           let received = ref [] in
-          let receipts = Receipts.create
+          let receipts = Receipts.create ~delivery:Receipts.Immediate
               ~notify:(fun ~block_index:_ ~tool_call_id:_ ~execution_id ->
                 Eio.Fiber.check ();
                 received := execution_id :: !received) in
@@ -1457,12 +1520,13 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
            ()
        in
        let received = ref [] in
-       let receipts = Masc.Keeper_codex_tool_receipts.create
+       let receipts = Masc.Keeper_official_client_tool_receipts.create
+           ~delivery:Masc.Keeper_official_client_tool_receipts.Immediate
            ~notify:(fun ~block_index:_ ~tool_call_id:_ ~execution_id ->
              (* Delivery must survive an already-cancelled hook context. *)
              Eio.Fiber.check ();
              received := execution_id :: !received) in
-       let hooks = Masc.Keeper_codex_tool_receipts.hooks receipts
+       let hooks = Masc.Keeper_official_client_tool_receipts.hooks receipts
            { hooks with pre_tool_use = None } in
        let post_tool_use =
          match hooks.Agent_core.Hooks.post_tool_use with
@@ -1482,7 +1546,7 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
                ; execution_mode = Agent_core.Tool_contract.Serial
                }
          in
-         Masc.Keeper_codex_tool_receipts.start receipts
+         Masc.Keeper_official_client_tool_receipts.start receipts
            ~call_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
            ~block_index:planned_index;
          (match hooks.pre_tool_use with
@@ -1536,7 +1600,7 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
        check (list string) "receipt identifies the durably committed row"
          (List.map Ids.Execution_id.to_string !received)
          (List.map (fun row -> Yojson.Safe.Util.(row |> member "execution_id" |> to_string)) rows);
-       Masc.Keeper_codex_tool_receipts.finish receipts ~call_id:"cancel-observer-0";
+       Masc.Keeper_official_client_tool_receipts.finish receipts ~call_id:"cancel-observer-0";
        (match post_tool_use (event 1) with
         | Agent_core.Hooks.Continue -> ()
         | _ -> fail "later production post-tool hook did not continue");
@@ -2200,6 +2264,8 @@ let () =
     ; ( "Codex result delivery"
       , [ test_case "committed tools reach live and cancelled history" `Quick
             test_codex_receipts_reach_live_and_cancelled_history
+        ; test_case "official receipts hold and key by call id" `Quick
+            test_official_receipts_hold_and_key_by_call_id
         ; test_case "interrupted hooks report only committed rows" `Quick
             test_codex_cancelled_hooks_only_report_committed_rows ] )
     ; ( "Skills block"

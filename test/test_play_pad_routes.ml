@@ -126,7 +126,7 @@ let change_count () =
 
 let newest_activity () =
   match Dos_lane.recent_activity () with
-  | entry :: _ -> entry.Lane_activity.who, entry.Lane_activity.action
+  | entry :: _ -> entry.Machine_action_feed.who, entry.Machine_action_feed.action
   | [] -> fail "no activity"
 
 let test_the_pad () =

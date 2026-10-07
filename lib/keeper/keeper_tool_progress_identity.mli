@@ -1,9 +1,11 @@
 (** Opaque tool I/O fingerprints. Typed JSON input is canonicalized by field
-    order. Output that parses as JSON is canonicalized and digested with the
-    measurement field ([execution_time_ms]) dropped at every depth — the
+    order. Output identity is the tool's answer ({!Keeper_tool_answer}): the
     repeated-call yield in [Keeper_agent_run] compares these fingerprints, so
-    a field that measures the call must not name its identity. Output that is
-    not JSON is redacted and hashed as bytes. Input identity keeps an opaque
+    a receipt field that changes on every call must not name its identity. A
+    tool whose answer is its whole output gets the canonical digest of the
+    JSON, or the redacted byte hash of output that is not JSON. The answer is a
+    function of the tool name and the output text, so the memo key and a
+    history replay agree with the live call. Input identity keeps an opaque
     digest of [next_page_token] cursors outside secret-bearing parents so
     advancing pagination is not mistaken for a repeated call; observability
     JSON still masks those cursor values. *)

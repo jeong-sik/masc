@@ -735,80 +735,6 @@ supports_native_streaming = true
 # checked 2026-07-10.
 
 [[models]]
-id_prefix = "deepseek-v3.1:671b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 163840
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-# R1-era deepseek reasoning reaches /v1 clients as <think>...</think> inside
-# message.content; this row declares no typed reasoning field to read instead.
-# The split is inert when no tag appears, so a clean content channel keeps
-# every byte.
-content_inline_reasoning = "think_tags"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "deepseek-v3.2"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 163840
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-# Same inline <think> contract as the deepseek-v3.1:671b row above.
-content_inline_reasoning = "think_tags"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-# Legacy catalog row for persisted runtime.toml bindings. Ollama's
-# /v1/models did not list this id on 2026-09-26; the seed uses
-# deepseek-v4.1-flash instead. Remove this row only after live bindings migrate.
-[[models]]
-id_prefix = "deepseek-v4-flash"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 1048576
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-# 2026-08-15: this row declared Ollama's native /api/chat think toggle
-# (ollama_think) even though it is served through ollama_cloud's OpenAI-compat
-# /v1/chat/completions, which cannot encode it — same defect as qwen3.5:397b
-# (PR #28748). Probed live 2026-08-04: the message keys came back
-# ['role','content','reasoning']. This row had carried the buggy default
-# forward. Closes #28749.
-reasoning_streaming_format = "delta:reasoning"
-# DeepSeek function calling with thinking requires the intermediate
-# assistant's reasoning to be passed back on every request of a tool-call
-# sequence (api-docs.deepseek.com/guides/thinking_mode, checked 2026-08-24);
-# plain user turns drop it. Ollama's /v1 layer maps incoming assistant
-# [reasoning] to the template's thinking slot (ollama/openai/openai.go), so
-# the replay is wire-effective here. Without any replay the dialect falls
-# back to No_replay and the model re-derives its plan on every tool round
-# (live: sangsu turn 163/165, 2026-08-24, 36 single-call rounds restating
-# the same answer).
-#
-# The sequence, not the history. The rule above is about one tool-call
-# sequence; DeepSeek's own API extends it to every prior turn because its
-# server refuses a tools request with 400 when an earlier reasoning_content
-# is missing, and that refusal is DeepSeek's, not this endpoint's. Ollama
-# documents no such requirement for incoming thinking, and its cloud model
-# cards say the opposite -- "Thoughts from previous model turns must not be
-# added before the next user turn begins"
-# (ollama.com/library/gemma4:31b-cloud, read 2026-09-18).
-# Carrying all of history cost a live keeper 4.7 MB of a 7.83 MB request on
-# 2026-09-18, on a binding whose own thinking is disabled.
-reasoning_replay = "latest_user_turn_tool_calls"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
 id_prefix = "deepseek-v4-pro"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
@@ -817,12 +743,16 @@ max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-# Same correction as deepseek-v4-flash above; see that row's comment. Confirmed
-# by a live probe of this row on 2026-08-04.
+# ollama.com's /v1 wire returns reasoning in a typed "reasoning" field: a live
+# probe of this row on 2026-08-04 returned message keys
+# ['role','content','reasoning'].
 reasoning_streaming_format = "delta:reasoning"
-# Same tool-call replay contract as the deepseek-v4-flash row above, and the
-# same boundary: this endpoint's rule covers the active sequence, not every
-# prior turn.
+# DeepSeek's thinking-mode rule asks for the reasoning of one tool-call
+# sequence to be passed back (api-docs.deepseek.com/guides/thinking_mode).
+# Its own API extends that to every prior turn and refuses a tools request
+# with 400 otherwise; ollama.com states no such requirement, and carrying all
+# of history cost a live keeper 4.7 MB of a 7.83 MB request on 2026-09-18.
+# So the active sequence, not every prior turn.
 reasoning_replay = "latest_user_turn_tool_calls"
 supports_multimodal_inputs = false
 supports_image_input = false
@@ -830,92 +760,6 @@ supports_native_streaming = true
 supports_response_format_json = false
 # OpenAI-compatible /v1 transport does not guarantee schema-shaped output.
 supports_structured_output = false
-
-[[models]]
-id_prefix = "devstral-2:123b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-thinking_control_format = "none"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-supports_response_format_json = true
-supports_structured_output = false
-
-[[models]]
-id_prefix = "devstral-small-2:24b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-thinking_control_format = "none"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-supports_response_format_json = true
-supports_structured_output = false
-
-[[models]]
-id_prefix = "gemini-3-flash-preview"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 1048576
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "gemma3:4b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 131072
-supports_tools = false
-supports_tool_choice = false
-supports_reasoning = false
-thinking_control_format = "none"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "gemma3:12b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 131072
-supports_tools = false
-supports_tool_choice = false
-supports_reasoning = false
-thinking_control_format = "none"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "gemma3:27b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 131072
-supports_tools = false
-supports_tool_choice = false
-supports_reasoning = false
-thinking_control_format = "none"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
 
 [[models]]
 id_prefix = "gemma4:31b-cloud"
@@ -954,53 +798,6 @@ modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "glm-4.7"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 202752
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-# GLM over ollama.com's /v1 wire does not split reasoning into a typed field:
-# it arrives as <think>...</think> inside message.content (the confirmed
-# non-streaming leak on glm/ollama-cloud runtimes). Without this flag the
-# tagged reasoning reaches the visible Text answer. The split is inert when
-# no tag appears, so a clean content channel keeps every byte.
-content_inline_reasoning = "think_tags"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "glm-5"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 202752
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-# Same inline <think> contract as the glm-4.7 row above; the prefix also
-# covers the glm-5.x family (e.g. the glm-5.3-flash runtime binding).
-content_inline_reasoning = "think_tags"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "glm-5.1"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 202752
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-# Same inline <think> contract as the glm-4.7 row above.
-content_inline_reasoning = "think_tags"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
 id_prefix = "glm-5.2"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
@@ -1009,7 +806,10 @@ max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-# Same inline <think> contract as the glm-4.7 row above.
+# GLM over ollama.com's /v1 wire can return its reasoning as <think>...</think>
+# inside message.content instead of a typed field. Without this flag the
+# tagged reasoning reaches the visible answer; the split is inert when no tag
+# appears.
 content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
@@ -1040,30 +840,6 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "kimi-k2.5"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-# Kimi K2 docs: reasoning content must be replayed (hard-required on tool turns,
-# recommended on all turns). Without this, the base replay policy is no_replay.
-reasoning_replay = "preserve_always"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-# OpenAI-compatible /v1 transport does not guarantee schema-shaped output.
-supports_structured_output = false
-
-# response_format is in Ollama's OpenAI-compatibility field list, so a model
-# reached over the /v1 wire can be asked for JSON even though the native
-# ollama_cloud preset leaves the flag off for the /api/chat wire
-# (docs.ollama.com/api/openai-compatibility, checked 2026-09-19). The same
-# list has no tool_choice, which is why no row here claims one for this
-# provider.
-[[models]]
 id_prefix = "kimi-k2.6"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
@@ -1071,13 +847,13 @@ max_context_tokens = 262144
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-# Same ollama_think/Enable_not_encodable defect as deepseek-v4-flash above
-# (2026-08-15, closes #28749); confirmed by a live probe of this row on
-# 2026-08-04: message keys ['role','content','reasoning'].
+# This row once declared Ollama's native think toggle, which the /v1 wire
+# cannot encode (2026-08-15, closes #28749). A live probe of this row on
+# 2026-08-04 returned message keys ['role','content','reasoning'].
 reasoning_streaming_format = "delta:reasoning"
 # Kimi K2 docs ask for reasoning content to be replayed: required on tool
 # turns, recommended on all turns. That is Moonshot's own API rule. This row
-# rides Ollama's /v1 wire, where the boundary is the one the deepseek-v4-flash
+# rides Ollama's /v1 wire, where the boundary is the one the deepseek-v4-pro
 # row above states: the active tool-call sequence, not every prior turn. This
 # value keeps the reasoning of the latest user turn's tool calls, so the model
 # still sees what it just called inside a turn (#31424), and drops the
@@ -1113,30 +889,6 @@ supports_native_streaming = true
 supports_structured_output = false
 
 [[models]]
-id_prefix = "minimax-m2.1"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 204800
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "minimax-m2.5"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 196608
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
 id_prefix = "minimax-m2.7"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
@@ -1163,8 +915,9 @@ max_context_tokens = 512000
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-# Same ollama_think/Enable_not_encodable defect as deepseek-v4-flash above
-# (2026-08-15, closes #28749); confirmed by a live probe of this row.
+# This row once declared Ollama's native think toggle, which the /v1 wire
+# cannot encode (2026-08-15, closes #28749); a live probe of this row
+# confirmed the typed "reasoning" field.
 # reasoning_streaming_format was already correct here — only the control-wire
 # axis and the coupled budget flag were wrong.
 reasoning_streaming_format = "delta:reasoning"
@@ -1176,60 +929,6 @@ supports_response_format_json = true
 # schema-shaped output; use the native /api/chat lane for strict schemas.
 supports_structured_output = false
 supports_native_streaming = true
-
-[[models]]
-id_prefix = "ministral-3:3b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-thinking_control_format = "none"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-supports_response_format_json = true
-# Live grouped SO check 2026-06-29: accepts JSON-format requests, but did not
-# return exact schema-shaped final JSON. Keep JSON mode enabled and native
-# structured-output guarantee disabled.
-supports_structured_output = false
-
-[[models]]
-id_prefix = "ministral-3:8b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-thinking_control_format = "none"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-supports_response_format_json = true
-# Live grouped SO check 2026-06-29: accepts JSON-format requests, but did not
-# return exact schema-shaped final JSON. Keep JSON mode enabled and native
-# structured-output guarantee disabled.
-supports_structured_output = false
-
-[[models]]
-id_prefix = "ministral-3:14b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-thinking_control_format = "none"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-supports_response_format_json = true
-supports_structured_output = false
 
 [[models]]
 id_prefix = "mistral-large-3:675b"
@@ -1289,94 +988,6 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "qwen3-coder:480b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-thinking_control_format = "none"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "qwen3-coder-next"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-thinking_control_format = "none"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "qwen3.5:cloud"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-# Probed live 2026-08-05: this alias carries reasoning in the typed
-# "reasoning" field (message keys
-# ['content','reasoning','role']), not "reasoning_content". Declare what the
-# wire actually sends; the sibling ":397b" rows declare the same member.
-reasoning_streaming_format = "delta:reasoning"
-# Authenticated 2026-07-27 /api/show and /v1/chat/completions probes:
-# json_object returned bare JSON; json_schema returned fenced, unconstrained JSON.
-supports_response_format_json = true
-supports_structured_output = false
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "qwen3.5:397b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-# 2026-08-15: "qwen3.5:397b" is the tag ollama.com actually serves; "qwen3.5:cloud"
-# above is an alias to the same backend (RFC-0370). This row previously declared
-# thinking_control_format="ollama_think" — Ollama's *native* /api/chat
-# think:true/false toggle, which does not exist on
-# this OpenAI-compatible /v1/chat/completions request path (confirmed:
-# docs.ollama.com/api/openai-compatibility documents reasoning control only via
-# reasoning_effort/reasoning.effort; the native think field is /api/chat-only).
-# A live probe of the ":cloud" alias on this same backend returned reasoning
-# unconditionally (message keys ['content','reasoning','role'], 882 chars) even
-# without any request-side toggle, matching the confirmed sibling family (kimi-k2.6,
-# kimi-k2.7-code, minimax-m3, deepseek-v4-pro/flash; 2026-07-20 audit) of
-# "inherent reasoning, no control wire on /v1". Sending enable_thinking=true against
-# ollama_think here fails fail-closed with Enable_not_encodable (masc keeper canary
-# canary-runtime-failover-20260814-0730, 2026-08-14 07:08); reasoning_effort was
-# tried too (PR #28680) and also failed, because nothing wires an effort value onto
-# this runtime — the reasoning_effort dialect needs both the format declaration and
-# a concrete effort level.
-# The wire member is "reasoning": config/runtime.toml's
-# ollama-cloud-qwen3-5-397b entry measured ollama.com/v1/chat/completions with
-# stream=true on 2026-08-25 (delta keys content / reasoning / role), and the
-# ":cloud" alias row above was live-probed to the same name on 2026-08-05.
-# The parser reads only this declared member (F111, 2026-09-14): a value that
-# differs from the wire fails the stream as Openai_undeclared_reasoning_member.
-reasoning_streaming_format = "delta:reasoning"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-
-# Provider-independent entries for Cloud models not already represented by a
-# direct-provider seed. Callers opt into these only through bare fallback.
-
-[[models]]
 id_prefix = "deepseek-v3.1:671b"
 base = "ollama_cloud"
 max_context_tokens = 163840
@@ -1384,7 +995,8 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 thinking_control_format = "ollama_think"
-# Bare-fallback twin: same inline <think> contract as the provider-scoped row.
+# R1-era deepseek reasoning can arrive as <think>...</think> inside
+# message.content; the split is inert when no tag appears.
 content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
@@ -1398,7 +1010,8 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 thinking_control_format = "ollama_think"
-# Bare-fallback twin: same inline <think> contract as the provider-scoped row.
+# R1-era deepseek reasoning can arrive as <think>...</think> inside
+# message.content; the split is inert when no tag appears.
 content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
@@ -1700,11 +1313,9 @@ max_context_tokens = 262144
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-# Same correction as the provider-scoped row above (2026-08-15): this is the
-# bare-fallback twin of that entry and was carrying the identical
-# ollama_think/Enable_not_encodable defect. See that row's comment for the
-# full root-cause citation. The streaming member follows that row's 2026-08-25
-# measurement: ollama.com sends "reasoning" (F111, 2026-09-14).
+# This row once declared Ollama's native think toggle, which the /v1 wire
+# cannot encode (2026-08-15, #28748). ollama.com sends the reasoning delta as
+# "reasoning" (measured 2026-08-25; F111, 2026-09-14).
 thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
 supports_multimodal_inputs = true
@@ -4078,12 +3689,16 @@ supports_native_streaming = true
 reasoning_streaming_format = "delta:reasoning_content"
 reasoning_replay = "latest_user_turn_tool_calls"
 
-# ollama.com's glm-5.3-flash. /api/show context_length 1048576. Declares the
-# window only; the rest of the capabilities come from the ollama_cloud_v1 base.
+# ollama.com's glm-5.3-flash. /api/show context_length 1048576. The other
+# capabilities come from the ollama_cloud_v1 base, except the replay contract:
+# that belongs to the model, as on the glm-5.3 row. Without it the /v1 wire sent
+# no reasoning back, and on 2026-10-06 a sangsu turn thought 13 times in its
+# first 48 steps and never again over the next 1,579 tool calls.
 [[models]]
 id_prefix = "glm-5.3-flash"
 provider_name = "ollama_cloud"
 max_context_tokens = 1048576
+reasoning_replay = "latest_user_turn_tool_calls"
 
 # Ollama GET /v1/models listed deepseek-v4.1-flash on 2026-09-26.
 # ollama.com serves this model under both the bare name and a ":cloud" suffix.
@@ -4098,10 +3713,8 @@ max_context_tokens = 1048576
 # (Model_catalog.lookup/lookup_result/lookup_entries_result, model_catalog.ml
 # :853-887) does longest-prefix-first matching, but it filters to rows
 # declaring no provider_name at all -- both deepseek-v4.1-flash rows below set
-# provider_name = "ollama_cloud", so that path never sees either of them. The
-# sibling qwen3.5:cloud/qwen3.5:397b split below is the established fix for
-# the same ollama.com ":cloud" alias shape: one row per exact spelling, not a
-# shared prefix.
+# provider_name = "ollama_cloud", so that path never sees either of them. One
+# row per exact spelling, not a shared prefix.
 [[models]]
 id_prefix = "deepseek-v4.1-flash"
 provider_name = "ollama_cloud"
@@ -4123,14 +3736,10 @@ supports_structured_output = false
 
 # Same backend as the bare "deepseek-v4.1-flash" row above under ollama.com's
 # ":cloud" alias spelling (#37074). Every capability field is duplicated
-# verbatim rather than left to inherit -- unlike qwen3.5:cloud/qwen3.5:397b
-# below, where supports_response_format_json/supports_structured_output are
-# declared only on the ":cloud" row and are absent (base-inherited) on
-# ":397b". Whether that is a real per-spelling difference or a stale gap in
-# ":397b" is unresolved (PR #37574 review); duplicating both fields here
-# avoids adding a third instance of the same ambiguity. id_prefix is compared
-# with exact equality by every provider-scoped exact-output consumer, so each
-# spelling a deployment can bind needs its own row.
+# verbatim rather than left to inherit, so the two spellings cannot drift.
+# id_prefix is compared with exact equality by every provider-scoped
+# exact-output consumer, so each spelling a deployment can bind needs its own
+# row.
 [[models]]
 id_prefix = "deepseek-v4.1-flash:cloud"
 provider_name = "ollama_cloud"

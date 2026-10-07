@@ -698,20 +698,6 @@ val entry_runtime_id_of_route : string -> string option
     route here first — {!get_runtime_by_id} knows nothing about lanes and
     answers [None] for a lane name. *)
 
-val smallest_prompt_capacity_bytes_of_route : string -> int option
-(** The smallest start-prompt ceiling ({!Runtime_instance.prompt_capacity_bytes}) of any
-    candidate the route may walk: every candidate of a declared lane, or the
-    runtime itself when the route names one. A candidate without one adds no
-    ceiling and does not erase one a sibling has. [None] when no candidate
-    has a ceiling, or when the route names neither a lane nor a runtime. *)
-
-val smallest_prompt_capacity_bytes_of_runtime_ids : string list -> int option
-(** The smallest start-prompt ceiling ({!Runtime_instance.prompt_capacity_bytes}) of the
-    named runtimes, for a walk whose candidate list is already fixed (a
-    deferred lane suffix). An id without one, or that the loaded catalog does
-    not hold, adds no ceiling and does not erase one another id has. [None]
-    when no named runtime has a ceiling. *)
-
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
     ["provider.model"] equals [id], or [None] if that runtime is not active.

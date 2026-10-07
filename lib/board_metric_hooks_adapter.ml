@@ -11,7 +11,6 @@
 let flusher_outcome_to_label : Board_metrics_hooks.flusher_outcome -> string =
   function
   | Switch_finished -> "switch_finished"
-  | Cas_exhausted -> "cas_exhausted"
 
 let install () =
   Board_metrics_hooks.set_observer

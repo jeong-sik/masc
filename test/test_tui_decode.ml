@@ -9380,7 +9380,7 @@ let restore_payload : Yojson.Safe.t =
     ; ( "report"
       , `Assoc
           [ ("restored", `String "morning")
-          ; ("autosave", `String "_autosave-20260903T103201Z")
+          ; ("autosave", `String "_autosave")
           ; ( "prompt_overrides"
             , `Assoc
                 [ ("effect", `String "immediate")
@@ -9413,7 +9413,7 @@ let test_decode_preset_restore_reads_each_surface () =
   match Tui_decode.decode_preset_restore restore_payload with
   | Error detail -> Alcotest.fail detail
   | Ok report ->
-    Alcotest.(check string) "autosave" "_autosave-20260903T103201Z" report.Tui_decode.prr_autosave;
+    Alcotest.(check string) "autosave" "_autosave" report.Tui_decode.prr_autosave;
     Alcotest.(check (list string)) "overrides applied" [ "keeper" ]
       report.Tui_decode.prr_prompt_overrides.Tui_decode.pp_applied;
     Alcotest.(check (list (pair string string))) "overrides skipped"
@@ -9459,6 +9459,18 @@ let test_decode_preset_refusal_is_the_servers_sentence () =
   match Tui_decode.decode_presets refused with
   | Error detail -> Alcotest.(check string) "list refusal" "invalid preset name: bad name" detail
   | Ok _ -> Alcotest.fail "a refused list decoded as a snapshot"
+
+let test_decode_preset_deleted_reads_the_removed_name () =
+  let deleted : Yojson.Safe.t = `Assoc [ ("ok", `Bool true); ("deleted", `String "_autosave") ] in
+  (match Tui_decode.decode_preset_deleted deleted with
+   | Ok name -> Alcotest.(check string) "the removed name" "_autosave" name
+   | Error detail -> Alcotest.fail detail);
+  let refused : Yojson.Safe.t =
+    `Assoc [ ("ok", `Bool false); ("error", `String "no preset named morning") ]
+  in
+  match Tui_decode.decode_preset_deleted refused with
+  | Error detail -> Alcotest.(check string) "the server's sentence" "no preset named morning" detail
+  | Ok _ -> Alcotest.fail "a refused delete decoded as a removed name"
 
 let test_decode_prompts_reads_the_live_shape () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -10903,6 +10915,21 @@ let test_decode_gate_identity_row_reads_its_target () =
           Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
 let test_decode_gate_rows_distinguish_operator_phases () =
+  let module Q = Keeper_approval_queue_rules_types in
+  (* The server sets human_required only from an available Require_human
+     summary, so that row carries one. *)
+  let handed_over =
+    Q.summary_status_to_yojson
+      (Q.Summary_available
+         { summary_version = Q.current_hitl_context_summary_version
+         ; generated_at = 1.0
+         ; model_run_id = "run-phase"
+         ; context_summary = "checks the GitHub login"
+         ; key_questions = []
+         ; judgment = Q.Require_human
+         ; rationale = "reads credentials"
+         })
+  in
   let phase ?phase_field () =
     let base_fields =
       [ "id", `String "appr-phase"
@@ -10912,6 +10939,10 @@ let test_decode_gate_rows_distinguish_operator_phases () =
       ; "waiting_s", `Int 42
       ; "input", `Assoc []
       ]
+      @
+      match phase_field with
+      | Some (`String "human_required") -> [ "summary_status", handed_over ]
+      | Some _ | None -> []
     in
     let fields =
       match phase_field with
@@ -11020,6 +11051,47 @@ let test_decode_gate_block_reason_and_retry_contract () =
     terminal.gp_auto_judge_detail;
   Alcotest.check Alcotest.bool "terminal exact failure is never replayable" false
     (Option.is_some terminal.gp_retry_request)
+;;
+
+(* Auto Judge hands a row to a person with its rationale and questions; the
+   row must carry them to the screen. The summary is written with the
+   server's own encoder, so the fixture follows the wire. *)
+let test_decode_gate_human_required_carries_the_judges_advice () =
+  let module Q = Keeper_approval_queue_rules_types in
+  let row summary_status =
+    `Assoc
+      [ "id", `String "appr-human"
+      ; "keeper_name", `String "advice-keeper"
+      ; "tool_name", `String "tool_execute"
+      ; "phase", `String "human_required"
+      ; "input_preview", `String "rm -rf build"
+      ; "summary_status", summary_status
+      ; "summary_attempt_disposition", `Assoc [ "code", `String "settled" ]
+      ]
+  in
+  let decode row = Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:(`List [ row ]) ()) in
+  let summary : Q.hitl_context_summary =
+    { summary_version = Q.current_hitl_context_summary_version
+    ; generated_at = 1.0
+    ; model_run_id = "run-1"
+    ; context_summary = "deletes the build directory"
+    ; key_questions = [ "Is build/ tracked?"; "Does anything else write there?" ]
+    ; judgment = Q.Require_human
+    ; rationale = "deletes tracked files"
+    }
+  in
+  (match decode (row (Q.summary_status_to_yojson (Q.Summary_available summary))) with
+   | Ok { gs_pending = [ pending ]; _ } ->
+     (match pending.gp_judge_advice with
+      | Some advice ->
+        Alcotest.(check string) "rationale" "deletes tracked files" advice.rationale;
+        Alcotest.(check (list string)) "questions"
+          [ "Is build/ tracked?"; "Does anything else write there?" ] advice.key_questions
+      | None -> Alcotest.fail "human_required row lost the judge's advice")
+   | Ok _ -> Alcotest.fail "expected one gate row"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "a human_required row without a summary is a wire error" true
+    (Result.is_error (decode (row (Q.summary_status_to_yojson Q.Summary_pending))))
 ;;
 
 let execute_gate_row ~preview ~input =
@@ -12601,48 +12673,56 @@ let test_play_invite_refusal_says_the_servers_sentence () =
   let check_sentence label expected ~status_code body =
     Alcotest.(check (option string)) label expected (refusal ~status_code body)
   in
+  (* Built by the server's own refusal writer, so the fixture cannot keep an
+     old wire shape after the server changes. *)
+  let server ?code ?fields sentence =
+    Yojson.Safe.to_string (Server_refusal.json ?code ?fields sentence)
+  in
   check_sentence "not ready lists what is missing"
     (Some "HTTP 409: an invite needs auth (missing: auth_disabled, no_public_base_url)")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":["auth_disabled","no_public_base_url"]}|};
+    (server ~code:"not_ready"
+       ~fields:[ ("missing", `List [ `String "auth_disabled"; `String "no_public_base_url" ]) ]
+       "an invite needs auth");
   check_sentence "a taken name says who holds it"
     (Some "HTTP 409: another participant already has this name (held by a keeper)")
     ~status_code:409
-    {|{"error":"name_taken","message":"another participant already has this name","taken_by":"keeper"}|};
+    (server ~code:"name_taken" ~fields:[ ("taken_by", `String "keeper") ]
+       "another participant already has this name");
   check_sentence "blank and non-string gaps are not listed"
     (Some "HTTP 409: an invite needs auth (missing: no_public_base_url)")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":["", 7, "no_public_base_url", null]}|};
+    {|{"error":"an invite needs auth","code":"not_ready","missing":["", 7, "no_public_base_url", null]}|};
   check_sentence "a missing that lists nothing adds nothing"
     (Some "HTTP 409: an invite needs auth")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":["  "]}|};
+    {|{"error":"an invite needs auth","code":"not_ready","missing":["  "]}|};
   check_sentence "a missing that is not a list adds nothing"
     (Some "HTTP 409: an invite needs auth")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":"no_public_base_url"}|};
+    {|{"error":"an invite needs auth","code":"not_ready","missing":"no_public_base_url"}|};
   check_sentence "a plain sentence stands alone"
     (Some "HTTP 400: hours must be between 1 and 8760, got 0")
     ~status_code:400
-    {|{"error":"invalid_request","message":"hours must be between 1 and 8760, got 0"}|};
+    (server ~code:"invalid_request" "hours must be between 1 and 8760, got 0");
   List.iter
     (fun (why, status_code, body) -> check_sentence why None ~status_code body)
-    [ ("a 401 is about the credential", 401, {|{"error":"unauthorized","message":"bad token"}|})
-    ; ("a 403 is about the credential", 403, {|{"error":"forbidden","message":"admin only"}|})
-    ; ("a success is not a refusal", 200, {|{"error":"x","message":"fine"}|})
-    ; ("a server failure is not a refusal", 500, {|{"error":"x","message":"disk"}|})
-    ; ("a body with no message", 409, {|{"error":"not_ready"}|})
-    ; ("a blank message", 409, {|{"error":"x","message":"   "}|})
-    ; ("a message that is not a string", 409, {|{"error":"x","message":7}|})
+    [ ("a 401 is about the credential", 401, server ~code:"unauthorized" "bad token")
+    ; ("a 403 is about the credential", 403, server ~code:"forbidden" "admin only")
+    ; ("a success is not a refusal", 200, server "fine")
+    ; ("a server failure is not a refusal", 500, server "disk")
+    ; ("a body with no sentence", 409, {|{"code":"not_ready"}|})
+    ; ("a blank sentence", 409, {|{"error":"   ","code":"x"}|})
+    ; ("a sentence that is not a string", 409, {|{"error":7,"code":"x"}|})
     ; ("a body that is not an object", 409, {|["not_ready"]|})
     ; ("a body that is not JSON", 409, "<html>bad gateway</html>")
     ];
   (* Every part comes from the far end, so every part is made safe to draw. *)
   match
     refusal ~status_code:409
-      "{\"error\":\"x\",\"message\":\"a\\u001b[31mred\\nnext\",\"missing\":[\"g\\u001b]0;t\\u0007\"],\"taken_by\":\"k\\u001b\"}"
+      "{\"code\":\"x\",\"error\":\"a\\u001b[31mred\\nnext\",\"missing\":[\"g\\u001b]0;t\\u0007\"],\"taken_by\":\"k\\u001b\"}"
   with
-  | None -> Alcotest.fail "a body with a message gave no sentence"
+  | None -> Alcotest.fail "a body with a sentence gave no sentence"
   | Some said ->
     Alcotest.(check bool) "no control byte is left in the sentence" false
       (String.exists (fun c -> c < ' ' || c = '\127') said)
@@ -13265,6 +13345,8 @@ let () =
           test_decode_preset_restore_reads_each_surface
       ; Alcotest.test_case "a preset refusal decodes to the server's sentence" `Quick
           test_decode_preset_refusal_is_the_servers_sentence
+      ; Alcotest.test_case "decode_preset_deleted reads the removed name" `Quick
+          test_decode_preset_deleted_reads_the_removed_name
       ; Alcotest.test_case "a 200 carrying only an error is an error" `Quick
           test_a_two_hundred_carrying_only_an_error_is_an_error
       ; Alcotest.test_case "a JSON refusal shows its sentence, not the envelope" `Quick
@@ -13369,6 +13451,8 @@ let () =
           test_decode_gate_rows_distinguish_operator_phases;
         Alcotest.test_case "blocked reason and retry contract" `Quick
           test_decode_gate_block_reason_and_retry_contract;
+        Alcotest.test_case "gate human_required carries the judge's advice" `Quick
+          test_decode_gate_human_required_carries_the_judges_advice;
         Alcotest.test_case "an execute row leads with the command" `Quick
           test_decode_execute_gate_row_leads_with_the_command;
         Alcotest.test_case "an execute row shows the command line" `Quick

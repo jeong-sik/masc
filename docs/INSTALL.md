@@ -524,18 +524,15 @@ For prompts, there are only three places to tell apart.
 | One Keeper's role | `instructions` in `.masc/config/keepers/<name>.toml` |
 | The detailed procedure for one tool | That skill |
 
-The shared body is provided in [Korean](../config/prompts/keeper.md) and
-[English](../config/prompts/keeper.en.md). Open `keeper` in the prompt editor
-and choose **한국어 / English** to switch the draft. Check the content, then
-press **오버라이드 적용** (apply override). An unsaved draft has to be saved
-or reset before another language can be chosen. The language choice changes
-only the shared behaviour guidance. The situational slots and tool schemas are
-shared, and it does not force a change to an individual Keeper's role
+The shared body is [config/prompts/keeper.md](../config/prompts/keeper.md).
+Open `keeper` in the prompt editor, edit the draft, then press
+**오버라이드 적용** (apply override). The override changes only the shared
+behaviour guidance; it does not change an individual Keeper's role
 instructions or answer language.
 
 Everything under `###` in `config/prompts/keeper.md` is a slot the runtime
-renders when it is needed. It does not send both language bodies at once, nor
-put all of these slots into every turn. Write the shared behaviour rules once
+renders when it is needed. It does not put all of these slots into every
+turn. Write the shared behaviour rules once
 in the body, and put only the assigned duties in the role instructions.
 
 The installed `.masc/config/prompts/` is the distributed copy. The server

@@ -25,7 +25,12 @@ val perform : base_path:string -> who:string -> speaker:speaker -> now:float ->
     message; reusing the id with different contents conflicts without a write. *)
 val read : base_path:string -> now:float -> before:int option -> (snapshot, error) result
 (** Read only; does not renew presence. [None] reads the most recent page. *)
-val snapshot_json : snapshot -> Yojson.Safe.t
+val snapshot_json : ?viewer:string -> snapshot -> Yojson.Safe.t
+(** Authenticated transports supply their verified viewer identity; it is
+    response metadata and is never persisted as part of the shared history. *)
 val snapshot_of_json : Yojson.Safe.t -> (snapshot, string) result
 (** Decode an HTTP snapshot without treating malformed/unavailable data as an empty room. *)
+val view_of_json : Yojson.Safe.t -> (string * snapshot, string) result
+(** Decode the authenticated viewer and snapshot together. Missing viewer
+    identity is an error, never inferred from message text or ordering. *)
 val error_message : error -> string

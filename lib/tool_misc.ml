@@ -225,7 +225,7 @@ let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args
         Play_room.perform ~base_path:ctx.config.base_path ~who:lane_caller ~speaker
           ~now:(Time_compat.now ()) action) with
         | Ok snapshot -> Tool_result.make_ok ~tool_name:name ~start_time:start
-            ~data:(Play_room.snapshot_json snapshot) ()
+            ~data:(Play_room.snapshot_json ~viewer:lane_caller snapshot) ()
         | Error error ->
             let class_ = match error with
               | Play_room.Invalid_request _ | Conflict _ -> Tool_result.Workflow_rejection

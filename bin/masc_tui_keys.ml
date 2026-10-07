@@ -155,6 +155,7 @@ let config_bindings =
 type runtime_key =
   | Every_reading of binding
   | Keeper_lanes_only of binding
+  | All_runtimes_only of binding
   | Reading_walk
 
 let runtime_reading_walk_help =
@@ -173,6 +174,9 @@ let runtime_keys =
   ; Every_reading
       (b Navigate "c" "clients"
          ~help:"everyone attached to this workspace, off the ring under Runtime")
+  ; All_runtimes_only
+      (b Act "e" "model settings"
+         ~help:"open the selected binding in Config Models; Esc then c copies a variant")
   ; Keeper_lanes_only
       (b Act "e" "add candidate"
          ~help:"append a candidate to the candidate order of the lane under the cursor (keeper lanes only)")
@@ -209,7 +213,7 @@ let runtime_keys =
   ]
 
 let runtime_sheet_binding = function
-  | Every_reading binding | Keeper_lanes_only binding -> binding
+  | Every_reading binding | Keeper_lanes_only binding | All_runtimes_only binding -> binding
   | Reading_walk ->
     b Navigate "p" "keeper lanes / all runtimes / service lanes"
       ~help:runtime_reading_walk_help
@@ -220,6 +224,8 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
     (match mode with
      | Runtime_lanes -> Some binding
      | Runtime_all -> None)
+  | All_runtimes_only binding ->
+    (match mode with Runtime_all -> Some binding | Runtime_lanes -> None)
   | Reading_walk ->
     Some
       (b Navigate "p"

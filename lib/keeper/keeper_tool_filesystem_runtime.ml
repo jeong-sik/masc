@@ -62,7 +62,6 @@ type fs_guidance = Keeper_tool_filesystem_guidance.t =
       ; cwds : string
       }
   | Checkout_scan_failed of { detail : string }
-  | Cwd_not_directory of { cwd : string }
   | Offset_beyond_window of
       { offset : int
       ; window_bytes : int

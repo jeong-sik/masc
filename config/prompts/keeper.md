@@ -628,9 +628,6 @@ available cwds (partial, {{limit}}): {{cwds}}
 ### tool_filesystem.checkout_scan_failed (vars: detail)
 workspace checkout scan failed ({{detail}}); cwds could not be enumerated
 
-### tool_filesystem.cwd_not_directory (vars: cwd)
-cwd_not_directory: {{cwd}} (directory does not exist)
-
 ### tool_filesystem.offset_beyond_window (vars: offset, window_bytes)
 offset {{offset}} is beyond the scanned window ({{window_bytes}} bytes)
 

@@ -506,8 +506,6 @@ let keeper_tool_filesystem_checkout_scan_failed =
   "keeper.tool_filesystem.checkout_scan_failed"
 ;;
 
-let keeper_tool_filesystem_cwd_not_directory = "keeper.tool_filesystem.cwd_not_directory"
-
 let keeper_tool_filesystem_offset_beyond_window =
   "keeper.tool_filesystem.offset_beyond_window"
 ;;

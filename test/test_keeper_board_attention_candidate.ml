@@ -1289,6 +1289,88 @@ let test_fibers_on_one_domain_share_the_ledger_lock () =
        !read_answers)
 ;;
 
+(* #41422: the prune is the replay gate mirrored — it removes a Consumed row
+   exactly when the replay gate (signal_after_cursor's strict token compare)
+   can never re-mint its signal: post_created with its creation coordinate,
+   comments with the comment's creation coordinate, at or before the
+   cursor. Ahead of the cursor, without a replay coordinate (reactions,
+   votes), and in every non-terminal status the row stays. The rewrite
+   happens even below the append-vs-rewrite compaction bound, and a
+   rejected row blocks it. *)
+let test_prune_consumed_behind_cursor () =
+  with_temp_base "board-attention-candidate-prune" @@ fun base_path ->
+  let consumed ~post_id ~ts status =
+    let signal = { (signal post_id) with updated_at = Some ts } in
+    { (candidate signal) with status }
+  in
+  let judged = judgment J.Not_relevant in
+  let behind =
+    consumed
+      ~post_id:"prune-behind"
+      ~ts:10.0
+      (A.Consumed
+         { judgment = judged
+         ; delivery = A.Not_relevant
+         ; consumed_at = 11.0
+         })
+  in
+  let ahead =
+    consumed
+      ~post_id:"prune-ahead"
+      ~ts:99.0
+      (A.Consumed
+         { judgment = judged
+         ; delivery = A.Not_relevant
+         ; consumed_at = 100.0
+         })
+  in
+  let pending = candidate (signal "prune-pending") in
+  let without_coordinate =
+    let base = signal "prune-vote" in
+    let vote_signal =
+      { base with
+        kind =
+          Masc.Board_dispatch.Board_vote_cast
+            { target = Masc.Board_dispatch.Vote_on_post "prune-vote"
+            ; target_author = "external-author"
+            ; voter = "external-author"
+            ; direction = Masc.Board.Up
+            }
+      }
+    in
+    { (candidate vote_signal) with
+      status =
+        A.Consumed
+          { judgment = judged
+          ; delivery = A.Not_relevant
+          ; consumed_at = 11.0
+          }
+    }
+  in
+  List.iter
+    (fun one -> ignore (record ~base_path one : A.candidate))
+    [ behind; ahead; pending; without_coordinate ];
+  let pruned =
+    ok "prune behind cursor" (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" (50.0, None))
+  in
+  Alcotest.(check int) "one consumed row behind the cursor was pruned" 1 pruned;
+  let survivors =
+    ok "load after prune" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  Alcotest.(check bool)
+    "ahead, pending, and coordinate-less rows survive"
+    true
+    (survivors = [ ahead; pending; without_coordinate ]);
+  Alcotest.(check int)
+    "the prune rewrote the store even below the compaction bound"
+    3
+    (List.length (ledger_rows ~base_path));
+  Alcotest.(check int)
+    "pruning again changes nothing"
+    0
+    (ok "idempotent prune" (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" (50.0, None)))
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_candidate"
@@ -1401,6 +1483,10 @@ let () =
             "fibers on one domain share the ledger lock"
             `Quick
             test_fibers_on_one_domain_share_the_ledger_lock
+        ; Alcotest.test_case
+            "prune removes consumed rows the replay gate cannot re-mint"
+            `Quick
+            test_prune_consumed_behind_cursor
         ] )
     ]
 ;;

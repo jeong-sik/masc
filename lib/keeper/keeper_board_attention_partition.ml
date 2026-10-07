@@ -1650,8 +1650,40 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
         let* rows, confirmations = parse snapshot.bytes in
         let* current = apply_rows (empty_view snapshot.cursor) rows in
         let* () = validate_keeper_identity ~keeper_name current in
+        let view = view_partitions current in
+        (* #41422: a settled receipt is droppable unless its candidate is
+           still non-terminal on the candidate ledger — Pending, Judged, or
+           in quarantine. Such a candidate replayed after a restart must
+           still find the settled root instead of re-minting a Ready root
+           and re-running the judgment. A Consumed candidate, or one already
+           pruned from the candidate ledger by the cursor-gated cleanup,
+           adds nothing durable to the receipt, so the receipt goes with it.
+           An unreadable candidate ledger keeps every receipt: nothing here
+           loses the durable judgment record. *)
+        let has_settled =
+          List.exists
+            (fun (partition : t) ->
+               match partition.state with Settled _ -> true | _ -> false)
+            view
+        in
+        let non_terminal_candidates =
+          if not has_settled
+          then Id_set.empty
+          else
+            match Candidate.load_candidates ~base_path ~keeper_name with
+            | Error _ -> Id_set.empty
+            | Ok candidates ->
+              Id_set.of_list
+                (List.filter_map
+                   (fun (candidate : Candidate.candidate) ->
+                      match candidate.status with
+                      | Candidate.Consumed _ -> None
+                      | Candidate.Pending _ | Candidate.Judged _
+                      | Candidate.Quarantine _ -> Some candidate.candidate_id)
+                   candidates)
+        in
         let* recovered, latest =
-          view_partitions current
+          view
           |> List.fold_left
                (fun result partition ->
                   let* recovered, latest = result in
@@ -1666,6 +1698,14 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
                        for an operator requeue before this returned them. *)
                     let* released = advance_state partition Ready in
                     Ok (recovered + 1, released :: latest)
+                  | Settled _
+                    when not (Id_set.mem partition.candidate_id non_terminal_candidates) ->
+                    (* The candidate ledger holds the terminal judgment or
+                       no candidate at all, so the receipt adds nothing
+                       durable. Keeping every settled receipt made the
+                       partition ledger grow with consumed board events,
+                       one row per judgment, for the keeper's whole life. *)
+                    Ok (recovered, latest)
                   | Ready | Completed _ | Settled _ | Abandoned _ | Blocked _ ->
                     Ok (recovered, partition :: latest))
                (Ok (0, []))

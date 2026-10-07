@@ -1855,6 +1855,33 @@ let process_next_with_claim_ready_exact_current
       ~execute
   =
   let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
+  (* #41422: drop consumed rows the replay gate can never re-mint before
+     roots are ensured, so a long-lived keeper's candidate ledger stays
+     bounded by its unresolved attention instead of its board history. The
+     cursor is the same coordinate the world-observation scanner replays
+     against; the default (0.0, None) of an unregistered keeper keeps every
+     row. A prune failure must not stop judgment work, so it is observed and
+     retried on the next wake. *)
+  let cursor_ts, cursor_post_id =
+    Keeper_registry.get_board_cursor ~base_path keeper_name
+  in
+  (match
+     Candidate.prune_consumed_behind_cursor
+       ~base_path
+       ~keeper_name
+       (cursor_ts, cursor_post_id)
+   with
+   | Ok 0 -> ()
+   | Ok removed ->
+     Log.Keeper.info
+       "board_attention_candidate_pruned keeper=%s removed=%d"
+       keeper_name
+       removed
+   | Error detail ->
+     Log.Keeper.warn
+       "board_attention_candidate_prune_failed keeper=%s detail=%s"
+       keeper_name
+       detail);
   let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
   let selected_generation_is_ready ~partition_id ~generation =
     let* partitions = Partition.load ~base_path ~keeper_name in

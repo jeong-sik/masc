@@ -1234,6 +1234,66 @@ let test_reset_during_wake_error_suppresses_old_generation_rearm () =
     (List.length !tasks)
 ;;
 
+(* #41422: the drain entry prunes consumed candidate rows the replay gate
+   cannot re-mint, before roots are ensured. A prune failure must never stop
+   judgment work, so an injected failure would only be logged and the wake
+   would proceed; this fixture exercises the successful prune. *)
+let test_drain_prunes_consumed_rows_behind_the_board_cursor () =
+  with_temp_base "board-attention-worker-prune-on-drain" @@ fun base_path ->
+  let consumed_status =
+    A.Consumed
+      { judgment = judgment (provenance "prune") J.Not_relevant
+      ; delivery = A.Not_relevant
+      ; consumed_at = 11.0
+      }
+  in
+  let consumed_row =
+    let row = candidate ~id:"candidate-prune" ~recorded_at:1.0 () in
+    { row with
+      signal = { row.signal with updated_at = Some 10.0 }
+    ; status = consumed_status
+    }
+  in
+  let prepare candidate = Ok candidate in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    Alcotest.fail "a ledger with only consumed rows dispatched a judgment"
+  in
+  (* Without a cursor the replay gate could re-mint the signal at any time,
+     so the drain keeps the row and runs out of work without dispatching. *)
+  ignore (record ~base_path consumed_row : A.candidate);
+  (match
+     ok
+       "drain without a cursor keeps the consumed row"
+       (process ~base_path ~prepare ~execute)
+   with
+   | W.Idle -> ()
+   | W.Contended _ | W.Rescan_later _
+   | W.Judgment_completed _ | W.Candidate_already_consumed _
+   | W.Judgment_deferred _ | W.Partition_blocked _ ->
+     Alcotest.fail "a consumed-only ledger produced partition work");
+  let kept =
+    ok "load without cursor" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  Alcotest.(check bool) "no cursor keeps every row" true (kept = [ consumed_row ]);
+  (* The keeper's board cursor has passed the signal coordinate, so the
+     replay gate can never re-mint it: the same drain now removes the row. *)
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  (match
+     ok
+       "drain behind the cursor prunes"
+       (process ~base_path ~prepare ~execute)
+   with
+   | W.Idle -> ()
+   | W.Contended _ | W.Rescan_later _
+   | W.Judgment_completed _ | W.Candidate_already_consumed _
+   | W.Judgment_deferred _ | W.Partition_blocked _ ->
+     Alcotest.fail "a pruned ledger produced partition work");
+  let remaining =
+    ok "load after pruned drain" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  Alcotest.(check int) "the consumed row behind the cursor was pruned" 0 (List.length remaining)
+;;
+
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
   with_temp_base "board-attention-worker-execution-error" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
@@ -4010,6 +4070,10 @@ let () =
             "execution error preserves bound progress"
             `Quick
             test_execution_error_preserves_bound_progress_without_hot_retry
+        ; Alcotest.test_case
+            "drain prunes consumed rows behind the board cursor"
+            `Quick
+            test_drain_prunes_consumed_rows_behind_the_board_cursor
         ; Alcotest.test_case
             "bookkeeping failure keeps its cause and the flow sentence"
             `Quick

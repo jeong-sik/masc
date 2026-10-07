@@ -227,16 +227,6 @@ let completed_turn_outcome_of_observation (obs : turn_observation)
   | Packed Turn_exhausted -> Keeper_transition_audit.Turn_failed
 ;;
 
-(* RFC-0002 Event Dispatch — lifecycle_event_origin type + pure helpers. *)
-type lifecycle_event_origin =
-  | Generic_dispatch
-  | Post_turn_lifecycle
-
-let lifecycle_event_origin_to_string = function
-  | Generic_dispatch -> "generic_dispatch"
-  | Post_turn_lifecycle -> "post_turn_lifecycle"
-;;
-
 let pending_measurement_after_event now entry event =
   match event with
   | Keeper_state_machine.Context_measured { context_actions; _ } ->

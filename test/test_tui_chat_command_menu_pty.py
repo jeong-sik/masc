@@ -17,6 +17,7 @@ def open_chat(process, fd, output):
     h.select_keeper_row(process, fd, output, b"alpha")
     h.send_and_wait(process, fd, output, b"\r", "Keepers ▸ \x1b[1malpha".encode())
     h.send_and_wait(process, fd, output, b"m", CHAT)
+    h.send_and_wait(process, fd, output, b"\x02", b"KEEPERS")
     h.drain_until_quiet(process, fd, output)
 
 

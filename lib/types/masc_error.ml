@@ -136,12 +136,6 @@ let category_for_tool tool =
   | Some category -> category
   | None -> GeneralLimit
 
-type cache_error =
-  | CacheReadFailed of string
-  | CacheWriteFailed of string
-  | CacheExpired of { key: string; age_hours: float }
-  | CacheCorrupted of string
-
 module Task_error = struct
   type t =
     | NotFound of string
@@ -212,11 +206,7 @@ end
 module System_error = struct
   type t =
     | NotInitialized
-    | AlreadyInitialized
-    | InvalidJson of string
     | IoError of string
-    | InvalidFilePath of string
-    | StorageError of string
     | ValidationError of string
     | LockContention of { key : string; attempts : int }
       (** Distributed lock acquire budget exhausted under transient
@@ -227,11 +217,7 @@ module System_error = struct
 
   let to_string = function
     | NotInitialized -> "[SystemError] MASC not initialized."
-    | AlreadyInitialized -> "[SystemError] MASC already initialized."
-    | InvalidJson msg -> Printf.sprintf "[SystemError] Invalid JSON: %s" msg
     | IoError msg -> Printf.sprintf "[SystemError] IO error: %s" msg
-    | InvalidFilePath reason -> Printf.sprintf "[SystemError] Invalid file path: %s" reason
-    | StorageError msg -> Printf.sprintf "[SystemError] Storage error: %s" msg
     | ValidationError msg -> Printf.sprintf "[SystemError] Validation error: %s" msg
     | LockContention { key; attempts } ->
         Printf.sprintf
@@ -245,22 +231,12 @@ type t =
   | Agent of Agent_error.t
   | Auth of Auth_error.t
   | System of System_error.t
-  | RateLimitExceeded of rate_limit_error
-  | CacheError of cache_error
 
 let to_string = function
   | Task e -> Task_error.to_string e
   | Agent e -> Agent_error.to_string e
   | Auth e -> Auth_error.to_string e
   | System e -> System_error.to_string e
-  | RateLimitExceeded e ->
-      Printf.sprintf "[RateLimit] Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
-        (Rate_limit_types.rate_limit_category_to_string e.category) e.current e.limit e.wait_seconds
-  | CacheError e -> (match e with
-      | CacheReadFailed path -> Printf.sprintf "[CacheError] Read failed [path=%s]" path
-      | CacheWriteFailed path -> Printf.sprintf "[CacheError] Write failed [path=%s]" path
-      | CacheExpired { key; age_hours } -> Printf.sprintf "[CacheError] Expired [key=%s, age=%.1fh]" key age_hours
-      | CacheCorrupted path -> Printf.sprintf "[CacheError] Corrupted [path=%s]" path)
 
 let show = to_string
 
@@ -281,15 +257,9 @@ let code = function
   | Task (Task_error.VerificationSuperseded _) -> 409
   | Agent (Agent_error.InvalidName _) -> 400
   | System (System_error.NotInitialized
-           | System_error.AlreadyInitialized
-           | System_error.InvalidJson _
            | System_error.IoError _
-           | System_error.InvalidFilePath _
-           | System_error.StorageError _
            | System_error.ValidationError _) -> 400
   | System (System_error.LockContention _) -> 503
-  | RateLimitExceeded _ -> 429
-  | CacheError _ -> 500
 
 (* [dashboard_auth_error_code] is the SSOT mapping from a typed
    [masc_error] to the stable dashboard auth-error-code string that the
@@ -345,7 +315,7 @@ let auth_error_code_of_error : t -> Auth_error_code.t = function
   | Auth (Auth_error.Unauthorized { reason = Auth_error.Missing_token; _ }) ->
       Auth_error_code.Missing_token
   | Auth (Auth_error.Unauthorized { reason = Auth_error.Generic; _ })
-  | Task _ | Agent _ | System _ | RateLimitExceeded _ | CacheError _ ->
+  | Task _ | Agent _ | System _ ->
       Auth_error_code.Unknown
 
 let dashboard_auth_error_code (err : t) : string option =
@@ -364,11 +334,5 @@ let is_retryable = function
   | Auth (Auth_error.Unauthorized _ | Auth_error.Forbidden _
          | Auth_error.SameOriginBlocked
          | Auth_error.InvalidToken _) -> false
-  | System (System_error.IoError _ | System_error.StorageError _
-           | System_error.LockContention _) -> true
-  | System (System_error.NotInitialized | System_error.AlreadyInitialized
-           | System_error.InvalidJson _ | System_error.InvalidFilePath _
-           | System_error.ValidationError _) -> false
-  | RateLimitExceeded _ -> true
-  | CacheError (CacheReadFailed _ | CacheWriteFailed _ | CacheExpired _) -> true
-  | CacheError (CacheCorrupted _) -> false
+  | System (System_error.IoError _ | System_error.LockContention _) -> true
+  | System (System_error.NotInitialized | System_error.ValidationError _) -> false

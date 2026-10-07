@@ -268,16 +268,6 @@ val validate_decision_transition
   -> to_:decision_stage_active
   -> unit
 
-module Decision_transition : sig
-  type ('from, 'to_) t =
-    | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
-    | Undecided_to_tool_policy_selected : (decision_undecided, decision_tool_policy_selected) t
-    | Guard_ok_to_tool_policy_selected : (decision_guard_ok, decision_tool_policy_selected) t
-    | Tool_policy_selected_to_guard_ok : (decision_tool_policy_selected, decision_guard_ok) t
-
-  val to_tag : ('from, 'to_) t -> string
-end
-
 type turn_attempt_state = {
   turn_id : int;
   attempts : int;
@@ -527,14 +517,6 @@ val registry_key_parts : string -> (string * string, string) result
     Pure function, no state access. *)
 val completed_turn_outcome_of_observation :
   turn_observation -> Keeper_transition_audit.completed_turn_outcome
-
-(** Dispatch origin for post-turn lifecycle events. *)
-type lifecycle_event_origin =
-  | Generic_dispatch
-  | Post_turn_lifecycle
-
-(** Pure converter for diagnostic / log labels. *)
-val lifecycle_event_origin_to_string : lifecycle_event_origin -> string
 
 (** Pure: derive the next [pending_turn_measurement] field after observing
     [event] at wall-clock [now], preserving the prior value when the event

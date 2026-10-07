@@ -4,7 +4,6 @@ type source =
   | Connectors
   | Keeper_schedule
   | Resource_read
-  | Runtime_config
   | Skills_catalog
 
 let source_prefix = function
@@ -13,7 +12,6 @@ let source_prefix = function
   | Connectors -> "connector load failed: "
   | Keeper_schedule -> "keeper schedule load failed: "
   | Resource_read -> "resource read: "
-  | Runtime_config -> "runtime config load failed: "
   | Skills_catalog -> "skills catalog load failed: "
 
 let attribute source result =

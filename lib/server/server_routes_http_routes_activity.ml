@@ -13,7 +13,9 @@ module Runtime = Server_routes_http_runtime
 module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
 (* Runtime prompt assets intentionally stay outside [Prompt_registry]: they
-   have no frontmatter contract and are not overrideable.  The prompt sync
+   have no frontmatter contract, so the prompt editor cannot override them.
+   The autonomous wake prompt takes its override from
+   MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT or runtime.toml instead.  The prompt sync
    owns the runtime directory, so enumerate the binary's [*.txt] inventory
    and then read the runtime projection.  A missing file stays visible rather
    than being silently omitted; that is the useful signal after a failed sync.

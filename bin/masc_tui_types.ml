@@ -2587,7 +2587,6 @@ type identity_login_expectation = {
 type keeper_chat_return =
   | Keeper_chat_return_list
   | Keeper_chat_return_detail
-  | Keeper_chat_return_lanes
   | Keeper_chat_return_home
 
 (** Where [Esc] returns after the Changes surface was opened. [f] opens it
@@ -3063,20 +3062,11 @@ type inflight_phase =
   | Turn_streaming
   | Turn_reconciling
 
-type inflight_origin =
-  | Direct_submission
-  | Promoted_queue of
-      { submission_seq : int
-      ; intent : Masc_tui_keeper_chat_queue.intent
-      ; causal_parent_request_id : string option
-      }
-
 type inflight =
   { sent_request : Masc_tui_keeper_chat_projection.request
   ; submitted_at : float
   ; sent_at : float
   ; control_generation : int
-  ; origin : inflight_origin
   ; mutable phase : inflight_phase
   ; log : turn_log
   }
@@ -5052,8 +5042,8 @@ type state = {
      newest; the keys that move it re-fetch the exact provider input for the
      row they name, so every tab describes the turn the operator chose. *)
   mutable context_inspector_turn_back: int;
-  (* Chat shows its roster by default; other surfaces keep their columns.
-     An explicit Ctrl-B choice survives both navigation and resizing. *)
+  (* The roster starts closed. An explicit Ctrl-B choice survives both
+     navigation and resizing; Left navigation is transient. *)
   mutable roster_pane_preference: Masc_tui_roster_pane.preference;
   (* Left opens a temporary Keeper navigator without changing Ctrl-B's choice.
      On narrow screens it occupies the body until a selection or dismissal. *)
@@ -6192,7 +6182,7 @@ type state = {
   mutable system_logs_category: string option;
   mutable system_logs_detail_seq: int option;
   mutable system_logs_detail_scroll: int;
-  msg_input: Buffer.t;
+  msg_input: Masc_tui_message_input.t;
   mutable msg_command_menu: Masc_tui_command.menu_state;
   (* A draft restored from an unterminated terminal paste needs explicit
      confirmation before any chat send. Keep its owner across pane changes. *)
@@ -6543,7 +6533,6 @@ let retire_identity_login_expectations (state : state) =
 let roster_pane_hidden (state : state) =
   not state.keeper_navigation_open
   && Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
-       ~in_chat:(state.view = Keepers Keeper_message)
 
 (* Called at interaction and presentation boundaries with the surface width,
    after reserving any Activity pane. Visibility preference survives a resize;
@@ -7420,12 +7409,6 @@ let completed_turn_row state (request : Masc_tui_keeper_chat_projection.request)
           ~turn_ref:completed.turn_ref completed.turn_outcome )
 ;;
 
-let promoted_inflight_for_keeper state keeper_name =
-  match inflight_for_keeper state keeper_name with
-  | Some ({ origin = Promoted_queue _; _ } as entry) -> Some entry
-  | Some { origin = Direct_submission; _ } | None -> None
-;;
-
 let working_chat_for_keeper state keeper_name =
   List.find_opt (fun entry ->
     let streaming =
@@ -7467,7 +7450,7 @@ let retain_preflight_inputs (state : state) entries =
          && state.msg_target_keeper_name = Some request.keeper_name
          && Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
               ~keeper_name:request.keeper_name = []
-         && Buffer.length state.msg_input = 0
+         && Masc_tui_message_input.length state.msg_input = 0
          && state.msg_attachments = [] && state.msg_references = []
          && Option.is_none state.msg_recall_replaces
       then begin
@@ -7476,7 +7459,7 @@ let retain_preflight_inputs (state : state) entries =
                && String.equal row.me_request_id request.request_id
                && match row.me_role with Message_user _ -> true | _ -> false))
           state.msg_history;
-        Buffer.add_string state.msg_input request.message;
+        Masc_tui_message_input.insert state.msg_input request.message;
         state.msg_attachments <- request.attachments;
         state.msg_references <- request.references;
         state.msg_attachments_since <- None
@@ -8062,7 +8045,7 @@ let composer_is_live (state : state) =
 let composing_for_keeper (state : state) keeper_name =
   state.coalesce_queued_input
   && composer_is_live state
-  && Buffer.length state.msg_input > 0
+  && Masc_tui_message_input.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
 (* A fresh Enter may bypass input held by an explicit stop. A refused
@@ -8294,9 +8277,9 @@ let create_state
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
   context_inspector_turn_back = 0;
-  (* Wide chat starts with its Keeper roster. Other surfaces keep their
-     full width until Ctrl-B records an explicit choice. *)
-  roster_pane_preference = Masc_tui_roster_pane.Auto;
+  (* Keep the reading surface full-width until Left opens the navigator
+     or Ctrl-B explicitly pins the roster. *)
+  roster_pane_preference = Masc_tui_roster_pane.Hidden;
   keeper_navigation_open = false;
   acting_pane_preference = Default_acting_pane;
   acting_pane_scroll = 0;
@@ -8857,7 +8840,7 @@ let create_state
   system_logs_category = None;
   system_logs_detail_seq = None;
   system_logs_detail_scroll = 0;
-  msg_input = Buffer.create 256;
+  msg_input = Masc_tui_message_input.create ();
   msg_command_menu = Masc_tui_command.Menu_idle;
   msg_recovered_paste_keepers = [];
   msg_attachments = [];
@@ -9372,7 +9355,7 @@ let composer_extra_rows (state : state) =
   let lines =
     Masc_tui_message_layout.composer_lines
       ~max_rows:Masc_tui_message_layout.composer_max_rows
-      (Buffer.contents state.msg_input)
+      (Masc_tui_message_input.contents state.msg_input)
   in
   max 0 (List.length lines - 1)
 
@@ -11983,7 +11966,7 @@ let keeper_observed_turn (state : state) keeper_name =
 ;;
 
 let keeper_message_draft_empty (state : state) =
-  Buffer.length state.msg_input = 0
+  Masc_tui_message_input.length state.msg_input = 0
   && state.msg_attachments = [] && state.msg_references = []
 
 let keeper_message_turn_active (state : state) =
@@ -12113,14 +12096,10 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
               Masc_tui_keeper_chat_transcript.admission transcript with
         | Waiting, None
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            (match entry.phase, entry.origin with
-             | Turn_preflight _, (Promoted_queue _ | Direct_submission) ->
-                 Some (entry.sent_request, Local_pending)
-             | Turn_reconciling, (Promoted_queue _ | Direct_submission) ->
-                 Some (entry.sent_request, Rechecking_delivery)
-             | Turn_streaming, Promoted_queue _ ->
-                 Some (entry.sent_request, Awaiting_receipt)
-             | Turn_streaming, Direct_submission -> None)
+            (match entry.phase with
+             | Turn_preflight _ -> Some (entry.sent_request, Local_pending)
+             | Turn_reconciling -> Some (entry.sent_request, Rechecking_delivery)
+             | Turn_streaming -> Some (entry.sent_request, Awaiting_receipt))
         | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
             let delivery = match entry.phase with
@@ -12531,7 +12510,7 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
   | Keepers Keeper_message, Right_pane, None, None when state.msg_scroll = 0 ->
     let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
     (match Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
-        (Buffer.contents state.msg_input) with
+        (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
        let status_rows = keeper_message_status_rows state ~terminal_cols + 1 in

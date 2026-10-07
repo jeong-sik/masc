@@ -293,7 +293,6 @@ type capability_write_stage =
   | Sync_parent
   | Remove_staging_directory
   | Close_staging_directory
-  | Discharge_prepared_recovery_obligation
   | Discharge_bound_recovery_obligation
   | Cleanup_close
   | Cleanup_verify_identity
@@ -370,9 +369,6 @@ type capability_write_failure =
   }
 
 type capability_recovery_phase =
-  | Recovery_validate_owner
-  | Recovery_open_registry
-  | Recovery_open_store
   | Recovery_prepare
   | Recovery_preserve_unbound
   | Recovery_bind
@@ -510,8 +506,6 @@ let capability_write_stage_to_string = function
   | Sync_parent -> "sync_parent"
   | Remove_staging_directory -> "remove_staging_directory"
   | Close_staging_directory -> "close_staging_directory"
-  | Discharge_prepared_recovery_obligation ->
-    "discharge_prepared_recovery_obligation"
   | Discharge_bound_recovery_obligation ->
     "discharge_bound_recovery_obligation"
   | Cleanup_close -> "cleanup_close"
@@ -562,9 +556,6 @@ let capability_write_failure_to_string failure =
 ;;
 
 let capability_recovery_phase_to_string = function
-  | Recovery_validate_owner -> "validate_owner"
-  | Recovery_open_registry -> "open_registry"
-  | Recovery_open_store -> "open_store"
   | Recovery_prepare -> "prepare"
   | Recovery_preserve_unbound -> "preserve_unbound"
   | Recovery_bind -> "bind"

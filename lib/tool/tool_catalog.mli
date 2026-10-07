@@ -3,7 +3,7 @@
 
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
-    - Implementation status: Real, Adapter, Simulation, Placeholder *)
+    - Implementation status: every registered tool is Real *)
 
 (** {1 Types} *)
 
@@ -12,9 +12,6 @@ type lifecycle = Active
 
 type implementation_status =
   | Real
-  | Adapter
-  | Simulation
-  | Placeholder
 
 type metadata = {
   visibility : visibility;
@@ -60,7 +57,6 @@ val metadata : string -> metadata
 val execution_policy_of_metadata :
   tool_name:string -> metadata -> (execution_policy, execution_policy_error) result
 val execution_policy_error_to_string : execution_policy_error -> string
-val implementation_status : string -> implementation_status
 val is_visible : ?include_hidden:bool -> string -> bool
 val allow_direct_call : string -> bool
 

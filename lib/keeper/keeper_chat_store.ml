@@ -149,7 +149,6 @@ type append_once_result =
 
 type user_row_origin =
   | Needs_append
-  | Already_persisted of { row_id : string }
   | Already_persisted_upstream
 
 let stream_lifecycle_event_to_label = function

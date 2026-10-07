@@ -405,7 +405,6 @@ type capability_write_stage = Atomic_write.capability_write_stage =
   | Sync_parent
   | Remove_staging_directory
   | Close_staging_directory
-  | Discharge_prepared_recovery_obligation
   | Discharge_bound_recovery_obligation
   | Cleanup_close
   | Cleanup_verify_identity
@@ -452,9 +451,6 @@ type capability_write_failure = Atomic_write.capability_write_failure =
   }
 
 type capability_recovery_phase = Atomic_write.capability_recovery_phase =
-  | Recovery_validate_owner
-  | Recovery_open_registry
-  | Recovery_open_store
   | Recovery_prepare
   | Recovery_preserve_unbound
   | Recovery_bind

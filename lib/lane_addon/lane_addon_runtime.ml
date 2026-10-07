@@ -2022,7 +2022,7 @@ let start_fleet_service ~config ~sw ~clock =
     let interval=Env_config_runtime_services.Timeouts.maintenance_pulse_interval_sec in
     let pulse=Pulse.create ~clock
       ~rhythm:{Pulse.base_s=interval;min_s=interval;max_s=interval;quiet=(0,0)}
-      ~lifecycle:Always_on ~consumers:[consumer] in
+      ~consumers:[consumer] in
     let stop ()=active:=false;Pulse.shutdown pulse in
     Hashtbl.add fleet_services key stop;
     let m=manager config in
@@ -2057,7 +2057,7 @@ let start_configuration_service ~config ~sw ~clock =
     let interval = Env_config_runtime_services.Timeouts.maintenance_pulse_interval_sec in
     let pulse = Pulse.create ~clock
       ~rhythm:{Pulse.base_s=interval; min_s=interval; max_s=interval; quiet=(0,0)}
-      ~lifecycle:Always_on ~consumers:[consumer] in
+      ~consumers:[consumer] in
     let stop () = active := false; Pulse.shutdown pulse in
     Hashtbl.add configuration_services key stop;
     let m = manager config in

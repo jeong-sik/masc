@@ -25,9 +25,9 @@ let test_sparkline_colored () =
   let colored =
     Chart.sparkline_colored
       ~style_of_level:(fun lvl ->
-        if lvl >= 6 then Chart.Status Masc_tui_theme.Bad
-        else if lvl >= 3 then Chart.Status Masc_tui_theme.Warn
-        else Chart.Status Masc_tui_theme.Ok)
+        if lvl >= 6 then Masc_tui_theme.Bad
+        else if lvl >= 3 then Masc_tui_theme.Warn
+        else Masc_tui_theme.Ok)
       values
   in
   check int "sparkline colored has 3 display cells" 3 (Layout.display_width colored)
@@ -124,7 +124,7 @@ let test_heatmap_24h_normalization () =
 
 let test_distribution_bars () =
   let items : Chart.bar_item list =
-    [ { name = "상수_speak"; count = 50; style = Some (Chart.Status Masc_tui_theme.Ok) }
+    [ { name = "상수_speak"; count = 50; style = Some Masc_tui_theme.Ok }
     ; { name = "run_command"; count = 25; style = None }
     ; { name = "replace_file"; count = 25; style = None }
     ]

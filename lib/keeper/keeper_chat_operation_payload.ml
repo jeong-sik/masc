@@ -202,12 +202,10 @@ let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
         ~workspace_id
   in
   let* () = validate_sender_keeper ~sender_keeper ~surface ~channel_user_id in
-  let* user_row_origin =
+  let user_row_origin =
     match user_row_origin with
-    | Keeper_chat_store.Needs_append -> Ok "needs_append"
-    | Keeper_chat_store.Already_persisted_upstream -> Ok "already_persisted_upstream"
-    | Keeper_chat_store.Already_persisted _ ->
-      Error "Keeper chat operation source requires the exact persisted row identity"
+    | Keeper_chat_store.Needs_append -> "needs_append"
+    | Keeper_chat_store.Already_persisted_upstream -> "already_persisted_upstream"
   in
   Ok
     (`Assoc
@@ -328,8 +326,6 @@ let source_of_json json =
     | `String "needs_append" -> Ok Keeper_chat_store.Needs_append
     | `String "already_persisted_upstream" ->
       Ok Keeper_chat_store.Already_persisted_upstream
-    | `String "already_persisted" ->
-      Error "Keeper chat operation source cannot omit an already-persisted row id"
     | `String _ -> Error "Keeper chat operation source user_row_origin is unsupported"
     | _ -> Error "Keeper chat operation source user_row_origin must be a string"
   in

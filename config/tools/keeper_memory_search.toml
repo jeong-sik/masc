@@ -8,7 +8,7 @@ Facts: whole-query matches first in store order, then \
 claims holding any whitespace-separated term (3+ characters match inside \
 words) by BM25. History needs a non-empty query, matched whole or by every \
 term, newest first. The default reads only current facts; source='all' \
-adds absorbed originals and history. Source-bound files are revalidated \
+adds absorbed originals, dropped history and conversation history. Source-bound files are revalidated \
 only for query-matching candidates; unrelated claims remain stored and \
 unverified. source_verification.status='incomplete' means matching claims \
 were withheld because their sources could not be verified; it is not proof \
@@ -18,7 +18,10 @@ original basis; current facts include exact memory_id, category and origin \
 (authored is yours to supersede). Use a memory_id as a derived \
 conclusion's premise_id only for store='current_memory_snapshot'. \
 source='absorbed' finds facts merged into a newer claim: into is the claim \
-now holding it; into_current=false if not current."""
+now holding it; into_current=false if not current. source='dropped' retrieves \
+historical removed claims with reasons from the journal; these are not current \
+facts. Check the reason and original evidence before using or writing a new \
+current claim. Search never restores memory. The removal journal may be incomplete."""
 additional_properties = false
 
 [[params]]
@@ -37,8 +40,8 @@ value is rejected."""
 [[params]]
 name = "source"
 type = "string"
-enum = ["current", "absorbed", "history", "all"]
+enum = ["current", "absorbed", "dropped", "history", "all"]
 description = """
 Search scope: current (default, ordinary and source-bound current facts), \
 absorbed (facts \
-merged into a newer claim), history (raw messages), or all"""
+merged into a newer claim), dropped (historical removed claims), history (raw messages), or all"""

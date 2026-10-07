@@ -184,13 +184,6 @@ const STALE_RULES: Array<{
     expected: 'Use keeper_task_done with task_id and result evidence.',
   },
   {
-    id: 'keeper-pr-create',
-    severity: 'warn',
-    title: 'Conflicting keeper-native PR creation guidance',
-    pattern: /\bkeeper_pr_create\b/,
-    expected: 'Use the current repo-hosting workflow exposed by active tool policy.',
-  },
-  {
     id: 'hardcoded-masc-path',
     severity: 'warn',
     title: 'Hardcoded repo path example',
@@ -454,8 +447,7 @@ export function buildKeeperPromptAssemblyReport(
 
   const keeperPrompts = prompts.filter(prompt =>
     prompt.key === 'keeper'
-    || (prompt.key.startsWith('keeper.') && prompt.key !== 'keeper.en')
-    || prompt.key.startsWith('behavior.'),
+    || prompt.key.startsWith('keeper.'),
   )
   const warnings: KeeperPromptAssemblyWarning[] = []
 

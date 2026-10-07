@@ -631,8 +631,7 @@ let with_lease config lease f =
       |> Result.iter_error (fun e ->
            let msg =
              match e with
-             | Backend_types.ConnectionFailed s | NotFound s
-             | IOError s | BackendNotSupported s | InvalidKey s
+             | Backend_types.NotFound s | IOError s | InvalidKey s
              | AlreadyExists s -> s
            in
            Log.Workspace.warn "lock release failed for %s: %s" lease.lease_key

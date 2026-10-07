@@ -941,21 +941,8 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_deliv
      (match backend_publish config ~channel:(broadcast_channel config)
          ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
       | Ok _ -> ()
-      (* One arm, not two. The dropped one quieted [BackendNotSupported] whose
-         message began "FileSystem backend", on the reading that a filesystem
-         backend without pub/sub is an expected skip rather than a failure. It
-         had never fired, for three separate reasons: [Pubsub_mem.publish] is
-         the only implementation and returns [Ok] on every path
-         (backend_types.ml:94-102); nothing in the tree constructs
-         [BackendNotSupported] at all; and the two messages that do name a
-         filesystem backend spell it mid-sentence ("Stale Eio fs context for
-         FileSystem backend;"), so the prefix would not have matched them
-         either. A guard that cannot fire is not a quieter log -- it is a
-         reader looking for why the quieting does not work. *)
-      | Error ((Backend_types.BackendNotSupported _
-               | Backend_types.NotFound _ | Backend_types.AlreadyExists _
-               | Backend_types.IOError _ | Backend_types.InvalidKey _
-               | Backend_types.ConnectionFailed _) as e) ->
+      | Error ((Backend_types.NotFound _ | Backend_types.AlreadyExists _
+               | Backend_types.IOError _ | Backend_types.InvalidKey _) as e) ->
         Log.Misc.error "broadcast publish failed: %s" (Backend_types.show_error e));
      emit_message_activity config ~from_agent:stored_agent ~content:stored_content
        ~mention ();

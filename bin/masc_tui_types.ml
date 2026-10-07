@@ -3069,7 +3069,13 @@ let turn_log_holds_the_turn turn_log =
   | Masc_tui_keeper_chat_transcript.Stream_ended ->
       Option.exists (fun (reply : Masc_tui_keeper_chat_transcript.reply) ->
         match reply.reply_outcome with
-        | Masc.Keeper_turn_outcome.Continuation_checkpoint -> false
+        | Masc.Keeper_turn_outcome.Continuation_checkpoint ->
+            (* An autonomous journal owns one finished turn. A direct
+               operation can continue past this checkpoint, so its final
+               history must remain visible if that later journal is lost. *)
+            (match Masc_tui_keeper_chat_log.source turn_log.tl_log with
+             | Autonomous_turn _ -> true
+             | Operation _ -> false)
         | Visible_reply | Terminal_effect_settled | Awaiting_gate_approval | No_visible_reply -> true)
         (Masc_tui_keeper_chat_transcript.reply turn_log.tl_transcript)
   | Masc_tui_keeper_chat_transcript.Waiting

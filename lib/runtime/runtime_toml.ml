@@ -631,7 +631,7 @@ let usage_read_shape_of_string = function
   | "openrouter-key" -> Some Runtime_schema.Openrouter_key
   | "zai-quota-limit" -> Some Runtime_schema.Zai_quota_limit
   | "kimi-coding-usages" -> Some Runtime_schema.Kimi_coding_usages
-  | "ollama-usage" -> Some Runtime_schema.Ollama_usage
+  | "ollama-balance" -> Some Runtime_schema.Ollama_balance
   | _ -> None
 ;;
 

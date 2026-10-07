@@ -3253,6 +3253,21 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
        |> ignore;
        Keeper_chat_operation_store.claim_next seed ~now:11.0 |> Result.get_ok |> ignore;
        Keeper_chat_operation_store.close seed |> Result.get_ok;
+       (* The run the crash cut off had journaled its start and nothing after. *)
+       let journal =
+         Keeper_chat_event_log.open_journal
+           ~base_dir:base_path
+           ~keeper_name
+           ~operation_id:(Chat_operation.Operation_id.to_string operation_id)
+           ()
+       in
+       (match
+          Keeper_chat_event_log.append_result journal ~seq:0 ~ts:10.0
+            (Keeper_chat_events.Run_started
+               { run_id = "restart-row-run"; thread_id = "keeper:" ^ keeper_name })
+        with
+        | Ok () -> ()
+        | Error detail -> fail ("seed journal: " ^ detail));
        Eio.Switch.run @@ fun sw ->
        (match
           Owner_registry.install_from_store
@@ -3263,6 +3278,21 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
         with
         | Ok count -> check int "one owner installed" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
+       (* A subscriber that reopens the operation replays this journal, so a
+          journal that stops at [Run_started] leaves it waiting on a terminal
+          the settled operation will never send. *)
+       (match Keeper_chat_event_log.read_journal journal with
+        | Ok entries ->
+          (match List.rev entries with
+           | { Keeper_chat_event_log.event =
+                 Keeper_chat_events.Event_error { message }
+             ; _ } :: _ ->
+             check string "the journal ends with the restart cause"
+               "the server restarted before this request finished." message;
+             check int "one terminal was appended after the run start" 2
+               (List.length entries)
+           | _ -> fail "the restart-interrupted journal does not end with a terminal error")
+        | Error _ -> fail "the restart-interrupted journal could not be read");
        let rows = Keeper_chat_store.load ~base_dir:base_path ~keeper_name in
        let failure_rows =
          List.filter

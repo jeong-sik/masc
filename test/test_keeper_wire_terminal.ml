@@ -352,6 +352,47 @@ let test_journal_failure_keeps_live_error_without_cursor () =
       (event.Ag_ui.event_type = Ag_ui.Run_error)
   | _ -> fail "failed journal append lost the live terminal or fabricated a cursor"
 
+(* Every settlement path without a live stream ends the journal through
+   [record_terminal_error], so the helper itself carries the guarantees: one
+   terminal per failure, never a second one, and a finished earlier segment
+   does not stand in for it. *)
+let test_record_terminal_error_writes_once () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-once" and operation_id = "op-terminal-once" in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  let append seq event =
+    match Journal.append_result journal ~seq ~ts:1.0 event with
+    | Ok () -> ()
+    | Error detail -> fail detail in
+  append 0 (Events.Run_started { run_id = "run-1"; thread_id = "keeper:terminal-once" });
+  append 1 (Events.Run_finished { run_id = "run-1" });
+  append 2 (Events.Run_started { run_id = "run-2"; thread_id = "keeper:terminal-once" });
+  (match Journal.record_terminal_error journal ~ts:2.0 ~message:"first cause" with
+   | Ok (Journal.Recorded_terminal_error { seq; _ }) ->
+     check int "appended after the unfinished segment" 3 seq
+   | Ok (Journal.Existing_terminal_error _) ->
+     fail "an earlier Run_finished stood in for this failure"
+   | Error detail -> fail detail);
+  (match Journal.record_terminal_error journal ~ts:3.0 ~message:"second cause" with
+   | Ok (Journal.Existing_terminal_error { seq; message; _ }) ->
+     check int "the first terminal is reported" 3 seq;
+     check string "with the cause it recorded" "first cause" message
+   | Ok (Journal.Recorded_terminal_error _) -> fail "a second terminal was appended"
+   | Error detail -> fail detail);
+  check int "one terminal in the journal" 1
+    (List.length (error_entries (read_journal ~base_path ~keeper_name ~operation_id)))
+
+let test_record_terminal_error_creates_a_missing_journal () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-missing" and operation_id = "op-terminal-missing" in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  (match Journal.record_terminal_error journal ~ts:1.0 ~message:"never started" with
+   | Ok (Journal.Recorded_terminal_error { seq; _ }) -> check int "first row" 0 seq
+   | Ok (Journal.Existing_terminal_error _) -> fail "nothing existed to report"
+   | Error detail -> fail detail);
+  check int "the terminal is the journal" 1
+    (List.length (read_journal ~base_path ~keeper_name ~operation_id))
+
 let () =
   Alcotest.run "keeper_wire_terminal"
     [ ( "wire-terminal"
@@ -377,5 +418,9 @@ let () =
             test_failed_continuation_after_prior_finished_segment
         ; test_case "journal failure preserves live terminal without cursor" `Quick
             test_journal_failure_keeps_live_error_without_cursor
+        ; test_case "record_terminal_error writes once" `Quick
+            test_record_terminal_error_writes_once
+        ; test_case "record_terminal_error creates a missing journal" `Quick
+            test_record_terminal_error_creates_a_missing_journal
         ] )
     ]

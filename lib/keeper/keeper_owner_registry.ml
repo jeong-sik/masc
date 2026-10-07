@@ -163,10 +163,38 @@ let prepare_operation_store_path pool keeper_name =
    sentence; the prefix is the stream's [persisted_error_reply] shape, so the
    row renders as the failure it is and does not read as the keeper's own
    words (RFC-0454 D2). *)
-let restart_interrupted_reply =
-  "Keeper request failed: "
-  ^ Keeper_request_failure.summary
-      { Keeper_request_failure.cause = Keeper_request_failure.Server_restarted }
+let restart_interrupted_summary =
+  Keeper_request_failure.summary
+    { Keeper_request_failure.cause = Keeper_request_failure.Server_restarted }
+;;
+
+let restart_interrupted_reply = "Keeper request failed: " ^ restart_interrupted_summary
+;;
+
+(* The run the restart cut off journaled whatever it had produced and stopped,
+   and its stream died with the process. A client that reopens the operation
+   replays that journal and then finds the operation settled, so the journal
+   needs the terminal the stream would have carried. Recorded through the same
+   helper the Owner's settlement uses, so a second start on the same store
+   finds the terminal already there and writes nothing. A journal that cannot
+   be written is logged and does not stop the owner from starting. *)
+let record_restart_terminal ~base_dir ~keeper_name ~operation_id =
+  let journal =
+    Keeper_chat_event_log.open_journal ~base_dir ~keeper_name ~operation_id ()
+  in
+  match
+    Keeper_chat_event_log.record_terminal_error
+      journal
+      ~ts:(Time_compat.now ())
+      ~message:restart_interrupted_summary
+  with
+  | Ok (Recorded_terminal_error _ | Existing_terminal_error _) -> ()
+  | Error detail ->
+    Log.Keeper.warn
+      ~keeper_name
+      "restart-interrupted operation %s left no journal terminal: %s"
+      operation_id
+      detail
 ;;
 
 (* A request the restart cut off is settled [Failed Interrupted_by_restart] in
@@ -185,6 +213,7 @@ let record_restart_interruptions pool ~keeper_name owner =
        let operation_id =
          Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
        in
+       record_restart_terminal ~base_dir ~keeper_name ~operation_id;
        let surface, conversation_id, broadcast_source =
          match Keeper_chat_operation_payload.source_of_json operation.source with
          | Ok source ->

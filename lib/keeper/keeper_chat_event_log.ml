@@ -819,6 +819,28 @@ let next_sequence ?(require_existing = false) journal =
          else Ok (highest + 1))
 ;;
 
+type terminal_error_receipt =
+  | Recorded_terminal_error of { seq : int; ts : float }
+  | Existing_terminal_error of { seq : int; ts : float; message : string }
+
+let record_terminal_error journal ~ts ~message =
+  let ( let* ) = Result.bind in
+  let read_error = function
+    | Journal_missing -> "operation journal disappeared during settlement"
+    | Journal_unreadable detail | Journal_corrupt detail -> detail in
+  let* seq = next_sequence journal |> Result.map_error read_error in
+  let* entries = match read_journal journal with
+    | Ok entries -> Ok entries
+    | Error Journal_missing -> Ok []
+    | Error error -> Error (read_error error) in
+  match List.rev entries with
+  | { event = Keeper_chat_events.Event_error { message }; seq; ts } :: _ ->
+    Ok (Existing_terminal_error { seq; ts; message })
+  | _ ->
+    let* () = append_result journal ~seq ~ts (Keeper_chat_events.Event_error { message }) in
+    Ok (Recorded_terminal_error { seq; ts })
+;;
+
 (** {1 Replay position} *)
 
 type replay_position =

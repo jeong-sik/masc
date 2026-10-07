@@ -1,0 +1,161 @@
+{
+  "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
+  "source_sha256": "bd48eaa1d5464c03642125dac9a56846da72c74e612a060366f5dbde77facd56",
+  "browser_version": "149.0.7827.55",
+  "seat_reads": 14,
+  "frame_reads": 5,
+  "checks": [
+    "seat recovers without machine activity",
+    "failed frame is fetched again",
+    "same-tab reload reconnects",
+    "pad click sends input",
+    "reopening focused selector discovers idle invite",
+    "pass updates controller and disables input",
+    "eject clears pixels",
+    "disconnect removes tab credential",
+    "controller disconnect releases before forgetting the credential"
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/play",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/play",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dos/pass",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/play",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dos/pass",
+      "query": ""
+    }
+  ],
+  "errors": []
+}

@@ -9,7 +9,6 @@
   (names nofile_stubs))
  (modules
   keeper_event_queue_schema
-  keeper_sandbox_error
   keeper_terminal_reason
   keeper_runtime_config
   keeper_disk_pressure

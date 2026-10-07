@@ -6439,8 +6439,8 @@ let switch_to_next_keeper_message state ~mailbox ~drain_queue =
    started before the latest turn persisted must keep that session's output.
 
    Errors used to be kept on sight for the opposite reason. Most are notices
-   the server has no row for -- a blocked dispatch, a recovery fence waiting on
-   Ctrl-R -- and dropping those loses the only record of them. A failed turn is
+   the server has no row for -- a blocked dispatch, a refused read -- and
+   dropping those loses the only record of them. A failed turn is
    the overlap the server does record, so it showed twice, which was the price
    of not being able to tell the two apart.
 
@@ -7546,9 +7546,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
 
    The refusals here are about whether the message can be delivered at all: no
    keeper selected, a roster this build could not read, a keeper that is no
-   longer registered. What used to sit above them — a prepared fence, an
-   unverified outcome, a blocked recovery, each with its own Ctrl-R — is gone
-   with the fence that produced them. *)
+   longer registered. *)
 let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
   match
     match keeper_name with

@@ -1049,6 +1049,9 @@ let test_reconciliation_failure_detail () =
         (has "masc login" detail);
       check bool (label ^ " says the operation survives") true
         (has "untouched on the server" detail);
+      (* Ctrl-R now cycles reasoning; no key settles a request. *)
+      check bool (label ^ " does not send the operator to a key that settles nothing") false
+        (has "Ctrl-R" detail);
       check bool (label ^ " does not paste the server body") false
         (has "auth_error_code" detail))
     [ ("absent", absent); ("rejected", rejected) ];

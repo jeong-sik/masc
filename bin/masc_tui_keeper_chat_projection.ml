@@ -363,11 +363,11 @@ let reader_unauthenticated = function
 (* The sentence itself belongs to Masc_tui_credential, which every refusal
    surface shares. What is specific here is the consequence: a refused read
    says nothing about the operation, so the operator needs to know it survived
-   and how to come back to it. *)
+   and what to run to read it again. *)
 let refused_reader_remedy ~credential_sent reason =
   Printf.sprintf
     "the operation could not be read back: %s. The operation itself is \
-     untouched on the server, so %s, then press Ctrl-R to settle this request."
+     untouched on the server, so %s."
     (Masc_tui_credential.refusal_cause ~credential_sent reason)
     Masc_tui_credential.remedy
 

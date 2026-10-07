@@ -428,6 +428,32 @@ let test_explicit_departure_and_same_link_reconnect () =
       check bool "reconnect restores eligibility" true (member "participants" connected = Some (`List [`String "minsu"]));
       check bool "reconnect does not take a controller" true (member "controller" connected = Some `Null)))
 
+let test_ineligible_participation_does_not_hide_active_seats () =
+  with_dir "play-ineligible-participation-" (fun base_path ->
+    Eio_main.run (fun env ->
+      Masc_test_deps.init_eio_clock env;
+      let auth_ok = function
+        | Ok value -> value
+        | Error error -> fail (Masc_domain.masc_error_to_string error) in
+      let _, expired = auth_ok (Auth.create_token_expiring_in base_path
+          ~agent_name:"expired" ~role:Masc_domain.Player ~hours:1) in
+      let expired = { expired with expires_at = Some "2000-01-01T00:00:00Z" } in
+      Auth.save_credential base_path expired;
+      let _, worker = auth_ok (Auth.create_token_without_expiry base_path
+          ~agent_name:"worker" ~role:Masc_domain.Worker) in
+      ignore (auth_ok (Auth.create_token_without_expiry base_path
+          ~agent_name:"active" ~role:Masc_domain.Player));
+      auth_ok (Auth.with_credential_transaction base_path (fun transaction ->
+        List.iter (fun credential ->
+          match Masc.Play_participation.write ~transaction ~base_path credential Connected with
+          | Ok () -> ()
+          | Error detail -> fail detail) [expired; worker]));
+      let directory = Filename.concat (Masc.Common.masc_dir_from_base_path ~base_path) "play" in
+      Array.iter (fun file -> Out_channel.with_open_bin (Filename.concat directory file)
+          (fun channel -> output_string channel "malformed")) (Sys.readdir directory);
+      let seats = auth_ok (Masc.Play_seat.participants ~base_path ~keepers:[] ~now:(Unix.gettimeofday ())) in
+      check (list string) "irrelevant damaged state does not block eligible seats" ["active"] seats))
+
 let () =
   run "play-page"
     [ ( "page"
@@ -437,5 +463,6 @@ let () =
         ; test_case "the seat names the bearer, the holder and the seats" `Quick test_the_seat
         ; test_case "expired invites and operators are not seats" `Quick test_expired_credentials_are_not_seats
         ; test_case "explicit departure and same-link reconnect over HTTP" `Quick test_explicit_departure_and_same_link_reconnect
+        ; test_case "ineligible damaged participation cannot hide active seats" `Quick test_ineligible_participation_does_not_hide_active_seats
         ] )
     ]

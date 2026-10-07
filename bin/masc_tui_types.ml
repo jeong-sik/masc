@@ -4857,9 +4857,10 @@ type play_invite =
   ; shown_name : string option
   }
 
-type play_change_kind = Issue_invite of string | Revoke_invite of string
+type play_change_kind = Masc_tui_play_pending.kind = Issue_invite of string | Revoke_invite of string
 type play_change_request = {
   change_ticket : unit ref;
+  change_id : string;
   change_workspace : workspace_input_identity;
   change_kind : play_change_kind;
 }
@@ -8245,6 +8246,25 @@ let workspace_change_origin state =
 let current_play_change state origin =
   List.find_opt (fun change -> (play_change_request change).change_workspace = origin) state.play_changes
 
+let play_pending_path state =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path)
+    "tui-play-pending.jsonl"
+
+let play_pending_entry request : Masc_tui_play_pending.entry =
+  {id=request.change_id; base_path=request.change_workspace.wi_base_path;
+   masc_root=request.change_workspace.wi_masc_root; kind=request.change_kind}
+
+let read_play_changes state =
+  if state.local_base_path = "" then Error "The local workspace for Play recovery is unavailable."
+  else Result.map (fun pending ->
+    state.play_changes <- List.map (fun (entry : Masc_tui_play_pending.entry) ->
+      match List.find_opt (fun held -> play_pending_entry (play_change_request held) = entry) state.play_changes with
+      | Some held -> held
+      | None -> Unknown_invite_change {change_ticket=ref (); change_id=entry.id;
+          change_workspace={wi_base_path=entry.base_path; wi_masc_root=entry.masc_root};
+          change_kind=entry.kind}) pending)
+    (Masc_tui_play_pending.read ~path:(play_pending_path state))
+
 let play_change_pending_notice = "An invite change is still pending; wait for its result."
 let play_change_unknown_notice request =
   let action, name = match request.change_kind with
@@ -8256,7 +8276,9 @@ let play_change_access state =
   match workspace_change_origin state with
   | Error detail -> Masc_tui_collab.Read_only detail
   | Ok origin ->
-      match current_play_change state origin with
+      match read_play_changes state with
+      | Error detail -> Masc_tui_collab.Read_only ("Play recovery unavailable: " ^ detail)
+      | Ok () -> match current_play_change state origin with
       | None -> Masc_tui_collab.Writable
       | Some (Sending_invite_change _) -> Masc_tui_collab.Pending play_change_pending_notice
       | Some (Unknown_invite_change request) -> Masc_tui_collab.Uncertain (play_change_unknown_notice request)
@@ -8265,21 +8287,30 @@ let begin_play_change state kind =
   match workspace_change_origin state with
   | Error detail -> Error detail
   | Ok origin ->
+      let ( let* ) = Result.bind in
+      let* () = read_play_changes state in
       match current_play_change state origin with
       | Some (Sending_invite_change _) -> Error play_change_pending_notice
       | Some (Unknown_invite_change request) -> Error (play_change_unknown_notice request)
       | None ->
-          let request = {change_ticket = ref (); change_workspace = origin; change_kind = kind} in
+          let request = {change_ticket = ref (); change_id=Random_id.uuid_v7 ();
+            change_workspace = origin; change_kind = kind} in
+          let* () = Masc_tui_play_pending.prepare ~path:(play_pending_path state) (play_pending_entry request) in
           state.play_changes <- Sending_invite_change request :: state.play_changes;
           Ok request
 
 let finish_play_change state request outcome =
   let matches change = (play_change_request change).change_ticket == request.change_ticket in
   let owns = List.exists matches state.play_changes in
+  let settled = owns && (match outcome with
+    | Change_unknown -> false
+    | Change_confirmed ->
+        (match Masc_tui_play_pending.settle ~path:(play_pending_path state) (play_pending_entry request) with
+         | Ok settled -> settled | Error _ -> false)) in
   if owns then state.play_changes <- List.filter_map (fun change ->
     if not (matches change) then Some change else match outcome with
-    | Change_confirmed -> None
-    | Change_unknown -> Some (Unknown_invite_change request)) state.play_changes;
+    | Change_confirmed when settled -> None
+    | Change_confirmed | Change_unknown -> Some (Unknown_invite_change request)) state.play_changes;
   owns
 
 let withdraw_play_changes state =
@@ -8291,10 +8322,12 @@ let resolve_play_change state =
   match workspace_change_origin state with
   | Error detail -> Error detail
   | Ok origin ->
+      let ( let* ) = Result.bind in
+      let* () = read_play_changes state in
       match current_play_change state origin with
       | Some (Unknown_invite_change request) ->
-          ignore (finish_play_change state request Change_confirmed);
-          Ok ()
+          let* _ = Masc_tui_play_pending.settle ~path:(play_pending_path state) (play_pending_entry request) in
+          read_play_changes state
       | Some (Sending_invite_change _) -> Error play_change_pending_notice
       | None -> Error "There is no unknown invite change in this workspace."
 

@@ -1497,7 +1497,7 @@ let quiet_after_s = 2.0
 
 (* The model side's phase as one clause, or [None] before the first byte,
    where the named runtime is the subject instead. *)
-let model_phase_text ~now t =
+let model_phase_text ~show_timing ~now t =
   match t.model_signal with
   | None -> None
   | Some signal ->
@@ -1508,17 +1508,15 @@ let model_phase_text ~now t =
       | Answering_at since -> "STREAMING · answering", since
       | Tool_returned_at (tool_name, since) -> tool_name ^ " returned", since
     in
-    if now -. since < quiet_after_s then Some word
+    if not show_timing || now -. since < quiet_after_s then Some word
     else
       match Masc_tui_message_layout.age_text ~now ~since with
       | None -> Some word
       | Some age -> Some (Printf.sprintf "%s, nothing back for %s" word age)
 ;;
 
-let phase_text ~now t =
+let phase_text ~show_timing ~now t =
   match t.phase with
-  | Waiting when awaiting_continuation t ->
-      "waiting for the Keeper to continue; this request is still open"
   | Waiting -> (
       (* The wait before RUN_STARTED is the one an operator cannot read from
          the outside. Saying which of the two it is -- the keeper's queue, or a
@@ -1607,6 +1605,7 @@ let phase_text ~now t =
       (* Keep the age beside the current pending calls. A held approval's
          age belongs to the approval surface, not another call's progress. *)
       let in_this_call =
+        if not show_timing then "" else
         match List.filter
           (fun (call : live_tool_call) ->
             Some call.local_id <> awaiting_call
@@ -1642,6 +1641,7 @@ let phase_text ~now t =
          then went quiet for ten seconds reports the minute. Which of the two
          is growing is the difference between slow and stuck. *)
       let silent_for =
+        if not show_timing then "" else
         match t.runtime_named_at with
         | None -> ""
         | Some since -> (
@@ -1672,7 +1672,7 @@ let phase_text ~now t =
       let leading =
         if has_pending_activity then runtime_tag
         else
-          match model_phase_text ~now t with
+          match model_phase_text ~show_timing ~now t with
           | Some phase -> String.concat " \xc2\xb7 " (List.filter (fun part -> part <> "") [phase; runtime_tag])
           | None -> (
             match t.current_runtime_id with
@@ -1745,10 +1745,12 @@ let elapsed_text ~now t =
       else Some (Masc_tui_message_layout.span_text (ended -. t.started_at))
   | None -> Masc_tui_message_layout.age_text ~now ~since:t.started_at
 
-let progress_text ~now t =
+let progress_text ~show_timing ~now t =
+  let phase = phase_text ~show_timing ~now t in
+  if not show_timing then phase else
   match elapsed_text ~now t with
-  | None -> phase_text ~now t
-  | Some age -> Printf.sprintf "%s · %s" (phase_text ~now t) age
+  | None -> phase
+  | Some age -> Printf.sprintf "%s · %s" phase age
 
 (* The question, as an Attention row. It is the one row an operator has to act
    on, so it is styled like the others that need them rather than like
@@ -1763,9 +1765,9 @@ let awaiting_text t =
       | because -> Printf.sprintf "%s\n  because %s" base because)
     t.awaiting
 
-let status_rows ~now t =
+let status_rows ?(show_timing = true) ~now t =
   [ (if awaiting_continuation t then None
-     else Some (Progress, progress_text ~now t))
+     else Some (Progress, progress_text ~show_timing ~now t))
   ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text t)
   ; Option.map
       (fun settlement ->

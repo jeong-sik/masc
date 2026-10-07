@@ -12085,8 +12085,14 @@ let keeper_effects_at_the_gate (state : state) ~keeper_name =
    returns and the pane draws what this returns, which is the arrangement that
    kept the unavailable row from going missing while the send hint still read
    Enter:send. Folding would have been a second place to disagree. *)
-let keeper_message_unfolded_status_rows (_state : state) live ~now =
-  Masc_tui_keeper_chat_transcript.status_rows ~now live
+let keeper_message_timing_visible (state : state) =
+  match state.msg_origin_display with
+  | Masc_tui_message_layout.Origin_bare -> false
+  | Origin_inline | Origin_row -> true
+
+let keeper_message_unfolded_status_rows (state : state) live ~now =
+  Masc_tui_keeper_chat_transcript.status_rows
+    ~show_timing:(keeper_message_timing_visible state) ~now live
 
 (* The most recently submitted input can be queued behind the execution that
    is streaming. Status follows the selected execution, including a journal
@@ -12249,6 +12255,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
           ; keys = "" } ]
       | None ->
         Masc_tui_answering.chat_activity ~frame:state.activity_frame
+          ~show_timing:(keeper_message_timing_visible state)
           ?stop_keys:(keeper_observed_stop_hint state)
           ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
           state.keeper_turns
@@ -12529,6 +12536,7 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
   in
   let summary group =
     let age =
+      if not (keeper_message_timing_visible state) then "" else
       match Masc_tui_message_layout.age_text ~now ~since:group.representative.sent_at with
       | None -> ""
       | Some text -> " · " ^ text

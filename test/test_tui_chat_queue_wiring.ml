@@ -4383,6 +4383,21 @@ let test_observed_checkpoint_retains_earlier_output () =
     Tui_types.turn_log_add ~now:110. log ~seq:(Some 8) Live.Run_started;
     Tui_types.turn_log_add ~now:111. log ~seq:(Some 9) (Live.Text "TEXT_AFTER_CHECKPOINT");
     retained "continuation starts";
+    let status () = Tui_types.keeper_message_visible_status_rows state
+        log.tl_transcript ~now:172_911.
+      |> List.map snd |> String.concat "\n" in
+    check bool "resumed progress keeps its activity" true
+      (Astring.String.is_infix ~affix:"STREAMING" (status ()));
+    check bool "resumed progress hides the cumulative request age" false
+      (Astring.String.is_infix ~affix:"2d" (status ()));
+    check bool "resumed progress hides silence timing" false
+      (Astring.String.is_infix ~affix:"nothing back for" (status ()));
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    check bool "clock metadata restores elapsed details" true
+      (Astring.String.is_infix ~affix:"2d" (status ()));
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+    check bool "turning clocks off hides silence timers again" false
+      (Astring.String.is_infix ~affix:"nothing back for" (status ()));
     check bool "new continuation text also appears" true
       (Astring.String.is_infix ~affix:"TEXT_AFTER_CHECKPOINT" (screen ())))
 ;;

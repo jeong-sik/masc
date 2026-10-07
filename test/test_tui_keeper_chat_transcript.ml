@@ -12,7 +12,8 @@ let fresh () =
   Transcript.create ~keeper_name:"keeper.one" ~request_id:"req-1"
     ~started_at:origin
 
-let rows ?(now = origin) t = Transcript.status_rows ~now t
+let rows ?(show_timing = true) ?(now = origin) t =
+  Transcript.status_rows ~show_timing ~now t
 
 let feed ?(now = origin) t deltas =
   List.iter (Transcript.apply ~now t) deltas
@@ -894,6 +895,11 @@ let test_progress_row_carries_the_turn_age () =
        check bool "a turn that has not started yet still reports its age" true
          (contains ~needle:"12s" text)
    | got -> failf "expected a progress row, got %d rows" (List.length got));
+  (match rows ~show_timing:false ~now:(origin +. 12.) t with
+   | (Transcript.Progress, text) :: _ ->
+       check string "hiding timing keeps the admission fact"
+         "sent; not accepted yet" text
+   | got -> failf "expected admission progress, got %d rows" (List.length got));
   feed t [ Live.Run_started ];
   (match rows ~now:(origin +. 90.) t with
    | (Transcript.Progress, text) :: _ ->

@@ -4431,6 +4431,7 @@ let launch_browser_history state ~mailbox ~reload =
   | Some history ->
       state.browser_history_generation <- state.browser_history_generation + 1;
       let generation = state.browser_history_generation in
+      state.browser_history <- Some {history with resume=None};
       let host = server_peer_host and port = state.port in
       let fetch () =
         if reload then Browser_history_list_loaded (generation,
@@ -12072,6 +12073,10 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
        the bundle has no tick of its own to recover it. *)
     launch_surface_reads state ~mailbox state.view;
     if state.keeper_deletions_open then launch_keeper_deletions state ~mailbox ();
+    (match state.browser_history with
+     | Some {resume=Some resume; _} -> launch_browser_history state ~mailbox
+         ~reload:(match resume with Browser_history.Reload_list -> true | Reload_selection -> false)
+     | Some _ | None -> ());
     (* The bundle was cut under the old authority too: its approval listing
        carries the approval_flow generation the move replaced, so the
        listing and the Home operator summary are refused when it lands. Read
@@ -16697,6 +16702,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           state.tools_error <- None;
           normalize_tools_skill_cursor state
       | Error detail -> state.tools_error <- Some detail)
+  | Skill_evidence_loaded (request, key, result) ->
+      if Option.exists (fun held -> held == request) state.tools_evidence_request then (
+        state.tools_evidence_request <- None;
+        match result with
+        | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
+        | Ok json -> state.tools_skill_evidence <- Some (key, json))
   | Skills_catalog_loaded (generation, result) ->
       settle_tools_read state ~generation Tools_catalog_read;
       if generation = state.tools_request_generation then (
@@ -19119,20 +19130,24 @@ and is loaded on demand through keeper_skill.
                   launch_tools_load state ~mailbox:async_messages)))))
   in
   let handle_skill_evidence () =
-    match selected_tools_skill_profile state with
+    if not (server_authority_ready state) then
+      report_action state "error" "Workspace identity is unconfirmed; Skill evidence unavailable"
+    else match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
-      let key =
-        Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string
-      in
-      (match
-         Masc_tui_http.post_skill_evidence
-           ~host:server_peer_host
-           ~port:state.port
-           profile.esp_reference
-       with
-       | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
-       | Ok json -> state.tools_skill_evidence <- Some (key, json))
+      let key = Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string in
+      let request = ref () in
+      state.tools_evidence_request <- Some request;
+      let check = capture_workspace_check state ~mailbox:async_messages in
+      let host = server_peer_host and port = state.port in
+      launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id
+        ~deliver:(fun result -> Skill_evidence_loaded (request, key, result))
+        (fun () ->
+          let ( let* ) = Result.bind in
+          let* () = check () in
+          let* json = Masc_tui_http.post_skill_evidence ~host ~port profile.esp_reference in
+          let* () = check () in
+          Ok json)
   in
   let handle_skill_edit () =
     let check = capture_workspace_check state ~mailbox:async_messages in

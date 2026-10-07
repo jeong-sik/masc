@@ -4426,8 +4426,16 @@ module Browser_history = struct
     | Listing
     | List_failed of string
     | Entries of { entries : entry list; cursor : int; selection : selection }
-  type t = { keeper_name : string; content : content; scroll : int }
-  let create keeper_name = {keeper_name;content=Listing;scroll=0}
+  type resume = Reload_list | Reload_selection
+  type t = { keeper_name : string; content : content; scroll : int; resume : resume option }
+  let create keeper_name = {keeper_name;content=Listing;scroll=0;resume=None}
+  let suspend t =
+    let detail = "Workspace identity is unconfirmed; reading will resume after recovery" in
+    match t.content with
+    | Listing -> {t with content=List_failed detail; resume=Some Reload_list}
+    | Entries ({selection=Loading; _} as entries) ->
+        {t with content=Entries {entries with selection=Failed detail}; resume=Some Reload_selection}
+    | List_failed _ | Entries _ -> t
   let entries (snapshot : Tui_decode.keeper_calls_snapshot) =
     snapshot.kcs_entries |> List.rev |> List.concat_map (fun (call : Tui_decode.keeper_call) ->
       match call.kc_execution_id with
@@ -4439,7 +4447,7 @@ module Browser_history = struct
     | Entries {entries;cursor;_} -> List.nth_opt entries cursor
     | Listing | List_failed _ -> None
   let select cursor entries t =
-    {t with content=Entries {entries;cursor;selection=Loading};scroll=0}
+    {t with content=Entries {entries;cursor;selection=Loading};scroll=0;resume=None}
   let move delta t = match t.content with
     | Entries {entries;cursor;_} when entries <> [] ->
         let next = max 0 (min (List.length entries - 1) (cursor + delta)) in
@@ -5877,6 +5885,7 @@ type state = {
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
+  mutable tools_evidence_request: unit ref option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
@@ -6493,6 +6502,9 @@ let suspend_workspace_readings state =
     if view.generation = generation then suspend_account_login_read view)
     state.account_login_readings;
   state.account_login_readings <- [];
+  state.tools_evidence_request <- None;
+  state.browser_history_generation <- state.browser_history_generation + 1;
+  state.browser_history <- Option.map Browser_history.suspend state.browser_history;
   state.browser_lane <- Option.map (fun (view : Browser_lane_view.t) ->
     match view.load with
     | Browser_lane_view.Loading (_, operation) when Browser_lane_view.operation_is_read operation ->
@@ -8966,6 +8978,7 @@ let create_state
   tools_scroll = 0;
   tools_skill_cursor = 0;
   tools_skill_evidence = None;
+  tools_evidence_request = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
   lane_addons = None;

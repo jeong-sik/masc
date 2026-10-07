@@ -41,6 +41,14 @@ let () =
       ~bytes:2 ~mime:Masc.Browser_observation.mime ~preview:"" |> Result.map_error Tool_output.make_error_to_string |> ok in
   let entry : History.entry = {at=1.;execution_id="exec-observation";artifact} in
   let selected = History.select 0 [entry;{entry with execution_id="exec-older"}] waiting in
+  let suspended = History.suspend selected in
+  expect "read retirement releases the loading selection" (match suspended.content with
+    | Entries {selection=Failed _; _} -> true | _ -> false);
+  expect "same selected artifact is retained for recovery"
+    (History.selected suspended = History.selected selected);
+  expect "selection recovery is explicit" (suspended.resume = Some History.Reload_selection);
+  expect "list recovery is explicit"
+    ((History.suspend waiting).resume = Some History.Reload_list);
   expect "newer bound does not start another fetch" (History.move (-1) selected=None);
   let older = match History.move 1 selected with Some value -> value | None -> failwith "older observation missing" in
   expect "moving observation selects a distinct receipt"

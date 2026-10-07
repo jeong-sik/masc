@@ -157,6 +157,8 @@ type turn_result =
   ; wall_duration_s : float
   }
 
+type response_ending = Response_done | Response_error
+
 type stream_event =
   | Turn_started of
       { conversation_id : string
@@ -166,6 +168,7 @@ type stream_event =
       { step_index : int option
       ; text : string
       }
+  | Text_completed of { step_index : int; ending : response_ending }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.finished
   | Usage_reported of
@@ -356,19 +359,18 @@ let parse_step_state stage value =
     value
 ;;
 
-(* [step_type] decides two things: whether this step is a tool step, for the
-   two tool counters, and whether the next read runs without an idle window
-   ([read_phase]). Every non-[Tool] value is behaviourally identical, and a
-   value we have not seen takes that same path: no count, idle window armed,
-   which is what every step got before the tool-step exemption. Rejecting it
-   instead ends the turn and parks the session, which blocks every later turn
+(* [step_type] decides tool counters and the idle window, and a known
+   [Agent_response] now also supplies a content-end boundary. Other non-[Tool]
+   values retain the open-vocabulary admission behavior: no tool count and an
+   armed idle window. Unknown values never invent a response completion.
+   Rejecting an unknown value instead ends the turn and parks the session,
+   which blocks every later turn
    for that Keeper. Live 2026-08-10: Antigravity began emitting
    "system_message" and the affected Keeper stopped (#28027).
 
    #28029 opened this with [Unrecognized]; #28037 closed it again and named
    [System_message] instead. Naming the member that stalled a keeper leaves the
-   next one to stall it again, and nothing branches on [System_message] -- it
-   appears at its declaration and at this parse site only. Both are kept here:
+   next one to stall it again. Both are kept here:
    the known member keeps its name, and anything else is carried rather than
    rejected.
 
@@ -419,9 +421,9 @@ let parse_step_update fields =
   let* step_json = required_member stage "step_update" fields in
   let* step_fields = assoc_at stage step_json in
   let* conversation_id = restated_string stage "conversation_id" step_fields in
-  (* The ordinal is now carried only as optional native-tool identity. An absent
-     or drifted value therefore stays [None] instead of turning an otherwise
-     usable step update into a terminal protocol failure (#28010). *)
+  (* A usable ordinal identifies native or response content. Preserve the
+     existing optional-index admission contract (#28010): absence or drift
+     leaves content unassigned and cannot authorize an identified block end. *)
   let step_index =
     match List.assoc_opt "step_index" step_fields with
     | Some (`Int value) when value >= 0 -> Some value
@@ -663,6 +665,7 @@ type protocol_state =
   ; tool_errors : int
   ; last_step : (step_type * step_state) option
     (* The step the CLI reported last; [read_phase] is its only reader. *)
+  ; closed_responses : (int * (response_ending * string option)) list
   ; text_streamed : bool
     (* Whether any step update carried a piece of the answer. The result
        event repeats the whole response, so forwarding it again would show
@@ -676,6 +679,7 @@ let initial_protocol_state =
   ; tool_steps = 0
   ; tool_errors = 0
   ; last_step = None
+  ; closed_responses = []
   ; text_streamed = false
   }
 ;;
@@ -784,6 +788,20 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
        if Option.is_some state.result
        then protocol_error stage "received step_update after result"
        else
+         let ending = match step_type, step_state with
+           | Agent_response, Done -> Some Response_done
+           | Agent_response, Step_error -> Some Response_error
+           | Agent_response, Active
+           | (System_message | Tool | User_input | Internal | Checkpoint | Unrecognized _), _ -> None in
+         let* replay = match Option.bind step_index (fun index -> List.assoc_opt index state.closed_responses) with
+           | None -> Ok false
+           | Some (previous_ending, previous_delta) ->
+               (match ending with
+                | Some ending when ending = previous_ending
+                    && (text_delta = previous_delta || text_delta = None || text_delta = Some "") -> Ok true
+                | Some _ | None -> protocol_error stage "response content changed after its step ended") in
+         if replay then Ok state
+         else
          (* The answer reaches the reader as the model writes it. An empty
             delta says nothing, so it is not forwarded; [text_streamed]
             records that the result event has nothing left to add. *)
@@ -794,6 +812,11 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
              true
            | Some _ | None -> false
          in
+         let closed_responses = match step_index, ending with
+           | Some step_index, Some ending ->
+               emit_stream_event on_stream_event (Text_completed {step_index; ending});
+               (step_index, (ending, text_delta)) :: state.closed_responses
+           | (Some _ | None), None | None, Some _ -> state.closed_responses in
          let is_tool = step_type = Tool in
          if is_tool
          then (
@@ -824,6 +847,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
                  completion={outcome=Runtime_native_tools.Error_reported; exit_code=None}}));
          Ok
            { state with
+             closed_responses;
              tool_steps =
                state.tool_steps
                + if is_tool && step_state = Active then 1 else 0

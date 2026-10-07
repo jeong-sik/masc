@@ -18,8 +18,7 @@ let test_default_all_on () =
   let global = G.all_enabled and meta = G.all_enabled in
   check bool "reactive default on" true (enabled G.Reactive ~global ~meta);
   check bool "proactive default on" true (enabled G.Proactive ~global ~meta);
-  check bool "autonomous default on" true (enabled G.Autonomous ~global ~meta);
-  check bool "bootstrap default on" true (enabled G.Bootstrap ~global ~meta)
+  check bool "autonomous default on" true (enabled G.Autonomous ~global ~meta)
 
 let test_global_kill_switch () =
   (* Global [proactive] enabled=false must suppress proactive even though
@@ -31,8 +30,7 @@ let test_global_kill_switch () =
     (enabled G.Proactive ~global ~meta);
   check bool "other gates unaffected by proactive kill-switch" true
     (enabled G.Reactive ~global ~meta
-     && enabled G.Autonomous ~global ~meta
-     && enabled G.Bootstrap ~global ~meta)
+     && enabled G.Autonomous ~global ~meta)
 
 let test_per_keeper_flag () =
   (* Per-keeper meta flag off suppresses even when the global switch is on. *)
@@ -49,15 +47,14 @@ let test_both_off_and_and_semantics () =
   let meta = { G.all_enabled with autonomous = false } in
   check bool "both sides off → disabled" false
     (enabled G.Autonomous ~global ~meta);
-  let global_only = { G.all_enabled with bootstrap = false } in
-  check bool "global bootstrap off → bootstrap disabled" false
-    (enabled G.Bootstrap ~global:global_only ~meta:G.all_enabled)
+  let global_only = { G.all_enabled with autonomous = false } in
+  check bool "global autonomous off → autonomous disabled" false
+    (enabled G.Autonomous ~global:global_only ~meta:G.all_enabled)
 
 let test_gate_labels () =
   check string "reactive label" "reactive" (G.gate_to_string G.Reactive);
   check string "proactive label" "proactive" (G.gate_to_string G.Proactive);
-  check string "autonomous label" "autonomous" (G.gate_to_string G.Autonomous);
-  check string "bootstrap label" "bootstrap" (G.gate_to_string G.Bootstrap)
+  check string "autonomous label" "autonomous" (G.gate_to_string G.Autonomous)
 
 let () =
   run "keeper_lifecycle_gate"

@@ -2736,11 +2736,16 @@ def run_keeper_lanes_regression(executable: str) -> None:
         "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
     ] = hitl_lane_run_detail_response()
     fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
+    # Open turns ride the refresh tick after boot. A read sent before the
+    # first workspace identity reading answers under the old workspace
+    # authority and is dropped, so at the harness's 60 s cadence the turns
+    # never come back inside the wait.
     run_terminal_scenario(
         executable,
         description="a failing keeper's open turn reads failing",
         interact=a_failing_keepers_open_turn_reads_failing,
         http_fixtures=open_turn_roster_http_fixtures(time.time() - 42),
+        refresh=0.5,
     )
     run_terminal_scenario(
         executable,

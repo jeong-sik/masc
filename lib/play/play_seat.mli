@@ -14,7 +14,8 @@ val participants :
     credentials are agents' MCP clients, not seats at the machine. Credentials
     come from current named authority; explicitly departed credential
     generations are excluded. Only role/expiry-eligible credentials have their
-    participation read. Unavailable eligible participation or credential storage
+    participation read, including credentials matching independently listed
+    Keepers. Unavailable eligible participation or credential storage
     returns [Error]. *)
 
 val hand_to : Workspace.config -> now:float -> (string list, string) result

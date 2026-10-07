@@ -27,6 +27,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
   const requests = [], errors = [];
   let seatReads = 0, frameReads = 0, passed = false, ejected = false, padPressed = false, invited = false, released = false, connected = true;
+  let reconnectRefusals = 0, inputRefusal = null;
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     page.on('pageerror', error => errors.push(error.message));
@@ -57,11 +58,22 @@ async function main() {
         const body = request.postDataJSON();
         assert.deepEqual(Object.keys(body), ['connected']);
         assert.equal(typeof body.connected, 'boolean');
+        if (body.connected && reconnectRefusals > 0) {
+          reconnectRefusals -= 1;
+          return route.fulfill({ status:503, json:{ ok:false, error:'participation unavailable' } });
+        }
         connected = body.connected;
         if (!connected && !passed) released = true;
         json = { ok:true, connected };
       } else if (url.pathname === '/api/v1/dos/type') {
         assert.deepEqual(request.postDataJSON(), { text:'123' });
+        if (inputRefusal !== null) {
+          const status = inputRefusal;
+          inputRefusal = null;
+          return status === 413
+            ? route.fulfill({ status, contentType:'text/plain', body:'Payload too large' })
+            : route.fulfill({ status, json:{ error:'Too Many Requests', message:'Try later' } });
+        }
         json = { ok:true, data:{ keys_pressed:1 } };
       } else if (url.pathname === '/api/v1/dos/pass') {
         if (request.postDataJSON().to === 'operator') {
@@ -105,6 +117,15 @@ async function main() {
     await page.waitForFunction(() => document.getElementById('text').value === '23');
     assert.match(await page.locator('#status').textContent(), /일부만 입력/);
     assert.equal(requests.filter(request => request.path === '/api/v1/dos/type').length, 1);
+    for (const status of [413, 429]) {
+      inputRefusal = status;
+      await page.locator('#text').fill('123');
+      await page.locator('#send-text').click();
+      await page.waitForFunction(() => sessionStorage.getItem('masc.play.pending') === null
+        && !document.getElementById('send-text').disabled);
+      assert.equal(inputRefusal, null, 'the fixture actually rejected the submitted body');
+      assert.equal(await page.locator('#text').inputValue(), '123');
+    }
     await page.locator('#pass-to').focus();
     invited = true;
     await page.locator('#pass-to').click();
@@ -144,7 +165,16 @@ async function main() {
     assert.equal(released, true, 'server departure precedes local removal');
     assert.equal(await page.evaluate(() => sessionStorage.getItem('masc.play.invite')), 'fixture-token');
     assert.equal(await page.locator('#send-text').isDisabled(), true);
-    await page.evaluate(() => window.restoreStorageRemoval());
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('조종 연결을 끊었어요'));
+    assert.equal(connected, false, 'plain reload must preserve confirmed departure');
+    await page.locator('#leave').click();
+    await page.waitForFunction(() => sessionStorage.getItem('masc.play.invite') === null);
+    reconnectRefusals = 2;
+    await page.goto('http://play.fixture/play#fixture-token');
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('조종권이 비어'));
+    assert.equal(reconnectRefusals, 0, 'explicit reconnect retries both transient refusals');
+    assert.equal(connected, true);
     await page.locator('#leave').click();
     await page.waitForFunction(() => sessionStorage.getItem('masc.play.invite') === null);
     assert.deepEqual(errors, []);
@@ -157,7 +187,10 @@ async function main() {
         'pass updates controller and disables input', 'eject clears pixels', 'disconnect removes tab credential',
         'atomic session departure precedes credential removal', 'departed same-link reopen explicitly reconnects',
         'partial DOS text retains unpressed suffix without replay', 'storage deletion failure retains credential and disables game input',
-        'retry after storage deletion failure completes disconnect', 'HTTP origin supports mutation randomness'],
+        'retry after storage deletion failure completes disconnect', 'HTTP origin supports mutation randomness',
+        'confirmed departure survives plain reload after storage cleanup failure',
+        'explicit invitation retries two transient reconnect refusals',
+        'plain-text 413 and rate-limit 429 settle without losing the draft'],
       requests, errors };
     await writeFile(resolve(output, 'play-browser.json'), JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify({ result: 'PASS', output, checks: receipt.checks }));

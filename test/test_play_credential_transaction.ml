@@ -673,10 +673,61 @@ let test_cancelled_disconnect_does_not_publish_departure () =
   check bool "cancelled admission retains eligibility" true (List.mem "player" names);
   check (option string) "cancelled admission retains ownership" (Some "player") (controller ())
 
+let test_departed_worker_keeper_is_not_a_handoff_target () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = auth_ok (Auth.ensure_keeper_credential config.base_path ~agent_name:"player") in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String "player"; "trace_id", `String "keeper-participation"]) with
+    | Ok meta -> meta | Error detail -> fail detail in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> () | Error detail -> fail detail);
+  operator_holds config;
+  participation_ok (participate config token Play_participation.Departed);
+  refused_target "departed Keeper with a Worker credential" (hand_to config "player");
+  check (option string) "refused Keeper handoff preserves the holder" (Some "operator") (controller ());
+  participation_ok (participate config token Play_participation.Connected);
+  ignore (handed (hand_to config "player"))
+
+let test_departed_caller_cannot_pass_a_free_controller () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = renew config in
+  ignore (auth_ok (Auth.create_token config.base_path ~agent_name:"operator" ~role:Masc_domain.Admin));
+  participation_ok (participate config token Play_participation.Departed);
+  let pass () = Keeper_dos_controller.execute ~config ~who:"player" ~name:"masc_dos_pass"
+      ~args:(`Assoc ["to", `String "operator"])
+      ~run:(fun () -> fail "pass cannot bypass its admitted lane effect") in
+  check bool "departure blocks handoff admission" true (Result.is_error (pass ()));
+  check (option string) "free controller remains free" None (controller ());
+  participation_ok (participate config token Play_participation.Connected);
+  ignore (handed (pass ()));
+  check (option string) "reconnected caller can pass" (Some "operator") (controller ())
+
+let test_independent_departure_recovers_damaged_participation () =
+  List.iter (fun stopped_keeper ->
+    with_machine @@ fun config _ credential ->
+    if stopped_keeper then (
+      let meta = match Masc_test_deps.meta_of_json_fixture
+          (`Assoc ["name", `String "player"; "trace_id", `String "stopped-holder"]) with
+        | Ok meta -> meta | Error detail -> fail detail in
+      match Keeper_meta_store.replace_snapshot config meta with
+      | Ok () -> () | Error detail -> fail detail);
+    auth_ok (Auth.with_credential_transaction config.base_path (fun transaction ->
+      match Play_participation.write ~transaction ~base_path:config.base_path credential Connected with
+      | Ok () -> () | Error detail -> fail detail));
+    let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "play" in
+    Array.iter (fun file -> Out_channel.with_open_bin (Filename.concat directory file)
+        (fun channel -> output_string channel "malformed")) (Sys.readdir directory);
+    recovered (recover config);
+    check (option string) (if stopped_keeper then "stopped Keeper is recoverable" else "expired credential is recoverable")
+      None (controller ())) [false; true]
+
 let () =
   run "play_credential_transaction"
     [ "controller recovery",
       [ test_case "current discovery follows regular symlinks" `Quick test_current_listing_follows_regular_symlink
+      ; test_case "departed Worker Keepers are excluded from handoffs" `Quick test_departed_worker_keeper_is_not_a_handoff_target
+      ; test_case "departed callers cannot pass a free controller" `Quick test_departed_caller_cannot_pass_a_free_controller
+      ; test_case "independent stop and expiry survive damaged participation" `Quick test_independent_departure_recovers_damaged_participation
       ; test_case "disconnect precedes racing and future handoffs" `Quick test_disconnect_before_handoff_prevents_future_assignment
       ; test_case "a racing earlier handoff is released before disconnect returns" `Quick test_handoff_before_disconnect_is_released_inside_admission
       ; test_case "late admitted moves cannot strand a departed holder" `Quick test_departed_generation_recovers_a_late_admitted_move

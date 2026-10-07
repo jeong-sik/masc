@@ -7,9 +7,9 @@ let keeper_names config =
       List.sort_uniq String.compare (persisted @ Keeper_meta_store.configured_keeper_names config))
     (Keeper_meta_store.keeper_names_result config)
 
-let eligible_credentials ~now credentials =
+let eligible_credentials ~keepers ~now credentials =
   let eligible (cred : Masc_domain.agent_credential) =
-    match cred.role with
+    List.mem cred.agent_name keepers || match cred.role with
     | Masc_domain.Admin | Masc_domain.Player ->
       (match Play_invite.expired ~now cred with
        | Ok false -> true
@@ -36,7 +36,7 @@ let connected_credentials ~transaction ~base_path credentials =
 let participants_in_transaction ~transaction ~base_path ~keepers ~now =
   let ( let* ) = Result.bind in
   let* credentials = Auth.list_current_credentials_in_transaction transaction in
-  let credentials = eligible_credentials ~now credentials in
+  let credentials = eligible_credentials ~keepers ~now credentials in
   let* credentials, departed = connected_credentials ~transaction ~base_path credentials in
   let keepers = List.filter (fun name -> not (List.mem name departed)) keepers in
   let names = List.map (fun (cred : Masc_domain.agent_credential) -> cred.agent_name) credentials in

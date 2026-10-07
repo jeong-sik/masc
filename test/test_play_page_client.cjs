@@ -89,6 +89,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token',
   const settle = () => new Promise(resolve => setImmediate(resolve));
   return {
     get, padButton, rendered, requests, settle,
+    get timerCount() { return timers.length; },
     get reloads() { return reloads; },
     get hash() { return location.hash; },
     navigateFragment(hash) { context.location.hash = hash; windowHandlers.get('hashchange')?.(); },
@@ -1038,6 +1039,82 @@ test('a plain-text 413 settles the rejected input without losing its draft', asy
   assert.match(page.get('status').textContent, /413/);
   await page.get('leave').handlers.click();
   assert.equal(storage.size, 0, 'a refused input does not block departure');
+});
+
+test('a pre-dispatch 429 preserves the draft and allows a later retry', async () => {
+  const storage = new Map();
+  let attempts = 0;
+  const page = fixture(request => request.url === '/api/v1/dos/type'
+    ? ++attempts === 1 ? response({ error:'Too Many Requests', message:'Try later' }, 429)
+      : response({ ok:true, data:{ keys_pressed:3 } })
+    : normalReply(request), { storage });
+  await page.settle();
+  page.get('text').value = '123';
+  page.get('send-text').handlers.click();
+  await page.settle();
+  assert.equal(storage.has('masc.play.pending'), false);
+  assert.equal(page.get('text').value, '123');
+  assert.equal(page.padButton.disabled, false);
+  page.get('send-text').handlers.click();
+  await page.settle();
+  assert.equal(page.get('text').value, '');
+  assert.equal(attempts, 2);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.size, 0);
+});
+
+for (const status of [401, 403]) {
+  test(`storage-blocked observation ends on terminal authentication ${status}`, async () => {
+    const storage = new Map([['masc.play.invite', 'unread-identity']]);
+    storage.get = () => { throw new Error('storage blocked'); };
+    const page = fixture(() => response({}, status), { storage });
+    await page.settle();
+    assert.match(page.get('turn').textContent, /초대가 끝났거나 회수됐어요/);
+    assert.equal(page.get('leave').disabled, true);
+    assert.equal(page.requests.length, 1);
+    assert.equal(page.timerCount, 0);
+    assert.equal(Map.prototype.get.call(storage, 'masc.play.invite'), 'unread-identity');
+  });
+}
+
+test('disconnect does not wait for an initial seat read that never answers', async () => {
+  const storage = new Map();
+  let finishSeat;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? new Promise(resolve => { finishSeat = () => resolve(response({ ...seat, connected:false })); })
+    : normalReply(request), { storage });
+  await page.settle();
+  let completed = false;
+  page.get('leave').handlers.click().then(() => { completed = true; });
+  await page.settle();
+  assert.equal(completed, true);
+  assert.equal(storage.size, 0);
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:false }]);
+  finishSeat();
+  await page.settle();
+  assert.equal(page.requests.filter(request => request.method === 'POST').length, 1, 'late seat cannot reconnect');
+});
+
+test('disconnect drains an already admitted reconnect before departing', async () => {
+  const storage = new Map();
+  let finishReconnect;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected:false }) : normalReply(request), { storage,
+    sessionReply: ({ body }) => body.connected
+      ? new Promise(resolve => { finishReconnect = () => resolve(response({ ok:true, connected:true })); })
+      : response({ ok:true, connected:false }) });
+  await page.settle();
+  let completed = false;
+  page.get('leave').handlers.click().then(() => { completed = true; });
+  await page.settle();
+  assert.equal(completed, false);
+  assert.equal(page.requests.filter(request => request.method === 'POST').length, 1);
+  finishReconnect();
+  await page.settle();
+  assert.equal(completed, true);
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body),
+    [{ connected:true }, { connected:false }]);
+  assert.equal(storage.size, 0);
 });
 
 test('an old initial seat response cannot reconnect after a newer document disconnects', async () => {

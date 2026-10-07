@@ -46,7 +46,7 @@ def run(executable):
         os.write(master_fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(executable, description="Answering fits long ASCII and CJK names without losing lane or age",
-                            interact=inspect_running, http_fixtures=fixtures)
+                            interact=inspect_running, http_fixtures=fixtures, refresh=0.5)
 
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/turns"] = (200, {
@@ -71,7 +71,7 @@ def run(executable):
         os.write(master_fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(executable, description="Answering scrolls unavailable rows with movement, page and edge keys",
-                            interact=inspect_unavailable, http_fixtures=fixtures)
+                            interact=inspect_unavailable, http_fixtures=fixtures, refresh=0.5)
 
     for page_key, move_key, target in ((b"\x1b[6~", b"j", b"beta"),
                                       (b"\x1b[F", b"k", b"alpha")):
@@ -113,12 +113,15 @@ def run(executable):
             _keyboard_harness.drain_until_quiet(process, master_fd, output)
             assert not any(b"MASC Answering" in row for row in current_rows(output)), current_rows(output)
             # In chat q belongs to the draft. Leave chat before asking to quit.
-            _keyboard_harness.escape_to_keeper_detail(process, master_fd, output, name=target)
+            # The Answering pane opens the chat with return_to=list, so Esc
+            # leaves it for the roster, not the keeper detail.
+            _keyboard_harness.escape_to_keeper_detail(process, master_fd, output, name=target,
+                                      destination=b"MASC Keepers")
             os.write(master_fd, b"q")
 
         _keyboard_harness.run_terminal_scenario(executable,
             description="Answering ignores invisible Enter then follows " + move_key.decode() + " back to a visible target",
-            interact=inspect_paged_selection, http_fixtures=fixtures)
+            interact=inspect_paged_selection, http_fixtures=fixtures, refresh=0.5)
     print("tui answering layout: PASS")
 
 

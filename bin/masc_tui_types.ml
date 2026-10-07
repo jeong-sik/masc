@@ -7533,11 +7533,9 @@ let advance_keeper_chat_control state keeper_name =
     List.remove_assoc keeper_name state.keeper_chat_control_generations;
   generation
 
-let begin_keeper_chat_control ?(preserve_input_holds = false) state keeper_name =
-  let previous_generation = keeper_chat_control_generation state keeper_name in
-  let generation = advance_keeper_chat_control state keeper_name in
-  state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
-  state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+(* A server control that stops or resumes the owner supersedes the priority
+   requests still waiting locally for that Keeper. *)
+let clear_keeper_priority_requests state keeper_name =
   state.keeper_run_next_pending <- List.filter
     (fun (request : Masc_tui_keeper_chat_projection.request) ->
        not (String.equal request.keeper_name keeper_name))
@@ -7546,6 +7544,21 @@ let begin_keeper_chat_control ?(preserve_input_holds = false) state keeper_name 
     (fun (request : Masc_tui_keeper_chat_projection.request) ->
        not (String.equal request.keeper_name keeper_name))
     state.keeper_run_next_ready;
+  state.keeper_auto_priority_pending <- List.filter
+    (fun (name, _) -> not (String.equal name keeper_name))
+    state.keeper_auto_priority_pending
+
+(* [preserve_priority_requests] is for a resume that first reads the owner's
+   state: when the read fails or the owner is already running, no server
+   control happened, so waiting priority requests stay. The caller clears them
+   with [clear_keeper_priority_requests] once a server resume is confirmed. *)
+let begin_keeper_chat_control ?(preserve_input_holds = false)
+    ?(preserve_priority_requests = false) state keeper_name =
+  let previous_generation = keeper_chat_control_generation state keeper_name in
+  let generation = advance_keeper_chat_control state keeper_name in
+  state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
+  state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  if not preserve_priority_requests then clear_keeper_priority_requests state keeper_name;
   (* Keep acknowledged evidence and active callbacks until the control's
      semantic result arrives. The token callback alone is not that result. *)
   let previous = List.concat_map (fun (name, control) ->
@@ -7559,9 +7572,6 @@ let begin_keeper_chat_control ?(preserve_input_holds = false) state keeper_name 
   state.keeper_priority_controls <-
     (keeper_name, { priority_generation = generation; priority_requests = requests }) ::
     state.keeper_priority_controls;
-  state.keeper_auto_priority_pending <- List.filter
-    (fun (name, _) -> not (String.equal name keeper_name))
-    state.keeper_auto_priority_pending;
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
     let intervention =
       if name <> keeper_name then intervention

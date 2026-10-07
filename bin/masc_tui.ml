@@ -7893,7 +7893,8 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
   let control_generation = match action with
     | Inbox.Pause | Inbox.Resume ->
-        Some (begin_keeper_chat_control ~preserve_input_holds:local_resume state keeper_name)
+        Some (begin_keeper_chat_control ~preserve_input_holds:local_resume
+                ~preserve_priority_requests:local_resume state keeper_name)
     | _ -> None in
   let check_control () =
     Result.bind (check_authority ()) (fun () ->
@@ -7936,11 +7937,21 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
                | Unobserved | Invalid _ ->
                  Error "Keeper pause state is unavailable; input remains retained") in
         let* () = check_control () in
-        if not owner_paused then Ok ["Server confirmed the Keeper is active"] else
+        (* The retained input leaves as soon as the owner is confirmed, ahead
+           of the informational queue reads below. *)
+        let confirm confirmation =
+          if action = Inbox.Resume then
+            Option.iter (fun generation ->
+              enqueue_async mailbox (Keeper_queue_resume_confirmed (keeper_name, generation, confirmation)))
+              control_generation in
+        if not owner_paused then begin
+          confirm Owner_already_active;
+          Ok ["Server confirmed the Keeper is active"]
+        end else
         let* status, body = Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
           ~action:verb ~operator_operation_id in
         (match Keeper_control.classify_response ~status ~body with
-         | Keeper_control.Accepted _ -> Ok ["Server confirmed queue " ^ verb]
+         | Keeper_control.Accepted _ -> confirm Owner_resumed; Ok ["Server confirmed queue " ^ verb]
          | Keeper_control.Rejected {detail;_} | Keeper_control.Paused_owner_conflict detail -> Error detail
          | Keeper_control.Purge_accepted _ -> Error "Unexpected purge response to queue directive")
       | Inbox.Cancel_event (reference, incarnation, _) | Inbox.Prioritize_event (reference, incarnation, _) ->
@@ -13506,18 +13517,25 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Some (installer,error) ->
             {view with loading=false;installer=Some installer;
               error=Option.bind error lane_addons_detail_failure;scroll=0})
-  | Keeper_queue_loaded (keeper_name, control_generation, action, result) ->
+  | Keeper_queue_resume_confirmed (keeper_name, generation, confirmation) ->
+      settle_keeper_priority_control state keeper_name ~generation
+        ~outcome:(match confirmation with
+          | Owner_resumed -> Priority_superseded
+          | Owner_already_active -> Priority_unconfirmed);
+      if finish_keeper_chat_control state keeper_name ~generation then begin
+        (match confirmation with
+         | Owner_resumed -> clear_keeper_priority_requests state keeper_name
+         | Owner_already_active -> ());
+        release_retained_keeper_input state keeper_name;
+        launch_waiting_keeper_input state ~mailbox ~keeper_name
+      end
+  | Keeper_queue_loaded (keeper_name, control_generation, _, result) ->
       Option.iter (fun generation -> settle_keeper_priority_control state keeper_name
         ~generation ~outcome:(match result with
           | Ok _ -> Priority_superseded | Error _ -> Priority_unconfirmed)) control_generation;
-      let current_control = match control_generation with
-        | Some generation -> finish_keeper_chat_control state keeper_name ~generation
-        | None -> false in
-      (match action, result with
-       | Masc_tui_queue_inspection.Resume, Ok _ when current_control ->
-         release_retained_keeper_input state keeper_name;
-         launch_waiting_keeper_input state ~mailbox ~keeper_name
-       | (Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _ | Cancel_event _ | Prioritize_event _), (Ok _ | Error _) -> ());
+      Option.iter (fun generation ->
+        ignore (finish_keeper_chat_control state keeper_name ~generation : bool))
+        control_generation;
       state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
       launch_keeper_turns_load state ~mailbox;
       let kind, lines = match result with

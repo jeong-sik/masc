@@ -711,6 +711,33 @@ let test_control_receipts_are_scoped_to_each_keeper () =
     (Tui_types.finish_keeper_chat_control state "beta" ~generation:beta)
 ;;
 
+let test_preflight_resume_keeps_priority_intents_until_server_resume () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let alpha = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"alpha" () in
+  let beta = Keeper_chat.create_request ~keeper_name:"beta" ~message:"beta" () in
+  let ids requests =
+    List.map (fun (request : Keeper_chat.request) -> request.request_id) requests in
+  state.keeper_run_next_pending <- [alpha; beta];
+  state.keeper_run_next_ready <- [alpha; beta];
+  state.keeper_auto_priority_pending <- ["alpha", alpha.request_id; "beta", beta.request_id];
+  let resume =
+    Tui_types.begin_keeper_chat_control ~preserve_priority_requests:true state "alpha" in
+  check (list string) "an unconfirmed preflight keeps pending priority intents"
+    [alpha.request_id; beta.request_id] (ids state.keeper_run_next_pending);
+  check (list string) "an unconfirmed preflight keeps ready priority intents"
+    [alpha.request_id; beta.request_id] (ids state.keeper_run_next_ready);
+  check (list string) "an unconfirmed preflight keeps automatic priority"
+    ["alpha"; "beta"] (List.map fst state.keeper_auto_priority_pending);
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:resume : bool);
+  Tui_types.clear_keeper_priority_requests state "alpha";
+  check (list string) "a confirmed server resume drops only alpha pending intents"
+    [beta.request_id] (ids state.keeper_run_next_pending);
+  check (list string) "a confirmed server resume drops only alpha ready intents"
+    [beta.request_id] (ids state.keeper_run_next_ready);
+  check (list string) "a confirmed server resume drops only alpha automatic priority"
+    ["beta"] (List.map fst state.keeper_auto_priority_pending)
+;;
+
 let test_new_control_discards_only_its_keeper_priority_intents () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
   let alpha = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"alpha" () in
@@ -4372,6 +4399,7 @@ let () =
         [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
         ; test_case "preflight recovery keeps newer input and full queue" `Quick test_preflight_recovery_keeps_newer_input_and_a_full_queue
         ; test_case "preflight recovery preserves order and steer intent" `Quick test_preflight_recovery_preserves_order_and_steer_intent
+        ; test_case "preflight resume keeps priority intents until a server resume" `Quick test_preflight_resume_keeps_priority_intents_until_server_resume
         ; test_case "preflight local resume preserves FIFO and server stops" `Quick test_preflight_local_resume_keeps_fifo_and_respects_server_stop
         ; test_case "workspace suspension preserves real stop ownership" `Quick test_workspace_suspension_preserves_real_stop_ownership
         ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership

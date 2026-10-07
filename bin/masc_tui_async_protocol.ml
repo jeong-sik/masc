@@ -109,11 +109,18 @@ type currency_authority_request = {
   car_identity : Masc.Tui_decode.server_identity option;
 }
 
+(* What the resume preflight learned about the Keeper's owner before the queue
+   snapshot is read. *)
+type resume_confirmation =
+  | Owner_resumed
+  | Owner_already_active
+
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
   | Workspace_identity_unconfirmed of string
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
+  | Keeper_queue_resume_confirmed of string * int * resume_confirmation
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket

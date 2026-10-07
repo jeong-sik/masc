@@ -133,8 +133,11 @@ val emit_prompt_metrics :
   system_prompt:string ->
   turn_prompt_parts ->
   unit
-(** Publish the per-segment byte gauges and the instruction hash for one
-    autonomous turn. [system_prompt] is the one the turn sends. *)
+(** Publish the per-segment byte gauges and the instruction hash after an
+    autonomous request has been assembled using its offered tool surface.
+    Inputs are the request's system prompt, projected world state and model
+    message, not the pre-tool source placeholder. This observes prepared input,
+    not provider delivery; omitted post-tool context does not replace it. *)
 
 (** Build the per-turn channels of the unified prompt: the observation frame
     and the user message. The system prompt is not built here; the turn sends

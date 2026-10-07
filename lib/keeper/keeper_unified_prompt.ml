@@ -1474,6 +1474,9 @@ let format_recent_work = function
   | Evidence evidence ->
     Some (render_fragment Prompt_names.keeper_world_recent_work
             [ "evidence", evidence ] ^ "\n\n")
+  | Preview evidence ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work_preview
+            [ "evidence", evidence ] ^ "\n\n")
   | Unavailable detail ->
     Some (render_fragment Prompt_names.keeper_world_recent_work
             [ "evidence", Yojson.Safe.to_string (`Assoc ["unavailable", `String detail]) ] ^ "\n\n")

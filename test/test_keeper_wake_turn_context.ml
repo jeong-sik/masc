@@ -1141,7 +1141,7 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
             | _ -> fail "the offered artifact reader could not recover recent work")
          | Tool_output.Not_marker -> text
          | Tool_output.Invalid_marker _ -> fail "invalid work artifact")
-      | Absent | Unavailable _ -> fail "work evidence missing" in
+      | Absent | Preview _ | Unavailable _ -> fail "work evidence missing" in
     let recent_work = project source in
     let evidence = read_evidence recent_work in
     let decision = WO.keeper_cycle_decision

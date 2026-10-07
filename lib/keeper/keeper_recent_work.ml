@@ -16,9 +16,14 @@ let collect ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
       ~session_dir ~roles:[Agent_core.Types.Assistant] ~limit:1 Internal in
   { conversation; autonomous_reply }
 
-type transmission = Absent | Evidence of string | Unavailable of string
+type transmission = Absent | Evidence of string | Preview of string | Unavailable of string
 
-let transmit ~base_path ~tools work =
+type audience = Request of Agent_core.Tool.t list | Operator_preview
+
+let project ~base_path ~audience work =
+  let evidence text = match audience with
+    | Request _ -> Evidence text
+    | Operator_preview -> Preview text in
   let message_json (observed : Keeper_turn_fragments.observed_message) =
     `Assoc
       [ "turn_ref", Ids.Turn_ref.to_yojson observed.turn_ref
@@ -38,12 +43,18 @@ let transmit ~base_path ~tools work =
     (* The existing artifact preview envelope is already safe to carry inline.
        Everything larger travels through its canonical reader, independently
        of the history's Wide/Small policy: this is extra pinned context. *)
-    if String.length bytes <= Tool_blob_store.preview_max then Evidence bytes
-    else match Keeper_recovery_transmission.require_reader tools with
+    if String.length bytes <= Tool_blob_store.preview_max then evidence bytes
+    else match (match audience with
+      | Operator_preview -> Ok ()
+      | Request tools -> Keeper_recovery_transmission.require_reader tools) with
     | Error _ -> Unavailable "Recent-work excerpt requires the canonical artifact reader; this tool surface does not offer it. Use retained conversation; absence of this excerpt does not mean no work remains."
     | Ok () ->
       (try
          let marker = Tool_blob_store.put (Tool_blob_store.create ~base_path)
              ~bytes ~mime:"application/json" |> Tool_output.encode_for_agent_core in
-         Evidence (if String.length marker < String.length bytes then marker else bytes)
+         evidence (if String.length marker < String.length bytes then marker else bytes)
        with Sys_error detail -> Unavailable ("Recent-work artifact could not be stored: " ^ detail))
+
+
+let transmit ~base_path ~tools work = project ~base_path ~audience:(Request tools) work
+let preview ~base_path work = project ~base_path ~audience:Operator_preview work

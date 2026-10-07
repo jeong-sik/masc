@@ -958,8 +958,8 @@ let run_keeper_cycle
                  : Keeper_agent_run.turn_prompt
                  =
                  sent_system_prompt_bytes := Some (String.length base_system_prompt);
-                 Keeper_unified_prompt.emit_prompt_metrics
-                   ~meta ~system_prompt:base_system_prompt prompt_parts;
+                 (* Request metrics are emitted by the pre-request hook after
+                    the offered tool surface selects the transmitted context. *)
                  (* The observation frame rides [dynamic_context]: rebuilt fresh
                     every turn and composed into the per-turn system prompt, so
                     it never enters the persisted AGENT_CORE conversation. Persisting

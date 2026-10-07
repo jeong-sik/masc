@@ -10,8 +10,14 @@ val collect : config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -
     request. Physical window omission remains explicit; it is not absence of
     conversation. Uses the trace from [meta], never a host-global history. *)
 
-type transmission = Absent | Evidence of string | Unavailable of string
+type transmission = Absent | Evidence of string | Preview of string | Unavailable of string
 val transmit : base_path:string -> tools:Agent_core.Tool.t list -> t -> transmission
 (** A bounded pinned-context view. Larger excerpts are content-addressed only
     when the actual tool surface offers the canonical reader. Failed storage
     or an unavailable reader never puts the oversized excerpt back inline. *)
+
+val preview : base_path:string -> t -> transmission
+(** An operator inspection of the current history excerpt, explicitly marked
+    [Preview]. It can store a retrievable artifact without claiming that an
+    as-yet-unselected runtime offers its reader. Storage failure remains
+    [Unavailable], and [Absent] still means neither source yielded context. *)

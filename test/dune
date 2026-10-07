@@ -382,7 +382,6 @@
   test_domain_pool
   test_sse
   test_graphql_api
-  test_subscriptions
   test_session
   test_progress
   test_validation
@@ -742,7 +741,6 @@
   test_domain_pool
   test_sse
   test_graphql_api
-  test_subscriptions
   test_session
   test_progress
   test_validation

@@ -587,6 +587,10 @@ val chat_title_row :
 (** Fit a chat navigation title while reserving the complete projection-mode
     suffix first. The opaque title yields width before semantic display state. *)
 
+val entry_body_cells : origin:origin_display -> inner_width:int -> entry -> int
+(** Available body cells after the entry's rail, origin and indentation. A
+    continued origin occupies the same padded width as its opening origin. *)
+
 val chat_role_label_width : pane_cells:int -> int
 (** The badge budget for a pane this wide. It does not read the labels: body
     width is taken from what the badge leaves, so measuring the loaded

@@ -3064,6 +3064,78 @@ let test_a_folded_reasoning_block_is_the_count_and_the_key () =
     check bool "the reasoning itself stays folded" false (has "then the test"))
 ;;
 
+let test_thinking_fold_tracks_origin_body_budget () =
+  let module Layout = Masc_tui_message_layout in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let thought = String.make 70 'x' in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+  state.msg_history <- [chat_entry ~request_id:"boundary-thought" ~role:Tui_types.Message_thinking
+      ~text:thought ~at:1. ()];
+  let body origin =
+    state.msg_origin_display <- origin;
+    match Masc_tui_render_chat.keeper_message_layout_entries state ~keeper_name:"alpha" ~chat_cols:80 with
+    | [entry] -> entry.Layout.body
+    | _ -> fail "expected one thinking entry" in
+  check string "one body row needs no fold" thought (body Layout.Origin_row);
+  check bool "inline gutter leaves less room so the same thought folds" true
+    (Astring.String.is_infix ~affix:"1 line folded" (body Layout.Origin_inline));
+  check string "returning to row origin invalidates the compact cached body" thought
+    (body Layout.Origin_row)
+;;
+
+let test_folded_single_line_reasoning_stays_compact () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> () in
+  let thought = String.concat " " (List.init 200 (fun _ -> "추론")) ^ " TAIL_UNFOLDED" in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    List.iter (fun columns ->
+      set_size (40, columns);
+      List.iter (fun origin ->
+        List.iter (fun journal ->
+          let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+          state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+          state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+          state.msg_target_keeper_name <- Some "alpha";
+          state.msg_origin_display <- origin;
+          if journal then begin
+            let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"long-thought"
+                ~started_at:1. in
+            List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
+              [Live.Run_started; Live.Thinking thought; Live.Text "VISIBLE_ANSWER";
+               Live.Reply_details {reply="VISIBLE_ANSWER";
+                 turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="alpha#1"};
+               Live.Run_finished];
+            Log.commit log.Tui_types.tl_log;
+            state.msg_settled_logs <- [log]
+          end else
+            state.msg_history <-
+              [chat_entry ~request_id:"long-thought" ~role:Tui_types.Message_thinking
+                 ~text:thought ~at:1. ();
+               chat_entry ~request_id:"long-thought" ~role:Tui_types.Message_keeper
+                 ~text:"VISIBLE_ANSWER" ~at:2. ()];
+          let screen mode =
+            state.msg_reasoning_visibility <- mode;
+            let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+            List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+          let has needle = List.exists (Astring.String.is_infix ~affix:needle) in
+          let folded = screen Tui_types.Reasoning_folded in
+          check bool "long one-line reasoning is summarized" true (has "1 line folded" folded);
+          check bool "folded reasoning does not draw its tail" false (has "TAIL_UNFOLDED" folded);
+          check bool "answer remains visible beside folded reasoning" true (has "VISIBLE_ANSWER" folded);
+          let full = screen Tui_types.Reasoning_full in
+          check bool "full mode restores the original reasoning" true (has "TAIL_UNFOLDED" full);
+          let hidden = screen Tui_types.Reasoning_hidden in
+          check bool "hidden mode draws neither reasoning nor fold summary" false
+            (has "TAIL_UNFOLDED" hidden || has "1 line folded" hidden))
+          [false; true])
+        [Masc_tui_message_layout.Origin_inline; Origin_row; Origin_bare])
+      [80; 140])
+;;
+
 (* A turn this pane did not open -- a TUI restarted mid-turn, a turn another
    surface opened -- is drawn from its journal while it runs. The journal
    reads fed a log that was held and drawn nowhere until the turn ended, so
@@ -4513,6 +4585,8 @@ let test_link_cards_use_actual_message_body_width () =
       List.iter (fun turn_rail ->
         let entry = { entry with Layout.timestamp = "12:34:56"; turn_rail } in
         let markdown ~entry ~width =
+          check int "entry budget matches the physical renderer" width
+            (Layout.entry_body_cells ~origin ~inner_width entry);
           let source = Render.chat_body_with_previews ~preview:Preview.get_preview ~mode:`Rich ~entry ~width in
           let cards = List.tl (String.split_on_char '\n' source) in
           check bool "preview present" true (cards <> []);
@@ -5185,6 +5259,10 @@ let () =
             test_a_failing_librarian_is_named_on_the_header
         ; test_case "a folded reasoning block is the count and the key" `Quick
             test_a_folded_reasoning_block_is_the_count_and_the_key
+        ; test_case "thinking fold follows origin body budget" `Quick
+            test_thinking_fold_tracks_origin_body_budget
+        ; test_case "long single-line reasoning folds in history and journal" `Quick
+            test_folded_single_line_reasoning_stays_compact
         ; test_case "an arrival reads behind a bar" `Quick
             test_an_arrival_reads_behind_a_bar
         ; test_case "an execute call leads with its exit and output" `Quick

@@ -241,17 +241,17 @@ let cached_chat_markdown ~link_previews_mode ~theme =
    Markdown colours. *)
 (* How many reasoning lines a folded block stands for. The count is the
    non-blank lines, matching what the unfolded block draws. *)
-let folded_thinking_summary body =
+let folded_thinking_summary ~width body =
   let lines =
     String.split_on_char '\n' body
     |> List.filter (fun line -> String.trim line <> "")
   in
   match lines with
-  (* A fold summary is itself one line, so folding one line hides nothing and
-     saves nothing. It also promised an expansion: every committed reasoning
-     block is the withheld-step count alone, and Ctrl-R on it redrew the same
-     sentence. A block with nothing to fold draws as itself. *)
-  | [] | [ _ ] -> body
+  | [] -> body
+  (* Logical lines can wrap to hundreds of rows when providers omit newline
+     deltas. Preserve short notes, including unrecorded-step facts. *)
+  | [line] when Message_layout.display_width line <= width -> body
+  | [_] -> "Reasoning · 1 line folded · Ctrl-R"
   (* A turn that reasons between every call draws this once a round, eight
      rounds a turn. At 61 cells the sentence was the widest thing in the pane
      and said the same "or /thinking to expand" each time; the key stays, the
@@ -259,6 +259,13 @@ let folded_thinking_summary body =
   | lines ->
       Printf.sprintf "Reasoning · %d lines folded · Ctrl-R" (List.length lines)
 
+
+let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry) =
+  if entry.style = Message_layout.Thinking && state.msg_reasoning_visibility = Reasoning_folded then
+    let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
+      ~inner_width:(max 1 (framed_inner_width chat_cols)) entry in
+    { entry with body = folded_thinking_summary ~width entry.body }
+  else entry
 
 let tool_projection_mode (state : state) =
   match state.msg_tool_visibility with
@@ -1701,9 +1708,6 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
         in
         let body =
           match message.me_role with
-          | Message_thinking
-            when state.msg_reasoning_visibility = Reasoning_folded ->
-              folded_thinking_summary message.me_text
           | Message_skill _ -> (
               match message.me_skill_block with
               | [] -> message.me_text
@@ -1808,7 +1812,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
                     Message_layout.Action_unfold_argument
                 | _ -> Message_layout.Action_none);
            }
-            : Message_layout.entry))
+            : Message_layout.entry)
+        |> fold_thinking_entry state ~chat_cols)
       visible_entries
   in
   layout_entries
@@ -2024,7 +2029,7 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
      in the visible list, so an append to an open turn flips the edge of
      the turn's previous last row; the walk compares the edge by value at
      every position, and a flipped edge ends the sharing there;
-   - the keeper, the pane width, and the memory/reasoning/tool visibility
+   - the keeper, pane width, origin mode, and memory/reasoning/tool visibility
      readings, compared by value. The width decides the badge column and
      the tool-row wrap; the visibilities decide the folded thinking body,
      the journal summary body, and the compact/full tool projection (memory
@@ -2039,8 +2044,9 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
      resolved colours into their text and a palette that arrived after
      start-up must not keep drawing the previous answer's escapes.
 
-   Deliberately not inputs: the scroll position and the origin-display mode
-   act after the entries exist ([rows_of_entry] takes them), the live turn
+   Origin mode also determines the body budget for one-line thinking folds.
+   Deliberately not inputs: the scroll position acts after the entries exist
+   ([rows_of_entry] takes it), the live turn
    is built where it is drawn, and [keeper_message_clock]'s timezone is the
    process's own for its whole life -- the assumption the whole-list memo
    already made.
@@ -2075,6 +2081,7 @@ type layout_entries_memo = {
   lem_preview_generation : int;
   lem_memory : memory_visibility;
   lem_reasoning : reasoning_visibility;
+  lem_origin : Message_layout.origin_display;
   lem_tools : tool_visibility;
   lem_file_changes_keeper : string option;
   lem_file_change_index : Keeper_chat_diff.index;
@@ -2152,6 +2159,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     && memo.lem_preview_generation = preview_generation
     && memo.lem_memory = state.msg_memory_visibility
     && memo.lem_reasoning = state.msg_reasoning_visibility
+    && memo.lem_origin = state.msg_origin_display
     && memo.lem_tools = state.msg_tool_visibility
     && Option.equal String.equal memo.lem_file_changes_keeper
          state.msg_file_changes_keeper
@@ -2208,6 +2216,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
             lem_preview_generation = preview_generation;
             lem_memory = state.msg_memory_visibility;
             lem_reasoning = state.msg_reasoning_visibility;
+            lem_origin = state.msg_origin_display;
             lem_tools = state.msg_tool_visibility;
             lem_file_changes_keeper = state.msg_file_changes_keeper;
             lem_file_change_index = state.msg_file_change_index;
@@ -2263,6 +2272,7 @@ type settled_block_memo = {
   sbm_timeline : (Masc_tui_types.msg_entry * float option) list;
   sbm_messages : Masc_tui_types.msg_entry list;
   sbm_reasoning : reasoning_visibility;
+  sbm_origin : Message_layout.origin_display;
   sbm_tools : tool_visibility;
   sbm_calls_keeper : string option;
   sbm_calls_loading : bool;
@@ -2478,7 +2488,12 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                         there is no argument here to unfold. *)
                      action = Message_layout.Action_none;
                    }
-                    : Message_layout.entry) }
+                    : Message_layout.entry)
+                    |> fold_thinking_entry state ~chat_cols
+                    |> fun entry ->
+                      if entry.style = Message_layout.Thinking then
+                        { entry with body = annotate_body entry.body }
+                      else entry }
               in
               match item.drawn with
               | Keeper_chat_transcript.Drawn_thinking _
@@ -2487,12 +2502,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                           state.msg_reasoning_visibility) ->
                   None
               | Keeper_chat_transcript.Drawn_thinking lines ->
-                  let body =
-                    if state.msg_reasoning_visibility = Reasoning_folded
-                    then folded_thinking_summary (String.concat "\n" lines)
-                    else String.concat "\n" lines
-                  in
-                  entry Message_layout.Thinking (label "THINKING") (annotate_body body)
+                  entry Message_layout.Thinking (label "THINKING") (String.concat "\n" lines)
               | Keeper_chat_transcript.Drawn_tools block ->
                   let projection =
                     Keeper_chat_transcript.project_tool_block
@@ -2566,6 +2576,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            && memo.sbm_timeline == committed_visible_timeline
            && memo.sbm_messages == committed_timeline_messages
            && memo.sbm_reasoning = state.msg_reasoning_visibility
+           && memo.sbm_origin = state.msg_origin_display
            && memo.sbm_tools = state.msg_tool_visibility
            && memo.sbm_calls_keeper = state.keeper_calls_keeper
            && memo.sbm_calls_loading = state.keeper_calls_loading
@@ -2587,6 +2598,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             sbm_timeline = committed_visible_timeline;
             sbm_messages = committed_timeline_messages;
             sbm_reasoning = state.msg_reasoning_visibility;
+            sbm_origin = state.msg_origin_display;
             sbm_tools = state.msg_tool_visibility;
             sbm_calls_keeper = state.keeper_calls_keeper;
             sbm_calls_loading = state.keeper_calls_loading;

@@ -45,6 +45,12 @@ let generic_provider_rejection =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rejected-1","result":"API Error: Sonnet safeguards flagged this message","api_error_status":null}|}
 ;;
 
+let access_rejection status =
+  Printf.sprintf
+    {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-access-rejected","result":"Your organization has disabled Claude subscription access for Claude Code","api_error_status":%d,"terminal_reason":"api_error"}|}
+    status
+;;
+
 let prompt_too_long_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400,"terminal_reason":"prompt_too_long"}|}
 ;;
@@ -2476,6 +2482,55 @@ let test_quota_enters_typed_recovery () =
          | _ -> fail "quota rejection did not require explicit recovery"))
 ;;
 
+let test_access_refusal_uses_status_and_keeps_pre_effect_rotation () =
+  List.iter (fun status ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture [ Emit (access_rejection status) ] (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"REVIEW_ACCESS" () with
+        | Ok _ -> fail "provider access rejection completed the turn"
+        | Error error ->
+          let route = Keeper_runtime_failure_route.route_of_error
+              ~boundary:Keeper_runtime_failure_route.Agent_core_execution error in
+          let expected = match status with
+            | 401 -> Keeper_runtime_failure_route.Auth_failed
+            | 403 -> Keeper_runtime_failure_route.Authorization_refused
+            | _ -> Keeper_runtime_failure_route.Provider_reported_failure in
+          check bool "numeric status selects the existing typed route" true
+            (route = Keeper_runtime_failure_route.Rotate_now { rotate = expected });
+          check bool "access rejection does not resume the same failed path" false
+            (Keeper_runtime_failure_route.route_resumes_on_same_path route);
+          if status = 403 then
+            check bool "receipt retains authorization refusal" true
+              (match Keeper_agent_error.terminal_reason_code_of_core_error error
+                 |> Keeper_terminal_reason.of_wire with
+               | Keeper_terminal_reason.Authorization_refused _ -> true
+               | _ -> false);
+          (match (load_state base_path).phase with
+           | Recovery_required { failure = Provider_rejected; _ } -> ()
+           | _ -> fail "account refusal lost the durable provider rejection"))))
+    [401; 403; 400]
+;;
+
+let test_access_refusal_after_native_tool_remains_fenced () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [ Emit (native_tool_call_block ~turn_id:"native-access"
+          ~call_id:"native-access-call" ~tool_name:"Write")
+      ; Emit (native_tool_result ~call_id:"native-access-call" ~content:"written")
+      ; Emit (access_rejection 403)
+      ] (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"TOOL_THEN_ACCESS_REFUSAL" () with
+        | Error error ->
+          (match Keeper_internal_error.classify_masc_internal_error error with
+           | Some (Keeper_internal_error.Provider_attempt_effect_fenced { effect_disposition; _ }) ->
+             check bool "account refusal cannot bypass an observed effect" false
+               (Keeper_provider_attempt_effect.allows_same_turn_retry effect_disposition)
+           | _ -> fail (Agent_core.Error.to_string error))
+        | Ok _ -> fail "post-effect access rejection completed the turn"))
+;;
+
 let test_quota_after_tool_effect_remains_fenced () =
   let base_path = temp_workspace () in
   let call_count = ref 0 in
@@ -3786,6 +3841,10 @@ let () =
             `Quick
             test_pre_effect_provider_rejection_keeps_failover_open
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
+        ; test_case "access refusal preserves structured status and rotation" `Quick
+            test_access_refusal_uses_status_and_keeps_pre_effect_rotation
+        ; test_case "access refusal after native tool remains fenced" `Quick
+            test_access_refusal_after_native_tool_remains_fenced
         ; test_case "quota after tool effect remains fenced" `Quick
             test_quota_after_tool_effect_remains_fenced
         ; test_case "quota after native tool remains fenced" `Quick

@@ -107,7 +107,7 @@ def main():
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     fixture_dir = Path(__file__).resolve().parent / 'fixtures/release-evidence'
     runtime = (fixture_dir / 'runtime.toml').read_text()
-    runtime = runtime.replace('default = "ollama_cloud.deepseek-v4-flash"', 'default = "primary.sample"')
+    runtime = runtime.replace('default = "ollama_cloud.deepseek-v4.1-flash"', 'default = "primary.sample"')
     runtime = runtime.replace('is-default = true', 'is-default = false')
     runtime += '\n[runtime.lanes."primary.sample"]\ncandidates = ["primary.sample", "alternate.sample"]\n'
     for name in ['primary', 'alternate']:

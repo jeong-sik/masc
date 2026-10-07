@@ -186,7 +186,7 @@ let test_split_secret_held_across_native_progress () =
           let delta value = Agent_core.Types.ContentBlockDelta {index=0;
             delta=(if thinking then ThinkingDelta value else TextDelta value)} in
           let fragments events = List.filter_map (function
-            | E.Text_delta value | E.Agent_core_thinking_delta value -> Some value
+            | E.Text_delta value | E.Agent_core_thinking_delta {delta=value; _} -> Some value
             | _ -> None) events in
           let check_held events =
             check (list string) "native progress cannot release a secret prefix" [] (fragments events);

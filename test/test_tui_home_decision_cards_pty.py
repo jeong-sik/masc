@@ -91,7 +91,10 @@ def fixtures_with_held(rows):
 
 
 def run(executable, description, fixtures, interact, requests, *, prepare=home.seed_goals,
-        refresh=60.0):
+        refresh=0.5):
+    # The approval aggregate completes only after the operator confirm-queue
+    # read is re-fetched on a tick (the startup burst races workspace
+    # identity), so these scenarios need the short cadence by default.
     _keyboard_harness.run_terminal_scenario(executable, description=description, interact=interact,
                             http_fixtures=fixtures, http_requests=requests,
                             prepare_workspace=prepare, refresh=refresh)
@@ -365,15 +368,20 @@ def planning_link_failure_has_own_diagnostic(executable):
         # truncates titles, so use its selected ID before opening full detail.
         _keyboard_harness.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         _keyboard_harness.send_and_wait(process, fd, output, b"go Work", b"go Work")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\r", goal["id"].encode())
-        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Open tasks  (links unavailable)")
+        # The Work tab loads asynchronously; wait for its goal row before
+        # selecting, then open the goal detail from there.
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Planning link s")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Title: Planning link source fixture")
+        # The link detail line itself is the proof of the unavailable
+        # registry reading; the detail frame is already on screen.
         unavailable = _keyboard_harness.screen_text(bytes(output))
+        assert b"Open tasks: (links unavailable)" in unavailable, unavailable
         assert goal["title"].encode() in unavailable, unavailable
         assert b"(none)" not in unavailable, unavailable
         assert b"task-777" not in unavailable, unavailable
         path = Path(base) / ".masc" / "tasks" / "goal_task_links.json"
         path.write_text(json.dumps({"version": 1, "links": []}))
-        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Open tasks  (none)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Open tasks: (none)")
         repaired = _keyboard_harness.screen_text(bytes(output))
         assert b"links unavailable" not in repaired, repaired
         home.assert_no_decision_posts(requests)
@@ -401,14 +409,14 @@ def planning_backlog_failure_recovers(executable):
         _keyboard_harness.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         _keyboard_harness.send_and_wait(process, fd, output, b"go Work", b"go Work")
         _keyboard_harness.send_and_wait(process, fd, output, b"\r", goal["title"].encode())
-        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Open tasks  (nothing here is a reading)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Open tasks: (nothing here is a reading)")
         failed = _keyboard_harness.screen_text(bytes(output))
         assert b"links not read" not in failed, failed
         assert b"Open tasks  (none)" not in failed, failed
         seed_operator_task(base)
         # An auxiliary archive error must not impersonate a primary failure.
         (Path(base) / ".masc" / "tasks-archive.json").write_text("{unreadable archive")
-        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Open tasks  (none)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Open tasks: (none)")
         repaired = _keyboard_harness.screen_text(bytes(output))
         assert b"nothing here is a reading" not in repaired, repaired
         assert b"links not read" not in repaired, repaired

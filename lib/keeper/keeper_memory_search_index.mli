@@ -9,6 +9,10 @@
     stop-word, stemming, regular-expression, or intent rules. There is no
     persistent index, so nothing can disagree with the memory store.
 
+    The table is built and queried as one job on the process domain pool when
+    one is installed ({!Domain_pool_ref.submit_cpu_or_inline}), so the
+    caller's domain keeps running its other fibers meanwhile.
+
     A term shorter than three characters matches no text through the trigram
     tokenizer. It is quoted into the query like any other term and simply
     contributes nothing; the caller's substring tiers still answer it. *)

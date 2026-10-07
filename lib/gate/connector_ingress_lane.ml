@@ -1,6 +1,4 @@
-type lane =
-  | Keeper_lane of string
-  | Connector_lane of string
+type lane = Keeper_lane of string
 
 type event_id =
   { source : string
@@ -41,10 +39,7 @@ type t =
   ; mutable lifecycle : [ `Open | `Closed ]
   }
 
-let lane_to_string = function
-  | Keeper_lane keeper_name -> "keeper:" ^ keeper_name
-  | Connector_lane connector_id -> "connector:" ^ connector_id
-;;
+let lane_to_string (Keeper_lane keeper_name) = "keeper:" ^ keeper_name
 
 let event_id_to_string event_id =
   event_id.source ^ ":" ^ event_id.opaque_id

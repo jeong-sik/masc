@@ -16,15 +16,11 @@
 
     *)
 
-type origin = Det | NonDet
+type origin = Det
 (** Decision nature. [Det] is rule-based logic whose verdict follows
     mechanically from the input (variant pattern matching, threshold
-    comparison). [NonDet] is model-based judgment (LLM scoring, human
-    verdict). The boundary is typed here because downstream consumers
-    treat them differently — Det verdicts are idempotent, NonDet
-    verdicts may vary across replays.
-
-    See MEMORY [deterministic-nondeterministic-boundary]. *)
+    comparison), so replaying the same input gives the same verdict.
+    The wire carries it as ["origin": "det"]. *)
 
 type outcome =
   | Passed

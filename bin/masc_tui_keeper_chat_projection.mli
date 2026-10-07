@@ -61,16 +61,6 @@ type response =
   | Turn_completed of completed_turn
   | Replayed_succeeded of acceptance
 
-type operation_reconciliation =
-  | Operation_pending of acceptance_state
-  | Operation_succeeded of { outcome_ref : string }
-  | Operation_failed of {
-      failure_kind : string;
-      detail : string;
-      outcome_ref : string option;
-    }
-  | Operation_cancelled
-
 type tool_occurrence =
   { stream_scope : int
   ; block_index : int
@@ -209,8 +199,6 @@ val terminal_safe_text : ?preserve_newlines:bool -> string -> string
 val decode_response : request:request -> string -> (response, stream_error) result
 val decode_response_with_provenance :
   request:request -> string -> (response, protocol_error) result
-val decode_operation_reconciliation :
-  request:request -> Yojson.Safe.t -> (operation_reconciliation, stream_error) result
 val stream_error_to_string : stream_error -> string
 val error_to_string : error -> string
 

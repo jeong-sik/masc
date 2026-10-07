@@ -11,9 +11,8 @@
       {!make_artifact_ref}, so every reference in flight has a valid sha256,
       a non-negative byte count, and a non-empty media type.
     - {!decode_from_agent_core} distinguishes [Not_marker], a valid {!Stored}, and
-      [Invalid_marker] — a marker-shaped payload that fails to parse is now a
-      visible, typed outcome instead of the previous silent [Inline]
-      fallback. *)
+      [Invalid_marker] — a marker-shaped payload that fails to parse is a
+      visible, typed outcome. *)
 
 (** {1 sha256 validation (SSOT, re-exported by {!Tool_blob_store})} *)
 
@@ -113,9 +112,7 @@ val artifact_manifest_of_json : Yojson.Safe.t -> artifact_manifest_decode
 
 (** {1 Wire codec} *)
 
-type t =
-  | Inline of string
-  | Stored of artifact_ref
+type t = Stored of artifact_ref
 
 (** Model-visible projection is owned by the tool descriptor, rather than
     inferred from the tool name or from a bridge-wide magic threshold. *)
@@ -171,8 +168,7 @@ val encode_for_agent_core : t -> string
 
 (** Exact decode outcome. [Invalid_marker] means the input starts with
     {!marker_prefix} but the payload is malformed or fails validation — the
-    caller must decide visibly (keep the raw text, log, or fail) rather than
-    inherit a silent inline fallback. *)
+    caller must decide visibly (keep the raw text, log, or fail). *)
 type decode_result =
   | Not_marker
   | Invalid_marker of { detail : string }

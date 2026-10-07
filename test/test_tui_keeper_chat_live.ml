@@ -462,10 +462,12 @@ let test_run_error_is_a_failure_even_with_no_message () =
 let test_events_this_view_does_not_draw_are_silent () =
   let body =
     sse (custom "KEEPER_STREAM_PING" `Null)
-    ^ sse (event "STEP_STARTED" [ "runId", `String run_id ])
+    ^ sse
+        (event "TEXT_MESSAGE_END"
+           [ "runId", `String run_id; "messageId", `String message_id ])
   in
   check (list delta)
-    "a ping and a step boundary produce nothing rather than a report" []
+    "a ping and a message end produce nothing rather than a report" []
     (feed_whole body)
 
 let test_checkpoint_and_external_effect_are_drawn () =

@@ -69,7 +69,7 @@ end
 (** {1 REST API} *)
 
 module Rest : sig
-  type http_method = GET | POST | PUT | DELETE | PATCH
+  type http_method = GET | POST
 
   val method_to_string : http_method -> string
   val tool_to_endpoint : string -> http_method * string

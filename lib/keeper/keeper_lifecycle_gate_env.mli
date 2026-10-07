@@ -7,7 +7,7 @@
 (** Global lifecycle kill-switches from their owning readers
     ({!Env_config_keeper.KeeperReactive.enabled} for reactive turns, and
     {!Env_config_keeper.KeeperBootstrap.enabled} governing
-    autonomous/proactive/bootstrap). Both default to [true]. *)
+    autonomous and proactive). Both default to [true]. *)
 val global : unit -> Keeper_lifecycle_gate.flags
 
 

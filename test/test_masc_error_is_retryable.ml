@@ -13,11 +13,8 @@
     2. {b Auth — only TokenExpired retryable} — refresh-then-retry
        semantics; Unauthorized / Forbidden / InvalidToken are not.
     3. {b System — only transient I/O retryable} — IoError /
-       StorageError; remaining caller-invariant violations
-       (NotInitialized, InvalidJson, ValidationError, …) are not.
-    4. {b Rate limit retryable} — replay after wait_seconds.
-    5. {b Cache — corruption non-retryable, others retryable} —
-       Read/Write/Expired retry; Corrupted is data-invariant. *)
+       LockContention; the caller-invariant violations
+       (NotInitialized, ValidationError) are not. *)
 
 module E = Masc_error
 
@@ -70,7 +67,9 @@ let test_auth_other_non_retryable () =
 let test_system_io_retryable () =
   assert (E.is_retryable (E.System (E.System_error.IoError "x")));
   assert (
-    E.is_retryable (E.System (E.System_error.StorageError "x")))
+    E.is_retryable
+      (E.System
+         (E.System_error.LockContention { key = "k"; attempts = 3 })))
 
 let test_system_caller_invariants_non_retryable () =
   assert (
@@ -78,49 +77,7 @@ let test_system_caller_invariants_non_retryable () =
   assert (
     not
       (E.is_retryable
-         (E.System E.System_error.AlreadyInitialized)));
-  assert (
-    not
-      (E.is_retryable (E.System (E.System_error.InvalidJson "x"))));
-  assert (
-    not
-      (E.is_retryable
-         (E.System (E.System_error.InvalidFilePath "x"))));
-  assert (
-    not
-      (E.is_retryable
          (E.System (E.System_error.ValidationError "x"))))
-
-(* ── (4) Rate limit retryable ──────────────────────────── *)
-
-let test_rate_limit_retryable () =
-  let err =
-    {
-      E.category = E.GeneralLimit;
-      current = 11;
-      limit = 10;
-      wait_seconds = 30;
-    }
-  in
-  assert (E.is_retryable (E.RateLimitExceeded err))
-
-(* ── (5) Cache: corruption non-retryable, rest retryable  *)
-
-let test_cache_transient_retryable () =
-  assert (
-    E.is_retryable (E.CacheError (E.CacheReadFailed "/p")));
-  assert (
-    E.is_retryable (E.CacheError (E.CacheWriteFailed "/p")));
-  assert (
-    E.is_retryable
-      (E.CacheError
-         (E.CacheExpired { key = "k"; age_hours = 1.0 })))
-
-let test_cache_corrupted_non_retryable () =
-  assert (
-    not
-      (E.is_retryable
-         (E.CacheError (E.CacheCorrupted "/p"))))
 
 (* ── runner ───────────────────────────────────────────── *)
 
@@ -131,7 +88,4 @@ let () =
   test_auth_other_non_retryable ();
   test_system_io_retryable ();
   test_system_caller_invariants_non_retryable ();
-  test_rate_limit_retryable ();
-  test_cache_transient_retryable ();
-  test_cache_corrupted_non_retryable ();
   print_endline "test_masc_error_is_retryable: all assertions passed"

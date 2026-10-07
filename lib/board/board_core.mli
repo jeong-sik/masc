@@ -301,9 +301,6 @@ val create_post_with_audience
 val read_post : store -> post_id:string -> (post, board_read_error) Result.t
 (** The post with [post_id], read from the in-memory store. *)
 
-val get_post : store -> post_id:string -> (post, board_error) Result.t
-(** {!read_post} for a caller that carries reads and writes in one
-    [board_error] result. *)
 
 (** RFC-0233 §7: look up a post by the originating turn's join key
     ([Ids.Turn_ref.to_string], i.e. ["<trace_id>#<absolute_turn>"]).  Exact
@@ -320,22 +317,17 @@ val list_posts_by_run_origin : store -> post list
 (** Snapshot the exact run-origin index, newest publication first. Does not
     scan unrelated Board posts or inspect body text. *)
 
-(** Coalesces [get_post] + [get_comments] under a single
+(** Coalesces [read_post] + [read_comments] under a single
     {!with_lock} block to avoid the two-call lock churn
     that previously surfaced as
     [Mutex.lock: Resource deadlock avoided] under contended
-    repeated agent polling.  Returns the whole thread in {!get_comments}
+    repeated agent polling.  Returns the whole thread in {!read_comments}
     order; paging is {!Board_types.Comment_page}'s job. *)
 val read_post_and_comments
   :  store
   -> post_id:string
   -> (post * comment list, board_read_error) Result.t
 
-val get_post_and_comments
-  :  store
-  -> post_id:string
-  -> (post * comment list, board_error) Result.t
-(** {!read_post_and_comments} as a [board_error] result. *)
 
 (** Returns posts sorted by [(score desc, created_at desc)]
     with optional visibility / hearth filters. Uses [store.sorted_posts_cache] when
@@ -392,15 +384,13 @@ val add_comment_with_audience
     unchanged thread returns the same order. *)
 val read_comments : store -> post_id:string -> (comment list, board_read_error) Result.t
 
-val get_comments : store -> post_id:string -> (comment list, board_error) Result.t
-(** {!read_comments} as a [board_error] result. *)
 
 (** Returns one comment by id. *)
 val get_comment : store -> comment_id:string -> (comment, board_error) Result.t
 
 (** Returns up to [limit] (default 1000) most recent
     comments across every post, newest first in the reverse of
-    {!get_comments} order.  Used by the profile aggregator. *)
+    {!read_comments} order.  Used by the profile aggregator. *)
 val list_comments : store -> ?limit:int -> unit -> comment list
 
 (** {1 Reaction operations} *)

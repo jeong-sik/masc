@@ -164,8 +164,8 @@ let test_prompt_ceiling_comes_from_the_window () =
           | Error detail -> failf "muse-serve did not initialize: %s" detail
           | Ok () ->
             (* 4 x (floor(75% of 1,007,997) - 11,946) = 4 x 744,051 *)
-            check (option int) "the lane budget counts the derived ceiling" (Some 2_976_204)
-              (Runtime.smallest_prompt_capacity_bytes_of_runtime_ids [ runtime_id ]))))
+            check (option int) "the runtime carries the derived ceiling" (Some 2_976_204)
+              (Runtime.prompt_capacity_bytes_of_runtime_id runtime_id))))
 ;;
 
 let test_derived_ceiling_arithmetic () =

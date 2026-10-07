@@ -461,10 +461,3 @@ let project_discovered_bounded ~base_path ~budget ~cursor =
     ; next_cursor = cursor
     }
 ;;
-
-module For_testing = struct
-  type 'a claim_outcome =
-    | Claim_acquired of 'a
-    | Claim_already_held
-
-end

@@ -219,9 +219,7 @@ let artifact_manifest_of_json = function
   | _ -> Not_artifact_manifest
 ;;
 
-type t =
-  | Inline of string
-  | Stored of artifact_ref
+type t = Stored of artifact_ref
 
 type model_projection =
   | Store_above of { threshold_bytes : int }
@@ -253,7 +251,6 @@ let marker_prefix = "[masc:blob sha256="
 let is_marker s = String.starts_with ~prefix:marker_prefix s
 
 let encode_for_agent_core = function
-  | Inline s -> s
   | Stored { sha256; bytes; preview; mime } ->
     Printf.sprintf "[masc:blob sha256=%s bytes=%d mime=%s preview=%S]"
       sha256 bytes mime preview

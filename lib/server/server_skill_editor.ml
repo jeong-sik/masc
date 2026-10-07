@@ -16,7 +16,6 @@ type cancellation_stage =
   | Quarantine_settlement
   | After_quarantine
   | After_verification
-  | Snapshot_refresh
 
 type recovery_cause =
   | Recovery_operation_failed of string
@@ -188,7 +187,6 @@ let cancellation_stage_to_string = function
   | Quarantine_settlement -> "quarantine_settlement"
   | After_quarantine -> "after_quarantine"
   | After_verification -> "after_verification"
-  | Snapshot_refresh -> "snapshot_refresh"
 ;;
 
 let recovery_cause_to_string = function

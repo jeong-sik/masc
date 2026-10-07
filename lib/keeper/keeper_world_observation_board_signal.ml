@@ -327,7 +327,7 @@ let match_observation ~(meta : keeper_meta) ~(observation : board_observation) =
     or updated_at). A prior response is reconsidered only when a new external
     comment arrives.
 
-    "After" is position in the thread as {!Board_dispatch.get_comments}
+    "After" is position in the thread as {!Board_dispatch.read_comments}
     returns it, the same order the thread read pages through, so
     [comment_offset] is an offset that read accepts and the replies are
     exactly the comments from there to the end of the thread. *)

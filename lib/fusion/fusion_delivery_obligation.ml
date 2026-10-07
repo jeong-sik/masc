@@ -566,7 +566,6 @@ let cleanup_staging_for_startup ~base_path =
       Fs_compat.cleanup_atomic_orphans
         ~ownership_root:base_path
         ~base_path:staging
-        ~scope:Fs_compat.Directory_only
         ())
   in
   Eio_guard.check_if_ready ();

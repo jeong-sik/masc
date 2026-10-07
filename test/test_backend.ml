@@ -206,31 +206,6 @@ let test_health_check () =
   | Ok result -> Alcotest.(check bool) "is healthy" true result.is_healthy
   | Error _ -> Alcotest.fail "health check failed"
 
-(** Test unified backend interface *)
-let test_unified_backend () =
-  Eio_main.run @@ fun env ->
-  let fs = Eio.Stdenv.fs env in
-  let tmp_dir = make_test_dir () in
-  let config = { (Backend.default_config ()) with
-    base_path = tmp_dir;
-    node_id = "unified_test";
-    cluster_name = "test";
-  } in
-  let fs_backend = Backend.FileSystem.create ~fs config in
-  let backend = Backend.FS fs_backend in
-
-  Fun.protect
-    ~finally:(fun () -> try rm_rf tmp_dir with _ -> ())
-    (fun () ->
-      (* Test through unified interface *)
-      (match Backend.set backend "unified:key" "unified value" with
-       | Ok () -> ()
-       | Error _ -> Alcotest.fail "unified set failed");
-
-      match Backend.get backend "unified:key" with
-      | Ok v -> Alcotest.(check string) "unified get" "unified value" v
-      | Error _ -> Alcotest.fail "unified get failed")
-
 let () =
   Alcotest.run "Backend" [
     "basic", [
@@ -252,8 +227,5 @@ let () =
     ];
     "health", [
       Alcotest.test_case "health check" `Quick test_health_check;
-    ];
-    "unified", [
-      Alcotest.test_case "unified backend" `Quick test_unified_backend;
     ];
   ]

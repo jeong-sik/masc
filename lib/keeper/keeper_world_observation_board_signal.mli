@@ -43,7 +43,7 @@ type 'a board_read =
 
 (** The comments after the keeper's latest comment on a post, which are by
     definition all written by someone else. They run to the end of the thread
-    in {!Board_dispatch.get_comments} order, the order [masc_board_post_get]
+    in {!Board_dispatch.read_comments} order, the order [masc_board_post_get]
     pages through. There is at least one: [oldest] always exists and [newer]
     holds the rest, oldest first. *)
 type replies_after_own_comment =

@@ -447,8 +447,7 @@ let read_post ~post_id =
   | Jsonl store -> Board.read_post store ~post_id
 
 let get_post ~post_id =
-  match backend () with
-  | Jsonl store -> Board.get_post store ~post_id
+  read_post ~post_id |> Result.map_error Board.board_error_of_read_error
 
 let list_posts_by_run_origin () =
   match backend () with
@@ -558,8 +557,7 @@ let read_comments ~post_id =
   | Jsonl store -> Board.read_comments store ~post_id
 
 let get_comments ~post_id =
-  match backend () with
-  | Jsonl store -> Board.get_comments store ~post_id
+  read_comments ~post_id |> Result.map_error Board.board_error_of_read_error
 
 let require_persisted_sources_readable () =
   match backend () with
@@ -570,7 +568,9 @@ let require_persisted_sources_readable () =
 
 let get_post_and_comments ~post_id =
   match backend () with
-  | Jsonl store -> Board.get_post_and_comments store ~post_id
+  | Jsonl store ->
+      Board.read_post_and_comments store ~post_id
+      |> Result.map_error Board.board_error_of_read_error
 
 let add_comment ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
@@ -584,7 +584,7 @@ let add_comment ~post_id ~author ~content ?parent_id
           let comment = creation.comment in
           let cid = Board.Comment_id.to_string comment.id in
           let auth = Board.Agent_id.to_string comment.author in
-          (match Board.get_post store ~post_id with
+          (match Board.read_post store ~post_id with
           | Ok post ->
               emit_board_signal
                 { signal =
@@ -601,8 +601,8 @@ let add_comment ~post_id ~author ~content ?parent_id
                 ; audience = creation.audience
                 }
           | Error e ->
-              Log.BoardLog.warn "board signal skipped: get_post failed for %s: %s"
-                post_id (Board_types.show_board_error e));
+              Log.BoardLog.warn "board signal skipped: read_post failed for %s: %s"
+                post_id (Board_types.show_board_read_error e));
           emit_board_sse_event
             (Comment_added { post_id; comment_id = cid; author = auth });
           Ok comment
@@ -637,7 +637,7 @@ let vote ~voter ~post_id ~direction =
     | Jsonl store ->
         (match Board.vote store ~voter ~post_id ~direction with
          | Ok _score as ok ->
-             (match Board.get_post store ~post_id with
+             (match Board.read_post store ~post_id with
               | Ok post ->
                   emit_vote_board_signal
                     ~target:(Vote_on_post (Board.Post_id.to_string post.id))
@@ -645,8 +645,8 @@ let vote ~voter ~post_id ~direction =
                     ~voter ~direction post
               | Error e ->
                   Log.BoardLog.warn
-                    "board vote signal skipped: get_post failed for %s: %s"
-                    post_id (Board_types.show_board_error e));
+                    "board vote signal skipped: read_post failed for %s: %s"
+                    post_id (Board_types.show_board_read_error e));
              ok
          | Error _ as err -> err)
   in
@@ -682,7 +682,7 @@ let vote_comment ~voter ~comment_id ~direction =
                     comment_id (Board_types.show_board_error e)
               | Ok comment ->
                   let post_id = Board.Post_id.to_string comment.post_id in
-                  (match Board.get_post store ~post_id with
+                  (match Board.read_post store ~post_id with
                    | Ok post ->
                        emit_vote_board_signal
                          ~target:
@@ -691,8 +691,8 @@ let vote_comment ~voter ~comment_id ~direction =
                          ~voter ~direction post
                    | Error e ->
                        Log.BoardLog.warn
-                         "board comment vote signal skipped: get_post failed for %s: %s"
-                         post_id (Board_types.show_board_error e)));
+                         "board comment vote signal skipped: read_post failed for %s: %s"
+                         post_id (Board_types.show_board_read_error e)));
              ok
          | Error _ as err -> err)
   in
@@ -713,13 +713,16 @@ let vote_comment ~voter ~comment_id ~direction =
 
 let post_for_reaction_target store ~target_type ~target_id =
   match target_type with
-  | Board.Reaction_post -> Board.get_post store ~post_id:target_id
+  | Board.Reaction_post ->
+      Board.read_post store ~post_id:target_id
+      |> Result.map_error Board.board_error_of_read_error
   | Board.Reaction_comment ->
       (match Board.get_comment store ~comment_id:target_id with
        | Error _ as err -> err
        | Ok comment ->
            let post_id = Board.Post_id.to_string comment.post_id in
-           Board.get_post store ~post_id)
+           Board.read_post store ~post_id
+           |> Result.map_error Board.board_error_of_read_error)
 
 let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
   match

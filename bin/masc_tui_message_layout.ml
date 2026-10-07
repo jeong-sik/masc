@@ -2275,9 +2275,23 @@ let count_rows_until held ?markdown ~wanted () =
    the numbering the window is expressed in. Entry [index] -- counting from
    the newest -- holds the rows [total - before - count] up to
    [total - before], where [before] is what the entries newer than it take. *)
+type body_row_position = {
+  entry_index : int;
+  body_row : int;
+  rows_below : int;
+}
+
+type scroll_window = {
+  scroll : int;
+  rows : row list;
+  body_positions : body_row_position list;
+}
+
 let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entries =
   if requested <= 0 then
-    requested, visible_rows ?markdown ?origin ~inner_width ~height entries
+    { scroll = requested;
+      rows = visible_rows ?markdown ?origin ~inner_width ~height entries;
+      body_positions = [] }
   else begin
     let inner_width = Int.max 1 inner_width in
     let origin = Option.value origin ~default:Origin_row in
@@ -2290,32 +2304,72 @@ let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entr
     let from_bottom = Int.min requested (Int.max 0 (total - bound_height)) in
     let bottom = Int.max 0 (total - from_bottom) in
     let first = Int.max 0 (bottom - window_height) in
-    let rec gather index before selected =
-      if index >= visited then selected
+    let rec gather index before (selected, positions) =
+      if index >= visited then selected, positions
       else begin
         let count = held.rc_counts.(index) in
         let low = total - before - count in
         let high = total - before in
-        let selected =
-          if high <= first || low >= bottom then selected
+        let selected, positions =
+          if high <= first || low >= bottom then selected, positions
           else begin
             let rows = entry_rows_at held ?markdown index in
             let take_from = Int.max first low and take_to = Int.min bottom high in
-            let chosen =
-              List.filteri
-                (fun offset _ ->
+            let _, _, chosen, chosen_positions =
+              List.fold_left
+                (fun (offset, body_row, chosen, positions) row ->
                   let position = low + offset in
-                  position >= take_from && position < take_to)
-                rows
+                  let is_body = match row.kind with Body -> true | _ -> false in
+                  let chosen, positions =
+                    if position < take_from || position >= take_to then chosen, positions
+                    else row :: chosen,
+                      (if is_body then
+                         { entry_index = Array.length held.rc_newest_first - index - 1;
+                           body_row; rows_below = bottom - position - 1 } :: positions
+                       else positions)
+                  in
+                  offset + 1, (if is_body then body_row + 1 else body_row), chosen, positions)
+                (0, 0, [], []) rows
             in
-            chosen @ selected
+            List.rev_append chosen selected, List.rev_append chosen_positions positions
           end
         in
-        gather (index + 1) (before + count) selected
+        gather (index + 1) (before + count) (selected, positions)
       end
     in
-    (from_bottom, gather 0 0 [])
+    let rows, body_positions = gather 0 0 ([], []) in
+    { scroll = from_bottom; rows; body_positions }
   end
+
+(* Resolve a physical body row against this exact layout, measuring only its
+   newer suffix. This is shared by search and by the next frame's origin pin. *)
+let scroll_for_body_row ?markdown ?(origin = Origin_row) ~inner_width
+    ~entry_index ~body_row entries =
+  let held = row_counts_for entries ~inner_width:(Int.max 1 inner_width) ~origin in
+  let index = Array.length held.rc_newest_first - entry_index - 1 in
+  if index < 0 || index >= Array.length held.rc_newest_first || body_row < 0 then None
+  else
+    let rec newer at total =
+      if at = index then total
+      else begin
+        if at >= held.rc_filled then begin
+          held.rc_counts.(at) <- List.length (entry_rows_at held ?markdown at);
+          held.rc_filled <- at + 1
+        end;
+        newer (at + 1) (total + held.rc_counts.(at))
+      end
+    in
+    let suffix = newer 0 0 in
+    let rows = entry_rows_at held ?markdown index in
+    let rec locate offset ordinal = function
+      | [] -> None
+      | row :: rest ->
+          match row.kind with
+          | Body when ordinal = body_row -> Some (suffix + List.length rows - offset - 1)
+          | Body -> locate (offset + 1) (ordinal + 1) rest
+          | Metadata _ | Viewport_gap _ -> locate (offset + 1) ordinal rest
+    in
+    locate 0 0 rows
 
 let last_page_start ~height row_costs =
   let costs = Array.of_list row_costs in

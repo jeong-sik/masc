@@ -1653,28 +1653,6 @@ let test_a_journal_built_log_holds_its_turn_in_the_timeline () =
      |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
 ;;
 
-(* Leaving the bottom remembers which settled logs were on screen, so their
-   rows are what the operator anchored to, not rows that arrived since. *)
-let test_the_scroll_pin_remembers_the_settled_logs_on_screen () =
-  let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
-  in
-  state.msg_target_keeper_name <- Some "alpha";
-  state.msg_loaded_keeper <- Some "alpha";
-  state.msg_loaded <- [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_keeper ~text:"x" ~at:1. () ];
-  let held = journal_log ~request_id:"op-1" ~started_at:1. () in
-  Tui_types.hold_settled_log state held;
-  Tui_types.set_msg_scroll state 5;
-  check bool "the pin holds the logs on screen" true
-    (state.msg_scroll_pin_settled == state.msg_settled_logs);
-  Tui_types.hold_settled_log state (journal_log ~request_id:"op-2" ~started_at:2. ());
-  check bool "a log held later is not among them" false
-    (List.memq (List.nth state.msg_settled_logs 1) state.msg_scroll_pin_settled);
-  Tui_types.set_msg_scroll state 0;
-  check (list string) "back at the bottom, nothing is pinned" []
-    (List.map Tui_types.turn_log_request_id state.msg_scroll_pin_settled)
-;;
-
 (* A settled block goes after its request's last row of any phase before
    output: a failed turn's words sit above its own error row and above the
    turns that ran in between, not below both. The live block still follows
@@ -3675,7 +3653,7 @@ let test_message_scroll_accepts_the_rendered_clamp () =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   state.msg_scroll <- 30;
-  Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll 7);
+  Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll {scroll=7; pin=None});
   check int "requested scroll is normalized to the drawn row" 7 state.msg_scroll
 ;;
 
@@ -5088,8 +5066,8 @@ let test_search_measures_original_message_rows () =
     match Masc_tui_render_chat.keeper_message_find_scroll state ~keeper_name:"alpha"
         ~needle:"SEARCH_TARGET" ~older_than:None with
     | None -> fail "search lost the original input"
-    | Some (scroll, _) ->
-        state.msg_scroll <- scroll;
+    | Some (position, _) ->
+        Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll position);
         let frame, _ = Masc_tui_render_chat.render_keeper_message state in
         check bool "search uses the same original message rows as the frame" true
           (List.exists (fun line -> Astring.String.is_infix ~affix:"SEARCH_TARGET"
@@ -5169,8 +5147,6 @@ let () =
             test_an_unfinished_settled_log_suppresses_nothing
         ; test_case "settle_turn_log commits, holds and clears live" `Quick
             test_settle_turn_log_commits_holds_and_clears_live
-        ; test_case "the scroll pin remembers the settled logs on screen" `Quick
-            test_the_scroll_pin_remembers_the_settled_logs_on_screen
         ; test_case "a settled block sits before its request's output rows" `Quick
             test_a_settled_block_sits_before_its_requests_output_rows
         ; test_case "loaded tool facts are folded into the held log" `Quick

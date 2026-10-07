@@ -813,9 +813,9 @@ type msg_anchor =
           Other rows remain identity-only anchors. *)
   }
 
-(* Search walks the same history and journal rows that the pane draws. A
-   surviving journal stretch keeps its origin when reasoning is folded or a
-   final reply replaces its streamed text. *)
+(* Search and scroll pins use the same projected history and journal rows.
+   A surviving journal stretch keeps its origin when reasoning is folded or
+   a final reply replaces its streamed text. *)
 type chat_search_anchor =
   | Search_history of {
       row_anchor : msg_anchor;
@@ -836,6 +836,29 @@ type chat_search_cursor = {
   older_anchors : chat_search_anchor list;
     (** Nearest older first. If reconciliation removes the matched stretch,
         continue at a surviving older row instead of restarting at the tail. *)
+}
+
+type chat_scroll_point = {
+  scroll_anchor : chat_search_anchor;
+  body_row : int;
+  rows_below : int;
+    (** Physical body-row ordinal within the projected entry, and its distance
+        from the viewport bottom. Neither field is a text/clock identity. *)
+}
+
+type chat_scroll_pin = {
+  pin_workspace : workspace_authority;
+  pin_keeper : string;
+  pin_scroll : int;
+  pin_points : chat_scroll_point list;
+    (** Drawn origins, oldest first. If a folded or replaced stretch disappears,
+        a surviving origin can still hold the reader's position. A viewport
+        containing only transient rows may retain an origin outside it. *)
+}
+
+type chat_scroll_position = {
+  scroll : int;
+  pin : chat_scroll_pin option;
 }
 
 let chat_turn_phase_of_role = function
@@ -6311,16 +6334,11 @@ type state = {
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: (int * string) option;
   mutable msg_copy_generation: int;
-  (* The newest row [msg_scroll] counts back from, by causal row identity, while the
-     operator is reading back. Counting from whatever is newest right now made
-     the count mean something different every time a reply landed: the new rows
-     go on that end, so the same count lands further down and the window slides
-     toward text nobody asked to see. Pinned when they scroll off the bottom
-     and released when they return to it, which is also how they get back to
-     following the turn. *)
-  mutable msg_scroll_pin: msg_anchor option;
-  (* How many rows above the newest the chat pane is showing. 0 is the bottom,
-     where the pane follows a running turn. Held rather than derived: an
+  (* Actual projected body rows on the last scrolled frame. History and journal
+     origins share the same pin, including their canonical reply aliases. *)
+  mutable msg_scroll_pin: chat_scroll_pin option;
+  (* How many rows above the newest the chat pane is showing. 0 without an
+     explicit search pin follows the running turn. Held rather than derived: an
      operator reading back should stay where they are while the keeper keeps
      talking. *)
   mutable msg_scroll: int;
@@ -6388,10 +6406,6 @@ type state = {
   (* The server refused this client's credential for the journal endpoint.
      Said once; no journal is asked for again this session. *)
   mutable msg_journal_reads_refused: bool;
-  (* The settled logs held when [msg_scroll_pin] was taken. Their rows were on
-     the screen the operator anchored, so they are not rows that arrived
-     since; a log held later is. *)
-  mutable msg_scroll_pin_settled: turn_log list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -9035,7 +9049,6 @@ let create_state
   msg_journal_inflight = [];
   msg_journal_wanted = [];
   msg_journal_reads_refused = false;
-  msg_scroll_pin_settled = [];
   detail_scroll = 0;
   workspace;
   port;
@@ -9543,31 +9556,8 @@ let merge_paged_history ~(paged : msg_entry list) ~(fresh : msg_entry list) =
 
 let set_msg_scroll (state : state) rows =
   let rows = max 0 rows in
-  if rows = 0 then begin
-    state.msg_scroll <- 0;
-    state.msg_scroll_pin <- None;
-    state.msg_scroll_pin_settled <- []
-  end
-  else begin
-    if state.msg_scroll = 0 then begin
-      state.msg_scroll_pin <-
-        (match state.msg_target_keeper_name with
-         | None -> None
-         | Some keeper_name ->
-           (match List.rev (chat_rows_for state keeper_name) with
-            | newest :: _ -> Some (msg_anchor newest)
-            | [] -> None));
-      state.msg_scroll_pin_settled <- state.msg_settled_logs
-    end;
-    state.msg_scroll <- rows
-  end
-
-(* A search result and a rendered clamp are absolute distances from the
-   current tail. Rebase their pin as well as their distance; otherwise the
-   next frame adds the same post-pin arrivals to an already adjusted value. *)
-let set_msg_scroll_absolute state rows =
-  state.msg_scroll <- 0;
-  set_msg_scroll state rows
+  state.msg_scroll <- rows;
+  if rows = 0 then state.msg_scroll_pin <- None
 
 (* Rows the composer needs beyond its first. Folded into the status-row count
    because that one number already sets both the history height and the cursor
@@ -9593,7 +9583,7 @@ let composer_extra_rows (state : state) =
 type clamped_scroll =
   | Task_detail of int
   | Board_read of (int * int)
-  | Message_scroll of int
+  | Message_scroll of chat_scroll_position
   | Schedule_detail_scroll of int
   | Keeper_detail of int
   | Keeper_calls of int
@@ -9695,7 +9685,9 @@ let apply_clamped_scroll (state : state) = function
       state.board_scroll <- body;
       state.board_comment_scroll <- comments;
       state.board_comment_landing <- None
-  | Message_scroll value -> set_msg_scroll_absolute state value
+  | Message_scroll { scroll; pin } ->
+      state.msg_scroll <- max 0 scroll;
+      state.msg_scroll_pin <- pin
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value

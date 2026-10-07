@@ -2297,7 +2297,6 @@ let merged_blocks_memo : merged_blocks_memo option ref = ref None
 type chat_projection = {
   tagged_entries : (tagged_row * Message_layout.entry) list;
   layout_entries : Message_layout.entry list;
-  has_unsettled_live : bool;
 }
 
 (* Drawing, search and row measurement consume this same chronological
@@ -2786,18 +2785,15 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                 };
             merged, entries)
   in
-  (* The operator's unsettled lines sit at the end of the same stream, not
-     in a slot below it. Appended after [tagged_layout_entries] on purpose:
-     the scroll pin counts rows of committed messages that landed after its
-     anchor, and these are not committed messages -- adding them there would
-     move a pin the reader set. *)
+  (* Unsettled input and polled excerpts occupy the same physical suffix as
+     speech. They have no durable search origin, but their height participates
+     in every search and scroll-pin measurement. *)
   let layout_entries =
     layout_entries
     @ polled_turn_output_entries state ~keeper_name ~role_label_column
     @ chat_tail_entries state ~keeper_name ~role_label_column
   in
-  { tagged_entries = tagged_layout_entries; layout_entries;
-    has_unsettled_live = other_live_blocks <> [] }
+  { tagged_entries = tagged_layout_entries; layout_entries }
 
 let search_reply_source (message : msg_entry) =
   match message.me_role, message.me_turn_phase with
@@ -2833,6 +2829,103 @@ let search_anchor_matches anchor tag =
   | Search_history _, Tagged_block _
   | Search_journal _, Tagged_block (_, None, _) -> false
 
+let projection_index_of_anchor projection anchor =
+  List.find_mapi (fun index (tag, _) ->
+    if search_anchor_matches anchor tag then Some index else None)
+    projection.tagged_entries
+
+(* The body has already passed the exact same Markdown and width calculation
+   as the frame. Search text is deliberately separate from origin matching:
+   a viewport pin below uses only the typed source and body ordinal. *)
+let matching_body_row ~needle rows =
+  let bodies = List.filter_map (fun (row : Message_layout.row) ->
+    match row.kind with
+    | Message_layout.Body -> Some (Masc_tui_theme.strip_sgr row.text |> String.trim)
+    | Metadata _ | Viewport_gap _ -> None) rows in
+  let needle = String.lowercase_ascii needle in
+  let body = String.lowercase_ascii (String.concat "\n" bodies) in
+  let body_length = String.length body and needle_length = String.length needle in
+  let rec matches body_at needle_at last =
+    if needle_at = needle_length then Some last
+    else if body_at = body_length then None
+    else if body.[body_at] = '\n' then
+      (* A physical wrap either replaces the space between words or splits a
+         long word without adding one. Only layout boundaries are optional;
+         spaces inside a rendered row still have to match the query. *)
+      let across =
+        if needle.[needle_at] = ' ' || needle.[needle_at] = '\n' then
+          matches (body_at + 1) (needle_at + 1) body_at
+        else None
+      in
+      (match across with Some _ -> across | None -> matches (body_at + 1) needle_at last)
+    else if body.[body_at] = needle.[needle_at] then
+      matches (body_at + 1) (needle_at + 1) body_at
+    else None
+  in
+  let rec find from =
+    if from >= body_length then None
+    else match matches from 0 from with
+      | Some _ as found -> found
+      | None -> find (from + 1)
+  in
+  match find 0 with
+  | None -> None
+  | Some offset ->
+      (* Put the last row of a wrapped phrase at the viewport bottom; putting
+         its first row there would leave the rest below the visible window. *)
+      let rec locate ordinal start = function
+        | [] -> None
+        | line :: rest ->
+            if offset < start + String.length line then Some ordinal
+            else locate (ordinal + 1) (start + String.length line + 1) rest
+      in
+      locate 0 0 bodies
+
+let requested_scroll_from_pin state ~keeper_name projection ~markdown ~inner_width =
+  match state.msg_scroll_pin with
+  | Some pin when pin.pin_workspace = state.workspace_authority
+      && String.equal pin.pin_keeper keeper_name ->
+      Option.value ~default:state.msg_scroll
+        (List.find_map (fun point ->
+          Option.bind (projection_index_of_anchor projection point.scroll_anchor)
+            (fun entry_index ->
+              Option.map (fun suffix -> max 0
+                (suffix - point.rows_below + state.msg_scroll - pin.pin_scroll))
+                (Message_layout.scroll_for_body_row ~markdown
+                  ~origin:state.msg_origin_display ~inner_width ~entry_index
+                  ~body_row:point.body_row projection.layout_entries))) pin.pin_points)
+  | Some _ | None -> state.msg_scroll
+
+let scroll_position_for_window state ~keeper_name projection ~markdown ~inner_width
+    (window : Message_layout.scroll_window) =
+  let points = List.filter_map (fun (position : Message_layout.body_row_position) ->
+    Option.bind (List.nth_opt projection.tagged_entries position.entry_index)
+      (fun (tag, _) -> Option.map (fun anchor ->
+        { scroll_anchor=anchor; body_row=position.body_row; rows_below=position.rows_below })
+        (search_anchor_of_tag tag))) window.body_positions in
+  let pin = match points with
+    | _ :: _ -> Some { pin_workspace=state.workspace_authority;
+        pin_keeper=keeper_name; pin_scroll=window.scroll; pin_points=points }
+    | [] ->
+        (* An explicit search can pin a short answer even at scroll zero.
+           Ordinary live-edge frames have no pin and continue following. *)
+        (match state.msg_scroll_pin with
+         | Some pin when pin.pin_workspace=state.workspace_authority
+             && String.equal pin.pin_keeper keeper_name ->
+             let pin_points = List.filter_map (fun point ->
+               Option.bind (projection_index_of_anchor projection point.scroll_anchor)
+                 (fun entry_index ->
+                   Option.map (fun suffix -> {point with rows_below=suffix-window.scroll})
+                     (Message_layout.scroll_for_body_row ~markdown
+                       ~origin:state.msg_origin_display ~inner_width ~entry_index
+                       ~body_row:point.body_row projection.layout_entries))) pin.pin_points in
+             (match pin_points with
+              | [] -> None
+              | _ :: _ -> Some {pin with pin_scroll=window.scroll; pin_points})
+         | Some _ | None -> None)
+  in
+  { scroll=window.scroll; pin }
+
 (* Search uses exactly the projected speech/activity rows and measures every
    displayed suffix row, including polled notices and pending input. Pending
    inputs and polled excerpts are not committed search candidates: they can
@@ -2850,8 +2943,10 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
     in
     let projection = keeper_message_projection state ~keeper_name ~chat_cols in
     let tagged = projection.tagged_entries in
-    let index_of anchor = List.find_mapi (fun index (tag, _) ->
-      if search_anchor_matches anchor tag then Some index else None) tagged in
+    let index_of = projection_index_of_anchor projection in
+    let inner_width = max 1 (framed_inner_width chat_cols) in
+    let markdown = cached_chat_markdown ~link_previews_mode:state.link_previews_mode
+      ~theme:(Chat_theme.snapshot ()) in
     let ceiling = match older_than with
       | None -> List.length tagged
       | Some cursor when cursor.search_workspace <> state.workspace_authority
@@ -2871,25 +2966,27 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
       |> List.filter (fun (index, _, _) -> index < ceiling)
       |> List.rev
       |> List.find_map (fun (index, tag, (entry : Message_layout.entry)) ->
-           if Masc_tui_pick_list.lowercase_contains ~needle entry.body then
-             Option.map (fun anchor -> index, entry, anchor) (search_anchor_of_tag tag)
-           else None)
+           Option.bind (search_anchor_of_tag tag) (fun anchor ->
+               let previous = if index=0 then None
+                 else List.nth_opt projection.layout_entries (index-1) in
+               let rows = Message_layout.rows_of_entry ~markdown
+                 ~origin:state.msg_origin_display ~inner_width ~previous entry in
+               Option.map (fun body_row -> index, anchor, body_row)
+                 (matching_body_row ~needle rows)))
     in
     match matched with
     | None -> None
-    | Some (at, matched_entry, matched_anchor) ->
-        let newer = List.drop (at + 1) projection.layout_entries in
-        let scroll =
-          Message_layout.total_rows
-            ~markdown:(cached_chat_markdown ~link_previews_mode:state.link_previews_mode
-              ~theme:(Chat_theme.snapshot ()))
-            ~origin:state.msg_origin_display ~previous:matched_entry
-            ~inner_width:(max 1 (framed_inner_width chat_cols)) newer
-        in
+    | Some (at, matched_anchor, body_row) ->
         let older_anchors = tagged |> List.take at
           |> List.filter_map (fun (tag, _) -> search_anchor_of_tag tag) |> List.rev in
-        Some (scroll, {search_workspace=state.workspace_authority;
-          search_keeper=keeper_name; matched_anchor; older_anchors})
+        Option.map (fun scroll ->
+          let pin = Some {pin_workspace=state.workspace_authority; pin_keeper=keeper_name;
+            pin_scroll=scroll;
+            pin_points=[{scroll_anchor=matched_anchor; body_row; rows_below=0}]} in
+          {scroll; pin}, {search_workspace=state.workspace_authority;
+            search_keeper=keeper_name; matched_anchor; older_anchors})
+          (Message_layout.scroll_for_body_row ~markdown ~origin:state.msg_origin_display
+            ~inner_width ~entry_index:at ~body_row projection.layout_entries)
 
 
 let render_keeper_message (state : state) =
@@ -3110,7 +3207,6 @@ let render_keeper_message (state : state) =
       Message_layout.message_history_height ~terminal_rows:rows ~status_rows
     in
     let projection = keeper_message_projection state ~keeper_name ~chat_cols in
-    let tagged_layout_entries = projection.tagged_entries in
     let layout_entries = projection.layout_entries in
     let inner_width = max 1 (framed_inner_width chat_cols) in
     (* Clamped here rather than where the key is handled: the limit depends on
@@ -3120,90 +3216,16 @@ let render_keeper_message (state : state) =
        pane counts are the rows it paints. *)
     let link_previews_mode = state.link_previews_mode in
     let markdown = cached_chat_markdown ~link_previews_mode ~theme:chat_theme in
-    (* [msg_scroll] counts back from the row the operator was last looking at,
-       not from whatever is newest now. Count the current structural suffix
-       after that anchor: newly appended rows belong there, and a late input
-       can move pre-existing output below an earlier phase inside its own turn.
-       In both cases those rows sit between the anchor and bottom, so adding
-       their height is what keeps the same anchored content still.
-
-       A settled block's rows count only if its log was held after the pin was
-       taken: the ones on screen when the operator anchored are what they
-       anchored to, not rows that arrived since. *)
-    let rows_since_pin =
-      match state.msg_scroll_pin, projection.has_unsettled_live with
-      | None, _ -> 0
-      | Some _, true ->
-          (* A live trail has no durable row identity and may already have
-             many wrapped rows when the operator first leaves the bottom.
-             Treating that existing height as newly arrived double-counts it
-             on the first key press. Structural compensation resumes when the
-             trail settles into a block the pin can account for.
-
-             An observed block is not this case: its log is among the settled
-             logs the pin remembered, so the branch below counts it the way it
-             counts any held log -- not at all while it was on screen when the
-             pin was taken, whole when it was held later. Rows it grows by
-             between the pin and its settle go uncounted, as a live trail's
-             do; the rows that arrive around it are counted as they land, so
-             the reader is not moved by them while the turn runs and not
-             jumped by them when it ends. *)
-          0
-      | Some pin, false ->
-          let arrived_since_pin = function
-            | Tagged_row _ -> true
-            | Tagged_block (log, _, _) -> not (List.memq log state.msg_scroll_pin_settled)
-          in
-          let entries_after rest =
-            List.filter_map
-              (fun (tag, entry) -> if arrived_since_pin tag then Some entry else None)
-              rest
-          in
-          let rendered_suffix =
-            let rec find_visible = function
-              | [] -> None
-              | (Tagged_row message, entry) :: rest ->
-                  if same_msg_anchor pin message
-                  then Some (Some entry, entries_after rest)
-                  else find_visible rest
-              | (Tagged_block _, _) :: rest -> find_visible rest
-            in
-            match find_visible tagged_layout_entries with
-            | Some _ as found -> found
-            | None ->
-                (* A hidden Memory/thinking row can own the logical pin but no
-                   layout entry. Start at the first visible identity after it,
-                   preserving the preceding entry from the full layout so an
-                   hour rail is measured exactly as the frame measures it. *)
-                let raw_after =
-                  Option.value ~default:[]
-                    (msg_entries_after_anchor (chat_rows_for state keeper_name) pin)
-                in
-                let after_anchors = List.map msg_anchor raw_after in
-                let belongs message =
-                  List.exists
-                    (fun anchor -> same_msg_anchor anchor message)
-                    after_anchors
-                in
-                let rec find_after previous = function
-                  | [] -> None
-                  | (Tagged_row message, entry) :: rest when belongs message ->
-                      Some (previous, entry :: entries_after rest)
-                  | (_, entry) :: rest -> find_after (Some entry) rest
-                in
-                find_after None tagged_layout_entries
-          in
-          (match rendered_suffix with
-           | None | Some (_, []) -> 0
-           | Some (previous, arrived) ->
-               Message_layout.total_rows ~markdown
-                 ~origin:state.msg_origin_display ?previous ~inner_width arrived)
-    in
-    let scroll, visible_rows =
+    let requested = requested_scroll_from_pin state ~keeper_name projection
+      ~markdown ~inner_width in
+    let window =
       Message_layout.clamped_scrolled_rows ~markdown
         ~origin:state.msg_origin_display ~inner_width ~height:history_height
-        ~requested:(state.msg_scroll + rows_since_pin) layout_entries
+        ~requested layout_entries
     in
+    let scroll = window.scroll and visible_rows = window.rows in
+    let scroll_feedback = scroll_position_for_window state ~keeper_name projection
+      ~markdown ~inner_width window in
 
     (* The chat buffer starts below the one-row tab strip, which is added by
        [finish_frame_beside_acting_pane]. Mouse reports count from the terminal's
@@ -3828,7 +3850,7 @@ let render_keeper_message (state : state) =
     Buffer.add_string buf
       (footer_line state ~max_cells:cols ?position:scroll_position ~hints:footer_hints);
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
-      ~clamped:(Message_scroll scroll)
+      ~clamped:(Message_scroll scroll_feedback)
       ~cursor:
         (if state.keeper_message_focus = Left_pane then
            Frame_presenter.Hidden

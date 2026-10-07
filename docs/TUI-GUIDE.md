@@ -1005,6 +1005,27 @@ not restart the search. Hidden reasoning is excluded. Editable pending inputs
 and replaceable polled excerpts contribute to scroll positioning but are not
 conversation search candidates.
 
+Search lands on the physical body row containing the match, including inside
+a long or wrapped answer. It searches rendered words, so `foo bar` also finds
+`foo **bar**`. Physical line breaks are treated as presentation boundaries:
+words may span a break with or without a space in the query. This applies to
+both source newlines and width wrapping, whose provenance the row layout does
+not distinguish. A wrapped phrase lands with its last row visible.
+
+While reading back, the pane pins projected history or journal origins and
+their physical body-row positions. Incoming input, broadcasts, streamed text,
+and settled journals therefore do not pull the view toward the tail. This also
+works when no raw history rows have been loaded. The canonical reply's typed
+alias keeps the same anchor when history and journal representations replace
+one another. Search installs its pin before the next frame; returning to the
+bottom releases it and resumes following output.
+
+These pins retain physical row ordinals, not source character offsets. A
+terminal resize or Markdown change that reflows the anchored entry can change
+which words occupy that ordinal. Preserving the exact words across such reflow
+requires source positions from the Markdown/layout boundary and remains outside
+this guarantee.
+
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did. Reasoning starts folded with a `THINKING`
 label; tool calls start as a compact activity row labelled `TOOLS`.

@@ -974,7 +974,7 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
     Layout.scrolled_rows ~markdown:uncached_markdown ~inner_width ~height
       ~from_bottom:expected_scroll entries
   in
-  let scroll, rows =
+  let {Layout.scroll; rows; _} =
     Layout.clamped_scrolled_rows ~markdown ~inner_width ~height ~requested entries
   in
   check int "combined scroll matches the separate clamp" expected_scroll scroll;
@@ -1004,7 +1004,7 @@ let test_a_second_walk_pays_for_what_it_newly_reaches () =
   in
   let walk requested =
     laid_out := 0;
-    let scroll, rows =
+    let {Layout.scroll; rows; _} =
       Layout.clamped_scrolled_rows ~markdown ~inner_width ~height ~requested
         entries
     in
@@ -1025,7 +1025,7 @@ let test_a_second_walk_pays_for_what_it_newly_reaches () =
   ignore
     (Layout.clamped_scrolled_rows ~markdown ~inner_width:(inner_width + 6)
        ~height ~requested:93 entries
-      : int * Layout.row list);
+      : Layout.scroll_window);
   check bool "a new width measures again" true (!laid_out > second_cost)
 
 let test_clamping_a_scroll_reads_only_as_far_as_it_must () =
@@ -1050,7 +1050,7 @@ let test_clamping_a_scroll_reads_only_as_far_as_it_must () =
                    Layout.scrolled_rows ~inner_width:30 ~height
                      ~from_bottom:expected entries
                  in
-                 let combined_scroll, combined_rows =
+                 let {Layout.scroll=combined_scroll; rows=combined_rows; _} =
                    Layout.clamped_scrolled_rows ~inner_width:30 ~height
                      ~requested entries
                  in
@@ -1727,7 +1727,7 @@ let test_scrolling_back_moves_the_window () =
 let test_a_new_message_does_not_move_a_scrolled_window () =
   let window requested entries =
     Layout.clamped_scrolled_rows ~inner_width:40 ~height:4 ~requested entries
-    |> snd |> text_of
+    |> fun (window : Layout.scroll_window) -> text_of window.rows
   in
   let before = window 4 ten_entries in
   let arrival =
@@ -2541,7 +2541,7 @@ let test_scrolling_measures_the_mode_it_draws () =
         bound;
       List.iter
         (fun requested ->
-          let clamped, rows =
+          let {Layout.scroll=clamped; rows; body_positions} =
             Layout.clamped_scrolled_rows ~origin ~inner_width:40 ~height
               ~requested entries
           in
@@ -2550,7 +2550,21 @@ let test_scrolling_measures_the_mode_it_draws () =
                entries)
             clamped;
           check bool "the window never exceeds the height" true
-            (List.length rows <= height))
+            (List.length rows <= height);
+          List.iter (fun (position : Layout.body_row_position) ->
+            check (option int) "a physical body origin resolves to the row drawn"
+              (Some (clamped + position.rows_below))
+              (Layout.scroll_for_body_row ~origin ~inner_width:40
+                ~entry_index:position.entry_index ~body_row:position.body_row entries);
+            let entry = List.nth entries position.entry_index in
+            let previous = if position.entry_index=0 then None
+              else List.nth_opt entries (position.entry_index-1) in
+            let bodies = Layout.rows_of_entry ~origin ~inner_width:40 ~previous entry
+              |> List.filter (fun (row : Layout.row) -> row.kind=Layout.Body) in
+            let drawn = List.nth rows (List.length rows - position.rows_below - 1) in
+            check string "the position names the actual displayed body row"
+              (List.nth bodies position.body_row).text drawn.text)
+            body_positions)
         [ 0; 1; 5; bound; bound + 4 ])
     [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]
 

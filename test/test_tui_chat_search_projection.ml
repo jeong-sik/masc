@@ -38,11 +38,13 @@ let log state ~id ~at deltas =
   T.hold_settled_log state log;
   log
 
-let screen state =
+let frame_lines state =
   let frame, clamped = Render.render_keeper_message state in
   Option.iter (T.apply_clamped_scroll state) clamped;
   frame.Masc_tui_frame_presenter.lines
-  |> List.map Masc_tui_theme.strip_sgr |> String.concat "\n"
+  |> List.map Masc_tui_theme.strip_sgr
+
+let screen state = String.concat "\n" (frame_lines state)
 
 let count text needle = List.length (Astring.String.cuts ~sep:needle text) - 1
 
@@ -50,7 +52,7 @@ let find ?older state needle =
   match Render.keeper_message_find_scroll state ~keeper_name:"alpha"
       ~needle ~older_than:older with
   | None -> fail ("visible conversation match missing: " ^ needle)
-  | Some (scroll, cursor) -> T.set_msg_scroll_absolute state scroll; cursor
+  | Some (position, cursor) -> T.apply_clamped_scroll state (T.Message_scroll position); cursor
 
 let at_sizes run =
   let cache = Masc_tui_ansi.terminal_size_cache in
@@ -176,6 +178,157 @@ let test_frame_feedback_consumes_arrival_compensation () = at_sizes (fun origin 
   List.iter (fun _ -> check int "absolute search remains visible through frame feedback" 1
     (count (screen state) "ORIGINAL_ROW_0")) [(); (); ()])
 
+let long_answer prefix =
+  String.concat "\n" (List.init 100 (fun index -> Printf.sprintf "%s%03d" prefix index))
+
+let visible_line lines needle =
+  match List.find_mapi (fun index line ->
+    if Astring.String.is_infix ~affix:needle line then Some index else None) lines with
+  | Some index -> index
+  | None -> fail ("matched physical row not on screen: " ^ needle)
+
+let assert_still_reading state needle =
+  let initial = visible_line (frame_lines state) needle in
+  let scroll = state.msg_scroll in
+  List.iter (fun _ ->
+    check int "frame feedback retains the physical row" initial
+      (visible_line (frame_lines state) needle);
+    check int "frame feedback does not accumulate arrival height" scroll state.msg_scroll)
+    [(); (); ()]
+
+let test_long_answer_match_location () = at_sizes (fun origin ->
+  List.iter (fun journal ->
+    let state = state origin in
+    let text = long_answer "LONG_NEEDLE_" in
+    if journal then ignore (log state ~id:"long" ~at:1.
+      [Live.Run_started; Live.Text text; reply text; Live.Run_finished])
+    else state.msg_loaded <- [row ~id:"long" ~request_id:"long"
+      ~role:T.Message_keeper ~text 1.];
+    List.iter (fun index ->
+      let needle = Printf.sprintf "LONG_NEEDLE_%03d" index in
+      ignore (find state needle);
+      assert_still_reading state needle) [0; 49; 99]) [false; true])
+
+let test_word_wrapped_match_location () = at_sizes (fun origin ->
+  let state = state origin in
+  (* A single paragraph spans many physical rows at both pane widths. *)
+  let words = List.init 300 (fun index -> Printf.sprintf "token%03d" index) in
+  let text = String.concat " " words in
+  ignore (log state ~id:"wrapped" ~at:1.
+    [Live.Run_started; Live.Text text; reply text; Live.Run_finished]);
+  List.iter (fun index ->
+    let needle = Printf.sprintf "token%03d" index in
+    ignore (find state needle);
+    assert_still_reading state needle) [0; 149; 299];
+  (* Longer than either body's width: the end of a matched phrase must also
+     be on screen, not below the viewport's bottom row. *)
+  let phrase = String.concat " " (words |> List.drop 140 |> List.take 18) in
+  ignore (find state phrase);
+  let lines = frame_lines state in
+  let first = visible_line lines "token140" and last = visible_line lines "token157" in
+  check bool "the matched phrase crosses actual wrapped rows" true (last > first);
+  assert_still_reading state "token157";
+  let unbroken = "HARDSTART" ^ String.make 180 'x' ^ "HARDEND" in
+  let wrapped_word = text ^ "\n" ^ unbroken ^ "\n" ^ text in
+  ignore (log state ~id:"hard-wrap" ~at:200.
+    [Live.Run_started; Live.Text wrapped_word; reply wrapped_word; Live.Run_finished]);
+  ignore (find state unbroken);
+  let lines = frame_lines state in
+  check bool "a hard-wrapped token retains both ends of its match" true
+    (visible_line lines "HARDEND" > visible_line lines "HARDSTART"))
+
+let test_search_matches_rendered_words () = at_sizes (fun origin ->
+  let state = state origin in
+  let text = "Visible **styled** text\nVISIBLE\nBOUNDARY\n" ^ long_answer "TAIL_" in
+  ignore (log state ~id:"markdown" ~at:1.
+    [Live.Run_started; Live.Text text; reply text; Live.Run_finished]);
+  ignore (find state "Visible styled text");
+  assert_still_reading state "Visible styled text";
+  (* Search treats physical breaks as presentation boundaries, including an
+     explicit source newline: their hard/soft provenance is not in row.text. *)
+  List.iter (fun needle ->
+    ignore (find state needle);
+    let lines = frame_lines state in
+    check bool "a rendered line boundary may separate a visible phrase" true
+      (visible_line lines "BOUNDARY" > visible_line lines "VISIBLE"))
+    ["VISIBLE BOUNDARY"; "VISIBLEBOUNDARY"])
+
+let test_journal_only_pin_survives_all_arrivals () = at_sizes (fun origin ->
+  let state = state origin in
+  let text = long_answer "READ_A_" in
+  ignore (log state ~id:"a" ~at:1.
+    [Live.Run_started; Live.Text text; reply text; Live.Run_finished]);
+  ignore (find state "READ_A_035");
+  check bool "search pins the journal before a frame can arrive" true
+    (Option.is_some state.msg_scroll_pin);
+  let before = visible_line (frame_lines state) "READ_A_035" in
+  let later = long_answer "NEW_C_" in
+  ignore (log state ~id:"c" ~at:100.
+    [Live.Run_started; Live.Text later; reply later; Live.Run_finished]);
+  check int "a large journal arrival cannot move the reading row" before
+    (visible_line (frame_lines state) "READ_A_035");
+  assert_still_reading state "READ_A_035";
+  state.msg_loaded <- [row ~id:"outside" ~request_id:"outside"
+    ~role:(T.Message_user (T.Sent_by_other {speaker="beta"; surface=Some "broadcast"}))
+    ~text:(long_answer "BROADCAST_") 200.];
+  assert_still_reading state "READ_A_035";
+  let pending = Chat.create_request ~keeper_name:"alpha"
+    ~message:(long_answer "PENDING_") () in
+  (match Masc_tui_keeper_chat_queue.push state.msg_queued ~submitted_at:250. pending with
+   | Error detail -> fail detail
+   | Ok (queue, _) -> state.msg_queued <- queue);
+  assert_still_reading state "READ_A_035";
+  let live = T.turn_log_create ~keeper_name:"alpha" ~request_id:"live" ~started_at:300. in
+  T.turn_log_add ~now:300. live ~seq:(Some 0) Live.Run_started;
+  T.turn_log_add ~now:301. live ~seq:(Some 1) (Live.Text (long_answer "LIVE_"));
+  state.msg_live <- Some live;
+  assert_still_reading state "READ_A_035";
+  T.turn_log_add ~now:302. live ~seq:(Some 2) (Live.Text ("\n" ^ long_answer "GROWTH_"));
+  assert_still_reading state "READ_A_035";
+  T.turn_log_add ~now:303. live ~seq:(Some 3)
+    (reply (long_answer "LIVE_" ^ "\n" ^ long_answer "GROWTH_"));
+  T.turn_log_add ~now:304. live ~seq:(Some 4) Live.Run_finished;
+  Log.commit live.tl_log;
+  T.hold_settled_log state live;
+  state.msg_live <- None;
+  assert_still_reading state "READ_A_035")
+
+let test_pin_aliases_history_and_canonical_reply () = at_sizes (fun origin ->
+  let state = state origin in
+  let text = long_answer "ALIASED_" in
+  state.msg_loaded <- [row ~id:"answer" ~request_id:"alias" ~role:T.Message_keeper
+    ~text 1.];
+  ignore (find state "ALIASED_040");
+  ignore (frame_lines state);
+  ignore (log state ~id:"alias" ~at:1.
+    [Live.Run_started; Live.Text text; reply text; Live.Run_finished]);
+  let later = long_answer "LATER_" in
+  let tail = log state ~id:"tail" ~at:100.
+    [Live.Run_started; Live.Text later; reply later; Live.Run_finished] in
+  assert_still_reading state "ALIASED_040";
+  state.msg_settled_logs <- [tail];
+  assert_still_reading state "ALIASED_040";
+  (* Removing all tail content clamps this long history entry without losing
+     its physical row. The next paint consumes the clamp exactly once. *)
+  state.msg_settled_logs <- [];
+  assert_still_reading state "ALIASED_040")
+
+let test_search_pin_before_first_frame_and_at_tail () = at_sizes (fun origin ->
+  let state = state origin in
+  ignore (log state ~id:"short" ~at:1.
+    [Live.Run_started; Live.Text "SHORT_MATCH"; reply "SHORT_MATCH"; Live.Run_finished]);
+  ignore (find state "SHORT_MATCH");
+  let tail = long_answer "ARRIVED_BEFORE_PAINT_" in
+  ignore (log state ~id:"tail" ~at:50.
+    [Live.Run_started; Live.Text tail; reply tail; Live.Run_finished]);
+  assert_still_reading state "SHORT_MATCH";
+  T.set_msg_scroll state 0;
+  check bool "explicitly returning to the bottom releases the search pin" true
+    (Option.is_none state.msg_scroll_pin);
+  ignore (frame_lines state);
+  check bool "live-edge frame feedback does not recreate a pin" true
+    (Option.is_none state.msg_scroll_pin))
+
 let () = run "chat search projection" [
   "rendered conversation", [
     test_case "held replies and full suffix geometry" `Quick test_settled_reply_and_complete_suffix;
@@ -184,4 +337,16 @@ let () = run "chat search projection" [
     test_case "repeat across source and workspace replacement" `Quick
       test_repeat_across_history_journal_replacement;
     test_case "frame feedback consumes arrival compensation" `Quick
-      test_frame_feedback_consumes_arrival_compensation ] ]
+      test_frame_feedback_consumes_arrival_compensation;
+    test_case "long history and journal matches land on their physical row" `Quick
+      test_long_answer_match_location;
+    test_case "word wrapped matches include the whole phrase" `Quick
+      test_word_wrapped_match_location;
+    test_case "search matches rendered markup and presentation line boundaries" `Quick
+      test_search_matches_rendered_words;
+    test_case "journal-only pin survives settled, broadcast, input and live arrivals" `Quick
+      test_journal_only_pin_survives_all_arrivals;
+    test_case "scroll pin follows history and canonical reply aliases" `Quick
+      test_pin_aliases_history_and_canonical_reply;
+    test_case "search pins before the first frame and releases at the live edge" `Quick
+      test_search_pin_before_first_frame_and_at_tail ] ]

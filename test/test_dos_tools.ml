@@ -1116,6 +1116,7 @@ let test_a_holder_departs_with_its_credential () =
       | Some Tool_misc_dos_lane.Keeper_stopped -> "keeper stopped"
       | Some Tool_misc_dos_lane.Credential_expired -> "credential expired"
       | Some Tool_misc_dos_lane.No_credential -> "no credential"
+      | Some Tool_misc_dos_lane.Participant_departed -> "participant departed"
     in
     let token name role =
       match Auth.create_token base_path ~agent_name:name ~role with

@@ -284,13 +284,13 @@ def task_cancel_editor_replacement(executable):
         )
 
 
-def task_cancel_previous_workspace_receipt(executable):
+def task_cancel_previous_workspace_receipt(executable, *, unconfirmed=False):
     """Accepted A cancellation remains visible after a refresh observes B."""
     fixtures = quiet_fixtures()
     requests = []
     accepted = threading.Event()
     release = threading.Event()
-    state = {"foreign": False, "health_reads": 0, "history_reads": 0}
+    state = {"foreign": False, "unread": False, "health_reads": 0, "history_reads": 0}
     transitions = []
     with tempfile.TemporaryDirectory(prefix="masc-task-cancel-receipt-") as directory:
         editor = Path(directory, "editor.py")
@@ -305,6 +305,9 @@ def task_cancel_previous_workspace_receipt(executable):
 
             def health():
                 state["health_reads"] += 1
+                if state["unread"]:
+                    return h.RawHttpResponse(503, b'{"error":"identity temporarily unread"}',
+                        content_type="application/json")
                 root = foreign if state["foreign"] else local
                 return h.RawHttpResponse(200, json.dumps({
                     "status": "ok", "paths": {
@@ -347,6 +350,10 @@ def task_cancel_previous_workspace_receipt(executable):
 
             def history():
                 state["history_reads"] += 1
+                if unconfirmed:
+                    return 200, [{"ts": STAMP, "action": "cancel", "to_status": "cancelled",
+                        "handoff_context": {"summary": "RECOVERED_CANCEL_HISTORY" if release.is_set()
+                                            else "INITIAL_TASK_HISTORY"}}]
                 return previous_history() if callable(previous_history) else previous_history
 
             fixtures[history_path] = history
@@ -360,24 +367,37 @@ def task_cancel_previous_workspace_receipt(executable):
                 h.send_and_wait(process, fd, output, b"\r", b"exact-detail-claimed-a")
                 os.write(fd, b"x")
                 assert h.wait_for_fixture_event(process, fd, output, accepted, timeout=10)
-                state["foreign"] = True
-                h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
+                state["foreign"] = not unconfirmed
+                state["unread"] = unconfirmed
+                h.send_and_wait(process, fd, output, b"r",
+                    b"[workspace unconfirmed]" if unconfirmed else b"[workspace mismatch]")
                 h.drain_until_quiet(process, fd, output)
                 before = (state["health_reads"], state["history_reads"])
                 start = len(output)
                 release.set()
-                h.wait_for_output(process, fd, output,
-                                  ("task " + TASK_A + " cancelled in the previous workspace").encode(),
-                                  start=start, timeout=10)
+                receipt = ("task " + TASK_A + " cancelled" +
+                           ("" if unconfirmed else " in the previous workspace")).encode()
+                h.wait_for_output(process, fd, output, receipt, start=start, timeout=10)
                 h.drain_until_quiet(process, fd, output)
                 assert (state["health_reads"], state["history_reads"]) == before, state
                 assert len(transitions) == 1, transitions
+                if unconfirmed:
+                    assert b"previous workspace" not in h.screen_text(bytes(output)), output[-4000:]
+                    state["unread"] = False
+                    start = len(output)
+                    os.write(fd, b"r")
+                    assert h.wait_for_fixture_state(process, fd, output,
+                        lambda: state["history_reads"] > before[1], timeout=10), state
+                    h.wait_for_output(process, fd, output, b"RECOVERED_CANCEL_HISTORY",
+                        start=start, timeout=10)
+                    assert len(transitions) == 1, "recovery repeated the cancellation POST"
                 os.write(fd, b"q")
             finally:
                 release.set()
 
         h.run_terminal_scenario(
-            executable, description="accepted Task cancel reports previous workspace without refresh",
+            executable, description=("accepted Task cancel waits for same-workspace history recovery"
+                if unconfirmed else "accepted Task cancel reports previous workspace without refresh"),
             interact=interact, http_fixtures=fixtures, http_requests=requests,
             prepare_workspace=prepare, refresh=60.0,
             extra_env={"EDITOR": f"{shlex.quote(sys.executable)} {shlex.quote(str(editor))}"},
@@ -390,4 +410,5 @@ if __name__ == "__main__":
     full_http_loss_retains_local_work_and_draft(exe)
     task_cancel_editor_replacement(exe)
     task_cancel_previous_workspace_receipt(exe)
-    print("Home failure and Task PTY: PASS (4 scenarios)")
+    task_cancel_previous_workspace_receipt(exe, unconfirmed=True)
+    print("Home failure and Task PTY: PASS (5 scenarios)")

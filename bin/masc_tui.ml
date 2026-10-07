@@ -12069,6 +12069,70 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
                 ~needs))
   end
 
+(* The task receipt and its dependent work have different authority. A
+   temporary loss of identity holds the latter without replaying the POST. *)
+let resume_task_followups state ~mailbox ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup =
+  let ready = function
+    | Task_handoff _ -> Option.is_none state.keepers_error
+    | Task_cancel_refresh _ -> true in
+  let run, withdrawn = take_task_followups state ~ready in
+  List.iter (function
+    | Task_handoff {task_id; _} -> report_action state "task"
+        (Printf.sprintf "%s created in the previous workspace; Keeper handoff withdrawn" task_id)
+    | Task_cancel_refresh task_id -> report_action state "system"
+        (Printf.sprintf "task %s cancelled in the previous workspace; current workspace unchanged" task_id)) withdrawn;
+  List.iter (function
+    | Task_handoff {keeper; task_id; _}
+      when not (keeper_available_for_new_message state keeper) ->
+        report_action state "error"
+          (Printf.sprintf "%s created; Keeper %s is no longer registered, handoff not sent" task_id keeper)
+    | (Task_handoff {keeper; task_id; title; body} as action) ->
+        (* This is an already accepted task, not the operator's current
+           composer. Keep any newer draft, attachment or recalled edit intact. *)
+        let request = Keeper_chat.create_request ~keeper_name:keeper
+            ~message:(Masc_tui_command.task_message ~task_id ~title ~body) () in
+        let submitted_at = Unix.gettimeofday () in
+        (match Chat_queue.push state.msg_queued ~submitted_at request with
+         | Error detail ->
+             Option.iter (fun expected_workspace ->
+               remember_task_followup state ~expected_workspace action) state.server_identity;
+             report_action state "error"
+               (Printf.sprintf "%s created; Keeper handoff waiting: %s" task_id detail)
+         | Ok (queue, _) ->
+             state.msg_queued <- queue;
+             append_user_history_once ~submitted_at state request;
+             state.keeper_interactive_waiting <-
+               (keeper, request.request_id,
+                Awaiting_control {generation = keeper_chat_control_generation state keeper; target = None})
+               :: state.keeper_interactive_waiting;
+             (* A handoff can complete after the operator starts editing a
+                different Keeper. Deliver to its own queue without switching
+                that editor (which would retire its recalled draft). *)
+             if state.msg_target_keeper_name = None
+                || state.msg_target_keeper_name = Some keeper then begin
+               close_key_modals state;
+               state.palette_open <- false;
+               state.palette_mode <- Masc_tui_types.Palette_jump;
+               state.palette_query <- "";
+               state.palette_cursor <- 0;
+               state.search <- None;
+               set_msg_scroll state 0;
+               state.view <- Keepers Keeper_message;
+               if state.msg_target_keeper_name = None then
+                 open_message_for_keeper state keeper ~drain_queue:(fun () -> ())
+             end;
+             launch_waiting_keeper_input state ~mailbox ~keeper_name:keeper)
+    | Task_cancel_refresh task_id ->
+        (* Only the detail that is still selected owns this follow-up read. *)
+        if state.task_detail_id = Some task_id then begin
+          state.task_history <- None;
+          launch_task_history_load state ~mailbox task_id
+        end;
+        start_http_refresh state ~host:server_peer_host ~port:state.port
+          ~intent:Revalidate ~refresh_inflight ~scoped_refresh_inflight
+          ~scoped_refresh_followup ~mailbox) run
+
 (* The two tokens a read is admitted under. Applying a server identity
    reading moves the workspace one when the workspace changes (the first
    reading at boot is one) and cancels every read it admitted; it revokes
@@ -12092,6 +12156,8 @@ let read_authority state =
    that refresh brought. *)
 let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~(before : read_authority) =
+  resume_task_followups state ~mailbox ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup;
   let workspace_moved = before.read_workspace <> state.workspace_authority in
   let moved = workspace_moved || before.read_detail != state.detail_read_authority in
   (* The detail goes first: it restores the remembered Keeper focus and
@@ -12110,6 +12176,10 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (* Retained nested readers own their selection independently of the list
        underneath. Reissue their observations without resetting navigation. *)
     (match state.view with
+     | Planning ->
+         (match state.planning_mode with
+          | Planning_detail goal_id -> launch_goal_timeline_load state ~mailbox goal_id
+          | Planning_list -> ())
      | Keepers Keeper_runtime_pick -> launch_runtime_catalog_load state ~mailbox
      | Keepers Keeper_calls -> Option.iter (fun keeper ->
          launch_keeper_calls_load ~force:true state ~mailbox keeper.Tui_decode.k_name) (selected_keeper state)
@@ -12145,6 +12215,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
               launch_librarian_input_load state ~mailbox ~prompt_key
           | _ -> ())
      | _ -> ());
+    (* Task detail also opens from Home; its retained selection owns history
+       independently of the underlying surface. *)
+    Option.iter (launch_task_history_load state ~mailbox) state.task_detail_id;
     if state.context_inspector_open then Option.iter (fun keeper_name ->
       launch_context_inspector_load state ~mailbox ~keeper_name) state.context_inspector_keeper;
     if state.repository_changes_open then
@@ -14672,26 +14745,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            | Repositories | Code | Changes | Connectors | Runtime | Config
            | Resources | Tools | System_logs ->
                ()))
-  | Task_dispatched { expected_workspace; keeper; task_id; title; body }
-      when state.workspace_identity = Workspace_identity_match
-           && same_workspace_identity (Some expected_workspace) state.server_identity ->
+  | Task_dispatched { expected_workspace; keeper; task_id; title; body } ->
       report_action state "task" (Printf.sprintf "%s created for %s" task_id keeper);
-      (* The jump lands on a clean screen: a modal or roster search opened
-         while the dispatch was in flight would otherwise sit over (or
-         zombie under) a surface it was not opened on. *)
-      close_key_modals state;
-      state.palette_open <- false;
-      state.palette_mode <- Masc_tui_types.Palette_jump;
-      state.palette_query <- "";
-      state.palette_cursor <- 0;
-      state.search <- None;
-      set_msg_scroll state 0;
-      state.view <- Keepers Keeper_message;
-      start_keeper_message ~keeper_name:keeper state ~base_path ~mailbox
-        (Masc_tui_command.task_message ~task_id ~title ~body)
-  | Task_dispatched { task_id; _ } ->
-      report_action state "task"
-        (Printf.sprintf "%s created in the previous workspace; Keeper handoff withdrawn" task_id)
+      remember_task_followup state ~expected_workspace
+        (Task_handoff {keeper; task_id; title; body});
+      resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
   | Task_dispatch_failed { keeper; detail; original } ->
       (* The operator's words come back to the input so nothing typed is
          lost with the failure. *)
@@ -14892,22 +14951,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | _ -> ())
   | Task_cancel_done (task_id, expected_workspace, result) ->
       (match result with
-       | Ok _ when state.workspace_identity = Workspace_identity_match
-                   && Option.exists (same_server_workspace expected_workspace) state.server_identity ->
-           report_action state "system"
-             (Printf.sprintf "task %s cancelled" task_id);
-           (* The backlog row and the detail's history both changed; refresh
-              re-reads the backlog, and the history reload draws the cancel
-              the operator just performed. *)
-           state.task_history <- None;
-           launch_task_history_load state ~mailbox task_id;
-           start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
-             ~scoped_refresh_inflight:http_scoped_refresh_inflight
-             ~scoped_refresh_followup ~mailbox
        | Ok _ ->
-           report_action state "system"
-             (Printf.sprintf "task %s cancelled in the previous workspace; current workspace unchanged" task_id)
+           report_action state "system" (Printf.sprintf "task %s cancelled" task_id);
+           remember_task_followup state ~expected_workspace (Task_cancel_refresh task_id);
+           resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
        | Error err -> report_action state "error" ("task cancel failed: " ^ err))
   | Goal_timeline_loaded (goal_id, result) ->
       (* Drawn only while the operator still has this goal open; a stale

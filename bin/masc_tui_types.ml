@@ -111,6 +111,19 @@ type workspace_identity =
       ; server_base_path : string
       }
 
+(* A task POST has already succeeded. Only its dependent handoff/reading
+   waits for identity recovery; creating or cancelling the task is never
+   repeated. Authority also prevents A -> B -> A from reviving a handoff. *)
+type task_followup =
+  | Task_handoff of { keeper : string; task_id : string; title : string; body : string }
+  | Task_cancel_refresh of string
+
+type pending_task_followup =
+  { tf_workspace : Tui_decode.server_identity
+  ; tf_authority : workspace_authority
+  ; tf_action : task_followup
+  }
+
 type workspace_input_identity =
   { wi_base_path : string
   ; wi_masc_root : string
@@ -5186,6 +5199,7 @@ type state = {
   mutable workspace_identity: workspace_identity;
   mutable workspace_authority: workspace_authority;
   mutable workspace_read_authority: unit ref;
+  mutable pending_task_followups: pending_task_followup list;
   mutable suspended_keeper_inputs: (workspace_input_identity option * suspended_keeper_input) list;
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable workspace_observation_cancellations: (unit ref * (unit -> unit)) list;
@@ -6442,6 +6456,38 @@ let server_authority_ready state =
       && not (String.equal identity.sid_base_path "")
       && not (String.equal identity.sid_masc_root "")
   | None -> false
+
+let remember_task_followup state ~expected_workspace action =
+  state.pending_task_followups <- state.pending_task_followups @
+    [{tf_workspace = expected_workspace; tf_authority = state.workspace_authority;
+      tf_action = action}]
+
+(* Consume each ready followup once, leaving unread identity/roster work
+   pending. A comparable foreign workspace retires it even if that workspace
+   has not finished booting. *)
+let take_task_followups state ~ready =
+  let foreign held =
+    held.tf_authority <> state.workspace_authority
+    || match state.server_identity with
+       | Some current when current.Tui_decode.sid_base_path <> ""
+                           && current.sid_masc_root <> "" ->
+           not (String.equal (canonical_path held.tf_workspace.sid_base_path)
+                  (canonical_path current.sid_base_path)
+                && String.equal (canonical_path held.tf_workspace.sid_masc_root)
+                     (canonical_path current.sid_masc_root))
+       | Some _ | None -> false
+  in
+  let run, withdrawn, waiting = List.fold_left (fun (run, withdrawn, waiting) held ->
+    if foreign held then run, held.tf_action :: withdrawn, waiting
+    else if state.workspace_identity = Workspace_identity_match
+            && server_workspace_matches ~expected:(Some held.tf_workspace)
+                 (match state.server_identity with Some id -> Ok id | None -> Error "unread")
+            && ready held.tf_action
+    then held.tf_action :: run, withdrawn, waiting
+    else run, withdrawn, held :: waiting)
+    ([], [], []) state.pending_task_followups in
+  state.pending_task_followups <- List.rev waiting;
+  List.rev run, List.rev withdrawn
 
 let workspace_reply_admitted state ~authority ~reading ~kind =
   authority = state.workspace_authority
@@ -8638,6 +8684,7 @@ let create_state
   workspace_read_authority = ref ();
   workspace_cancellations = [];
   workspace_observation_cancellations = [];
+  pending_task_followups = [];
   suspended_keeper_inputs = [];
   workspace_identity =
     (if String.equal local_base_path ""

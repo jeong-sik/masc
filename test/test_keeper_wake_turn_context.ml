@@ -768,39 +768,6 @@ let test_direct_turn_discovers_published_workspace_memory () =
     check bool "unavailable direct reply does not reuse a stale read target" false
       (contains ~needle:ledger_sha256 unavailable))
 
-let test_workspace_memory_observation_carries_the_claims_digest () =
-  let module Ledger = Masc.Workspace_memory_ledger in
-  let observation ?(claim_count = 2) ?(truncated = false) () =
-    Ledger.Available
-      { ledger_sha256 = "digest-sha"
-      ; claim_count
-      ; conflict_count = 0
-      ; classified_count = 2
-      ; claims_digest = [ "- c1: Board 에 숫자를 쓰기 전에 원문에서 다시 센다"; "- c2: 두 번째 공유 주장" ]
-      ; claims_digest_truncated = truncated
-      } in
-  let shared = Prompt.format_workspace_memory_observation (observation ()) |> Option.get in
-  List.iter (fun needle -> check bool "shared ledger digest reaches the briefing" true
-    (contains ~needle shared))
-    [ "digest-sha"; "- c1: Board 에 숫자를 쓰기 전에 원문에서 다시 센다"; "- c2: 두 번째 공유 주장";
-      "each of the 2 shared claims"; "keeper_workspace_memory_read" ];
-  (* Two digest rows against three claims is the shape observe produces when
-     the budget stops the walk: the note must state that reachable slice. *)
-  let truncated =
-    Prompt.format_workspace_memory_observation (observation ~claim_count:3 ~truncated:true ()) |> Option.get in
-  check bool "a truncated digest says which slice it holds" true
-    (contains ~needle:"the digest shows the first 2 of 3 claims in id order" truncated);
-  let none_yet =
-    Prompt.format_workspace_memory_observation
-      (Ledger.Available
-         { ledger_sha256 = "digest-sha"; claim_count = 0; conflict_count = 0;
-           classified_count = 0; claims_digest = []; claims_digest_truncated = false })
-    |> Option.get in
-  check bool "an empty ledger says so instead of an empty section" true
-    (contains ~needle:"None yet." none_yet);
-  check bool "an empty ledger announces no claims, not a slice" true
-    (contains ~needle:"The ledger holds no shared claims yet." none_yet)
-
 let test_open_goal_store_keeps_one_stable_safety_contract () =
   let meta_with_goal =
     meta_of_json
@@ -1132,8 +1099,6 @@ let () =
             test_direct_turn_carries_held_task_skills;
           test_case "direct reply discovers shared proposal with source uncertainty" `Quick
             test_direct_turn_discovers_published_workspace_memory;
-          test_case "workspace memory observation carries the claims digest" `Quick
-            test_workspace_memory_observation_carries_the_claims_digest;
           test_case "unresolved goal keeps one stable safety contract" `Quick
             test_open_goal_store_keeps_one_stable_safety_contract;
         ] );

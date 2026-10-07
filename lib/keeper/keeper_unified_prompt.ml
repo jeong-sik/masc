@@ -1448,26 +1448,11 @@ let format_workspace_memory_observation = function
   | Workspace_memory_ledger.Unavailable _ ->
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_unavailable [] ^ "\n\n")
   | Workspace_memory_ledger.Available descriptor ->
-    let claims_digest, digest_note = match descriptor.claims_digest with
-      | [] -> "None yet.", "The ledger holds no shared claims yet."
-      | lines ->
-        let shown = List.length lines in
-        String.concat "\n" lines,
-        if descriptor.claims_digest_truncated then
-          Printf.sprintf
-            "Opening line of each shared claim — the digest shows the first %d of %d claims in id order, not a relevance selection:"
-            shown descriptor.claim_count
-        else
-          Printf.sprintf
-            "Opening line of each of the %d shared claims:"
-            descriptor.claim_count in
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_available
       [ "ledger_sha256", descriptor.ledger_sha256;
         "claim_count", string_of_int descriptor.claim_count;
         "conflict_count", string_of_int descriptor.conflict_count;
-        "classified_count", string_of_int descriptor.classified_count;
-        "claims_digest", claims_digest;
-        "digest_note", digest_note ] ^ "\n\n")
+        "classified_count", string_of_int descriptor.classified_count ] ^ "\n\n")
 
 let build_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)

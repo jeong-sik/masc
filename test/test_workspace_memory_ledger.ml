@@ -153,70 +153,6 @@ let test_codec_refuses_malformed_ledgers () =
   refused "conflict without members"
     (ledger_json ~conflicts:["x1", "Owners disagree"] [writer, excluded "old"])
 
-let test_observe_digest_is_bounded_and_first_line_only () =
-  let base_path = Filename.temp_dir "workspace-ledger-digest" "" in
-  let long_line =
-    String.concat ""
-      (List.init 80 (fun n -> Printf.sprintf "공유 주장 %03d 첫 줄이 예산보다 길면 문자 경계에서 잘리고 말줄임표가 붙는다. " n)) in
-  let claims =
-    ("c-long", long_line)
-    :: (List.init 400 (fun n -> Printf.sprintf "c%03d" n, Printf.sprintf "주장 %03d의 첫 줄\n둘째 줄은 다이제스트에 오지 않는다" n))
-  in
-  let facts =
-    List.map (fun (id, claim) -> ordinary_ref "writer" claim, claim_member id) claims in
-  let ledger = decode (ledger_json ~claims facts) in
-  (match Ledger.save ~base_path ledger with Ok () -> () | Error detail -> Alcotest.fail detail);
-  (match Ledger.observe ~base_path with
-   | Ledger.Available row ->
-     let joined = String.concat "\n" row.claims_digest in
-     Alcotest.(check bool) "the digest is a prefix of the claims, not all of them"
-       (List.length row.claims_digest < row.claim_count) true;
-     Alcotest.(check bool) "the observation says the digest left claims out"
-       row.claims_digest_truncated true;
-     Alcotest.(check bool) "the digest keeps its byte budget"
-       (String.length joined <= Ledger.digest_budget_bytes) true;
-     Alcotest.(check bool) "lines render in claim_id order, the long id first"
-       (String.starts_with ~prefix:"- c-long: " (List.hd row.claims_digest)) true;
-     Alcotest.(check bool) "a line cut by the budget ends with the ellipsis mark"
-       (String.ends_with ~suffix:"…" (List.hd row.claims_digest)) true;
-     Alcotest.(check bool) "a numbered claim's digest line carries only its first line"
-       (List.mem "- c000: 주장 000의 첫 줄" row.claims_digest) true
-   | Ledger.Missing -> Alcotest.fail "saved ledger observed as missing"
-   | Ledger.Unavailable detail -> Alcotest.fail ("saved ledger observed as unavailable: " ^ detail))
-
-let test_observe_digest_binds_a_hostile_claim_id () =
-  let base_path = Filename.temp_dir "workspace-ledger-hostile-id" "" in
-  let huge_id = "c-huge" ^ String.make 9000 'A' in
-  let newline_first_id = "\n둘째 줄부터 시작하는 id" in
-  let claims = [ huge_id, "단일 주장"; newline_first_id, "둘째 주장" ] in
-  let ledger =
-    decode (ledger_json ~claims
-              [ ordinary_ref "writer" "단일 주장", claim_member huge_id
-              ; ordinary_ref "writer" "둘째 주장", claim_member newline_first_id ]) in
-  (match Ledger.save ~base_path ledger with Ok () -> () | Error detail -> Alcotest.fail detail);
-  match Ledger.observe ~base_path with
-  | Ledger.Available row ->
-    let joined = String.concat "\n" row.claims_digest in
-    Alcotest.(check bool) "the codec accepted the ledger, so the budget must still hold"
-      (String.length joined <= Ledger.digest_budget_bytes) true;
-    Alcotest.(check bool) "an oversized id is cut and marked, not carried whole"
-      (String.ends_with ~suffix:"…: 단일 주장" (List.nth row.claims_digest 1)) true;
-    Alcotest.(check bool) "an id whose first line is empty is dropped, and the row says so"
-      (String.starts_with ~prefix:"- …: 둘째 주장" (List.nth row.claims_digest 0)) true;
-    Alcotest.(check bool) "both claims fit, so nothing was left out"
-      row.claims_digest_truncated false
-  | Ledger.Missing -> Alcotest.fail "saved ledger observed as missing"
-  | Ledger.Unavailable detail -> Alcotest.fail ("saved ledger observed as unavailable: " ^ detail)
-
-let test_observe_empty_ledger_digest_is_empty () =
-  let base_path = Filename.temp_dir "workspace-ledger-empty-digest" "" in
-  (match Ledger.save ~base_path Ledger.empty with Ok () -> () | Error detail -> Alcotest.fail detail);
-  match Ledger.observe ~base_path with
-  | Ledger.Available row ->
-    Alcotest.(check int) "no claims, no digest lines" 0 (List.length row.claims_digest);
-    Alcotest.(check bool) "an empty ledger leaves nothing out" row.claims_digest_truncated false
-  | _ -> Alcotest.fail "saved empty ledger is unavailable"
-
 let test_store_missing_corrupt_and_round_trip () =
   let base_path = Filename.temp_dir "workspace-ledger" "" in
   (match Ledger.load ~base_path with
@@ -422,13 +358,6 @@ let () =
         ; Alcotest.test_case "malformed ledgers are refused" `Quick test_codec_refuses_malformed_ledgers
         ; Alcotest.test_case "missing, corrupt and saved ledgers" `Quick
             test_store_missing_corrupt_and_round_trip ] )
-    ; ( "observation"
-      , [ Alcotest.test_case "digest is bounded and first-line only" `Quick
-            test_observe_digest_is_bounded_and_first_line_only
-        ; Alcotest.test_case "digest binds a hostile claim id" `Quick
-            test_observe_digest_binds_a_hostile_claim_id
-        ; Alcotest.test_case "empty ledger digest is empty" `Quick
-            test_observe_empty_ledger_digest_is_empty ] )
     ; ( "reconcile"
       , [ Alcotest.test_case "new facts follow store order" `Quick test_new_facts_follow_store_order
         ; Alcotest.test_case "unchanged facts are no work" `Quick test_unchanged_facts_are_no_work

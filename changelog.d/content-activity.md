@@ -1,2 +1,0 @@
-### Fixed
-- End stale Thinking/Streaming activity at the exact model content boundary while preserving overlapping content, native tool state, and continuation generations.

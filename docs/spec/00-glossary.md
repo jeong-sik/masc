@@ -3080,14 +3080,16 @@ status: reference
 
 **Recent Work Context (최근 작업 발췌)**
 : 자율 턴(`autonomous turn`)이 직전 직접 대화의 요청과 이전 자율 턴의 결론을
-  유실하지 않고 이어받을 수 있도록 제공하는 유계된 이력 발췌(#41675). 직접 대화
+  이어받아 작업할 수 있도록 제공하는 유계된 이력 발췌(#41675). 직접 대화
   이력(`conversation`)과 최신 내부 어시스턴트 메시지(`autonomous_reply`)를
   독립적으로 수집하여, 자율 루프의 긴 반복 실행이 사용자의 원래 요청을 밀어내지
-  (`displace`) 않도록 보장한다. 인라인 표시 한도를 넘는 큰 발췌는 현재 도구
-  표면이 정규 아티팩트 판독기(`keeper_artifact_read`)를 제공할 때만 내용 주소화된
-  아티팩트(`Evidence of string`)로 결속되며, 판독기 부재나 저장 실패 시 인라인으로
-  되돌리지 않고 누락(`Unavailable`) 상태를 명시한다. 이 발췌는 완료된 역사적
-  증거일 뿐이며 새로운 할 일 목록이나 열린 의무가 아니다.
+  (`displace`) 않도록 돕는다. 단, 물리 창 생략(`Physical window omission`)은
+  명시적으로 보존되나 창 밖 대화의 무손실 보존이나 작업 완료 여부까지 증명하지는
+  않는다. 인라인 표시 한도를 넘는 큰 발췌는 현재 도구 표면이 정규 아티팩트
+  판독기(`keeper_artifact_read`)를 제공할 때만 내용 주소화된 아티팩트
+  (`Evidence of string`)로 결속되며, 판독기 부재나 저장 실패 시 인라인으로
+  되돌리지 않고 누락(`Unavailable`) 상태를 명시한다. 이 발췌는 불완전할 수 있는
+  역사적 발췌일 뿐이며, 완료 상태를 증명하거나 새로운 할 일 목록·열린 의무를 규정하지 않는다.
   → [Keeper_recent_work](../../lib/keeper/keeper_recent_work.mli) ·
   [Keeper Unified Prompt](../../lib/keeper/keeper_unified_prompt.mli)
 

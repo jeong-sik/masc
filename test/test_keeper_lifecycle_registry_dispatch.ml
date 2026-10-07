@@ -193,7 +193,6 @@ let test_dispatch_keeper_phase_event_uses_workspace_base_path () =
       ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
-        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
         (KST.Heartbeat_failed { consecutive = 1 });
       match KR.get ~base_path:config.base_path meta.name with

@@ -150,8 +150,6 @@ let test_stage_isolation () =
 let test_stage_label_vocabulary () =
   (* Pin the wire-format label strings so a future rename surfaces here
      and not as a silent dashboard regression. *)
-  Alcotest.(check string) "slot_wait label" "slot_wait"
-    (Timeout_origin.to_label Timeout_origin.Slot_wait);
   Alcotest.(check string) "spawn label" "spawn"
     (Timeout_origin.to_label Timeout_origin.Spawn);
   Alcotest.(check string) "command label" "command"

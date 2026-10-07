@@ -1850,6 +1850,12 @@ let purge ~base_path ~keeper_name =
     |> cursor_result ~path
     |> Result.map (fun _cursor -> ()))
 ;;
+(* Two guards keep the prune from rewriting a store another process is
+   extending: the byte cursor must equal the read snapshot's (the rewrite is
+   at-cursor), and rejected rows must be repaired first. Between the load
+   inside the lock and this write nothing of ours appends, so the only
+   writer that can move the cursor is a concurrent keeper process; losing
+   that race fails the whole prune instead of dropping the loser's row. *)
 
 let find_candidate candidates candidate_id =
   List.find_opt

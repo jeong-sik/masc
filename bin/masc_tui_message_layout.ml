@@ -1865,6 +1865,17 @@ let inbound_indent (entry : entry) =
   | Inbound -> inbound_indent_cells
   | User | Keeper | Status | Local | Journal | Error | Tool | Skill _ | Thinking -> 0
 
+let body_cells_after_gutter ~inner_width gutter =
+  let gutter_width = match gutter with
+    | None -> 0
+    | Some (text, rail_cells, _, _) -> rail_cells + display_width text in
+  Int.max min_body_cells (inner_width - 2 - gutter_width)
+
+let entry_body_cells ~origin ~inner_width entry =
+  let inner_width = inner_width - inbound_indent entry in
+  let gutter = origin_gutter ~origin ~previous:None ~inner_width entry in
+  body_cells_after_gutter ~inner_width gutter
+
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
   (* Everything after the indent is laid out in the column that is left, so
      the origin, the heading and the body fit the column rather than the
@@ -1873,12 +1884,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
   let pane_width = inner_width in
   let inner_width = pane_width - indent in
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in
-  let gutter_width =
-    match gutter with
-    | None -> 0
-    | Some (text, rail_cells, _, _) -> rail_cells + display_width text
-  in
-  let body_width = Int.max min_body_cells (inner_width - 2 - gutter_width) in
+  let body_width = body_cells_after_gutter ~inner_width gutter in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
      module keeps no terminal vocabulary; without it the body is wrapped as the
      plain text it always was. *)

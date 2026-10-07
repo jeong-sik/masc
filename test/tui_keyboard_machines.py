@@ -326,7 +326,7 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
             return bytes(output[start:])
 
         key(b":go msx\r", b"watch MSX machine")
-        first = key(b"\r", b"F6: save quick")
+        first = key(b"\r\x1b[15~", b"F6: save quick")
         assert b"f=24" in first, "Kitty path was not negotiated"
         start = len(output)
         target = number[0] + 3
@@ -363,7 +363,7 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         # Ticks named the cartridge, and a live read of the same machine keeps
         # that name, so the reopened menu's watch row says it.
         key(b":go msx\r", b"watch split.rom")
-        reopened = key(b"\r", b"F6: save quick")
+        reopened = key(b"\r\x1b[15~", b"F6: save quick")
         assert b"f=24" in reopened, "reopening reused a deleted image"
         # The next explicit read starts at the mark of the tick picture, and
         # keeps its title metadata while the live route returns pixels only.
@@ -400,10 +400,13 @@ def run_msx_background_poll_regression(executable: str) -> None:
     failed = GatedHttpResponse((503, {"error": "tick unavailable"}), hold_seconds=20.0)
     calls = []
     get_frames = []
+    observation_number = 101
 
     def frame():
         get_frames.append(len(get_frames) + 1)
-        return 200, dict(original, number=100 + len(get_frames))
+        # Reads observe one snapshot; only the fixture's explicit machine
+        # update changes it. GET timing must not advance the machine.
+        return 200, dict(original, number=observation_number)
 
     def tick(body):
         calls.append(json.loads(body))
@@ -434,6 +437,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
         return transfers
 
     def interact(process, master, slave, output, _base):
+        nonlocal observation_number
         def await_marker(marker, start):
             wait_for_output(process, master, output, marker, start=start, timeout=2.0)
 
@@ -453,7 +457,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
 
         try:
             key(b":go msx\r", b"watch MSX machine")
-            key(b"\r", b"F8: disk")
+            key(b"\r\x1b[15~", b"F8: disk")
             assert wait_for_fixture_event(process, master, output, pending.requested, timeout=5.0)
             assert not pending.completed.is_set(), "fixture did not hold the tick"
             # Scaling is a keyboard resize, and SIGWINCH is a physical resize.
@@ -470,11 +474,12 @@ def run_msx_background_poll_regression(executable: str) -> None:
             observe_for(0.8)  # More than two 0.3-second spectator poll intervals.
             assert len(calls) == 1, f"pending/closed view issued more ticks: {len(calls)}"
             before_get = len(get_frames)
+            observation_number = 102
             key(b":go msx\r", b"watch MSX machine")
             assert len(get_frames) > before_get, "reopening skipped fresh observation"
-            start = key(b"\r", b"F8: disk")
+            start = key(b"\r\x1b[15~", b"F8: disk")
             assert b"f=24" in bytes(output[start:]), "fresh reopen did not restore image"
-            expected_frame = 100 + len(get_frames)
+            expected_frame = observation_number
             assert f"frame {expected_frame} ".encode() in bytes(output[start:])
             observe_for(0.8)
             assert not pending.completed.is_set(), "old tick finished before reopened-view test"

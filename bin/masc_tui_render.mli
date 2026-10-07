@@ -154,6 +154,7 @@ val frame_choice :
   Masc_tui_types.state -> terminal_rows:int ->
   [ `Too_small of int
   | `Play_card of Masc_tui_play_card.t
+  | `Collab of Masc_tui_collab.t
   | `Account_login of Masc_tui_account_login.t
   | `Lane_addons of Masc_tui_lane_addons.t
   | `About | `Palette | `Context | `Keeper_deletions | `Help

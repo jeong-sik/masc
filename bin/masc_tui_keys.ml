@@ -280,8 +280,7 @@ let global =
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
   ; b Meta "&"
-      "the MSX screen: the emulator core over the whole terminal (esc: back; \
-       also `:` go MSX)"
+      "Collab: watch MSX/DOS and manage play links (also `:` go Collab)"
   ; b Meta roster_toggle_key "show or hide the Keeper roster"
       ~help:"the roster starts hidden; this choice persists \
              across navigation and resizing"

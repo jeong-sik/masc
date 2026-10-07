@@ -448,7 +448,7 @@ let test_ineligible_participation_does_not_hide_active_seats () =
           match Masc.Play_participation.write ~transaction ~base_path credential Connected with
           | Ok () -> ()
           | Error detail -> fail detail) [expired; worker]));
-      let directory = Filename.concat (Masc.Common.masc_dir_from_base_path ~base_path) "play" in
+      let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path) "play" in
       Array.iter (fun file -> Out_channel.with_open_bin (Filename.concat directory file)
           (fun channel -> output_string channel "malformed")) (Sys.readdir directory);
       let seats = auth_ok (Masc.Play_seat.participants ~base_path ~keepers:[] ~now:(Unix.gettimeofday ())) in

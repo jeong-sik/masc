@@ -202,7 +202,36 @@ let test_stale_invalid_expiry_does_not_override_current_worker () =
       |> Yojson.Safe.to_string);
   check_routes ~state ~operator ~names:["operator"] ~invites:[]
 
+let test_invite_listing_completes_after_credential_publication () =
+  with_workspace @@ fun base_path state operator ->
+  let _, _, _uuid = seed_guest base_path D.Player in
+  (* Keep HTTP authentication out of the contention being exercised. The
+     fixture clock is fixed, so this index stays current until the deletion. *)
+  ignore (auth_ok (Auth.find_credential_by_token base_path ~token:operator));
+  let lock_path = Filename.concat (Unix.realpath (Auth.auth_dir base_path)) ".credentials.lock" in
+  Eio.Switch.run @@ fun sw ->
+  let completed, resolve = Eio.Promise.create () in
+  ignore (auth_ok (Auth.with_credential_transaction base_path (fun transaction ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve resolve (dispatch ~state ~token:operator ~meth:"GET"
+        ~target:Server_routes_http_routes_play.invites_path ~body:""));
+    let rec await_listing () =
+      (* Two admitted/waiting operations are this publisher and the listing.
+         No elapsed-time threshold stands in for reaching that boundary. *)
+      if File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 2 then ()
+      else match Eio.Promise.peek completed with
+        | Some _ -> fail "invite listing bypassed the credential transaction"
+        | None -> Eio.Fiber.yield (); await_listing () in
+    await_listing ();
+    ignore (auth_ok (Auth.delete_credential_in_transaction transaction "guest")))));
+  let response = Eio.Promise.await completed in
+  check int "the contended HTTP listing completes" 200 (status response);
+  check (option string) "the completed publication determines the invite list" (Some "[]")
+    (Option.map Yojson.Safe.to_string (member "invites" (json response)));
+  check (option string) "listing never changes the machine controller" (Some "operator") (controller ())
+
 let () = run "Play current named authority" [ "routes", [
+  test_case "listing completes after credential publication in Eio" `Quick test_invite_listing_completes_after_credential_publication;
   test_case "invalid stale UUID cannot override current Worker" `Quick test_stale_invalid_expiry_does_not_override_current_worker;
   test_case "removed Player keeps data but loses seat and invite" `Quick (fun () -> test_surviving_data ~role:D.Player Removed);
   test_case "replaced Player uses current Worker authority" `Quick (fun () -> test_surviving_data ~role:D.Player Worker);

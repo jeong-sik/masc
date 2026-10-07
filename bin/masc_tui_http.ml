@@ -610,10 +610,9 @@ let http_delete ~(host : string) ~(port : int) ~(path : string) =
 let list_play_invites ~host ~port =
   get_json ~host ~port ~path:"/api/v1/play/invites"
 
-(* The play routes say why in [message]; the shared refusal reads only the
-   [error] code, which leaves the operator with "HTTP 409: not_ready". The
-   credential's own 401 and 403, and a body with no sentence in it, keep the
-   shared wording. *)
+(* The play routes add [missing] and [taken_by] to the refusal sentence; the
+   shared refusal shows only the sentence. The credential's own 401 and 403,
+   and a body with no sentence in it, keep the shared wording. *)
 let play_mutation_outcome = function
   | Ok (status_code, body) as answer when status_code >= 400 && status_code < 500 ->
     (match Masc.Tui_decode.play_invite_refusal ~status_code ~body with

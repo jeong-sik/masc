@@ -12673,48 +12673,56 @@ let test_play_invite_refusal_says_the_servers_sentence () =
   let check_sentence label expected ~status_code body =
     Alcotest.(check (option string)) label expected (refusal ~status_code body)
   in
+  (* Built by the server's own refusal writer, so the fixture cannot keep an
+     old wire shape after the server changes. *)
+  let server ?code ?fields sentence =
+    Yojson.Safe.to_string (Server_refusal.json ?code ?fields sentence)
+  in
   check_sentence "not ready lists what is missing"
     (Some "HTTP 409: an invite needs auth (missing: auth_disabled, no_public_base_url)")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":["auth_disabled","no_public_base_url"]}|};
+    (server ~code:"not_ready"
+       ~fields:[ ("missing", `List [ `String "auth_disabled"; `String "no_public_base_url" ]) ]
+       "an invite needs auth");
   check_sentence "a taken name says who holds it"
     (Some "HTTP 409: another participant already has this name (held by a keeper)")
     ~status_code:409
-    {|{"error":"name_taken","message":"another participant already has this name","taken_by":"keeper"}|};
+    (server ~code:"name_taken" ~fields:[ ("taken_by", `String "keeper") ]
+       "another participant already has this name");
   check_sentence "blank and non-string gaps are not listed"
     (Some "HTTP 409: an invite needs auth (missing: no_public_base_url)")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":["", 7, "no_public_base_url", null]}|};
+    {|{"error":"an invite needs auth","code":"not_ready","missing":["", 7, "no_public_base_url", null]}|};
   check_sentence "a missing that lists nothing adds nothing"
     (Some "HTTP 409: an invite needs auth")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":["  "]}|};
+    {|{"error":"an invite needs auth","code":"not_ready","missing":["  "]}|};
   check_sentence "a missing that is not a list adds nothing"
     (Some "HTTP 409: an invite needs auth")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":"no_public_base_url"}|};
+    {|{"error":"an invite needs auth","code":"not_ready","missing":"no_public_base_url"}|};
   check_sentence "a plain sentence stands alone"
     (Some "HTTP 400: hours must be between 1 and 8760, got 0")
     ~status_code:400
-    {|{"error":"invalid_request","message":"hours must be between 1 and 8760, got 0"}|};
+    (server ~code:"invalid_request" "hours must be between 1 and 8760, got 0");
   List.iter
     (fun (why, status_code, body) -> check_sentence why None ~status_code body)
-    [ ("a 401 is about the credential", 401, {|{"error":"unauthorized","message":"bad token"}|})
-    ; ("a 403 is about the credential", 403, {|{"error":"forbidden","message":"admin only"}|})
-    ; ("a success is not a refusal", 200, {|{"error":"x","message":"fine"}|})
-    ; ("a server failure is not a refusal", 500, {|{"error":"x","message":"disk"}|})
-    ; ("a body with no message", 409, {|{"error":"not_ready"}|})
-    ; ("a blank message", 409, {|{"error":"x","message":"   "}|})
-    ; ("a message that is not a string", 409, {|{"error":"x","message":7}|})
+    [ ("a 401 is about the credential", 401, server ~code:"unauthorized" "bad token")
+    ; ("a 403 is about the credential", 403, server ~code:"forbidden" "admin only")
+    ; ("a success is not a refusal", 200, server "fine")
+    ; ("a server failure is not a refusal", 500, server "disk")
+    ; ("a body with no sentence", 409, {|{"code":"not_ready"}|})
+    ; ("a blank sentence", 409, {|{"error":"   ","code":"x"}|})
+    ; ("a sentence that is not a string", 409, {|{"error":7,"code":"x"}|})
     ; ("a body that is not an object", 409, {|["not_ready"]|})
     ; ("a body that is not JSON", 409, "<html>bad gateway</html>")
     ];
   (* Every part comes from the far end, so every part is made safe to draw. *)
   match
     refusal ~status_code:409
-      "{\"error\":\"x\",\"message\":\"a\\u001b[31mred\\nnext\",\"missing\":[\"g\\u001b]0;t\\u0007\"],\"taken_by\":\"k\\u001b\"}"
+      "{\"code\":\"x\",\"error\":\"a\\u001b[31mred\\nnext\",\"missing\":[\"g\\u001b]0;t\\u0007\"],\"taken_by\":\"k\\u001b\"}"
   with
-  | None -> Alcotest.fail "a body with a message gave no sentence"
+  | None -> Alcotest.fail "a body with a sentence gave no sentence"
   | Some said ->
     Alcotest.(check bool) "no control byte is left in the sentence" false
       (String.exists (fun c -> c < ' ' || c = '\127') said)

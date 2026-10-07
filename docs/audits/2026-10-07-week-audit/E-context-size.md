@@ -1,6 +1,6 @@
 # Domain E — context occupancy, token/cache waste, drain queues (audit 2026-10-07)
 
-HEAD 7fb34c7172. Live data: `~/me/.masc` UTC day 10-06 (06:00Z–19:23Z for wire-capture, which keeps only ~13 h / 250 MB; costs and system log are full days). Scripts: `scratchpad/auditE/*.py`.
+HEAD 7fb34c7172. Live data: `~/me/.masc` UTC day 10-06 (06:00Z–19:23Z for wire-capture, which keeps only ~13 h / 250 MB; costs and system log are full days). Scripts: `scratchpad/auditE/*.py` ran from an uncommitted scratchpad. They are not in this repository, and the inputs stay under the author's `~/me/.masc`. The live counts in this document cannot be regenerated from this PR, so treat them as unverified measurements.
 
 ## 1. Change flow 09-30..10-07
 
@@ -36,7 +36,7 @@ HEAD 7fb34c7172. Live data: `~/me/.masc` UTC day 10-06 (06:00Z–19:23Z for wire
 |---|---|---|
 | D2-06 / L1-08 (recall block resent / 95% of Codex window) | **Fixed** by design: recall is demand-only. No Codex traffic is left (codex cost rows: 28,127 on 10-01, 0 on 10-06) | keeper_memory_os_recall.mli:1-20, #40473, #40782 |
 | D2-02 (Codex has no capacity owner) | **Partly fixed**: start ceilings come from the window (#41224). Not re-checked live (no Codex traffic) | — |
-| D2-04, D2-05 (Codex held context / session discard) | **Unknown**: no live Codex traffic to test against | — |
+| D2-05 (Codex session discard) | **Unknown**: no live Codex traffic to test against | — |
 | D3-04 / L1-01 (Librarian resends all facts, up to 3 passes per wake) | **Still open**, measured below as E-02 | keeper_librarian_queue_refresh.ml:564-590 |
 | L1-04 (exact lane records no token usage) | **Still open**: 0 of 5,121 completion rows carry usage | exact-lane-runs-v6.jsonl |
 | D5-03 (old rows in the queue state) | **Still open, tracked #40074**. code-reviewer queue file is 940,953 B; `projected_dispositions` holds 901 rows / 805,750 B (85.6%) | keeper_event_queue_state.ml:434-438 |

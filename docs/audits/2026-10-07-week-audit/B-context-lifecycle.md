@@ -37,7 +37,7 @@ Judged at HEAD `7fb34c7172` (main checkout). `origin/main` has since moved to `d
 | D2-01 continuity snapshot rejected | **Fixed**: `capture_range` asks `B.witness_line` | `librarian_continuity_snapshot.ml:195-250`, `keeper_turn_boundaries.ml:479` |
 | D2-02 no owner of Codex context size | **Superseded** by the 10-06 operator rule (provider counts the window). The derived byte ceilings left over are being removed by #41369 | — |
 | D2-03 Codex item identity mismatch | **Partial**: the cause was reduced by #40364 (sub-agents disabled). `Protocol_error` still carries `{stage; detail:string}` with no expected/received ids | `runtime_codex_app_server.ml:322,523` |
-| D2-04 host stop discards held context | **Still open, untracked**. `settle_holding ~held_context:[]` and the stale comment are unchanged, although `settled_held_context` is maintained right below | `keeper_codex_runtime.ml:1244-1250` vs `:979,1310-1316,1483` |
+| D2-04 host stop discards held context | **Not a defect**. A tool boundary does not reveal whether Codex compacted the thread, so `settle_holding ~held_context:[]` resends context on the next Resume. The comment says so. `Compaction_observed` clears `settled_held_context` the same way | `keeper_codex_runtime.ml:1244-1250` vs `:979,1310-1316,1483` |
 | D2-05 Codex drops the vendor session on most failures | **Still open**. `Timeout`/`Process_exited` with `turn_accepted=false` map to `Transport_interrupted` (Ambiguous → automatic supersede → full Start). `Rpc_error` maps to `Protocol_failed` | `keeper_codex_runtime.ml:629-660`, `keeper_official_client_session_store.ml:51-61`. Nearest tracker is issue #35362 |
 | D2-06 / L1-08 whole recall block resent | **Fixed** for search-capable surfaces (#40473, #40782): only a demand notice is injected | `keeper_memory_os_recall.ml:199-216` |
 | D2-07 stage save rewrites the whole checkpoint | **Still open, worse when measured** (§4). Tracked by issue #36690 | `keeper_agent_run.ml:1620-1700` |
@@ -71,7 +71,7 @@ Judged at HEAD `7fb34c7172` (main checkout). `origin/main` has since moved to `d
 - **Scenario**: once a workspace ledger's claims pass 8 KB, every Keeper turn sees the same first-N claims in **lexicographic claim_id order**. A new claim whose id sorts late never appears in the briefing.
 - **Conflict**: the operator rule of 10-06 forbids new byte ceilings ("바이트 숫자로 자르거나 막지 않고, 그런 기준을 새로 만들지도 않는다"). Open #41351 is deleting the briefing byte budgets at the same moment.
 - **Tick**: the ledger grows, the digest stays frozen at the first 8 KB, and the briefing stays stale. The loop is **open**.
-- **Fix**: send one line per claim with no budget (the provider refusal path owns size), or send no digest and leave the read tool. Drop the three constants.
+- **Fix**: send no digest and leave the read tool. A digest with one line per claim and no bound would pass any window once the ledger grows: it is rendered into the fixed briefing fragment, and the refusal recovery (`keeper_turn_driver_try_provider.ml:2535-2578,2738-2888`) only moves the carried atom front or demotes current-turn tool results, so it cannot shrink it. Keeping a digest needs a bound derived from the provider window or from relevance to the turn. Drop the three constants either way.
 - **Confidence**: High. **Tracked**: no.
 
 ### B-03 (P3) Ledger-seed flush swallows Eio cancellation
@@ -82,8 +82,7 @@ Judged at HEAD `7fb34c7172` (main checkout). `origin/main` has since moved to `d
 
 ### B-04 (P3) Stale size-cap prose in the overflow paths
 - `keeper_turn_driver_try_provider.ml:2274-2281` still says the official-client "seed history is cut against a declared prompt byte cap", but max-prompt-bytes is gone (#41224).
-- `keeper_codex_runtime.ml:1245-1247` (D2-04) claims a tool boundary cannot see compaction, yet `settled_held_context` tracks it.
-- Fix both together with D2-04. Confidence: High.
+- Fix the prose. Confidence: High.
 
 ### Turn-boundary tick analysis (memory claim re-checked; not re-reported, tracked #41378)
 - The claim still holds at HEAD. Agent-Core errors and cancellations write no line (`keeper_agent_run.ml:2157-2178`).

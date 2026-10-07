@@ -1,6 +1,6 @@
 # Domain C — Librarian, Memory lifecycle, Skills (audit 2026-10-07, HEAD 7fb34c7172)
 
-Sources: code at HEAD (the running server reports commit 7fb34c7172 on /health), plus live read-only stats from `~/me/.masc/config/keepers/*.memory-{journal,absorbed,current}.json[l]`, `~/me/.masc/exact-lane-run-payloads/`, `~/me/.masc/workspace-memory/ledger.json` and `~/me/.masc/logs/system_log_2026-10-0*.jsonl`. Scripts: `scratchpad/audit/c2/*.py` and `scratchpad/audit/c/*.py`. Days are KST.
+Sources: code at HEAD (the running server reports commit 7fb34c7172 on /health), plus live read-only stats from `~/me/.masc/config/keepers/*.memory-{journal,absorbed,current}.json[l]`, `~/me/.masc/exact-lane-run-payloads/`, `~/me/.masc/workspace-memory/ledger.json` and `~/me/.masc/logs/system_log_2026-10-0*.jsonl`. Scripts: `scratchpad/audit/c2/*.py` and `scratchpad/audit/c/*.py` ran from an uncommitted scratchpad. They are not in this repository, and the inputs stay under the author's `~/me/.masc`. The live counts in this document cannot be regenerated from this PR, so treat them as unverified measurements. The code citations (`file:line`) can be checked at the stated HEAD. Days are KST.
 
 ## 0. Live counts (memory journal, all keepers)
 

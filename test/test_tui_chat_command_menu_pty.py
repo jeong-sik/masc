@@ -169,7 +169,7 @@ def run(executable):
                 raise AssertionError(f"120-column roster truncated runtime status {field!r}: {status!r}")
         # Moving the roster cursor does not switch the conversation yet.
         h.send_and_wait(process, fd, output, b"\x1b[D", b"Enter:open")
-        h.send_and_wait(process, fd, output, b"\x1b[B", b"\x1b[7m \xc2\xb7 beta")
+        h.send_and_wait(process, fd, output, b"\x1b[B", h.keeper_row_selected(b"beta"))
         rows = screen(process, fd, output)
         status_row = h.screen_row_of(rows, b"Context")
         if status_row < 0 or not rows[status_row].lstrip().startswith("alpha · ".encode()):

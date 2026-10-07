@@ -350,6 +350,10 @@ a message or interrupting the Keeper. Chat drafts stay with their Keeper when
 you switch. `Left` also opens a list hidden with `Ctrl-B`, without changing
 that visibility preference. On a narrow terminal the list uses the whole body;
 on a wider terminal it sits to the left of Dashboard or the conversation.
+The list uses a quiet divider, a count (or visible range for a long list), and
+a highlighted cursor row. While selecting, the lower panel identifies the
+Keeper, its observed health and runtime; it labels the current conversation
+separately. Short viewports give those detail rows back to the list.
 
 ### The Activity pane
 

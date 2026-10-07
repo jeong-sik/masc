@@ -89,24 +89,25 @@ def run_unknown(executable, operation):
             current['phase'] = 'a'
             h.wait_for_output(process, master, output, ('Base: ' + current['base']).encode(), start=start, timeout=8)
             key(b':go Collab\r', b'unknown outcome')
-            key(b'n', b'unknown outcome')
-            key(b'x', b'unknown outcome')
+            # Both blocked keys set the same notice, so the second key need
+            # not redraw. The distinct confirmation is a processing barrier:
+            # neither n nor x may have opened its write form before u.
+            key(b'nxu', b'original request cannot still complete')
+            key(b'\x1b', b'unknown outcome')
             key(b'r', b'No invites' if operation == 'issue' else '› guest'.encode())
-            key(b'n', b'unknown outcome')
-            key(b'u', b'original request cannot still complete')
+            key(b'nxu', b'original request cannot still complete')
             key(b'\x1b', b'unknown outcome')
             assert mutations == [operation] and not applied.is_set(), mutations
             gate.release.set()
             assert h.wait_for_fixture_event(process, master, output, applied, timeout=8)
             key(b'r', '› guest'.encode() if operation == 'issue' else b'No invites')
-            key(b'n', b'unknown outcome')
             # The held handler is now known to have completed independently
             # of inventory. The operator can acknowledge that evidence.
-            key(b'u', b'original request cannot still complete')
+            key(b'nxu', b'original request cannot still complete')
             key(b'\r', b'Operator confirmed')
             key(b'n', b'Player name:')
             assert mutations == [operation], mutations
-            key(b'\x1b', b'MASC Collab')
+            key(b'\x1b', b'm:MSX')  # The header is unchanged when closing a form.
             key(b'q', b'MASC Dashboard')
             os.write(master, b'q')
         finally:
@@ -159,8 +160,9 @@ def run_control_boundary(executable):
         boundary = len(requests)
         key(b':go Collab\r', '› guest'.encode())
         key(b'n', b'matching this TUI\'s local workspace')
-        key(b'x', b'matching this TUI\'s local workspace')
-        key(b'm', b'Watching only')
+        # x repeats the same notice; m supplies a distinct processing barrier
+        # and must still open observation rather than type into a revoke form.
+        key(b'xm', b'Watching only')
         key(b'\x1b[15~', b'MSX control requires')
         for value in (b'\x1b[17~', b'\x1b[18~', b'\x1b[19~', b'1'):
             key(value, b'Watching only')

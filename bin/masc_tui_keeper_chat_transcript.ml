@@ -204,6 +204,7 @@ type reply =
    the instant it arrived. The row states the word, and once the silence since
    it is long enough to read as a stall, the silence's age beside it. *)
 type model_signal =
+  | Scoped_model_content
   | Model_started_at of float
       (* STREAM_MODEL_STARTED: the endpoint answered; no token yet. *)
   | Model_response_ended
@@ -281,6 +282,12 @@ type t =
            verdict masc settled afterwards. And it is a different fact from
            [Keeper_turn_outcome.t], which says what masc did with the turn: a
            reply cut off at [max_tokens] is still a visible reply. *)
+  ; mutable content_scope : (int * int) option
+  ; mutable content_scope_closed : bool
+  ; mutable active_model_content : (int * Masc.Keeper_chat_events.model_content_channel * float option) list
+        (* Most recently observed first; None is a closed occurrence. These
+           tombstones prevent duplicate/late observations reopening an index.
+           An event from an older server scope cannot erase current activity. *)
   ; mutable model_signal : model_signal option
         (* The last thing the model side sent in this attempt, and when.
            Tool calls carry their own pending state; this covers the stretches
@@ -348,6 +355,9 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; observed_model = None
   ; observed_usage = None
   ; observed_stop_reason = None
+  ; content_scope = None
+  ; content_scope_closed = false
+  ; active_model_content = []
   ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
@@ -1599,6 +1609,12 @@ let model_phase_text ~now t =
   match t.model_signal with
   | None -> None
   | Some Model_response_ended -> Some "model response ended"
+  | Some Scoped_model_content ->
+      (match List.find_opt (fun (_,_,at) -> Option.is_some at) t.active_model_content with
+       | Some (_,channel,Some since) -> observed ~since
+           (match channel with Masc.Keeper_chat_events.Model_text -> "STREAMING · answering"
+            | Model_thinking -> "THINKING · reasoning")
+       | Some (_,_,None) | None -> Some "model content ended")
   | Some (Model_started_at since) -> observed ~since "model started"
   | Some (Reasoning_at since) -> observed ~since "THINKING · reasoning"
   | Some (Answering_at since) -> observed ~since "STREAMING · answering"
@@ -2065,6 +2081,46 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
          t.response_first_stretch <- t.next_stretch_id;
          t.reversed_trail <- Node_tool local_id :: t.reversed_trail)
 
+let retire_model_content t =
+  t.active_model_content <- [];
+  t.content_scope_closed <- true
+;;
+
+let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content_activity) =
+  let open Masc.Keeper_chat_events in
+  match t.phase with
+  | Stream_ended | Stream_failed _ -> ()
+  | Waiting | Working ->
+    let scope_order = match t.content_scope with
+      | None -> 1
+      | Some scope -> compare (activity.content_generation, activity.content_scope) scope in
+    if scope_order < 0 || (scope_order = 0 && t.content_scope_closed) then ()
+    else match activity.state with
+    | Content_observed ->
+      if scope_order > 0 then begin
+        t.content_scope <- Some (activity.content_generation, activity.content_scope);
+        t.content_scope_closed <- false;
+        t.active_model_content <- []
+      end;
+      (match List.find_opt (fun (index,_,_) -> index=activity.content_index) t.active_model_content with
+       | Some (_,_,None) -> ()
+       | Some (_,channel,Some _) when channel <> activity.channel ->
+           note_unreadable t "model content channel changed within its occurrence"
+       | Some (_,_,Some _) | None ->
+           t.active_model_content <- (activity.content_index,activity.channel,Some now) ::
+             List.filter (fun (index,_,_) -> index<>activity.content_index) t.active_model_content;
+           t.model_signal <- Some Scoped_model_content)
+    | Content_ended ->
+      (* Unknown or older stops provide no authority over the current model
+         signal. In particular a tool/content header alone is not activity. *)
+      if scope_order = 0 then
+        match List.find_opt (fun (index,_,_) -> index=activity.content_index) t.active_model_content with
+        | Some (_,channel,Some _) when channel=activity.channel ->
+            t.active_model_content <- List.map (fun (index,channel,at) ->
+              index,channel,(if index=activity.content_index then None else at)) t.active_model_content
+        | Some (_,_,_) | None -> ()
+;;
+
 let apply_delta ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
@@ -2078,6 +2134,7 @@ let apply_delta ~now t (delta : Live.delta) =
         t.observed_model <- None;
         t.observed_usage <- None;
         t.observed_stop_reason <- None;
+        retire_model_content t;
         t.model_signal <- None;
         t.runtime_named_at <- None;
         t.interrupt <- Not_requested
@@ -2143,6 +2200,7 @@ let apply_delta ~now t (delta : Live.delta) =
       if new_attempt then t.observed_model <- None;
       if new_attempt then t.observed_usage <- None;
       if new_attempt then t.observed_stop_reason <- None;
+      retire_model_content t;
       t.model_signal <- None;
       t.runtime_named_at <- Some now;
       t.awaiting <- None;
@@ -2155,11 +2213,14 @@ let apply_delta ~now t (delta : Live.delta) =
          replays retain sequence identity and are deduplicated by the log.
          A provider id may legally be reused in a later response. *)
       begin_response t;
+      retire_model_content t;
       t.observed_model <- Some model;
       t.observed_usage <- usage;
       t.observed_stop_reason <- None;
       t.model_signal <- Some (Model_started_at now)
+  | Live.Model_content_activity activity -> apply_model_content ~now t activity
   | Live.Stream_model_stopped ->
+      retire_model_content t;
       t.model_signal <- Some Model_response_ended
   | Live.Stream_details { usage; stop_reason } ->
       (* What the provider reported, not that anything was written, so the

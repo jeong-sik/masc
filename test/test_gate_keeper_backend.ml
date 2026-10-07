@@ -1055,6 +1055,8 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
   in
   match events with
   | [ Keeper_chat_events.Agent_core_thinking_delta { index = first_index; delta = first };
+      Keeper_chat_events.Model_content_activity
+        {content_index=0; channel=Model_thinking; state=Content_observed; _};
       Keeper_chat_events.Agent_core_content_block_start
         { index = tool_index;
           content_type;
@@ -1066,7 +1068,9 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
         { tool_call_id = snapshot_id; snapshot; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
       Keeper_chat_events.Tool_call_end { tool_call_id = end_id; _ };
-      Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last } ] ->
+      Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last };
+      Keeper_chat_events.Model_content_activity
+        {content_index=2; channel=Model_thinking; state=Content_observed; _} ] ->
       check int "first thinking index" 0 first_index;
       check string "first thinking" "think A" first;
       check int "tool block index" 1 tool_index;
@@ -1121,7 +1125,9 @@ let test_keeper_stream_bridge_projects_reasoning_details_delta () =
       ]
   in
   match events with
-  | [ Keeper_chat_events.Agent_core_thinking_delta { index; delta } ] ->
+  | [ Keeper_chat_events.Agent_core_thinking_delta { index; delta };
+      Keeper_chat_events.Model_content_activity
+        {content_index=0; channel=Model_thinking; state=Content_observed; _} ] ->
       check int "reasoning details index" 0 index;
       check string "reasoning details thinking" "detail thinking" delta
   | _ ->
@@ -1156,6 +1162,8 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
   in
   match events with
   | [ Keeper_chat_events.Agent_core_thinking_delta { index = first_index; delta = first };
+      Keeper_chat_events.Model_content_activity
+        {content_index=0; channel=Model_thinking; state=Content_observed; _};
       Keeper_chat_events.Agent_core_content_block_start
         { index = tool_index;
           content_type;
@@ -1168,7 +1176,9 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
         { tool_call_id = snapshot_id_b; snapshot = snapshot_b; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
       Keeper_chat_events.Tool_call_end { tool_call_id = end_id; _ };
-      Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last } ] ->
+      Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last };
+      Keeper_chat_events.Model_content_activity
+        {content_index=2; channel=Model_thinking; state=Content_observed; _} ] ->
       check int "first thinking index" 0 first_index;
       check string "first thinking" "think A" first;
       check int "tool block index" 1 tool_index;

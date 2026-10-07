@@ -7,6 +7,7 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_STREAM_PING',
   'KEEPER_CONTENT_BLOCK_START',
   'KEEPER_CONTENT_BLOCK_STOP',
+  'KEEPER_MODEL_CONTENT_ACTIVITY',
   'KEEPER_THINKING_DELTA',
   'KEEPER_THINKING_SIGNATURE_DELTA',
   'KEEPER_MEDIA_DELTA',
@@ -116,6 +117,17 @@ type KeeperQuarantinedToolOccurrence = {
   providerMessageId?: string
 }
 
+/** Side metadata for an exact model content occurrence, never body bytes,
+ * tool progress, or proof that the whole response/turn has ended. */
+export type KeeperModelContentActivity = {
+  generation: number
+  stream_scope: number
+  block_index: number
+  provider_message_id?: string
+  channel: 'text' | 'thinking'
+  state: 'observed' | 'ended'
+}
+
 type KeeperChatCustomEvent =
   | { type: 'CUSTOM'; name: 'KEEPER_CONNECTED'; value: null }
   | {
@@ -192,6 +204,7 @@ type KeeperChatCustomEvent =
       }
     }
   | { type: 'CUSTOM'; name: 'KEEPER_CONTENT_BLOCK_STOP'; value: { index?: number } }
+  | { type: 'CUSTOM'; name: 'KEEPER_MODEL_CONTENT_ACTIVITY'; value: KeeperModelContentActivity }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_THINKING_DELTA'

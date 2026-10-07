@@ -56,7 +56,9 @@ type scope_disposition =
          dropped. *)
 
 type state =
-  { blocks_by_index : (int * block_state) list
+  { content_generation : int
+  ; blocks_by_index : (int * block_state) list
+  ; model_content : (int * content_channel * bool) list
   ; current_stream_scope : int option
   ; stream_phase : stream_phase
   ; scope_disposition : scope_disposition
@@ -86,8 +88,10 @@ let diagnostic_provider_id = function
   | None -> "<provider-id-absent>"
 ;;
 
-let empty_state () =
-  { blocks_by_index = []
+let empty_state ?(generation=0) () =
+  { content_generation = generation
+  ; blocks_by_index = []
+  ; model_content = []
   ; current_stream_scope = None
   ; stream_phase = Accepting_content
   ; scope_disposition = Scope_live
@@ -105,6 +109,7 @@ let empty_state () =
 let reset_runtime_attempt_state state =
   { state with
     blocks_by_index = []
+  ; model_content = []
   ; current_stream_scope = None
   ; stream_phase = Accepting_content
   ; scope_disposition = Scope_live
@@ -123,6 +128,7 @@ let enter_stream_scope state stream_scope =
   | Some _ ->
     { state with
       blocks_by_index = []
+    ; model_content = []
     ; current_stream_scope = Some stream_scope
     ; stream_phase = Accepting_content
     ; scope_disposition = Scope_live
@@ -528,6 +534,41 @@ let finalize_media_block ~max_wire_bytes ~redact_text ~base_dir ~index ~media_ty
           (media_persist_error_kind err)
       ]
 
+(* Activity is separate from body bytes: it preserves the exact producer
+   occurrence after the reader-facing text projection discards block indices.
+   Headers do not establish activity, and duplicate/unknown stops say nothing. *)
+let model_content_event bridge_state ~stream_scope ~index ~channel state =
+  Keeper_chat_events.Model_content_activity
+    { content_generation = bridge_state.content_generation
+    ; content_scope = stream_scope
+    ; content_index = index
+    ; content_provider_message_id = bridge_state.current_provider_message_id
+    ; channel = (match channel with Public_text -> Model_text | Provider_reasoning -> Model_thinking)
+    ; state
+    }
+;;
+
+let observe_model_content bridge_state ~stream_scope ~index ~channel text events =
+  if text = "" then {bridge_state; chat_events=events}
+  else match List.find_opt (fun (i,_,_) -> i=index) bridge_state.model_content with
+  | Some (_,_,false) -> {bridge_state; chat_events=events}
+  | Some (_,_,true) | None ->
+    let bridge_state = {bridge_state with model_content =
+      (index,channel,true) :: List.filter (fun (i,_,_) -> i<>index) bridge_state.model_content} in
+    {bridge_state; chat_events=events @
+      [model_content_event bridge_state ~stream_scope ~index ~channel Content_observed]}
+;;
+
+let end_model_content bridge_state ~stream_scope ~index events =
+  match List.find_opt (fun (i,_,_) -> i=index) bridge_state.model_content with
+  | Some (_,channel,true) ->
+    let bridge_state = {bridge_state with model_content =
+      (index,channel,false) :: List.filter (fun (i,_,_) -> i<>index) bridge_state.model_content} in
+    {bridge_state; chat_events=events @
+      [model_content_event bridge_state ~stream_scope ~index ~channel Content_ended]}
+  | Some (_,_,false) | None -> {bridge_state; chat_events=events}
+;;
+
 let close_open_content_blocks ~redact_text ~base_dir state =
   let ordered =
     List.sort
@@ -558,7 +599,11 @@ let close_open_content_blocks ~redact_text ~base_dir state =
                  ~redact_text ~base_dir ~index ~media_type ~source_type
                  ~chunks ~encoded_bytes
          }
-       | Occupied_non_tool_block _
+       | Occupied_non_tool_block _ ->
+         let bridge_state = replace_block bridge_state index block in
+         (match bridge_state.current_stream_scope with
+          | Some stream_scope -> end_model_content bridge_state ~stream_scope ~index chat_events
+          | None -> {bridge_state; chat_events})
        | Active_native_tool _
        | Ended_native_tool _
        | Invalid_tool_block _
@@ -671,8 +716,9 @@ let tool_args_event ~redact_text ~stream_scope ~snapshot bridge_state index args
 
 let content_event_allowed state (evt : Agent_core.Types.sse_event) =
   match evt, state.stream_phase with
-  | (Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _),
-    Accepting_content -> true
+  | (Agent_core.Types.ContentBlockStart {index; _} | Agent_core.Types.ContentBlockDelta {index; _}),
+    Accepting_content ->
+      not (List.exists (fun (closed_index,_,active) -> closed_index=index && not active) state.model_content)
   | Agent_core.Types.ContentBlockStop _,
     (Accepting_content | Stop_reason_seen _) -> true
   | (Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _
@@ -907,13 +953,11 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       | Some rejected -> rejected
       | None ->
         let bridge_state = occupy_non_tool_index ~channel:Public_text bridge_state index in
-        { bridge_state =
-            { bridge_state with
-              current_message_has_text =
-                bridge_state.current_message_has_text || not (String.equal text "")
-            }
-        ; chat_events = [ Text_delta (redact_text text) ]
-        })
+        let bridge_state = {bridge_state with current_message_has_text =
+          bridge_state.current_message_has_text || text <> ""} in
+        let text = redact_text text in
+        observe_model_content bridge_state ~stream_scope ~index ~channel:Public_text
+          text [Text_delta text])
   | ContentBlockDelta { index; delta = ThinkingDelta text } ->
       (match
          reject_non_input_tool_delta ~stream_scope ~index ~delta_kind:"thinking"
@@ -921,10 +965,10 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        with
        | Some rejected -> rejected
        | None ->
-         { bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index
-         ; chat_events =
-             [ Agent_core_thinking_delta { index; delta = redact_text text } ]
-         })
+         let bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index in
+         let text = redact_text text in
+         observe_model_content bridge_state ~stream_scope ~index ~channel:Provider_reasoning
+           text [Agent_core_thinking_delta {index; delta=text}])
   | ContentBlockDelta
       { index; delta = ReasoningDetailsDelta { reasoning_content; details } } ->
       (* MiniMax split-reasoning stream (#2347): project the reasoning payload
@@ -940,10 +984,9 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
          let text =
            Agent_core.Types.reasoning_details_text ~reasoning_content ~details
          in
-         { bridge_state
-         ; chat_events =
-             [ Agent_core_thinking_delta { index; delta = redact_text text } ]
-         })
+         let text = redact_text text in
+         observe_model_content bridge_state ~stream_scope ~index ~channel:Provider_reasoning
+           text [Agent_core_thinking_delta {index; delta=text}])
   | ContentBlockDelta { index; delta = RedactedThinkingSnapshot _ } ->
       (match
          reject_non_input_tool_delta ~stream_scope ~index
@@ -1331,7 +1374,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
               ]
           }
       | Some (Occupied_non_tool_block _) ->
-        { bridge_state; chat_events = [ block_stop ] }
+        end_model_content bridge_state ~stream_scope ~index [block_stop]
       | Some
           (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence; _ }) ->
           { bridge_state

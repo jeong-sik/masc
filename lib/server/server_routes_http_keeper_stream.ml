@@ -1752,7 +1752,7 @@ type translated_keeper_stream_event =
   ; chat_events : Keeper_chat_events.keeper_chat_event list
   }
 
-let empty_keeper_stream_bridge_state () = Keeper_chat_agent_core_stream_bridge.empty_state ()
+let empty_keeper_stream_bridge_state ~generation () = Keeper_chat_agent_core_stream_bridge.empty_state ~generation ()
 let translate_agent_core_stream_event = Keeper_chat_agent_core_stream_bridge.translate
 
 (* Provider events that already passed the request's
@@ -1783,8 +1783,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
   let redact_text = Keeper_secret_redaction.redact_text redaction in
-  Keeper_chat_events.publish events
-    (Run_started { run_id; thread_id });
+  let content_generation = Keeper_chat_events.publish_with_sequence events
+    (Run_started { run_id; thread_id }) in
   Option.iter (fun (operation_id, execution_id) ->
     Keeper_chat_events.publish events (Batch_bound {operation_id; execution_id})) batch_binding;
   Keeper_chat_events.publish events
@@ -2913,7 +2913,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
               (Event_error { message });
             Some (Failed { kind = Stream_projection_failed; detail = message }))
   in
-  match consume_worker_events (empty_keeper_stream_bridge_state ()) with
+  match consume_worker_events (empty_keeper_stream_bridge_state ~generation:content_generation ()) with
   | outcome ->
       signal_stream_projection_done ();
       outcome

@@ -77,6 +77,8 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
   "summary_not_requested": int,     // queue 전체 pending entries 집계
   "summary_pending": int,
   "exact_bound_residual": int,      // B3 잔여(ineligible) 카운트 — operator 볼 수 있게
+  "late_uncertain": int,            // consume/deliver 사이 결과 불명 창(§D2) + workspace
+                                    // 교차 배분 거부분 — operator ack 필요
   "operator_action_required": bool,
   "reason": "..."                   // approvals_open>0 && age_sec > timeout_sec*2 등
 }

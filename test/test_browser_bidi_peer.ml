@@ -96,11 +96,14 @@ let test_hover_without_click () =
       "height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0] in
     let point = obj ["x",`Float 0.5;"y",`Float 0.5] in
     let command method_ args = match method_ with
-      | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+      | "browsingContext.getTree" -> Ok (obj ["contexts",`List
+          [obj ["context",`String "other"]; obj ["context",`String "owned"]]])
       | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";
           "title",`String "hover fixture";"hovered",`Bool !hovered]))
       | "input.performActions" ->
         let open Yojson.Safe.Util in
+        check string "selected context receives the input" "owned"
+          (args |> member "context" |> to_string);
         let sources = args |> member "actions" |> to_list in
         let actions = List.hd sources |> member "actions" |> to_list in
         check int "one input, no pressed buttons" 1 (List.length actions);
@@ -112,11 +115,12 @@ let test_hover_without_click () =
       | _ -> fail ("unexpected hover command: " ^ method_) in
     let peer = Peer.create ~command in
     check bool "fixture starts unhovered" false !hovered;
-    match Peer.dispatch peer ~verb:Peer.Page_interact (obj ["tabId",`Int 1;
+    match Peer.dispatch peer ~verb:Peer.Page_interact (obj ["tabId",`Int 2;
       "action",`String "hover_at";"expectedUrl",`String "https://example.test/";
       "point",point;"viewport",viewport]) with
     | Ok receipt ->
       check bool "input reached fixture" true !hovered;
+      check int "receipt identifies the selected tab" 2 Yojson.Safe.Util.(receipt |> member "tabId" |> to_int);
       check string "hover receipt" "hover_at" Yojson.Safe.Util.(receipt |> member "action" |> to_string)
     | Error _ -> fail "hover rejected")
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity];

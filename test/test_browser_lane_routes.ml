@@ -79,12 +79,14 @@ let test_discovery_distinguishes_transports_of_the_same_browser () =
       ~headers:(Httpun.Headers.of_list headers) `POST "/browser-lane/poll" in
     Server_routes_http_routes_browser_lane.client_of_request request
   in
-  let register id transport =
+  let register ?transport id =
     let headers = host_headers token
       |> List.remove_assoc "x-browser-client-id"
       |> List.remove_assoc "x-browser-transport" in
-    let info = match decode
-        (("x-browser-client-id", id) :: ("x-browser-transport", transport) :: headers) with
+    let headers = ("x-browser-client-id", id) :: headers in
+    let headers = match transport with None -> headers
+      | Some transport -> ("x-browser-transport", transport) :: headers in
+    let info = match decode headers with
       | Ok info -> info | Error detail -> fail detail in
     (match Browser_lane.register info with
      | Ok _ -> () | Error detail -> fail detail);
@@ -92,8 +94,13 @@ let test_discovery_distinguishes_transports_of_the_same_browser () =
       ignore (Browser_lane.disconnect_client ~client_id:info.client_id));
     info
   in
-  let extension = register "50000000-0000-4000-8000-000000000002" "web_extension" in
-  let bidi = register "50000000-0000-4000-8000-000000000003" "webdriver_bidi" in
+  let extension = register ~transport:"web_extension" "50000000-0000-4000-8000-000000000002" in
+  let bidi = register ~transport:"webdriver_bidi" "50000000-0000-4000-8000-000000000003" in
+  let installed = register "50000000-0000-4000-8000-000000000004" in
+  check bool "installed extension host keeps polling after the server upgrade" true
+    (installed.transport = Browser_lane.Web_extension);
+  check bool "explicit extension declaration keeps the installed client identity" true
+    (Result.is_ok (Browser_lane.register {installed with transport=Browser_lane.Web_extension}));
   let clients = Browser_lane.active_clients () |> List.map Browser_lane.client_json in
   let bidi_ids = List.filter_map (fun json ->
     let open Yojson.Safe.Util in
@@ -104,8 +111,9 @@ let test_discovery_distinguishes_transports_of_the_same_browser () =
   check bool "a client id cannot change transport" true
     (Browser_lane.register {extension with transport=Browser_lane.Webdriver_bidi}
      = Error "client_identity_changed");
-  check bool "missing transport is not guessed" true
-    (Result.is_error (decode (List.remove_assoc "x-browser-transport" (host_headers token))));
+  check bool "empty transport is rejected" true
+    (Result.is_error (decode (("x-browser-transport", "") ::
+      List.remove_assoc "x-browser-transport" (host_headers token))));
   check bool "unknown transport is not guessed" true
     (Result.is_error (decode (("x-browser-transport", "other") ::
       List.remove_assoc "x-browser-transport" (host_headers token))))

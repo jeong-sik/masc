@@ -131,10 +131,10 @@ let dispatch t ~verb args =
         if url<>after_url || viewport<>after_viewport then Error "viewport_changed_during_capture" else
         let* title=required "title" after in let* data=string "data" png in
         Ok (obj ["tabId",`Int id;"url",str url;"title",title;"mimeType",str "image/png";"data",str data;"viewport",viewport])))
-  | Page_interact -> on_tab (fun context _id ->
+  | Page_interact -> on_tab (fun context id ->
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
       let* request=pre (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live))::fields))) in
-      (match request.action with
+      let* receipt = match request.action with
       | Browser_lane.Hover_at {point;viewport} -> pointer t context args ~viewport ~start:point Hover_pointer
       | Browser_lane.Click_at {point;viewport} -> pointer t context args ~viewport ~start:point Click_pointer
       | Browser_lane.Scroll_at {point;viewport;x;y} -> pointer t context args ~viewport ~start:point (Wheel_pointer {x;y})
@@ -147,7 +147,8 @@ let dispatch t ~verb args =
               (match field "effectStarted" failure with Some (`Bool false)->Error (Before_effect message)
                | _ -> Error (Outcome_unknown message))
             | None -> Ok result))
-      | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction")))
+      | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction") in
+      Result.map_error (fun detail -> Outcome_unknown detail) (with_tab id receipt))
 
 module Endpoint = Ws_direct_core.Endpoint
 module Message = Ws_direct_core.Connection.Message

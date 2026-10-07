@@ -3,6 +3,7 @@
 type t
 type read
 type mutation
+type write_access = Writable | Pending of string | Uncertain of string | Read_only of string
 type action =
   | Stay
   | Close
@@ -12,9 +13,14 @@ type action =
   | Issue of mutation * string * int
   | Revoke of mutation * string
   | Open_link of string
+  | Resolve_unknown
 
 val create : unit -> t
 val owner : t -> unit ref
+val write_access : t -> write_access -> t
+(** Refresh mutation authority before opening a form or consuming its input.
+    Losing it closes issue/revoke forms. An unknown outcome needs explicit
+    operator confirmation that the original server request has finished. *)
 val loading : t -> t * read
 val listed : t -> read -> (Masc.Tui_decode.play_invite_row list, string) result -> t
 (** Only the latest read of this view may replace its inventory. *)

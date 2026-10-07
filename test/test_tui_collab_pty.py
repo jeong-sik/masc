@@ -236,8 +236,8 @@ def run_pending_revoke(executable):
             # and q is text instead of closing the hub.
             key(b"nxq", b"MASC Dashboard")
             key(b":go Collab\r", "› beta".encode())
-            key(b"nalpha\r", b"Expires in hours:")
-            key(b"\r", b"An invite change is still pending")
+            key(b"n", b"An invite change is still pending")
+            key(b"x", b"An invite change is still pending")
             key(b"q", b"MASC Dashboard")
             key(b":go Collab\r", "› beta".encode())
             refreshed_expiry = "2031-02-03T04:05:06Z"
@@ -297,10 +297,8 @@ def run_issue_after_reopen(executable):
             assert h.wait_for_fixture_event(process, master, output, gate.requested, timeout=8)
             key(b"q", b"MASC Dashboard")
             key(b":go Collab\r", "› guest".encode())
-            key(b"x", b"Revoke guest?")
-            key(b"\r", b"An invite change is still pending")
-            key(b"nnext\r", b"Expires in hours:")
-            key(b"\r", b"An invite change is still pending")
+            key(b"x", b"An invite change is still pending")
+            key(b"n", b"An invite change is still pending")
             key(b"q", b"MASC Dashboard")
             key(b":go Collab\r", "› guest".encode())
             start = len(output)
@@ -398,7 +396,7 @@ def run_workspace_withdrawal(executable):
             assert h.wait_for_fixture_event(process, master, output, late.requested, timeout=8)
             key(b"q", b"MASC Dashboard")
             key(b":go Collab\r", "› shared".encode())
-            key(b"x", b"Revoke shared?")
+            key(b"x", b"An invite change is still pending")
             boundary = len(output)
             current["phase"] = "b"
             assert h.wait_for_fixture_event(process, master, output, health_b, timeout=8)
@@ -407,13 +405,12 @@ def run_workspace_withdrawal(executable):
             assert h.wait_for_fixture_event(process, master, output, late.completed, timeout=8)
             key(b":go Collab\r", "› shared".encode())
             key(b"\r", b"one-time link is not retained")
-            key(b"nfresh\r", b"Expires in hours:")
-            key(b"\r", new_link.encode())
-            key(b"\x1b", b"MASC Collab")
+            key(b"n", b"matching this TUI's local workspace")
+            key(b"x", b"matching this TUI's local workspace")
             key(b"q", b"MASC Dashboard")
             assert old_link.encode() not in output[boundary:], "A's retained card leaked into B"
             assert late_link.encode() not in output[boundary:], "A's late issue repopulated B's card store"
-            assert issued == [("a", "shared"), ("a", "late"), ("b", "fresh")], issued
+            assert issued == [("a", "shared"), ("a", "late")], issued
             assert not any(path.startswith("/api/v1/play/invites/") for path, _ in requests), requests
             os.write(master, b"q")
         finally:

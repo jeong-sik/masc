@@ -507,8 +507,8 @@ type async_msg =
   | Preset_restored of preset_sink * (Masc.Tui_decode.preset_restore_report, string) result
   | Preset_deleted of preset_sink * (string, string) result
   | Play_invites_listed of play_list_sink * (Masc.Tui_decode.play_invite_row list, string) result
-  | Play_invite_issued of play_sink * Masc.Tui_decode.play_invite_issued play_mutation
-  | Play_invite_revoked of play_sink * string * play_revoke
+  | Play_invite_issued of Masc_tui_types.play_change_request * play_sink * Masc.Tui_decode.play_invite_issued play_mutation
+  | Play_invite_revoked of Masc_tui_types.play_change_request * play_sink * string * play_revoke
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   (* The scope travels with the directory. Without it a reply names a

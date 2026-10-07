@@ -745,8 +745,9 @@ status: reference
 : 공식 클라이언트나 네이티브 런타임의 내장 도구 시작/종료 관측(`tool_stream_occurrence`,
   `native_tool`)은 관측된 실행 생애주기일 뿐, MASC 도구 실행 영수증(`MASC execution receipts`)이나
   도구 성공 실행을 증명하지 않는다는 경계 규약(#41661, #41667).
-  동일한 프로바이더 도구 식별자의 반복 관측은 단일 콘텐츠 인덱스를 유지하며, 이후의
-  종료 관측이 최초 출현을 닫는다.
+  같은 진행 중 출현(`in-flight occurrence`) 범위 안에서 동일한 프로바이더 도구 식별자의
+  반복 관측은 단일 콘텐츠 인덱스를 유지하며, 이후의 종료 관측이 최초 출현을 닫고
+  어댑터의 식별자 매핑을 정리한다.
   → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
   [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
 

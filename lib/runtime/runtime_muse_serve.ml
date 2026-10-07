@@ -113,6 +113,7 @@ type turn_result =
   ; model : string option
   ; text : string
   ; usage : Runtime_muse_msp.token_usage option
+  ; last_call_usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
   ; approvals_decided : int
   ; call_models : call_model list
@@ -819,6 +820,9 @@ type turn_state =
         or like it names none, adds nothing. *)
   ; usage_cursors : string list
   ; observed_usage : observed_usage
+  ; last_call_usage : Msp.token_usage option
+    (** The newest reported call's own counts. A view gap after it means a
+        later call may be missing, so the gap clears it. *)
   }
 
 (* Per-completion counts are turn-local, never the session's cumulative
@@ -994,7 +998,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
        continue state
      | Msp.View_gap { session_id = sid; _ } ->
        if gap_applies ~session_id sid
-       then continue { state with observed_usage = Usage_gap }
+       then continue { state with observed_usage = Usage_gap; last_call_usage = None }
        else continue state
      (* The session's selection is what MASC asked for; the model a call ran
         on is what the host names here. They differ only when the host ran
@@ -1008,6 +1012,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
        let state =
          { state with
            usage_cursors = view_cursor :: state.usage_cursors;
+           last_call_usage = Some usage;
            observed_usage = (match state.observed_usage with
              | Usage_gap -> Usage_gap
              | Observing_usage None -> Observing_usage (Some usage)
@@ -1290,6 +1295,7 @@ let run_protocol
         ; call_models = []
         ; usage_cursors = []
         ; observed_usage = !observed_usage
+        ; last_call_usage = None
         ; tool_calls = 0
         ; approvals = 0
         ; pending_decisions = []
@@ -1309,6 +1315,7 @@ let run_protocol
     ; model = session.Msp.model_id
     ; text
     ; usage
+    ; last_call_usage = state.last_call_usage
     ; tool_calls = state.tool_calls
     ; approvals_decided = state.approvals
     ; call_models = List.rev state.call_models

@@ -357,6 +357,29 @@ let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_us
   }
 ;;
 
+(* What the turn's newest request carried. The host's counted-once
+   [prompt_tokens] is that request's whole input under the provider's cache
+   convention; the raw [input_tokens] beside it may or may not include the
+   cached part, so it is never used here. The cache split is reported only
+   when the provider names both its reads and its writes. *)
+let request_context_of_call_usage (usage : Msp.token_usage)
+  : Runtime_observation.request_context option =
+  Option.map
+    (fun prompt ->
+       { Runtime_observation.input_tokens = prompt
+       ; cache =
+           (match usage.cache_read_tokens, usage.cache_write_tokens with
+            | Some read, Some write ->
+              Some
+                { Runtime_observation.cache_creation_input_tokens = write
+                ; cache_read_input_tokens = read
+                }
+            | Some _, None | None, Some _ | None, None -> None)
+       ; output_tokens = Some usage.output_tokens
+       })
+    usage.prompt_tokens
+;;
+
 (* The model a Keeper row names. [reported] is the model the host named: the
    one the turn's last reported call ran on ([session/tokenUsage]), and the
    session's model from [session/start] or [session/resume] before any call
@@ -1696,6 +1719,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               ~attempt_details_source:provider_name
               ~agent_core_internal_runtime_allowed:false
               ~usage_scope
+              ?request_context:
+                (Option.bind turn.last_call_usage request_context_of_call_usage)
               ()
           in
           Ok

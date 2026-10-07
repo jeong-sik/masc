@@ -427,6 +427,61 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
                 self.assertTrue((Path(root) / (reference["sha256"] + ".json")).exists())
             self.assertEqual(host.records[refs["outcome"]["sha256"]]["request"], refs["request"])
 
+    def test_same_worker_input_lineage_stays_separate_through_judge_and_report(self):
+        with tempfile.TemporaryDirectory() as root:
+            prior = Host(root, instance_id="same-worker")
+            previous = call(prior, [source()])["structuredContent"]["rows"][0]
+            old_request = previous["fields"]["model_evidence"]["request"]
+            supplied = source()
+            supplied["observations"][0]["evidence"] = [old_request]
+            current = Host(root, instance_id="same-worker", text="new analysis of retained evidence")
+            output = call(current, [supplied])["structuredContent"]
+            item = output["rows"][0]
+            refs = item["fields"]["model_evidence"]
+            self.assertNotEqual(refs["request"], old_request)
+            self.assertEqual(item["evidence"], list(refs.values()),
+                             "only the current receipt claims this observation's inputs")
+            self.assertEqual(item["fields"]["input_evidence"], [old_request])
+            request = current.records[refs["request"]["sha256"]]
+            retained_input = json.loads(request["params"]["messages"][0]["content"]["text"])
+            self.assertEqual(retained_input["untrusted_inputs"][0]["observations"][0]["evidence"], [old_request])
+            self.assertTrue((Path(root) / (old_request["sha256"] + ".json")).exists())
+            judged = call(Host(root, instance_id="judge-worker"),
+                          [upstream(output, instance_id="same-worker")], binding("judge"))["structuredContent"]
+            judged_row = judged["rows"][0]
+            self.assertIn(old_request, judged_row["fields"]["input_evidence"])
+            self.assertNotIn(old_request, judged_row["evidence"])
+            reported = call_report("fusion-report", [upstream(judged, instance_id="judge-worker")])
+            self.assertFalse(reported["isError"])
+            report = next(row for row in reported["structuredContent"]["rows"] if row["lane_id"] == "fusion/report")
+            self.assertEqual(report["fields"]["input_evidence"], judged_row["fields"]["input_evidence"])
+            self.assertIn(old_request, report["fields"]["input_evidence"])
+            legacy = copy.deepcopy(output)
+            legacy["rows"][0]["fields"].pop("input_evidence")
+            legacy["rows"][0]["evidence"].append(old_request)
+            captured = upstream(legacy, instance_id="same-worker")
+            legacy_judged = call(Host(root), [captured], binding("judge"))["structuredContent"]["rows"][0]
+            self.assertIn(old_request, legacy_judged["fields"]["input_evidence"])
+            legacy_report = call_report("fusion-report", [captured])
+            self.assertFalse(legacy_report["isError"])
+            legacy_row = next(row for row in legacy_report["structuredContent"]["rows"] if row["lane_id"] == "fusion/report")
+            self.assertIn(old_request, legacy_row["fields"]["input_evidence"])
+
+    def test_explicit_input_evidence_is_validated_by_judge_and_report(self):
+        with tempfile.TemporaryDirectory() as root:
+            panel = call(Host(root), [source()])["structuredContent"]
+            for inherited in ({}, [{"uri": "https://example.org/unretained", "sha256": None}],
+                              [{"uri": "lane-evidence:invalid", "sha256": "invalid"}],
+                              [{**source()["observations"][0]["evidence"][0], "provider_key": "invented"}]):
+                with self.subTest(inherited=inherited):
+                    malformed = copy.deepcopy(panel)
+                    malformed["rows"][0]["fields"]["input_evidence"] = inherited
+                    captured = upstream(malformed)
+                    judge = Host(root)
+                    self.assertTrue(call(judge, [captured], binding("judge"), ping=True)["isError"])
+                    self.assertEqual(judge.calls, [])
+                    self.assertTrue(call_report("fusion-report", [captured])["isError"])
+
     def test_oversized_sampling_text_returns_a_bounded_explicit_refusal(self):
         maximum = tomllib.loads((ADDONS / "fusion-compute/lane.toml").read_text())["resources"]["max_reply_bytes"]
         with tempfile.TemporaryDirectory() as root:
@@ -479,7 +534,8 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
             self.assertFalse(result["isError"])
             item = result["structuredContent"]["rows"][0]
             self.assertNotIn(uri_only, item["evidence"])
-            self.assertIn(captured["observations"][0]["evidence"][0], item["evidence"])
+            self.assertNotIn(uri_only, item["fields"]["input_evidence"])
+            self.assertIn(captured["observations"][0]["evidence"][0], item["fields"]["input_evidence"])
             payload = json.loads(host.calls[0]["params"]["messages"][0]["content"]["text"])
             self.assertEqual(payload["untrusted_inputs"][0]["observations"], captured["observations"])
             captured["observations"][0]["evidence"] = [uri_only]
@@ -812,8 +868,9 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
             item = result["structuredContent"]["rows"][0]
             self.assertTrue(item["fields"]["input_complete"])
             self.assertTrue(all(ref["sha256"] is not None for ref in item["evidence"]))
+            self.assertTrue(all(ref["sha256"] is not None for ref in item["fields"]["input_evidence"]))
             for ref in panel_refs:
-                self.assertIn(ref, item["evidence"])
+                self.assertIn(ref, item["fields"]["input_evidence"])
             payload = json.loads(judge.calls[0]["params"]["messages"][0]["content"]["text"])
             raw = payload["untrusted_inputs"][0]["observations"][0]["output"]["rows"][0]
             for citation in citations:
@@ -825,7 +882,7 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
                           if row["lane_id"] == "fusion/report")
             self.assertTrue(all(ref["sha256"] is not None for ref in report["evidence"]))
             for ref in panel_refs:
-                self.assertIn(ref, report["evidence"])
+                self.assertIn(ref, report["fields"]["input_evidence"])
 
     def test_two_panels_judge_and_report_keep_answers_and_model_evidence(self):
         with tempfile.TemporaryDirectory() as root:
@@ -880,8 +937,8 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
             self.assertEqual(linked_refs, request_refs)
             for panel_output in outputs:
                 for reference in panel_output["rows"][0]["evidence"]:
-                    self.assertIn(reference, item["evidence"])
-                    self.assertIn(reference, report["evidence"])
+                    self.assertIn(reference, item["fields"]["input_evidence"])
+                    self.assertIn(reference, report["fields"]["input_evidence"])
 
     def test_failed_and_uncertain_calls_preserve_error_and_retained_references(self):
         with tempfile.TemporaryDirectory() as root:

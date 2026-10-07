@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fusion_judge import JudgeFailure, JudgeSynthesis, canonical_judge
 from protocol import (InvalidInput, Source, boolean, evidence, finite_json, object_value,
                       number, optional_string, row, serve, stable_id, string)
-from fusion_sampling import coverage, validate_sampling_result
+from fusion_sampling import coverage, input_references, validate_sampling_result
 
 
 class RunState(Enum):
@@ -180,6 +180,7 @@ def computation_report(source, observation, original, *, producer, producer_stat
         raise InvalidInput("computation.input_coverage must be an array")
     inputs = [coverage(item, "computation input coverage") for item in inputs]
     validate_sampling_result(computation, fields, refs, original.get("evidence"), observation.get("sampling_receipts"))
+    inherited = input_references(fields, refs, original.get("evidence"))
     response, error = fields["sampling_response"], fields["sampling_error"]
     validation_error = fields.get("validation_error")
     if status is ComputationState.ANSWERED:
@@ -193,6 +194,7 @@ def computation_report(source, observation, original, *, producer, producer_stat
                    "format": "markdown", "analysis_id": analysis_id,
                    "computation": {key: value for key, value in computation.items() if key != "text"},
                    "computation_status": status.value, "model_evidence": refs, "input_complete": complete,
+                   "input_evidence": inherited,
                    "validation_error": validation_error,
                    "scope": "supplied_fusion_computation", "content_trust": "untrusted_model_text",
                    "delivery_status": "not_attempted", "delivery_label": "아직 전달하지 않음"})

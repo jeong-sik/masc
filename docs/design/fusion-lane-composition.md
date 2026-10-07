@@ -283,6 +283,17 @@ remain separate and unproven.
 
 ## Isolated computation and shared evidence
 
+Each computation's row evidence contains only its current model request and
+permitted outcome. Inherited immutable references live in `fields.input_evidence`
+and remain in the full input embedded in the retained model request. Judges
+validate and carry those references forward; reports expose the same input
+lineage alongside their current `model_evidence`. Readers of older retained
+computations separate inherited digested references from the flat row evidence
+without promoting URI-only citations into immutable claims. The raw retained
+input remains available, including those citations. This separation lets a
+worker analyze an earlier request from its own instance while the host continues
+to reject an old receipt claimed as the result of new observation inputs.
+
 `fusion-compute` runs as an isolated package with `panel` or `judge` role. It
 requests model access through its declared host sampling route; the worker has
 no provider network or injected host credentials. The host persists the exact

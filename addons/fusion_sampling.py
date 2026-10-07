@@ -16,6 +16,23 @@ def coverage(value, label):
     return value
 
 
+def input_references(fields, refs, row_evidence):
+    if "input_evidence" in fields:
+        inherited = evidence(fields["input_evidence"])
+        if any(set(ref) != {"uri", "sha256"} for ref in fields["input_evidence"]):
+            raise InvalidInput("Input evidence references must contain exactly uri and sha256")
+    else:
+        # Retained computations from before provenance separation stored their
+        # input references beside the current receipt in the row evidence.
+        # URI-only citations remain in the retained raw row, not immutable
+        # input claims, matching the computation package's existing contract.
+        inherited = [ref for ref in evidence(row_evidence)
+                     if ref["sha256"] is not None and ref not in refs.values()]
+    if any(ref["sha256"] is None for ref in inherited):
+        raise InvalidInput("Input evidence requires immutable digests")
+    return inherited
+
+
 def response_problem(response):
     if response.get("role") != "assistant":
         return "Fusion requires an assistant sampling response"

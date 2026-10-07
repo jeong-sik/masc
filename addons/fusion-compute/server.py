@@ -15,7 +15,7 @@ import tomllib
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from protocol import (InvalidInput, SamplingClient, SamplingFailure, Source,
                       boolean, decode_json, evidence, number, object_value, optional_string, stable_id, string, serve)
-from fusion_sampling import coverage, response_problem, validate_sampling_result
+from fusion_sampling import coverage, input_references, response_problem, validate_sampling_result
 
 
 class Role(Enum):
@@ -155,6 +155,7 @@ def prepare(binding, sources):
                                             pending=computation_status is ComputationStatus.OUTCOME_UNKNOWN)
                     validate_sampling_result(computation, fields, refs, item.get("evidence"), observation.get("sampling_receipts"))
                     references.extend(refs.values())
+                    references.extend(input_references(fields, refs, item.get("evidence")))
                     # Retain immutable lineage; URI-only citations remain in untrusted input.
                     references.extend(retained(item.get("evidence"), "upstream computation"))
                     input_complete = boolean(fields.get("input_complete"), "input_complete")
@@ -228,7 +229,8 @@ def observe(binding: dict, sources: tuple[Source, ...], client: SamplingClient) 
         refs = model_references(terminal["evidence"], pending=status == "outcome_unknown")
         computation = {"analysis_id": analysis_id, "role": role.value, "status": status,
                        "model": None, "text": None, "stop_reason": None}
-    references.extend(refs.values())
+    # Input lineage may include an earlier call by this same worker. Keep it
+    # separate from the receipt that attests this observation's current inputs.
     unique = {json.dumps(reference, sort_keys=True): reference for reference in references}
     complete = all(status["complete"] for status in statuses)
     item = {"id": stable_id(analysis_id, role.value, refs), "lane_id": "fusion/computation",
@@ -237,9 +239,10 @@ def observe(binding: dict, sources: tuple[Source, ...], client: SamplingClient) 
             "fields": {"computation": computation, "input_complete": complete,
                        "call_status_label": STATUS_LABELS[ComputationStatus(computation["status"])],
                        "model_evidence": refs, "sampling_response": response, "sampling_error": error,
+                       "input_evidence": list(unique.values()),
                        "validation_error": validation_error,
                        "input_coverage": statuses, "content_trust": "untrusted_model_text"},
-            "evidence": list(unique.values()), "related_ids": []}
+            "evidence": list(refs.values()), "related_ids": []}
     return {"rows": [item], "coverage": statuses}
 
 

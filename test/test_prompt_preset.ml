@@ -513,7 +513,31 @@ let test_delete_removes_a_preset_whether_or_not_it_loads () =
     check (list string) "no preset is unreadable" []
       (List.map fst listing.Preset.unreadable);
     check bool "the directory is gone" false
-      (Sys.file_exists (Preset.source_directory ~base_path evening)))
+      (Sys.file_exists (Preset.source_directory ~base_path evening));
+    let staging = Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging" in
+    check (array string) "no holder is left behind" [||] (Sys.readdir staging);
+    (match Preset.delete ~base_path "morning" with
+     | Error (Preset.Delete_not_found "morning") -> ()
+     | Error error -> fail ("wrong refusal: " ^ Preset.delete_error_to_string error)
+     | Ok () -> fail "a preset deleted twice was found the second time"))
+;;
+
+(* A link left at a preset's place whose target is gone is listed as
+   unreadable, so delete removes it too. *)
+let test_delete_removes_a_dangling_link () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    let presets = Filename.dirname (Preset.source_directory ~base_path morning) in
+    Unix.symlink (Filename.concat presets "never-there") (Filename.concat presets "ghost");
+    check (list string) "the link is listed as unreadable" [ "ghost" ]
+      (List.map fst (Preset.list ~base_path).Preset.unreadable);
+    (match Preset.delete ~base_path "ghost" with
+     | Ok () -> ()
+     | Error error -> fail (Preset.delete_error_to_string error));
+    check (list string) "nothing is unreadable" []
+      (List.map fst (Preset.list ~base_path).Preset.unreadable))
 ;;
 
 let test_delete_refuses_a_missing_or_invalid_name () =
@@ -719,6 +743,8 @@ let () =
             test_override_that_cannot_render_is_skipped_with_the_reason
         ; Alcotest.test_case "delete removes a preset whether or not it loads" `Quick
             test_delete_removes_a_preset_whether_or_not_it_loads
+        ; Alcotest.test_case "delete removes a dangling link" `Quick
+            test_delete_removes_a_dangling_link
         ; Alcotest.test_case "delete refuses a missing or invalid name" `Quick
             test_delete_refuses_a_missing_or_invalid_name
         ; Alcotest.test_case "a second restore replaces the autosave" `Quick

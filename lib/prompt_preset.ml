@@ -821,19 +821,41 @@ type delete_error =
   | Delete_not_found of string
   | Delete_failed of { name : string; reason : string }
 
-(* No [load] first: an unreadable preset cannot be restored, so removing it is
-   the one thing the operator can still do with it. *)
+let unix_error_text error operation argument =
+  Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)
+;;
+
+(* The preset leaves [presets/] in one rename, into a fresh holder beside it,
+   and is removed from there. A save of the same name running alongside
+   either replaces it whole or finds it gone; it never loses files to a
+   delete still walking the old directory. A second delete of the same name
+   finds nothing to rename. No [load] first: an unreadable preset cannot be
+   restored, so removing it is the one thing the operator can still do with
+   it, and a rename moves a dangling symlink as readily as a directory. *)
 let delete ~base_path name =
   if not (is_valid_name name)
   then Error (Delete_invalid_name name)
   else (
-    let dir = preset_dir ~base_path name in
-    if not (Sys.file_exists dir && Sys.is_directory dir)
-    then Error (Delete_not_found name)
-    else (
-      match guard (fun () -> Ok (Fs_compat.remove_tree dir)) with
-      | Ok () -> Ok ()
-      | Error reason -> Error (Delete_failed { name; reason })))
+    let holder =
+      guard (fun () ->
+        let* () = mkdir_p (staging_dir ~base_path) in
+        Ok (Filename.temp_dir ~temp_dir:(staging_dir ~base_path) (name ^ "-") ""))
+    in
+    match holder with
+    | Error reason -> Error (Delete_failed { name; reason })
+    | Ok holder ->
+      let moved =
+        match
+          Fs_compat.rename_noreplace (preset_dir ~base_path name) (Filename.concat holder name)
+        with
+        | () -> Ok ()
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Delete_not_found name)
+        | exception Unix.Unix_error (error, operation, argument) ->
+          Error (Delete_failed { name; reason = unix_error_text error operation argument })
+        | exception Sys_error reason -> Error (Delete_failed { name; reason })
+      in
+      remove_quietly holder;
+      moved)
 ;;
 
 let delete_error_to_string = function

@@ -3606,6 +3606,8 @@ let render_keeper_message (state : state) =
       | None -> slash_hint_text ~restore:Ansi.default_fg (Buffer.contents state.msg_input)
     in
     let footer_hints =
+      if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
+      else
       match slash_hint with
       | Some line -> line
       (* A capture takes the hint line for as long as it runs. The chat surface

@@ -841,6 +841,7 @@ let clear_keeper_history_projection state =
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
     ?(remember_home_chat = true) state
     keeper_name ~drain_queue =
+  state.keeper_navigation_open <- false;
   (* The paste goes back into the draft before the draft is put away. A spill
      lives with the composer; a saved draft has to stand on its own, and a
      placeholder without its text would reach the keeper as a sentence about a
@@ -894,6 +895,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
    settle coming to send it, and the operator who left is not about to fold
    another line onto it. *)
 let leave_keeper_message state ~drain_queue =
+  state.keeper_navigation_open <- false;
   save_message_draft state;
   state.msg_history_inflight <- None;
   let target_registered =
@@ -6007,6 +6009,8 @@ let enter_theme_filter state filter =
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
+  state.keeper_navigation_open <- false;
+  state.keeper_message_focus <- Right_pane;
   state.runtime_model_jump <- None;
   state.detail_focus_recovery <- None;
   (* The browser reader owns Connectors; refocusing it keeps the reader.
@@ -19157,6 +19161,8 @@ and is loaded on demand through keeper_skill.
                ~port:state.port ~body_json))
   in
   let reconcile_chat_focus () =
+    if state.view <> Overview && state.view <> Keepers Keeper_message then
+      state.keeper_navigation_open <- false;
     let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
     let cols = max 1 (terminal_cols - acting_pane_columns state ~terminal_cols) in
     reconcile_keeper_message_focus state ~cols
@@ -19894,6 +19900,11 @@ and is loaded on demand through keeper_skill.
            (* The URL field above owns paste while open; a page reader has
               no hidden Keeper composer or attachment destination. *)
            ()
+       | Some (Pasted _) when state.keeper_navigation_open ->
+           (* Fields above keep their paste. The Keeper list itself has no
+              editor, so text and dropped images cannot change the draft
+              behind it. *)
+           ()
        | Some (Pasted paste)
          when not dismissed_image && not compact_viewport ->
            (* A dropped or Finder-copied file arrives shell-escaped. The
@@ -20138,6 +20149,7 @@ and is loaded on demand through keeper_skill.
            six were circling, and it cannot fall behind a new field. *)
         && Option.is_none (text_input_target state ~compact_viewport)
         && state.view <> Keepers Keeper_message
+        && not state.keeper_navigation_open
         && key <> Some toggle_mouse_tracking_key
         && key <> Some toggle_roster_pane_key
         && key <> Some toggle_acting_pane_key
@@ -20976,7 +20988,12 @@ and is loaded on demand through keeper_skill.
           showing, and reclaiming its columns should not depend on which
           surface is up. *)
        | Some k when String.equal k toggle_roster_pane_key ->
-           (match
+           if state.keeper_navigation_open then begin
+             state.keeper_navigation_open <- false;
+             state.keeper_message_focus <- Right_pane;
+             if terminal_columns >= Masc_tui_roster_pane.threshold_cols then
+               state.roster_pane_preference <- Masc_tui_roster_pane.Hidden
+           end else (match
               Masc_tui_roster_pane.toggle_preference state.roster_pane_preference
                 ~in_chat:(state.view = Keepers Keeper_message) ~cols:terminal_columns
             with
@@ -21002,6 +21019,7 @@ and is loaded on demand through keeper_skill.
           beside the pane. Any other key reaches the surface unchanged. *)
        | Some k
          when Option.is_some state.acting_pane_cursor
+              && not state.keeper_navigation_open
               && acting_pane_drawn state
               && Option.is_none (text_input_target state ~compact_viewport)
               && List.mem k acting_pane_focus_keys ->
@@ -21015,6 +21033,7 @@ and is loaded on demand through keeper_skill.
           in its draft and gives it up only when the draft is empty. *)
        | Some "\023"
          when Option.is_none state.acting_pane_cursor
+              && not state.keeper_navigation_open
               && acting_pane_drawn state
               && Option.is_none (text_input_target state ~compact_viewport)
               && state.view <> Board && state.view <> Resources
@@ -23180,6 +23199,37 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Acting
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
+       | Some key when state.keeper_navigation_open ->
+           (match key with
+            | "right" | "esc" | "\t" ->
+                state.keeper_navigation_open <- false;
+                state.keeper_message_focus <- Right_pane
+            | "down" | "j" ->
+                state.keeper_cursor <- Masc_tui_scroll.cursor_down
+                  ~count:(List.length state.keepers) state.keeper_cursor
+            | "up" | "k" ->
+                state.keeper_cursor <- Masc_tui_scroll.cursor_up
+                  ~count:(List.length state.keepers) state.keeper_cursor
+            | "\r" | "\n" | "enter" ->
+                (match selected_keeper state with
+                 | None -> ()
+                 | Some keeper ->
+                     let return_to = if state.view = Overview then
+                       Keeper_chat_return_home else state.msg_return in
+                     open_message_for_keeper ~return_to state keeper.k_name
+                       ~drain_queue:(fun () -> drain_queued_message state
+                         ~base_path ~mailbox:async_messages);
+                     set_msg_scroll state 0;
+                     launch_keeper_history_load state ~mailbox:async_messages
+                       ~keeper_name:keeper.k_name;
+                     state.view <- Keepers Keeper_message)
+            | _ -> ())
+       | Some "left"
+         when (state.view = Overview && not state.repository_changes_open)
+              || message_mode ->
+           state.acting_pane_cursor <- None;
+           state.keeper_navigation_open <- true;
+           state.keeper_message_focus <- Left_pane
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
            Masc_tui_home.home_step state ~backwards:(key = "k" || key = "up")
        | Some ("p" | "P") when state.view = Overview ->
@@ -23291,40 +23341,6 @@ and is loaded on demand through keeper_skill.
        | Some "?" when message_mode && Buffer.length state.msg_input = 0 ->
            state.help_open <- true;
            state.help_scroll <- 0
-        | Some ("right" | "esc" | "\t")
-          when message_mode
-               && state.keeper_message_focus = Left_pane ->
-            state.keeper_message_focus <- Right_pane
-       | Some "left"
-         when message_mode
-              && keeper_roster_pane_shown state
-                   ~cols:terminal_columns ->
-           state.keeper_message_focus <- Left_pane
-       | Some "down"
-         when message_mode
-              && state.keeper_message_focus = Left_pane ->
-           state.keeper_cursor <-
-             Masc_tui_scroll.cursor_down ~count:(List.length state.keepers)
-               state.keeper_cursor
-       | Some "up"
-         when message_mode
-              && state.keeper_message_focus = Left_pane ->
-           state.keeper_cursor <-
-             Masc_tui_scroll.cursor_up ~count:(List.length state.keepers)
-               state.keeper_cursor
-       | Some ("\r" | "\n")
-         when message_mode
-              && state.keeper_message_focus = Left_pane ->
-           (match List.nth_opt state.keepers state.keeper_cursor with
-            | Some keeper ->
-                open_message_for_keeper ~return_to:state.msg_return state
-                  keeper.k_name ~drain_queue:(fun () ->
-                    drain_queued_message state ~base_path
-                      ~mailbox:async_messages);
-                set_msg_scroll state 0;
-                launch_keeper_history_load state ~mailbox:async_messages
-                  ~keeper_name:keeper.k_name
-            | None -> ())
        | Some k when message_mode ->
            (* Ctrl-R/Ctrl-D/Ctrl-F/Ctrl-N shape what the transcript draws,
               not what the composer holds, so a viewport too small for the

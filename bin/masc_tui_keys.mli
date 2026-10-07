@@ -101,6 +101,9 @@ val for_surface : Masc_tui_types.surface -> binding list
     Feeds both projections; a surface whose footer is not yet converted is
     still read by the help overlay. *)
 
+val keeper_navigation_hints : string
+(** Keys while the Keeper navigator opened with Left holds focus. *)
+
 val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
     Meta order.

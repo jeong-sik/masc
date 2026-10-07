@@ -337,13 +337,16 @@ let update_native_call ~now ~expected ~replacement current =
       | Preparing | Ready | Suspended _ | Recovering _ | Settled _ -> invalid "native call update requires running execution" in
     let* () = match expected, replacement with
       | No_native_call, Active _ -> Ok ()
-      | Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Agent_core.Agent.Retire; _}), Active _ -> Ok ()
+      | Terminal_unacknowledged (_, disposition), (Active _ | No_native_call) ->
+        (match disposition.Agent_core.Agent.recovery with
+         | Agent_core.Agent.Retire -> Ok ()
+         | Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown ->
+           invalid "native call transition is not admitted")
       | Active before, Active after ->
         let* advanced = advance before ~observed:before.checkpoint ~checkpoint:after.checkpoint
           |> Result.map_error (fun detail -> Invalid_transition detail) in
         if equal advanced after then Ok () else invalid "native call identity changed"
       | Active before, Terminal_unacknowledged (after, _) when equal before after -> Ok ()
-      | Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Agent_core.Agent.Retire; _}), No_native_call -> Ok ()
       | _, _ when equal_state expected replacement -> Ok ()
       | (No_native_call | Active _ | Terminal_unacknowledged _), _ -> invalid "native call transition is not admitted" in
     if equal_state expected replacement then Ok current
@@ -505,21 +508,42 @@ let apply ~now action current =
                 (match current.phase with
                  | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Suspended _ -> unchanged (Settled terminal)
                  | Settled _ -> reject ())) in
-    let* native_call = match current.native_call, action with
-      | Keeper_native_call.Active _, Settle _ -> Error (Invalid_transition "active native call has no terminal disposition")
-      | Keeper_native_call.Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Agent_core.Agent.Operator_repair_required _; _}), Settle Completed ->
-        Error (Invalid_transition "unknown native effect cannot complete")
-      | Keeper_native_call.Active _, _ when phase <> current.phase ->
-        Error (Invalid_transition "active native call cannot change execution phase")
-      | Keeper_native_call.Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Agent_core.Agent.Retire; _}),
-        (Suspend _ | Suspend_official_checkpoint _ | Suspend_runtime_retry _ | Suspend_gate _ | Suspend_gate_reconciliation _) ->
-        (* The accepted continuation is the Owner acknowledgement. Its store
-           transaction commits this retirement together with queue deferral. *)
-        Ok Keeper_native_call.No_native_call
-      | Keeper_native_call.Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Agent_core.Agent.Operator_repair_required _; _}),
-        (Suspend _ | Suspend_official_checkpoint _ | Suspend_runtime_retry _ | Suspend_gate _ | Suspend_gate_reconciliation _) ->
-        Error (Invalid_transition "unknown native effect cannot resume through another continuation")
-      | (Keeper_native_call.No_native_call | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _), _ -> Ok current.native_call in
+    let* native_call = match current.native_call with
+      | Keeper_native_call.No_native_call -> Ok Keeper_native_call.No_native_call
+      | Keeper_native_call.Active _ ->
+        (match action with
+         | Settle (Completed | Cancelled | Failed _) ->
+           Error (Invalid_transition "active native call has no terminal disposition")
+         | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+         | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
+         | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
+         | Suspend_gate_reconciliation _ | Suspend_gate _ | Reconcile_gate_binding _
+         | Resolve_gate _ | Resume_gate _ | Discharge_gate _ ->
+           if phase <> current.phase then
+             Error (Invalid_transition "active native call cannot change execution phase")
+           else Ok current.native_call)
+      | Keeper_native_call.Terminal_unacknowledged (_, disposition) ->
+        (match disposition.Agent_core.Agent.recovery with
+         | Agent_core.Agent.Retire ->
+           (match action with
+            | Suspend _ | Suspend_official_checkpoint _ | Suspend_runtime_retry _
+            | Suspend_gate _ | Suspend_gate_reconciliation _ ->
+              (* Retirement commits together with the accepted continuation. *)
+              Ok Keeper_native_call.No_native_call
+            | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+            | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
+            | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+            | Settle (Completed | Cancelled | Failed _) -> Ok current.native_call)
+         | Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown ->
+           (match action with
+            | Settle Completed -> Error (Invalid_transition "unknown native effect cannot complete")
+            | Suspend _ | Suspend_official_checkpoint _ | Suspend_runtime_retry _
+            | Suspend_gate _ | Suspend_gate_reconciliation _ ->
+              Error (Invalid_transition "unknown native effect cannot resume through another continuation")
+            | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+            | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
+            | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+            | Settle (Cancelled | Failed _) -> Ok current.native_call)) in
     let gate_obligations = match action with
       | Suspend_gate_reconciliation (binding, _) -> binding.obligations
       | Suspend_gate waiting | Reconcile_gate_binding (_, waiting) -> waiting.obligations

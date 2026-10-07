@@ -59,11 +59,16 @@ let equal_state left right = match left, right with
   | Terminal_unacknowledged (left, ld), Terminal_unacknowledged (right, rd) -> equal left right && ld = rd
   | (No_native_call | Active _ | Terminal_unacknowledged _), _ -> false
 
+let retirement_allowed (disposition : Agent.execution_terminal_disposition) =
+  match disposition.recovery with
+  | Agent.Retire -> true
+  | Agent.Operator_repair_required Agent.Effect_outcome_unknown -> false
+
 let transition state change = match state, change with
   | No_native_call, Bind {observed=No_native_call; call} -> Ok (Active call)
   | Active current, Bind {observed; call} when equal_state state observed && equal current call -> Ok state
-  | Terminal_unacknowledged (previous, {Agent.recovery=Agent.Retire; _}), Bind {observed; call}
-    when equal_state state observed && previous.call_id <> call.call_id
+  | Terminal_unacknowledged (previous, disposition), Bind {observed; call}
+    when retirement_allowed disposition && equal_state state observed && previous.call_id <> call.call_id
       && not (Yojson.Safe.equal (Agent.execution_locator_to_yojson previous.locator)
         (Agent.execution_locator_to_yojson call.locator)) -> Ok (Active call)
   | Active call, Checkpoint {call_id; observed; checkpoint} when call.call_id = call_id ->
@@ -72,8 +77,8 @@ let transition state change = match state, change with
     Ok (Terminal_unacknowledged (call, disposition))
   | Terminal_unacknowledged (call, current), Terminal {call_id; disposition}
     when call.call_id = call_id && current = disposition -> Ok state
-  | Terminal_unacknowledged (call, {Agent.recovery=Agent.Retire; _}), Acknowledge call_id
-    when call.call_id = call_id -> Ok No_native_call
+  | Terminal_unacknowledged (call, disposition), Acknowledge call_id
+    when retirement_allowed disposition && call.call_id = call_id -> Ok No_native_call
   | (No_native_call | Active _ | Terminal_unacknowledged _),
     (Bind _ | Checkpoint _ | Terminal _ | Acknowledge _) -> Error "native call transition or identity is not admitted"
 

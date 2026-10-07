@@ -3060,6 +3060,68 @@ let test_pause_rechecks_pending_claim_admission () =
   check int "pending child was admitted once before pause" 1 !execution_count
 ;;
 
+let test_startup_requeues_exact_native_call () =
+  Eio_main.run @@ fun _env ->
+  let path = Filename.temp_file "keeper-owner-native-" ".sqlite3" in
+  Unix.unlink path;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path) (fun () ->
+    let operation_id = operation_id "kmsg-native-restart" in
+    let seed = Keeper_chat_operation_store.open_or_create ~path |> Result.get_ok in
+    ignore (Keeper_chat_operation_store.submit seed ~now:10. ~operation_id
+      ~source:operation_source ~input:(operation_input "retain original native input") |> Result.get_ok);
+    let operation = Keeper_chat_operation_store.claim_next seed ~now:11. |> Result.get_ok |> Option.get in
+    let checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:(Keeper_id.Trace_id.of_string "native-owner-trace" |> Result.get_ok)
+      ~turn_count:1 ~canonical_checkpoint_bytes:"exact owner seed" |> Result.get_ok in
+    let locator = Agent_core.Agent.execution_locator_of_yojson
+      (`Assoc ["version", `Int 1; "run_id", `String "execution-run-native-owner"]) |> Result.get_ok in
+    let call = Keeper_native_call.create
+      ~call_id:"019a0010-1000-7000-8000-000000000010" ~runtime_id:"native.primary"
+      ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
+      ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
+    Keeper_chat_operation_store.update_direct_native_call seed ~now:12. ~operation_id
+      ~execution_digest:operation.execution_digest
+      (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call}) |> Result.get_ok;
+    Keeper_chat_operation_store.close seed |> Result.get_ok;
+    Eio.Switch.run @@ fun sw ->
+    let owner = Owner.start ~sw
+      ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      ~operation_store_path:path ~now:(fun () -> 20.) ~operation_runner:None
+      ~on_turn_slot_released:None ~keeper_name:"native-restart"
+      ~initial_meta:(Some (make_meta "native-restart")) |> owner_ok in
+    check int "witnessed native operation not interrupted" 0 (List.length (Owner.restart_interrupted_operations owner));
+    let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+    check bool "Owner claims original operation" true (Chat_operation.Operation_id.equal operation_id resumed.operation_id);
+    check bool "Owner preserves input" true (operation.input = resumed.input);
+    let observed = Owner.direct_native_call owner ~operation_id |> owner_ok in
+    check bool "Owner restores exact native witness" true
+      (Keeper_native_call.equal_state observed (Keeper_native_call.Active call));
+    Owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~observed ~call |> owner_ok;
+    let advanced_checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:checkpoint.trace_id ~turn_count:2
+      ~canonical_checkpoint_bytes:"native progress after restart" |> Result.get_ok in
+    Owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~call_id:call.call_id ~observed:checkpoint ~checkpoint:advanced_checkpoint |> owner_ok;
+    (match Owner.checkpoint_direct_native_call owner ~operation_id
+       ~execution_digest:operation.execution_digest ~call_id:call.call_id
+       ~observed:checkpoint ~checkpoint:advanced_checkpoint with
+     | Error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _)) -> ()
+     | Error error -> fail ("stale callback fenced Owner: " ^ Owner.error_to_string error)
+     | Ok () -> fail "stale callback was accepted");
+    (match Owner.direct_native_call owner ~operation_id |> owner_ok with
+     | Keeper_native_call.Active current ->
+       check bool "stale callback keeps committed checkpoint" true
+         (Keeper_checkpoint_ref.equal current.checkpoint advanced_checkpoint)
+     | _ -> fail "stale callback changed active native state");
+    Owner.terminal_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~call_id:call.call_id ~disposition:{Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;
+        recovery=Agent_core.Agent.Retire} |> owner_ok;
+    ignore (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"native-owner-receipt" |> owner_ok);
+    check bool "Owner receipt retires native witness" true
+      (Keeper_native_call.equal_state Keeper_native_call.No_native_call (Owner.direct_native_call owner ~operation_id |> owner_ok)))
+;;
+
 let test_startup_interrupts_running_without_requeue () =
   Eio_main.run @@ fun _env ->
   let path = Filename.temp_file "keeper-owner-restart-" ".sqlite3" in
@@ -5201,6 +5263,7 @@ let () =
             "startup interrupts Running without requeue"
             `Quick
             test_startup_interrupts_running_without_requeue
+        ; test_case "native restart and stale callback preserve Owner progress" `Quick test_startup_requeues_exact_native_call
         ; test_case
             "registry start leaves a failure row for a restart-interrupted request"
             `Quick

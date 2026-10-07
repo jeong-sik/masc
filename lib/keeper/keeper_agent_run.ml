@@ -13,6 +13,11 @@ include Keeper_agent_error
 module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
+type native_continuation =
+  { binding : Keeper_direct_native_continuation.binding
+  ; resumed : Keeper_direct_native_continuation.resumed option
+  }
+
 type direct_continuation =
   | Checkpoint_continuation of Keeper_direct_checkpoint_continuation.admission
   | Runtime_continuation of Keeper_direct_runtime_continuation.admission
@@ -842,6 +847,7 @@ let run_turn
       ?approval_gate
       ?(trajectory_acc : Trajectory.accumulator option)
       ?direct_resume
+      ?native_continuation
       ?official_task_reference
       ?on_gate_evidence_admitted
       ?deferred_runtime_lane
@@ -862,6 +868,15 @@ let run_turn
       ()
   : Keeper_agent_result.turn_settlement
   =
+  let native_binding, native_resume = match native_continuation with
+    | None -> None, None
+    | Some { binding; resumed } -> Some binding, resumed in
+  (* Restore the whole native context before prompt/tool setup closes over
+     it. The same object must reach Core so new load receipts, repetition
+     observations and injector updates are persisted together. *)
+  let shared_context = match native_resume with
+    | Some resumed -> Some (Keeper_direct_native_continuation.restored_context resumed)
+    | None -> shared_context in
   let preview = Some (Keeper_turn_preview.reset ~keeper_name:meta.name
       ~now:(Time_compat.now ())
       ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path
@@ -942,7 +957,9 @@ let run_turn
   Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ())
   @@ fun () ->
   let runtime_id_string = runtime_id in
-  let direct_resume_checkpoint = Option.bind direct_resume direct_checkpoint in
+  let direct_resume_checkpoint = match native_resume with
+    | Some resumed -> Some (Keeper_direct_native_continuation.checkpoint resumed)
+    | None -> Option.bind direct_resume direct_checkpoint in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   (* Not a [let*] bind. Result.bind put every later expression -- including the
@@ -1077,7 +1094,8 @@ let run_turn
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
-    match direct_resume, hitl_resolution with
+    if Option.is_some native_resume then Keeper_run_prompt.Skip_already_checkpointed_user_turn
+    else match direct_resume, hitl_resolution with
     | Some _, _ | None, Some _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
     | None, None -> user_turn_record
   in
@@ -1094,7 +1112,9 @@ let run_turn
       ~user_turn_record:prompt_user_turn_record
       ~start_turn_count
   in
-  let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
+  let turn_system_prompt = match native_resume with
+    | Some resumed -> Keeper_direct_native_continuation.system_prompt resumed
+    | None -> prompt_ctx.Keeper_run_prompt.turn_system_prompt in
   let dynamic_context = prompt_ctx.Keeper_run_prompt.dynamic_context in
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
@@ -1240,10 +1260,12 @@ let run_turn
       Keeper_agent_result.not_dispatched
         (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok admitted_checkpoint ->
-    let admitted_checkpoint = match admitted_checkpoint, direct_resume with
+    let admitted_checkpoint = match native_resume with
+      | Some resumed -> Some (Keeper_direct_native_continuation.checkpoint resumed)
+      | None -> (match admitted_checkpoint, direct_resume with
       | Some checkpoint, _ -> Some checkpoint
       | None, Some admission -> direct_checkpoint admission
-      | None, None -> None in
+      | None, None -> None) in
     let evidence_admission = match on_gate_evidence_admitted, admitted_checkpoint with
       | None, _ -> Ok ()
       | Some callback, Some checkpoint -> callback checkpoint
@@ -1702,16 +1724,25 @@ let run_turn
                 | Error _ as error -> error
          in
          let call_run_named ~raw_trace ~initial_messages () =
+                let dispatch_input ~dispatch = match native_resume with
+                  | Some resumed ->
+                    (* Core's journal owns completion of an interrupted tool
+                       cycle. Do not synthesize results before settled effects
+                       have been replayed into its exact retained checkpoint. *)
+                    let checkpoint = Keeper_direct_native_continuation.checkpoint resumed in
+                    dispatch ~checkpoint:(Some checkpoint) checkpoint.messages
+                  | None -> dispatch_after_provider_transcript_admission
+                      ~messages:initial_messages ~checkpoint:resume_agent_core_checkpoint ~dispatch in
                 (* Keeper does not impose a cumulative turn, time, token, or cost
                    budget. Explicit cancellation and provider/tool progress
                    boundaries settle the lane, while usage remains observational. *)
-                dispatch_after_provider_transcript_admission
-                  ~messages:initial_messages
-                  ~checkpoint:resume_agent_core_checkpoint
+                dispatch_input
                   ~dispatch:(fun ~checkpoint initial_messages ->
                     Keeper_turn_driver.run_named
                       ~input_policy:meta.input_policy
-                      ~runtime_id:runtime_id_string
+                      ~runtime_id:(match native_resume with
+                        | None -> runtime_id_string
+                        | Some _ -> Keeper_meta_contract.runtime_id_of_meta meta)
                       ~base_path:config.base_path
                       ~keeper_name:meta.name
                       ~walk_owner:
@@ -1720,6 +1751,7 @@ let run_turn
                               ~keeper_name:meta.name))
                       ~pre_tool_rejects
                       ~continue_from_checkpoint
+                      ?native_binding
                       ~goal:user_message
                       ?goal_blocks:user_blocks
                       ~goal_metadata:input_metadata

@@ -9,6 +9,69 @@ type operation =
   | Equip
   | Gift
 
+(* The one place a misc tool name is read as a Candle operation. Every misc
+   operation is named so a new Candle tool, or any new misc tool, has to be
+   answered here before the dispatchers that read it compile. *)
+let operation_of_misc : Tool_schemas_misc.misc_operation -> operation option = function
+  | Tool_schemas_misc.Misc_candle_balance -> Some Balance
+  | Tool_schemas_misc.Misc_candle_catalog -> Some Catalog
+  | Tool_schemas_misc.Misc_candle_purchase -> Some Purchase
+  | Tool_schemas_misc.Misc_candle_equip -> Some Equip
+  | Tool_schemas_misc.Misc_candle_gift -> Some Gift
+  | Tool_schemas_misc.Misc_lane_declaration_read
+  | Tool_schemas_misc.Misc_lane_declaration_save
+  | Tool_schemas_misc.Misc_lane_updates
+  | Tool_schemas_misc.Misc_lane_attach
+  | Tool_schemas_misc.Misc_lane_inspect
+  | Tool_schemas_misc.Misc_lane_observe
+  | Tool_schemas_misc.Misc_lane_slice
+  | Tool_schemas_misc.Misc_lane_detach
+  | Tool_schemas_misc.Misc_lane_evidence
+  | Tool_schemas_misc.Misc_lane_act
+  | Tool_schemas_misc.Misc_lane_action_status
+  | Tool_schemas_misc.Misc_ask
+  | Tool_schemas_misc.Misc_ask_status
+  | Tool_schemas_misc.Misc_ask_withdraw
+  | Tool_schemas_misc.Misc_config
+  | Tool_schemas_misc.Misc_dashboard
+  | Tool_schemas_misc.Misc_gc
+  | Tool_schemas_misc.Misc_keeper_waiting_inventory
+  | Tool_schemas_misc.Misc_tool_help
+  | Tool_schemas_misc.Misc_web_fetch
+  | Tool_schemas_misc.Misc_web_search
+  | Tool_schemas_misc.Misc_browser_tabs
+  | Tool_schemas_misc.Misc_browser_read
+  | Tool_schemas_misc.Misc_browser_session
+  | Tool_schemas_misc.Misc_browser_goto
+  | Tool_schemas_misc.Misc_browser_act
+  | Tool_schemas_misc.Misc_browser_interact
+  | Tool_schemas_misc.Misc_browser_instruct
+  | Tool_schemas_misc.Misc_msx_load
+  | Tool_schemas_misc.Misc_msx_eject
+  | Tool_schemas_misc.Misc_msx_save
+  | Tool_schemas_misc.Misc_msx_restore
+  | Tool_schemas_misc.Misc_msx_change_disk
+  | Tool_schemas_misc.Misc_msx_screen
+  | Tool_schemas_misc.Misc_msx_press
+  | Tool_schemas_misc.Misc_msx_step
+  | Tool_schemas_misc.Misc_msx_step_until_change
+  | Tool_schemas_misc.Misc_msx_peek
+  | Tool_schemas_misc.Misc_msx_ram_diff
+  | Tool_schemas_misc.Misc_portrait_read
+  | Tool_schemas_misc.Misc_dos_load
+  | Tool_schemas_misc.Misc_dos_eject
+  | Tool_schemas_misc.Misc_dos_screen
+  | Tool_schemas_misc.Misc_dos_step
+  | Tool_schemas_misc.Misc_dos_press
+  | Tool_schemas_misc.Misc_dos_click
+  | Tool_schemas_misc.Misc_dos_type
+  | Tool_schemas_misc.Misc_dos_peek
+  | Tool_schemas_misc.Misc_dos_pass
+  | Tool_schemas_misc.Misc_dos_save
+  | Tool_schemas_misc.Misc_dos_restore ->
+    None
+;;
+
 type failure =
   | Bad_arguments of string
   | Invalid_keeper of string

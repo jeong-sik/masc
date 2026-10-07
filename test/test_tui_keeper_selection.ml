@@ -11,9 +11,11 @@ let pp_navigation formatter = function
   | Selection.Logs_keeper { keeper_name; cursor } ->
       Format.fprintf formatter "Logs_keeper { keeper_name = %S; cursor = %d }"
         keeper_name cursor
-  | Selection.Message_keeper { keeper_name; cursor } ->
+  | Selection.Message_keeper { keeper_name; cursor; return_keeper } ->
       Format.fprintf formatter
-        "Message_keeper { keeper_name = %S; cursor = %d }" keeper_name cursor
+        "Message_keeper { keeper_name = %S; cursor = %d; return_keeper = %s }"
+        keeper_name cursor
+        (match return_keeper with Some name -> Printf.sprintf "Some %S" name | None -> "None")
   | Selection.Calls_keeper { keeper_name; cursor } ->
       Format.fprintf formatter "Calls_keeper { keeper_name = %S; cursor = %d }"
         keeper_name cursor
@@ -64,38 +66,37 @@ let test_detail_and_logs_identity_across_replacement () =
        (Selection.Logs_keeper { keeper_name = "seongsu"; cursor = 1 })
        [])
 
+let message ?return_keeper keeper_name cursor =
+  Selection.Message_keeper { keeper_name; cursor; return_keeper }
+
 let test_message_target_survives_unavailability () =
   check navigation "a new chat target preserves the roster return selection"
-    (Selection.Message_keeper { keeper_name = "new-keeper"; cursor = 0 })
-    (reconcile [ "haneul" ]
-       (Selection.Message_keeper { keeper_name = "new-keeper"; cursor = 0 })
+    (message ~return_keeper:"haneul" "new-keeper" 0)
+    (reconcile [ "haneul" ] (message "new-keeper" 0)
        [ "haneul"; "new-keeper" ]);
   check navigation "chat target and reordered roster return selection stay independent"
-    (Selection.Message_keeper { keeper_name = "haneul"; cursor = 2 })
-    (reconcile [ "haneul"; "seongsu"; "tukkomi" ]
-       (Selection.Message_keeper { keeper_name = "haneul"; cursor = 1 })
+    (message ~return_keeper:"seongsu" "haneul" 2)
+    (reconcile [ "haneul"; "seongsu"; "tukkomi" ] (message "haneul" 1)
        [ "tukkomi"; "haneul"; "seongsu" ]);
   check navigation "missing target stays in message mode with a bounded cursor"
-    (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 1 })
-    (reconcile [ "haneul"; "seongsu"; "tukkomi" ]
-       (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 2 })
+    (message ~return_keeper:"tukkomi" "seongsu" 1)
+    (reconcile [ "haneul"; "seongsu"; "tukkomi" ] (message "seongsu" 2)
        [ "haneul"; "tukkomi" ]);
   check navigation "empty roster preserves the unavailable message target"
-    (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 0 })
-    (reconcile [ "haneul"; "seongsu" ]
-       (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 1 })
-       []);
-  (* A failed read empties the roster and the next one refills it. The cursor
-     read against the empty roster names no row, so the chat target, not row
-     zero, is where Esc must return. *)
+    (message ~return_keeper:"seongsu" "seongsu" 0)
+    (reconcile [ "haneul"; "seongsu" ] (message "seongsu" 1) []);
+  (* A failed read empties the roster and the next one refills it. The chat
+     target differs from the selected row, so Esc must return to the row the
+     operator came from, not to the chat target and not to row zero. *)
   let emptied =
-    reconcile [ "haneul"; "seongsu" ]
-      (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 1 })
-      []
+    reconcile [ "haneul"; "seongsu"; "tukkomi" ] (message "haneul" 2) []
   in
-  check navigation "a refilled roster returns the cursor to the chat target"
-    (Selection.Message_keeper { keeper_name = "seongsu"; cursor = 1 })
-    (reconcile [] emptied [ "haneul"; "seongsu" ])
+  check navigation "an empty roster keeps the return row name"
+    (message ~return_keeper:"tukkomi" "haneul" 0)
+    emptied;
+  check navigation "a refilled roster returns the cursor to the selected row"
+    (message ~return_keeper:"tukkomi" "haneul" 2)
+    (reconcile [] emptied [ "haneul"; "seongsu"; "tukkomi" ])
 
 let test_pathological_cursors_are_total () =
   check navigation "negative list cursor normalizes to zero"
@@ -117,9 +118,9 @@ let test_pathological_cursors_are_total () =
        (Selection.Logs_keeper { keeper_name = "missing"; cursor = max_int })
        [ "haneul"; "seongsu" ]);
   check navigation "missing message target clamps a negative cursor"
-    (Selection.Message_keeper { keeper_name = "missing"; cursor = 0 })
+    (message "missing" 0)
     (reconcile [ "haneul"; "seongsu" ]
-       (Selection.Message_keeper { keeper_name = "missing"; cursor = min_int })
+       (message "missing" min_int)
        [ "haneul"; "seongsu" ])
 
 let test_message_switch_wraps_and_recovers () =

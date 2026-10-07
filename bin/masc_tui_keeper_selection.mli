@@ -15,6 +15,9 @@ type navigation =
   | Message_keeper of {
       keeper_name : string;
       cursor : int;
+      return_keeper : string option;
+          (** Roster row to return to after closing the message view. It
+              survives a roster read that came back empty. *)
     }
 
 type message_switch =

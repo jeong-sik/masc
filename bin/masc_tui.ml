@@ -14092,8 +14092,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         state.workspace_identity <> Workspace_identity_match
         || Option.is_some state.keepers_error
       in
-      let first_confirmed =
-        state.workspace_identity <> Workspace_identity_match
+      (* Recovery, not repair: only a session that has never seen a matching
+         identity (cold start, or the server went away and came back) may
+         re-read the confirm queue outside the bundle. A workspace that just
+         read as another one keeps its count on the failed line it earned --
+         an automatic extra read must not be the thing that launders a
+         foreign admission. *)
+      let identity_recovered =
+        state.workspace_identity = Workspace_identity_unread
       in
       let authority = read_authority state in
       apply_http_surfaces state ~mailbox results;
@@ -14160,7 +14166,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          superseded before it could ever be drawn. The other approval
          sources relaunch above for the same reason; the count's own source
          re-reads here instead of sitting unread until the next cadence. *)
-      if first_confirmed then enqueue_async mailbox Approvals_listing_superseded;
+      if identity_recovered then enqueue_async mailbox Approvals_listing_superseded;
       open_observer_if_due state ~retry_closed:false
         ~host:(server_peer_host) ~port:state.port ~mailbox;
       end;

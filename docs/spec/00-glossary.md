@@ -1396,10 +1396,10 @@ status: reference
   [Msx_lane](../../lib/msx_lane/msx_lane.mli), [Dos_lane](../../lib/dos_lane/dos_lane.mli),
   [lane-addons 라우트](../../lib/server/server_routes_http_routes_lane_addons.mli)
 
-**Lane 활동 피드 (Lane Activity)**
+**기계 행동 피드 (Machine Action Feed)**
 : DOS Lane 에서 Keeper 가 한 일을 한 줄씩 담는 짧은 목록. load·step·press·click·type·save·
   restore·pass·eject 마다 `who`(누가)와 `action`(무엇을, 예: `"press a,b"`·`"pass -> cao-cao"`)
-  한 줄이 쌓인다. 최근 `Lane_activity.cap`(20)개만 남고 그 앞은 떨어진다.
+  한 줄이 쌓인다. 최근 `Machine_action_feed.cap`(20)개만 남고 그 앞은 떨어진다.
   위 변경 표식(`count`)과는 다른 것을 센다. `pass`는 화면을 안 바꿔서 `count`를 안 올리지만,
   이 피드에는 "누가 넘겼는지"가 그대로 남는다. `GET /api/v1/lane-addons/live?source_kind=dos_capture`
   의 모든 답 — `unchanged`(표식이 그대로인 빠른 답)까지 포함 — 에 `activity` 필드로 실린다.
@@ -1410,7 +1410,7 @@ status: reference
   (`~who` 가 없다) 누가 했는지를 붙일 수 없다.
   masc-tui 의 DOS 관전 화면이 이 필드를 오른쪽 고정폭 목록으로 그린다 — 터미널이
   충분히 넓고 목록이 비어 있지 않을 때만, 그림은 그만큼 좁아진다.
-  → [Lane_activity](../../lib/lane_activity/lane_activity.mli),
+  → [Machine_action_feed](../../lib/machine_action_feed/machine_action_feed.mli),
   [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
   [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.ml),
   [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
@@ -1424,8 +1424,8 @@ status: reference
   선언된 후보·경로·설정과 이미 잡은 실행 스냅샷은 그대로 둔다 — package Add-on은 소유
   worker의 정리를 요청한다. Required exact lane(Board Attention·HITL auto-judge)은 끌 수
   없다(`Standalone_lane.obligation`·`Runtime_exact_output_registry.admit_publication`).
-  위의 **Lane 활동 피드 (Lane Activity)**(DOS에서 누가 무엇을 했는지의 흐름)와 다른 층이다
-  — 이쪽은 작업 진입을 여닫는 구성값이다.
+  위의 **기계 행동 피드 (Machine Action Feed)**(DOS에서 누가 무엇을 했는지의 흐름)와 다른
+  층이다 — 이쪽은 작업 진입을 여닫는 구성값이다.
   → [Runtime_schema.exact_output_lane_decl](../../lib/runtime/runtime_schema.mli),
   [Machine_configuration](../../lib/machine_configuration/machine_configuration.mli),
   [Browser_configuration](../../lib/browser_configuration/browser_configuration.mli)

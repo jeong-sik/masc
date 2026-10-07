@@ -1101,6 +1101,48 @@ let test_task_identities_are_parsed_once_per_backlog_list () =
   | Ok identities -> check int "and answers for that list" 1 (List.length identities)
   | Error reason -> fail reason
 
+let test_autonomous_turn_recovers_task_free_work_from_history () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_dir "autonomous-work-context-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let config = Masc.Workspace.default_config base_path in
+    let trace_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    let session = Masc.Keeper_context_core.create_session ~session_id:trace_id
+      ~base_dir:(Masc.Keeper_fs.session_store_path config) in
+    let turn n = Ids.Turn_ref.make ~trace_id ~absolute_turn:n in
+    let persist n source role text metadata =
+      Masc.Keeper_context_core_history.persist_message ~keeper_name:meta.name
+        ~turn_ref:(turn n) ~source session
+        {Agent_core.Types.role; content=[Text text]; name=None; tool_call_id=None; metadata} in
+    let attribution = Masc.Keeper_input_speaker.metadata
+        (Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner) in
+    persist 1 "direct_user" User "Review PR-ongoing through verdict" attribution;
+    persist 1 "direct_assistant" Assistant "Read producer; consumer remains" [];
+    persist 2 "internal_assistant" Assistant "Consumer inspected; publish pending verdict next" [];
+    let recent_work = Masc.Keeper_recent_work.collect ~config ~meta in
+    let decision = WO.keeper_cycle_decision
+        ~event_queue_triggers:[WO.Bootstrap_stimulus] ~meta base_observation in
+    let prompt = Prompt.build_prompt ~turn_decision:decision
+        ~current_task:Inputs.No_current_task ~recent_work ~observation:base_observation () in
+    List.iter (fun text -> check bool ("history reaches wake: " ^ text) true
+        (contains ~needle:text prompt.world_state))
+      ["Review PR-ongoing through verdict"; "Read producer; consumer remains";
+       "Consumer inspected; publish pending verdict next"; Ids.Turn_ref.to_string (turn 2)];
+    check bool "host attribution remains off provider text" false
+      (contains ~needle:Agent_core.Types.Input_speaker.key prompt.world_state);
+    let preview = Prompt.build_prompt_preview ~current_task:Inputs.No_current_task
+        ~recent_work ~observation:base_observation () in
+    check bool "preview carries the same continuation evidence" true
+      (contains ~needle:"Consumer inspected; publish pending verdict next" preview.world_state);
+    let unavailable = { recent_work with Masc.Keeper_recent_work.autonomous_reply=Error "history unreadable" } in
+    let degraded = Prompt.build_prompt ~turn_decision:decision ~current_task:Inputs.No_current_task
+        ~recent_work:unavailable ~observation:base_observation () in
+    check bool "read failure remains visible" true (contains ~needle:"history unreadable" degraded.world_state);
+    check bool "other source survives failure" true
+      (contains ~needle:"Review PR-ongoing through verdict" degraded.world_state))
+;;
+
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
@@ -1137,6 +1179,8 @@ let () =
           test_case "unresolved goal keeps one stable safety contract" `Quick
             test_open_goal_store_keeps_one_stable_safety_contract;
         ] );
+      ( "work continuation", [test_case "task-free work reaches the next autonomous prompt" `Quick
+          test_autonomous_turn_recovers_task_free_work_from_history] );
       ( "threaded turn decision",
         [
           test_case "stimulus decision renders wake reason" `Quick

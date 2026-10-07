@@ -887,6 +887,7 @@ let run_keeper_cycle
                      (Keeper_playground_checkouts.scan_error_to_string scan_error);
                    []
                in
+               let recent_work = Keeper_recent_work.collect ~config ~meta in
                let render_prompt observation =
                  Keeper_unified_prompt.build_prompt
                      ~turn_decision
@@ -897,6 +898,7 @@ let run_keeper_cycle
                      ~workspace_memory
                      ~lane_updates
                      ~repository_freshness
+                     ~recent_work
                      ~observation
                      ()
                in

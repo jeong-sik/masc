@@ -825,7 +825,7 @@ let scan_step input ~chunk_size ~decode { scan_position = position; read_size; u
   end
 ;;
 
-let find_latest_decoded_from_channel input ~decode f =
+let find_latest_decoded_from_channel ?end_offset input ~decode f =
   let chunk_size = 8192 in
   let rec drive state =
     let decoded_newest_first, next =
@@ -838,14 +838,15 @@ let find_latest_decoded_from_channel input ~decode f =
        | None -> None
        | Some state -> drive state)
   in
+  let end_offset = match end_offset with Some offset -> offset | None -> in_channel_length input in
   drive
-    { scan_position = in_channel_length input
+    { scan_position = end_offset
     ; read_size = chunk_size
     ; unfinished_line = []
     }
 ;;
 
-let find_latest_entry_in_file_result path f =
+let find_latest_entry_in_file_result ?(require_final_newline = false) path f =
   match open_regular_input_result path with
   | Error _ as error -> error
   | Ok input ->
@@ -853,12 +854,19 @@ let find_latest_entry_in_file_result path f =
       ~finally:(fun () -> close_in_noerr input)
       (fun () ->
          match
-           find_latest_decoded_from_channel
+           let end_offset = in_channel_length input in
+           let terminated =
+             if not require_final_newline || end_offset = 0 then true
+             else (seek_in input (end_offset - 1); input_char input = '\n') in
+           if not terminated then
+             Error (Io_error { operation = Read_file; path;
+                              detail = "final row is not newline-terminated" })
+           else Ok (find_latest_decoded_from_channel ~end_offset
              input
              ~decode:(fun line -> recent_entry_of_line ~path line)
-             f
+             f)
          with
-         | found -> Ok found
+         | result -> result
          | exception Sys_error detail ->
            Error (Io_error { operation = Read_file; path; detail })
          | exception End_of_file ->

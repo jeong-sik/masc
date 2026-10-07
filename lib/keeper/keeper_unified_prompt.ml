@@ -1469,6 +1469,29 @@ let format_workspace_memory_observation = function
         "claims_digest", claims_digest;
         "digest_note", digest_note ] ^ "\n\n")
 
+let format_recent_work (work : Keeper_recent_work.t) =
+  let message_json (observed : Keeper_turn_fragments.observed_message) =
+    `Assoc
+      [ "turn_ref", Ids.Turn_ref.to_yojson observed.turn_ref
+      ; "recorded_at", `Float observed.recorded_at
+      ; "source", (match observed.source with None -> `Null | Some s -> `String s)
+      ; "message", Keeper_official_client_context_codec.message_to_json observed.message
+      ]
+  in
+  let observed_json = function
+    | Ok rows -> `Assoc [ "messages", `List (List.map message_json rows) ]
+    | Error detail -> `Assoc [ "unavailable", `String detail ]
+  in
+  match work.conversation, work.autonomous_reply with
+  | Ok [], Ok [] -> None
+  | _ ->
+    let evidence = `Assoc
+        [ "recent_conversation", observed_json work.conversation
+        ; "latest_autonomous_reply", observed_json work.autonomous_reply ] in
+    Some (render_fragment Prompt_names.keeper_world_recent_work
+            [ "evidence", Yojson.Safe.to_string evidence ] ^ "\n\n")
+;;
+
 let build_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
@@ -1479,6 +1502,7 @@ let build_prompt_internal
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
+    ?(recent_work = Keeper_recent_work.empty)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
   =
@@ -2078,6 +2102,7 @@ let build_prompt_internal
        outcomes are shown: the rejections are what the keeper must not repeat,
        the successes are what it must not redo. *)
     | Keeper_context_layers.Own_recent_actions -> own_recent_actions_section
+    | Keeper_context_layers.Recent_work -> format_recent_work recent_work
     | Keeper_context_layers.Fleet_messages ->
       if observation.fleet_messages <> [] then (
         let ubuf = Buffer.create 256 in
@@ -2173,6 +2198,7 @@ let build_prompt
       ?workspace_memory
       ?lane_updates
       ?repository_freshness
+      ?recent_work
       ~observation
       ()
   =
@@ -2185,6 +2211,7 @@ let build_prompt
     ?workspace_memory
     ?lane_updates
     ?repository_freshness
+    ?recent_work
     ~observation
     ()
 ;;
@@ -2196,6 +2223,7 @@ let build_prompt_preview
       ?workspace_memory
       ?lane_updates
       ?repository_freshness
+      ?recent_work
       ~observation
       ()
   =
@@ -2207,6 +2235,7 @@ let build_prompt_preview
     ?workspace_memory
     ?lane_updates
     ?repository_freshness
+    ?recent_work
     ~observation
     ()
 ;;

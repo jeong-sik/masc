@@ -6,13 +6,15 @@ module H = Keeper_context_core_history
 
 let ( let* ) = Result.bind
 
+type observed_message =
+  { turn_ref : Ids.Turn_ref.t
+  ; recorded_at : float
+  ; source : string option
+  ; message : Agent_core.Types.message
+  }
+
 type fragment =
-  | Message of
-      { turn_ref : Ids.Turn_ref.t
-      ; recorded_at : float
-      ; source : string option
-      ; message : Agent_core.Types.message
-      }
+  | Message of observed_message
   | Tool_observation of
       { turn_ref : Ids.Turn_ref.t
       ; recorded_at : float
@@ -118,9 +120,7 @@ let decode_tagged ~turn_ref json assoc : (fragment, read_error) result =
   else wire (W.wire_fail [ W.Wire_field H.key_kind ] (W.Unknown_token kind))
 ;;
 
-let decode_line text : (line, read_error) result =
-  match Yojson.Safe.from_string text with
-  | exception Yojson.Json_error message -> Error (Not_json message)
+let decode_json : Yojson.Safe.t -> (line, read_error) result = function
   | `Assoc assoc as json ->
     if not (List.mem_assoc H.key_turn_ref assoc)
     then Ok Untagged
@@ -130,6 +130,41 @@ let decode_line text : (line, read_error) result =
       | Ok turn_ref -> Result.map (fun fragment -> Fragment fragment) (decode_tagged ~turn_ref json assoc))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Result.map_error (fun error -> Malformed error) (W.wire_here W.Expected_object)
+;;
+
+let decode_line text =
+  match Yojson.Safe.from_string text with
+  | json -> decode_json json
+  | exception Yojson.Json_error message -> Error (Not_json message)
+;;
+
+let read_recent_messages ~session_dir ~roles ~limit file =
+  let file_path = path ~session_dir file in
+  let read () =
+    let selected = ref [] in
+    let remaining = ref limit in
+    let select = function
+      | Dated_jsonl.Malformed_json { detail; _ } -> Some (Error detail)
+      | Dated_jsonl.Parsed json ->
+        (match decode_json json with
+         | Error error -> Some (Error (read_error_to_string error))
+         | Ok (Fragment (Message ({ message; _ } as observed)))
+           when List.mem message.role roles ->
+           selected := observed :: !selected;
+           decr remaining;
+           if !remaining = 0 then Some (Ok ()) else None
+         | Ok (Fragment (Message _ | Tool_observation _)) | Ok Untagged -> None)
+    in
+    match Dated_jsonl.find_latest_entry_in_file_result ~require_final_newline:true file_path select with
+    | Error error -> Error (Dated_jsonl.read_error_to_string error)
+    | Ok (Some (Error detail)) -> Error detail
+    | Ok (Some (Ok ())) | Ok None -> Ok !selected
+  in
+  if limit <= 0 then Ok [] else
+  match Fs_compat.exact_path_kind ~follow:false file_path with
+  | Fs_compat.Exact_missing -> Ok []
+  | Fs_compat.Exact_unknown -> Error ("history path cannot be inspected: " ^ file_path)
+  | Fs_compat.Exact_kind _ -> read ()
 ;;
 
 let numbered_lines ~rows ~rows_end ~end_offset =

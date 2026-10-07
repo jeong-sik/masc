@@ -15,16 +15,19 @@
     [turn_ref] the decoder refuses is an [Error]: it is never read as
     untagged, because that would hide a turn's words behind a shape mistake.
 
-    Reads hold the file lock the writer holds, so a line is either whole or
-    not there; a torn tail with no newline is not a line. *)
+    The full [read] holds the file lock the writer holds. The observational
+    recent reader takes a file-end snapshot and reports an unterminated tail
+    as unavailable; neither accepts an uncommitted final row. *)
+
+type observed_message =
+  { turn_ref : Ids.Turn_ref.t
+  ; recorded_at : float
+  ; source : string option
+  ; message : Agent_core.Types.message
+  }
 
 type fragment =
-  | Message of
-      { turn_ref : Ids.Turn_ref.t
-      ; recorded_at : float
-      ; source : string option
-      ; message : Agent_core.Types.message
-      }
+  | Message of observed_message
   | Tool_observation of
       { turn_ref : Ids.Turn_ref.t
       ; recorded_at : float
@@ -58,6 +61,19 @@ val read
   :  session_dir:string
   -> file
   -> ((int * (line, read_error) result) list, string) result
+
+val read_recent_messages
+  : session_dir:string
+  -> roles:Agent_core.Types.role list
+  -> limit:int
+  -> file
+  -> (observed_message list, string) result
+(** Recent attributed messages in file order, for prompt observation only.
+    Reverse-scans until [limit] messages with the requested roles are found;
+    tool observations consume no slots. Whole message bodies and provenance
+    survive. Missing files yield [Ok []]; unreadable or malformed encountered
+    rows yield [Error], never a silently older excerpt. This observational
+    reader does not hold the append lock and must not advance durable cursors. *)
 
 (** The fragments of [turn_ref] among [lines], in file order. *)
 val of_turn

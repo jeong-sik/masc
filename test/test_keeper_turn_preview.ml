@@ -166,6 +166,14 @@ let test_secret_split_across_deltas_never_reaches_the_tail () =
          (Keeper_turn_preview.status_text
             (Option.get (Keeper_turn_preview.current ~keeper_name)))
          "receiving response");
+    Keeper_turn_preview.note_stream ~writer ~now:2.2
+      (Agent_core.Types.ContentBlockStart
+        {index=1;content_type=Runtime_native_tools.stream_content_type;
+         tool_id=Some "background";tool_name=Some "Read"});
+    Keeper_turn_preview.note_stream ~writer ~now:2.3
+      (Agent_core.Types.ContentBlockStop {index=1});
+    Alcotest.(check string) "background tool start and end cannot release the prefix"
+      "" (tail keeper_name);
     Keeper_turn_preview.note_stream ~writer ~now:3. (text_delta second);
     Alcotest.(check string) "the finished line arrives redacted"
       "deploy with [REDACTED] now\n" (tail keeper_name);

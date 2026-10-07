@@ -157,11 +157,15 @@ let test_autonomous_progress_journal_matches_direct_projection () =
           (Option.bind call.native_progress (fun value -> value.output_bytes))
       | _ -> fail "native autonomous row lost"))
 
-let test_split_secret_held_across_native_progress () =
+type side_observation =
+  | Progress of Native.progress
+  | Completion
+
+let test_split_secret_held_across_native_side_events () =
   let module Stream = Masc.Keeper_autonomous_stream in
   let module Secret = Masc.Keeper_secret_redaction in
   List.iter (fun thinking ->
-    List.iter (fun progress ->
+    List.iter (fun observation ->
       let base_path = Filename.temp_dir "masc-progress-redaction-" "" in
       Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
         Eio_main.run (fun _ ->
@@ -191,13 +195,22 @@ let test_split_secret_held_across_native_progress () =
           let check_held events =
             check (list string) "native progress cannot release a secret prefix" [] (fragments events);
             check bool "side observation remains visible while text is withheld" true
-              (List.exists (function E.Native_tool_progress _ -> true | _ -> false) events) in
+              (List.exists (function E.Native_tool_progress _ | E.Native_tool_end _ -> true | _ -> false) events) in
           send (start_message "response");
-          send (tool_start ~native:true 1 "native");
           send (delta prefix);
-          F.on_progress direct ~block_index:1 ~tool_call_id:(Some "native") progress;
-          Stream.on_tool_stream_observation stream (Masc.Keeper_hooks_agent_core.Native_tool_progress
-            {block_index=1;tool_call_id=Some "native";progress});
+          send (tool_start ~native:true 1 "native");
+          (match observation with
+           | Progress progress ->
+             F.on_progress direct ~block_index:1 ~tool_call_id:(Some "native") progress;
+             Stream.on_tool_stream_observation stream (Masc.Keeper_hooks_agent_core.Native_tool_progress
+               {block_index=1;tool_call_id=Some "native";progress})
+           | Completion ->
+             F.on_completion direct ~block_index:1 ~tool_call_id:(Some "native") Native.end_observed;
+             Stream.on_tool_stream_observation stream (Masc.Keeper_hooks_agent_core.Native_tool_completion
+               {block_index=1;tool_call_id=Some "native";completion=Native.end_observed});
+             (* All official adapters follow the native outcome with this
+                indexed generic stop. It must not close model index zero. *)
+             send (Agent_core.Types.ContentBlockStop {index=1}));
           check_held (F.events direct); check_held (read ());
           send (delta (suffix ^ "\n"));
           List.iter (fun events ->
@@ -209,11 +222,14 @@ let test_split_secret_held_across_native_progress () =
             check bool "secret is absent from persisted event payloads" false
               (Astring.String.is_infix ~affix:secret serialized);
             let order = List.filter_map (function
-              | E.Native_tool_progress _ -> Some "progress"
+              | E.Native_tool_progress _ | E.Native_tool_end _ -> Some "native-observation"
               | E.Text_delta _ | E.Agent_core_thinking_delta _ -> Some "safe-content"
               | _ -> None) events in
-            check (list string) "publication order records safe disclosure, not held raw chunks"
-              ["progress";"safe-content"] order) [F.events direct;read ()];
+            check bool "native observations remain visible before safely released content" true
+              (match order with
+               | "native-observation" :: (_ :: _ as content) ->
+                   List.for_all (String.equal "safe-content") content
+               | _ -> false)) [F.events direct;read ()];
           let live,replay = F.snapshots direct in
           List.iter (fun log ->
             let transcript = T.of_log ~now:2000. log in
@@ -223,11 +239,37 @@ let test_split_secret_held_across_native_progress () =
               (Astring.String.is_infix ~affix:secret visible)) [live;replay];
           Stream.finish stream (Stream.Completed
             {reply="Safe final response";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply}))))
-      [output 3; Native.Message_reported {message="still working"}]) [false;true]
+      [Progress (output 3); Progress (Native.Message_reported {message="still working"}); Completion]) [false;true]
+
+let test_held_content_reserves_its_index_before_native_headers () =
+  let module Stream = Masc.Keeper_autonomous_stream in
+  List.iter (fun thinking ->
+    let base_path = Filename.temp_dir "masc-content-occupancy-" "" in
+    Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> Eio_main.run (fun _ ->
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"held-occupancy" ~absolute_turn:1 in
+      let stream = Stream.create ~base_path ~keeper_name:"fixture" ~turn_ref in
+      let direct = F.create () in
+      let send event = F.on_event direct event; Stream.on_event stream event in
+      send (start_message "response");
+      send (Agent_core.Types.ContentBlockDelta {index=0;
+        delta=(if thinking then ThinkingDelta "still pending" else TextDelta "still pending")});
+      send (tool_start ~native:true 0 "wrong-owner");
+      let path = Journal.turn_journal_path ~base_dir:base_path ~keeper_name:"fixture" ~turn_ref in
+      let journal = match Journal.read_journal_path_result path with
+        | Ok lines -> List.map (fun (line:Journal.journaled_event) -> line.event) lines
+        | Error _ -> fail "missing occupancy journal" in
+      List.iter (fun events ->
+        check bool "a withheld model index cannot become a native tool row" false
+          (List.exists (function E.Native_tool_start _ -> true | _ -> false) events);
+        check bool "the model prefix stays undisclosed" false
+          (List.exists (function E.Text_delta _ | E.Agent_core_thinking_delta _ -> true | _ -> false) events))
+        [F.events direct; journal];
+      Stream.finish stream Stream.Cancelled))) [false;true]
 
 let () = run "native tool progress" ["contract",[
   test_case "same deltas count twice, same journal seq once" `Quick test_replayed_sequence_and_model_signal;
   test_case "exact current active native scope" `Quick test_exact_active_scope_only;
-  test_case "split secrets stay held across native side observations" `Quick test_split_secret_held_across_native_progress;
+  test_case "split secrets stay held across native lifecycle and progress" `Quick test_split_secret_held_across_native_side_events;
+  test_case "held model content reserves its index" `Quick test_held_content_reserves_its_index_before_native_headers;
   test_case "strict nested progress payload" `Quick test_strict_nested_wire_and_journal;
   test_case "autonomous actual journal matches direct projection" `Quick test_autonomous_progress_journal_matches_direct_projection]]

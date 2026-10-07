@@ -2783,7 +2783,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     | `Worker_event (Stream_native_tool_completion (stream_scope, block_index, tool_call_id, completion)) ->
         let translated = Keeper_chat_agent_core_stream_bridge.finish_native_tool
           ~redact_text ~stream_scope ~block_index ~tool_call_id completion
-          (publish_held_stream_text bridge_state) in
+          bridge_state in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
     | `Worker_event (Stream_chat_event event) ->

@@ -526,6 +526,9 @@ let with_exact_secret ~keeper_name secret f =
 
 let feed stream events = List.concat_map (Stream_text.on_event stream) events
 
+let without_headers events = List.filter (function
+  | Agent_core.Types.ContentBlockStart _ -> false | _ -> true) events
+
 (* Two Codex [item/agentMessage/delta] chunks, each holding half of a secret.
    Redacting each delta on its own saw no exact value in either half. *)
 let test_stream_text_redacts_an_exact_secret_split_across_deltas () =
@@ -597,39 +600,37 @@ let test_stream_text_passes_korean_through_whole () =
   let korean = first_line ^ "비밀이 없는 문장은 그대로예요" in
   let cut_in_a_syllable = 7 in
   let second_cut = String.length korean - 5 in
-  let events =
-    feed (Stream_text.create redaction)
+  let stream = Stream_text.create redaction in
+  let before_stop =
+    feed stream
       [ text_delta 0 (String.sub korean 0 cut_in_a_syllable)
       ; text_delta 0 (String.sub korean cut_in_a_syllable (second_cut - cut_in_a_syllable))
       ; text_delta 0 (String.sub korean second_cut (String.length korean - second_cut))
-      ; Agent_core.Types.MessageDelta
-          { stop_reason = Some Agent_core.Types.EndTurn; usage = None }
       ]
   in
+  Alcotest.(check string) "the finished first line is released before the stop"
+    first_line (forwarded_text before_stop);
+  let events = before_stop @ Stream_text.on_event stream
+    (Agent_core.Types.MessageDelta {stop_reason=Some Agent_core.Types.EndTurn; usage=None}) in
   Alcotest.(check string) "the text arrives unchanged and complete" korean
-    (forwarded_text events);
-  match events with
-  | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta line; _ } :: _ ->
-    Alcotest.(check string) "the finished first line is released first" first_line line
-  | _ -> Alcotest.fail "no text delta was forwarded first"
+    (forwarded_text events)
 
 let test_stream_text_releases_held_text_in_order () =
   let stream = Stream_text.create R.empty in
   Alcotest.(check int) "an unfinished line is held" 0
-    (List.length (Stream_text.on_event stream (text_delta 0 "before the tool")));
+    (List.length (without_headers (Stream_text.on_event stream (text_delta 0 "before the tool"))));
   (match Stream_text.on_event stream Agent_core.Types.Ping with
    | [ Agent_core.Types.Ping ] -> ()
    | _ -> Alcotest.fail "a ping passes without releasing the line");
   (match
      Stream_text.on_event stream
-       (Agent_core.Types.ContentBlockStart
-          { index = 1; content_type = "tool_use"; tool_id = Some "call-1"; tool_name = Some "Execute" })
+       (Agent_core.Types.ContentBlockStop { index = 0 })
    with
    | [ Agent_core.Types.ContentBlockDelta
          { index = 0; delta = Agent_core.Types.TextDelta "before the tool" }
-     ; Agent_core.Types.ContentBlockStart { index = 1; _ }
+     ; Agent_core.Types.ContentBlockStop { index = 0 }
      ] -> ()
-   | _ -> Alcotest.fail "another block's start releases the held text first");
+   | _ -> Alcotest.fail "the model block's own stop releases its text before later tools");
   let (_ : Agent_core.Types.sse_event list) =
     Stream_text.on_event stream (text_delta 0 "cut off")
   in
@@ -644,7 +645,8 @@ let test_stream_text_releases_held_text_in_order () =
 let test_stream_text_releases_under_the_scope_it_arrived_in () =
   let stream = Stream_text.Scoped.create R.empty in
   Alcotest.(check int) "an unfinished line is held" 0
-    (List.length (Stream_text.Scoped.on_event stream ~stream_scope:1 (text_delta 0 "scope one")));
+    (List.length (without_headers
+      (List.map snd (Stream_text.Scoped.on_event stream ~stream_scope:1 (text_delta 0 "scope one")))));
   match
     Stream_text.Scoped.on_event stream ~stream_scope:2
       (Agent_core.Types.MessageStart { id = "m2"; model = "model"; usage = None })
@@ -654,6 +656,129 @@ let test_stream_text_releases_under_the_scope_it_arrived_in () =
     ; (2, Agent_core.Types.MessageStart _)
     ] -> ()
   | _ -> Alcotest.fail "held text is released under its own scope before the next one"
+
+let test_overlapping_content_keeps_its_own_redaction () =
+  let secret = "overlapping-private-value-4850" in
+  with_exact_secret ~keeper_name:"overlapping-content" secret @@ fun redaction ->
+  let stream = Stream_text.create redaction in
+  let header = Agent_core.Types.MessageStart {id="same-response"; model="fixture"; usage=None} in
+  let prefix = "overlapping-" and suffix = "private-value-4850" in
+  let events = feed stream
+    [ header
+    ; text_delta 0 prefix
+    ; delta 1 (Agent_core.Types.ThinkingDelta prefix)
+    ; delta 2 (Agent_core.Types.InputJsonDelta ("{\"secret\":\"" ^ prefix))
+    ; Agent_core.Types.ContentBlockStart
+        {index=3;content_type="tool_use";tool_id=Some "other";tool_name=Some "Read"}
+    ; delta 3 (Agent_core.Types.InputJsonSnapshot "{}")
+    ; Agent_core.Types.ContentBlockStop {index=3}
+    ; header
+    ] in
+  Alcotest.(check string) "unrelated block events and header replay cannot release text" "" (forwarded_text events);
+  Alcotest.(check string) "nor reasoning" "" (forwarded_thinking events);
+  Alcotest.(check string) "nor another tool's argument prefix" "" (forwarded_tool_arguments events);
+  let events = feed stream
+    [ delta 2 (Agent_core.Types.InputJsonDelta (suffix ^ "\"}"))
+    ; Agent_core.Types.ContentBlockStop {index=2}
+    ] in
+  Alcotest.(check string) "only the completed tool arguments are released"
+    "{\"secret\":\"[REDACTED]\"}" (forwarded_tool_arguments events);
+  Alcotest.(check string) "tool stop does not release the model prefix" "" (forwarded_text events);
+  let events = feed stream [text_delta 0 suffix; Agent_core.Types.ContentBlockStop {index=0}] in
+  Alcotest.(check string) "text's own stop sees its whole secret" "[REDACTED]" (forwarded_text events);
+  Alcotest.(check string) "text stop leaves reasoning held" "" (forwarded_thinking events);
+  let events = feed stream [delta 1 (Agent_core.Types.ThinkingDelta suffix); Agent_core.Types.MessageStop] in
+  Alcotest.(check string) "terminal releases the remaining complete reasoning" "[REDACTED]" (forwarded_thinking events);
+  Alcotest.(check int) "terminal leaves nothing to replay" 0 (List.length (Stream_text.flush stream))
+
+let test_argument_snapshot_replaces_only_its_pending_channel () =
+  let secret = "snapshot-private-value-5832" in
+  with_exact_secret ~keeper_name:"snapshot-ownership" secret @@ fun redaction ->
+  let stream = Stream_text.create redaction in
+  let events = feed stream
+    [text_delta 0 "snapshot-private-";
+     delta 1 (Agent_core.Types.InputJsonDelta "{\"secret\":\"superseded-prefix");
+     delta 1 (Agent_core.Types.InputJsonSnapshot ("{\"secret\":\"" ^ secret ^ "\"}"))] in
+  Alcotest.(check string) "snapshot does not release unrelated text" "" (forwarded_text events);
+  Alcotest.(check string) "superseded argument prefix is never published" "" (forwarded_tool_arguments events);
+  (match without_headers events with
+   | [Agent_core.Types.ContentBlockDelta {index=1;delta=InputJsonSnapshot snapshot}] ->
+       Alcotest.(check string) "whole replacement is redacted" "{\"secret\":\"[REDACTED]\"}" snapshot
+   | _ -> Alcotest.fail "only the authoritative argument snapshot is published");
+  let events = feed stream [text_delta 0 "value-5832"; Agent_core.Types.MessageStop] in
+  Alcotest.(check string) "other channel survived the snapshot" "[REDACTED]" (forwarded_text events);
+  Alcotest.(check string) "terminal cannot restore the discarded argument tail" "" (forwarded_tool_arguments events)
+
+let test_authored_content_preserves_cross_channel_positions () =
+  let secret = "order-sensitive-secret-8204" in
+  with_exact_secret ~keeper_name:"ordered-redaction" secret @@ fun redaction ->
+  let contents events = List.filter_map (function
+    | Agent_core.Types.ContentBlockDelta {index; delta=TextDelta text} -> Some (index,"text",text)
+    | ContentBlockDelta {index; delta=ThinkingDelta text} -> Some (index,"thinking",text)
+    | _ -> None) events in
+  let check_order label input expected =
+    let stream = Stream_text.create redaction in
+    let events = feed stream (input @ [Agent_core.Types.MessageStop]) in
+    Alcotest.(check (list (triple int string string))) label expected (contents events) in
+  check_order "later completed text cannot overtake an earlier unfinished block"
+    [text_delta 0 "first "; text_delta 1 "second\n";
+     Agent_core.Types.ContentBlockStop {index=0}]
+    [0,"text","first "; 1,"text","second\n"];
+  check_order "text on both sides of thinking retains its original positions"
+    [text_delta 0 "A "; delta 1 (Agent_core.Types.ThinkingDelta "R\n"); text_delta 0 "B\n"]
+    [0,"text","A "; 1,"thinking","R\n"; 0,"text","B\n"];
+  check_order "a split mask cannot move surrounding words across reasoning"
+    [text_delta 0 "left order-sensitive-";
+     delta 1 (Agent_core.Types.ThinkingDelta "R\n");
+     text_delta 0 "secret-8204 right\n"]
+    [0,"text","left [REDACTED]"; 1,"thinking","R\n"; 0,"text"," right\n"];
+  let korean = "한" in
+  check_order "a split UTF8 scalar belongs to its first source byte"
+    [text_delta 0 (String.sub korean 0 1);
+     delta 1 (Agent_core.Types.ThinkingDelta "R\n");
+     text_delta 0 (String.sub korean 1 2 ^ "\n")]
+    [0,"text",korean; 1,"thinking","R\n"; 0,"text","\n"]
+
+let test_snapshot_stop_follows_its_deferred_content () =
+  let stream = Stream_text.create R.empty in
+  let before = feed stream
+    [text_delta 0 "held";
+     delta 1 (Agent_core.Types.TextSnapshot "visible");
+     Agent_core.Types.ContentBlockStop {index=1}] in
+  Alcotest.(check int) "neither snapshot nor its stop overtakes earlier content" 0
+    (List.length (without_headers before));
+  match Stream_text.on_event stream (Agent_core.Types.ContentBlockStop {index=0}) with
+  | [Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta "held"};
+     ContentBlockDelta {index=1;delta=TextSnapshot "visible"};
+     ContentBlockStop {index=1}; ContentBlockStop {index=0}] -> ()
+  | _ -> Alcotest.fail "snapshot-only block stop overtook its deferred content"
+
+let test_snapshot_discards_only_the_old_channel_owner () =
+  let stream = Stream_text.create R.empty in
+  ignore (feed stream
+    [text_delta 0 "held"; text_delta 1 "superseded";
+     delta 1 (Agent_core.Types.TextSnapshot "replacement");
+     text_delta 1 " continuation\n";
+     Agent_core.Types.ContentBlockStop {index=1}]);
+  match Stream_text.on_event stream (Agent_core.Types.ContentBlockStop {index=0}) with
+  | [Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta "held"};
+     ContentBlockDelta {index=1;delta=TextSnapshot "replacement"};
+     ContentBlockDelta {index=1;delta=TextDelta " continuation\n"};
+     ContentBlockStop {index=1}; ContentBlockStop {index=0}] -> ()
+  | _ -> Alcotest.fail "discarded snapshot owner consumed or restored another owner's content"
+
+let test_long_later_content_waits_without_loss () =
+  let stream = Stream_text.create R.empty in
+  ignore (Stream_text.on_event stream (text_delta 0 "first"));
+  (* A workload, not a product capacity or a timing threshold. Attribution
+     must not revisit these completed chunks while the first channel waits. *)
+  let lines = List.init 2_000 (fun i -> string_of_int i ^ "\n") in
+  List.iter (fun line ->
+    Alcotest.(check int) "later lines stay in their source positions" 0
+      (List.length (without_headers (Stream_text.on_event stream (text_delta 1 line))))) lines;
+  let released = Stream_text.on_event stream (Agent_core.Types.ContentBlockStop {index=0}) in
+  Alcotest.(check string) "all deferred lines follow the earlier text exactly once"
+    ("first" ^ String.concat "" lines) (forwarded_text released)
 
 let () =
   Alcotest.run
@@ -713,5 +838,17 @@ let () =
             test_stream_text_releases_held_text_in_order;
           Alcotest.test_case "stream text: released under its own scope" `Quick
             test_stream_text_releases_under_the_scope_it_arrived_in;
+          Alcotest.test_case "stream text: overlapping blocks retain their secrets" `Quick
+            test_overlapping_content_keeps_its_own_redaction;
+          Alcotest.test_case "stream text: snapshot replaces only its pending channel" `Quick
+            test_argument_snapshot_replaces_only_its_pending_channel;
+          Alcotest.test_case "stream text: authored interleaving retains source positions" `Quick
+            test_authored_content_preserves_cross_channel_positions;
+          Alcotest.test_case "stream text: snapshot-only stop retains its position" `Quick
+            test_snapshot_stop_follows_its_deferred_content;
+          Alcotest.test_case "stream text: snapshot replacement retains new owner content" `Quick
+            test_snapshot_discards_only_the_old_channel_owner;
+          Alcotest.test_case "stream text: long deferred content retains its order" `Quick
+            test_long_later_content_waits_without_loss;
         ] )
     ]

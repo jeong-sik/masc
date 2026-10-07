@@ -168,6 +168,22 @@ let test_operation_and_journal_read_order () =
     check (list string) "journal follows the newest operation observation"
       ["operation";"journal";"operation";"journal"] !calls)
     [Running {started_at=2.}; Succeeded {completed_at=3.;outcome_ref="result"}];
+  List.iter (fun initial ->
+    let terminal = Succeeded {completed_at=3.;outcome_ref="result"} in
+    let states = ref [initial; terminal] in
+    let first = [line 0 1.0 (E.Text_delta "retained partial output")] in
+    let journals = ref [Ok first; Error Log.Journal_pruned] in
+    let read_operation () = match !states with
+      | x :: xs -> states := xs; Ok (Some x)
+      | [] -> fail "unexpected extra operation read" in
+    let read_journal () = match !journals with
+      | x :: xs -> journals := xs; x
+      | [] -> fail "unexpected extra journal read" in
+    let observed, journal = Log.read_with_operation_state ~read_operation ~read_journal in
+    check bool "operation settling during the journal read is observed" true (observed = Ok (Some terminal));
+    check bool "failed terminal reread preserves the first successful journal" true (journal = Ok first);
+    check int "the terminal journal was retried" 0 (List.length !journals))
+    [Queued; Running {started_at=2.}];
   let terminal = Failed {completed_at=3.;failure={kind=Interrupted_by_restart;
     detail="server restarted";outcome_ref=None}} in
   let observed, journal = Log.read_with_operation_state

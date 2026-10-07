@@ -197,6 +197,6 @@ val read_with_operation_state :
   read_journal:(unit -> (Masc.Keeper_chat_event_log.journaled_event list, events_error) result) ->
   (Keeper_chat_operation.state option, string) result
   * (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
-(** Read operation state before its journal. Recheck a queued observation after
-    reading the journal; if it has since started or ended, read the journal
-    after that newer state. A journal failure does not discard the state. *)
+(** Read operation state before its journal. Recheck queued and running observations after reading the journal. If the
+    state advanced, read the journal again; retain a successful first journal
+    if that second fetch fails. A journal failure does not discard the state. *)

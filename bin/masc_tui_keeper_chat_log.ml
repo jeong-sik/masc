@@ -559,13 +559,20 @@ let read_whole_journal ~fetch ~since_seq =
 let read_with_operation_state ~read_operation ~read_journal =
   let operation = read_operation () in
   let journal = read_journal () in
+  let reread refreshed =
+    let latest = match read_journal (), journal with
+      | Ok _ as latest, _ -> latest
+      | Error _, (Ok _ as first) -> first
+      | (Error _ as latest), Error _ -> latest in
+    refreshed, latest in
   match operation with
-  | Ok (Some Keeper_chat_operation.Queued) ->
+  | Ok (Some (Keeper_chat_operation.Queued | Running _)) ->
       let refreshed = read_operation () in
-      (match refreshed with
-       | Ok (Some (Keeper_chat_operation.Running _ | Succeeded _ | Failed _ | Cancelled _)) ->
-           refreshed, read_journal ()
-       | Ok (Some Queued) | Ok None | Error _ -> refreshed, journal)
-  | Ok (Some (Running _ | Succeeded _ | Failed _ | Cancelled _)) | Ok None | Error _ ->
+      (match operation, refreshed with
+       | _, Ok (Some (Keeper_chat_operation.Succeeded _ | Failed _ | Cancelled _)) ->
+           reread refreshed
+       | Ok (Some Queued), Ok (Some (Running _)) -> reread refreshed
+       | _, (Ok (Some (Queued | Running _)) | Ok None | Error _) -> refreshed, journal)
+  | Ok (Some (Succeeded _ | Failed _ | Cancelled _)) | Ok None | Error _ ->
       operation, journal
 ;;

@@ -1797,6 +1797,9 @@ supports-multimodal-inputs = true
 # reasoning on whenever the request carries no control value.
 [models.ollama-cloud-deepseek-v4-1-flash]
 api-name = "deepseek-v4.1-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true
@@ -1824,6 +1827,9 @@ supports-multimodal-inputs = true
 # turns the sibling collapsed (keeper_turn_driver.ml).
 [models.ollama-cloud-deepseek-v4-1-flash-none]
 api-name = "deepseek-v4.1-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 1048576
 tools-support = true
 thinking-support = true
@@ -1841,6 +1847,9 @@ supports-multimodal-inputs = true
 [models.ollama-cloud-deepseek-v4-pro]
 reasoning-uncontrolled = true
 api-name = "deepseek-v4-pro"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true
@@ -2597,6 +2606,9 @@ reasoning-effort = "high"
 
 [models.openrouter-deepseek-v4-flash]
 api-name = "deepseek/deepseek-v4-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true
@@ -2607,6 +2619,9 @@ wizard-default = true
 
 [models.openrouter-deepseek-v4-1-flash]
 api-name = "deepseek/deepseek-v4.1-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true
@@ -2616,6 +2631,9 @@ reasoning-effort = "high"
 
 [models.openrouter-deepseek-v4-pro]
 api-name = "deepseek/deepseek-v4-pro"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true

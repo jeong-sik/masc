@@ -7,8 +7,8 @@ module Snapshot = Keeper_repetition_snapshot
 module Recovery = Keeper_native_repetition_recovery
 
 let require render = function Ok value -> value | Error error -> fail (render error)
-let frame = require Snapshot.error_to_string
-let recover = require Recovery.error_to_string
+let frame result = require Snapshot.error_to_string result
+let recover result = require Recovery.error_to_string result
 let scope name = Keeper_chat_operation.Operation_id.of_string name
   |> require Fun.id |> Keeper_execution_scope_id.direct_operation
 let current_scope = scope "native-repetition-current"

@@ -15,6 +15,14 @@ type phase =
   | Stream_ended  (** The run reported it finished. *)
   | Stream_failed of string  (** The run reported an error. *)
 
+(** How a closed {!phase} was learned. *)
+type ending_source =
+  | Ending_heard_in_stream
+      (** RUN_FINISHED or RUN_ERROR reached this log. *)
+  | Ending_read_from_record
+      (** Only the server's operation record said the request ended, so the
+          journal appends this log missed may still be missing. *)
+
 (** What came of an operator's request to interrupt this turn.
 
     [Signal_sent] is not "the turn stopped". The server reports whether it
@@ -342,6 +350,12 @@ val revision : t -> int
     drawn from this transcript. *)
 
 val phase : t -> phase
+
+val ending_source : t -> ending_source
+(** {!Ending_read_from_record} only after {!close_from_operation_record} closed
+    the turn. A later RUN_FINISHED or RUN_ERROR the log hears sets it back to
+    {!Ending_heard_in_stream}. *)
+
 val awaiting_continuation : t -> bool
 (** A checkpoint segment ended; the original request still awaits its answer. *)
 val admission : t -> (Masc_tui_keeper_chat_live.admission * int) option

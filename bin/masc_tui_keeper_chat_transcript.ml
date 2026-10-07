@@ -15,6 +15,10 @@ type phase =
   | Stream_ended
   | Stream_failed of string
 
+type ending_source =
+  | Ending_heard_in_stream
+  | Ending_read_from_record
+
 type interrupt =
   | Not_requested
   | Signal_sent of { turn_id : int option; signalled_at_ns : int64 }
@@ -280,6 +284,11 @@ type t =
         (* Not a trail node: the server streams the reply text as deltas --
            chunked at the end when nothing streamed -- so the text is already
            in the trail. [drawn] reconciles the two. *)
+  ; mutable ending_source : ending_source
+        (* How [phase] came to be closed. A log that heard RUN_FINISHED or
+           RUN_ERROR holds the turn it drew. One closed from the operation
+           record never heard the end, so the journal appends it missed may
+           still be missing and it holds part of the turn at most. *)
   ; mutable settled_at : float option
         (* The instant the turn's outcome landed: the first of Run_finished,
            Run_failed or Reply_details. [started_at] is when the request left;
@@ -330,6 +339,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
+  ; ending_source = Ending_heard_in_stream
   ; settled_at = None
   ; noted_skills = []
   ; revision = 0
@@ -466,6 +476,7 @@ let settled_at t = t.settled_at
 let attempt t = t.attempt
 let reply t = t.reply
 let phase t = t.phase
+let ending_source t = t.ending_source
 let awaiting_continuation t =
   match t.phase, t.reply with
   | Waiting, Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ } -> true
@@ -2185,6 +2196,7 @@ let apply_delta ~now t (delta : Live.delta) =
         | _ -> message
       in
       t.phase <- Stream_failed message;
+      t.ending_source <- Ending_heard_in_stream;
       t.ended_at <- Some now;
       settle t ~now
   | Live.Run_finished ->
@@ -2196,6 +2208,7 @@ let apply_delta ~now t (delta : Live.delta) =
          t.settled_at <- None
        | _, (Some _ | None) ->
          t.phase <- Stream_ended;
+         t.ending_source <- Ending_heard_in_stream;
          t.ended_at <- Some now;
          settle t ~now)
   | Live.Reply_details { reply; turn_outcome; turn_ref } ->
@@ -2231,6 +2244,7 @@ let close_from_operation_record ~now t (record : Projection.operation_record) =
            t.phase <-
              Stream_failed
                "the server recorded this request as cancelled; its closing event never reached this screen");
+      t.ending_source <- Ending_read_from_record;
       t.ended_at <- Some now;
       settle t ~now;
       bump t

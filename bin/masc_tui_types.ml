@@ -3060,10 +3060,16 @@ let autonomous_journal_candidates ~keeper_name rows =
    and no KEEPER_REPLY_DETAILS), whose ending the log cannot draw; and a log
    that never heard the end -- the request went without a live view (no Eio
    clock), or the stream was cut and nothing replayed it -- holds part of the
-   turn at most. In both the committed rows keep saying what the turn did. *)
+   turn at most. In both the committed rows keep saying what the turn did.
+   A log closed from the operation record alone is the second kind: it never
+   heard the end, so appends it missed may be absent, and a retained
+   continuation checkpoint is not the final reply. *)
 let turn_log_holds_the_turn turn_log =
   Masc_tui_keeper_chat_log.committed turn_log.tl_log
   &&
+  match Masc_tui_keeper_chat_transcript.ending_source turn_log.tl_transcript with
+  | Masc_tui_keeper_chat_transcript.Ending_read_from_record -> false
+  | Masc_tui_keeper_chat_transcript.Ending_heard_in_stream ->
   match Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
   | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
   | Masc_tui_keeper_chat_transcript.Stream_ended ->

@@ -2315,3 +2315,38 @@ test('a stalled frame seat read is replaced without stopping frames or accepting
   assert.equal(page.padButton.disabled, false);
   assert.equal(page.get('chat-text').disabled, false);
 });
+
+
+for (const watched of ['dos', 'msx']) for (const initiallyConnected of [true, false]) {
+  test(`${watched} observes external departure and reconnection without game activity from ${initiallyConnected}`, async () => {
+    const storage = new Map([['masc.play.invite', 'fixture-token']]);
+    let connected = initiallyConnected;
+    const page = fixture(request => request.url === '/api/v1/play/seat'
+      ? response({ ...seat, connected, controller:null })
+      : request.url.includes('/live?') ? response({ ...frame, activity:[] }) : gameReply(request), {storage, hash:''});
+    await page.settle();
+    if (watched === 'msx') {
+      page.get('machine-view').value = watched;
+      page.get('machine-view').handlers.change();
+      await page.settle();
+    }
+    assert.equal(page.get('chat-text').disabled, !connected);
+    const reads = () => page.requests.filter(r => r.url === '/api/v1/play/seat').length;
+    const before = reads();
+    connected = !connected;
+    await page.poll(4999);
+    assert.equal(reads(), before, 'idle participation uses the slower cadence');
+    await page.poll(1);
+    assert.equal(reads(), before + 1);
+    assert.equal(page.get('chat-text').disabled, !connected);
+    assert.equal(page.padButton.disabled, watched === 'msx' || !connected);
+    const roomReads = page.roomRequests.length;
+    await page.roomTick();
+    assert.equal(page.roomRequests.length, roomReads + (connected ? 1 : 0), 'room presence follows observed participation');
+    connected = !connected;
+    await page.poll(5000);
+    assert.equal(page.get('chat-text').disabled, !connected, 'observed departure is reversible by an external reconnect');
+    assert.equal(page.padButton.disabled, watched === 'msx' || !connected);
+    assert.equal(page.requests.some(r => r.method === 'POST'), false, 'observation never changes participation itself');
+  });
+}

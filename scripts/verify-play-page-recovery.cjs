@@ -227,6 +227,19 @@ async function main() {
     await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례'));
     assert.equal(await page.locator('#send-text').isDisabled(), false);
     await page.evaluate(() => { Object.defineProperty(performance, 'now', { configurable:true, value:window.fixtureClock }); });
+    // A second tab can change participation without a DOS activity event.
+    // MSX observation must still discover both departure and reconnection.
+    await page.locator('#machine-view').selectOption('msx');
+    const sessionWritesBeforeParticipation = requests.filter(r => r.method === 'POST' && r.path === '/api/v1/play/session').length;
+    connected = false; released = true;
+    await page.waitForFunction(() => document.getElementById('chat-text').disabled);
+    connected = true;
+    await page.waitForFunction(() => !document.getElementById('chat-text').disabled);
+    assert.equal(requests.filter(r => r.method === 'POST' && r.path === '/api/v1/play/session').length,
+      sessionWritesBeforeParticipation, 'passive observation does not reconnect by itself');
+    await page.locator('#machine-view').selectOption('dos');
+    released = false;
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례'));
     // The write has its receipt but its follow-up authority projection never
     // answers until after departure. Disconnect must only drain actual writes.
     const projectionRequested = new Promise(resolve => { projectionStarted = resolve; });
@@ -246,7 +259,8 @@ async function main() {
     const receipt = { scope: 'Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.',
       source_sha256: createHash('sha256').update(source).digest('hex'),
       browser_version: browser.version(), seat_reads: seatReads, frame_reads: frameReads, room_reads:roomReads, pad_reads:padReads,
-      checks: ['activity changes update ownership before the recovery deadline',
+      checks: ['external departure closes chat while MSX is selected', 'external reconnect reopens chat without game activity',
+        'activity changes update ownership before the recovery deadline',
         'terminal write receipt and disconnect do not wait for a stalled seat projection', 'stalled room read recovers automatically', 'stalled pad read recovers while frames continue', 'seat recovers without machine activity', 'failed frame is fetched again',
         'several Keepers share public conversation', 'guest sends public message',
         'one viewport switches DOS and MSX without splitting conversation',

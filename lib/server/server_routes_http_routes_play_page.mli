@@ -28,7 +28,10 @@
     Activity during a pending read is coalesced and observed after it completes;
     stalled seat reads are replaced at the recovery cadence. Disconnect drains
     admitted writes without waiting for projection reads.
-    Departed controllers can therefore be discovered without game activity. When the
+    Participation is checked at the idle cadence even with a free controller or
+    MSX selected, so another client can depart and rejoin without game activity.
+    Observed participation changes suspend/resume chat independently of a local
+    confirmed disconnect. Departed controllers are discovered without game activity. When the
     loaded program has a masc pad layout ([GET /api/v1/play/pad]) it draws
     that pad in place of the plain keys row, and reads a physical gamepad in
     the standard mapping onto the same buttons. A pad read that fails shows the keys row and a

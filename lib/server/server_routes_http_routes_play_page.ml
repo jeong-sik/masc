@@ -252,7 +252,6 @@ let controllerRecoverable = false;
 let controllerError = null;
 let machine = false;
 let since = null;
-let lastActivityKey = null;
 let observedActivityKey = null;
 let latestSeatRequest = null;
 let machineObservationRevision = 0;
@@ -264,7 +263,7 @@ let handoffRead = null;
 let ended = false;
 let authRejected = false;
 let disconnecting = false;
-let connected = false;
+let connected = null;
 let departureConfirmed = false;
 // Only opening the invitation explicitly asks to rejoin a departed seat.
 // A reload may retain the bearer after confirmed departure if cleanup failed.
@@ -411,8 +410,12 @@ async function api(method, path, body, signal) {
   return { status: response.status, json };
 }
 
+function participationClosed() {
+  return connected === false && !initialConnectIntent;
+}
+
 function setRoomControls() {
-  const closed = ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || roomDetached;
+  const closed = ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || participationClosed() || roomDetached;
   el('chat-text').disabled = closed;
   el('chat-send').disabled = closed || chatSending || (!pendingChat && el('chat-text').value.trim() === '');
   el('chat-send').textContent = pendingChat ? '이전 전송 확인' : '대화 보내기';
@@ -539,7 +542,7 @@ function roomRequest(body) {
   const dispatch = () => {
     // Another document can replace this tab's draft before dispatch.
     // Recheck its authority at the public write boundary.
-    if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || !roomConnectionCurrent(body.action === 'say')) return null;
+    if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || participationClosed() || !roomConnectionCurrent(body.action === 'say')) return null;
     if (body.action === 'read' && readRequest !== roomReadRequest) return null;
     roomClients.add(body.client_id);
     // Record leases before dispatch so a reload without a pending chat still
@@ -560,7 +563,7 @@ function roomRequest(body) {
 }
 
 function refreshRoom(replace = true) {
-  if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || roomDetached) return;
+  if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || participationClosed() || roomDetached) return;
   // Preserve slow reads between pulses, but renew a stalled observation at
   // the seat recovery cadence. This never retries or abandons a room write.
   if (roomBusy && !replace && performance.now() - roomReadRequest.startedAt < SEAT_POLL_MS) return;
@@ -601,7 +604,7 @@ function sendChat() {
   // An edited textarea is the next draft, not permission to abandon a send
   // whose outcome is still unknown. Reconcile that exact payload first.
   const text = pendingChat ? pendingChat.text : el('chat-text').value;
-  if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || chatSending || text.trim() === '' || !roomConnectionCurrent(true)) return;
+  if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || participationClosed() || chatSending || text.trim() === '' || !roomConnectionCurrent(true)) return;
   if (new TextEncoder().encode(text).length > 4096) {
     el('room-status').textContent = '대화 한 번은 UTF-8 4096바이트까지 보낼 수 있어요.';
     return;
@@ -697,7 +700,7 @@ function renderTurn() {
     turn.textContent = 'MSX · 관전 중이에요. 공용 대화에 함께 참여할 수 있어요.';
   } else if (!connected) {
     turn.className = '';
-    turn.textContent = '조종 연결을 확인하고 있어요.';
+    turn.textContent = connected === false ? '조종 연결이 끊겨 있어요.' : '조종 연결을 확인하고 있어요.';
   } else if (!machine) {
     turn.className = '';
     turn.textContent = '지금 켜진 게임이 없어요.';
@@ -739,9 +742,7 @@ function renderPassTargets(participants) {
 
 async function refreshSeat(signal) {
   if (ended || disconnecting) return null;
-  // Only a successful read may acknowledge the activity that prompted it.
-  // A failed read after sending a move must be retried by the poll as well.
-  lastActivityKey = null;
+  // Frame activity reads and idle participation refresh share this authority.
   const request = {};
   const observedMachineRevision = machineObservationRevision;
   latestSeatRequest = request;
@@ -781,11 +782,8 @@ async function refreshSeat(signal) {
     machine = r.json.machine;
     seatSavesName = r.json.saves_name;
   }
-  if (!connected && !initialConnectIntent) {
-    departureConfirmed = true;
-    if (roomReadAbort) roomReadAbort.abort();
-    setRoomControls();
-  }
+  if (participationClosed() && roomReadAbort) roomReadAbort.abort();
+  setRoomControls();
   renderTurn();
   renderPassTargets(r.json.participants);
   setStatus('seat', controllerError ?? '');
@@ -976,9 +974,8 @@ function refreshFrameSeat(revision, signal, activityKey) {
   if (signal.aborted) cancel();
   const request = { startedAt:performance.now(), cancel };
   frameSeatRequest = request;
-  void refreshSeat(abort.signal).then(result => {
+  void refreshSeat(abort.signal).then(() => {
     if (ended || abort.signal.aborted || revision !== viewRevision || frameSeatRequest !== request) return;
-    if (result) lastActivityKey = activityKey;
     refreshFramePad(revision, signal);
   }).catch(() => {
     if (!ended && !abort.signal.aborted && revision === viewRevision && frameSeatRequest === request)
@@ -1041,16 +1038,14 @@ async function poll(revision, signal) {
     // Machine activity prompts a seat read; failed reads remain pending.
     // Opening the handoff selector refreshes participants independently.
     const key = activity.length === 0 ? '' : JSON.stringify(activity[0]) + '#' + activity.length;
-    // Expiry and Keeper stops need not move the machine. An observer must
-    // still discover that its holder departed, so a real move can recover it.
-    if (watched === 'dos') {
-      const activityChanged = key !== observedActivityKey && (observedActivityKey !== null || key !== '');
-      observedActivityKey = key;
-      const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
-      if (activityChanged || (performance.now() >= nextSeatPollAt && (key !== lastActivityKey || waitingForController || initialConnectIntent)))
-        refreshFrameSeat(revision, signal, key);
-      refreshFramePad(revision, signal);
-    }
+    // Session changes can happen in another tab without any machine activity.
+    // Keep observing participation even with a free controller or MSX selected.
+    const activityChanged = watched === 'dos' && key !== observedActivityKey
+      && (observedActivityKey !== null || key !== '');
+    if (watched === 'dos') observedActivityKey = key;
+    if (activityChanged || performance.now() >= nextSeatPollAt)
+      refreshFrameSeat(revision, signal, key);
+    if (watched === 'dos') refreshFramePad(revision, signal);
   }
 }
 

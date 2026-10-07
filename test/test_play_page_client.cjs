@@ -140,8 +140,7 @@ test('a failed seat read retries without a new move and restores playable contro
   });
   await page.settle();
   assert.match(page.get('status').textContent, /자리/);
-  await page.poll();
-  assert.equal(seatReads, 2);
+  assert.equal(seatReads, 2, 'the initial activity immediately refreshes the seat');
   assert.equal(page.padButton.disabled, true);
   await page.poll();
   assert.equal(seatReads, 3, 'retry the same activity after the seat recovers');
@@ -1014,8 +1013,6 @@ test('explicit reconnect retries transient refusals while the machine stays idle
     }
   });
   await page.settle();
-  assert.equal(attempts, 1);
-  await page.poll();
   assert.equal(attempts, 2);
   await page.poll();
   assert.equal(attempts, 3);
@@ -1195,7 +1192,7 @@ for (const count of [undefined, -1, 4, 0.5]) {
 test('a reopened departed invitation reconnects after a transient initial seat failure', async () => {
   let reads = 0, connected = false;
   const page = fixture(request => request.url === '/api/v1/play/seat'
-    ? ++reads === 1 ? response({}, 503) : response({ ...seat, connected, controller:null }) : normalReply(request), {
+    ? ++reads <= 2 ? response({}, 503) : response({ ...seat, connected, controller:null }) : normalReply(request), {
     sessionReply: ({ body }) => { connected = body.connected; return response({ ok:true, connected }); }
   });
   await page.settle();
@@ -1219,3 +1216,43 @@ for (const [count, remaining] of [[1, '가x'], [3, 'x']]) {
     if (count === 1) assert.match(page.get('status').textContent, /글자 중간/);
   });
 }
+
+
+test('disconnect drains the admitted write without waiting for its stalled seat projection', async () => {
+  let afterWrite = false, finishSeat;
+  const storage = new Map();
+  const page = fixture(request => {
+    if (request.method === 'POST') { afterWrite = true; return response({ok:true}); }
+    if (request.url === '/api/v1/play/seat' && afterWrite)
+      return new Promise(resolve => { finishSeat = () => resolve(response(seat)); });
+    return normalReply(request);
+  }, { storage });
+  await page.settle();
+  page.padButton.handlers.click();
+  await page.settle();
+  assert.ok(finishSeat, 'the post-write projection is held');
+  let departed = false;
+  page.get('leave').handlers.click().then(() => { departed = true; });
+  await page.settle();
+  assert.equal(departed, true, 'known mutation outcome allows departure before the read returns');
+  assert.equal(storage.size, 0);
+  finishSeat();
+  await page.settle();
+  assert.equal(page.padButton.disabled, true);
+});
+
+test('a new handoff refreshes authority before the unchanged-activity interval', async () => {
+  let changed = false;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') return response({...seat,controller:changed ? 'operator' : 'minsu'});
+    if (request.url === '/api/v1/play/pad') return response(layout);
+    return response({...frame,activity:changed ? [{at:2,who:'minsu',action:'pass operator'}] : activity});
+  });
+  await page.settle();
+  const reads = page.requests.filter(r => r.url === '/api/v1/play/seat').length;
+  changed = true;
+  await page.poll(300);
+  assert.equal(page.requests.filter(r => r.url === '/api/v1/play/seat').length, reads + 1);
+  assert.equal(page.padButton.disabled, true);
+  assert.match(page.get('turn').textContent, /operator/);
+});

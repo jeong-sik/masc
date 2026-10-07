@@ -214,6 +214,7 @@ let controllerError = null;
 let machine = false;
 let since = null;
 let lastActivityKey = null;
+let observedActivityKey = null;
 let latestSeatRequest = null;
 let nextSeatPollAt = 0;
 let handoffRead = null;
@@ -226,6 +227,7 @@ let departureConfirmed = false;
 let initialConnectIntent = invitation !== '' && !invitationConflict;
 let connecting = Promise.resolve();
 let sending = Promise.resolve();
+let admittedWrite = Promise.resolve();
 let textSending = false;
 // The saves name the seat last reported (null: nothing loaded), and the one
 // the pad on screen was read for (undefined: not read yet, or the last read
@@ -619,7 +621,9 @@ async function poll() {
     // Expiry and Keeper stops need not move the machine. An observer must
     // still discover that its holder departed, so a real move can recover it.
     const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
-    if (performance.now() >= nextSeatPollAt && (key !== lastActivityKey || waitingForController || initialConnectIntent)
+    const activityChanged = key !== observedActivityKey && (observedActivityKey !== null || key !== "");
+    observedActivityKey = key;
+    if ((activityChanged || (performance.now() >= nextSeatPollAt && (key !== lastActivityKey || waitingForController || initialConnectIntent)))
         && await refreshSeat()) lastActivityKey = key;
     await syncPad();
   }
@@ -628,7 +632,8 @@ async function poll() {
 function send(path, body) {
   sending = sending.then(async () => {
     if (!canMove()) return null;
-    const r = await mutate(path, body);
+    admittedWrite = mutate(path, body);
+    const r = await admittedWrite;
     if (ended || r === null) return null;
     const applied = r.status >= 200 && r.status < 300 && r.json && r.json.ok === true;
     if (!applied) setStatus('action', (r.json && (r.json.message || r.json.error)) || ('요청이 거절됐어요 (' + r.status + ')'));
@@ -655,7 +660,7 @@ async function disconnect() {
     // Only an admitted reconnect can race departure. A pending initial
     // authority read is invalidated above and cannot delay this mutation.
     await connecting;
-    await sending;
+    await admittedWrite;
     if (ended) return;
     if (unsettled) {
       setStatus('disconnect', '');

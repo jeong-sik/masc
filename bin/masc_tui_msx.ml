@@ -34,6 +34,8 @@ let synchronized_output = ref false
 let set_synchronized_output enabled = synchronized_output := enabled
 let delete_image = Masc_tui_graphics.delete_image ~image_id
 let write_batch ~write payload =
+  (* A full-width sidebar/footer must not leave a pending automatic wrap. *)
+  let payload = "\027[?7l" ^ payload ^ "\027[?7h" in
   if !synchronized_output then write ("\027[?2026h" ^ payload ^ "\027[?2026l")
   else write payload
 
@@ -57,8 +59,7 @@ let set_cell_pixels px = cell_pixels := px
    available width allows at the frame's own shape; the row count is that
    height in whole cells, rounded down so the last row is not a partial one.
 
-   Without a cell size there is nothing to compute with, and the caller keeps
-   the rows it asked for. *)
+   Without a cell size the caller uses the bounded cell mosaic. *)
 let rows_that_fit ~cols ~rows ~frame_width ~frame_height =
   match !cell_pixels with
   | Some (cell_width, cell_height)
@@ -70,7 +71,8 @@ let rows_that_fit ~cols ~rows ~frame_width ~frame_height =
       max 1 (min rows (height / cell_height))
   | Some _ | None -> rows
 
-let fit_line width s = String.sub s 0 (min (String.length s) (max width 1))
+let fit_line width s =
+  Masc_tui_ansi.fit_width (Masc_tui_ansi.Terminal_text.single_line s) (max width 0)
 
 (* The activity sidebar (RFC machine-spectating-goes-through-lanes §2.1's
    [activity] field, drawn here for the first time): a fixed-width column of
@@ -223,10 +225,12 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     | None -> None
   in
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
+  let rows = max 1 rows and cols = max 1 cols in
+  let notice = if rows >= 4 then notice else None in
   let header_rows = if Option.is_some notice then 2 else 1 in
-  let screen_rows = max 4 (rows - header_rows - 1) in
+  let screen_rows = max 0 (rows - header_rows - 1) in
   let picture_rows =
-    max 2 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8)
+    min screen_rows (max 1 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8))
   in
   let has_activity = activity <> [] in
   let show_sidebar = shows_sidebar ~cols ~has_activity in
@@ -235,9 +239,11 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
      decides its rendered size, and the sidebar toggling on or off changes
      that budget without necessarily changing [cols] itself. *)
   let geometry = (rows, picture_cols, header_rows, picture_rows, !cell_pixels) in
-  let kitty = match dims, !graphics_protocol with
-    | Some (width, height, rgb), Masc_tui_graphics.Kitty_protocol ->
-        width > 0 && height > 0 && String.length rgb = width * height * 3
+  let kitty = match dims, !graphics_protocol, !cell_pixels with
+    | Some (width, height, rgb), Masc_tui_graphics.Kitty_protocol, Some (cw, ch) ->
+        cw > 0 && ch > 0 && screen_rows > 0
+        && width > 0 && height > 0 && String.length rgb = width * height * 3
+        && ch * width <= picture_cols * cw * height
     | _ -> false
   in
   let previous = !retained in
@@ -266,7 +272,7 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     Buffer.add_string buf "\027[2J\027[H"
   end;
   Buffer.add_string buf (fit_line cols title);
-  Buffer.add_string buf "\027[0K\r\n";
+  Buffer.add_string buf (if rows > 1 then "\027[0K\r\n" else "\027[0K");
   Option.iter (fun message -> Buffer.add_string buf (fit_line cols (" " ^ message)); Buffer.add_string buf "\027[0K\r\n") notice;
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match dims with
@@ -290,7 +296,7 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
        Buffer.add_string buf escape;
        Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
    | Some (width, height, rgb)
-     when width > 0 && height > 0 && String.length rgb >= width * height * 3 ->
+     when screen_rows > 0 && width > 0 && height > 0 && String.length rgb >= width * height * 3 ->
        (* The machine's frame has a shape of its own -- 256x192 from the
           server's screen -- and the terminal has another. Fitting the grid to
           the terminal alone drew that shape stretched to whatever the window
@@ -334,8 +340,10 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     done;
     Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
   end;
-  Buffer.add_string buf (fit_line cols footer);
-  Buffer.add_string buf "\027[0K";
+  if rows > 1 then begin
+    Buffer.add_string buf (fit_line cols footer);
+    Buffer.add_string buf "\027[0K"
+  end;
   image_may_exist := !image_may_exist || kitty;
   write_batch ~write (Buffer.contents buf);
   image_may_exist := kitty;

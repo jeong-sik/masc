@@ -381,7 +381,7 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         executable,
         description=("MSX tick sends a reference for pixels the TUI already holds" if retained_tick
                      else "MSX retains Kitty pixels between live polls"),
-        interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
+        interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY + b"\x1b[6;16;8t",
         http_fixtures={MACHINE_LIVE_PATH: PathHttpResponse(live),
                        "/api/v1/msx/tick": RequestHttpResponse(tick) if retained_tick else tick,
                        "/api/v1/msx/press": RequestHttpResponse(press)},
@@ -530,7 +530,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
             failed.release.set()
 
     run_terminal_scenario(executable, description="MSX asynchronous poll preserves terminal input",
-        interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
+        interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY + b"\x1b[6;16;8t",
         http_fixtures={MACHINE_LIVE_PATH: msx_live_fixture(frame),
                        "/api/v1/msx/tick": RequestHttpResponse(tick)})
 

@@ -198,6 +198,8 @@ const KEY_NAMES = {
 const SESSION_KEY = 'masc.play.invite';
 const PENDING_KEY = 'masc.play.pending';
 const DOCUMENT_KEY = 'masc.play.document';
+const DEPARTURE_KEY = 'masc.play.departure';
+let retainedDeparture = false;
 function operationId() {
   return [...crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -210,8 +212,12 @@ try {
   const retained = sessionStorage.getItem(SESSION_KEY) || '';
   if (retained !== '') {
     token = retained;
+    retainedDeparture = sessionStorage.getItem(DEPARTURE_KEY) === 'pending';
     invitationConflict = invitation !== '' && invitation !== retained;
-  } else if (token !== '') sessionStorage.setItem(SESSION_KEY, token);
+  } else if (token !== '') {
+    sessionStorage.setItem(SESSION_KEY, token);
+    if (sessionStorage.getItem(DEPARTURE_KEY) !== null) sessionStorage.removeItem(DEPARTURE_KEY);
+  }
   unsettled = token !== '' && sessionStorage.getItem(PENDING_KEY) !== null;
   if (token !== '') {
     const identity = operationId();
@@ -278,11 +284,12 @@ let roomSnapshot = null;
 let roomMessagesKey = null;
 let pendingChat = null;
 let roomAbort = null;
+let roomReadAbort = null;
+let roomReadRequest = null;
 let roomDetached = false;
 let roomDraftVersion = null;
 const ROOM_DRAFT_KEY = 'masc.play.room.draft';
 const ROOM_CLIENTS_KEY = 'masc.play.room.clients';
-const ROOM_READ_TIMEOUT_MS = 5000;
 // The saves name the seat last reported (null: nothing loaded), and the one
 // the pad on screen was read for (undefined: not read yet, or the last read
 // failed). The pad is read again while the two differ.
@@ -342,6 +349,11 @@ function connectionSettled() {
 
 function end(text) {
   if (ended) return;
+  if (pendingChat !== null) {
+    el('room-status').textContent = '대화 전송 결과가 확인되지 않아 초대와 전송 기록을 유지했어요.';
+    setControlsEnabled(false);
+    return;
+  }
   initialConnectIntent = false;
   // Check storage at the forget boundary too, including authentication
   // failures delivered to a restored document with an older cached state.
@@ -361,7 +373,7 @@ function end(text) {
     }
   }
   ended = true;
-  try { sessionStorage.removeItem(DOCUMENT_KEY); } catch (_) { /* No bearer remains in storage. */ }
+  try { sessionStorage.removeItem(DEPARTURE_KEY); sessionStorage.removeItem(DOCUMENT_KEY); } catch (_) { /* No bearer remains in storage. */ }
   token = '';
   setStatus('disconnect', '');
   setStatus('invitation', '');
@@ -393,7 +405,7 @@ async function api(method, path, body, signal) {
 }
 
 function setRoomControls() {
-  const closed = ended || authRejected || disconnecting || departureConfirmed || roomDetached;
+  const closed = ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || roomDetached;
   el('chat-text').disabled = closed;
   el('chat-send').disabled = closed || chatSending || (!pendingChat && el('chat-text').value.trim() === '');
   el('chat-send').textContent = pendingChat ? '이전 전송 확인' : '대화 보내기';
@@ -418,7 +430,7 @@ function roomConnectionCurrent(checkDraft = false) {
 }
 
 function saveRoomDraft() {
-  if (authRejected || departureConfirmed || !roomConnectionCurrent(true)) return false;
+  if (authRejected || departureConfirmed || retainedDeparture || !roomConnectionCurrent(true)) return false;
   try {
     const saved = JSON.stringify({ token, text:el('chat-text').value, pending:pendingChat });
     sessionStorage.setItem(ROOM_DRAFT_KEY, saved);
@@ -437,8 +449,9 @@ function restoreRoomDraft() {
       throw new Error('invalid saved room clients');
     for (const id of clients) roomClients.add(id);
   } catch (_) {
-    roomDetached = true;
-    el('room-status').textContent = '이 탭의 대화 연결 기록을 읽지 못했어요. 저장소를 확인한 뒤 새로고침해 주세요.';
+    // Presence cleanup is best effort; document and draft authority still
+    // guard sends and atomic departure independently of this damaged ledger.
+    el('room-status').textContent = '대화 접속 기록 일부를 읽지 못했어요. 연결 끊기는 계속 사용할 수 있어요.';
   }
   try {
     roomDraftVersion = sessionStorage.getItem(ROOM_DRAFT_KEY);
@@ -515,37 +528,40 @@ function renderRoom(snapshot, showMessages = true) {
 }
 
 function roomRequest(body) {
-  roomSending = roomSending.catch(() => {}).then(() => {
-    // A send can wait behind a read while another document replaces this
-    // tab's draft. Recheck its authority at the public write boundary.
-    if (ended || authRejected || disconnecting || departureConfirmed || !roomConnectionCurrent(body.action === 'say')) return null;
+  const readRequest = roomReadRequest;
+  const dispatch = () => {
+    // Another document can replace this tab's draft before dispatch.
+    // Recheck its authority at the public write boundary.
+    if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || !roomConnectionCurrent(body.action === 'say')) return null;
+    if (body.action === 'read' && readRequest !== roomReadRequest) return null;
     roomClients.add(body.client_id);
     // Record leases before dispatch so a reload without a pending chat still
     // knows every presence created by this tab when the user disconnects.
     sessionStorage.setItem(ROOM_CLIENTS_KEY, JSON.stringify([...roomClients]));
     const abort = new AbortController();
-    roomAbort = abort;
-    let timer = null;
-    const request = api('POST', ROOM_PATH, body, abort.signal);
-    // Reads may renew presence but carry no message receipt. Bound their wait
-    // so an unavailable response cannot indefinitely hold a queued send.
-    const result = body.action !== 'read' ? request : Promise.race([request,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          abort.abort();
-          reject(new Error('room read timed out'));
-        }, ROOM_READ_TIMEOUT_MS);
-      })]);
-    return result.finally(() => {
-      if (timer !== null) clearTimeout(timer);
+    if (body.action === 'read') roomReadAbort = abort;
+    else roomAbort = abort;
+    return api('POST', ROOM_PATH, body, abort.signal).finally(() => {
       if (roomAbort === abort) roomAbort = null;
+      if (roomReadAbort === abort) roomReadAbort = null;
     });
-  });
+  };
+  if (body.action === 'read') return Promise.resolve().then(dispatch);
+  roomReadRequest = null;
+  roomBusy = false;
+  if (roomReadAbort) roomReadAbort.abort();
+  roomSending = roomSending.catch(() => {}).then(dispatch);
   return roomSending;
 }
 
-function refreshRoom() {
-  if (ended || authRejected || disconnecting || departureConfirmed || roomDetached || roomBusy) return;
+function refreshRoom(replace = true) {
+  if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || roomDetached) return;
+  // A normal pulse leaves a slow read intact. Explicit navigation or a send
+  // supersedes it; elapsed time alone does not revoke observation ownership.
+  if (roomBusy && !replace) return;
+  if (roomReadAbort) roomReadAbort.abort();
+  const request = {};
+  roomReadRequest = request;
   roomBusy = true;
   setRoomControls();
   const before = roomBefore;
@@ -553,14 +569,16 @@ function refreshRoom() {
   const body = { action:'read', client_id:roomClient, machine:viewMachine };
   if (before !== null) body.before = before;
   roomRequest(body).then(result => {
-    if (ended || departureConfirmed || !result || !roomConnectionCurrent()) return;
+    if (ended || authRejected || departureConfirmed || request !== roomReadRequest || !result || !roomConnectionCurrent()) return;
     if (result.status === 200 && validRoom(result.json)) {
       renderRoom(result.json, before === roomBefore);
       if (!pendingChat) el('room-status').textContent = '';
     } else el('room-status').textContent = '공용 대화를 읽지 못했어요 (' + result.status + '). 다시 읽고 있어요.';
   }).catch(() => {
-    if (!ended && !departureConfirmed && !roomDetached) el('room-status').textContent = '공용 대화 연결이 끊겼어요. 다시 읽고 있어요.';
+    if (!ended && !authRejected && !departureConfirmed && !roomDetached && request === roomReadRequest)
+      el('room-status').textContent = '공용 대화 연결이 끊겼어요. 다시 읽고 있어요.';
   }).finally(() => {
+    if (request !== roomReadRequest) return;
     roomBusy = false;
     setRoomControls();
   });
@@ -570,7 +588,7 @@ function refreshRoom() {
 // live-frame request must not prevent an otherwise healthy room from updating.
 function tickRoom() {
   if (ended || authRejected || departureConfirmed || roomDetached) return;
-  refreshRoom();
+  refreshRoom(false);
   setTimeout(tickRoom, ROOM_POLL_MS);
 }
 
@@ -578,7 +596,7 @@ function sendChat() {
   // An edited textarea is the next draft, not permission to abandon a send
   // whose outcome is still unknown. Reconcile that exact payload first.
   const text = pendingChat ? pendingChat.text : el('chat-text').value;
-  if (ended || authRejected || disconnecting || departureConfirmed || chatSending || text.trim() === '' || !roomConnectionCurrent(true)) return;
+  if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || chatSending || text.trim() === '' || !roomConnectionCurrent(true)) return;
   if (new TextEncoder().encode(text).length > 4096) {
     el('room-status').textContent = '대화 한 번은 UTF-8 4096바이트까지 보낼 수 있어요.';
     return;
@@ -595,6 +613,10 @@ function sendChat() {
   roomRequest({ action:'say', ...request }).then(result => {
     if (ended || departureConfirmed || !result || !roomConnectionCurrent(true)) return;
     if (result.status === 200 && validRoom(result.json)) {
+      // Reads begun during this send cannot replace its acknowledged history.
+      roomReadRequest = null;
+      roomBusy = false;
+      if (roomReadAbort) roomReadAbort.abort();
       pendingChat = null;
       if (el('chat-text').value === request.text) el('chat-text').value = '';
       roomBefore = null;
@@ -655,7 +677,7 @@ async function mutate(path, body) {
 }
 
 function canMove() {
-  return !authRejected && viewMachine === 'dos' && documentId !== null && connected && !departureConfirmed && machine && controllerError === null && !ended && !disconnecting && !unsettled
+  return !authRejected && !retainedDeparture && viewMachine === 'dos' && documentId !== null && connected && !departureConfirmed && machine && controllerError === null && !ended && !disconnecting && !unsettled
     && (controller === null || controller === me || controllerRecoverable);
 }
 
@@ -755,10 +777,19 @@ async function refreshSeat(signal) {
   // Keep explicit connect intent through transient reads and refused writes.
   // Only observed connection, successful reconnect, or ending it settles it.
   if (initialConnectIntent && controllerError === null && !disconnecting) {
-    if (connected) initialConnectIntent = false;
+    if (connected) {
+      initialConnectIntent = false;
+      if (retainedDeparture) {
+        sessionStorage.removeItem(DEPARTURE_KEY);
+        retainedDeparture = false;
+        setRoomControls();
+      }
+    }
     else if (connectionSettled()) {
       const joined = await mutate(SESSION_PATH, { connected:true });
       if (!ended && joined?.status === 200 && joined.json?.ok === true && joined.json.connected === true) {
+        if (retainedDeparture) sessionStorage.removeItem(DEPARTURE_KEY);
+        retainedDeparture = false;
         initialConnectIntent = false;
         return refreshSeat();
       }
@@ -975,6 +1006,7 @@ async function disconnect() {
   }
   disconnecting = true;
   if (roomAbort) roomAbort.abort();
+  if (roomReadAbort) roomReadAbort.abort();
   initialConnectIntent = false;
   setControlsEnabled(false);
   setStatus('disconnect', '조종권을 확인하고 연결을 끊고 있어요.');
@@ -990,10 +1022,16 @@ async function disconnect() {
       setStatus('action', UNKNOWN_MESSAGE);
       return;
     }
+    // Record intent before the server mutation. A crash or failed deletion
+    // must not make an ordinary reload renew room presence after departure.
+    sessionStorage.setItem(DEPARTURE_KEY, 'pending');
+    retainedDeparture = true;
     const r = await mutate(SESSION_PATH, { connected:false });
     if (ended) return;
     if (r === null) { setStatus('disconnect', ''); return; }
     if (!(r.status >= 200 && r.status < 300 && r.json?.ok === true && r.json.connected === false)) {
+      sessionStorage.removeItem(DEPARTURE_KEY);
+      retainedDeparture = false;
       setStatus('disconnect', '서버의 연결 종료를 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
       return;
     }

@@ -62,9 +62,15 @@ let check (run : Runs.run) =
     "the detail holds the output the registry recorded"
     recorded_output
     detail.lrd_output;
-  (* The pane folds a Librarian run's raw output behind its preflight reading. *)
+  (* The pane folds a Librarian run's raw output behind its preflight reading.
+     A run that ended before its preflight was observed records none. *)
+  let recorded_preflight =
+    match recorded_output with
+    | Some (`Assoc fields) -> List.mem_assoc "jev_preflight" fields
+    | Some _ | None -> false
+  in
   Alcotest.(check bool)
-    "an available output carries the preflight reading"
-    (Option.is_some recorded_output)
+    "the detail reads the preflight the run recorded"
+    recorded_preflight
     (Option.is_some detail.lrd_librarian_preflight)
 ;;

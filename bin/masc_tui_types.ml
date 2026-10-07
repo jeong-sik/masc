@@ -6206,6 +6206,10 @@ type state = {
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: ((workspace_input_identity option * string) * keeper_composer_draft) list;
+  (* The workspace the open chat belonged to while the server's identity is
+     unread. Its draft and queue stay with that workspace until the identity
+     reads again; [None] once it does, or when no chat was open. *)
+  mutable msg_unconfirmed_workspace: workspace_input_identity option;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -7524,6 +7528,22 @@ let resume_preflight_keeper_input ~owner_paused state keeper_name =
       name, id, intervention) state.keeper_interactive_waiting;
     true
   end else false
+
+(* The holds a queue keeps when its chat survives an unread identity: a hold
+   it already had stays as it was, and a steer queued behind a stop is held
+   before dispatch. An ordinary NEXT message is not turned into a hold. *)
+let retained_input_markers queue previous =
+  Masc_tui_keeper_chat_queue.waiting queue
+  |> List.filter_map (fun (item : Masc_tui_keeper_chat_queue.item) ->
+    let name = item.request.keeper_name and id = item.request.request_id in
+    let prior = List.find_opt (fun (held_name, held_id, _) ->
+      held_name = name && held_id = id) previous in
+    match prior with
+    | Some (_, _, (Retained_before_dispatch | Retained_after_stop as held)) -> Some (name, id, held)
+    | Some (_, _, Awaiting_control _) | None ->
+      match item.intent with
+      | Next -> None
+      | Steer_after_interrupt -> Some (name, id, Retained_before_dispatch))
 
 let advance_keeper_chat_control state keeper_name =
   let generation = keeper_chat_control_generation state keeper_name + 1 in
@@ -8849,6 +8869,7 @@ let create_state
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
+  msg_unconfirmed_workspace = None;
   msg_history = [];
   msg_recall_at = None;
   msg_recall_draft = ("", [], [], None);

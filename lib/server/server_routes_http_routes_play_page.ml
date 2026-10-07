@@ -133,6 +133,8 @@ let page_script =
 'use strict';
 // The TUI reads the same live route every 0.3 s.
 const POLL_MS = 300;
+// Seat authority scans credentials; frame reads do not need that inventory.
+const SEAT_POLL_MS = 5000;
 const ACTIVITY_SHOWN = 8;
 const LIVE_PATH = '/api/v1/lane-addons/live?source_kind=dos_capture';
 const SEAT_PATH = '/api/v1/play/seat';
@@ -159,10 +161,18 @@ const KEY_NAMES = {
 };
 
 const SESSION_KEY = 'masc.play.invite';
-let token = location.hash.slice(1);
+const PENDING_KEY = 'masc.play.pending';
+const invitation = location.hash.slice(1);
+let token = invitation;
+let invitationConflict = false;
+let unsettled = false;
 try {
-  if (token !== '') sessionStorage.setItem(SESSION_KEY, token);
-  else token = sessionStorage.getItem(SESSION_KEY) || '';
+  const retained = sessionStorage.getItem(SESSION_KEY) || '';
+  if (retained !== '') {
+    token = retained;
+    invitationConflict = invitation !== '' && invitation !== retained;
+  } else if (token !== '') sessionStorage.setItem(SESSION_KEY, token);
+  unsettled = token !== '' && sessionStorage.getItem(PENDING_KEY) === token;
 } catch (_) { /* A browser may deny storage; the original link still works. */ }
 history.replaceState(null, '', location.pathname + location.search);
 // Opening an invitation again in this tab can be only a fragment navigation.
@@ -190,6 +200,7 @@ let machine = false;
 let since = null;
 let lastActivityKey = null;
 let latestSeatRequest = null;
+let nextSeatPollAt = 0;
 let handoffRead = null;
 let ended = false;
 let disconnecting = false;
@@ -205,6 +216,9 @@ const gamepadHeld = new Set();
 let gamepadLoop = false;
 
 const statusMessages = new Map();
+const UNKNOWN_MESSAGE = '전송 결과를 확인하지 못해 초대 연결을 유지했어요. 추가 입력과 연결 끊기를 멈췄어요. 운영자에게 초대 회수를 요청한 뒤 새 링크를 새 탭에서 열어 주세요.';
+if (unsettled) setStatus('action', UNKNOWN_MESSAGE);
+if (invitationConflict) setStatus('invitation', '새 초대를 열려면 현재 연결을 먼저 끊은 뒤 새 초대 링크를 다시 열어 주세요.');
 function setStatus(source, text) {
   if (text === '') statusMessages.delete(source);
   else statusMessages.set(source, text);
@@ -239,12 +253,45 @@ async function api(method, path, body) {
   const response = await fetch(path, init);
   let json = null;
   try { json = await response.json(); } catch (_) { json = null; }
-  if (response.status === 401 || response.status === 403) end('초대가 끝났거나 회수됐어요. 운영자에게 새 링크를 받아 주세요.');
+  // Authentication/read failures do not settle an earlier admitted write.
+  if (!unsettled && (response.status === 401 || response.status === 403)) end('초대가 끝났거나 회수됐어요. 운영자에게 새 링크를 받아 주세요.');
   return { status: response.status, json };
 }
 
+async function mutate(path, body) {
+  if (unsettled) { setStatus('action', UNKNOWN_MESSAGE); return null; }
+  try {
+    // Persist before dispatch: closing/reloading the document can lose its
+    // response while the authenticated server operation is still pending.
+    sessionStorage.setItem(SESSION_KEY, token);
+    sessionStorage.setItem(PENDING_KEY, token);
+  } catch (_) {
+    setStatus('action', '브라우저에 연결 상태를 저장하지 못해 입력을 보내지 않았어요. 이 사이트의 탭 저장소를 허용해 주세요.');
+    return null;
+  }
+  unsettled = true;
+  setControlsEnabled(false);
+  try {
+    const r = await api('POST', path, body);
+    const success = r.status >= 200 && r.status < 300 && r.json?.ok === true;
+    const refusal = r.status >= 400 && r.status < 600 && r.json &&
+      (r.json.ok === false || typeof r.json.auth_error_code === 'string' ||
+       (typeof r.json.code === 'string' && typeof r.json.error === 'string'));
+    if (!success && !refusal) throw new Error('unconfirmed operation response');
+    // Only this operation's terminal response clears its marker. Seat/frame
+    // reads are not ordered behind it, and cannot acknowledge it instead.
+    sessionStorage.removeItem(PENDING_KEY);
+    unsettled = false;
+    if (r.status === 401 || r.status === 403) end('초대가 끝났거나 회수됐어요. 운영자에게 새 링크를 받아 주세요.');
+    return r;
+  } catch (_) {
+    setStatus('action', UNKNOWN_MESSAGE);
+    return null;
+  }
+}
+
 function canMove() {
-  return machine && controllerError === null && !ended && !disconnecting
+  return machine && controllerError === null && !ended && !disconnecting && !unsettled
     && (controller === null || controller === me || controllerRecoverable);
 }
 
@@ -296,6 +343,7 @@ async function refreshSeat() {
   lastActivityKey = null;
   const request = {};
   latestSeatRequest = request;
+  nextSeatPollAt = performance.now() + SEAT_POLL_MS;
   let r;
   try {
     r = await api('GET', SEAT_PATH);
@@ -485,7 +533,8 @@ async function poll() {
     // Expiry and Keeper stops need not move the machine. An observer must
     // still discover that its holder departed, so a real move can recover it.
     const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
-    if ((key !== lastActivityKey || waitingForController) && await refreshSeat()) lastActivityKey = key;
+    if (performance.now() >= nextSeatPollAt && (key !== lastActivityKey || waitingForController)
+        && await refreshSeat()) lastActivityKey = key;
     await syncPad();
   }
 }
@@ -493,15 +542,15 @@ async function poll() {
 function send(path, body) {
   sending = sending.then(async () => {
     if (!canMove()) return false;
-    const r = await api('POST', path, body);
-    if (ended) return false;
+    const r = await mutate(path, body);
+    if (ended || r === null) return false;
     const applied = r.status >= 200 && r.status < 300 && r.json && r.json.ok === true;
     if (!applied) setStatus('action', (r.json && (r.json.message || r.json.error)) || ('요청이 거절됐어요 (' + r.status + ')'));
     else setStatus('action', '');
     await refreshSeat();
     return applied;
   }).catch(() => {
-    setStatus('action', '전송 결과를 확인하지 못했어요. 화면을 확인한 뒤 다시 시도해 주세요.');
+    setStatus('action', '요청 뒤 화면을 갱신하지 못했어요. 다시 읽고 있어요.');
     return false;
   });
   return sending;
@@ -517,6 +566,11 @@ async function disconnect() {
     // Drain it before observing/releasing our seat, and admit no new moves.
     await sending;
     if (ended) return;
+    if (unsettled) {
+      setStatus('disconnect', '');
+      setStatus('action', UNKNOWN_MESSAGE);
+      return;
+    }
     const seat = await refreshSeat();
     if (ended) return;
     if (seat === null) {
@@ -524,8 +578,9 @@ async function disconnect() {
       return;
     }
     if (seat.machine && seat.controller === seat.name) {
-      const r = await api('POST', '/api/v1/dos/pass', {});
+      const r = await mutate('/api/v1/dos/pass', {});
       if (ended) return;
+      if (r === null) { setStatus('disconnect', ''); return; }
       if (!(r.status >= 200 && r.status < 300 && r.json && r.json.ok === true)) {
         setStatus('disconnect', '조종권 반납을 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
         return;

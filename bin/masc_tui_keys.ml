@@ -277,7 +277,7 @@ let global =
       "the MSX screen: the emulator core over the whole terminal (esc: back; \
        also `:` go MSX)"
   ; b Meta roster_toggle_key "show or hide the Keeper roster"
-      ~help:"wide chats show the roster by default; this choice persists \
+      ~help:"the roster starts hidden; this choice persists \
              across navigation and resizing"
   ; b Meta "Ctrl-L"
       "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
@@ -513,7 +513,7 @@ let for_surface = function
       ]
       @ listing_meta
   | Keepers Keeper_message ->
-      [ b Navigate "Left" "roster" ~help:"open and focus the Keeper roster, including when hidden or narrow"
+      [ b Navigate "Left" "roster" ~help:"empty composer: open the Keeper list; with text: move the cursor left"
       ; b Navigate "Right" "chat"
           ~help:"roster focused: return focus to the chat composer"
       ; (* One key, two focuses: the roster when it holds focus, the history

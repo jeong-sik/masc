@@ -26,6 +26,10 @@ val side_pane_background : Masc_tui_terminal_palette.t option -> string
     page {!user_message_background} takes, so the two things set apart from
     the page are set apart by the same amount. Same fallbacks. *)
 
+val sidebar_selection : Masc_tui_terminal_palette.t option -> string
+(** A restrained neutral band derived from the terminal palette, keeping body
+    text contrast. Falls back to reverse video without a usable colour palette. *)
+
 val recede
   :  theme_mode:Masc_tui_terminal_palette.theme_mode option
   -> Masc_tui_terminal_palette.t option

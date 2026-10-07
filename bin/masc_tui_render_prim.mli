@@ -278,6 +278,11 @@ val count_frame_lines : Buffer.t -> int
     it counts as a row: the terminal draws it, and a footer is written that
     way. *)
 
+val composer_draft_window :
+  Masc_tui_types.state -> cols:int -> prompt:string -> string * int
+(** The sanitized shared-composer text and its cursor column in display cells.
+    Drawing and caret placement use the same horizontally fitted window. *)
+
 val slash_hint_text : restore:string -> string -> string option
 (** What the slash word at the start of a draft is -- the command it names,
     the commands it could still become, or that it is none -- painted, with

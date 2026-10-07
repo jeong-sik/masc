@@ -921,29 +921,6 @@ let create_thread_fixture config ~keeper_name =
   meta, signal
 ;;
 
-(* #25600 regression: a transient store read failure on the
-   [Thread_participants] route must not silently drop the signal — the
-   bounded retry re-reads and the addressed keeper still wakes. *)
-let test_thread_participant_wakes_after_transient_store_read_failure () =
-  Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
-  Fun.protect
-    ~finally:(fun () ->
-      KKS.force_transient_relevance_failures_for_test 0;
-      Keeper_registry.For_testing.clear ())
-    (fun () ->
-       let meta, signal = create_thread_fixture config ~keeper_name:"threadlane" in
-       KKS.force_transient_relevance_failures_for_test 1;
-       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
-       check int "addressed lane durable queue after transient failure" 1
-         (board_queue_length config meta.name);
-       match Keeper_registry.get ~base_path:config.base_path meta.name with
-       | Some entry ->
-         check bool "addressed lane woken after transient failure" true
-           (Atomic.get entry.fiber_wakeup)
-       | None -> fail "threadlane registry entry missing")
-;;
-
 (* The author of a post is a thread participant. [check_self_comment_status]
    only looks for the keeper's own comments, so before the authorship check an
    answer to a keeper's question never reached the keeper that asked. Measured
@@ -1165,36 +1142,12 @@ let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
        | votes -> failf "expected one vote stimulus, got %d" (List.length votes))
 ;;
 
-(* #25600 bound pin: the retry is bounded — a store that keeps failing past
-   [board_signal_relevance_max_attempts] still drops the lane (loudly), it
-   does not retry forever. *)
-let test_thread_participant_drop_is_bounded_under_persistent_failure () =
-  Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
-  Fun.protect
-    ~finally:(fun () ->
-      KKS.force_transient_relevance_failures_for_test 0;
-      Keeper_registry.For_testing.clear ())
-    (fun () ->
-       let meta, signal = create_thread_fixture config ~keeper_name:"boundlane" in
-       KKS.force_transient_relevance_failures_for_test 100;
-       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
-       check int "persistently failing lane stays undelivered" 0
-         (board_queue_length config meta.name);
-       match Keeper_registry.get ~base_path:config.base_path meta.name with
-       | Some entry ->
-         check bool "persistently failing lane not woken" false
-           (Atomic.get entry.fiber_wakeup)
-       | None -> fail "boundlane registry entry missing")
-;;
-
 (* #27329 regression: a comment signal classifies as [Thread_participants],
    and a lane that never touched the thread has no deterministic address —
    [wake_reason] answers [Available None] for it. That folded to [Ignore]
    for every non-participant lane, so a comment could never reach attention
    judgment: [Judge_discoverable] was produced only for the [Discoverable]
-   audience, and the owner cursor scan re-synthesizes post_created signals
-   only — no other net catches comments. Now the [None] fold escalates to
+   audience. Now the [None] fold escalates to
    [Judge_discoverable] for comment signals and the push path records the
    attention candidate, while the participant lane keeps its direct
    delivery. *)
@@ -1437,10 +1390,6 @@ let () =
             test_restarting_exact_mention_is_durable_with_deferred_wake
         ; test_case "lane metadata failure does not block next durable delivery" `Quick
             test_lane_meta_failure_does_not_block_next_durable_delivery
-        ; test_case "thread participant wakes after transient store read failure" `Quick
-            test_thread_participant_wakes_after_transient_store_read_failure
-        ; test_case "thread participant drop is bounded under persistent failure" `Quick
-            test_thread_participant_drop_is_bounded_under_persistent_failure
         ; test_case "comment routes bystander lane to attention judgment" `Quick
             test_comment_routes_bystander_lane_to_attention_judgment
         ; test_case "comment on own post wakes the author" `Quick

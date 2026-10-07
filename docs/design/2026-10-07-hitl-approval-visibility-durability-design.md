@@ -94,16 +94,32 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
 
 `Keeper_late_approval` 을 메모리 구조는 유지한 채 뒤에 append-only 저널을 붙인다.
 
-- 저장: `gate/late_approval.log.jsonl`(workspace base_path 아래, `gate/pending.json` 옆 —
-  경로 SSOT 는 `keeper_gate_path.ml` 에 `late_approval_log` 로 추가).
+- 저장 권위(reviewer 경계 1 반영, 하나로 확정): **전역 저널 하나** — `keeper_gate_path.ml` 에
+  `late_approval_log` 로 SSOT 를 추가하고 gate 루트 아래 단일 파일로 둔다. workspace별 파일은 채택하지
+  않는다(기존 `shared ()` 싱글턴 구조를 바꾸지 않기 위해, 그리고 부팅 복원을 한 파일 읽기로 단순화하기
+  위해). 대신 **모든 레코드와 모든 연산에 caller 의 인증된 workspace identity(`base_path`)를 결속**한다:
+  레코드는 `{op, base_path, keeper, tool_call_id, tool, args_fingerprint, decision, actor, at}` 를
+  가지고, `take` 배분 키는 `(base_path, keeper, tool_call_id)` 정확 일치 + `args_fingerprint` 동일
+  확인이다. fingerprint 만 같은 다른 workspace 의 같은 식별자에는 결정을 배분하지 않고, 이 경우
+  `late_uncertain` 로 분류해 operator 확인을 요구한다(§7 열린 질문에서 제거됨).
 - 쓰기: `note_timed_out`(expired 기록)과 `remember_late`(remembered 확정) 시각에
   `{op, keeper, tool_call_id, tool, args_fingerprint, decision, actor, at}` 레코드를 fsync append.
   기존 `reap_locked` 는 메모리 view 만 걷고 저널은 지우지 않는다(크래시 안전, won-chik 이 지적한
   full-replace 위험을 처음부터 만들지 않는다).
 - 복원: `create ()` 시점에 저널을 읽어 expired/remembered 를 재구성한다. 재시작 직후
   `take` 가 바로 동작하려면 이 복원이 부팅 동기 경로여야 한다(주석으로 근거 명시).
-- 소비: `take` 성공 시 tombstone 레코드(`op=consume`)를 append — 재시작 뒤 같은 결정이 두 번
-  쓰이는 것을 막는다. 메모리 목록은 지금처럼 즉시 뽑아낸다.
+- 소비(reviewer 경계 2 반영, 성공 경계를 순서 계약으로 고정):
+  1. `take` 는 **먼저** `op=consume` 레코드를 append+fsync 하고, 성공한 뒤에만 decision 을 caller 에게
+     반환한다. append/fsync 가 실패하면 decision 을 반환하지 않고 메모리 항목도 제거하지 않는다 —
+     재시작 뒤 복원 시 같은 결정이 다시 제공될 수 있다(중복 인가보다 안전한 쪽으로 무릅니다).
+  2. caller 반환에 성공하면 `op=deliver` 레코드를 붙인다. 저널에 `consume` 만 있고 `deliver` 가 없는
+     꼬리 레코드는 "결과 불명" 창이다: 복원 시 자동 재적용하지 않고 health `late_uncertain` 카운트로
+     노출하며, operator 확인(`ack`)으로만 닫는다.
+  3. 이 창에서 외부 효과는 아직 없다 — gate 는 dispatch 앞에서 막는 지점이고, tool 실행은 decision 이
+     caller(스트림 핸들러)에게 돌아간 뒤 정상 턴 흐름에서 새 attempt identity 로 일어난다. 따라서
+     "consume 내구화 직후 프로세스 사망"은 미전달·무효과 상태이며 위 2의 계약으로 멈춘다. tombstone
+     하나만으로 end-to-end 단 한 번을 주장하지 않는다(단 한 번의 보증은 consume/deliver 순서 계약 +
+     실행 원장의 attempt identity 로 나눠 근거를 둔다).
 - TTL 900s 는 **유지**한다. 이것은 wall-clock 자동 만료(금지)가 아니라 "인간 결정 하나가 인가할 수 있는
   시간"의 안전 상계이고, 기존 주석(`keeper_late_approval.ml:60~79`)의 논리 — yolo 전환 시 과거 기억
   발화 차단 포함 — 가 그대로 성립하기 때문이다. TTL 이 "만료"가 아니라 "인가 상계"임을 주석에
@@ -136,11 +152,20 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
   (`Exact_restart_quarantined` 투영, `keeper_approval_queue_exact_transition.ml:44~46`)을 거친다 —
   이를 건드리지 않는다(안전 latch 유지).
 - 대신 operator 전용 복구 엔드포인트를 dashboard 에 하나 둔다:
-  `POST /api/v1/keepers/hitl/approvals/:id/recover` — 본문 `{ action: "rearm" }`.
+  `POST /api/v1/keepers/hitl/approvals/:id/recover` — 본문 `{ action: "rearm", expected_revision }`.
   전제조건을 typed 로 강제한다: `exact_attempt.status ∈ { Exact_restart_quarantined,
   Exact_released_recovery_required }` 이고 `summary_attempt_disposition ∈ { in_flight,
   persistence_uncertain }` 일 때만 `Exact_unbound + Summary_attempt_ready` 로 되돌린다.
   rules_types.mli 주석("Only explicit operator recovery")이 가정한 바로 그 경로다.
+- (reviewer 경계 3 반영) 복구 계약을 더 좁힌다:
+  - **CAS**: recover 는 `expected_revision` 을 요구하고 row revision 과 attempt identity 에 대해
+    compare-and-swap 한다. 두 요청이 같은 revision 을 겨냥하면 정확히 하나만 적용되고 나머지는
+    `status_conflict` 로 거절된다(테스트 §5-3).
+  - **재실행 범위**: rearm 은 **summary(auto judge) 생성을 다시 시작하는 것**뿐이다 — 외부 tool 이나
+    이전 attempt 의 dispatch 를 재실행하지 않는다. 이전 dispatch 결과가 불명한 row 는 자동 재실행되지
+    않고, 이전 attempt 의 실행 원장 readback(확정 결과·비실행 증거·효과 불명)을 health/responses 로
+    그대로 노출해 operator 가 수동 처분을 결정하게 둔다. 즉 recover = 새 판단 생성 재개이지
+    효과 재실행이 아니다.
 - 재시작 자동 재시도는 만들지 않는다 — latch 의 존재 이유(dispatch 결과 불명)를 유지한다.
   operator 는 health 섹션의 `exact_bound_residual`(D1)로 이 정체를 발견하고 recover 로 푼다.
 - polisher 163h 사례류의 수동 모드 방치 entry 는 자동 복구를 붙이지 않는다(모드 정책 #31321 존중).
@@ -155,18 +180,44 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
   `summary_attempt_disposition` 의 closed variant 에 exhaustive match 한다. health `reason`
   문자열은 표시용이고 판정 입력이 아니다.
 
+## 4b. 숫자 정책과 task 계약의 구분 (reviewer D3 지적 반영)
+
+현재 task-1665 계약이 요구하는 것은 180초의 "typed 조건 또는 측정 근거"다. 아래 숫자들은 그 외의
+새 정책이므로 계약 범위와 근거를 이렇게 갈라 둔다:
+
+| 수 | 분류 | 이번 설계에서의 근거 |
+|---|---|---|
+| 180.0 (timeout 기본값) | task 계약 대상 | 측정 부재를 주석으로 명시(현 요구의 셋째 길). config 이동만 함 |
+| 900.0 (late TTL) | 기존 설계 유지 | 이번에 새로 만드는 정책이 아니다 — 기존 인가 상계 논리를 보존 |
+| clamp 5.0–3600.0 | 새 정책(보호 한계) | 측정 근거 없음. 오용 방지 한계로만 명시하고 근거 부재를 주석에 적는다 |
+| attention 임계 timeout×2 | 새 정책(표시 임계) | 근거 없음. §7 의 열린 질문으로 남기고 카운터가 모이면 재조정 |
+| answered/timed_out 카운터 | 측정 도구 | task 계약이 요구하는 근거 수집기 자체. §D3 참조 |
+
+카운터는 **프로세스 수명 동안만** 유효하다(등록부가 메모리 구조). 재시작을 넘어 지속하는 카운터를
+만들지 않는 이유는, 지속 카운터가 곧 또 하나의 저널이 되어 D2 와 동일한 내구성 문제를 끌어오기
+때문이다. 대신 health 섹션에 `measured_since`(프로세스 부팅 시각)를 함께 내보내 전후 비교 가능성을
+보장한다. 재시작 지속 측정이 필요해지면 그때 별도 근거와 함께 확장한다.
+
 ## 5. 테스트 계획 (완료 기준과 1:1)
 
 1. **재시작 뒤 늦은 승인 적용(필수)** — `note_timed_out` → `remember_late` → 저널 기록 →
    새 `t` 를 저널에서 복원 → `take` 가 같은 decision 을 되돌려주는 단위 테스트.
-   tombstone 이 있으면 복원되지 않는 부정 케이스 포함.
+   `deliver` 레코드까지 남으면 복원되지 않는 부정 케이스 포함.
 2. **health 섹션** — registry stub + queue fixture 로 `approvals_open`/`oldest`/summary 카운트
    정확성, `status="attention"` 전환 조건 테스트. `/health?full=1` 롤업에 섹션이 등장하는지
-   routes 테스트.
-3. **recover 엔드포인트** — typed 전제 충족 row 만 rearm 되고, `Exact_completed` 등은
-   거절(status_conflict)인 테스트. 미인증 caller 거절(task-1662 경계 재사용).
-4. **회귀** — 기존 `classify_auto_judge_entry`·부팅 resume 테스트는 그대로 통과해야 한다
+   routes 테스트. `measured_since` 가 부팅 시각과 같은지 확인.
+3. **저널 경계(reviewer 표 반영)** —
+   - consume append/fsync 실패: decision 미반환, 메모리 항목 보존, 재시도 시 재배분 가능 확인.
+   - consume 후 deliver 전 중단: 복원 시 `late_uncertain` 분류, 자동 재적용 없음.
+   - workspace 교차: 같은 keeper/call/fingerprint 의 A·B 결정이 서로 적용되지 않음(배분 키에
+     base_path 포함).
+4. **recover 엔드포인트** — typed 전제 충족 row 만 rearm 되고, `Exact_completed` 등은
+   거절(status_conflict)인 테스트. 같은 revision 을 겨냥한 두 요청 중 하나만 적용(CAS).
+   미인증 caller 거절(task-1662 경계 재사용). rearm 이 외부 tool 을 재실행하지 않음을
+   stub 수준에서 확인.
+5. **회귀** — 기존 `classify_auto_judge_entry`·부팅 resume 테스트는 그대로 통과해야 한다
    (요구 4의 "이미 있는 경로"를 부수지 않았음을 증명).
+
 
 ## 6. 순서와 범위
 
@@ -176,7 +227,16 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
 
 ## 7. 열린 질문 (구현 전 답이 필요한 것)
 
-- D2 저널의 위치: workspace별(base_path 하위) vs 전역 단일 — 현재 `shared ()` 가 전역 싱글턴이라
-  workspace 구분이 없다. 전역 저널 하나로 가되 레코드에 base_path 를 넣는 안을 기본으로 제안한다.
+- ~~D2 저널의 위치: workspace별 vs 전역~~ → §D2 에서 **전역 저널 + base_path 결속**으로 확정함
+  (context-reviewer 경계 1 반영, 2026-10-07 리뷰).
 - D1 `oldest` 임계(attention 전환)의 초기값: `timeout_sec * 2`(360s) 제안 — 근거는 없고, D3 카운터가
-  쌓인 뒤 재조정한다. 상수의 근거 부재를 숨기지 않기 위해 주석에 동일하게 명시한다.
+  쌓인 뒤 재조정한다. 상수의 근거 부재를 숨기지 않기 위해 주석에 동일하게 명시한다(§4b 표 참조).
+- `late_uncertain`(consume/deliver 사이 결과 불명)의 operator `ack` 표면을 dashboard 어디에 둘지 —
+  D1 health 섹션에 카운트로 먼저 노출하고, ack 엔드포인트는 D4 recover 와 같은 PR 에 넣는다.
+
+## 8. 개정 이력
+
+- 2026-10-07 초기안(9249fed570): §0~§7.
+- 2026-10-07 개정(anyang-keepers COMMENTED 리뷰 반영, head 갱신 예정): D2 저장 권위 확정(전역+
+  base_path 결속), consume/deliver 성공 경계와 late_uncertain 계약, D4 CAS+재실행 범위 명시,
+  §4b 숫자 정책의 계약 범위 구분, 테스트 계획에 저널 경계 4케이스 추가.

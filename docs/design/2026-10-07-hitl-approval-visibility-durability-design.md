@@ -239,6 +239,6 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
 ## 8. 개정 이력
 
 - 2026-10-07 초기안(9249fed570): §0~§7.
-- 2026-10-07 개정(anyang-keepers COMMENTED 리뷰 반영, head 갱신 예정): D2 저장 권위 확정(전역+
+- 2026-10-07 개정(anyang-keepers COMMENTED 리뷰 반영, head eaf9fbb669+): D2 저장 권위 확정(전역+
   base_path 결속), consume/deliver 성공 경계와 late_uncertain 계약, D4 CAS+재실행 범위 명시,
   §4b 숫자 정책의 계약 범위 구분, 테스트 계획에 저널 경계 4케이스 추가.

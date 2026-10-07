@@ -487,6 +487,48 @@ let test_a_preset_that_does_not_load_is_listed_as_unreadable () =
       [ ("evening", reason) ] listing.Preset.unreadable)
 ;;
 
+(* Delete removes a preset whether or not it loads. A preset saved in an
+   older overrides format cannot be restored, so deleting it is what the
+   operator can still do with it; the list then holds neither. *)
+let test_delete_removes_a_preset_whether_or_not_it_loads () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    let evening = or_fail (Preset.capture ~base_path ~name:"evening" ~description:"") in
+    or_fail (Preset.save ~base_path evening);
+    write_file
+      (Filename.concat (Preset.source_directory ~base_path evening) "prompt_overrides.json")
+      {|{"schema_version":1,"overrides":[]}|};
+    let delete name =
+      match Preset.delete ~base_path name with
+      | Ok () -> ()
+      | Error error -> fail (Preset.delete_error_to_string error)
+    in
+    delete "morning";
+    delete "evening";
+    let listing = Preset.list ~base_path in
+    check (list string) "no preset is listed" []
+      (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
+    check (list string) "no preset is unreadable" []
+      (List.map fst listing.Preset.unreadable);
+    check bool "the directory is gone" false
+      (Sys.file_exists (Preset.source_directory ~base_path evening)))
+;;
+
+let test_delete_refuses_a_missing_or_invalid_name () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    (match Preset.delete ~base_path "never-saved" with
+     | Error (Preset.Delete_not_found "never-saved") -> ()
+     | Error error -> fail ("wrong refusal: " ^ Preset.delete_error_to_string error)
+     | Ok () -> fail "a preset that was never saved was deleted");
+    (match Preset.delete ~base_path ".." with
+     | Error (Preset.Delete_invalid_name "..") -> ()
+     | Error error -> fail ("wrong refusal: " ^ Preset.delete_error_to_string error)
+     | Ok () -> fail "the parent directory name was accepted"))
+;;
+
 (* A preset is opened, listed and restored by its directory's name. A
    directory copied under a new name keeps the original's name in its
    manifest, and listed from it the copy's row would open the original. *)
@@ -675,6 +717,10 @@ let () =
             test_override_written_against_an_older_default_still_restores
         ; Alcotest.test_case "an override that cannot render is skipped with the reason" `Quick
             test_override_that_cannot_render_is_skipped_with_the_reason
+        ; Alcotest.test_case "delete removes a preset whether or not it loads" `Quick
+            test_delete_removes_a_preset_whether_or_not_it_loads
+        ; Alcotest.test_case "delete refuses a missing or invalid name" `Quick
+            test_delete_refuses_a_missing_or_invalid_name
         ; Alcotest.test_case "a second restore replaces the autosave" `Quick
             test_a_second_restore_replaces_the_autosave
         ; Alcotest.test_case "a failed save keeps the preset it was replacing" `Quick

@@ -814,6 +814,35 @@ let restore ~base_path name =
   Ok { restored = name; autosave; prompt_overrides_result; instructions_result; runtime_result }
 ;;
 
+(* ── Delete ────────────────────────────────────────────────────────── *)
+
+type delete_error =
+  | Delete_invalid_name of string
+  | Delete_not_found of string
+  | Delete_failed of { name : string; reason : string }
+
+(* No [load] first: an unreadable preset cannot be restored, so removing it is
+   the one thing the operator can still do with it. *)
+let delete ~base_path name =
+  if not (is_valid_name name)
+  then Error (Delete_invalid_name name)
+  else (
+    let dir = preset_dir ~base_path name in
+    if not (Sys.file_exists dir && Sys.is_directory dir)
+    then Error (Delete_not_found name)
+    else (
+      match guard (fun () -> Ok (Fs_compat.remove_tree dir)) with
+      | Ok () -> Ok ()
+      | Error reason -> Error (Delete_failed { name; reason })))
+;;
+
+let delete_error_to_string = function
+  | Delete_invalid_name name -> "invalid preset name: " ^ name
+  | Delete_not_found name -> "no preset named " ^ name
+  | Delete_failed { name; reason } ->
+    Printf.sprintf "preset %s could not be removed: %s" name reason
+;;
+
 let same_settings (left : snapshot) (right : snapshot) =
   let ordered rows = List.sort Stdlib.compare rows in
   ordered left.prompt_overrides = ordered right.prompt_overrides

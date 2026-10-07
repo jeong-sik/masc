@@ -313,6 +313,7 @@ type async_msg =
       int * (Masc_tui_loader.runtime_surface_load, string) result
   | Tools_loaded of int * string option * (Masc.Tui_decode_tools.tool_snapshot, string) result
   | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
+  | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list

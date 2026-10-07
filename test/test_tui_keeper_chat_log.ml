@@ -849,10 +849,10 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       let t = T.of_log ~now:2000. log in
       check bool "response stop does not finish the Keeper turn" true (T.phase t = T.Working);
       check bool "provider stop reaches the progress row" true
-        (Masc.String_util.contains_substring (T.progress_text ~now:2000. t) "model response ended");
+        (String_util.contains_substring (T.progress_text ~now:2000. t) "model response ended");
       check bool "stopped provider is not still streaming or thinking" false
-        (Masc.String_util.contains_substring (T.progress_text ~now:2000. t) "STREAMING"
-         || Masc.String_util.contains_substring (T.progress_text ~now:2000. t) "THINKING");
+        (String_util.contains_substring (T.progress_text ~now:2000. t) "STREAMING"
+         || String_util.contains_substring (T.progress_text ~now:2000. t) "THINKING");
       check string "the completed response text stays authored text" "EARLIER_RESPONSE" (T.text t))
       [wire; replay];
     let revision = Log.revision replay in
@@ -865,9 +865,9 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
     List.iter (fun log ->
       let text = T.progress_text ~now:2000. (T.of_log ~now:2000. log) in
       check bool "the next response clears its predecessor's stop" false
-        (Masc.String_util.contains_substring text "model response ended");
+        (String_util.contains_substring text "model response ended");
       check bool "a response start does not invent reasoning or text" false
-        (Masc.String_util.contains_substring text "STREAMING" || Masc.String_util.contains_substring text "THINKING"))
+        (String_util.contains_substring text "STREAMING" || String_util.contains_substring text "THINKING"))
       [wire; replay];
     List.iter send Agent_core.Types.[
       ContentBlockDelta {index=0;delta=TextDelta "PREFIX"};

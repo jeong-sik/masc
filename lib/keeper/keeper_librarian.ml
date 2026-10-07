@@ -325,7 +325,8 @@ let prompt_variables (inp : input) : (string * string) list =
   ; "memory_limits", Yojson.Safe.to_string
       (Keeper_memory_limits.to_json
          (Keeper_memory_limits.current
-            (Option.fold ~none:[] ~some:(fun current -> current.facts) inp.current)))
+            (Option.fold ~none:[]
+               ~some:(fun (current : current_selection) -> current.facts) inp.current)))
   ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "historical_task_contexts", Yojson.Safe.to_string

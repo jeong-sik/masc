@@ -33,7 +33,7 @@ required = true
 name = "prompt"
 type = "string"
 required = true
-description = "The request the receiving Keeper reads: goal, scope, inputs, expected output, and how you will check it."
+description = "The request the receiving Keeper reads: goal, scope, inputs, expected output, and how you will check it. Also shown to the operator in chat. Use readable prose with normal word spacing, punctuation, and paragraph breaks, including Korean spacing. Shorten wording when needed; do not remove spaces between words. Preserve quoted source text, code, paths, and identifiers exactly."
 
 [[params]]
 name = "artifacts"

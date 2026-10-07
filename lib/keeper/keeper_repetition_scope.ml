@@ -21,26 +21,9 @@ let tool_calls state ~scope =
     ; output_fingerprint = observation.output_fingerprint
     }) calls)
 
-let context_key = "keeper_repetition_scopes"
-
-let load context =
-  match Agent_core.Context.get_scoped context Agent_core.Context.Session context_key with
-  | None -> Ok Snapshot.empty
-  | Some json -> Snapshot.of_json json
-
-let save context state =
-  Agent_core.Context.set_scoped context Agent_core.Context.Session context_key (Snapshot.to_json state)
-
-let restore ~source ~target =
-  let* state = load source in
-  (* No checkpoint freshness order can be inferred from counts or an active
-     scope. Restore into an empty key, or replay the exact same projection. *)
-  match Agent_core.Context.get_scoped target Agent_core.Context.Session context_key with
-  | None -> save target state; Ok state
-  | Some _ ->
-      let* existing = load target in
-      if Snapshot.equal state existing then Ok existing
-      else Error Snapshot.Restore_target_conflict
+let load = Keeper_repetition_context.load
+let save = Keeper_repetition_context.save
+let restore = Keeper_repetition_context.restore
 
 module Execution = struct
   type snapshot = Snapshot.t
@@ -52,13 +35,7 @@ module Execution = struct
   let direct_operation operation_id =
     { scope = Id.direct_operation operation_id; current = None }
 
-  let install ~target state =
-    match Agent_core.Context.get_scoped target Agent_core.Context.Session context_key with
-    | None -> save target state; Ok ()
-    | Some _ ->
-      let* existing = load target in
-      if Snapshot.equal existing state then Ok ()
-      else Error Snapshot.Restore_target_conflict
+  let install = Keeper_repetition_context.install
 
   let prepare execution ~source ~target =
     let result =

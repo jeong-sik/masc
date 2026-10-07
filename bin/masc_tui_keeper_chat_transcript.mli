@@ -456,6 +456,8 @@ type drawn =
   | Drawn_status of string
       (** How a turn without visible reply text ended, from the recorded
           reply through {!turn_status_text}. *)
+  | Drawn_error of string
+      (** The terminal stream failure, after any partial text and tools. *)
 
 type drawn_item =
   { superseded : int option
@@ -468,8 +470,10 @@ type drawn_item =
 
 val drawn : t -> drawn_item list
 (** The trail flattened -- a superseded block's rows in place, tagged with
-    their attempt -- and reconciled with the recorded reply. Without a reply,
-    the trail as it is. The recorded reply is the terminal message's text, not
+    their attempt -- and reconciled with the recorded reply. A terminal
+    failure appends one [Drawn_error], preserving any prior reply or checkpoint.
+    Without a reply, the trail stays as it is.
+    The recorded reply is the terminal message's text, not
     the whole turn's, so with a [Visible_reply] it stands for the text
     stretch that streamed after the current attempt's last tool or skill
     round: that one stretch is replaced by one [Drawn_reply] carrying the

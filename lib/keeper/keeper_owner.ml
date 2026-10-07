@@ -178,6 +178,9 @@ type _ command =
       Operation_id.t -> (bool, error) result command
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
+  | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
+  | Update_direct_native_call :
+      {operation_id:Operation_id.t; execution_digest:string; change:Keeper_native_call.change} -> (unit, error) result command
   | Defer_direct_checkpoint :
       { operation_id : Operation_id.t; execution_digest : string;
         checkpoint : Keeper_semantic_execution.gate_checkpoint } ->
@@ -355,7 +358,6 @@ type t =
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; on_turn_slot_released : (unit -> unit) option
   ; autonomous_lost_slot : bool ref
-  ; autonomous_deferral_debt : int ref
         (* Set when the autonomous lane asked for the slot and was refused,
            cleared when the release notification is delivered. Without it the
            notification fires after every turn, and since a woken keeper starts
@@ -428,19 +430,6 @@ let turn_in_flight_equal (left : turn_in_flight option) (right : turn_in_flight 
 
 let shutdown_operation_id_equal =
   Option.equal Keeper_shutdown_types.Operation_id.equal
-;;
-
-(* RFC-0373 direction 2: consecutive losses of the turn slot to the chat lane
-   become a value the next admission decision reads. The debt counts releases
-   the autonomous lane asked for and did not get while a chat turn held the
-   slot, resets to zero when an admitted autonomous turn settles, and at
-   [autonomous_deferral_debt_cap] the admission stops handing a freed slot to
-   the queued chat first: the handoff leaves the slot free, which is the owed
-   release signal the autonomous lane needs to take it. The cap is 3 -- one
-   less than the 5 consecutive cycles RFC-0373 measured a single 16.3-minute
-   chat hold to cost -- and it can delay a chat turn by at most the forfeited
-   releases. Owner-fiber-local like [autonomous_lost_slot]. *)
-let autonomous_deferral_debt_cap = 3
 ;;
 
 let publish_operation_projection t next =
@@ -577,6 +566,8 @@ let answer : type response. response command -> answer = function
   | Exact_operation _ -> In_its_drain_step
   | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
+  | Direct_native_call _ -> In_its_drain_step
+  | Update_direct_native_call _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
   | Resume_direct_checkpoint _ -> In_its_drain_step
   | Direct_runtime_retry _ -> In_its_drain_step
@@ -1062,7 +1053,6 @@ let start
     ; child_active = ref false
     ; child_cancel = Atomic.make None
     ; autonomous_lost_slot = ref false
-    ; autonomous_deferral_debt = ref 0
     ; stopping_waiters = ref []
     ; shutdown_idle_waiters = ref []
     ; on_turn_slot_released
@@ -1285,26 +1275,13 @@ let start
       | Some runner when not (runner.ready ~keeper_name:t.keeper_name) -> ()
       | Some runner ->
         let inventory = Atomic.get t.operation_projection in
-        (* RFC-0373 direction 2: past the debt cap the freed slot goes to the
-           autonomous lane that lost [autonomous_deferral_debt_cap]
-           consecutive releases, so the queued chat is not started and the
-           slot is left free: the handoff branch of [Run_if_idle] reads a free
-           slot as the owed release signal and wakes that lane, and with no
-           autonomous waiter the next [Run_if_idle] admits it directly. An
-           admitted autonomous turn clears the debt elsewhere; nothing else
-           writes it, and every read here is on the command loop. *)
-        let autonomous_owed_slot =
-          !(t.autonomous_deferral_debt) >= autonomous_deferral_debt_cap
-        in
-        if autonomous_owed_slot
-        then
-          Log.Keeper.info
-            ~keeper_name:t.keeper_name
-            "deferral debt cap reached: the freed slot stays open for the autonomous lane (debt=%d)"
-            !(t.autonomous_deferral_debt);
+        (* A released slot belongs to claimable direct input first. Repeated
+           autonomous observations of the same busy slot must not change that
+           order, including when the running turn yielded to newer input.
+           [notify_turn_slot_released] wakes the refused autonomous lane once
+           no direct operation claims the slot. *)
         if
-          (not autonomous_owed_slot)
-          && inventory.has_claimable_queued
+          inventory.has_claimable_queued
           && Option.is_none inventory.running_operation_id
         then (
           t.child_active := true;
@@ -1523,6 +1500,17 @@ let start
         | Command (Direct_checkpoint operation_id, resolve) ->
           let response = run_operation_read t ~label:"read direct cooperative checkpoint" (fun () ->
             Chat_operation_store.direct_checkpoint t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Direct_native_call operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read direct native execution" (fun () ->
+            Chat_operation_store.direct_native_call t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Update_direct_native_call {operation_id; execution_digest; change}, resolve) ->
+          let response = run_operation_command t ~label:"persist direct native execution" (fun () ->
+            Chat_operation_store.update_direct_native_call t.operation_store ~now:(t.now ())
+              ~operation_id ~execution_digest change) |> Result.map fst in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint}, resolve) ->
@@ -1970,27 +1958,16 @@ let start
                  | Some in_flight ->
                    (match lane with
                     | Autonomous ->
-                      t.autonomous_lost_slot := true;
-                      (* RFC-0373 direction 2: count the lost release, but
-                         only against the chat lane -- a maintenance or
-                         autonomous holder is not the queue that starves the
-                         autonomous lane, and the cap must not reorder around
-                         them. *)
-                      (match in_flight.lane with
-                       | Chat_operation ->
-                         t.autonomous_deferral_debt := !(t.autonomous_deferral_debt) + 1
-                       | Autonomous | Maintenance -> ())
+                      t.autonomous_lost_slot := true
                     | Chat_operation | Maintenance -> ());
                    Eio.Promise.resolve
                      resolve
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
                  | None ->
                    let run_admitted_turn () =
-                     (* The turn the debt existed for is running now. The
-                        Owner keeps its slot until the turn settles. A chat
-                        can be admitted only after a settled tool boundary
-                        cooperatively ends this turn or the turn completes.
-                        The debt clears at settlement. *)
+                     (* The Owner keeps its slot until the turn settles. A
+                        chat starts after a settled tool boundary yields this
+                        turn or the turn completes. *)
                      t.child_active := true;
                      publish_turn_in_flight
                        t
@@ -2072,9 +2049,6 @@ let start
                         match Atomic.get t.turn_in_flight with
                         | Some ({ lane = Chat_operation; _ } as chat) ->
                           t.autonomous_lost_slot := true;
-                          (* Same count as the poll refusal above: the lane
-                             lost this release to a chat turn. *)
-                          t.autonomous_deferral_debt := !(t.autonomous_deferral_debt) + 1;
                           Eio.Promise.resolve
                             resolve
                             (Ok (Autonomous_busy (Turn_busy (Some chat))))
@@ -2104,9 +2078,6 @@ let start
                 | Error (exn, backtrace) -> Ok (Autonomous_raised (exn, backtrace))
               in
               Eio.Promise.resolve autonomous_resolve response;
-              (* The turn the debt bought has finished, so its slot protection
-                 ends here: the next release starts a fresh cap count. *)
-              t.autonomous_deferral_debt := 0;
               Ok ()
           in
           t.child_active := false;
@@ -2162,6 +2133,15 @@ let apply_meta t command = request t (Apply_meta command)
 let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_id)
 let defer_direct_checkpoint t ~operation_id ~execution_digest ~checkpoint =
   request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint})
+let direct_native_call t ~operation_id = request t (Direct_native_call operation_id)
+let bind_direct_native_call t ~operation_id ~execution_digest ~observed ~call =
+  request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Bind {observed; call}})
+let checkpoint_direct_native_call t ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
+  request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Checkpoint {call_id; observed; checkpoint}})
+let terminal_direct_native_call t ~operation_id ~execution_digest ~call_id ~disposition =
+  request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Terminal {call_id; disposition}})
+let acknowledge_direct_native_call t ~operation_id ~execution_digest ~call_id =
+  request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Acknowledge call_id})
 let resume_direct_checkpoint t ~operation_id ~observed =
   request t (Resume_direct_checkpoint {operation_id; observed})
 

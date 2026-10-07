@@ -370,6 +370,8 @@ type try_provider_ctx =
   ; preserve_thinking : bool option
   ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
   ; agent_core_checkpoint : Agent_core.Checkpoint.t option
+  ; native_binding : Keeper_direct_native_continuation.binding option
+  ; native_retired_history_cut : Keeper_direct_native_continuation.retired_history_cut option
   ; sw : Eio.Switch.t
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; on_event : (Agent_core.Types.sse_event -> unit) option

@@ -220,6 +220,12 @@ type execution_terminal_disposition =
   ; recovery : execution_recovery_action
   }
 
+type execution_terminal_evidence =
+  { disposition : execution_terminal_disposition
+  ; has_tool_attempts : bool
+  ; settled_tool_results : Types.content_block list
+  }
+
 val execution_locator_to_yojson : execution_locator -> Yojson.Safe.t
 
 (** Decode the exact versioned locator emitted by
@@ -247,6 +253,20 @@ val open_execution_projection
   -> dir:Eio.Fs.dir_ty Eio.Path.t
   -> execution_locator
   -> (Execution_projection.t, Execution_projection.error) result
+
+val read_execution_terminal :
+  Execution_projection.t ->
+  (execution_terminal_evidence option, Execution_projection.error) result
+(** Read the canonical terminal/recovery disposition after restart, including
+    a crash after journal commit but before the host's terminal callback.
+    [None] means the root is still running. Uses the same recovery derivation
+    as terminal settlement, with no writer lock or recovery mutation. A
+    terminal disposition alone does not reconstruct the lost Agent response
+    or acknowledge its delivery to the host. The evidence includes canonical
+    Tool-attempt admission and settled ToolResults for this root Agent run.
+    A host can distinguish a
+    provider-only failure from effects settled before its checkpoint sink.
+    Child results are represented by their enclosing root ToolResult. *)
 
 (** Configure one durable execution scope. Without [resume], the directory must
     be new and the call starts a fresh scope. With [resume], the same Agent API

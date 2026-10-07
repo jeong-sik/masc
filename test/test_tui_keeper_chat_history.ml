@@ -357,7 +357,10 @@ let test_a_failed_turn_names_the_request_it_came_from () =
   check int "nothing was dropped" 0 decoded.History.dropped;
   check (list (option string)) "an operation key is the request, anything else is not"
     [ Some "tui-28e58beb"; None; None ]
-    (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows)
+    (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows);
+  check (list (option string)) "failure grouping retains the operation without a transcript slot"
+    [ Some "tui-28e58beb"; None; None ]
+    (List.map (fun r -> r.History.turn_id) decoded.History.rows)
 ;;
 
 (* The row the server persists, built by the producers' own functions rather
@@ -666,9 +669,8 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
              ~tool_call_name:"Read" "{}"
          ; row ~role:"assistant" ~delivery_key:key
              ~transcript_slot:(transcript_slot "terminal_assistant") "done"
-           (* A failure row is stored under the operation's key and carries no
-              transcript slot, so the provenance reader gives it no turn id;
-              the operation id still comes from the key. *)
+           (* A failure row carries no transcript slot. Its operation key
+              still owns both journal lookup and conversation grouping. *)
          ; row ~role:"assistant" ~kind:"transport_failure" ~delivery_key:key
              "the wire dropped"
          ; autonomous_turn ~turn_ref:"trace-1#54" [ reason "look"; tool "Read" ]
@@ -682,8 +684,8 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
     [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
     ; None; None; None ]
     (List.map (fun row -> row.History.operation_id) decoded.History.rows);
-  check (list (option string)) "turn identity is unchanged beside it"
-    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; None
+  check (list (option string)) "turn identity includes the operation's failure"
+    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
     ; Some "trace-1#54"; Some "trace-1#54"; Some "fr-1" ]
     (List.map (fun row -> row.History.turn_id) decoded.History.rows)
 ;;

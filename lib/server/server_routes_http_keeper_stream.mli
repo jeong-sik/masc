@@ -452,11 +452,13 @@ module For_testing : sig
   val take_operation_wire_stream :
     operation_id:string -> operation_wire_stream option
   val synthesize_wire_terminal_on_settle :
+    base_path:string ->
     keeper_name:string ->
     operation_id:string ->
     execution:Keeper_owner.operation_execution ->
     unit
   val on_operation_execution_settled :
+    base_path:string ->
     keeper_name:string ->
     claimed_operation_id:Keeper_owner.Chat_operation.Operation_id.t option ->
     execution:Keeper_owner.operation_execution ->

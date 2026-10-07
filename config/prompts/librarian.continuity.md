@@ -52,15 +52,18 @@ template_variables: [continuity, conversation_history, current_memory, keeper_id
 
 ## 자료
 
-### 턴 진입 시점의 Task/Goal 문맥
-
-{{historical_task_contexts}}
-
 ### 대상 Keeper
 {{keeper_id}}
 
 ### 대상 Keeper의 역할 자료
 {{keeper_instructions}}
+
+### 참고용 현재 기억
+{{current_memory}}
+
+### 턴 진입 시점의 Task/Goal 문맥
+
+{{historical_task_contexts}}
 
 ### 현재 Task에 연결된 Goal 기준
 {{goal_context}}
@@ -69,9 +72,6 @@ template_variables: [continuity, conversation_history, current_memory, keeper_id
 목표는 과거 작업의 맥락이며 새 실행 의무가 아닙니다. unavailable은 조회 실패이며
 목표가 없다는 뜻이 아닙니다. 여기의 no_task는 현재 Task 자료를 제공하지 않았다는
 뜻이며, 위의 과거 Task/Goal 관측을 지우지 않습니다.
-
-### 참고용 현재 기억
-{{current_memory}}
 
 ### 완료된 대화
 {{conversation_history}}

@@ -252,8 +252,21 @@ is-default = true
   let config = Workspace.default_config root in
   if child then (
     ignore (Workspace.init config ~agent_name:(Some "ingress-fixture"));
-    Masc_test_deps.declare_fixture_keeper ~base_path:root
-      ~sandbox_profile:(Some Keeper_types_profile.Docker) keeper_name;
+    (* The admitted turn validates the complete Docker profile even though
+       these in-process tools never acquire a guest. The catalog helper only
+       records a reference; it neither inspects nor starts Docker. *)
+    Masc_test_deps.write_sandbox_image_catalog ~base_path:root
+      ["base", "masc-ingress-native-fixture:unused"];
+    let keeper_path = Config_dir_resolver.keeper_toml_path_for_base_path
+        ~base_path:root keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname keeper_path);
+    write keeper_path (Otoml.Printer.to_string (Otoml.TomlTable [
+      "keeper", Otoml.TomlTable [
+        "instructions", Otoml.TomlString (keeper_name ^ " fixture instructions");
+        "activation_mode", Otoml.TomlString "manual";
+        "sandbox_profile", Otoml.TomlString
+          (Keeper_types_profile.sandbox_profile_to_string Keeper_types_profile.Docker);
+        "sandbox_image", Otoml.TomlString "base"]]));
     let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String keeper_name;
       "trace_id", `String session_id; "activation_mode", `String "manual"])
       |> require "meta" in

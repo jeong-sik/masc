@@ -441,7 +441,9 @@ let test_settled_invocation_projection () =
     let (_turn, _provider, _pending) = open_call root 4 "unsettled-tool" in
     check int "unsettled result is absent" 3
       (List.length (projection_value (Projection.settled_tool_invocations projection)));
-    scope_value (Scope.abort root (Scope.Cancelled {reason=None; data=None}));
+    scope_value (Scope.abort root (Scope.Cancelled
+      {reason=Some "fixture closes the unsettled invocation before read-only reopen";
+       data=None}));
     locator)) in
   let reopened = projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
   check int "restart projection retains the same settled occurrences" 3

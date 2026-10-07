@@ -192,7 +192,6 @@ val remove_snapshot : Workspace.config -> name:string -> (unit, string) result
 module Problem_report_state : sig
   type site =
     | Meta_read
-    | Meta_read_changed
     | Meta_repair
     | Meta_retired_fields
         (** The file still carries keys #39025 retired; the decoder dropped

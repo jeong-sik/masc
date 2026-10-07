@@ -477,8 +477,7 @@ let deliver_addressed_board_signal
    observable: the [Unavailable] branch below logs and counts the drop. *)
 let board_signal_relevance_max_attempts = 3
 
-(* Test hook mirroring
-   [Board_dispatch.force_flusher_start_cas_conflicts_for_test]: forces the
+(* Test hook: forces the
    next N relevance computations to report a transient board read failure so
    the bounded-retry path is exercisable without a real store outage. *)
 let forced_transient_relevance_failures_for_test : int Atomic.t = Atomic.make 0

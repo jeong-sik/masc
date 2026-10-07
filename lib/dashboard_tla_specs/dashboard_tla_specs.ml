@@ -11,7 +11,6 @@ type tlc_status =
   | Tlc_passed
   | Tlc_violated
   | Tlc_running
-  | Tlc_queued
   | Tlc_error
   | Tlc_not_run
 
@@ -192,7 +191,6 @@ let tlc_status_to_string = function
   | Tlc_passed -> "passed"
   | Tlc_violated -> "violated"
   | Tlc_running -> "running"
-  | Tlc_queued -> "queued"
   | Tlc_error -> "error"
   | Tlc_not_run -> "not_run"
 ;;

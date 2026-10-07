@@ -14,14 +14,6 @@ type t =
       call : call;
       because : string;
     }
-  | Spell_it_as of {
-      spelling : string;
-      because : string;
-    }
-      (** The same call, written the way this tool spells it. Separate from
-          {!Call_this_instead} because nothing about which call to make
-          changes, and from {!Move_to_field} because the construct is not
-          something a field carries. *)
   | Unrepresentable of {
       construct : Masc_exec.Parsed.reason_too_complex;
       because : string;
@@ -125,7 +117,6 @@ let call_instruction = function
 let tag = function
   | Move_to_field { field; _ } -> "move_to_field:" ^ field_name field
   | Call_this_instead { call; _ } -> "call_this_instead:" ^ call_name call
-  | Spell_it_as _ -> "spell_it_as"
   | Unrepresentable _ -> "unrepresentable"
 ;;
 
@@ -157,11 +148,6 @@ let to_string = function
     render_advice
       Prompt_names.subset_rewrite_call_this_instead
       [ "call", call_instruction call; "because", because ]
-      ~fallback:because
-  | Spell_it_as { spelling; because } ->
-    render_advice
-      Prompt_names.subset_rewrite_spell_it_as
-      [ "spelling", spelling; "because", because ]
       ~fallback:because
   | Unrepresentable { construct = _; because } -> because
 ;;

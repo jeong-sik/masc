@@ -219,7 +219,8 @@ def open_chat(process, fd, output) -> None:
     _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
     _keyboard_harness.send_and_wait(process, fd, output, b"c", chat_title(b"alpha"))
     _keyboard_harness.drain_until_quiet(process, fd, output)
-    assert any(b"KEEPERS" in row for row in screen(output).values()), "wide chat must show its roster by default"
+    _keyboard_harness.send_and_wait(process, fd, output, b"\x02", b"KEEPERS")
+    assert any(b"KEEPERS" in row for row in screen(output).values()), "Ctrl-B pins the portrait roster"
 
 
 def assert_chat_intact(rows: dict[int, bytes], name: bytes) -> None:
@@ -297,6 +298,16 @@ def pixels_follow_conversation(binary: str) -> None:
         assert row + 7 < _keyboard_harness.screen_row_of(rows, b"Context"), "portrait crossed the full-width status row"
         assert not mosaic_rows(rows), "Kitty portrait also drew a mosaic"
         assert_chat_intact(rows, b"alpha")
+        # Left opens navigation only while the composer is empty. Moving its
+        # cursor must leave the open conversation's portrait on alpha.
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[D", b"Enter:open")
+        cursor_start = len(output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[B", _keyboard_harness.keeper_row_selected(b"beta"))
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        caption_row(screen(output), b"alpha")
+        assert DELETE not in output[cursor_start:], "moving the roster cursor removed the active chat portrait"
+        assert png_transfers(bytes(output))[-1][2] == alpha, "roster cursor retargeted the portrait before chat opened"
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[C", b"\x1b[?25h")
         assert _keyboard_harness.drain_until_quiet(process, fd, output), "chat did not settle before typing measurement"
         typing_start = len(output)
         draft = b"portrait10"
@@ -311,15 +322,10 @@ def pixels_follow_conversation(binary: str) -> None:
               f"frames beside it: {frames_beside(typing_output, set(range(row, row + PORTRAIT_ROWS)))}", flush=True)
         assert not resent, f"typing sent the unchanged portrait's pixels again: {resent[:3]}"
         assert_chat_intact(screen(output), b"alpha")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[D", b"Enter:open")
-        cursor_start = len(output)
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[B", _keyboard_harness.keeper_row_selected(b"beta"))
-        _keyboard_harness.drain_until_quiet(process, fd, output)
-        caption_row(screen(output), b"alpha")
-        assert DELETE not in output[cursor_start:], "moving the roster cursor removed the active chat portrait"
-        assert png_transfers(bytes(output))[-1][2] == alpha, "roster cursor retargeted the portrait before chat opened"
+        # A nonempty draft keeps Left for editing; Ctrl-G switches Keeper
+        # while retaining that draft for the return trip.
         start = len(output)
-        _keyboard_harness.send_and_wait(process, fd, output, b"\r", chat_title(b"beta"))
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x07", chat_title(b"beta"))
         _keyboard_harness.drain_until_quiet(process, fd, output)
         beta = png_transfers(bytes(output[start:]))
         assert beta and beta[-1][2] != alpha, "new conversation kept alpha's portrait"
@@ -452,24 +458,28 @@ def running_turn_keeps_the_portrait(binary: str) -> None:
 def hidden_roster_releases_focus(binary: str, *, resize: bool) -> None:
     def interact(process, fd, _slave, output, _base):
         open_chat(process, fd, output)
-        draft = b"alpha-kept-draft"
-        _keyboard_harness.send_and_wait(process, fd, output, draft, _keyboard_harness.composer_showing(draft))
+        # Transient navigation starts from the empty composer.
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[D", b"Up/Down:move")
         # Leave the roster cursor on beta, distinct from the open conversation.
-        # A stale focus would let Enter switch chats and abandon alpha's draft.
+        # A stale focus would let Enter switch chats instead of editing alpha.
         _keyboard_harness.write_all(fd, output, b"\x1b[B")
         _keyboard_harness.drain_until_quiet(process, fd, output)
         if resize:
             _keyboard_harness.resize_and_wait(process, fd, output, rows=TALL_ROWS, columns=109,
-                              needle=chat_title(b"alpha"))
+                              needle=b"KEEPERS")
+            # The narrow navigator owns the body until explicitly dismissed.
+            assert chat_title(b"alpha") not in b"\n".join(screen(output).values())
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", chat_title(b"alpha"))
         else:
             _keyboard_harness.send_and_wait(process, fd, output, b"\x02", chat_title(b"alpha"))
         _keyboard_harness.drain_until_quiet(process, fd, output)
         rows = screen(output)
         assert not any(b"KEEPERS" in row for row in rows.values()), "roster is still visible"
-        assert draft in b"\n".join(rows.values()), "hiding the roster discarded the draft"
+        assert_chat_intact(rows, b"alpha")
         assert b"Up/Down:move" not in b"\n".join(rows.values()), "hidden roster still owns the footer"
         assert output.rfind(b"\x1b[?25h") > output.rfind(b"\x1b[?25l"), "hidden roster still hides the input cursor"
+        draft = b"alpha-kept-draft"
+        _keyboard_harness.send_and_wait(process, fd, output, draft, _keyboard_harness.composer_showing(draft))
         _keyboard_harness.send_and_wait(process, fd, output, b"-typed", _keyboard_harness.composer_showing(draft + b"-typed"))
 
         def composer_keys():
@@ -491,13 +501,14 @@ def hidden_roster_releases_focus(binary: str, *, resize: bool) -> None:
             _keyboard_harness.send_and_wait(process, fd, output, b"\x02", b"KEEPERS")
         _keyboard_harness.drain_until_quiet(process, fd, output)
         assert any(b"KEEPERS" in row for row in screen(output).values()), "roster did not return"
+        assert _keyboard_harness.composer_showing(b"/settings").search(b"\n".join(screen(output).values())), "showing the roster discarded the composer draft"
         # Showing it again must not restore the former invisible focus.
         composer_keys()
         _keyboard_harness.write_all(fd, output, b"\x15")
         _keyboard_harness.drain_until_quiet(process, fd, output)
         close_chat(process, fd, output)
 
-    reason = "resize" if resize else "Ctrl-B"
+    reason = "narrow navigator dismissal" if resize else "Ctrl-B"
     _keyboard_harness.run_terminal_scenario(binary, description=f"chat roster {reason} hands focus back to the composer",
                             interact=interact, http_fixtures=_keyboard_harness.keeper_runtime_http_fixtures(),
                             terminal_cols=COLUMNS)

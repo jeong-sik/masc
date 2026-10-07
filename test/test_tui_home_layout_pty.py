@@ -65,7 +65,7 @@ def explicit_pane_choice(executable):
     _keyboard_harness.run_terminal_scenario(
         executable, description="Home pane opens only after an explicit choice",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
-        prepare_workspace=home.seed_goals,
+        prepare_workspace=home.seed_goals, refresh=0.5,
     )
 
 
@@ -113,6 +113,7 @@ def short_home_keeps_destinations(executable):
         executable, description="Short Home preserves decisions resume and new work",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
         prepare_workspace=lambda base: home.seed_goals(base, [goal]),
+        refresh=0.5,
     )
 
 

@@ -244,7 +244,6 @@ let decode_connector json =
   let* cn_directory_updated_at =
     optional_string_field json "directory_updated_at"
   in
-  let* cn_workspace_id = optional_string_field json "workspace_id" in
   let* bindings_json = required_list_field json "configured_bindings" in
   let* cn_bindings =
     decode_list "configured_bindings" decode_connector_binding bindings_json
@@ -289,15 +288,10 @@ let decode_connector json =
     ; cn_directory_permission_denied
     ; cn_directory_errors
     ; cn_directory_updated_at = nonblank_option cn_directory_updated_at
-    ; cn_workspace_id = nonblank_option cn_workspace_id
       (* Name evidence does not travel on the connector object. It arrives as
          one connector name page per kind, and connector_with_name_pages
-         fills these in from those pages -- which is already why the two
-         fields below start empty. The connector used to be read for
-         server_names_path, channel_names_path, people_names_path and
-         name_mappings as well, but no producer has emitted any of them since
-         the page vocabulary landed, so those reads only claimed a source
-         that does not exist. *)
+         fills these in from those pages, the workspace id included. *)
+    ; cn_workspace_id = None
     ; cn_server_names_path = None
     ; cn_channel_names_path = None
     ; cn_people_names_path = None

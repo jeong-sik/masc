@@ -36,6 +36,10 @@ let ready_account_revision ~events ~policy ~balance ~keeper =
         String.equal allocation.keeper keeper) payment.allocations
     | Candle_event.Purchased purchase -> String.equal purchase.keeper keeper
     | Candle_event.Granted granted -> String.equal granted.keeper keeper
+    | Candle_event.Gifted gift ->
+      String.equal gift.from_keeper keeper || String.equal gift.to_keeper keeper
+    | Candle_event.Gifted_item gift ->
+      String.equal gift.from_keeper keeper || String.equal gift.to_keeper keeper
     | Candle_event.Equipped choice -> String.equal choice.keeper keeper
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
     | Candle_event.Unattributed _ | Candle_event.Payout_failed _ -> false in

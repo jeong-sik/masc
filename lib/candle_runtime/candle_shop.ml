@@ -11,6 +11,17 @@ type catalog_entry =
   ; price : Candle_config.price
   }
 
+let catalog_entry_to_yojson (entry : catalog_entry) =
+  `Assoc
+    ([ "id", `String (Keeper_portrait_item.id entry.item)
+     ; "slot", `String (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot entry.item))
+     ]
+     @
+     match entry.price with
+     | Candle_config.Unpriced -> [ "price_status", `String "unpriced" ]
+     | Candle_config.Priced amount ->
+       [ "price_status", `String "priced"; "price_milli", `String (string_of_int amount) ])
+
 type receipt =
   { account : account
   ; item : Keeper_portrait_item.t

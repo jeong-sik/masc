@@ -117,18 +117,18 @@ type usage_read_shape =
   | Openrouter_key
   | Zai_quota_limit
   | Kimi_coding_usages
-  | Ollama_usage
+  | Ollama_balance
 [@@deriving show, eq]
 
 let all_usage_read_shapes =
-  [ Openrouter_key; Zai_quota_limit; Kimi_coding_usages; Ollama_usage ]
+  [ Openrouter_key; Zai_quota_limit; Kimi_coding_usages; Ollama_balance ]
 ;;
 
 let usage_read_shape_to_string = function
   | Openrouter_key -> "openrouter-key"
   | Zai_quota_limit -> "zai-quota-limit"
   | Kimi_coding_usages -> "kimi-coding-usages"
-  | Ollama_usage -> "ollama-usage"
+  | Ollama_balance -> "ollama-balance"
 ;;
 
 type usage_read =

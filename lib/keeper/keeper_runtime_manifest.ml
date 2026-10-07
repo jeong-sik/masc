@@ -8,13 +8,11 @@ type payload_role =
   | Model_input
   | Operator_evidence
   | Checkpoint
-  | Memory_store
 
 let payload_role_to_string = function
   | Model_input -> "model_input"
   | Operator_evidence -> "operator_evidence"
   | Checkpoint -> "checkpoint"
-  | Memory_store -> "memory_store"
 
 type source_clock =
   | Wall

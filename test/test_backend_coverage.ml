@@ -322,84 +322,6 @@ let test_eio_memory_delete_not_found () =
   | _ -> fail "delete nonexistent should fail"
 
 (* ============================================================ *)
-(* Backend.ml - Unified Backend Interface                    *)
-(* ============================================================ *)
-
-let test_eio_unified_memory () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let mem = Backend.Memory.create () in
-  let backend = Backend.Mem mem in
-
-  (* set *)
-  (match Backend.set backend "key" "value" with
-  | Ok () -> ()
-  | Error _ -> fail "unified set failed");
-
-  (* get *)
-  (match Backend.get backend "key" with
-  | Ok v -> check string "unified get" "value" v
-  | Error _ -> fail "unified get failed");
-
-  (* exists *)
-  check bool "unified exists" true (Backend.exists backend "key");
-
-  (* delete *)
-  (match Backend.delete backend "key" with
-  | Ok () -> ()
-  | Error _ -> fail "unified delete failed");
-
-  check bool "unified not exists" false (Backend.exists backend "key")
-
-let test_eio_unified_set_if_not_exists () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let mem = Backend.Memory.create () in
-  let backend = Backend.Mem mem in
-
-  (* First set should succeed *)
-  (match Backend.set_if_not_exists backend "unique" "first" with
-  | Ok true -> ()
-  | _ -> fail "first set_if_not_exists should succeed");
-
-  (* Second set should fail *)
-  match Backend.set_if_not_exists backend "unique" "second" with
-  | Ok false -> ()
-  | _ -> fail "second set_if_not_exists should fail"
-
-let test_eio_unified_list_keys () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let mem = Backend.Memory.create () in
-  let backend = Backend.Mem mem in
-
-  let _ = Backend.set backend "a" "1" in
-  let _ = Backend.set backend "b" "2" in
-
-  match Backend.list_keys backend with
-  | Ok keys -> check bool "has keys" true (List.length keys >= 2)
-  | Error _ -> fail "list_keys failed"
-
-let test_eio_unified_lock_memory () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let mem = Backend.Memory.create () in
-  let backend = Backend.Mem mem in
-
-  (* Memory backend locks always succeed *)
-  (match Backend.acquire_lock backend ~key:"k" ~owner:"o" ~ttl_seconds:60 with
-  | Ok true -> ()
-  | _ -> fail "memory lock should succeed");
-
-  (match Backend.release_lock backend ~key:"k" ~owner:"o" with
-  | Ok true -> ()
-  | _ -> fail "memory release should succeed");
-
-  match Backend.extend_lock backend ~key:"k" ~owner:"o" ~ttl_seconds:60 with
-  | Ok true -> ()
-  | _ -> fail "memory extend should succeed"
-
-(* ============================================================ *)
 (* Backend.ml - lock_info JSON                               *)
 (* ============================================================ *)
 
@@ -572,12 +494,6 @@ let () =
       test_case "list_keys" `Quick test_eio_memory_list_keys;
       test_case "clear" `Quick test_eio_memory_clear;
       test_case "delete not found" `Quick test_eio_memory_delete_not_found;
-    ];
-    "eio_unified", [
-      test_case "memory ops" `Quick test_eio_unified_memory;
-      test_case "set_if_not_exists" `Quick test_eio_unified_set_if_not_exists;
-      test_case "list_keys" `Quick test_eio_unified_list_keys;
-      test_case "lock memory" `Quick test_eio_unified_lock_memory;
     ];
     "eio_lock_info", [
       test_case "json roundtrip" `Quick test_lock_info_json_roundtrip;

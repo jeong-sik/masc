@@ -159,8 +159,10 @@ val continuity_prompt_variables
   -> continuity:Yojson.Safe.t
   -> (string * string) list
 
-(** Variables of the pending-input organization pass: the working context
-    and the material that reads it, with no conversation to judge. *)
+(** Variables of the pending-input organization pass: the working context,
+    the Keeper's identity, instructions and goal. There is no conversation to
+    judge and no current Memory: organizing pending sources neither judges
+    nor carries Memory. *)
 val working_context_prompt_variables : input -> (string * string) list
 
 type parse_error =

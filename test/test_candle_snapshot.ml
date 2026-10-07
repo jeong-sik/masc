@@ -187,7 +187,9 @@ let goal_ids events =
        | Candle_event.Paid p -> Some p.identity.goal_id
        | Candle_event.Half_life_set _ -> None
        | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no Goal identity"
-       | Candle_event.Granted _ -> Alcotest.fail "a grant has no Goal identity")
+       | Candle_event.Granted _ -> Alcotest.fail "a grant has no Goal identity"
+        | Candle_event.Gifted _ -> Alcotest.fail "a gift has no Goal identity"
+        | Candle_event.Gifted_item _ -> Alcotest.fail "an item gift has no Goal identity")
     events
 ;;
 
@@ -480,6 +482,32 @@ let test_a_clock_that_gives_no_time_refuses_the_step () =
   no_ledger "refused" config
 ;;
 
+(* #40054: the appraiser lane settles money; it does not gate the pass record.
+   A pass records its Snapshot while the lane is unavailable. Recording sees
+   Enabled; only appraiser-gated readers (settlement,
+   [Candle_status.current]) see Disabled. *)
+let test_a_pass_records_its_snapshot_while_the_appraiser_is_unavailable () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  Fun.protect
+    ~finally:(fun () -> Candle_status.install_appraiser_check (fun () -> Ok ()))
+    (fun () ->
+      Candle_status.install_appraiser_check (fun () -> Error "publication unavailable");
+      check
+        bool
+        "settlement view is disabled"
+        true
+        (match Candle_status.current ~base_path:(base_path_of config) with
+         | Candle_config.Disabled _ -> true
+         | Candle_config.Off | Candle_config.Enabled _ -> false);
+      is_ok "snapshot records" (record config);
+      (match ledger_events config with
+       | [ { Candle_event.body = Candle_event.Snapshot snapshot; _ } ] ->
+         check string "goal" "goal-1" snapshot.goal_id
+       | events -> failf "expected one Snapshot, got %d rows" (List.length events)))
+;;
+
 let () =
   run
     "candle_snapshot"
@@ -535,6 +563,10 @@ let () =
             "a clock that gives no time refuses the step"
             `Quick
             test_a_clock_that_gives_no_time_refuses_the_step
+        ; test_case
+            "a pass records its snapshot while the appraiser is unavailable"
+            `Quick
+            test_a_pass_records_its_snapshot_while_the_appraiser_is_unavailable
         ] )
     ]
 ;;

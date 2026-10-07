@@ -120,7 +120,6 @@ type append_once_result =
     the owning request or queue store. *)
 type user_row_origin =
   | Needs_append
-  | Already_persisted of { row_id : string }
   | Already_persisted_upstream
 
 (** Authority class of the human (or agent) whose message opened a

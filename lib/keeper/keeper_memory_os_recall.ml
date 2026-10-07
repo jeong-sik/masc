@@ -116,7 +116,7 @@ let render_demand_notice ~memory_search_available ~keepers_dir ~keeper_id =
         (List.length snapshot.Keeper_memory_source_current.facts)
         (List.length snapshot.invalidations) in
   let retrieval = if memory_search_available then
-      "Use keeper_memory_search with a query relevant to the current input or task. Only returned, currently verified facts apply; do not enumerate the entire memory store as a prerequisite for work."
+      "Use keeper_memory_search with a query relevant to the current input or task. Its default scope is current memory; source=absorbed retrieves merged originals and source=dropped retrieves historical removals with reasons. Historical results require checking before use. Only returned, currently verified facts apply; do not enumerate the entire memory store as a prerequisite for work."
     else
       "Memory retrieval is unavailable on this tool surface. No stored claim bodies are included. Continue from original admitted inputs; ask for retrieval capability if historical memory is required." in
   block [ordinary; source; retrieval; current_lookup_scope]

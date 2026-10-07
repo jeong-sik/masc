@@ -2,7 +2,8 @@
     All changes are drafts until the existing config preview/save succeeds. *)
 type mode = Edit | Copy
 type t
-val create : mode -> Masc_tui_model_runtime_table.row -> t
+val create : ?source_revision:string -> mode -> Masc_tui_model_runtime_table.row -> t
+val source_revision : t -> string option
 val rows : width:int -> height:int -> t -> string list
 val paste : t -> string -> t
 type outcome = Editing of t | Cancelled | Submit of t

@@ -3284,6 +3284,67 @@ let test_official_cursor_above_the_range_end_refuses_the_hand_off () =
   | None -> fail "the refused pass removed progress"
 ;;
 
+let test_memory_count_cleanup_without_history () =
+  let module Cleanup = Masc.Keeper_memory_cleanup in
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let module Limits = Masc.Keeper_memory_limits in
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.librarian_env_key
+    (Some "true") @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.category_cap_env_key
+    (Some "1") @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.facts_per_category_cap_env_key
+    (Some "1") @@ fun () ->
+  with_workspace @@ fun config ->
+  write_meta config "cleanup-trace";
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  let custom = match Memory.category_of_string "deployment_rules" with
+    | Some value -> value | None -> fail "custom category" in
+  let fact category claim = Memory.observed ~category ~claim ~now:1.
+      ~origin:{kind=Memory.Injected;trace_id="cleanup-trace"} in
+  let first = fact Memory.Constraint "Production deployment requires approval." in
+  let second = fact custom "Deploy production only with rollback assets ready." in
+  let commit ?(absorbed=[]) new_claims =
+    match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:2.
+      ~source:{kind=Current.Librarian;trace_id="cleanup-trace"}
+      ~absorbed ~new_claims () with
+    | Ok _ -> true | Error detail -> fail detail in
+  ignore (commit [first;second]);
+  let report = Limits.current [first;second] in
+  check bool "custom category occupies the same category limit" true (Limits.exceeded report);
+  check bool "same-category item limit is independent" true
+    (Limits.exceeded (Limits.current [first; {second with category=Memory.Constraint}]));
+  let calls = ref 0 in
+  let execute ~keepers_dir:_ ~keeper_name:_ ~expected_revision:_ (input : Masc.Keeper_librarian.input) =
+    incr calls;
+    check int "no invented conversation for a count review" 0 (List.length input.messages);
+    check bool "no queue context admitted" true
+      (Masc.Keeper_librarian_context.shows_no_working_context input.working_context);
+    check int "complete current facts supplied" 2
+      (match input.current with Some current -> List.length current.facts | None -> 0);
+    commit [] in
+  let run execute = Cleanup.For_testing.run_with ~execute ~base_path:config.base_path ~keeper_name in
+  check bool "overflow reviewed without a finished turn" true
+    (run execute = Cleanup.Reviewed {remaining_excess=true});
+  check bool "safe no-change choice is not immediately repeated" true
+    (run execute = Cleanup.Already_reviewed);
+  check int "one model decision" 1 !calls;
+  Cleanup.forget ~base_path:config.base_path ~keeper_name;
+  check bool "failed dispatch stays retryable" true
+    (match run (fun ~keepers_dir:_ ~keeper_name:_ ~expected_revision:_ _ -> false) with
+     | Cleanup.Unavailable _ -> true | _ -> false);
+  let merged = fact Memory.Constraint
+      "Production deployment requires approval and ready rollback assets." in
+  let merge ~keepers_dir:_ ~keeper_name:_ ~expected_revision:_ _ =
+    commit ~absorbed:
+      [ {Memory.absorbed=Memory.memory_id first;into=Memory.memory_id merged}
+      ; {Memory.absorbed=Memory.memory_id second;into=Memory.memory_id merged} ] [merged] in
+  check bool "next wake can consolidate with lineage" true
+    (run merge = Cleanup.Reviewed {remaining_excess=false});
+  check bool "within limit requires no model" true (run execute = Cleanup.Within_limits);
+  check int "no additional no-change model calls" 1 !calls
+;;
+
 let () =
   run
     "Keeper Librarian durable consumer"
@@ -3422,7 +3483,9 @@ let () =
             test_official_cursor_above_the_range_end_refuses_the_hand_off
         ] )
     ; ( "production wake"
-      , [ test_case "failure stops and a later wake drains successful cuts" `Quick
+      , [ test_case "count overflow is reviewed without unread history" `Quick
+            test_memory_count_cleanup_without_history
+        ; test_case "failure stops and a later wake drains successful cuts" `Quick
             test_one_wake_stops_on_failure_then_drains_successful_cuts
         ; test_case "growing source allows following phases" `Quick
             test_growing_source_allows_following_phases

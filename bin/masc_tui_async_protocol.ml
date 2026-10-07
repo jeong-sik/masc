@@ -102,6 +102,7 @@ type lane_addons_reply = {
 type 'a play_mutation =
   | Play_answered of ('a, string) result
   | Play_refused of string
+  | Play_not_dispatched of string
   | Play_unanswered of string
 
 type play_revoke =

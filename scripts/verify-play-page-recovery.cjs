@@ -28,6 +28,8 @@ async function main() {
   const requests = [], errors = [];
   let roomReads = 0, padReads = 0;
   let seatReads = 0, frameReads = 0, passed = false, ejected = false, padPressed = false, invited = false, released = false, connected = true;
+  let activityRevision = 0, stallProjectionAfterType = false, holdProjection = false, projectionStarted;
+  const heldSeatReads = [];
   const messages = [
     { id:1, at:1, who:'keeper-a', speaker:'keeper', machine:'dos', text:'같이 보고 있어요.' },
     { id:2, at:2, who:'keeper-b', speaker:'keeper', machine:'msx', text:'다음 차례에 무엇을 할까요?' }
@@ -49,6 +51,7 @@ async function main() {
         json = { viewer:'minsu', messages, members, has_more:false, presence_seconds:60 };
       } else if (url.pathname === '/api/v1/play/seat') {
         seatReads += 1;
+        if (holdProjection) await new Promise(resolve => { heldSeatReads.push(resolve); projectionStarted(); });
         if (seatReads <= 2) return route.fulfill({ status: 503, json: { error: 'fixture-unavailable' } });
         json = { name: 'minsu', connected, machine: !ejected, controller: ejected || released ? null : passed ? 'operator' : 'minsu',
           controller_recoverable: false,
@@ -74,6 +77,7 @@ async function main() {
         json = { ok:true, connected };
       } else if (url.pathname === '/api/v1/dos/type') {
         assert.deepEqual(request.postDataJSON(), { text:'123' });
+        if (stallProjectionAfterType) holdProjection = true;
         json = { ok:true, data:{ keys_pressed:1 } };
       } else if (url.pathname === '/api/v1/dos/pass') {
         if (request.postDataJSON().to === 'operator') {
@@ -90,7 +94,7 @@ async function main() {
           state:'changed', change_count:7, incarnation:'msx-fixture', activity:[],
           screen:{ format:'rgb8', width:1, height:1, rgb_base64:'AP8A' }
         } });
-        const activity = [{ at: ejected ? 2 : 1, who: 'operator', action: ejected ? 'eject' : 'pass minsu' }];
+        const activity = [{ at: ejected ? 2 : 1 + activityRevision, who:'operator', action:ejected ? 'eject' : passed ? 'pass operator' : 'pass minsu' }];
         json = ejected ? { state: 'no_machine', activity }
           : url.searchParams.has('since')
             ? { state: 'unchanged', change_count: 3, incarnation: 'machine-1', activity }
@@ -206,12 +210,44 @@ async function main() {
     await page.evaluate(() => window.restoreStorageRemoval());
     await page.locator('#leave').click();
     await page.waitForFunction(() => sessionStorage.getItem('masc.play.invite') === null);
+    // Hold the clock before the recovery deadline: only an activity edge can
+    // update this seat, so elapsed browser polling cannot make the check pass.
+    passed = false; released = false; connected = true;
+    await page.goto('http://play.fixture/play#fixture-token');
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례')
+      && !document.getElementById('pad').hidden);
+    await page.evaluate(() => {
+      window.fixtureClock = performance.now.bind(performance);
+      Object.defineProperty(performance, 'now', { configurable:true, value:() => 0 });
+    });
+    passed = true; activityRevision += 1;
+    await page.waitForFunction(() => document.getElementById('turn').textContent === 'operator 님 차례예요');
+    assert.equal(await page.locator('#send-text').isDisabled(), true);
+    passed = false; activityRevision += 1;
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례'));
+    assert.equal(await page.locator('#send-text').isDisabled(), false);
+    await page.evaluate(() => { Object.defineProperty(performance, 'now', { configurable:true, value:window.fixtureClock }); });
+    // The write has its receipt but its follow-up authority projection never
+    // answers until after departure. Disconnect must only drain actual writes.
+    const projectionRequested = new Promise(resolve => { projectionStarted = resolve; });
+    stallProjectionAfterType = true;
+    await page.locator('#text').fill('123');
+    await page.locator('#send-text').click();
+    await projectionRequested;
+    await page.waitForFunction(() => document.getElementById('text').value === '23');
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('masc.play.pending')), null);
+    await page.locator('#leave').click();
+    await page.waitForFunction(() => sessionStorage.getItem('masc.play.invite') === null);
+    assert.equal(connected, false, 'authoritative departure completes while its projection remains unanswered');
+    holdProjection = false;
+    for (const release of heldSeatReads) release();
     assert.deepEqual(errors, []);
     assert.equal(padPressed, true);
     const receipt = { scope: 'Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.',
       source_sha256: createHash('sha256').update(source).digest('hex'),
       browser_version: browser.version(), seat_reads: seatReads, frame_reads: frameReads, room_reads:roomReads, pad_reads:padReads,
-      checks: ['stalled room read recovers automatically', 'stalled pad read recovers while frames continue', 'seat recovers without machine activity', 'failed frame is fetched again',
+      checks: ['activity changes update ownership before the recovery deadline',
+        'terminal write receipt and disconnect do not wait for a stalled seat projection', 'stalled room read recovers automatically', 'stalled pad read recovers while frames continue', 'seat recovers without machine activity', 'failed frame is fetched again',
         'several Keepers share public conversation', 'guest sends public message',
         'one viewport switches DOS and MSX without splitting conversation',
         'MSX live response renders green pixels before DOS red pixels return', 'room layout fits phone and desktop',

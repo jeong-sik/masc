@@ -1,12 +1,14 @@
 {
   "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
-  "source_sha256": "bbfd93f1e6f15202e96f7cf2c470270f2a336dba97f67ff3ab72715b2eb36b7f",
+  "source_sha256": "365db821ed0395dc94dba242c7104b9242b78abf3eea17b110ac05a139a24d2c",
   "browser_version": "149.0.7827.55",
-  "seat_reads": 16,
-  "frame_reads": 40,
-  "room_reads": 8,
-  "pad_reads": 4,
+  "seat_reads": 21,
+  "frame_reads": 43,
+  "room_reads": 9,
+  "pad_reads": 5,
   "checks": [
+    "activity changes update ownership before the recovery deadline",
+    "terminal write receipt and disconnect do not wait for a stalled seat projection",
     "stalled room read recovers automatically",
     "stalled pad read recovers while frames continue",
     "seat recovers without machine activity",
@@ -444,6 +446,76 @@
     {
       "method": "POST",
       "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/session",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/play",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dos/type",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
       "query": ""
     },
     {

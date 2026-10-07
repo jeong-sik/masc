@@ -34,6 +34,7 @@ let test_unknown_survives_withdrawal base =
   List.iter (fun kind ->
     let state = fresh base in
     let old = admitted (T.begin_play_change state kind) in
+    check bool "the HTTP request starts before withdrawal" true (T.dispatch_play_change state old);
     T.withdraw_play_changes state;
     state.server_identity <- None;
     state.workspace_identity <- T.Workspace_identity_unread;
@@ -59,11 +60,13 @@ let test_origin_and_explicit_resolution base =
   ignore (T.finish_play_change state old T.Change_unknown);
   current state "b";
   let other = admitted (T.begin_play_change state (T.Issue_invite "same")) in
-  check bool "a pending request cannot be manually cleared" true (Result.is_error (T.resolve_play_change state));
+  check bool "a pending request cannot be manually cleared" true
+    (Result.is_error (T.resolve_play_change state ~request_id:other.change_id));
   ignore (T.finish_play_change state other T.Change_confirmed);
   current state "a";
   unknown state;
-  check bool "explicit confirmation resolves the current origin" true (Result.is_ok (T.resolve_play_change state));
+  check bool "explicit confirmation resolves the current origin" true
+    (Result.is_ok (T.resolve_play_change state ~request_id:old.change_id));
   let newer = admitted (T.begin_play_change state (T.Issue_invite "same")) in
   check bool "a retired receipt cannot settle the later issue" false (T.finish_play_change state old T.Change_confirmed);
   blocked state (T.Revoke_invite "same");
@@ -112,7 +115,8 @@ let test_unknown_survives_restart base =
     ignore (T.finish_play_change restarted other T.Change_confirmed);
     current restarted "a";
     unknown restarted;
-    check bool "operator reconciliation is durable" true (Result.is_ok (T.resolve_play_change restarted));
+    check bool "operator reconciliation is durable" true
+      (Result.is_ok (T.resolve_play_change restarted ~request_id:old.change_id));
     let resumed = fresh base in
     let next = admitted (T.begin_play_change resumed (T.Issue_invite "same")) in
     ignore (T.finish_play_change original old T.Change_confirmed);
@@ -135,6 +139,44 @@ let test_unreadable_recovery_refuses_dispatch base =
   check bool "corrupt storage is not a writable empty store" true
     (match T.play_change_access restarted with C.Read_only _ -> true | _ -> false)
 
+let test_resolution_cannot_clear_another_process_request base =
+  let original = fresh base in
+  let old = admitted (T.begin_play_change original (T.Issue_invite "same")) in
+  check bool "the original mutation starts" true (T.dispatch_play_change original old);
+  let observer = fresh base in
+  let view = C.write_access (C.create ()) (T.play_change_access observer) in
+  let view, _ = C.key view "u" in
+  ignore (T.finish_play_change original old T.Change_confirmed);
+  let newer = admitted (T.begin_play_change original (T.Revoke_invite "same")) in
+  check bool "the replacement mutation starts" true (T.dispatch_play_change original newer);
+  let request_id = match snd (C.key view "enter") with
+    | C.Resolve_unknown request_id -> request_id | _ -> fail "expected a captured confirmation" in
+  check string "confirmation still belongs to the old request" old.change_id request_id;
+  check bool "a fresh journal read cannot retarget the confirmation" true
+    (Result.is_error (T.resolve_play_change observer ~request_id));
+  unknown (fresh base);
+  blocked (fresh base) (T.Issue_invite "same");
+  ignore (T.finish_play_change original newer T.Change_confirmed)
+
+let test_pre_dispatch_failure_releases_guard base =
+  List.iter (fun kind ->
+    let state = fresh base in
+    let request = admitted (T.begin_play_change state kind) in
+    check bool "preparation has not dispatched an HTTP mutation" false
+      (T.play_change_dispatched state request);
+    ignore (T.finish_play_change state request T.Change_confirmed);
+    check bool "a failed launch leaves no guard across restart" true
+      (T.play_change_access (fresh base) = C.Writable);
+    let request = admitted (T.begin_play_change state kind) in
+    (* The failed identity probe withdraws authority before its completion can
+       be consumed. No later completion is needed to settle this preparation. *)
+    T.withdraw_play_changes state;
+    check bool "a withdrawn preparation cannot dispatch later" false
+      (T.dispatch_play_change state request);
+    check bool "pre-dispatch authority failure leaves no durable uncertainty" true
+      (T.play_change_access (fresh base) = C.Writable))
+    [T.Issue_invite "same"; T.Revoke_invite "same"]
+
 let () = run "Play workspace authority" ["lifecycle", [
   test_case "unknown issue and revoke survive withdrawal and inventory" `Quick (with_workspace test_unknown_survives_withdrawal);
   test_case "origins, explicit resolution and stale receipts" `Quick (with_workspace test_origin_and_explicit_resolution);
@@ -142,4 +184,6 @@ let () = run "Play workspace authority" ["lifecycle", [
   test_case "machine control ends at authority withdrawal" `Quick (with_workspace test_machine_authority_withdrawal);
   test_case "unknown changes survive restarts and late receipts" `Quick (with_workspace test_unknown_survives_restart);
   test_case "unreadable recovery refuses dispatch" `Quick (with_workspace test_unreadable_recovery_refuses_dispatch);
+  test_case "confirmation cannot settle another process's replacement request" `Quick (with_workspace test_resolution_cannot_clear_another_process_request);
+  test_case "pre-dispatch failures release durable mutation admission" `Quick (with_workspace test_pre_dispatch_failure_releases_guard);
 ]]

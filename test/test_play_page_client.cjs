@@ -1555,7 +1555,9 @@ test('explicit reconnect retries transient refusals while the machine stays idle
     }
   });
   await page.settle();
-  assert.equal(attempts, 2, 'first observed activity rechecks reconnect intent');
+  assert.equal(attempts, 1, 'activity observation does not flood reconnect writes');
+  await page.poll();
+  assert.equal(attempts, 2);
   await page.poll();
   assert.equal(attempts, 3);
   assert.equal(page.padButton.disabled, false);
@@ -2034,4 +2036,282 @@ test('changing spectator cancels its stalled pad without stopping the next view'
   await page.settle();
   assert.equal(oldSignal.aborted, true);
   assert.ok(page.rendered.length > frames);
+});
+
+test('a pre-dispatch 429 preserves the draft and allows a later retry', async () => {
+  const storage = new Map();
+  let attempts = 0;
+  const page = fixture(request => request.url === '/api/v1/dos/type'
+    ? ++attempts === 1 ? response({ error:'Too Many Requests', message:'Try later' }, 429)
+      : response({ ok:true, data:{ keys_pressed:3 } })
+    : normalReply(request), { storage });
+  await page.settle();
+  page.get('text').value = '123';
+  page.get('send-text').handlers.click();
+  await page.settle();
+  assert.equal(storage.has('masc.play.pending'), false);
+  assert.equal(page.get('text').value, '123');
+  assert.equal(page.padButton.disabled, false);
+  page.get('send-text').handlers.click();
+  await page.settle();
+  assert.equal(page.get('text').value, '');
+  assert.equal(attempts, 2);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.size, 0);
+});
+
+for (const status of [401, 403]) {
+  test(`storage-blocked observation ends on terminal authentication ${status}`, async () => {
+    const storage = new Map([['masc.play.invite', 'unread-identity']]);
+    storage.get = () => { throw new Error('storage blocked'); };
+    const page = fixture(() => response({}, status), { storage });
+    await page.settle();
+    assert.match(page.get('turn').textContent, /초대가 끝났거나 회수됐어요/);
+    assert.equal(page.get('leave').disabled, true);
+    assert.equal(page.requests.length, 2, 'seat and frame start independently');
+    await page.roomTick();
+    assert.equal(page.requests.length, 2, 'closed observation sends no further traffic');
+    assert.equal(Map.prototype.get.call(storage, 'masc.play.invite'), 'unread-identity');
+  });
+}
+
+test('disconnect does not wait for an initial seat read that never answers', async () => {
+  const storage = new Map();
+  let finishSeat;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? new Promise(resolve => { finishSeat = () => resolve(response({ ...seat, connected:false })); })
+    : normalReply(request), { storage });
+  await page.settle();
+  let completed = false;
+  page.get('leave').handlers.click().then(() => { completed = true; });
+  await page.settle();
+  assert.equal(completed, true);
+  assert.equal(storage.size, 0);
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:false }]);
+  finishSeat();
+  await page.settle();
+  assert.equal(page.requests.filter(request => request.method === 'POST').length, 1, 'late seat cannot reconnect');
+});
+
+test('disconnect drains an already admitted reconnect before departing', async () => {
+  const storage = new Map();
+  let finishReconnect;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected:false }) : normalReply(request), { storage,
+    sessionReply: ({ body }) => body.connected
+      ? new Promise(resolve => { finishReconnect = () => resolve(response({ ok:true, connected:true })); })
+      : response({ ok:true, connected:false }) });
+  await page.settle();
+  let completed = false;
+  page.get('leave').handlers.click().then(() => { completed = true; });
+  await page.settle();
+  assert.equal(completed, false);
+  assert.equal(page.requests.filter(request => request.method === 'POST').length, 1);
+  finishReconnect();
+  await page.settle();
+  assert.equal(completed, true);
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body),
+    [{ connected:true }, { connected:false }]);
+  assert.equal(storage.size, 0);
+});
+
+test('first observed activity reconnects a departed invitation after a transient initial seat failure', async () => {
+  let reads = 0, connected = false;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? ++reads === 1 ? response({}, 503) : response({ ...seat, connected, controller:null }) : normalReply(request), {
+    sessionReply: ({ body }) => { connected = body.connected; return response({ ok:true, connected }); }
+  });
+  await page.settle();
+  assert.equal(reads, 3, 'initial failure, immediate activity read, and connected confirmation');
+  assert.equal(page.padButton.disabled, false);
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:true }]);
+  await page.poll();
+  assert.equal(page.requests.filter(request => request.method === 'POST').length, 1);
+});
+
+for (const [name, receipt, remaining] of [
+  ['successful', response({ ok:true, data:{ keys_pressed:1 } }), '23'],
+  ['refused', response({ ok:false, message:'try later' }, 409), '123'],
+]) {
+  test(`disconnect drains a ${name} write without waiting for its stalled seat projection`, async () => {
+    const storage = new Map();
+    let afterWrite = false, finishProjection;
+    const page = fixture(request => {
+      if (request.url === '/api/v1/dos/type') { afterWrite = true; return receipt; }
+      if (afterWrite && request.url === '/api/v1/play/seat')
+        return new Promise(resolve => { finishProjection = resolve; });
+      return normalReply(request);
+    }, { storage });
+    await page.settle();
+    page.get('text').value = '123';
+    page.get('send-text').handlers.click();
+    await page.settle();
+    assert.equal(typeof finishProjection, 'function', 'post-write read really is pending');
+    assert.equal(storage.has('masc.play.pending'), false, 'write has a terminal receipt');
+    assert.equal(page.get('text').value, remaining, 'the text receipt does not wait for projection');
+    let disconnected = false;
+    page.get('leave').handlers.click().then(() => { disconnected = true; });
+    await page.settle();
+    assert.equal(disconnected, true, 'no read response is needed to finish departure');
+    assert.equal(storage.size, 0);
+    assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.url),
+      ['/api/v1/dos/type', '/api/v1/play/session']);
+    finishProjection(response(seat));
+    await page.settle();
+    assert.match(page.get('turn').textContent, /연결을 끊었어요/);
+    assert.equal(page.padButton.disabled, true, 'late projection cannot revive ended controls');
+    assert.equal(storage.size, 0);
+  });
+}
+
+test('new activity updates controller ownership immediately inside the recovery interval', async () => {
+  let controller = 'operator', version = 1;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, controller }) : request.url.includes('/live?')
+      ? response({ ...frame, activity:[{ at:version, who:controller, action:'handoff' }] }) : normalReply(request));
+  await page.settle();
+  const reads = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
+  const before = reads();
+  controller = 'minsu'; version += 1;
+  await page.poll(300);
+  assert.equal(reads(), before + 1);
+  assert.equal(page.padButton.disabled, false, 'new owner becomes playable before five seconds');
+  controller = 'operator'; version += 1;
+  await page.poll(300);
+  assert.equal(reads(), before + 2);
+  assert.equal(page.padButton.disabled, true, 'previous owner is disabled on the next changed frame');
+  await page.poll(4999);
+  assert.equal(reads(), before + 2, 'unchanged observer recovery keeps its cadence');
+  await page.poll(1);
+  assert.equal(reads(), before + 3, 'idle departure discovery still runs after five seconds');
+});
+
+test('a failed activity-triggered read retries unchanged activity only at the recovery cadence', async () => {
+  let version = 1, fail = false;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? fail ? response({}, 503) : response(seat) : request.url.includes('/live?')
+      ? response({ ...frame, activity:[{ at:version, who:'operator', action:'handoff' }] }) : normalReply(request));
+  await page.settle();
+  const reads = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
+  const before = reads();
+  fail = true; version += 1;
+  await page.poll(300);
+  assert.equal(reads(), before + 1);
+  assert.equal(page.padButton.disabled, true);
+  fail = false;
+  await page.poll(4999);
+  assert.equal(reads(), before + 1, 'failed acknowledgement is not a new activity edge');
+  await page.poll(1);
+  assert.equal(reads(), before + 2);
+  assert.equal(page.padButton.disabled, false);
+});
+
+test('changed activity does not accelerate refused explicit reconnect writes', async () => {
+  let version = 1, attempts = 0;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected:false, controller:null }) : request.url.includes('/live?')
+      ? response({ ...frame, activity:[{ at:version, who:'operator', action:'move' }] }) : normalReply(request), {
+    sessionReply: () => { attempts += 1; return response({ ok:false, error:'unavailable' }, 503); },
+  });
+  await page.settle();
+  assert.equal(attempts, 1, 'first activity does not immediately retry the refused reconnect');
+  version += 1;
+  await page.poll(300);
+  assert.equal(attempts, 1);
+  version += 1;
+  await page.poll(4700);
+  assert.equal(attempts, 2, 'new authority may retry once its independent reconnect cadence is due');
+});
+
+for (const explicit of [true, false]) {
+  test('empty-machine frames preserve delayed ' + (explicit ? 'explicit reconnect' : 'departed reload') + ' authority', async () => {
+    let finish, reads = 0, connected = false;
+    const storage = new Map([['masc.play.invite', 'fixture-token']]);
+    const page = fixture(request => {
+      if (request.url === '/api/v1/play/seat') return ++reads === 1
+        ? new Promise(resolve => { finish = resolve; })
+        : response({ ...seat, connected, machine:false, controller:null, saves_name:null });
+      if (request.url.includes('/lane-addons/live')) return response({ state:'no_machine', activity:[] });
+      return gameReply(request);
+    }, { storage, hash:explicit ? '#fixture-token' : '', sessionReply: ({ body }) => {
+      connected = body.connected;
+      return response({ ok:true, connected });
+    } });
+    await page.settle();
+    await page.poll(300);
+    await page.poll(300);
+    finish(response({ ...seat, connected:false, machine:false, controller:null, saves_name:null }));
+    await page.settle();
+    const reconnects = page.requests.filter(request => request.url === '/api/v1/play/session');
+    assert.equal(reconnects.length, explicit ? 1 : 0);
+    assert.equal(page.get('chat-text').disabled, !explicit);
+    assert.equal(page.get('send-text').disabled, true, 'no game is available for input');
+    if (!explicit) {
+      const before = page.roomRequests.length;
+      await page.roomTick();
+      assert.equal(page.roomRequests.length, before, 'departed identity no longer renews presence');
+    }
+  });
+}
+
+test('a delayed pre-unload seat cannot restore old game controls', async () => {
+  let finish;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? new Promise(resolve => { finish = resolve; })
+    : request.url.includes('/lane-addons/live') ? response({ state:'no_machine', activity:[] }) : gameReply(request));
+  await page.settle();
+  finish(response(seat));
+  await page.settle();
+  assert.equal(page.get('send-text').disabled, true);
+  assert.equal(page.get('pad').hidden, true);
+  assert.match(page.get('turn').textContent, /켜진 게임이 없어요/);
+  assert.equal(page.get('chat-text').disabled, false, 'connected authority still updates independently');
+});
+
+
+test('activity during a healthy slow seat read is coalesced without canceling it', async () => {
+  let reads = 0, version = 1, finish, slowSignal;
+  const page = fixture((request, signal) => {
+    if (request.url === '/api/v1/play/seat') {
+      if (++reads === 2) {
+        slowSignal = signal;
+        return new Promise(resolve => { finish = () => resolve(response({ ...seat, controller:'operator' })); });
+      }
+      return response({ ...seat, controller:version === 1 ? 'operator' : 'minsu' });
+    }
+    if (request.url.includes('/live?')) return response({ ...frame, activity:[{at:version, who:'operator', action:'move'}] });
+    return gameReply(request);
+  });
+  await page.settle();
+  version += 1;
+  await page.poll(300);
+  version += 1;
+  await page.poll(300);
+  assert.equal(reads, 2);
+  assert.equal(slowSignal.aborted, false);
+  finish();
+  await page.settle();
+  assert.equal(reads, 3, 'the latest pending activity is observed immediately after the slow read');
+  assert.equal(page.padButton.disabled, false);
+});
+
+test('a stalled frame seat read is replaced without stopping frames or accepting late auth failure', async () => {
+  let reads = 0, finish, slowSignal;
+  const page = fixture((request, signal) => {
+    if (request.url === '/api/v1/play/seat' && ++reads === 2) {
+      slowSignal = signal;
+      return new Promise(resolve => { finish = () => resolve(response({}, 401)); });
+    }
+    return gameReply(request);
+  });
+  await page.settle();
+  const frames = page.rendered.length;
+  await page.poll(5000);
+  assert.equal(slowSignal.aborted, true);
+  assert.equal(reads, 3);
+  assert.ok(page.rendered.length > frames);
+  finish();
+  await page.settle();
+  assert.equal(page.padButton.disabled, false);
+  assert.equal(page.get('chat-text').disabled, false);
 });

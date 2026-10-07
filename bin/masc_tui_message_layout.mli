@@ -168,8 +168,15 @@ type memory_pass =
           read, a neutral system row sharing the Memory lane, and every row
           outside it. *)
 
+type heading_boundary = Inherit_heading | Start_heading
+(** [Inherit_heading] keeps ordinary per-turn heading grouping. [Start_heading]
+    explicitly opens an origin heading for this entry, even inside the same
+    request and with the same speaker label. This is presentation metadata,
+    not a new turn or a change to the authored body. *)
+
 type entry = {
   style : style;
+  heading_boundary : heading_boundary;
   timestamp : string;
   timeline_bucket : timeline_bucket option;
       (** The civil-hour rail this entry belongs under. [None] is reserved for

@@ -851,7 +851,7 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       sparse 9;start next_initial;
       ContentBlockDelta {index=2;delta=TextDelta "SUFFIX"};MessageStop];
     let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1 in
-    publish (E.Reply_details {reply="SUFFIX";turn_outcome=Outcome.Visible_reply;turn_ref});
+    publish (E.Reply_details {reply="PREFIX\nSUFFIX";turn_outcome=Outcome.Visible_reply;turn_ref});
     publish (E.Run_finished {run_id="run"});
     check int "each new sealed scope publishes one start, even with a reused or absent id" 2
       (List.length (List.filter (function E.Agent_core_stream_message_start _ -> true | _ -> false) !reversed));
@@ -861,7 +861,11 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       let speech = T.drawn t |> List.filter_map (fun (item:T.drawn_item) ->
         match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) in
       check (list string) "earlier response and observed stretches stay in place"
-        ["EARLIER_RESPONSE";"PREFIX";"SUFFIX"] speech;
+        ["EARLIER_RESPONSE";"PREFIX";"SUFFIX";"PREFIX\nSUFFIX"] speech;
+      check bool "canonical authority is separate from observed interleaving" true
+        (match List.rev (T.drawn t) with
+         | {response_part=Some T.Final_response;origin=T.Reply_of_segment 0;_} :: _ -> true
+         | _ -> false);
       check (option string) "same provider id in a later sealed scope starts fresh usage"
         (Some "tokens: in 200 · out 9 · cache read 0 · cache write 0") (tokens log);
       check (option string) "later response has usage without the preceding stop reason"

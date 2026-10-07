@@ -111,8 +111,11 @@ type memory_pass =
   | Pass_failed of { kind : string }
   | No_pass
 
+type heading_boundary = Inherit_heading | Start_heading
+
 type entry = {
   style : style;
+  heading_boundary : heading_boundary;
   timestamp : string;
   timeline_bucket : timeline_bucket option;
   span_clock : string option;
@@ -1574,8 +1577,11 @@ let metadata_row ~(previous : entry option) ~inner_width ~indent (entry : entry)
     | Some previous -> continues_turn ~previous entry
     | None -> false
   in
+  let starts_heading = match entry.heading_boundary with
+    | Inherit_heading -> false
+    | Start_heading -> true in
   let metadata =
-    if not (within_turn || continues_previous ~previous entry) then
+    if starts_heading || not (within_turn || continues_previous ~previous entry) then
       Some
         ( Origin
             { clock; speaker = entry.speaker; role_label = entry.role_label }

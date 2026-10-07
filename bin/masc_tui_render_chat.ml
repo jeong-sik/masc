@@ -1766,6 +1766,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
               message.me_text
         in
         ({ style;
+             heading_boundary = Message_layout.Inherit_heading;
              timestamp =
                Option.fold ~none:message.me_timestamp
                  ~some:keeper_message_clock timeline_at;
@@ -1858,6 +1859,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
        local mark, not the arrow that means a submitted conversation row. *)
     let style = Message_layout.Local in
     ({ style
+     ; heading_boundary = Message_layout.Inherit_heading
      ; timestamp = keeper_message_clock at
      ; timeline_bucket = Some (keeper_message_timeline_bucket at)
      ; span_clock = None
@@ -1959,6 +1961,7 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
           | Some _ -> "마지막 관측, 갱신 실패"
         in
         let speech = ({ style
+           ; heading_boundary = Message_layout.Inherit_heading
            ; timestamp = keeper_message_clock preview.ktp_updated_at_unix
            ; timeline_bucket = Some (keeper_message_timeline_bucket preview.ktp_updated_at_unix)
            ; span_clock = None
@@ -2442,7 +2445,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                 Message_layout.Markdown_growing
                   { keeper_name; request_id; entry_index }
               in
-              let entry ?(speaker : string option) style role_label body =
+              let entry ?(speaker : string option)
+                  ?(heading_boundary = Message_layout.Inherit_heading) style role_label body =
                 (* One alignment, on the label the row actually carries.
                    Aligning the continuation mark and then aligning the
                    result again pays the badge's width twice, so the second
@@ -2454,6 +2458,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                       | Drawn_text _ | Drawn_thinking _ | Drawn_tools _
                       | Drawn_skill _ | Drawn_status _ | Drawn_error _ -> false);
                     le_entry = ({ style;
+                     heading_boundary;
                      timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
                      timeline_bucket;
                      span_clock = None;
@@ -2518,8 +2523,14 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
               | Keeper_chat_transcript.Drawn_reply text ->
                   (* No name on the heading, as on the committed rows:
                      this is the keeper's own pane. *)
-                  entry ~speaker:(label "") Message_layout.Keeper
-                    (label keeper_label) text
+                  let speaker, role, heading_boundary = match item.response_part with
+                    | None -> "", keeper_label, Message_layout.Inherit_heading
+                    | Some Keeper_chat_transcript.Observed_response ->
+                        "SAYING", "SAYING", Message_layout.Start_heading
+                    | Some Keeper_chat_transcript.Final_response ->
+                        "FINAL", "FINAL", Message_layout.Start_heading in
+                  entry ~speaker:(label speaker) ~heading_boundary Message_layout.Keeper
+                    (label role) text
               | Keeper_chat_transcript.Drawn_status text ->
                   entry Message_layout.Status (label "STATUS") text
               | Keeper_chat_transcript.Drawn_error _
@@ -2623,6 +2634,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
               let style = Message_layout.Status in
               entries @
               [{ last with le_origin = None; le_is_reply = false; le_entry = { last.le_entry with style; speaker = "STATUS";
+                 heading_boundary = Message_layout.Inherit_heading;
                  role_label = Message_layout.align_role_label
                    ~column:role_label_column ~style "STATUS";
                  role_label_mark_cells = Message_layout.role_label_mark_cells

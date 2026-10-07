@@ -128,8 +128,15 @@ let test_same_request_id_keeps_terminal_accounting_and_unsubscribe_separate () =
        ~operation_id = Some Stream.Wire_started)
 
 let test_same_keeper_and_request_id_keep_runtime_roots_separate () =
-  with_workspace @@ fun root_alpha ->
-  with_workspace @@ fun root_beta ->
+  with_workspace @@ fun parent ->
+  (* The shared fixture names its root from millisecond time. Allocate both
+     simultaneously live runtime roots under one owned fixture directory. *)
+  let root_alpha = Filename.concat parent "runtime-alpha" in
+  let root_beta = Filename.concat parent "runtime-beta" in
+  List.iter (fun root ->
+    Unix.mkdir root 0o755;
+    Unix.mkdir (Filename.concat root Common.masc_dirname) 0o755)
+    [root_alpha; root_beta];
   let operation_id = "op-shared-across-roots" in
   let alpha, alpha_sink = collect_sink () in
   let beta, beta_sink = collect_sink () in

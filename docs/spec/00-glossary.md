@@ -751,6 +751,29 @@ status: reference
   → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
   [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
 
+**Authored Whitespace Preservation (작성 공백 보존)**
+: 운영자 대면 채팅, Board 게시글 및 댓글, 커넥터(Slack, Discord), 위임(delegation)
+  요청 전반에서 한국어 띄어쓰기를 포함한 작성자의 공백·들여쓰기·문단 구분을 임의로
+  축약하거나 제거하지 않고 원문 그대로 보존하는 전역 텍스트 규약(#41683, #41690,
+  #41693, #41701, #41708, #41717).
+  단어 사이 공백을 임의로 압축하거나 붙여쓰는 행위를 금지하며, 글자 수 예산이나
+  Channel Gate의 본문 바이트 제한에 도달할 때도 공백을 지우는 대신 문장 길이를 줄이거나
+  단락을 분할하는 방식을 취한다. TUI 캡션, 마크다운 렌더링, 대시보드 편집/전송,
+  저널 스토어 및 모델 입력 프롬프트 전 구간에서 작성 공백의 불변성을 유지한다.
+  → [Keeper_chat_blocks](../../lib/keeper/keeper_chat_blocks.mli) ·
+  [Channel_gate](../../lib/gate/channel_gate.mli) ·
+  [Keeper prompt speaking convention](../../config/prompts/keeper.md)
+
+**Clock Density Stage (시계 밀도 단계)**
+: TUI 채팅 화면에서 타임스탬프와 시간대 구분선 노출 밀도를 단계적으로 제어하는
+  인터페이스 계약(#41699, #41749).
+  기본 모드(`Origin_bare`)에서는 시각·턴 시간 범위·시간 구분선·진행 타이머를 생략하여
+  메시지 본문의 가독성을 극대화하고, 단축키(`Ctrl-F`) 입력을 통해 간이 시계(`Origin_inline`)
+  또는 전체 헤더 시계(`Origin_row`) 메타데이터를 동적으로 복원·토글한다
+  (`Origin_bare` → `Origin_inline` → `Origin_row` → `Origin_bare`).
+  → [Masc_tui_message_layout](../../bin/masc_tui_message_layout.mli) ·
+  [Tui-chat-design](../../.agents/skills/tui-chat-design/SKILL.md)
+
 **Speaker Authority (화자 권한)**
 : Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
   추측하지 않고 진입 경로와 Keeper 레지스트리 대조로 구조적으로 결정한다(RFC-0223 §3,

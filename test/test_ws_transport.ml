@@ -529,6 +529,7 @@ let test_inbound_size_env_defaults () =
 
 let test_dashboard_hello_keeps_upgrade_runtime_authority () =
   Eio_main.run (fun env ->
+    Eio.Switch.run @@ fun sw ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     let parent = Masc_test_deps.setup_test_workspace () in
     let base_a = Filename.concat parent "runtime-alpha" in
@@ -540,19 +541,40 @@ let test_dashboard_hello_keeps_upgrade_runtime_authority () =
     let id = "ws-runtime-authority" in
     let session = Ws.new_session ~id ~wsd:(Obj.magic ())
       ~runtime_authority:(Sse.runtime_authority_exn ~base_path:base_a) in
+    let hello (auth : Sse.registration_auth) request_id =
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path:auth.config in
+      let params = match auth.token with
+        | Some token -> ["token", `String token]
+        | None -> [] in
+      let request = Yojson.Safe.to_string (`Assoc [
+        "jsonrpc", `String "2.0"; "id", `Int request_id;
+        "method", `String "dashboard/hello"; "params", `Assoc params ]) in
+      (* Use the registered WS handler through the production dispatcher. The
+         request's server state supplies the root; params cannot override it. *)
+      Masc.Mcp_server_eio.handle_request ~clock:(Eio.Stdenv.clock env) ~sw
+        ~mcp_session_id:id state request in
     Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions id session);
     Fun.protect ~finally:(fun () ->
       Ws.with_sessions_rw (fun () -> Hashtbl.remove Ws.sessions id);
       Masc_test_deps.cleanup_test_workspace parent) (fun () ->
-      Alcotest.(check (result reject string)) "another root cannot authorize this upgrade"
-        (Error "dashboard/hello belongs to a different runtime")
-        (Ws.dashboard_hello ~base_path:base_b ~session_id:id ?token:auth_b.token ());
+      let foreign = hello auth_b 1 in
+      Alcotest.(check int) "foreign hello is an invalid request"
+        (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_request)
+        Yojson.Safe.Util.(foreign |> member "error" |> member "code" |> to_int);
+      Alcotest.(check string) "another root cannot authorize this upgrade"
+        "dashboard/hello belongs to a different runtime"
+        Yojson.Safe.Util.(foreign |> member "error" |> member "message" |> to_string);
       Alcotest.(check bool) "foreign root did not authenticate the socket" false
         (Ws.dashboard_auth_is_authenticated (Atomic.get session.dashboard_auth));
-      (match Ws.dashboard_hello ~base_path:base_a ~session_id:id ?token:auth_a.token () with
-       | Ok _ -> () | Error detail -> Alcotest.fail detail);
+      let accepted = hello auth_a 2 in
+      Alcotest.(check bool) "bound-root hello returns an authenticated session" true
+        Yojson.Safe.Util.(accepted |> member "result" |> member "session"
+          |> member "authenticated" |> to_bool);
       Alcotest.(check bool) "the socket authenticates only its bound runtime" true
-        (Ws.dashboard_auth_is_authenticated (Atomic.get session.dashboard_auth))))
+        (Ws.dashboard_auth_is_authenticated (Atomic.get session.dashboard_auth));
+      Alcotest.(check (option string)) "authentication retains the bound-root credential"
+        (Some "same-reader")
+        (Ws.dashboard_auth_agent (Atomic.get session.dashboard_auth))))
 ;;
 
 let with_registered_test_session sid f =

@@ -1,5 +1,4 @@
 type 'registration_error error =
-  | Shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Intake_token_not_live
   | Reservation_unavailable of Keeper_lifecycle_reservation.snapshot
   | Registration_failed of 'registration_error

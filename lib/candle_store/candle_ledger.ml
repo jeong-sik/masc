@@ -4,7 +4,7 @@ let file_name = "candle-ledger.jsonl"
 
 let path ~base_path =
   Filename.concat
-    (Workspace_utils_paths_backend.masc_dir_from_base_path ~base_path)
+    (Common.masc_dir_from_base_path ~base_path)
     file_name
 ;;
 

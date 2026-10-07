@@ -271,9 +271,15 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     if kitty || !image_may_exist then Buffer.add_string buf delete_image;
     Buffer.add_string buf "\027[2J\027[H"
   end;
+  (* With DECAWM disabled the cursor stays on the last printed cell. Clear
+     each row before writing it, otherwise EL would erase that final cell. *)
+  Buffer.add_string buf "\027[0K";
   Buffer.add_string buf (fit_line cols title);
-  Buffer.add_string buf (if rows > 1 then "\027[0K\r\n" else "\027[0K");
-  Option.iter (fun message -> Buffer.add_string buf (fit_line cols (" " ^ message)); Buffer.add_string buf "\027[0K\r\n") notice;
+  if rows > 1 then Buffer.add_string buf "\r\n";
+  Option.iter (fun message ->
+    Buffer.add_string buf "\027[0K";
+    Buffer.add_string buf (fit_line cols (" " ^ message));
+    Buffer.add_string buf "\r\n") notice;
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match dims with
    | Some (width, height, rgb) when kitty ->
@@ -317,22 +323,23 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
        for _ = 1 to above do blank_row () done;
        List.iter
          (fun line ->
+           Buffer.add_string buf "\027[0K";
            Buffer.add_string buf left;
            Buffer.add_string buf line;
-           blank_row ())
+           Buffer.add_string buf "\r\n")
          lines;
        for _ = 1 to screen_rows - drawn - above do blank_row () done
    | Some _ | None ->
        (* Nothing to draw: clear the body so a stale frame does not linger. *)
        for _ = 1 to screen_rows do blank_row () done);
   (* Drawn after the picture, never before: the picture's own rows erase to
-     the true right edge of the terminal (["\027[0K"] on a mosaic or blank
+     the true right edge of the terminal (["\027[0K"] before a mosaic or blank
      row, the whole screen on a kitty redraw), which would wipe this column
      out again if it went first. Every path above leaves the cursor
      somewhere other than the footer row, so this always ends by parking it
      there explicitly -- the one thing every path used to get for free by
      writing the footer immediately next in sequence. *)
-  if show_sidebar then begin
+  if show_sidebar && screen_rows > 0 then begin
     let sidebar_col = picture_cols + sidebar_gap + 1 in
     for i = 0 to screen_rows - 1 do
       Buffer.add_string buf (Printf.sprintf "\027[%d;%dH" (header_rows + 1 + i) sidebar_col);
@@ -341,8 +348,8 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
   end;
   if rows > 1 then begin
-    Buffer.add_string buf (fit_line cols footer);
-    Buffer.add_string buf "\027[0K"
+    Buffer.add_string buf "\027[0K";
+    Buffer.add_string buf (fit_line cols footer)
   end;
   image_may_exist := !image_may_exist || kitty;
   write_batch ~write (Buffer.contents buf);
@@ -523,59 +530,59 @@ let entry_label (state : Masc_tui_types.state) = function
 let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state) =
   invalidate ();
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
+  let rows = max 1 rows and cols = max 1 cols in
   let entries = menu_entries state in
   settle_selection state entries;
   let buf = Buffer.create 1024 in
   if !image_may_exist then Buffer.add_string buf delete_image;
   Buffer.add_string buf "\027[2J\027[H";
-  Buffer.add_string buf (fit_line cols (match state.msx_menu_mode with
+  let row = ref 1 in
+  let line text =
+    Buffer.add_string buf "\027[0K";
+    Buffer.add_string buf text;
+    if !row < rows then Buffer.add_string buf "\r\n";
+    incr row
+  in
+  line (fit_line cols (match state.msx_menu_mode with
     | Masc_tui_types.Boot_game -> menu_title
     | Change_disk -> " MSX — change disk (no reboot)"));
-  Buffer.add_string buf "\027[0K\r\n";
+  let body_rows = max 0 (rows - 2) in
   let status_rows =
     match status with
-    | Some s ->
-        Buffer.add_string buf (fit_line cols (" " ^ s));
-        Buffer.add_string buf "\027[0K\r\n";
+    | Some s when body_rows > 0 ->
+        line (fit_line cols (" " ^ s));
         1
-    | None -> 0
+    | Some _ | None -> 0
   in
-  (match entries with
-   | [] ->
-       Buffer.add_string buf
-         (fit_line cols
-            " no cartridges yet \xe2\x80\x94 an operator fills .masc/msx/carts/ with ROM or .dsk images");
-       Buffer.add_string buf "\027[0K\r\n"
-   | _ ->
+  let entry_rows = body_rows - status_rows in
+  (match entries, entry_rows with
+   | _, 0 -> ()
+   | [], _ ->
+       line (fit_line cols
+         " no cartridges yet \xe2\x80\x94 an operator fills .masc/msx/carts/ with ROM or .dsk images")
+   | _, _ ->
+       let selected = match state.msx_menu_selected with
+         | Some entry -> Option.value (index_in entries entry 0) ~default:0
+         | None -> 0 in
+       let start = max 0 (selected - entry_rows + 1) in
+       let visible = List.take entry_rows (List.drop start entries) in
        List.iter
          (fun entry ->
            let label = entry_label state entry in
-           let line =
+           let text =
              if is_selected state entry then
                "\027[7m" ^ fit_line (max 1 (cols - 1)) (" " ^ label) ^ "\027[0m"
              else fit_line cols (" " ^ label)
            in
-           Buffer.add_string buf line;
-           Buffer.add_string buf "\027[0K\r\n")
-         entries);
-  (* Pad the body so a previously longer list leaves no ghost rows behind, put
-     the keys on the bottom row, and write no newline there. A newline written
-     on the last row scrolls the screen by one, and the row that scrolls off is
-     the first -- the title. Measured at 150x44 with no cartridges: the screen
-     held two lines, the sentence about the empty directory and a blank, and
-     nothing said how to leave. *)
-  let drawn = 1 + status_rows + max 1 (List.length entries) in
-  let last_row = max 4 (rows - 1) in
-  for row = drawn to last_row do
-    if row = last_row then
-      Buffer.add_string buf
-        ("\027[2m"
-         ^ fit_line cols
-             (" " ^ menu_hints state.msx_menu_mode ~has_entries:(entries <> []))
-         ^ "\027[0m");
-    Buffer.add_string buf "\027[0K";
-    if row < last_row then Buffer.add_string buf "\r\n"
-  done;
+           line text)
+         visible);
+  (* Even one- and two-row windows keep all output inside the viewport. Only
+     body rows scroll through the list; the title and available footer stay. *)
+  while !row < rows do line "" done;
+  if rows > 1 then
+    line ("\027[2m"
+      ^ fit_line cols (" " ^ menu_hints state.msx_menu_mode ~has_entries:(entries <> []))
+      ^ "\027[0m");
   write_batch ~write (Buffer.contents buf);
   image_may_exist := false
 

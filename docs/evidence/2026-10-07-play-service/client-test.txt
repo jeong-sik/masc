@@ -1,88 +1,520 @@
-✔ a refused changed program displays its explanation after refreshing the seat (12.404167ms)
-✔ a refused denied handoff displays its explanation after refreshing the seat (0.95475ms)
-✔ a failed seat read retries without a new move and restores playable controls (2.350917ms)
-✔ a frame rejected for wrong byte count is fetched again before acknowledging its mark (1.020917ms)
-✔ a frame rejected for invalid base64 is fetched again before acknowledging its mark (1.049125ms)
-✔ a failed seat request after an input retries while the activity feed is unchanged (1.423209ms)
-✔ eject clears the last picture and the game pad (0.905667ms)
-✔ no_machine hides the old pad while seat is unavailable and a loaded game restores controls (1.202458ms)
-✔ a malformed frame does not prevent new activity from refreshing the controller (1.011625ms)
-✔ choosing a handoff discovers an invite added while the machine stays idle (1.178083ms)
-✔ revoked access keeps controls disabled and stops sending moves (2.627417ms)
-✔ an older seat response cannot overwrite a newer poll result (1.011209ms)
-✔ reopening a focused handoff selector refreshes new invites once per opening (0.718792ms)
-✔ an unreadable controller disables moves and recovers without new machine activity (0.70075ms)
-✔ a HTTP failure after a valid seat prevents input until ownership is readable again (0.872625ms)
-✔ a malformed seat after a valid seat prevents input until ownership is readable again (0.801916ms)
-✔ a missing controller departure authority after a valid seat prevents input until ownership is readable again (0.95475ms)
-✔ a invalid JSON after a valid seat prevents input until ownership is readable again (1.054042ms)
-✔ a transport failure after a valid seat prevents input until ownership is readable again (0.94225ms)
-✔ reloading reconnects the same tab and disconnect clears its credential (3.430875ms)
-✔ a revoked invitation clears the tab credential and a new link replaces it (1.14ms)
-✔ another controller permits observation but no keyboard, pad or handoff mutation (0.676542ms)
-✔ text is retained after a refused send outcome (0.637292ms)
-✔ text is retained after a unknown send outcome (0.629ms)
-✔ a pending text submission is sent once while a changed draft is retained (0.816417ms)
-✔ a departed holder becomes recoverable without any machine activity (0.669792ms)
-✔ disconnect releases its own controller before forgetting the credential (0.7095ms)
-✔ a spectator disconnects without releasing another participant (0.742667ms)
-✔ a refused disconnect retains its credential across reload for recovery (1.537959ms)
-✔ a unknown disconnect retains its credential across reload for recovery (1.267333ms)
-✔ disconnect relies on the atomic server transition even when seat reads fail (0.961083ms)
-✔ disconnect drains an admitted move that acquires control and suppresses queued input (1.544042ms)
-✔ a stale live response cannot bypass the atomic disconnect transition (0.890334ms)
-✔ reopening the invitation in a disconnected tab reloads authentication (1.340708ms)
-✔ a different invitation requires disconnecting the current holder first (1.285333ms)
-✔ an uncertain release cannot be bypassed by opening a different invitation (1.482958ms)
-✔ opening the same invitation while connected reloads without changing its identity (0.62125ms)
-✔ full-document invitation navigation preserves an existing controller identity (0.654292ms)
-✔ spectator frame polling does not repeatedly scan the seat inventory (1.849833ms)
-✔ a lost move response cannot forget a credential before the server acquires its seat (1.390417ms)
-✔ reload during an unresolved fetch retains the outstanding operation (1.331625ms)
-✔ HTTP 401 on a later read cannot settle an earlier lost write (0.644792ms)
-✔ HTTP 403 on a later read cannot settle an earlier lost write (0.648208ms)
-✔ HTTP 503 on a later read cannot settle an earlier lost write (0.852417ms)
-✔ unavailable tab storage prevents dispatch instead of losing reload recovery (1.18525ms)
-✔ an acknowledged success clears its own marker before a failing seat read (2.068833ms)
-✔ an acknowledged DOS refusal clears its own marker before a failing seat read (0.76675ms)
-✔ an acknowledged pad refusal clears its own marker before a failing seat read (0.680458ms)
-✔ a malformed mutation response remains unknown rather than enabling a retry (0.803792ms)
-✔ a restored older document cannot clear a newer unknown write via disconnect (2.23975ms)
-✔ a restored older document cannot clear a newer unknown write via input (1.659541ms)
-✔ a restored older document cannot clear a newer unknown write via auth failure (1.345458ms)
-✔ an old document cannot forget a replacement identity (1.549084ms)
-✔ an old acknowledgement cannot remove a different operation marker (1.009417ms)
-✔ late auth failure after disconnect cannot clear a later invitation (0.992417ms)
-✔ failure to load a retained credential never deletes the unread identity (0.572958ms)
-✔ credential removal failure keeps disconnect retryable and game input disabled (1.065041ms)
-✔ opening a departed invitation reconnects explicitly without a game move (0.848958ms)
-✔ reloading after departure cleanup fails does not rejoin without an invitation fragment (3.124125ms)
-✔ explicit reconnect retries transient refusals while the machine stays idle (1.006291ms)
-✔ a plain-text 413 settles the rejected input without losing its draft (1.096209ms)
-✔ a pre-dispatch 429 preserves the draft and allows a later retry (1.22125ms)
-✔ storage-blocked observation ends on terminal authentication 401 (0.782542ms)
-✔ storage-blocked observation ends on terminal authentication 403 (0.6765ms)
-✔ disconnect does not wait for an initial seat read that never answers (0.750542ms)
-✔ disconnect drains an already admitted reconnect before departing (1.044167ms)
-✔ an old initial seat response cannot reconnect after a newer document disconnects (1.315625ms)
-✔ a pending old operation cannot reactivate a departed invitation on reload (0.681667ms)
-✔ missing participation authority is not treated as a connected session (1.526375ms)
-✔ a DOS text receipt for 0 keys retains exactly the unpressed suffix (0.97925ms)
-✔ a DOS text receipt for 1 keys retains exactly the unpressed suffix (0.644417ms)
-✔ a DOS text receipt for 3 keys retains exactly the unpressed suffix (0.787208ms)
-✔ a partial text receipt preserves a draft edited while the request ran (0.914ms)
-✔ an invalid text count undefined keeps the entire draft with an explanation (0.757542ms)
-✔ an invalid text count -1 keeps the entire draft with an explanation (0.912208ms)
-✔ an invalid text count 4 keeps the entire draft with an explanation (0.67575ms)
-✔ an invalid text count 0.5 keeps the entire draft with an explanation (2.41325ms)
-✔ a reopened departed invitation reconnects after a transient initial seat failure (1.028417ms)
-✔ a 1-byte text acknowledgement preserves Unicode boundaries (0.818334ms)
-✔ a 3-byte text acknowledgement preserves Unicode boundaries (2.983875ms)
-ℹ tests 80
-ℹ suites 0
-ℹ pass 80
-ℹ fail 0
-ℹ cancelled 0
-ℹ skipped 0
-ℹ todo 0
-ℹ duration_ms 204.180875
+TAP version 13
+# Subtest: a refused changed program displays its explanation after refreshing the seat
+ok 1 - a refused changed program displays its explanation after refreshing the seat
+  ---
+  duration_ms: 11.833333
+  type: 'test'
+  ...
+# Subtest: a refused denied handoff displays its explanation after refreshing the seat
+ok 2 - a refused denied handoff displays its explanation after refreshing the seat
+  ---
+  duration_ms: 0.901667
+  type: 'test'
+  ...
+# Subtest: a failed seat read retries without a new move and restores playable controls
+ok 3 - a failed seat read retries without a new move and restores playable controls
+  ---
+  duration_ms: 2.554917
+  type: 'test'
+  ...
+# Subtest: a frame rejected for wrong byte count is fetched again before acknowledging its mark
+ok 4 - a frame rejected for wrong byte count is fetched again before acknowledging its mark
+  ---
+  duration_ms: 0.977458
+  type: 'test'
+  ...
+# Subtest: a frame rejected for invalid base64 is fetched again before acknowledging its mark
+ok 5 - a frame rejected for invalid base64 is fetched again before acknowledging its mark
+  ---
+  duration_ms: 0.99775
+  type: 'test'
+  ...
+# Subtest: a failed seat request after an input retries while the activity feed is unchanged
+ok 6 - a failed seat request after an input retries while the activity feed is unchanged
+  ---
+  duration_ms: 1.037625
+  type: 'test'
+  ...
+# Subtest: eject clears the last picture and the game pad
+ok 7 - eject clears the last picture and the game pad
+  ---
+  duration_ms: 1.009041
+  type: 'test'
+  ...
+# Subtest: no_machine hides the old pad while seat is unavailable and a loaded game restores controls
+ok 8 - no_machine hides the old pad while seat is unavailable and a loaded game restores controls
+  ---
+  duration_ms: 0.835833
+  type: 'test'
+  ...
+# Subtest: a malformed frame does not prevent new activity from refreshing the controller
+ok 9 - a malformed frame does not prevent new activity from refreshing the controller
+  ---
+  duration_ms: 0.717416
+  type: 'test'
+  ...
+# Subtest: choosing a handoff discovers an invite added while the machine stays idle
+ok 10 - choosing a handoff discovers an invite added while the machine stays idle
+  ---
+  duration_ms: 1.844834
+  type: 'test'
+  ...
+# Subtest: revoked access keeps controls disabled and stops sending moves
+ok 11 - revoked access keeps controls disabled and stops sending moves
+  ---
+  duration_ms: 0.731625
+  type: 'test'
+  ...
+# Subtest: an older seat response cannot overwrite a newer poll result
+ok 12 - an older seat response cannot overwrite a newer poll result
+  ---
+  duration_ms: 1.614584
+  type: 'test'
+  ...
+# Subtest: reopening a focused handoff selector refreshes new invites once per opening
+ok 13 - reopening a focused handoff selector refreshes new invites once per opening
+  ---
+  duration_ms: 0.922208
+  type: 'test'
+  ...
+# Subtest: an unreadable controller disables moves and recovers without new machine activity
+ok 14 - an unreadable controller disables moves and recovers without new machine activity
+  ---
+  duration_ms: 0.931375
+  type: 'test'
+  ...
+# Subtest: a HTTP failure after a valid seat prevents input until ownership is readable again
+ok 15 - a HTTP failure after a valid seat prevents input until ownership is readable again
+  ---
+  duration_ms: 0.917708
+  type: 'test'
+  ...
+# Subtest: a malformed seat after a valid seat prevents input until ownership is readable again
+ok 16 - a malformed seat after a valid seat prevents input until ownership is readable again
+  ---
+  duration_ms: 0.722958
+  type: 'test'
+  ...
+# Subtest: a missing controller departure authority after a valid seat prevents input until ownership is readable again
+ok 17 - a missing controller departure authority after a valid seat prevents input until ownership is readable again
+  ---
+  duration_ms: 0.8915
+  type: 'test'
+  ...
+# Subtest: a invalid JSON after a valid seat prevents input until ownership is readable again
+ok 18 - a invalid JSON after a valid seat prevents input until ownership is readable again
+  ---
+  duration_ms: 2.800583
+  type: 'test'
+  ...
+# Subtest: a transport failure after a valid seat prevents input until ownership is readable again
+ok 19 - a transport failure after a valid seat prevents input until ownership is readable again
+  ---
+  duration_ms: 0.7955
+  type: 'test'
+  ...
+# Subtest: reloading reconnects the same tab and disconnect clears its credential
+ok 20 - reloading reconnects the same tab and disconnect clears its credential
+  ---
+  duration_ms: 2.28375
+  type: 'test'
+  ...
+# Subtest: a revoked invitation clears the tab credential and a new link replaces it
+ok 21 - a revoked invitation clears the tab credential and a new link replaces it
+  ---
+  duration_ms: 1.014542
+  type: 'test'
+  ...
+# Subtest: another controller permits observation but no keyboard, pad or handoff mutation
+ok 22 - another controller permits observation but no keyboard, pad or handoff mutation
+  ---
+  duration_ms: 0.595875
+  type: 'test'
+  ...
+# Subtest: text is retained after a refused send outcome
+ok 23 - text is retained after a refused send outcome
+  ---
+  duration_ms: 0.575875
+  type: 'test'
+  ...
+# Subtest: text is retained after a unknown send outcome
+ok 24 - text is retained after a unknown send outcome
+  ---
+  duration_ms: 0.472583
+  type: 'test'
+  ...
+# Subtest: a pending text submission is sent once while a changed draft is retained
+ok 25 - a pending text submission is sent once while a changed draft is retained
+  ---
+  duration_ms: 0.547
+  type: 'test'
+  ...
+# Subtest: a departed holder becomes recoverable without any machine activity
+ok 26 - a departed holder becomes recoverable without any machine activity
+  ---
+  duration_ms: 0.609041
+  type: 'test'
+  ...
+# Subtest: disconnect releases its own controller before forgetting the credential
+ok 27 - disconnect releases its own controller before forgetting the credential
+  ---
+  duration_ms: 0.577084
+  type: 'test'
+  ...
+# Subtest: a spectator disconnects without releasing another participant
+ok 28 - a spectator disconnects without releasing another participant
+  ---
+  duration_ms: 0.805834
+  type: 'test'
+  ...
+# Subtest: a refused disconnect retains its credential across reload for recovery
+ok 29 - a refused disconnect retains its credential across reload for recovery
+  ---
+  duration_ms: 1.193334
+  type: 'test'
+  ...
+# Subtest: a unknown disconnect retains its credential across reload for recovery
+ok 30 - a unknown disconnect retains its credential across reload for recovery
+  ---
+  duration_ms: 1.01125
+  type: 'test'
+  ...
+# Subtest: disconnect relies on the atomic server transition even when seat reads fail
+ok 31 - disconnect relies on the atomic server transition even when seat reads fail
+  ---
+  duration_ms: 0.6385
+  type: 'test'
+  ...
+# Subtest: disconnect drains an admitted move that acquires control and suppresses queued input
+ok 32 - disconnect drains an admitted move that acquires control and suppresses queued input
+  ---
+  duration_ms: 0.788583
+  type: 'test'
+  ...
+# Subtest: a stale live response cannot bypass the atomic disconnect transition
+ok 33 - a stale live response cannot bypass the atomic disconnect transition
+  ---
+  duration_ms: 2.261209
+  type: 'test'
+  ...
+# Subtest: reopening the invitation in a disconnected tab reloads authentication
+ok 34 - reopening the invitation in a disconnected tab reloads authentication
+  ---
+  duration_ms: 1.262042
+  type: 'test'
+  ...
+# Subtest: a different invitation requires disconnecting the current holder first
+ok 35 - a different invitation requires disconnecting the current holder first
+  ---
+  duration_ms: 1.066875
+  type: 'test'
+  ...
+# Subtest: an uncertain release cannot be bypassed by opening a different invitation
+ok 36 - an uncertain release cannot be bypassed by opening a different invitation
+  ---
+  duration_ms: 0.56775
+  type: 'test'
+  ...
+# Subtest: opening the same invitation while connected reloads without changing its identity
+ok 37 - opening the same invitation while connected reloads without changing its identity
+  ---
+  duration_ms: 0.477042
+  type: 'test'
+  ...
+# Subtest: full-document invitation navigation preserves an existing controller identity
+ok 38 - full-document invitation navigation preserves an existing controller identity
+  ---
+  duration_ms: 0.5415
+  type: 'test'
+  ...
+# Subtest: spectator frame polling does not repeatedly scan the seat inventory
+ok 39 - spectator frame polling does not repeatedly scan the seat inventory
+  ---
+  duration_ms: 1.316959
+  type: 'test'
+  ...
+# Subtest: a lost move response cannot forget a credential before the server acquires its seat
+ok 40 - a lost move response cannot forget a credential before the server acquires its seat
+  ---
+  duration_ms: 1.172917
+  type: 'test'
+  ...
+# Subtest: reload during an unresolved fetch retains the outstanding operation
+ok 41 - reload during an unresolved fetch retains the outstanding operation
+  ---
+  duration_ms: 1.876
+  type: 'test'
+  ...
+# Subtest: HTTP 401 on a later read cannot settle an earlier lost write
+ok 42 - HTTP 401 on a later read cannot settle an earlier lost write
+  ---
+  duration_ms: 0.647666
+  type: 'test'
+  ...
+# Subtest: HTTP 403 on a later read cannot settle an earlier lost write
+ok 43 - HTTP 403 on a later read cannot settle an earlier lost write
+  ---
+  duration_ms: 0.52075
+  type: 'test'
+  ...
+# Subtest: HTTP 503 on a later read cannot settle an earlier lost write
+ok 44 - HTTP 503 on a later read cannot settle an earlier lost write
+  ---
+  duration_ms: 0.614417
+  type: 'test'
+  ...
+# Subtest: unavailable tab storage prevents dispatch instead of losing reload recovery
+ok 45 - unavailable tab storage prevents dispatch instead of losing reload recovery
+  ---
+  duration_ms: 0.768917
+  type: 'test'
+  ...
+# Subtest: an acknowledged success clears its own marker before a failing seat read
+ok 46 - an acknowledged success clears its own marker before a failing seat read
+  ---
+  duration_ms: 0.643458
+  type: 'test'
+  ...
+# Subtest: an acknowledged DOS refusal clears its own marker before a failing seat read
+ok 47 - an acknowledged DOS refusal clears its own marker before a failing seat read
+  ---
+  duration_ms: 0.57575
+  type: 'test'
+  ...
+# Subtest: an acknowledged pad refusal clears its own marker before a failing seat read
+ok 48 - an acknowledged pad refusal clears its own marker before a failing seat read
+  ---
+  duration_ms: 0.532833
+  type: 'test'
+  ...
+# Subtest: a malformed mutation response remains unknown rather than enabling a retry
+ok 49 - a malformed mutation response remains unknown rather than enabling a retry
+  ---
+  duration_ms: 0.675
+  type: 'test'
+  ...
+# Subtest: a restored older document cannot clear a newer unknown write via disconnect
+ok 50 - a restored older document cannot clear a newer unknown write via disconnect
+  ---
+  duration_ms: 1.053083
+  type: 'test'
+  ...
+# Subtest: a restored older document cannot clear a newer unknown write via input
+ok 51 - a restored older document cannot clear a newer unknown write via input
+  ---
+  duration_ms: 0.895
+  type: 'test'
+  ...
+# Subtest: a restored older document cannot clear a newer unknown write via auth failure
+ok 52 - a restored older document cannot clear a newer unknown write via auth failure
+  ---
+  duration_ms: 1.163709
+  type: 'test'
+  ...
+# Subtest: an old document cannot forget a replacement identity
+ok 53 - an old document cannot forget a replacement identity
+  ---
+  duration_ms: 0.543666
+  type: 'test'
+  ...
+# Subtest: an old acknowledgement cannot remove a different operation marker
+ok 54 - an old acknowledgement cannot remove a different operation marker
+  ---
+  duration_ms: 1.159959
+  type: 'test'
+  ...
+# Subtest: late auth failure after disconnect cannot clear a later invitation
+ok 55 - late auth failure after disconnect cannot clear a later invitation
+  ---
+  duration_ms: 1.52325
+  type: 'test'
+  ...
+# Subtest: failure to load a retained credential never deletes the unread identity
+ok 56 - failure to load a retained credential never deletes the unread identity
+  ---
+  duration_ms: 0.73
+  type: 'test'
+  ...
+# Subtest: credential removal failure keeps disconnect retryable and game input disabled
+ok 57 - credential removal failure keeps disconnect retryable and game input disabled
+  ---
+  duration_ms: 0.827875
+  type: 'test'
+  ...
+# Subtest: opening a departed invitation reconnects explicitly without a game move
+ok 58 - opening a departed invitation reconnects explicitly without a game move
+  ---
+  duration_ms: 0.691
+  type: 'test'
+  ...
+# Subtest: reloading after departure cleanup fails does not rejoin without an invitation fragment
+ok 59 - reloading after departure cleanup fails does not rejoin without an invitation fragment
+  ---
+  duration_ms: 2.033084
+  type: 'test'
+  ...
+# Subtest: explicit reconnect retries transient refusals while the machine stays idle
+ok 60 - explicit reconnect retries transient refusals while the machine stays idle
+  ---
+  duration_ms: 0.977333
+  type: 'test'
+  ...
+# Subtest: a plain-text 413 settles the rejected input without losing its draft
+ok 61 - a plain-text 413 settles the rejected input without losing its draft
+  ---
+  duration_ms: 0.782416
+  type: 'test'
+  ...
+# Subtest: a pre-dispatch 429 preserves the draft and allows a later retry
+ok 62 - a pre-dispatch 429 preserves the draft and allows a later retry
+  ---
+  duration_ms: 0.795208
+  type: 'test'
+  ...
+# Subtest: storage-blocked observation ends on terminal authentication 401
+ok 63 - storage-blocked observation ends on terminal authentication 401
+  ---
+  duration_ms: 0.521167
+  type: 'test'
+  ...
+# Subtest: storage-blocked observation ends on terminal authentication 403
+ok 64 - storage-blocked observation ends on terminal authentication 403
+  ---
+  duration_ms: 0.408042
+  type: 'test'
+  ...
+# Subtest: disconnect does not wait for an initial seat read that never answers
+ok 65 - disconnect does not wait for an initial seat read that never answers
+  ---
+  duration_ms: 0.728167
+  type: 'test'
+  ...
+# Subtest: disconnect drains an already admitted reconnect before departing
+ok 66 - disconnect drains an already admitted reconnect before departing
+  ---
+  duration_ms: 0.603209
+  type: 'test'
+  ...
+# Subtest: an old initial seat response cannot reconnect after a newer document disconnects
+ok 67 - an old initial seat response cannot reconnect after a newer document disconnects
+  ---
+  duration_ms: 0.936875
+  type: 'test'
+  ...
+# Subtest: a pending old operation cannot reactivate a departed invitation on reload
+ok 68 - a pending old operation cannot reactivate a departed invitation on reload
+  ---
+  duration_ms: 0.673459
+  type: 'test'
+  ...
+# Subtest: missing participation authority is not treated as a connected session
+ok 69 - missing participation authority is not treated as a connected session
+  ---
+  duration_ms: 0.936917
+  type: 'test'
+  ...
+# Subtest: a DOS text receipt for 0 keys retains exactly the unpressed suffix
+ok 70 - a DOS text receipt for 0 keys retains exactly the unpressed suffix
+  ---
+  duration_ms: 0.8435
+  type: 'test'
+  ...
+# Subtest: a DOS text receipt for 1 keys retains exactly the unpressed suffix
+ok 71 - a DOS text receipt for 1 keys retains exactly the unpressed suffix
+  ---
+  duration_ms: 3.522666
+  type: 'test'
+  ...
+# Subtest: a DOS text receipt for 3 keys retains exactly the unpressed suffix
+ok 72 - a DOS text receipt for 3 keys retains exactly the unpressed suffix
+  ---
+  duration_ms: 0.654291
+  type: 'test'
+  ...
+# Subtest: a partial text receipt preserves a draft edited while the request ran
+ok 73 - a partial text receipt preserves a draft edited while the request ran
+  ---
+  duration_ms: 0.80325
+  type: 'test'
+  ...
+# Subtest: an invalid text count undefined keeps the entire draft with an explanation
+ok 74 - an invalid text count undefined keeps the entire draft with an explanation
+  ---
+  duration_ms: 0.657
+  type: 'test'
+  ...
+# Subtest: an invalid text count -1 keeps the entire draft with an explanation
+ok 75 - an invalid text count -1 keeps the entire draft with an explanation
+  ---
+  duration_ms: 0.544
+  type: 'test'
+  ...
+# Subtest: an invalid text count 4 keeps the entire draft with an explanation
+ok 76 - an invalid text count 4 keeps the entire draft with an explanation
+  ---
+  duration_ms: 0.508292
+  type: 'test'
+  ...
+# Subtest: an invalid text count 0.5 keeps the entire draft with an explanation
+ok 77 - an invalid text count 0.5 keeps the entire draft with an explanation
+  ---
+  duration_ms: 0.641625
+  type: 'test'
+  ...
+# Subtest: first observed activity reconnects a departed invitation after a transient initial seat failure
+ok 78 - first observed activity reconnects a departed invitation after a transient initial seat failure
+  ---
+  duration_ms: 0.650041
+  type: 'test'
+  ...
+# Subtest: a 1-byte text acknowledgement preserves Unicode boundaries
+ok 79 - a 1-byte text acknowledgement preserves Unicode boundaries
+  ---
+  duration_ms: 0.6435
+  type: 'test'
+  ...
+# Subtest: a 3-byte text acknowledgement preserves Unicode boundaries
+ok 80 - a 3-byte text acknowledgement preserves Unicode boundaries
+  ---
+  duration_ms: 0.63075
+  type: 'test'
+  ...
+# Subtest: disconnect drains a successful write without waiting for its stalled seat projection
+ok 81 - disconnect drains a successful write without waiting for its stalled seat projection
+  ---
+  duration_ms: 0.883083
+  type: 'test'
+  ...
+# Subtest: disconnect drains a refused write without waiting for its stalled seat projection
+ok 82 - disconnect drains a refused write without waiting for its stalled seat projection
+  ---
+  duration_ms: 0.65625
+  type: 'test'
+  ...
+# Subtest: new activity updates controller ownership immediately inside the recovery interval
+ok 83 - new activity updates controller ownership immediately inside the recovery interval
+  ---
+  duration_ms: 0.764875
+  type: 'test'
+  ...
+# Subtest: a failed activity-triggered read retries unchanged activity only at the recovery cadence
+ok 84 - a failed activity-triggered read retries unchanged activity only at the recovery cadence
+  ---
+  duration_ms: 0.630958
+  type: 'test'
+  ...
+# Subtest: changed activity does not accelerate refused explicit reconnect writes
+ok 85 - changed activity does not accelerate refused explicit reconnect writes
+  ---
+  duration_ms: 1.427292
+  type: 'test'
+  ...
+1..85
+# tests 85
+# suites 0
+# pass 85
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 188.173292

@@ -27,7 +27,9 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
   const requests = [], errors = [];
   let seatReads = 0, frameReads = 0, passed = false, ejected = false, padPressed = false, invited = false, released = false, connected = true;
-  let reconnectRefusals = 0, inputRefusal = null;
+  let reconnectRefusals = 0, inputRefusal = null, activityRevision = 0;
+  let stallProjectionAfterType = false, holdProjection = false, projectionStarted;
+  const heldSeatReads = [];
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     page.on('pageerror', error => errors.push(error.message));
@@ -39,6 +41,10 @@ async function main() {
       let json;
       if (url.pathname === '/api/v1/play/seat') {
         seatReads += 1;
+        if (holdProjection) await new Promise(resolve => {
+          heldSeatReads.push(resolve);
+          projectionStarted();
+        });
         if (seatReads <= 2) return route.fulfill({ status: 503, json: { error: 'fixture-unavailable' } });
         json = { name: 'minsu', connected, machine: !ejected, controller: ejected || released ? null : passed ? 'operator' : 'minsu',
           controller_recoverable: false,
@@ -74,6 +80,7 @@ async function main() {
             ? route.fulfill({ status, contentType:'text/plain', body:'Payload too large' })
             : route.fulfill({ status, json:{ error:'Too Many Requests', message:'Try later' } });
         }
+        if (stallProjectionAfterType) holdProjection = true;
         json = { ok:true, data:{ keys_pressed:1 } };
       } else if (url.pathname === '/api/v1/dos/pass') {
         if (request.postDataJSON().to === 'operator') {
@@ -86,7 +93,8 @@ async function main() {
         json = { ok: true };
       } else if (url.pathname === '/api/v1/lane-addons/live') {
         frameReads += 1;
-        const activity = [{ at: ejected ? 2 : 1, who: 'operator', action: ejected ? 'eject' : 'pass minsu' }];
+        const activity = [{ at: ejected ? 2 : 1 + activityRevision, who: 'operator',
+          action: ejected ? 'eject' : passed ? 'pass operator' : 'pass minsu' }];
         json = ejected ? { state: 'no_machine', activity }
           : url.searchParams.has('since')
             ? { state: 'unchanged', change_count: 3, incarnation: 'machine-1', activity }
@@ -177,6 +185,37 @@ async function main() {
     assert.equal(connected, true);
     await page.locator('#leave').click();
     await page.waitForFunction(() => sessionStorage.getItem('masc.play.invite') === null);
+    // Hold the clock before the recovery deadline: only an activity edge can
+    // update this seat, so elapsed browser polling cannot make the check pass.
+    passed = false; released = false; connected = true;
+    await page.goto('http://play.fixture/play#fixture-token');
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례')
+      && !document.getElementById('pad').hidden);
+    await page.evaluate(() => {
+      window.fixtureClock = performance.now.bind(performance);
+      Object.defineProperty(performance, 'now', { configurable:true, value:() => 0 });
+    });
+    passed = true; activityRevision += 1;
+    await page.waitForFunction(() => document.getElementById('turn').textContent === 'operator 님 차례예요');
+    assert.equal(await page.locator('#send-text').isDisabled(), true);
+    passed = false; activityRevision += 1;
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례'));
+    assert.equal(await page.locator('#send-text').isDisabled(), false);
+    await page.evaluate(() => { Object.defineProperty(performance, 'now', { configurable:true, value:window.fixtureClock }); });
+    // The write has its receipt but its follow-up authority projection never
+    // answers until after departure. Disconnect must only drain actual writes.
+    const projectionRequested = new Promise(resolve => { projectionStarted = resolve; });
+    stallProjectionAfterType = true;
+    await page.locator('#text').fill('123');
+    await page.locator('#send-text').click();
+    await projectionRequested;
+    await page.waitForFunction(() => document.getElementById('text').value === '23');
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('masc.play.pending')), null);
+    await page.locator('#leave').click();
+    await page.waitForFunction(() => sessionStorage.getItem('masc.play.invite') === null);
+    assert.equal(connected, false, 'authoritative departure completes while its projection remains unanswered');
+    holdProjection = false;
+    for (const release of heldSeatReads) release();
     assert.deepEqual(errors, []);
     assert.equal(padPressed, true);
     const receipt = { scope: 'Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.',
@@ -190,7 +229,9 @@ async function main() {
         'retry after storage deletion failure completes disconnect', 'HTTP origin supports mutation randomness',
         'confirmed departure survives plain reload after storage cleanup failure',
         'explicit invitation retries two transient reconnect refusals',
-        'plain-text 413 and rate-limit 429 settle without losing the draft'],
+        'plain-text 413 and rate-limit 429 settle without losing the draft',
+        'activity changes update ownership before the recovery deadline',
+        'terminal write receipt and disconnect do not wait for a stalled seat projection'],
       requests, errors };
     await writeFile(resolve(output, 'play-browser.json'), JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify({ result: 'PASS', output, checks: receipt.checks }));

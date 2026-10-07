@@ -513,7 +513,7 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
      | Auth_failed | Authorization_refused | Payment_required | Not_found -> false)
   (* An answer that came back unusable is a refused output, which §4.3 counts
      among the failures reading less answers. *)
-  | Incomplete_output | Missing_output | Ambiguous_output _
+  | Output_limit_reached | Incomplete_output | Missing_output | Ambiguous_output _
   | Unexpected_output_content | Invalid_json_output
   | Response_body_deadline_exceeded -> true
   | Completion_failed { error; dispatch } -> completion_failure_shows_size ~dispatch error

@@ -768,38 +768,38 @@ let test_direct_turn_discovers_published_workspace_memory () =
     check bool "unavailable direct reply does not reuse a stale read target" false
       (contains ~needle:ledger_sha256 unavailable))
 
-let test_workspace_memory_observation_carries_the_claims_digest () =
+let test_workspace_memory_observation_distinguishes_briefing_states () =
   let module Ledger = Masc.Workspace_memory_ledger in
-  let observation ?(claim_count = 2) ?(truncated = false) () =
-    Ledger.Available
-      { ledger_sha256 = "digest-sha"
-      ; claim_count
-      ; conflict_count = 0
-      ; classified_count = 2
-      ; claims_digest = [ "- c1: Board 에 숫자를 쓰기 전에 원문에서 다시 센다"; "- c2: 두 번째 공유 주장" ]
-      ; claims_digest_truncated = truncated
-      } in
-  let shared = Prompt.format_workspace_memory_observation (observation ()) |> Option.get in
-  List.iter (fun needle -> check bool "shared ledger digest reaches the briefing" true
-    (contains ~needle shared))
-    [ "digest-sha"; "- c1: Board 에 숫자를 쓰기 전에 원문에서 다시 센다"; "- c2: 두 번째 공유 주장";
-      "each of the 2 shared claims"; "keeper_workspace_memory_read" ];
-  (* Two digest rows against three claims is the shape observe produces when
-     the budget stops the walk: the note must state that reachable slice. *)
-  let truncated =
-    Prompt.format_workspace_memory_observation (observation ~claim_count:3 ~truncated:true ()) |> Option.get in
-  check bool "a truncated digest says which slice it holds" true
-    (contains ~needle:"the digest shows the first 2 of 3 claims in id order" truncated);
-  let none_yet =
+  let module Briefing = Masc.Workspace_memory_briefing in
+  let text = "Board claims require checking the original source before acting." in
+  let summary : Briefing.summary = { source_ids = ["c1"]; text } in
+  let render briefing =
     Prompt.format_workspace_memory_observation
       (Ledger.Available
-         { ledger_sha256 = "digest-sha"; claim_count = 0; conflict_count = 0;
-           classified_count = 0; claims_digest = []; claims_digest_truncated = false })
+         { ledger_sha256 = "briefing-sha"; claim_count = 1; conflict_count = 0;
+           classified_count = 1; briefing })
     |> Option.get in
-  check bool "an empty ledger says so instead of an empty section" true
-    (contains ~needle:"None yet." none_yet);
-  check bool "an empty ledger announces no claims, not a slice" true
-    (contains ~needle:"The ledger holds no shared claims yet." none_yet)
+  let current = render (Ok (Briefing.Current summary)) in
+  check bool "current semantic briefing is delivered" true (contains ~needle:text current);
+  check bool "current status is explicit" true (contains ~needle:"current for" current);
+  let stale = render (Ok (Briefing.Stale summary)) in
+  check bool "stale summary remains available as prior context" true (contains ~needle:text stale);
+  check bool "stale status names the previous publication" true
+    (contains ~needle:"last completed version" stale);
+  check bool "stale summary is not presented as current" false
+    (contains ~needle:"current for" stale);
+  let pending = render (Ok Briefing.Missing) in
+  check bool "not yet published is explicit" true
+    (contains ~needle:"has not published" pending);
+  let unavailable = render (Error "briefing storage read failed") in
+  check bool "failed summary read is explicit" true
+    (contains ~needle:"could not be read" unavailable);
+  List.iter (fun rendered ->
+    check bool "missing or unreadable summaries do not invent text" false
+      (contains ~needle:text rendered);
+    check bool "readable ledger remains available without a briefing" true
+      (contains ~needle:"briefing-sha" rendered
+       && contains ~needle:"keeper_workspace_memory_read" rendered)) [pending; unavailable]
 
 let test_open_goal_store_keeps_one_stable_safety_contract () =
   let meta_with_goal =
@@ -1132,8 +1132,8 @@ let () =
             test_direct_turn_carries_held_task_skills;
           test_case "direct reply discovers shared proposal with source uncertainty" `Quick
             test_direct_turn_discovers_published_workspace_memory;
-          test_case "workspace memory observation carries the claims digest" `Quick
-            test_workspace_memory_observation_carries_the_claims_digest;
+          test_case "workspace memory distinguishes briefing freshness and availability" `Quick
+            test_workspace_memory_observation_distinguishes_briefing_states;
           test_case "unresolved goal keeps one stable safety contract" `Quick
             test_open_goal_store_keeps_one_stable_safety_contract;
         ] );

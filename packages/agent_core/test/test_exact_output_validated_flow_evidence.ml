@@ -124,11 +124,12 @@ let fresh_port () =
   port
 ;;
 
-let openai_response content =
+let openai_response ?(finish_reason = "stop") content =
   let encoded_content = Yojson.Safe.to_string (`String content) in
   Printf.sprintf
-    {|{"id":"evidence-response","model":"evidence","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+    {|{"id":"evidence-response","model":"evidence","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":%s}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
     encoded_content
+    (Yojson.Safe.to_string (`String finish_reason))
 ;;
 
 let sha256 value = Digestif.SHA256.(to_hex (digest_string value))
@@ -164,7 +165,7 @@ let break_first_step_ordinal = function
   | _ -> fail "durable evidence was not an object"
 ;;
 
-let with_server f =
+let with_server ?(first_response = openai_response "not-json") f =
   let posts = Atomic.make 0 in
   let result =
     Eio_main.run
@@ -179,7 +180,7 @@ let with_server f =
       let index = Atomic.fetch_and_add posts 1 in
       let response =
         if index = 0
-        then openai_response "not-json"
+        then first_response
         else openai_response {|{"name":"accepted"}|}
       in
       Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
@@ -467,6 +468,64 @@ let test_refusal_advance_survives_the_durable_round_trip ~http_status ~kind () =
     | Ok _ -> fail "accepted a refusal kind inconsistent with its HTTP status"
 ;;
 
+let test_output_limit_preserves_cause_and_durable_evidence ~content () =
+  let result, posts =
+    with_server ~first_response:(openai_response ~finish_reason:"length" content)
+    @@ fun ~net ~clock ~base_url ->
+    with_catalog ~base_url @@ fun snapshot ->
+    EO.execute_flow_once ~net ~clock
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      ~validate:(fun success -> EO.Accept (candidate_id success))
+      (start_flow snapshot) in
+  check int "limited answer and successor each dispatch once" 2 posts;
+  let success = match result with
+    | Ok success -> success | Error _ -> fail "output-limited attempt did not advance" in
+  let evidence = EO.flow_success_evidence success.transport_success in
+  let limited = List.filter (fun (advance : EO.flow_advance_receipt) ->
+    match advance.failed with
+    | EO.Flow_advance_execution_failed { cause = EO.Output_limit_reached; _ } -> true
+    | _ -> false) evidence.advances in
+  check int "normalized MaxTokens has a distinct public cause" 1 (List.length limited);
+  let durable = match snapshot success ~accepted_calls:(ref 0) ~rejection_calls:(ref 0) with
+    | Ok durable -> durable | Error _ -> fail "output limit lost durable evidence" in
+  let encoded = EO.validated_flow_evidence_to_string durable in
+  (match EO.validated_flow_evidence_of_string encoded with
+   | Ok restored -> check string "output limit durable round trip" encoded
+       (EO.validated_flow_evidence_to_string restored)
+   | Error error -> fail (EO.validated_flow_evidence_decode_error_to_string error));
+  let open Yojson.Safe.Util in
+  let document = Yojson.Safe.from_string encoded in
+  let steps = document |> member "steps" |> to_list in
+  let is_limited step = match step |> member "outcome" |> member "failure" with
+    | `Assoc fields -> List.assoc_opt "kind" fields = Some (`String "output_limit_reached")
+    | `Null -> false
+    | _ -> fail "expected typed failure object" in
+  let limited_step = match List.filter is_limited steps with
+    | [step] -> step | _ -> fail "output_limit_reached stable token missing" in
+  let replace key value = function
+    | `Assoc fields -> `Assoc (List.map (fun (name, old) ->
+        name, if String.equal name key then value else old) fields)
+    | _ -> fail "evidence object expected" in
+  let reject label bad_step =
+    let invalid = replace "steps" (`List (List.map (fun step ->
+      if is_limited step then bad_step else step) steps)) document
+      |> recompute_integrity |> Yojson.Safe.to_string in
+    match EO.validated_flow_evidence_of_string invalid with
+    | Error _ -> () | Ok _ -> fail ("accepted invalid output-limit evidence: " ^ label) in
+  List.iter (fun (field, value) ->
+    reject field (replace "attempt" (replace field value (member "attempt" limited_step)) limited_step))
+    ["dispatch_count", `Int 0; "raw_response_sha256", `Null;
+     "provider_trace_sha256", `Null; "http_status", `Int 413;
+     "phase", `String "before_dispatch"; "phase", `String "terminal"];
+  let outcome = member "outcome" limited_step in
+  reject "unknown failure field"
+    (replace "outcome" (replace "failure"
+      (`Assoc ["kind", `String "output_limit_reached"; "extra", `Bool true]) outcome) limited_step)
+;;
+
 let () =
   run
     "exact-output validated flow evidence"
@@ -492,6 +551,10 @@ let () =
         ; test_case "overload 529 advance round trip" `Quick
             (test_refusal_advance_survives_the_durable_round_trip
                ~http_status:529 ~kind:"overloaded")
+        ; test_case "output limit cause and durable round trip" `Quick
+            (test_output_limit_preserves_cause_and_durable_evidence ~content:"{}")
+        ; test_case "empty output limit cause and durable round trip" `Quick
+            (test_output_limit_preserves_cause_and_durable_evidence ~content:"")
         ; test_case
             "typed projection failure"
             `Quick

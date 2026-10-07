@@ -84,6 +84,7 @@ let librarian_continuity = "librarian.continuity"
 let librarian_working_context = "librarian.working_context"
 let librarian_working_contexts_rule = "librarian.working_contexts_rule"
 let workspace_memory_curator = "workspace_memory_curator"
+let workspace_memory_briefing = "workspace_memory_briefing"
 
 (* Runtime-owned instruction assets.  A caller may supply data to these
    templates, but the instruction wording itself never lives beside the
@@ -677,6 +678,10 @@ let agent_core_agent_tool_prompt_param_description =
 ;;
 let keeper_context_workspace_memory_available = "keeper.context.workspace_memory.available"
 let keeper_context_workspace_memory_unavailable = "keeper.context.workspace_memory.unavailable"
+let keeper_context_workspace_memory_briefing_current = "keeper.context.workspace_memory.briefing_current"
+let keeper_context_workspace_memory_briefing_stale = "keeper.context.workspace_memory.briefing_stale"
+let keeper_context_workspace_memory_briefing_pending = "keeper.context.workspace_memory.briefing_pending"
+let keeper_context_workspace_memory_briefing_unavailable = "keeper.context.workspace_memory.briefing_unavailable"
 
 let candle_appraiser_grade = "candle_appraiser_grade"
 

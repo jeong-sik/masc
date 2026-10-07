@@ -728,8 +728,7 @@ module FileSystem = struct
     | Ok json -> Ok (Some json)
     | Error (NotFound _) -> Ok None
     | Error
-        (( AlreadyExists _ | IOError _ | InvalidKey _ | ConnectionFailed _
-         | BackendNotSupported _ ) as e) -> Error e
+        ((AlreadyExists _ | IOError _ | InvalidKey _) as e) -> Error e
 
   let acquire_lock t ~key ~owner ~ttl_seconds =
     let lock_key = "locks:" ^ key in

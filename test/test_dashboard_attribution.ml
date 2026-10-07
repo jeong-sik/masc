@@ -18,7 +18,7 @@ let blocked gate =
     ~from_state:"A" ~to_state:"B" ~reason:"denied"
 
 let partial gate =
-  A.partial_pass ~origin:NonDet ~gate ~evidence:ev ~score:0.7
+  A.partial_pass ~origin:Det ~gate ~evidence:ev ~score:0.7
     ~rationale:"meh"
 
 let setup () = DA.reset ()

@@ -10,12 +10,9 @@ type phase =
   | Projection_configured_keepers
   | Projection_config_resolution
   | Projection_runtime_resolution
-  | Project_snapshot_shell_refresh
   | Project_snapshot_runtime
   | Tools_compute
   | Telemetry_query
-  | Telemetry_filter
-  | Telemetry_summary_per_keeper
   | Telemetry_summary_aggregate
   | Health_build_identity
   | Health_paths
@@ -50,12 +47,9 @@ let phase_token = function
   | Projection_configured_keepers -> "projection_configured_keepers"
   | Projection_config_resolution -> "projection_config_resolution"
   | Projection_runtime_resolution -> "projection_runtime_resolution"
-  | Project_snapshot_shell_refresh -> "project_snapshot_shell_refresh"
   | Project_snapshot_runtime -> "project_snapshot_runtime"
   | Tools_compute -> "tools_compute"
   | Telemetry_query -> "telemetry_query"
-  | Telemetry_filter -> "telemetry_filter"
-  | Telemetry_summary_per_keeper -> "telemetry_summary_per_keeper"
   | Telemetry_summary_aggregate -> "telemetry_summary_aggregate"
   | Health_build_identity -> "health_build_identity"
   | Health_paths -> "health_paths"

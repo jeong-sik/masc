@@ -69,6 +69,12 @@ checks cross-function state and identity invariants.
 
 ## Reproduce the measurement
 
+Run from a separate checkout of `5a9d7aeac2e609a5dab261204cf89825155860b6`,
+copying this report's `ast_complexity.ml` into that checkout first. Running the
+command against another revision measures that revision, not the frozen baseline.
+The repaired sample instead uses the commit and three files in
+`repaired-projection-metrics-summary.json`.
+
 ```sh
 ocaml -I +compiler-libs ocamlcommon.cma \
   docs/evidence/2026-10-07-chat-complexity/ast_complexity.ml \

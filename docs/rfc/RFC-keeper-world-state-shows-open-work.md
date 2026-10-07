@@ -48,7 +48,7 @@ Goal 은 Task 를 쥔 Keeper 에게만 보인다.
 | 자율 턴 주기 | 라이브 600초 (기본 300초) | [사실] `lib/config/env_config_keeper.ml:553-554`, 라이브 `runtime_params.json` `keeper.keepalive_interval_sec` |
 | 하루 턴 시도 | 5,529회. 깨운 이유: Board 47%, keepalive 26%, 자기 예약 15% | [사실] 09-26 system log `keeper cycle` 줄 |
 | GitHub 때문에 깬 턴 | 0회 | [사실] `turn_reason` 에 GitHub variant 가 없다. `lib/keeper_contract/keeper_world_observation_turn_types.ml:64-81` |
-| World State 의 PR 정보 | 없음 | [사실] `lib/keeper/keeper_unified_prompt.ml:1607-2082` 의 `text_of` 와 `lib/keeper/keeper_context_layers.mli:15-36` 의 `layer_id` 에 PR 절이 없다 |
+| World State 의 PR 정보 | 없음 | [사실] `lib/keeper/keeper_unified_prompt.ml` 의 `content_of` 와 `lib/keeper/keeper_context_layers.mli:15-36` 의 `layer_id` 에 PR 절이 없다 |
 | GitHub 이벤트 유입 | 없음 | [사실] `Surface_ref.Webhook` 은 decoder(`lib/keeper/surface_ref.ml:110`)에서만 만들어진다. lib·bin 어디에도 `x-github-event` 처리가 없다 |
 | 도구 0회로 끝난 턴 | 완료 턴의 28%, keepalive 턴의 42% | [사실] 도구 호출 원장과 턴 이음 |
 | 리뷰 요청이 가는 곳 | 공유 계정 둘. pangyo-preachers(Keeper 7명), anyang-keepers(Keeper 12명) | [사실] 각 Keeper 의 `github-cli/hosts.yml` `user` |
@@ -217,7 +217,7 @@ figma-mcp·wkbl 의 실제 cost 는 재지 않았다.
 | store | 메모리 투영. 재시작하면 비어 있다 | [제안] 타입, `keeper_of_author`, `github_slug_of_remote`, `Atomic` 투영을 `masc` 라이브러리의 새 모듈 `Repository_pulls`(`lib/repository_pulls/`)로 옮긴다. 쓰는 함수는 `Repository_pulls.publish : snapshot -> unit` 하나이고 producer 만 부른다. 읽는 함수는 `Repository_pulls.current : unit -> snapshot` 이다 |
 | 대상 입력 1 | 이 Keeper 의 checkout 과 그 remote | [제안] §4.1. `Keeper_sandbox_control.checkout_freshness_rows` 가 이미 턴마다 도는 checkout 측정(`lib/keeper/keeper_unified_turn.ml:768`)에 remote 한 칸을 더한다 |
 | 대상 입력 2 | 이 Keeper 가 선언한 `watch_repositories` | [제안] §4.1. keeper TOML 을 읽을 때 `Github_slug.t list` 로 파싱되어 profile·meta 에 실린다(`board_interests` 와 같은 길, `lib/keeper/keeper_types_profile_toml_parser.ml:29`, `lib/keeper/keeper_meta_contract.ml:250`). 턴은 이미 받는 meta 에서 읽는다. 턴 중에 따로 읽는 저장소는 없다 |
-| consumer 1 | World State `Pull_requests` 절 | [제안] `Keeper_context_layers.layer_id` 에 variant 추가, `keeper_unified_prompt.ml` 의 `text_of`·`content_of` 에 arm 추가 |
+| consumer 1 | World State `Pull_requests` 절 | [제안] `Keeper_context_layers.layer_id` 에 variant 추가, `keeper_unified_prompt.ml` 의 `content_of` 에 arm 추가 |
 | consumer 2 | 전체 목록 도구 `keeper_pull_requests_list` | [제안] §4.7 |
 | consumer 3 | 기존 HTTP 두 곳 | [사실] `server_routes_http_routes_repositories.ml:527`, `server_h2_gateway.ml:1249`. [제안] 둘 다 `Repository_pulls.current` 를 읽는다. JSON 은 새 칸과 `unrecognized` 값만 더한다 |
 | consumer 4 | §5 의 깨우기 (S7) | [제안] producer 가 `publish` 한 뒤 같은 snapshot 으로 계산한다 |
@@ -445,8 +445,6 @@ Task 목록과 달리 여기서는 오래된 것이 먼저다. [사실] 열린 P
   자기 PR 수는 그 Keeper 가 연 PR 수로 묶인다. [사실] 2026-09-27 17:53Z 서버 스냅숏에서 커밋한 Keeper 가 붙은 열린 PR 은 Keeper 당 최대 2개(tui-developer, simplifyer), 합계 7개였다.
 - 묶음 머리에는 "N개 중 k개 보임"을 쓴다. Board Activity·Fleet Messages 머리가 개수를 세는 것과 같다.
   나머지를 읽는 도구 이름(`keeper_pull_requests_list`)은 절 안내 조각에 한 번 적는다. 행을 빼고 "N more" 줄을 따로 붙이지 않는다.
-- 이 절은 `Keeper_context_layers` 의 `Required` 로 둔다. 행 폭이 정해져 있고 행 수가 상한으로 묶이므로
-  바이트가 이미 묶인다(`lib/keeper/keeper_context_layers.mli:49-58` 의 `Required` 정의). 바이트 예산으로 행을 더 빼지 않는다.
 - 절의 자리(`ordered`)는 `Repository_freshness` 바로 뒤, `Autonomous_trigger` 앞이다.
   60초마다 바뀌므로 자주 안 바뀌는 앞쪽 절들의 prefix cache 를 깨지 않는 자리다.
 

@@ -8214,7 +8214,9 @@ let withdraw_play_invite_workspace state
       state.play_invite <- {cards = []; shown_name = None}
   | Some workspace ->
       let retained =
-        if previous = Some workspace then hidden state.play_invite
+        (* Retained chat can still name this workspace after authority loss
+           already withdrew the live cards into quarantine. *)
+        if previous = Some workspace && state.play_invite.cards <> [] then hidden state.play_invite
         else match state.play_invite_quarantine with
           | Some (owner, invite) when owner = workspace -> hidden invite
           | Some _ | None -> {cards = []; shown_name = None} in

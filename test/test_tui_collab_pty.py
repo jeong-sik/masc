@@ -93,6 +93,7 @@ def run(executable):
                        "/api/v1/lane-addons/live": h.PathHttpResponse(live)},
         http_requests=requests)
     run_early_control(executable)
+    run_reopened_msx_read(executable)
     run_pending_revoke(executable)
     run_issue_after_reopen(executable)
     run_workspace_withdrawal(executable)
@@ -100,7 +101,7 @@ def run(executable):
 
 
 def run_early_control(executable):
-    """F5 before the first live answer must recover a current frame and start the clock."""
+    """F5 obtains its own frame; reopening the game picker returns control to observation."""
     requests = []
     pending = h.GatedHttpResponse(live_answer("msx_capture", 1001),
                                  subsequent_response=live_answer("msx_capture", 1002),
@@ -108,8 +109,7 @@ def run_early_control(executable):
 
     def live(path):
         source = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)["source_kind"][0]
-        assert source == "msx_capture", source
-        return pending()
+        return pending() if source == "msx_capture" else live_answer(source, 1)
 
     tick = {"loaded": True, "number": 1003, "change_count": 1003,
             "incarnation": "msx_capture", "width": 2, "height": 1,
@@ -128,14 +128,23 @@ def run_early_control(executable):
             # Wait for the actual held request, independent of its status label.
             os.write(master, b"m")
             assert h.wait_for_fixture_event(process, master, output, pending.requested, timeout=8)
+            start = len(output)
             key(b"\x1b[15~", b"Controlling")
             assert not pending.completed.is_set(), "F5 did not run while the first read was held"
-            start = len(output)
-            pending.release.set()
             h.wait_for_output(process, master, output, b"frame 1002 ", start=start, timeout=8)
+            assert not pending.completed.is_set(), "control waited for the abandoned observation"
             h.wait_for_http_request(process, master, output, requests, path="/api/v1/msx/tick")
             h.wait_for_output(process, master, output, b"frame 1003", start=start, timeout=8)
+            pending.release.set()
+            assert h.wait_for_fixture_event(process, master, output, pending.completed, timeout=8)
             assert b"frame 1001 " not in output[start:], "the abandoned observation replaced the current view"
+            key(b"\x1b[19~", b"change disk")
+            key(b"\x1b", b"Controlling")
+            key(b"\x1b", b"MASC Collab")
+            key(b"g", b"pick a game")
+            pending.subsequent_requested.clear()
+            key(b"\x1b", b"Watching only")
+            assert h.wait_for_fixture_event(process, master, output, pending.subsequent_requested, timeout=8)
             key(b"\x1b", b"MASC Collab")
             key(b"\x1b", b"MASC Dashboard")
             os.write(master, b"q")
@@ -143,12 +152,50 @@ def run_early_control(executable):
             pending.release.set()
 
     h.run_terminal_scenario(executable,
-        description="Collab control recovers when F5 precedes its first live frame",
+        description="Collab control recovers during an old read and the game picker resets it",
         interact=interact,
         http_fixtures={"/api/v1/play/invites": (200, {"invites": []}),
                        "/api/v1/lane-addons/live": h.PathHttpResponse(live),
+                       "/api/v1/msx/carts": (200, {"carts": ["fixture.dsk"]}),
                        "/api/v1/msx/tick": (200, tick)},
         http_requests=requests)
+
+
+def run_reopened_msx_read(executable):
+    """Closing and reopening MSX starts a new live read before the old view's GET completes."""
+    pending = h.GatedHttpResponse(live_answer("msx_capture", 2001),
+                                 subsequent_response=live_answer("msx_capture", 2002),
+                                 hold_seconds=15)
+
+    def interact(process, master, _slave, output, _base):
+        def key(value, needle):
+            start = len(output)
+            os.write(master, value)
+            h.wait_for_output(process, master, output, needle, start=start, timeout=8)
+
+        try:
+            key(b":go Collab\r", b"No invites")
+            os.write(master, b"m")
+            assert h.wait_for_fixture_event(process, master, output, pending.requested, timeout=8)
+            key(b"\x1b", b"MASC Collab")
+            start = len(output)
+            key(b"m", b"frame 2002 ")
+            assert not pending.completed.is_set(), "reopening waited for the abandoned view"
+            pending.release.set()
+            assert h.wait_for_fixture_event(process, master, output, pending.completed, timeout=8)
+            key(b"+", b"Watching only")
+            assert b"frame 2001 " not in output[start:], "old response replaced the new view"
+            key(b"\x1b", b"MASC Collab")
+            key(b"\x1b", b"MASC Dashboard")
+            os.write(master, b"q")
+        finally:
+            pending.release.set()
+
+    h.run_terminal_scenario(executable,
+        description="Reopened Collab MSX view starts a read while its old view is pending",
+        interact=interact,
+        http_fixtures={"/api/v1/play/invites": (200, {"invites": []}),
+                       "/api/v1/lane-addons/live": pending})
 
 
 def invite_row(name):

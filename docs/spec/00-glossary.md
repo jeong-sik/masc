@@ -709,6 +709,48 @@ status: reference
   → [Keeper_native_result_retention](../../lib/keeper/keeper_native_result_retention.mli) ·
   [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli)
 
+**Keeper Chat Event Timeline (키퍼 채팅 이벤트 타임라인)**
+: 직접 채팅 오퍼레이션(`/chat/events`)과 자율 턴(`/turns/:turn_ref/events`,
+  `masc.keeper_turn_events.v1`) 양쪽의 정규화된 이벤트(`keeper_chat_event`)
+  스트림을 시간축으로 통합 소비·표현하는 인터페이스 계약(#41661, #41667).
+  라이브 SSE 스트림과 저널 리플레이 모두 서버의 epoch-seconds 시계를
+  보존하여, 클라이언트의 연결 시점이나 리플레이 여부에 관계없이 타임라인
+  이벤트의 시계열 순서와 타이밍을 유지한다. 옵서버 증분 알림은 알림 자체의
+  페이로드를 추가하지 않고 마지막 수락 시퀀스 이후의 저널을 읽어 일관성을
+  유지한다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Pending Chat Input Separation (대기 채팅 입력 분리)**
+: 사용자의 입력이 로컬 디스패치(`local dispatch`), 미확인 전송(`unconfirmed transport`),
+  서버 큐 접수(`server queue admission`) 단계를 거치는 동안 확정된 대화 이력과
+  분리된 별도 대기 영역(`pending area`)에 머무는 상태 계약(#41661, #41667).
+  `Run_started` 이벤트 또는 영속화된 권위적 입력 확인이 도착하기 전까지는
+  처리가 시작된 것으로 간주하지 않으며, 검증된 거절(refusal) 시 원본 회상 텍스트를
+  보존한 채 실패로 표시한다. 배치 입력의 경우 단일 공유 응답에 앞서 모든 묶인
+  입력 식별자가 차례대로 보존된다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Thinking Stream Index Separation (사고 스트림 인덱스 분리)**
+: 프로바이더 런타임(Codex, Claude, GLM 등)의 추론/사고 스트림(`ThinkingDelta` /
+  `Agent_core_thinking_delta`)이 공개 텍스트 답변(`TextDelta`)의 콘텐츠 인덱스(`content index`)를
+  점유하거나 오염시키지 않도록 식별자와 블록 인덱스를 엄격히 분리하는 경계 계약(#41661, #41667).
+  완료된 추론 블록은 누락된 접미사(suffix)만 기여하며, 불투명 서명(opaque signatures)이나
+  비공개 페이로드는 공개 텍스트로 노출하지 않는다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Native Tool Observed Occurrence (네이티브 도구 관측 출현)**
+: 공식 클라이언트나 네이티브 런타임의 내장 도구 시작/종료 관측(`tool_stream_occurrence`,
+  `native_tool`)은 관측된 실행 생애주기일 뿐, MASC 도구 실행 영수증(`MASC execution receipts`)이나
+  도구 성공 실행을 증명하지 않는다는 경계 규약(#41661, #41667).
+  같은 진행 중 출현(`in-flight occurrence`) 범위 안에서 동일한 프로바이더 도구 식별자의
+  반복 관측은 단일 콘텐츠 인덱스를 유지하며, 이후의 종료 관측이 최초 출현을 닫고
+  어댑터의 식별자 매핑을 정리한다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
 **Speaker Authority (화자 권한)**
 : Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
   추측하지 않고 진입 경로와 Keeper 레지스트리 대조로 구조적으로 결정한다(RFC-0223 §3,

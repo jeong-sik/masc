@@ -175,7 +175,8 @@ let read ~base_path ~now ~before =
   | Some n when n <= 0 -> Error (Invalid_request "before must be a positive message id")
   | None | Some _ -> with_db ~base_path (fun db -> snapshot db ~now ~before)
 
-let snapshot_json snapshot = `Assoc [
+let snapshot_json ?viewer snapshot = `Assoc ((match viewer with
+  | None -> [] | Some name -> ["viewer", `String name]) @ [
   "messages", `List (List.map (fun (m : message) -> `Assoc [
     "id", `Int m.id; "at", `Float m.at; "who", `String m.who;
     "speaker", `String (speaker_name m.speaker); "machine", `String (machine_name m.machine);
@@ -185,7 +186,7 @@ let snapshot_json snapshot = `Assoc [
     "machine", `String (machine_name m.machine); "seen_at", `Float m.seen_at]) snapshot.members);
   "has_more", `Bool snapshot.has_more;
   "presence_seconds", `Float presence_seconds;
-]
+])
 
 let snapshot_of_json json =
   let field key = function
@@ -223,3 +224,12 @@ let snapshot_of_json json =
   let* members = field "members" json in let* members = array member members in
   let* has_more = field "has_more" json in let* has_more = bool has_more in
   Ok {messages; members; has_more}
+
+let view_of_json json =
+  let* viewer = match json with
+    | `Assoc fields -> (match List.assoc_opt "viewer" fields with
+        | Some (`String viewer) when viewer <> "" -> Ok viewer
+        | _ -> Error "authenticated room viewer is missing or malformed")
+    | _ -> Error "room view must be an object" in
+  let* snapshot = snapshot_of_json json in
+  Ok (viewer, snapshot)

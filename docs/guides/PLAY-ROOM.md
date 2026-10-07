@@ -9,6 +9,8 @@ Only deliberate room messages are shared. Keeper transcripts, workspace
 broadcasts, private instructions and invite credentials are not copied here.
 The HTTP API requires an authenticated `CanPlayMachine` bearer. Keeper tools use
 the verified Keeper principal, and request bodies cannot supply a speaker name.
+Responses include that authenticated principal as `viewer`, so clients can
+distinguish their own messages without guessing from text or message order.
 
 `GET /api/v1/play/room` reads the latest 100 messages, in ascending id order,
 and current members. `?before=<oldest message id>` reads older history.

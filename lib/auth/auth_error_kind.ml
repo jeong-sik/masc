@@ -57,9 +57,7 @@ let classify : Masc_domain.t -> t = function
      have no auth-relevant label of their own. *)
   | Masc_domain.Agent _
   | Masc_domain.System _
-  | Masc_domain.Task _
-  | Masc_domain.RateLimitExceeded _
-  | Masc_domain.CacheError _ ->
+  | Masc_domain.Task _ ->
     Other
 
 let all =

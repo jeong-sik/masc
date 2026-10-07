@@ -136,12 +136,6 @@ let category_for_tool tool =
   | Some category -> category
   | None -> GeneralLimit
 
-type cache_error =
-  | CacheReadFailed of string
-  | CacheWriteFailed of string
-  | CacheExpired of { key: string; age_hours: float }
-  | CacheCorrupted of string
-
 module Task_error = struct
   type t =
     | NotFound of string
@@ -237,22 +231,12 @@ type t =
   | Agent of Agent_error.t
   | Auth of Auth_error.t
   | System of System_error.t
-  | RateLimitExceeded of rate_limit_error
-  | CacheError of cache_error
 
 let to_string = function
   | Task e -> Task_error.to_string e
   | Agent e -> Agent_error.to_string e
   | Auth e -> Auth_error.to_string e
   | System e -> System_error.to_string e
-  | RateLimitExceeded e ->
-      Printf.sprintf "[RateLimit] Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
-        (Rate_limit_types.rate_limit_category_to_string e.category) e.current e.limit e.wait_seconds
-  | CacheError e -> (match e with
-      | CacheReadFailed path -> Printf.sprintf "[CacheError] Read failed [path=%s]" path
-      | CacheWriteFailed path -> Printf.sprintf "[CacheError] Write failed [path=%s]" path
-      | CacheExpired { key; age_hours } -> Printf.sprintf "[CacheError] Expired [key=%s, age=%.1fh]" key age_hours
-      | CacheCorrupted path -> Printf.sprintf "[CacheError] Corrupted [path=%s]" path)
 
 let show = to_string
 
@@ -276,8 +260,6 @@ let code = function
            | System_error.IoError _
            | System_error.ValidationError _) -> 400
   | System (System_error.LockContention _) -> 503
-  | RateLimitExceeded _ -> 429
-  | CacheError _ -> 500
 
 (* [dashboard_auth_error_code] is the SSOT mapping from a typed
    [masc_error] to the stable dashboard auth-error-code string that the
@@ -333,7 +315,7 @@ let auth_error_code_of_error : t -> Auth_error_code.t = function
   | Auth (Auth_error.Unauthorized { reason = Auth_error.Missing_token; _ }) ->
       Auth_error_code.Missing_token
   | Auth (Auth_error.Unauthorized { reason = Auth_error.Generic; _ })
-  | Task _ | Agent _ | System _ | RateLimitExceeded _ | CacheError _ ->
+  | Task _ | Agent _ | System _ ->
       Auth_error_code.Unknown
 
 let dashboard_auth_error_code (err : t) : string option =
@@ -354,6 +336,3 @@ let is_retryable = function
          | Auth_error.InvalidToken _) -> false
   | System (System_error.IoError _ | System_error.LockContention _) -> true
   | System (System_error.NotInitialized | System_error.ValidationError _) -> false
-  | RateLimitExceeded _ -> true
-  | CacheError (CacheReadFailed _ | CacheWriteFailed _ | CacheExpired _) -> true
-  | CacheError (CacheCorrupted _) -> false

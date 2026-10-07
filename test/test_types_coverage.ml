@@ -917,11 +917,6 @@ let test_masc_error_task_already_claimed () =
     (try let _ = Str.search_forward (Str.regexp "currently owned by agent") s 0 in true
      with Not_found -> false)
 
-let test_masc_error_rate_limit () =
-  let s = Masc_domain.masc_error_to_string
-    (Masc_domain.RateLimitExceeded { limit = 100; current = 101; wait_seconds = 5; category = Masc_domain.GeneralLimit }) in
-  check bool "contains limit" true (String.length s > 0)
-
 (* ============================================================
    agent_role Tests
    ============================================================ *)
@@ -1886,7 +1881,6 @@ let () =
       test_case "agent not found" `Quick test_masc_error_agent_not_found;
       test_case "task not found" `Quick test_masc_error_task_not_found;
       test_case "task already claimed" `Quick test_masc_error_task_already_claimed;
-      test_case "rate limit" `Quick test_masc_error_rate_limit;
     ];
     "agent_role_to_string", [
       test_case "worker" `Quick test_agent_role_to_string_worker;

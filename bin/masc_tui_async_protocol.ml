@@ -112,7 +112,8 @@ type currency_authority_request = {
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
   | Workspace_identity_unconfirmed of string
-  | Schedule_form_authority_refused of { action : string; detail : string }
+  | Schedule_form_authority_refused of
+      { action : string; detail : string; workspace : workspace_input_identity option }
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result

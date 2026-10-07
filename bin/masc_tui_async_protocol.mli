@@ -112,7 +112,8 @@ type currency_authority_request = {
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
   | Workspace_identity_unconfirmed of string
-  | Schedule_form_authority_refused of { action : string; detail : string }
+  | Schedule_form_authority_refused of
+      { action : string; detail : string; workspace : workspace_input_identity option }
       (** A schedule create/modify form refused by the workspace guard: the
           guard's withdrawal, then the refusal kept on the Schedules surface. *)
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result

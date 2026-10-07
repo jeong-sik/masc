@@ -4901,6 +4901,17 @@ type preset_arm =
   | Restore_armed of string
   | Delete_armed of string
 
+(* A refused schedule create or modify form, kept on the Schedules surface for
+   the last-action window. [sfr_workspace] is the workspace the form was sent
+   to: a reading that only loses the identity, or reads that workspace again,
+   keeps the refusal; a reading of another workspace retires it. *)
+type schedule_form_refusal =
+  { sfr_action : string
+  ; sfr_detail : string
+  ; sfr_at : float
+  ; sfr_workspace : workspace_input_identity option
+  }
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5755,9 +5766,9 @@ type state = {
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: (string * string) option;
-  (* The latest refused create/modify form: action, detail and when, kept on
-     the Schedules surface for the last-action window. *)
-  mutable schedule_form_refusal: (string * string * float) option;
+  (* The latest refused create/modify form, kept on the Schedules surface for
+     the last-action window. *)
+  mutable schedule_form_refusal: schedule_form_refusal option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;

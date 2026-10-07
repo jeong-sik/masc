@@ -1601,7 +1601,9 @@ let check_workspace_request ?schedule_form_action state ~mailbox ~authority ~ide
       let detail = "Workspace identity changed or is unavailable; request withdrawn" in
       let withdrawal = match schedule_form_action with
         | None -> Workspace_identity_unconfirmed detail
-        | Some action -> Schedule_form_authority_refused {action; detail} in
+        | Some action ->
+          Schedule_form_authority_refused
+            {action; detail; workspace = workspace_input_identity_of_server identity} in
       enqueue_async mailbox (Workspace_scoped (authority, withdrawal));
       Error detail
     end
@@ -10418,9 +10420,6 @@ let revoke_detail_readings state =
   Masc_tui_types.withdraw_identity_readings state;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
-  (* A refusal receipt answers one workspace's create or modify form; the
-     next workspace's forms must not inherit it. *)
-  state.schedule_form_refusal <- None;
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs
 
 let same_currency_workspace source current =
@@ -10750,8 +10749,13 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
   (* A refusal receipt answers one workspace's create or modify form; the
-     next workspace's forms must not inherit it. *)
-  state.schedule_form_refusal <- None;
+     next workspace's forms must not inherit it. Losing the reading, or
+     reading the same workspace again, is not the next workspace: the guard's
+     own withdrawal and the refresh after it leave the receipt on screen. *)
+  (match state.schedule_form_refusal, workspace_input_identity_of_server state.server_identity with
+   | Some refusal, Some current when refusal.sfr_workspace <> Some current ->
+     state.schedule_form_refusal <- None
+   | Some _, (Some _ | None) | None, (Some _ | None) -> ());
   state.keeper_usage <- Keeper_usage_unread;
   state.github_identity_view <- None;
   state.github_identity_view_error <- None;
@@ -13471,12 +13475,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Workspace_identity_unconfirmed detail ->
       apply_server_identity_reading state (Error detail);
       report_action state "error" detail
-  | Schedule_form_authority_refused {action; detail} ->
+  | Schedule_form_authority_refused {action; detail; workspace} ->
       (* This receipt belongs to the guard's withdrawal, and is presented
          only after that withdrawal retires the former workspace readings.
          Its Workspace_scoped envelope rejects delivery to a successor. *)
       apply_server_identity_reading state (Error detail);
-      state.schedule_form_refusal <- Some (action, detail, Unix.gettimeofday ());
+      state.schedule_form_refusal <- Some
+        { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
+        ; sfr_workspace = workspace };
       report_action state "error" (action ^ ": " ^ detail)
   | Lane_package_catalog_loaded (generation,directory,result) ->
       map_lane_addons state (fun view ->
@@ -19117,12 +19123,14 @@ and is loaded on demand through keeper_skill.
        the action line alone is lost under a workspace warning. A new
        attempt clears the previous one. *)
     state.schedule_form_refusal <- None;
-    let report_form_refusal detail =
-      state.schedule_form_refusal <- Some (action, detail, Unix.gettimeofday ());
-      report_action state "error" (action ^ ": " ^ detail)
-    in
     let authority = state.workspace_authority in
     let identity = state.server_identity in
+    let report_form_refusal detail =
+      state.schedule_form_refusal <- Some
+        { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
+        ; sfr_workspace = workspace_input_identity_of_server identity };
+      report_action state "error" (action ^ ": " ^ detail)
+    in
     let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
     | None ->
@@ -19135,7 +19143,8 @@ and is loaded on demand through keeper_skill.
        with
        | Error Masc_tui_editor.Cancelled ->
            report_editor_abort state ~action Masc_tui_editor.Cancelled
-       | Error abort -> report_form_refusal (Masc_tui_editor.abort_detail abort)
+       | Error (Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ as abort) ->
+           report_form_refusal (Masc_tui_editor.abort_detail abort)
        | Ok declaration ->
          (match Yojson.Safe.from_string declaration with
           | exception Yojson.Json_error message ->

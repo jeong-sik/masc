@@ -1768,10 +1768,10 @@ let schedule_list_freshness (state : state) =
    warning. *)
 let schedule_form_refusal_rows (state : state) ~cols =
   match state.schedule_form_refusal with
-  | Some (action, detail, at)
-    when Unix.gettimeofday () -. at <= Masc_tui_types.last_action_window_s ->
+  | Some { sfr_action; sfr_detail; sfr_at; sfr_workspace = _ }
+    when Unix.gettimeofday () -. sfr_at <= Masc_tui_types.last_action_window_s ->
       Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
-        (Terminal_text.single_line (action ^ ": " ^ detail))
+        (Terminal_text.single_line (sfr_action ^ ": " ^ sfr_detail))
   | Some _ | None -> []
 
 (** Render the Schedules surface: the scheduled-automation list, with an

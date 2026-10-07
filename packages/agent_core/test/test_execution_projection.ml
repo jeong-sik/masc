@@ -160,6 +160,8 @@ let test_live_and_restart_projection () =
               projection_value (Agent.open_execution_projection ~runtime ~dir locator)
             in
             projection_ref := Some projection;
+            check bool "running root has no terminal receipt" true
+              (Option.is_none (projection_value (Agent.read_execution_terminal projection)));
             let first =
               projection_value
                 (Projection.read_page
@@ -227,6 +229,14 @@ let test_live_and_restart_projection () =
             scope_value (Scope.finish root Event.Succeeded)));
        let projection = Option.get !projection_ref in
        let locator = Option.get !locator_ref in
+       let terminal = projection_value (Agent.read_execution_terminal projection)
+         |> Option.get in
+       check bool "recursive tool attempt is recorded" true terminal.has_tool_attempts;
+       check int "only the enclosing root ToolResult is returned" 1
+         (List.length terminal.settled_tool_results);
+       (match terminal.disposition with
+        | {Agent.outcome=Terminal_succeeded; recovery=Retire} -> ()
+        | _ -> fail "settled recursive call must retain its canonical disposition");
        let through = projection_value (Projection.current_cursor projection) in
        check bool "final cursor advanced" true (Projection.cursor_seq through > 2);
        Eio.Fiber.all
@@ -462,11 +472,82 @@ let test_cursor_codec_is_closed_and_versioned () =
        | Ok _ | Error _ -> fail "ahead after cursor role was not typed")
 ;;
 
+let test_terminal_callback_failure_readback () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let runtime = Agent.create_execution_runtime ~sw
+      ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~domain_count:1
+    |> Result.map_error Error.to_string |> value in
+  let dir = make_dir (Eio.Stdenv.fs env) "agent_core-terminal-callback-" in
+  Fun.protect ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir) (fun () ->
+    let locator = ref None in
+    let agent = child_agent ~net:(Eio.Stdenv.net env) in
+    let store = Agent.execution_store ~runtime ~dir
+        ~on_scope_ready:(fun value -> locator := Some value; Ok ())
+        ~on_terminal_disposition:(fun _ -> Error "host receipt sink unavailable") () in
+    (match Agent.run ~sw ~execution_store:store agent "complete once" with
+     | Error (Error.Internal _) -> ()
+     | Error error -> fail (Error.to_string error)
+     | Ok _ -> fail "host terminal sink failure must fail the public call");
+    let committed_before = Eio.Path.load Eio.Path.(dir / "events.v1.commit") in
+    let projection = projection_value
+      (Agent.open_execution_projection ~runtime ~dir (Option.get !locator)) in
+    let terminal = projection_value (Agent.read_execution_terminal projection) |> Option.get in
+    (match terminal.disposition with
+     | {Agent.outcome=Terminal_succeeded; recovery=Retire} -> ()
+     | _ -> fail "readback must preserve success committed before host sink failure");
+    check bool "provider-only call admits no tool attempt" false terminal.has_tool_attempts;
+    check int "provider-only call has no invented ToolResult" 0
+      (List.length terminal.settled_tool_results);
+    check string "terminal readback never advances durable authority" committed_before
+      (Eio.Path.load Eio.Path.(dir / "events.v1.commit")))
+;;
+
+let test_terminal_unknown_effect_readback () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let runtime = Agent.create_execution_runtime ~sw ~domain_mgr ~domain_count:1
+    |> Result.map_error Error.to_string |> value in
+  let internal_runtime = Runtime.create ~sw ~domain_mgr ~domain_count:1
+    |> Result.map_error Runtime.create_error_to_string |> value in
+  let codec = Codec.of_runtime internal_runtime in
+  let dir = make_dir (Eio.Stdenv.fs env) "agent_core-terminal-unknown-" in
+  Fun.protect ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir) (fun () ->
+    let locator = writer_value (Writer.run ~codec ~dir (fun ~sw:_ writer ->
+      let scope = scope_value (Scope.start ~writer ~agent_name:"unknown-effect") in
+      let turn = scope_value (Scope.open_turn scope ~ordinal:1) in
+      let provider = scope_value (Scope.open_provider_attempt turn ~ordinal:0 (binding ())) in
+      let tool = scope_value (Scope.open_invocation provider ~invocation:(invocation ())
+        ~tool_name:"uncertain-write" ~input:(`Assoc [])) in
+      (match Scope.execute tool ~invoke:(fun ~start_child:_ ~tool_name:_ ~input:_ -> raise Exit) with
+       | exception Exit -> ()
+       | Ok _ -> fail "unknown effect fixture unexpectedly settled"
+       | Error error -> fail (Scope.error_to_string error));
+      scope_value (Scope.abort scope (Scope.Failed
+        {Event.kind=Internal_failure; detail="interrupted after admission"; data=None}));
+      (match scope_value (Scope.terminal_recovery_action scope) with
+       | Scope.Operator_repair_required Effect_outcome_unknown -> ()
+       | Scope.Retire -> fail "writer must report the admitted unknown effect");
+      public_locator scope)) in
+    let projection = projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
+    let terminal = projection_value (Agent.read_execution_terminal projection) |> Option.get in
+    (match terminal.disposition with
+     | {Agent.outcome=Terminal_failed;
+        recovery=Operator_repair_required Effect_outcome_unknown} -> ()
+     | _ -> fail "read-only terminal evidence must agree with writer recovery");
+    check bool "unknown effect keeps tool admission" true terminal.has_tool_attempts;
+    check int "unknown effect does not synthesize a settled result" 0
+      (List.length terminal.settled_tool_results))
+;;
+
 let () =
   Alcotest.run
     "Execution projection"
     [ ( "authority"
       , [ test_case "live and restart projection" `Quick test_live_and_restart_projection
+        ; test_case "terminal callback failure readback" `Quick test_terminal_callback_failure_readback
+        ; test_case "terminal unknown-effect readback" `Quick test_terminal_unknown_effect_readback
         ; test_case
             "cursor codec is closed and versioned"
             `Quick

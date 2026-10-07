@@ -645,6 +645,24 @@ let current_cursor t =
   { scope_id = t.scope_id; seq = Durable.last_seq snapshot.durable }
 ;;
 
+let terminal_recovery t =
+  let* snapshot = refresh t in
+  match Journal.Reducer.find_run snapshot.reducer t.locator_run_id with
+  | None -> Error (Locator_not_found t.locator_run_id)
+  | Some {Journal.status=Running; _} -> Ok None
+  | Some {Journal.status=Finished terminal; run; _} ->
+    let+ recovery = Execution_agent_scope.recovery_evidence_from_tree
+      ~root:(Journal.run_root run)
+      ~read_node:(fun node ->
+        Eio.Fiber.yield ();
+        match Journal.Reducer.find_node snapshot.reducer node with
+        | Some view -> Ok view
+        | None -> Error (Semantic_failure
+            {seq=Durable.last_seq snapshot.durable;
+             detail="terminal execution descendant disappeared"})) in
+    Some (terminal.value, recovery)
+;;
+
 let cursor_matches scope_id (cursor : cursor) =
   Durable.Scope_id.equal scope_id cursor.scope_id
 ;;

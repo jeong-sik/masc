@@ -1,6 +1,6 @@
 {
   "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
-  "source_sha256": "f1409507c499d8641fb6ec205914702fed852acb99b65f8c42b03c086473cd57",
+  "source_sha256": "ca12a5de68bcf4dea0ecac4d5f06a662454024db6b1c2a4ca04135b19bf89667",
   "browser_version": "149.0.7827.55",
   "seat_reads": 16,
   "frame_reads": 23,
@@ -275,6 +275,11 @@
     {
       "method": "POST",
       "path": "/api/v1/play/session",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
       "query": ""
     },
     {

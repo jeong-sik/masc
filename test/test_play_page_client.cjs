@@ -113,13 +113,6 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     // Existing cases assert game requests; room traffic has its own assertions.
     get requests() { return requests.filter(request => request.url !== '/api/v1/play/room'); },
     get roomRequests() { return requests.filter(request => request.url === '/api/v1/play/room'); },
-    async expireRoomRead() {
-      const timer = timers.find(timer => timer.delay === 5000);
-      assert.ok(timer, 'the in-flight read has a timeout');
-      timers.splice(timers.indexOf(timer), 1);
-      timer.callback();
-      await settle();
-    },
     async roomPoll() { vm.runInContext('refreshRoom();', context); await settle(); },
     get reloads() { return reloads; },
     get hash() { return location.hash; },
@@ -481,36 +474,70 @@ test('a late room acknowledgment and disconnect cannot erase a newer document dr
   assert.equal(storage.size, 0, 'the current document may explicitly clear its own draft on disconnect');
 });
 
-test('a queued public message cannot dispatch after a newer document replaces its draft', async () => {
-  const storage = new Map();
-  let finishRead;
-  const older = fixture(gameReply, { storage, roomReply: ({ body }) => body.action === 'read'
-    ? new Promise(resolve => { finishRead = () => resolve(response(emptyRoom)); }) : response(emptyRoom) });
-  await older.settle();
-  older.get('chat-text').value = 'superseded queued public message';
-  older.get('chat-send').handlers.click();
-  await older.settle();
-  assert.equal(older.roomRequests.some(request => request.body.action === 'say'), false,
-    'the message is waiting behind the admitted read');
-
-  const newer = fixture(gameReply, { storage, hash:'' });
-  await newer.settle();
-  newer.get('chat-text').value = 'newer draft';
-  newer.get('chat-text').handlers.input();
-  const saved = storage.get('masc.play.room.draft');
+test('a user send bypasses a hung room read and ignores its late response', async () => {
+  let finishRead, readSignal;
+  const page = fixture(gameReply, { roomReply: ({ body }, signal) => {
+    if (body.action === 'read') {
+      readSignal = signal;
+      return new Promise(resolve => { finishRead = () => resolve(response({ ...emptyRoom, messages:[] })); });
+    }
+    return response({ ...emptyRoom, messages:[roomMessage(1, body.text)] });
+  } });
+  await page.settle();
+  page.get('chat-text').value = 'without waiting for read';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  assert.equal(readSignal.aborted, true);
+  assert.equal(page.roomRequests.filter(request => request.body.action === 'say').length, 1);
+  assert.equal(page.get('chat-text').value, '');
+  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'without waiting for read');
   finishRead();
-  await older.settle();
-  assert.equal(older.roomRequests.some(request => request.body.action === 'say'), false,
-    'superseded draft authority must be checked before the public POST');
-  assert.equal(storage.get('masc.play.room.draft'), saved);
-  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
-  assert.equal(older.get('chat-text').disabled, true);
-  assert.match(older.get('room-status').textContent, /새로고침/);
-  assert.equal(newer.get('chat-text').value, 'newer draft');
-  assert.equal(newer.get('chat-text').disabled, false);
+  await page.settle();
+  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'without waiting for read');
 });
 
-test('a queued public message still dispatches when its own document edits the next draft', async () => {
+test('explicit room refresh replaces a hung read without timing out slow observations', async () => {
+  let attempts = 0, oldSignal;
+  const page = fixture(gameReply, { roomReply: (_request, signal) => {
+    if (++attempts === 1) { oldSignal = signal; return new Promise(() => {}); }
+    return response({ ...emptyRoom, messages:[roomMessage(1, 'recovered room')] });
+  } });
+  await page.settle();
+  await page.roomTick();
+  assert.equal(oldSignal.aborted, false, 'ordinary pulses preserve an in-flight read');
+  assert.equal(attempts, 1);
+  await page.roomPoll();
+  assert.equal(oldSignal.aborted, true);
+  assert.equal(attempts, 2);
+  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'recovered room');
+  await page.roomTick();
+  assert.equal(attempts, 3);
+});
+
+test('a read started during a send cannot overwrite the acknowledged message', async () => {
+  let finishSend, finishRead, readSignal, reads = 0;
+  const page = fixture(gameReply, { roomReply: ({ body }, signal) => {
+    if (body.action === 'say') return new Promise(resolve => {
+      finishSend = () => resolve(response({ ...emptyRoom, messages:[roomMessage(1, body.text)] }));
+    });
+    if (++reads === 1) return response(emptyRoom);
+    readSignal = signal;
+    return new Promise(resolve => { finishRead = () => resolve(response(emptyRoom)); });
+  } });
+  await page.settle();
+  page.get('chat-text').value = 'acknowledged';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  await page.roomTick();
+  finishSend();
+  await page.settle();
+  assert.equal(readSignal.aborted, true);
+  finishRead();
+  await page.settle();
+  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'acknowledged');
+});
+
+test('a public message bypasses a hung read and preserves its next draft', async () => {
   const storage = new Map();
   let finishRead;
   const page = fixture(gameReply, { storage, roomReply: ({ body }) => body.action === 'read'
@@ -1787,31 +1814,3 @@ for (const failingKey of ['masc.play.room.draft', 'masc.play.room.clients', 'mas
     assert.equal(page.roomRequests.length, sent, 'cleanup uses no rejected bearer');
   });
 }
-
-test('a timed-out room read releases a queued send and cannot overwrite its receipt', async () => {
-  let finishRead;
-  let signal;
-  let reads = 0;
-  const page = fixture(gameReply, { roomReply: ({ body }, abort) => {
-    if (body.action === 'read' && ++reads === 1) {
-      signal = abort;
-      return new Promise(resolve => { finishRead = () => resolve(response(emptyRoom)); });
-    }
-    return response({ ...emptyRoom, messages:[roomMessage(1, 'delivered', 'minsu')] });
-  } });
-  await page.settle();
-  page.get('chat-text').value = 'delivered';
-  page.get('chat-send').handlers.click();
-  await page.settle();
-  assert.equal(page.roomRequests.some(r => r.body.action === 'say'), false);
-  await page.expireRoomRead();
-  assert.equal(signal.aborted, true);
-  assert.equal(page.roomRequests.filter(r => r.body.action === 'say').length, 1);
-  assert.equal(page.get('chat-text').value, '');
-  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'delivered');
-  finishRead();
-  await page.settle();
-  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'delivered');
-  await page.roomTick();
-  assert.equal(reads, 2, 'periodic reads recover after the timeout');
-});

@@ -278,11 +278,12 @@ let roomSnapshot = null;
 let roomMessagesKey = null;
 let pendingChat = null;
 let roomAbort = null;
+let roomReadAbort = null;
+let roomReadRequest = null;
 let roomDetached = false;
 let roomDraftVersion = null;
 const ROOM_DRAFT_KEY = 'masc.play.room.draft';
 const ROOM_CLIENTS_KEY = 'masc.play.room.clients';
-const ROOM_READ_TIMEOUT_MS = 5000;
 // The saves name the seat last reported (null: nothing loaded), and the one
 // the pad on screen was read for (undefined: not read yet, or the last read
 // failed). The pad is read again while the two differ.
@@ -515,37 +516,40 @@ function renderRoom(snapshot, showMessages = true) {
 }
 
 function roomRequest(body) {
-  roomSending = roomSending.catch(() => {}).then(() => {
-    // A send can wait behind a read while another document replaces this
-    // tab's draft. Recheck its authority at the public write boundary.
+  const readRequest = roomReadRequest;
+  const dispatch = () => {
+    // Another document can replace this tab's draft before dispatch.
+    // Recheck its authority at the public write boundary.
     if (ended || authRejected || disconnecting || departureConfirmed || !roomConnectionCurrent(body.action === 'say')) return null;
+    if (body.action === 'read' && readRequest !== roomReadRequest) return null;
     roomClients.add(body.client_id);
     // Record leases before dispatch so a reload without a pending chat still
     // knows every presence created by this tab when the user disconnects.
     sessionStorage.setItem(ROOM_CLIENTS_KEY, JSON.stringify([...roomClients]));
     const abort = new AbortController();
-    roomAbort = abort;
-    let timer = null;
-    const request = api('POST', ROOM_PATH, body, abort.signal);
-    // Reads may renew presence but carry no message receipt. Bound their wait
-    // so an unavailable response cannot indefinitely hold a queued send.
-    const result = body.action !== 'read' ? request : Promise.race([request,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          abort.abort();
-          reject(new Error('room read timed out'));
-        }, ROOM_READ_TIMEOUT_MS);
-      })]);
-    return result.finally(() => {
-      if (timer !== null) clearTimeout(timer);
+    if (body.action === 'read') roomReadAbort = abort;
+    else roomAbort = abort;
+    return api('POST', ROOM_PATH, body, abort.signal).finally(() => {
       if (roomAbort === abort) roomAbort = null;
+      if (roomReadAbort === abort) roomReadAbort = null;
     });
-  });
+  };
+  if (body.action === 'read') return Promise.resolve().then(dispatch);
+  roomReadRequest = null;
+  roomBusy = false;
+  if (roomReadAbort) roomReadAbort.abort();
+  roomSending = roomSending.catch(() => {}).then(dispatch);
   return roomSending;
 }
 
-function refreshRoom() {
-  if (ended || authRejected || disconnecting || departureConfirmed || roomDetached || roomBusy) return;
+function refreshRoom(replace = true) {
+  if (ended || authRejected || disconnecting || departureConfirmed || roomDetached) return;
+  // A normal pulse leaves a slow read intact. Explicit navigation or a send
+  // supersedes it; elapsed time alone does not revoke observation ownership.
+  if (roomBusy && !replace) return;
+  if (roomReadAbort) roomReadAbort.abort();
+  const request = {};
+  roomReadRequest = request;
   roomBusy = true;
   setRoomControls();
   const before = roomBefore;
@@ -553,14 +557,16 @@ function refreshRoom() {
   const body = { action:'read', client_id:roomClient, machine:viewMachine };
   if (before !== null) body.before = before;
   roomRequest(body).then(result => {
-    if (ended || departureConfirmed || !result || !roomConnectionCurrent()) return;
+    if (ended || authRejected || departureConfirmed || request !== roomReadRequest || !result || !roomConnectionCurrent()) return;
     if (result.status === 200 && validRoom(result.json)) {
       renderRoom(result.json, before === roomBefore);
       if (!pendingChat) el('room-status').textContent = '';
     } else el('room-status').textContent = '공용 대화를 읽지 못했어요 (' + result.status + '). 다시 읽고 있어요.';
   }).catch(() => {
-    if (!ended && !departureConfirmed && !roomDetached) el('room-status').textContent = '공용 대화 연결이 끊겼어요. 다시 읽고 있어요.';
+    if (!ended && !authRejected && !departureConfirmed && !roomDetached && request === roomReadRequest)
+      el('room-status').textContent = '공용 대화 연결이 끊겼어요. 다시 읽고 있어요.';
   }).finally(() => {
+    if (request !== roomReadRequest) return;
     roomBusy = false;
     setRoomControls();
   });
@@ -570,7 +576,7 @@ function refreshRoom() {
 // live-frame request must not prevent an otherwise healthy room from updating.
 function tickRoom() {
   if (ended || authRejected || departureConfirmed || roomDetached) return;
-  refreshRoom();
+  refreshRoom(false);
   setTimeout(tickRoom, ROOM_POLL_MS);
 }
 
@@ -595,6 +601,10 @@ function sendChat() {
   roomRequest({ action:'say', ...request }).then(result => {
     if (ended || departureConfirmed || !result || !roomConnectionCurrent(true)) return;
     if (result.status === 200 && validRoom(result.json)) {
+      // Reads begun during this send cannot replace its acknowledged history.
+      roomReadRequest = null;
+      roomBusy = false;
+      if (roomReadAbort) roomReadAbort.abort();
       pendingChat = null;
       if (el('chat-text').value === request.text) el('chat-text').value = '';
       roomBefore = null;
@@ -970,6 +980,7 @@ async function disconnect() {
   }
   disconnecting = true;
   if (roomAbort) roomAbort.abort();
+  if (roomReadAbort) roomReadAbort.abort();
   initialConnectIntent = false;
   setControlsEnabled(false);
   setStatus('disconnect', '조종권을 확인하고 연결을 끊고 있어요.');

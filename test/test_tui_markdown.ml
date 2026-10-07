@@ -114,6 +114,23 @@ let test_unpaired_marker_stays_literal () =
   check_rows "lone backtick" [ "a ` here" ] (render "a ` here");
   check_rows "trailing marker" [ "ends with *" ] (render "ends with *")
 
+let test_indented_words_share_the_wrap_budget () =
+  List.iter (fun (source, expected) ->
+    let rows = render ~width:5 ~palette:Markdown.plain_palette source in
+    check_rows (Printf.sprintf "indented row %S" source) expected rows;
+    List.iter (fun row -> Alcotest.(check bool) "row fits body width" true
+      (Masc_tui_message_layout.display_width row <= 5)) rows)
+    [ " abcde", [" abcd"; "e"]
+    ; "  abcde", ["  abc"; "de"]
+    ; " abcdefghij", [" abcd"; "efghi"; "j"]
+    ; "  **abcde**", ["  abc"; "de"]
+    ; " 가나", [" 가나"]
+    ; "  가나", ["  가"; "나"]
+    ];
+  check_rows "ordinary word wraps still consume their separator"
+    ["abc"; "def"] (render ~width:5 ~palette:Markdown.plain_palette "abc def")
+;;
+
 (* Half this workspace's chat is snake_case. Pairing the underscores in
    [keeper_tool_descriptor_registry_integrity] ate them and italicised the
    middle, so an identifier arrived on screen as a different identifier. *)
@@ -860,7 +877,8 @@ let test_double_tilde_strikes_and_single_tilde_does_not () =
 let () =
   Alcotest.run "tui-markdown"
     [ ( "inline"
-      , [ Alcotest.test_case "code loses its backticks" `Quick
+      , [ Alcotest.test_case "indented words share the wrap budget" `Quick test_indented_words_share_the_wrap_budget
+        ; Alcotest.test_case "code loses its backticks" `Quick
             test_inline_code_loses_its_backticks
         ; Alcotest.test_case "strong and emphasis" `Quick
             test_strong_and_emphasis

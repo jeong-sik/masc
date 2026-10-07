@@ -294,54 +294,47 @@ let wrap_tokens palette ~width tokens =
   let rows = ref [] in
   let current = Buffer.create 128 in
   let current_cells = ref 0 in
+  let current_has_word = ref false in
   let flush () =
     rows := Buffer.contents current :: !rows;
     Buffer.clear current;
-    current_cells := 0
+    current_cells := 0;
+    current_has_word := false
   in
-  (* The word is measured once by [place] and carried in: measuring it again
-     to decide the row and a third time to advance the count segmented every
-     word of every rendered line three times over. *)
-  let push ~word_cells token =
-    (* Empty leading tokens are source indentation. Keep their spaces even
-       before the first word; only a width-induced wrap consumes a separator. *)
-    let separator = if token.space_before then " " else "" in
-    let cells = Layout.display_width separator + word_cells in
-    let separator =
-      if !current_cells > 0 && !current_cells + cells > width then (
-        flush ();
-        "")
-      else separator in
-    Buffer.add_string current separator;
-    Buffer.add_string current (render_token palette token);
-    current_cells :=
-      !current_cells + Layout.display_width separator + word_cells
+  let append token ~word_cells word =
+    Buffer.add_string current (render_token palette { token with word });
+    current_cells := !current_cells + word_cells;
+    if word <> "" then current_has_word := true
   in
-  let place token =
-    let word_cells = Layout.display_width token.word in
-    if word_cells <= width then push ~word_cells token
+  let append_word token ~word_cells =
+    let remaining = width - !current_cells in
+    if word_cells <= remaining then append token ~word_cells token.word
     else begin
-      (* A word wider than the row is split between scalars rather than allowed
-         to push the frame past its border. The tail stays open so the next
-         word joins it instead of starting a row of its own. *)
-      if !current_cells > 0 then flush ();
-      let rec emit = function
-        | [] -> ()
-        | [ tail ] ->
-            Buffer.add_string current
-              (render_token palette { token with word = tail });
-            current_cells := Layout.display_width tail
-        | chunk :: rest ->
-            Buffer.add_string current
-              (render_token palette { token with word = chunk });
-            current_cells := Layout.display_width chunk;
-            flush ();
-            emit rest
-      in
-      emit (Layout.split_cells ~max_cells:width token.word)
+      let prefix, tail = Layout.split_at_cells token.word remaining in
+      if prefix <> "" then
+        append token ~word_cells:(Layout.display_width prefix) prefix;
+      (* Split the remaining word once at the full row width, preserving
+         graphemes and styling without repeatedly measuring its suffix. *)
+      List.iter (fun word ->
+        if Buffer.length current > 0 then flush ();
+        append token ~word_cells:(Layout.display_width word) word)
+        (Layout.split_cells ~max_cells:width tail)
     end
   in
-  List.iter place tokens;
+  List.iter (fun token ->
+    let separator_cells = if token.space_before then 1 else 0 in
+    let word_cells = Layout.display_width token.word in
+    (* Wrap whole words after text. At the start, source indentation consumes
+       the same body budget as the word, so split the word into the space
+       that remains instead of overflowing or emitting indentation alone. *)
+    let wrapped = !current_has_word
+      && !current_cells + separator_cells + word_cells > width in
+    if wrapped then flush ();
+    if token.space_before && not wrapped then (
+      if !current_cells = width then flush ();
+      Buffer.add_char current ' ';
+      incr current_cells);
+    append_word token ~word_cells) tokens;
   if Buffer.length current > 0 || !rows = [] then flush ();
   List.rev !rows
 

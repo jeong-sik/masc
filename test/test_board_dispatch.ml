@@ -1175,6 +1175,10 @@ let test_read_answers_only_parse_and_absence () =
    | Error (Board.Read_invalid_id _) -> ()
    | Error e -> Alcotest.fail ("expected Read_invalid_id, got " ^ Board.show_board_read_error e)
    | Ok _ -> Alcotest.fail "an invalid post id was read");
+  (match Board_dispatch.read_comments ~post_id:"never-existed" with
+   | Ok [] -> ()
+   | Ok _ -> Alcotest.fail "a missing post returned comments"
+   | Error e -> Alcotest.fail ("expected Ok [], got " ^ Board.show_board_read_error e));
   match Board_dispatch.get_post ~post_id:"never-existed" with
   | Error (Board.Post_not_found "never-existed") -> ()
   | Error e -> Alcotest.fail ("expected Post_not_found, got " ^ Board.show_board_error e)

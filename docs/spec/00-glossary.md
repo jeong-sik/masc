@@ -725,9 +725,11 @@ status: reference
   외부에 읽기 전용으로 노출하는 단일 진실 공급원(SSOT) 인터페이스 계약(#41673).
   런·턴·프로바이더 시도·출력 블록·도구 호출의 생명주기를 노드(`Node_opened`·
   `Node_updated`·`Node_closed`)와 종단 상태(`terminal`: `Succeeded`, `Failed`, `Cancelled`)로
-  표현하며, 불변 커서(`cursor_role`: `After` / `Through`) 기반의 원자적 페이지네이션(`read_page`)과
-  정규 정산 도구 호출 목록(`settled_tool_invocations`)을 제공하여 복구 하네스와
-  타임라인 소비자가 동일한 실행 상태를 비결정성 없이 재현할 수 있도록 보장한다.
+  표현한다. 페이지네이션(`read_page`)은 `through` 미지정 시 호출 시점의 현재 권위적 상태
+  (`current atomic authority`)를 관측하며, 반환된 `high_watermark`를 후속 `through`로 재사용할 때만
+  해당 시점의 확정 접두사(`committed prefix`)가 고정된다. 정규 정산 도구 호출 목록
+  (`settled_tool_invocations`)은 루트 런의 확정 관측일 뿐 재실행 권한(`replay authority`)이 아니며,
+  미정산 호출 누락이 재시도 안전을 뜻하지 않고 중첩 런 결과는 둘러싼 도구 결과 뒤에 남는다.
   → [Agent_execution_projection](../../packages/agent_core/lib/agent/agent_execution_projection.mli) ·
   [Agent_execution_projection_intf](../../packages/agent_core/lib/agent/agent_execution_projection_intf.mli)
 
@@ -735,11 +737,13 @@ status: reference
 : 네이티브 Keeper 실행 중 영속화된 도구 결과(`durable ToolResult`) 정산과 다음
   체크포인트 저장 사이에 프로세스가 중단·재시작되었을 때, 유실된 도구 반복 관측값
   (`repetition observation`)을 결정론적으로 복원하는 정합성 계약(#41673).
-  핸들러·게이트·옵서버를 재호출하지 않고, 불변 네이티브 시드(`seed`)가 체크포인트
-  관측값의 정확한 접미사(`suffix`)로 유지되는지 검증한 뒤, 시드 이후의 관측값이
-  정규 실행 발생 건을 체크포인트 순서대로 소비하도록 맞춘다. 누락된 관측값은
-  정규 정산 순서(`canonical settlement order`)로 보충 기록하여 재시작 후에도
-  도구 재실행 없이 반복 방지 가드(`repetition snapshot`)를 완전하게 복구한다.
+  핸들러·게이트·옵서버를 재실행하지 않으며, 스코프 불일치·시드 변경·미정산 체크포인트·
+  잘못된 정산 결과·미지원 출처·스냅샷 오류(`Scope_mismatch`, `Seed_observations_changed`,
+  `Checkpoint_observation_not_settled`, `Invalid_settled_result`, `Unsupported_result_provenance`,
+  `Repetition_error`) 등 6종의 타입화된 오류가 발생하면 복구를 거절한다. 불변 네이티브
+  시드(`seed`)가 체크포인트 관측값의 정확한 접미사(`suffix`)로 검증되고 각 관측값이
+  정규 발생 건을 순서대로 소비한 경우에만 누락 관측값을 정규 정산 순서(`canonical settlement order`)로
+  보충하며, 유실된 라이브 옵서버 순서는 추론하지 않는다.
   → [Keeper_native_repetition_recovery](../../lib/keeper/keeper_native_repetition_recovery.mli) ·
   [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli) ·
   [Keeper native restart harness](../../docs/guides/KEEPER-NATIVE-RESTART-HARNESS.md)

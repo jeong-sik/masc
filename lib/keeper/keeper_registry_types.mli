@@ -23,13 +23,6 @@ type fiber_drop_cause =
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Stale_termination_storm of { count : int }
-      (** #10765 Phase 2: latched when [record_stale_termination] returns a
-          window count >= [escalation_threshold]. The supervisor's
-          [`Crashed] branch checks this variant and skips [to_restart],
-          persisting [meta.paused = true] instead so an operator must
-          investigate the underlying runtime/provider/fd issue before
-          resuming the keeper. *)
   | Provider_runtime_error of
       { code : string
       ; detail : string
@@ -54,9 +47,6 @@ type failure_reason =
   | Official_client_recovery_required of Keeper_internal_error.official_client_recovery
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string
-  | Turn_overflow_failure
-      (** Context-overflow compact-retry exhaustion observed for the current
-          turn. It does not change Keeper lifecycle state. *)
   | Operator_interrupt
       (** The current turn was cancelled by an explicit operator request,
           typically from the dashboard "stop current turn" action. *)

@@ -3337,6 +3337,9 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
        start_and_check ())
 ;;
 
+(* A shared chat batch runs once and journals to every member. The restart
+   settles the whole batch, so every member's journal needs the terminal, not
+   only the execution leader's. *)
 let test_registry_start_ends_every_batch_member_journal_after_a_restart () =
   let base_path = Filename.temp_dir "keeper-owner-restart-batch" "" in
   Fun.protect

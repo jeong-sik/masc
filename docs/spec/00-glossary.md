@@ -1833,8 +1833,8 @@ status: reference
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
-    기록되는 사건은 10종(`Half_life_set`·`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Granted`·`Purchased`·`Equipped`·`Payout_failed`)이며,
-    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급, `Granted` 운영자 지급, `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`와 `Granted`는 금액을 더하고, `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
+    기록되는 사건은 12종(`Half_life_set`·`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Granted`·`Gifted`·`Gifted_item`·`Purchased`·`Equipped`·`Payout_failed`)이며,
+    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급, `Granted` 운영자 지급, `Gifted` 키퍼 간 금액 이전, `Gifted_item` 키퍼 간 아이템 이전, `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`와 `Granted`는 금액을 더하고, `Gifted`는 보내는 키퍼의 잔액을 덜어 받는 키퍼에 더하며(발행량과 소각량은 변하지 않는다), `Gifted_item`은 소유권만 옮기고 착용 중이던 해당 아이템은 보낸 쪽에서 벗겨진다. `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
     `keeper_candle_equip` 도구를 통해 `Equipped` 사건(`{keeper; slot; choice}`)으로 원장에 덧붙인다.
     `choice`가 `Default`면 시작 장비를 복원하고, 동일한 선택은 중복 기록하지 않으며 추가 차감도 발생하지 않는다. 헌법·승인·도구 호출 원장이나 `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 지급 의무 보존(Payout Obligation Preservation)·평가 후 채무 지속성(Post-Appraisal Debt Retention):

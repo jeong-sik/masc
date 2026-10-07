@@ -817,13 +817,20 @@ type msg_anchor =
    surviving journal stretch keeps its origin when reasoning is folded or a
    final reply replaces its streamed text. *)
 type chat_search_anchor =
-  | Search_history of msg_anchor
+  | Search_history of {
+      row_anchor : msg_anchor;
+      reply_source : Masc_tui_keeper_chat_log.journal_source option;
+        (** Only a durable terminal reply slot may be replaced by a journal's
+            canonical reply. Progress/tool rows do not acquire this alias. *)
+    }
   | Search_journal of {
       source : Masc_tui_keeper_chat_log.journal_source;
       origin : Masc_tui_keeper_chat_transcript.drawn_origin;
+      canonical_reply : bool;
     }
 
 type chat_search_cursor = {
+  search_workspace : workspace_authority;
   search_keeper : string;
   matched_anchor : chat_search_anchor;
   older_anchors : chat_search_anchor list;
@@ -9555,6 +9562,13 @@ let set_msg_scroll (state : state) rows =
     state.msg_scroll <- rows
   end
 
+(* A search result and a rendered clamp are absolute distances from the
+   current tail. Rebase their pin as well as their distance; otherwise the
+   next frame adds the same post-pin arrivals to an already adjusted value. *)
+let set_msg_scroll_absolute state rows =
+  state.msg_scroll <- 0;
+  set_msg_scroll state rows
+
 (* Rows the composer needs beyond its first. Folded into the status-row count
    because that one number already sets both the history height and the cursor
    row, so a composer that grew would otherwise push the cursor off the line it
@@ -9681,7 +9695,7 @@ let apply_clamped_scroll (state : state) = function
       state.board_scroll <- body;
       state.board_comment_scroll <- comments;
       state.board_comment_landing <- None
-  | Message_scroll value -> set_msg_scroll state value
+  | Message_scroll value -> set_msg_scroll_absolute state value
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value

@@ -2229,7 +2229,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
 (* Whose a merged row is: a committed message's, or a block's log's. *)
 type tagged_row =
   | Tagged_row of Masc_tui_types.msg_entry
-  | Tagged_block of Masc_tui_types.turn_log * Keeper_chat_transcript.drawn_origin option
+  | Tagged_block of Masc_tui_types.turn_log * Keeper_chat_transcript.drawn_origin option * bool
 
 (* One turn's block as the chat pane draws it: the log it comes from, where
    it goes in the committed timeline, and its rows -- built as continuations,
@@ -2237,6 +2237,7 @@ type tagged_row =
 type log_entry = {
   le_at : float option;
   le_origin : Keeper_chat_transcript.drawn_origin option;
+  le_is_reply : bool;
   le_entry : Message_layout.entry;
 }
 
@@ -2448,7 +2449,12 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                    result again pays the badge's width twice, so the second
                    call trims what the first had already fitted. *)
                 Some
-                  { le_at = timeline_at; le_origin = Some item.origin; le_entry = ({ style;
+                  { le_at = timeline_at; le_origin = Some item.origin;
+                    le_is_reply = (match item.drawn with
+                      | Keeper_chat_transcript.Drawn_reply _ -> true
+                      | Drawn_text _ | Drawn_thinking _ | Drawn_tools _
+                      | Drawn_skill _ | Drawn_status _ | Drawn_error _ -> false);
+                    le_entry = ({ style;
                      timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
                      timeline_bucket;
                      span_clock = None;
@@ -2617,7 +2623,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
           | true, last :: _ ->
               let style = Message_layout.Status in
               entries @
-              [{ last with le_origin = None; le_entry = { last.le_entry with style; speaker = "STATUS";
+              [{ last with le_origin = None; le_is_reply = false; le_entry = { last.le_entry with style; speaker = "STATUS";
                  role_label = Message_layout.align_role_label
                    ~column:role_label_column ~style "STATUS";
                  role_label_mark_cells = Message_layout.role_label_mark_cells
@@ -2670,7 +2676,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
               ~bounds:(fun _ -> false) ~request_id:block.lb_request_id
               ~timeline_at:item.le_at committed_visible_timeline in
           let insertion = max block.lb_insertion by_time in
-          insertion, item.le_at, (Tagged_block (block.lb_log, item.le_origin), item.le_entry))
+          insertion, item.le_at, (Tagged_block (block.lb_log, item.le_origin, item.le_is_reply), item.le_entry))
           block.lb_entries) blocks
       |> List.stable_sort (fun (left, left_at, _) (right, right_at, _) ->
           let by_slot = Int.compare left right in
@@ -2708,7 +2714,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
               List.mem message.me_request_id block.lb_member_ids) blocks with
            | Some block -> block.lb_request_id
            | None -> message.me_request_id)
-      | Tagged_block (log, _) -> Masc_tui_types.turn_log_execution_id log
+      | Tagged_block (log, _, _) -> Masc_tui_types.turn_log_execution_id log
     in
     let edges = Hashtbl.create 16 in
     let close_run ~at_tail request_id indices =
@@ -2793,21 +2799,39 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   { tagged_entries = tagged_layout_entries; layout_entries;
     has_unsettled_live = other_live_blocks <> [] }
 
+let search_reply_source (message : msg_entry) =
+  match message.me_role, message.me_turn_phase with
+  | Message_keeper, Turn_output ->
+      Some (Masc_tui_keeper_chat_log.Operation message.me_request_id)
+  | Message_autonomous, Turn_output ->
+      Option.map (fun turn_ref -> Masc_tui_keeper_chat_log.Autonomous_turn turn_ref)
+        (Ids.Turn_ref.of_string message.me_request_id)
+  | (Message_user _ | Message_status | Message_local | Message_error
+    | Message_tool | Message_skill _ | Message_thinking | Message_memory), _
+  | (Message_keeper | Message_autonomous), (Turn_input | Turn_progress | Turn_tool) -> None
+
 let search_anchor_of_tag = function
-  | Tagged_row message -> Some (Search_history (msg_anchor message))
-  | Tagged_block (log, Some origin) ->
+  | Tagged_row message -> Some (Search_history {
+      row_anchor = msg_anchor message; reply_source = search_reply_source message })
+  | Tagged_block (log, Some origin, canonical_reply) ->
       Some (Search_journal {
-        source = Masc_tui_types.turn_log_execution_source log; origin })
-  | Tagged_block (_, None) -> None
+        source = Masc_tui_types.turn_log_execution_source log; origin; canonical_reply })
+  | Tagged_block (_, None, _) -> None
 
 let search_anchor_matches anchor tag =
   match anchor, tag with
-  | Search_history anchor, Tagged_row message -> same_msg_anchor anchor message
-  | Search_journal anchor, Tagged_block (log, Some origin) ->
+  | Search_history anchor, Tagged_row message -> same_msg_anchor anchor.row_anchor message
+  | Search_history {reply_source=Some source; _}, Tagged_block (log, _, true) ->
+      source = Masc_tui_types.turn_log_execution_source log
+  | Search_journal anchor, Tagged_block (log, Some origin, _) ->
       anchor.source = Masc_tui_types.turn_log_execution_source log
       && anchor.origin = origin
+  | Search_journal anchor, Tagged_row message ->
+      (* A refreshed history may become the selected source after the held
+         journal is discarded. Only the canonical reply slot is equivalent. *)
+      anchor.canonical_reply && search_reply_source message = Some anchor.source
   | Search_history _, Tagged_block _
-  | Search_journal _, (Tagged_row _ | Tagged_block (_, None)) -> false
+  | Search_journal _, Tagged_block (_, None, _) -> false
 
 (* Search uses exactly the projected speech/activity rows and measures every
    displayed suffix row, including polled notices and pending input. Pending
@@ -2830,7 +2854,8 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
       if search_anchor_matches anchor tag then Some index else None) tagged in
     let ceiling = match older_than with
       | None -> List.length tagged
-      | Some cursor when not (String.equal cursor.search_keeper keeper_name) ->
+      | Some cursor when cursor.search_workspace <> state.workspace_authority
+          || not (String.equal cursor.search_keeper keeper_name) ->
           List.length tagged
       | Some cursor ->
           (match index_of cursor.matched_anchor with
@@ -2863,7 +2888,8 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
         in
         let older_anchors = tagged |> List.take at
           |> List.filter_map (fun (tag, _) -> search_anchor_of_tag tag) |> List.rev in
-        Some (scroll, {search_keeper=keeper_name; matched_anchor; older_anchors})
+        Some (scroll, {search_workspace=state.workspace_authority;
+          search_keeper=keeper_name; matched_anchor; older_anchors})
 
 
 let render_keeper_message (state : state) =
@@ -3126,7 +3152,7 @@ let render_keeper_message (state : state) =
       | Some pin, false ->
           let arrived_since_pin = function
             | Tagged_row _ -> true
-            | Tagged_block (log, _) -> not (List.memq log state.msg_scroll_pin_settled)
+            | Tagged_block (log, _, _) -> not (List.memq log state.msg_scroll_pin_settled)
           in
           let entries_after rest =
             List.filter_map

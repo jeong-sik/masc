@@ -39,7 +39,8 @@ let log state ~id ~at deltas =
   log
 
 let screen state =
-  let frame, _ = Render.render_keeper_message state in
+  let frame, clamped = Render.render_keeper_message state in
+  Option.iter (T.apply_clamped_scroll state) clamped;
   frame.Masc_tui_frame_presenter.lines
   |> List.map Masc_tui_theme.strip_sgr |> String.concat "\n"
 
@@ -49,7 +50,7 @@ let find ?older state needle =
   match Render.keeper_message_find_scroll state ~keeper_name:"alpha"
       ~needle ~older_than:older with
   | None -> fail ("visible conversation match missing: " ^ needle)
-  | Some (scroll, cursor) -> state.msg_scroll <- scroll; cursor
+  | Some (scroll, cursor) -> T.set_msg_scroll_absolute state scroll; cursor
 
 let at_sizes run =
   let cache = Masc_tui_ansi.terminal_size_cache in
@@ -121,14 +122,66 @@ let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun or
   T.turn_log_add ~now:21. held ~seq:(Some 5) Live.Run_finished;
   Log.commit held.tl_log;
   let settled = find state "MATCH_REPLY" in
-  check bool "canonical replacement preserves the matched stretch identity" true
-    (settled.matched_anchor = latest.matched_anchor);
+  (match settled.matched_anchor, latest.matched_anchor with
+   | T.Search_journal settled, T.Search_journal latest ->
+       check bool "canonical replacement preserves the matched stretch identity" true
+         (settled.origin = latest.origin && settled.source = latest.source)
+   | _ -> fail "journal reply lost its source anchor");
   check bool "hidden reasoning cannot be found as visible speech" true
     (Option.is_none (Render.keeper_message_find_scroll state ~keeper_name:"alpha"
        ~needle:"MATCH_REASONING" ~older_than:None)))
+
+let test_repeat_across_history_journal_replacement () = at_sizes (fun origin ->
+  let state = state origin in
+  state.msg_loaded <- [
+    row ~id:"a" ~request_id:"a" ~role:T.Message_keeper ~text:"MATCH_A" 1.;
+    row ~id:"b" ~request_id:"b" ~role:T.Message_keeper ~text:"MATCH_B" 10. ];
+  let latest = find state "MATCH_" in
+  List.iter (fun (id, at, text) -> ignore (log state ~id ~at
+    [Live.Run_started; Live.Text text; reply text; Live.Run_finished]))
+    ["a", 1., "MATCH_A"; "b", 10., "MATCH_B"];
+  let older = find ~older:latest state "MATCH_" in
+  (match older.matched_anchor with
+   | T.Search_journal {source=Log.Operation "a"; _} -> ()
+   | _ -> fail "history replacement skipped the older journal answer");
+  let journal_latest = find state "MATCH_" in
+  state.msg_settled_logs <- [];
+  let older = find ~older:journal_latest state "MATCH_" in
+  (match older.matched_anchor with
+   | T.Search_history {reply_source=Some (Log.Operation "a"); _} -> ()
+   | _ -> fail "journal replacement skipped the older history answer");
+  state.workspace_authority <- T.Workspace_authority 1;
+  state.msg_loaded <- [row ~id:"workspace-b" ~request_id:"new"
+    ~role:user ~text:"MATCH_NEW_WORKSPACE" 20.];
+  ignore (find ~older state "MATCH_");
+  check int "same Keeper in another workspace starts its own search" 1
+    (count (screen state) "MATCH_NEW_WORKSPACE"))
+
+let test_frame_feedback_consumes_arrival_compensation () = at_sizes (fun origin ->
+  let state = state origin in
+  state.msg_loaded <- List.init 30 (fun index ->
+    row ~id:(string_of_int index) ~request_id:(string_of_int index) ~role:user
+      ~text:(Printf.sprintf "ORIGINAL_ROW_%d" index) (float_of_int index));
+  T.set_msg_scroll state 8;
+  ignore (screen state);
+  state.msg_loaded <- state.msg_loaded @ [row ~id:"arrival" ~request_id:"arrival"
+    ~role:user ~text:"NEW_ARRIVAL" 50.];
+  ignore (screen state);
+  let adjusted = state.msg_scroll in
+  List.iter (fun _ ->
+    ignore (screen state);
+    check int "a repaint does not count the same arrival twice" adjusted state.msg_scroll)
+    [(); (); ()];
+  ignore (find state "ORIGINAL_ROW_0");
+  List.iter (fun _ -> check int "absolute search remains visible through frame feedback" 1
+    (count (screen state) "ORIGINAL_ROW_0")) [(); (); ()])
 
 let () = run "chat search projection" [
   "rendered conversation", [
     test_case "held replies and full suffix geometry" `Quick test_settled_reply_and_complete_suffix;
     test_case "repeat across visibility, backfill and finalization" `Quick
-      test_repeat_survives_reasoning_visibility_and_backfill ] ]
+      test_repeat_survives_reasoning_visibility_and_backfill;
+    test_case "repeat across source and workspace replacement" `Quick
+      test_repeat_across_history_journal_replacement;
+    test_case "frame feedback consumes arrival compensation" `Quick
+      test_frame_feedback_consumes_arrival_compensation ] ]

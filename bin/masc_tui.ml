@@ -829,6 +829,7 @@ let forget_recall (state : state) =
   state.msg_recall_draft <- ("", [], [], None)
 
 let clear_keeper_history_projection state =
+  state.msg_find_at <- None;
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
   state.msg_copy_generation <- state.msg_copy_generation + 1;
@@ -8862,7 +8863,7 @@ let seek_in_chat state ~target ~restart =
       with
       | Some (scroll, anchor) ->
           state.msg_find_at <- Some anchor;
-          set_msg_scroll state scroll;
+          set_msg_scroll_absolute state scroll;
           notice ~kind:Notice_reply
             (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
                state.msg_find scroll)

@@ -15024,7 +15024,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                  | Some (index, row) ->
                    state.config_models_cursor <- index;
                    state.config_scroll <- 0;
-                   state.runtime_model_form <- Some (Masc_tui_model_form.create Edit row)
+                   state.runtime_model_form <- Some
+                     (Masc_tui_model_form.create ~source_revision:metadata.source_revision Edit row)
                  | None ->
                    open_runtime_model_source state runtime_id;
                    report_action state "info"
@@ -18376,9 +18377,33 @@ let main
          | Error detail -> state.lane_addons <- Some {view with document_key=None;
              editor_ready=false;scroll=0;error=lane_addons_input_failure detail})
   in
+  (* Fields belong to the source on which the form opened. A fresh read
+     must not silently rebase them onto another writer's source. *)
+  let check_runtime_config_edit_revision opened_revision current_revision =
+    match opened_revision with
+    | Some revision when String.equal revision current_revision -> Ok ()
+    | Some _ | None ->
+      launch_runtime_config_load ~force:true state ~mailbox:async_messages;
+      Error "runtime.toml changed since this form opened; close the form and reopen it after reload"
+  in
   (* The raw editor and account form share preview and guarded commit. Each
      caller keeps the revision from the same read as the text it edits. *)
-  let save_runtime_config_text = save_runtime_config_text state ~mailbox:async_messages in
+  let save_runtime_config_text ~authority ~identity ~expected_source_path ~expected_source_revision edited =
+    match save_runtime_config_text state ~mailbox:async_messages
+      ~authority ~identity ~expected_source_path ~expected_source_revision edited with
+    | Ok receipt -> Ok receipt
+    | Error error ->
+      (match error with
+       | Masc_tui_http.Runtime_config_save_unconfirmed _ ->
+         launch_runtime_config_load ~force:true state ~mailbox:async_messages;
+         launch_runtime_catalog_load state ~mailbox:async_messages;
+         launch_runtime_surface_load state ~mailbox:async_messages ~force:true;
+         launch_lanes_reread state ~mailbox:async_messages
+       | Masc_tui_http.Runtime_config_conflict _ ->
+         launch_runtime_config_load ~force:true state ~mailbox:async_messages
+       | Masc_tui_http.Runtime_config_save_refused _ -> ());
+      Error error
+  in
   let save_runtime_config_edit_session ~workspace session =
     let module Edit = Masc_tui_runtime_config_edit in
     let authority = state.workspace_authority in
@@ -18471,17 +18496,20 @@ let main
   let handle_model_form_open mode () =
     if Option.is_some state.runtime_model_jump then
       report_action state "info" "Loading the selected binding; Esc cancels"
-    else match selected_config_model state with
-    | Ok row -> state.runtime_model_form <- Some (Masc_tui_model_form.create mode row)
-    | Error detail -> report_action state "error" detail
+    else match state.runtime_config_view, selected_config_model state with
+    | Some { rcv_metadata = metadata; _ }, Ok row ->
+      state.runtime_model_form <- Some
+        (Masc_tui_model_form.create ~source_revision:metadata.source_revision mode row)
+    | None, _ -> report_action state "error" "config not loaded yet; r to reload"
+    | Some _, Error detail -> report_action state "error" detail
   in
   let handle_runtime_account_open () =
     match state.runtime_config_view with
     | None -> report_action state "error" "config not loaded yet; r to reload"
     | Some reading -> (
       match
-        Masc_tui_runtime_account_form.open_on ?home_dir:(Sys.getenv_opt "HOME")
-          reading.rcv_source_text
+        Masc_tui_runtime_account_form.open_on ~source_revision:reading.rcv_metadata.source_revision
+          ?home_dir:(Sys.getenv_opt "HOME") reading.rcv_source_text
       with
       | Ok form -> state.runtime_account_form <- Some form
       | Error reason -> report_action state "error" reason)
@@ -20782,11 +20810,9 @@ and is loaded on demand through keeper_skill.
                  if length > 0 then set (String.sub draft 0 (length - 1))
                | s when String.length s = 1 && Char.code s.[0] >= 32 -> set (draft ^ s)
                | _ -> ()))
-       (* The account form takes every key while it is open. Submitting
-          declares against runtime.toml as the server holds it now, not the
-          text the form was opened on, so a change made in between is kept.
-          A refusal keeps the form and what was typed, with the reason on it;
-          only a save that lands closes it. The sign-in command goes to the
+       (* Each form checks its opening revision before applying fields to a
+          fresh read. A refusal or unknown outcome keeps the draft and that
+          revision; only a confirmed save completes the form. The sign-in command goes to the
           session log, where it stays readable after the footer moves on. *)
        | Some k
          when text_input_target state ~compact_viewport = Some Text_runtime_model_form ->
@@ -20803,6 +20829,8 @@ and is loaded on demand through keeper_skill.
                     ~host:server_peer_host ~port:state.port () in
                   let* json = Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host ~port:state.port in
                   let* reading = Masc_tui_runtime_config_view.decode json in
+                  let* () = check_runtime_config_edit_revision
+                    (Masc_tui_model_form.source_revision form) reading.metadata.source_revision in
                   let* draft = Masc_tui_model_form.apply form reading.source_text in
                   save_runtime_config_text ~authority ~identity
                     ~expected_source_path:reading.path ~expected_source_revision:reading.metadata.source_revision draft
@@ -20852,10 +20880,16 @@ and is loaded on demand through keeper_skill.
                      match current with
                      | Error message -> Error (Masc_tui_runtime_account_form.refused form message)
                      | Ok current ->
-                       Masc_tui_runtime_account_form.declare_on
-                         ~inherited_home:Masc_tui_runtime_account_form.inherited_home form
-                         current.Masc_tui_runtime_config_view.source_text
-                       |> Result.map (fun declaration -> declaration, current.metadata.source_revision, current.path)
+                       (match check_runtime_config_edit_revision
+                          (Masc_tui_runtime_account_form.source_revision form)
+                          current.Masc_tui_runtime_config_view.metadata.source_revision with
+                        | Error detail -> Error (Masc_tui_runtime_account_form.refused form detail)
+                        | Ok () ->
+                          Masc_tui_runtime_account_form.declare_on
+                            ~inherited_home:Masc_tui_runtime_account_form.inherited_home form
+                            current.source_text
+                          |> Result.map (fun declaration ->
+                            declaration, current.metadata.source_revision, current.path))
                    in
                    match declared with
                    | Error form -> state.runtime_account_form <- Some form
@@ -22217,6 +22251,20 @@ and is loaded on demand through keeper_skill.
                           row.Masc.Tui_decode.rcr_lane_id);
                      Masc_tui_types.dismiss_runtime_lane_notice state;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
+       (* The roster opens the same fresh Config Models editor as Runtime
+          detail and Standalone slots; no second form or writer owns it. *)
+       | Some "e"
+         when state.view = Runtime && state.runtime_mode = Masc_tui_types.Runtime_all
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick ->
+           (match state.runtime_surface with
+            | None -> ()
+            | Some snapshot ->
+              (match List.nth_opt snapshot.Masc.Tui_decode.rss_resolved.rrs_runtimes state.runtime_cursor with
+               | None -> ()
+               | Some runtime ->
+                 Masc_tui_types.dismiss_runtime_lane_notice state;
+                 open_runtime_model_settings runtime.Masc.Tui_decode.ro_id))
        (* The route editor holds the Runtime reading's own keys while it is
           open: [a] adds to the route rather than naming a new lane, and
           x/J/K act on the route's entry under its cursor. *)

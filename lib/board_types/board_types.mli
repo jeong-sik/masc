@@ -37,7 +37,6 @@ type board_error =
 type board_read_error =
   | Read_invalid_id of string
   | Read_post_not_found of string
-  | Read_comment_not_found of string
 [@@deriving show]
 
 val board_error_of_read_error : board_read_error -> board_error
@@ -74,8 +73,6 @@ module Comment_id : sig
   (** Accepts exactly the shape {!generate} mints: ["c-"] followed by 32
       lowercase hex characters (trimmed). Anything else is [Invalid_id] with
       {!accepted_format} in the message. *)
-  val of_string_for_read : string -> (t, board_read_error) result
-  (** The same parse, answered as a read error. *)
   val to_string : t -> string
   val generate : unit -> t
   (** Cryptographic random id, prefix ["c-"], 16 random bytes as 32 hex

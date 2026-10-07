@@ -37,13 +37,11 @@ type board_error =
 type board_read_error =
   | Read_invalid_id of string
   | Read_post_not_found of string
-  | Read_comment_not_found of string
   [@@deriving show]
 
 let board_error_of_read_error = function
   | Read_invalid_id detail -> Invalid_id detail
   | Read_post_not_found post_id -> Post_not_found post_id
-  | Read_comment_not_found comment_id -> Comment_not_found comment_id
 
 (** {1 Safe ID Module - Parse Don't Validate} *)
 
@@ -88,7 +86,6 @@ end
 module Comment_id : sig
   type t
   val of_string : string -> (t, board_error) result
-  val of_string_for_read : string -> (t, board_read_error) result
   val to_string : t -> string
   val generate : unit -> t
   val accepted_format : string
@@ -120,7 +117,6 @@ end = struct
            s accepted_format)
 
   let of_string s = Result.map_error (fun detail -> Invalid_id detail) (parse s)
-  let of_string_for_read s = Result.map_error (fun detail -> Read_invalid_id detail) (parse s)
 
   let to_string t = t
 

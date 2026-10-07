@@ -23,11 +23,7 @@ let read_post store ~post_id : (post, board_read_error) Result.t =
       | None -> Error (Read_post_not_found post_id))
 ;;
 
-let get_post store ~post_id : (post, board_error) Result.t =
-  read_post store ~post_id |> Result.map_error board_error_of_read_error
-;;
-
-(* RFC-0233 §7 guard #2: exact O(1) index lookups, mirroring [get_post] by
+(* RFC-0233 §7 guard #2: exact O(1) index lookups, mirroring [read_post] by
    primary key. The index is keyed on the full join string (turn_ref =
    "trace#turn", or the fusion run_id) — never a meta_json substring or a
    time-window heuristic. A miss returns [None] (no scan, no false positive). *)
@@ -73,7 +69,7 @@ let compare_comments_oldest_first (a : comment) (b : comment) =
 ;;
 
 (* Reads post + comments under a single critical section. The previous
-   two-call sequence (get_post then get_comments) acquired
+   two-call sequence (read_post then read_comments) acquired
    [store.mutex] twice with [maybe_sweep] dispatching to the flusher
    actor between releases. That race window surfaces as
    [Mutex.lock: Resource deadlock avoided] under contended
@@ -98,10 +94,6 @@ let read_post_and_comments store ~post_id
           List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
         in
         Ok (post, List.sort compare_comments_oldest_first comments))
-;;
-
-let get_post_and_comments store ~post_id : (post * comment list, board_error) Result.t =
-  read_post_and_comments store ~post_id |> Result.map_error board_error_of_read_error
 ;;
 
 let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post list =
@@ -415,10 +407,6 @@ let read_comments store ~post_id : (comment list, board_read_error) Result.t =
         List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
       in
       Ok (List.sort compare_comments_oldest_first comments))
-;;
-
-let get_comments store ~post_id : (comment list, board_error) Result.t =
-  read_comments store ~post_id |> Result.map_error board_error_of_read_error
 ;;
 
 let get_comment store ~comment_id : (comment, board_error) Result.t =

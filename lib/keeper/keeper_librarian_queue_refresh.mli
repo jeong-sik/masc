@@ -35,7 +35,10 @@ val submit_durable : base_path:string -> keeper_name:string -> unit
     or disabled/invalid setting ends this wake. A launch submits its own
     Keeper's catch-up;
     {!submit_durable_for_unlaunched} submits it at boot for the Keepers that
-    did not launch. *)
+    did not launch. After catch-up it reviews an over-limit current Memory
+    working set even if there were no unread turns. A successful decision
+    on unchanged input is remembered until the input changes or the process
+    restarts; a failed pass can retry on a later wake. *)
 
 val with_purge_then_catch_up
   :  base_path:string

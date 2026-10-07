@@ -677,12 +677,11 @@ status: reference
   → [Keeper_owner](../../lib/keeper/keeper_owner.mli)
 
 **Cancelled Chat Terminal Retention (취소된 채팅 종단 보존)**
-: Keeper 채팅 오퍼레이션이 취소되거나 실패했을 때, 라이브 SSE 스트림 구독자가 이미 연결을
-  끊었더라도(`subscriber disconnected`) 취소 종단 이벤트(`Cancelled` terminal event)를 작업
-  저널(`Keeper_chat_event_log`)에 동기적으로 확정 기록(`append_result`)하는 계약(#41657).
-  라이브 투영 전에 저널 커밋을 먼저 보장함으로써, 재연결한 클라이언트가 오퍼레이션 저널을
-  통해 취소 상태를 일관되게 재생(replay)하고 완료되지 않는 영구 대기 상태에 빠지는 것을
-  방지한다.
+: Keeper 채팅 오퍼레이션이 취소되거나 실패했을 때, 라이브 SSE 스트림 구독자의 연결 여부와
+  무관하게 종단 에러 이벤트(`Keeper_chat_events.Event_error`)의 동기 저널 기록을
+  시도(`Journal.append_result`)하는 계약(#41657). 기록에 성공하면 재연결 클라이언트의 replay에
+  보존되어 취소 상태를 확정적으로 재생할 수 있고, 저널 기록에 실패하면 `seq` 없는 live 오류
+  이벤트(`Ag_ui.Run_error`, code는 failure kind)로 투영된다.
   → [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
   [Server_routes_http_keeper_stream](../../lib/server/server_routes_http_keeper_stream.mli)
 

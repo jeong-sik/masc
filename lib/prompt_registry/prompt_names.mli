@@ -351,7 +351,6 @@ val keeper_tool_filesystem_offset_not_1_based : string
 val keeper_tool_filesystem_limit_not_positive : string
 val keeper_tool_filesystem_available_cwds_partial : string
 val keeper_tool_filesystem_checkout_scan_failed : string
-val keeper_tool_filesystem_cwd_not_directory : string
 val keeper_tool_filesystem_offset_beyond_window : string
 val keeper_tool_filesystem_capability_unavailable : string
 val keeper_tool_filesystem_publication_failed : string

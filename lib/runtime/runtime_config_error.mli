@@ -35,14 +35,6 @@ type resolution_failure =
     reason when one was declared under that id, [None] when nothing declared
     it. *)
 
-type admitted_allowance_change =
-  { runtime_id : string
-  ; change : Llm_provider.Provider_admission_state.conflict
-  }
-(** One runtime whose account the running server already admits under
-    another allowance ([max-concurrent] with the provider's
-    [admission-priority-run-limit]). *)
-
 type exact_slot_body_deadline_gap =
   { lane_id : string
   ; slot_id : string
@@ -103,12 +95,12 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
-  | Admitted_allowances_changed of admitted_allowance_change list
-      (** Runtimes whose account the running server already admits under
-          another allowance. The server keeps an account's first allowance
-          until it restarts and refuses every request that declares other
-          values, so publishing the change would stop that account; the save
-          is refused instead. *)
+  | Admission_allowances_disagree of
+      Llm_provider.Provider_admission.allowance_disagreement list
+      (** Runtimes on one provider account that declare different
+          [max-concurrent] or [admission-priority-run-limit]. Admission keeps
+          one allowance per account, so the configuration is refused, naming
+          each runtime and its values. *)
   | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
       (** The exact-output slots a save would add on an HTTP provider that
           declares no [exact-body-timeout-s], compared with the file on disk.

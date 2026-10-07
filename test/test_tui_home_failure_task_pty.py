@@ -176,16 +176,19 @@ def full_http_loss_retains_local_work_and_draft(executable):
             assert draft in screen, "identity outage discarded the unsent local draft"
             home.assert_no_decision_posts(requests)
         assert_no_chat_delivery()
-        h.send_and_wait(process, fd, output, b"\x1b", b"Goal confirmations not read")
+        h.send_and_wait(process, fd, output, b"\x1b", b"decisions wait")
         visible = cards.frame(process, fd, output, "all-http-503-local-work")
-        for label in (b"Goal confirmations not read", b"Operator tasks not read", b"not fully read"):
+        # A failed identity read keeps the last confirmed Home rows on screen
+        # and says that decisions wait; it does not turn them into "not read".
+        for label in (b"workspace identity unconfirmed \xc2\xb7 decisions wait",
+                      b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode()):
             assert label in visible, (label, visible)
-        for label in (b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode()):
-            assert label not in visible, ("unverified Home retained an actionable card", label, visible)
+        for label in (b"Goal confirmations not read", b"Operator tasks not read"):
+            assert label not in visible, ("a failed read replaced the kept rows", label, visible)
         assert b"No decision is waiting" not in visible, visible
-        assert b"workspace identity not read" in visible, visible
-        # Unverified Home offers no history reader; the unsent draft was
-        # witnessed above before returning to this nonactionable context.
+        home.assert_no_decision_posts(requests)
+        # Unconfirmed Home offers no history reader; the unsent draft was
+        # witnessed above before returning to this context.
         assert b"read history" not in visible and b"Continue with beta" not in visible, visible
         assert backlog(base).read_bytes() == original
         assert_no_chat_delivery()

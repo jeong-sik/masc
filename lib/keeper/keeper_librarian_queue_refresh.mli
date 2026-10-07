@@ -127,7 +127,6 @@ module For_testing : sig
     :  config:Workspace.config
     -> keeper_id:Keeper_identity.Keeper_id.t
     -> meta:Keeper_meta_contract.keeper_meta
-    -> current:Keeper_librarian.current_selection option
     -> working_context:Keeper_librarian_context.input
     -> Keeper_librarian.input
   (** The input the queue pass hands the Librarian. Reads the Goal store and

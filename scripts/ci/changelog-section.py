@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Cut one version's section out of CHANGELOG.md for the GitHub release body.
+"""Write the GitHub release body for one version from its CHANGELOG.md section.
 
 A release page is the first thing a reader meets, and the tag workflow used to
 hand it nothing but GitHub's generated pull-request list. An upgrade that asks
 for an action before installing -- 0.35.21 asks for a stopped server and a
-deleted turn-records directory -- is invisible there. This lifts the version's
-own section to the top of the body, followed by one compare link to the
-previous release.
+deleted turn-records directory -- is invisible there. The body opens with the
+version's own section, followed by one compare link to the previous release.
+
+The page lists what a reader acts on and counts the rest. Upgrade notes, known
+issues and what was added, changed, deprecated, removed or made faster are
+printed entry by entry. The headings in COUNTED are named with their entry
+count and a link to CHANGELOG.md, which keeps every entry: a release folds
+several hundred pull requests, and 0.50.0's fixes alone (651 entries, 125,100
+characters) were longer than the page can hold.
 
 Failing loudly is the point: a tag whose version has no section would publish a
 page that says nothing about the release, so this exits non-zero instead. A
@@ -32,6 +38,48 @@ import argparse
 import pathlib
 import sys
 
+# Headings whose entries the release page counts instead of listing.
+COUNTED = ("Fixed", "Documentation", "Internal")
+
+
+def split_sections(body: list[str]) -> tuple[list[str], list[tuple[str, list[str]]]]:
+    """(lines before the first heading, [(heading, its lines)]) of a section body."""
+    preamble: list[str] = []
+    sections: list[tuple[str, list[str]]] = []
+    for line in body:
+        if line.startswith("### "):
+            sections.append((line[len("### "):].strip(), []))
+        elif sections:
+            sections[-1][1].append(line)
+        else:
+            preamble.append(line)
+    return preamble, sections
+
+
+def release_page(heading: str, body: list[str], changelog_url: str | None) -> str:
+    preamble, sections = split_sections(body)
+    listed = [heading, *preamble]
+    counted: list[tuple[str, int]] = []
+    for name, lines in sections:
+        if name in COUNTED:
+            entries = sum(1 for line in lines if line.startswith("- "))
+            if entries:
+                counted.append((name, entries))
+        else:
+            listed += [f"### {name}", *lines]
+    page = "\n".join(listed).strip()
+    if counted:
+        where = f"[CHANGELOG.md]({changelog_url})" if changelog_url else "CHANGELOG.md"
+        rows = "\n".join(
+            f"- {name}: {entries} {'entry' if entries == 1 else 'entries'}"
+            for name, entries in counted
+        )
+        page += (
+            f"\n\n### Also in this release\n\n{rows}\n\n"
+            f"Every entry is in {where} under `{heading}`."
+        )
+    return page
+
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
@@ -50,6 +98,10 @@ def main(argv=None) -> int:
         "--max-chars",
         type=int,
         help="refuse a body longer than this many characters",
+    )
+    parser.add_argument(
+        "--changelog-url",
+        help="where the page links for the entries it only counts",
     )
     parser.add_argument(
         "--expect-date",
@@ -105,7 +157,7 @@ def main(argv=None) -> int:
             file=sys.stderr,
         )
         return 1
-    section = "\n".join(lines[start:end]).strip()
+    section = release_page(lines[start], lines[start + 1 : end], args.changelog_url)
     appended = (
         args.append.read_text(encoding="utf-8").strip() if args.append else ""
     )
@@ -116,8 +168,9 @@ def main(argv=None) -> int:
             f"({len(section)} from the {header} section, {len(appended)} "
             f"appended); the limit is {args.max_chars}, so "
             f"{len(body) - args.max_chars} characters would be cut from the "
-            f"published page without an error. Shorten the section before "
-            f"tagging {version}.",
+            f"published page without an error. Shorten the listed entries "
+            f"before tagging {version}; {', '.join(COUNTED)} are counted, "
+            f"not listed.",
             file=sys.stderr,
         )
         return 1

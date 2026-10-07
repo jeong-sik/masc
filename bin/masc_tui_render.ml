@@ -9708,7 +9708,15 @@ let runtime_detail_lines state target ~width =
           Masc_tui_runtime_evidence.lines evidence ~runtime_id:runtime.ro_id
           |> List.concat_map (fun (label, value) ->
             runtime_detail_field ~width ~style:Ansi.reset label value) in
-      fields @ candidate @ evidence_lines @ usage_lines @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
+      let failed_attempt =
+        match runtime.ro_failed_attempt with
+        | None -> []
+        | Some attempt ->
+          runtime_detail_field ~width ~style:(Theme.warn ()) "Last failure"
+            (Terminal_text.single_line (runtime_failed_attempt_text attempt))
+      in
+      fields @ candidate @ evidence_lines @ usage_lines @ quota @ rate_limit @ failed_attempt
+      @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in

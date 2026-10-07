@@ -11166,6 +11166,28 @@ let runtime_rate_limit_label (runtime : Tui_decode.runtime_option) =
         Printf.sprintf "rate limited (retry %02d:%02d)" tm.Unix.tm_hour tm.Unix.tm_min
     | None -> "rate limited")
 
+(* What the last failed attempt was, in the words the failure route uses. *)
+let runtime_attempt_failure_word = function
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Server_error -> "server error"
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_capacity ->
+      "provider at capacity"
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Network_transient ->
+      "network failure"
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout -> "timeout"
+  | Tui_decode.Unrecognised_attempt_failure raw -> raw
+
+(* The failed attempt the lane walk orders by, for the runtime detail. It says
+   what the walk does with it: the Keeper that saw it tries the runtime first
+   on its next cycle, every other Keeper tries it after the candidates that
+   answered, and only an answer clears it. *)
+let runtime_failed_attempt_text (attempt : Tui_decode.runtime_failed_attempt) =
+  let tm = Unix.localtime attempt.rfa_noted_at in
+  Printf.sprintf
+    "%s at %02d:%02d, seen by %s; other Keepers try it after the ones that \
+     answered, until it answers"
+    (runtime_attempt_failure_word attempt.rfa_failure)
+    tm.Unix.tm_hour tm.Unix.tm_min attempt.rfa_recorded_by
+
 let runtime_usage_label state runtime =
   match state.runtime_surface with
   | None -> Some "usage unknown"

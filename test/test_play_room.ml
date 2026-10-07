@@ -93,14 +93,21 @@ let test_keeper_dispatch () = workspace (fun base ->
   let result = Masc.Tool_misc.dispatch ~lane_access:(Masc.Lane_addon_sources.Keeper "real-keeper")
     context ~name:"masc_play_room" ~args in
   (match result with
-   | Some result -> check bool "tool succeeds" true (Tool_result.is_success result)
+   | Some result ->
+       check bool "tool succeeds" true (Tool_result.is_success result);
+       (match Room.view_of_json (Tool_result.data result) with
+        | Ok (viewer, _) -> check string "response viewer is the verified Keeper" "real-keeper" viewer
+        | Error message -> fail message)
    | None -> fail "public room tool was not dispatched");
   let snapshot = read base ~now:(Unix.gettimeofday ()) () in
   let message = List.hd snapshot.messages in
   check string "verified principal wins over the session alias" "real-keeper" message.who;
   check bool "Keeper speaker mark" true (message.speaker = Room.Keeper);
   match Room.snapshot_of_json (Room.snapshot_json snapshot) with
-  | Ok decoded -> check (list string) "wire readback" (texts snapshot) (texts decoded)
+  | Ok decoded ->
+      check (list string) "wire readback" (texts snapshot) (texts decoded);
+      check bool "a bare stored snapshot cannot invent a viewer" true
+        (Result.is_error (Room.view_of_json (Room.snapshot_json snapshot)))
   | Error message -> fail message)
 
 let () = run "public play room" ["room", [

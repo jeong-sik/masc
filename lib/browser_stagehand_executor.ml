@@ -316,6 +316,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
   let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
   match (action : Browser_lane.interaction) with
   | Browser_lane.Activate_tab -> Error (Browser_lane.Rejected_before_effect "activate_tab requires live lane")
+  | Browser_lane.Hover_at _ -> Error (Browser_lane.Rejected_before_effect "trusted hover requires automation or a live BiDi connection")
   | Browser_lane.Click_at { point; viewport } ->
     pointer ~call ~tab_id ~page_id ~args ~name:"click_at"
       (Wire.Page_click { page_id; x = viewport_x viewport point; y = viewport_y viewport point })

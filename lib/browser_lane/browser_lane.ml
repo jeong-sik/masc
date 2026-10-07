@@ -25,6 +25,7 @@ type scene_view = Content | Regions
 
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
+  | Hover_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Click_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
   | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport }
@@ -84,6 +85,8 @@ let interaction_args ~tab_id ~expected_url action =
     | Scroll_at {point;viewport;x;y} -> ["action", `String "scroll_at";
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport;
         "x",`Int x; "y",`Int y]
+    | Hover_at {point;viewport} -> ["action", `String "hover_at";
+        "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
     | Click_at {point;viewport} -> ["action", `String "click_at";
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
     | Drag {from;to_;viewport} -> ["action", `String "drag";
@@ -258,7 +261,16 @@ let client_id_of_string value =
   match Uuidm.of_string value with
   | Some id when String.equal (Uuidm.to_string id) value -> Ok id
   | _ -> Error "invalid_client_id"
-type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string }
+type live_transport = Web_extension | Webdriver_bidi
+let live_transport_to_string = function
+  | Web_extension -> "web_extension"
+  | Webdriver_bidi -> "webdriver_bidi"
+let live_transport_of_string = function
+  | "web_extension" -> Ok Web_extension
+  | "webdriver_bidi" -> Ok Webdriver_bidi
+  | _ -> Error "unsupported_browser_transport"
+type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string;
+  transport : live_transport }
 type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
@@ -272,6 +284,7 @@ let command_uuid = Uuidm.v4_gen (Random.State.make_self_init ())
 let lane_connected_window_sec = 120.
 let connected client = not client.closed && not (Monotonic_deadline.passed client.connected_until)
 let same_info left right = left.browser = right.browser
+  && left.transport = right.transport
   && String.equal left.version right.version && String.equal left.engine_version right.engine_version
 let retire_unlocked key client =
   client.closed <- true;
@@ -293,7 +306,8 @@ let active_clients () =
        (client_id_to_string left.client_id) (client_id_to_string right.client_id))
 let client_json info = `Assoc ["clientId", `String (client_id_to_string info.client_id);
   "browser", `String (browser_name info.browser); "version", `String info.version;
-  "engineVersion", `String info.engine_version]
+  "engineVersion", `String info.engine_version;
+  "transport", `String (live_transport_to_string info.transport)]
 let target_client_id = function Automation | Stagehand -> None | Live_client client -> Some client.info.client_id
 let target_lane = function
   | Automation -> Lane_name.Automation
@@ -428,7 +442,10 @@ let issue_live_with ~activity_check ?(only_if_idle = false) client ~verb ~timeou
     Error (Selected_client_disconnected client.info.client_id)
   else if not (verb_allowed_on_live verb) then
     Ok (Rejected_before_effect "session ownership, direct navigation and sentence verbs belong to the server's lanes")
-  else
+  else match client.info.transport, verb with
+  | Web_extension, Page_interact {action=Hover_at _; _} ->
+    Ok (Rejected_before_effect "trusted_hover_requires_live_bidi_connection")
+  | (Web_extension | Webdriver_bidi), _ ->
     Ok (Eio.Switch.run (fun sw ->
       let id = Uuidm.to_string (command_uuid ()) in
       let promise, resolver = Eio.Promise.create () in

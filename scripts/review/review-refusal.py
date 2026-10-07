@@ -34,7 +34,7 @@ def verdict_pattern(head, policy):
 
 
 def short(text, limit=REASON_PREVIEW_CHARS):
-    text = text.replace("\n", "\\n")
+    text = "".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in text)
     return text if len(text) <= limit else text[:limit] + "..."
 
 

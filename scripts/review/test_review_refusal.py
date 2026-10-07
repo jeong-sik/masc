@@ -71,6 +71,12 @@ class RefusalReasons(unittest.TestCase):
             self.assertEqual(ok, bound)
             self.assertEqual(run(review(footer)) == [], bound)
 
+    def test_control_bytes_in_echoed_lines_are_escaped(self):
+        out = run(review(f"approve-guard: head {HEAD}\x1b[2J"))
+        joined = "\n".join(out)
+        self.assertNotIn("\x1b", joined)
+        self.assertIn("\\x1b[2J", joined)
+
     def test_non_approved_state_is_refused(self):
         out = run(review(GOOD_FOOTER, state="COMMENTED"))
         self.assertTrue(any("review state is COMMENTED" in line for line in out), out)

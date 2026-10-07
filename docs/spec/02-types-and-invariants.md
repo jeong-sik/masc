@@ -336,18 +336,6 @@ type t =
   | Agent of Agent_error.t
   | Auth of Auth_error.t
   | System of System_error.t
-  | RateLimitExceeded of rate_limit_error
-  | CacheError of cache_error
-```
-
-`cache_error`는 캐시 I/O 및 만료 상태를 표현한다:
-
-```ocaml
-type cache_error =
-  | CacheReadFailed of string
-  | CacheWriteFailed of string
-  | CacheExpired of { key: string; age_hours: float }
-  | CacheCorrupted of string
 ```
 
 Result alias: `type 'a masc_result = ('a, masc_error) result`
@@ -554,13 +542,6 @@ type rate_limit_config = {
 }
 
 type rate_limit_category = GeneralLimit | BroadcastLimit | TaskOpsLimit
-
-type rate_limit_error = {
-  limit : int;
-  current : int;
-  wait_seconds : int;
-  category : rate_limit_category;
-}
 ```
 
 ---

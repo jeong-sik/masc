@@ -130,9 +130,7 @@ let release_failure_is_permanent (error : Masc_domain.masc_error) =
      these today, and a change that makes it raise one has to decide here
      instead of inheriting "retry forever". *)
   | Masc_domain.Agent _
-  | Masc_domain.Auth _
-  | Masc_domain.RateLimitExceeded _
-  | Masc_domain.CacheError _ -> false
+  | Masc_domain.Auth _ -> false
 ;;
 
 let release_unroutable_task ~config (item : Masc_domain.pending_completion_rejection) =

@@ -31,12 +31,12 @@ let surface_of ?(w = 256) ?(h = 192) () =
   Masc_tui_interactive.Pixels { width = w; height = h; rgb = String.make (w * h * 3) '\128' }
 ;;
 
-let drawn ?(f = frame ()) ?(surface = surface_of ()) ?notice () =
+let drawn ?(f = frame ()) ?(surface = surface_of ()) ?notice ?interaction () =
   let buf = Buffer.create 65536 in
   Msx.render ~live:Masc_tui_machine_live.Unread
     ~write:(Buffer.add_string buf)
     ~connection:Masc_tui_types.Connected
-    ?notice
+    ?notice ?interaction
     (Some f)
     (Some surface);
   Buffer.contents buf
@@ -95,7 +95,10 @@ let test_an_unreachable_server_is_not_a_missing_machine () =
    back -- the default is what a terminal that never answered leaves. *)
 let with_protocol p f =
   Msx.set_graphics_protocol p;
-  Fun.protect ~finally:(fun () -> Msx.set_graphics_protocol Graphics.Unsupported_protocol) f
+  Msx.set_cell_pixels (Some (8, 16));
+  Fun.protect ~finally:(fun () ->
+    Msx.set_cell_pixels None;
+    Msx.set_graphics_protocol Graphics.Unsupported_protocol) f
 ;;
 
 let test_a_graphics_terminal_gets_the_pixels () =
@@ -170,12 +173,16 @@ let test_meta_pixels_do_not_draw () =
 ;;
 
 let test_checkpoint_bindings_and_result_are_visible () =
+  let _, cols = Masc_tui_ansi.get_terminal_size () in
+  let restore_visible out =
+    if cols >= 90 then check bool "footer names quick restore" true (mentions ~needle:"F7: restore quick" out)
+    else check bool "short footer shows truncation" true (mentions ~needle:"…" out) in
   with_protocol Graphics.Kitty_protocol (fun () ->
-    let out = drawn () in
+    let out = drawn ~interaction:Types.Control_machine () in
     check bool "footer names quick save" true (mentions ~needle:"F6: save quick" out);
-    check bool "footer names quick restore" true (mentions ~needle:"F7: restore quick" out);
+    restore_visible out;
     List.iter (fun notice ->
-      let out = drawn ~notice () in
+      let out = drawn ~notice ~interaction:Types.Control_machine () in
       check bool "checkpoint outcome remains visible beside the frame" true
         (mentions ~needle:notice out);
       (* In Kitty the explicit placement cursor used to jump back onto the
@@ -188,7 +195,7 @@ let test_checkpoint_bindings_and_result_are_visible () =
       check bool "footer remains on the final terminal row" true
         (mentions ~needle:(Printf.sprintf "\027[%d;1H" rows) out);
       check bool "notice keeps save control visible" true (mentions ~needle:"F6: save quick" out);
-      check bool "notice keeps restore control visible" true (mentions ~needle:"F7: restore quick" out))
+      restore_visible out)
       [ "Saved quick checkpoint"; "Restored quick checkpoint"; "Restore failed: no checkpoint" ])
 ;;
 
@@ -256,16 +263,28 @@ let test_the_image_is_kept_inside_the_screen () =
           (drawn_width <= available_width)))
 ;;
 
-(* Without an answer there is nothing to compute with, and guessing a cell size
-   would size every placement against a number no terminal gave. *)
-let test_no_cell_size_leaves_the_rows_alone () =
-  let rows, _ = Masc_tui_ansi.get_terminal_size () in
-  let screen_rows = max 4 (rows - 2) in
+(* Without a measured cell size, row-only graphics have no width bound. The
+   cell mosaic still preserves the entire frame inside its column budget. *)
+let test_no_cell_size_uses_bounded_mosaic () =
   with_protocol Graphics.Kitty_protocol (fun () ->
     with_cell_pixels None (fun () ->
-      check (option int) "the screen's rows, unchanged" (Some screen_rows)
-        (rows_of (drawn ()))))
+      let out = drawn () in
+      check bool "no unbounded pixel placement" false (mentions ~needle:"f=24" out);
+      check bool "the frame remains visible" true (mentions ~needle:"\027[38;2;" out)))
 ;;
+
+let test_unicode_title_fits_cells () =
+  let _, cols = Masc_tui_ansi.get_terminal_size () in
+  let f = frame ~mode:(String.concat "" (List.init cols (fun _ -> "한글"))) () in
+  let out = drawn ~f () in
+  check bool "no split UTF-8 scalar" true (String.is_valid_utf_8 out);
+  let title = List.hd (String.split_on_char '\n' out) in
+  (* Drop cursor/erase escapes; keep the actual title cells. *)
+  let start = String.index title ' ' in
+  let stop = String.index_from title start '\027' in
+  let title = String.sub title start (stop - start) in
+  check string "title already fits terminal columns" title
+    (Masc_tui_ansi.fit_width title cols)
 
 let draw_frame f =
   let buf = Buffer.create 1024 in
@@ -483,8 +502,9 @@ let () =
     ; ( "fit"
       , [ test_case "the image is kept inside the screen" `Quick
             test_the_image_is_kept_inside_the_screen
-        ; test_case "no cell size leaves the rows alone" `Quick
-            test_no_cell_size_leaves_the_rows_alone
+        ; test_case "no cell size uses bounded mosaic" `Quick
+            test_no_cell_size_uses_bounded_mosaic
+        ; test_case "Unicode title fits cells" `Quick test_unicode_title_fits_cells
         ] )
     ; ( "menu"
       , [ test_case "the menu does not scroll its title off" `Quick

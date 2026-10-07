@@ -1593,7 +1593,7 @@ let workspace_enqueue state =
   let authority = state.workspace_authority in
   fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, message))
 
-let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
+let check_workspace_request ?schedule_form_action state ~mailbox ~authority ~identity ~host ~port () =
   if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
   else
     let reading = Masc_tui_loader.load_server_identity ~host ~port in
@@ -1601,7 +1601,12 @@ let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
     else if Masc_tui_types.server_workspace_matches ~expected:identity reading then Ok ()
     else begin
       let detail = "Workspace identity changed or is unavailable; request withdrawn" in
-      enqueue_async mailbox (Workspace_scoped (authority, Workspace_identity_unconfirmed detail));
+      let withdrawal = match schedule_form_action with
+        | None -> Workspace_identity_unconfirmed detail
+        | Some action ->
+          Schedule_form_authority_refused
+            {action; detail; workspace = workspace_input_identity_of_server identity} in
+      enqueue_async mailbox (Workspace_scoped (authority, withdrawal));
       Error detail
     end
 
@@ -10793,6 +10798,14 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_config_view_error <- None;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
+  (* A refusal receipt answers one workspace's create or modify form; the
+     next workspace's forms must not inherit it. Losing the reading, or
+     reading the same workspace again, is not the next workspace: the guard's
+     own withdrawal and the refresh after it leave the receipt on screen. *)
+  (match state.schedule_form_refusal, workspace_input_identity_of_server state.server_identity with
+   | Some refusal, Some current when refusal.sfr_workspace <> Some current ->
+     state.schedule_form_refusal <- None
+   | Some _, (Some _ | None) | None, (Some _ | None) -> ());
   state.keeper_usage <- Keeper_usage_unread;
   state.github_identity_view <- None;
   state.github_identity_view_error <- None;
@@ -13582,6 +13595,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Workspace_identity_unconfirmed detail ->
       apply_server_identity_reading state (Error detail);
       report_action state "error" detail
+  | Schedule_form_authority_refused {action; detail; workspace} ->
+      (* This receipt belongs to the guard's withdrawal, and is presented
+         only after that withdrawal retires the former workspace readings.
+         Its Workspace_scoped envelope rejects delivery to a successor. *)
+      apply_server_identity_reading state (Error detail);
+      state.schedule_form_refusal <- Some
+        { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
+        ; sfr_workspace = workspace };
+      report_action state "error" (action ^ ": " ^ detail)
   | Lane_package_catalog_loaded (generation,directory,result) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -19273,41 +19295,52 @@ and is loaded on demand through keeper_skill.
           | Error detail -> report_action state "error" detail))
   in
   let handle_schedule_form ~action ~stem ~post =
+    (* A refusal stays on the Schedules surface for the last-action window:
+       the action line alone is lost under a workspace warning. A new
+       attempt clears the previous one. *)
+    state.schedule_form_refusal <- None;
     let authority = state.workspace_authority in
     let identity = state.server_identity in
+    let report_form_refusal detail =
+      state.schedule_form_refusal <- Some
+        { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
+        ; sfr_workspace = workspace_input_identity_of_server identity };
+      report_action state "error" (action ^ ": " ^ detail)
+    in
     let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
     | None ->
-      report_action state "error"
+      report_form_refusal
         ("no $EDITOR set; export EDITOR to " ^ action ^ " a schedule here")
     | Some _ ->
       (match
          Masc_tui_editor.roundtrip ~restore:restore_terminal
            ~reenter:reenter_terminal stem
        with
-       | Error abort -> report_editor_abort state ~action abort
+       | Error Masc_tui_editor.Cancelled ->
+           report_editor_abort state ~action Masc_tui_editor.Cancelled
+       | Error (Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ as abort) ->
+           report_form_refusal (Masc_tui_editor.abort_detail abort)
        | Ok declaration ->
          (match Yojson.Safe.from_string declaration with
           | exception Yojson.Json_error message ->
-            report_action state "error"
-              (action ^ ": body is not JSON: " ^ message)
+            report_form_refusal ("body is not JSON: " ^ message)
           | `Assoc _ ->
             (match Result.bind
-               (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ())
+               (check_workspace_request ~schedule_form_action:action state
+                  ~mailbox:async_messages ~authority ~identity ~host ~port ())
                (fun () -> post declaration) with
-             | Error detail -> report_action state "error" (action ^ ": " ^ detail)
+             | Error detail -> report_form_refusal detail
              | Ok response ->
                (match Masc.Tui_decode.tool_envelope_outcome response with
-                | Error detail ->
-                  report_action state "error" (action ^ ": " ^ detail)
+                | Error detail -> report_form_refusal detail
                 | Ok message ->
                   report_action state "system" (action ^ ": " ^ message);
                   state.schedule_cancel_armed <- None;
                   state.schedule_cancel_error <- None;
                   launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages))
           | _ ->
-            report_action state "error"
-              (action ^ ": the editor form must be a JSON object")))
+            report_form_refusal "the editor form must be a JSON object"))
   in
   let handle_schedule_create () =
     handle_schedule_form ~action:"create"
@@ -19317,6 +19350,9 @@ and is loaded on demand through keeper_skill.
           ~port:state.port ~body_json)
   in
   let handle_schedule_modify () =
+    (* Every modify attempt retires the earlier refusal, including the ones
+       refused before an editor opens; their reason goes to the footer. *)
+    state.schedule_form_refusal <- None;
     match selected_schedule_row state with
     | None -> report_action state "error" "modify: no schedule under the cursor"
     (* The refusal was always real; it just arrived after the operator had

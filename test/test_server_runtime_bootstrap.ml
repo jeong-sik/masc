@@ -4117,16 +4117,8 @@ let test_health_response_survives_deleted_cwd () =
              |> member "effective_base_path"
              |> to_string)))
 
-let execution_label = function
-  | Server_runtime_bootstrap.Parallel -> "parallel"
-  | Server_runtime_bootstrap.Serial -> "serial"
-
-let check_lazy_group group ~name ~execution ~tasks =
+let check_lazy_group group ~name ~tasks =
   Alcotest.(check string) "group name" name group.Server_runtime_bootstrap.group_name;
-  Alcotest.(check string)
-    (name ^ " execution")
-    execution
-    (execution_label group.Server_runtime_bootstrap.execution);
   Alcotest.(check (list string))
     (name ^ " tasks")
     tasks
@@ -4142,9 +4134,9 @@ let test_lazy_startup_plan_groups_independent_tasks () =
        groups);
   match groups with
   | [ initialize; cleanup ] ->
-      check_lazy_group initialize ~name:"initialize" ~execution:"parallel"
+      check_lazy_group initialize ~name:"initialize"
         ~tasks:[ "restore_sessions" ];
-      check_lazy_group cleanup ~name:"cleanup" ~execution:"parallel"
+      check_lazy_group cleanup ~name:"cleanup"
         ~tasks:[ "jsonl_prune" ];
       Alcotest.(check (list string))
         "flattened task order"

@@ -3550,7 +3550,7 @@ end
    held). The fragment is reported by [rows_end < end_offset], never returned
    as bytes, so the caller sees exactly the rows a later append would build
    on. *)
-let read_private_jsonl_rows_locked_with_io ~io path =
+let read_private_jsonl_locked_with_io ~io ~missing path read =
   let open Private_jsonl_rows in
   try
     test_exec_home_guard ~op:"read_private_jsonl_rows_locked" path;
@@ -3562,7 +3562,7 @@ let read_private_jsonl_rows_locked_with_io ~io path =
          Stdlib.Mutex.protect path_mu (fun () ->
            match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0 with
            | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-             Private_file_succeeded Rows_missing
+             Private_file_succeeded missing
            | fd ->
              private_jsonl_with_fd_outcome
                ~close_operation:Close_transaction_data
@@ -3576,16 +3576,7 @@ let read_private_jsonl_rows_locked_with_io ~io path =
                       Error (Non_regular_file kind)
                     | Unix.S_REG ->
                     lock_whole_file_shared fd;
-                    let bytes = read_fd_chunks fd (Buffer.create 65536) in
-                    let end_offset = String.length bytes in
-                    let rows_end =
-                      match String.rindex_opt bytes '\n' with
-                      | Some newline -> newline + 1
-                      | None -> 0
-                    in
-                    Ok
-                      (Rows_present
-                         { rows = String.sub bytes 0 rows_end; rows_end; end_offset })
+                    Ok (read fd)
                   with
                   | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
                   | exn -> Error (Io_failed exn))))
@@ -3594,12 +3585,97 @@ let read_private_jsonl_rows_locked_with_io ~io path =
   | exn -> Private_file_failed (Io_failed exn)
 ;;
 
+let read_private_jsonl_rows_locked_with_io ~io path =
+  let open Private_jsonl_rows in
+  read_private_jsonl_locked_with_io ~io ~missing:Rows_missing path (fun fd ->
+    let bytes = read_fd_chunks fd (Buffer.create 65536) in
+    let end_offset = String.length bytes in
+    let rows_end =
+      match String.rindex_opt bytes '\n' with
+      | Some newline -> newline + 1
+      | None -> 0
+    in
+    Rows_present { rows = String.sub bytes 0 rows_end; rows_end; end_offset })
+;;
+
 let read_private_jsonl_rows_locked_result path =
   read_private_jsonl_rows_locked_with_io ~io:private_jsonl_transaction_unix_io path
 ;;
 
 let read_private_jsonl_rows_locked_with_io_for_testing ~io path =
   read_private_jsonl_rows_locked_with_io ~io path
+;;
+
+module Private_jsonl_tail = struct
+  type t =
+    | Tail_missing
+    | Tail_present of
+        { rows : string
+        ; prefix_omitted : bool
+        ; incomplete_tail : bool
+        ; end_offset : int
+        }
+
+  type error =
+    | Invalid_max_bytes of int
+    | Read_error of Private_jsonl_rows.error
+
+  let error_to_string = function
+    | Invalid_max_bytes bytes ->
+      Printf.sprintf "private JSONL tail byte limit must be positive: %d" bytes
+    | Read_error error -> Private_jsonl_rows.error_to_string error
+  ;;
+end
+
+let read_private_jsonl_tail_locked_result path ~max_bytes =
+  let open Private_jsonl_tail in
+  if max_bytes <= 0
+  then Private_file_failed (Invalid_max_bytes max_bytes)
+  else
+    let read fd =
+      let end_offset = Unix.lseek fd 0 Unix.SEEK_END in
+      let from = max 0 (end_offset - max_bytes) in
+      let starts_at_row =
+        from = 0 || Char.equal (private_jsonl_read_byte fd (Bytes.create 1) (from - 1)) '\n'
+      in
+      let length = end_offset - from in
+      let bytes = Bytes.create length in
+      ignore (Unix.lseek fd from Unix.SEEK_SET : int);
+      let rec read_all offset =
+        if offset < length then
+          match Unix.read fd bytes offset (length - offset) with
+          | 0 -> raise End_of_file
+          | count -> read_all (offset + count)
+          | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_all offset
+      in
+      read_all 0;
+      let bytes = Bytes.unsafe_to_string bytes in
+      let rows_start =
+        if starts_at_row then 0
+        else match String.index_opt bytes '\n' with
+          | Some newline -> newline + 1
+          | None -> length
+      in
+      let rows_end =
+        match String.rindex_opt bytes '\n' with
+        | Some newline -> newline + 1
+        | None -> 0
+      in
+      Tail_present
+        { rows = String.sub bytes rows_start (max 0 (rows_end - rows_start))
+        ; prefix_omitted = from > 0
+        ; incomplete_tail = length > 0 && not (Char.equal bytes.[length - 1] '\n')
+        ; end_offset
+        }
+    in
+    match read_private_jsonl_locked_with_io ~io:private_jsonl_transaction_unix_io
+            ~missing:Tail_missing path read with
+    | Private_file_succeeded value -> Private_file_succeeded value
+    | Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+      Private_file_succeeded_with_cleanup_failure { value; cleanup_failure }
+    | Private_file_failed error -> Private_file_failed (Read_error error)
+    | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+      Private_file_failed_with_cleanup_failure { error = Read_error error; cleanup_failure }
 ;;
 
 let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomplete_tail=false) ~io path decide =

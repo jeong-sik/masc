@@ -954,25 +954,18 @@ let assemble_hooks
                     ~current_tool_choice:current_params.tool_choice
                     ()
                 in
+                let offered_tools = Keeper_agent_tool_surface.for_request
+                    ~enabled:!active_tool_surface_enabled
+                    ~tool_choice:current_params.tool_choice ~schema_names:schema_filter
+                    ~agent_cell:turn_agent_cell ~built:built_tools in
                 let recall_tool_available name =
-                  !active_tool_surface_enabled
-                  && (match current_params.tool_choice with
-                      | Some Agent_core.Types.None_ -> false
-                      | None | Some (Agent_core.Types.Auto | Agent_core.Types.Any | Agent_core.Types.Tool _) -> true)
-                  && List.mem name schema_filter
-                  && List.exists (fun (tool : Agent_core.Tool.t) ->
-                       String.equal tool.schema.name name)
-                       (Keeper_agent_tool_surface.on_the_wire
-                          ~agent_cell:turn_agent_cell ~built:built_tools)
+                  List.exists (fun (tool : Agent_core.Tool.t) ->
+                    String.equal tool.schema.name name) offered_tools
                 in
                 let dynamic_context =
                   match dynamic_context_for_tools with
                   | Some project when not post_tool_round ->
-                    let offered = Keeper_agent_tool_surface.on_the_wire
-                        ~agent_cell:turn_agent_cell ~built:built_tools
-                      |> List.filter (fun (tool : Agent_core.Tool.t) ->
-                        List.mem tool.schema.name schema_filter) in
-                    project offered
+                    project offered_tools
                   | Some _ | None -> dynamic_context in
                 (if String.trim dynamic_context <> ""
                  then record_block Prompt_block_id.Dynamic_context dynamic_context);

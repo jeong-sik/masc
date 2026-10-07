@@ -138,35 +138,6 @@ let decode_line text =
   | exception Yojson.Json_error message -> Error (Not_json message)
 ;;
 
-let read_recent_messages ~session_dir ~roles ~limit file =
-  let file_path = path ~session_dir file in
-  let read () =
-    let selected = ref [] in
-    let remaining = ref limit in
-    let select = function
-      | Dated_jsonl.Malformed_json { detail; _ } -> Some (Error detail)
-      | Dated_jsonl.Parsed json ->
-        (match decode_json json with
-         | Error error -> Some (Error (read_error_to_string error))
-         | Ok (Fragment (Message ({ message; _ } as observed)))
-           when List.mem message.role roles ->
-           selected := observed :: !selected;
-           decr remaining;
-           if !remaining = 0 then Some (Ok ()) else None
-         | Ok (Fragment (Message _ | Tool_observation _)) | Ok Untagged -> None)
-    in
-    match Dated_jsonl.find_latest_entry_in_file_result ~require_final_newline:true file_path select with
-    | Error error -> Error (Dated_jsonl.read_error_to_string error)
-    | Ok (Some (Error detail)) -> Error detail
-    | Ok (Some (Ok ())) | Ok None -> Ok !selected
-  in
-  if limit <= 0 then Ok [] else
-  match Fs_compat.exact_path_kind ~follow:false file_path with
-  | Fs_compat.Exact_missing -> Ok []
-  | Fs_compat.Exact_unknown -> Error ("history path cannot be inspected: " ^ file_path)
-  | Fs_compat.Exact_kind _ -> read ()
-;;
-
 let numbered_lines ~rows ~rows_end ~end_offset =
   let complete =
     match List.rev (String.split_on_char '\n' rows) with
@@ -206,6 +177,46 @@ let read ~session_dir file =
       { error; cleanup_failure } ->
     settled cleanup_failure;
     unreadable error
+;;
+
+type recent_messages =
+  { messages : observed_message list
+  ; prefix_omitted : bool
+  }
+
+let read_recent_messages ~session_dir ~roles ~limit file =
+  let file_path = path ~session_dir file in
+  let of_tail = function
+    | Fs_compat.Private_jsonl_tail.Tail_missing -> Ok { messages=[]; prefix_omitted=false }
+    | Tail_present { incomplete_tail=true; _ } ->
+      Error "history ends with an incomplete append"
+    | Tail_present { rows; prefix_omitted; incomplete_tail=false; _ } ->
+      let lines = numbered_lines ~rows ~rows_end:(String.length rows) ~end_offset:(String.length rows) in
+      let* messages = List.fold_left (fun acc (_, line) ->
+        let* acc = acc in
+        match line with
+        | Error error -> Error (read_error_to_string error)
+        | Ok (Fragment (Message ({message;_} as observed))) when List.mem message.role roles ->
+          Ok (observed :: acc)
+        | Ok (Fragment (Message _ | Tool_observation _)) | Ok Untagged -> Ok acc)
+          (Ok []) lines in
+      let omitted = prefix_omitted || List.length messages > limit in
+      Ok { messages=List.rev (List.filteri (fun i _ -> i < limit) messages); prefix_omitted=omitted }
+  in
+  if limit <= 0 then Ok {messages=[]; prefix_omitted=true} else
+  (* Same physical history observation window as Keeper status. This bounds
+     read work, not Keeper execution; an omitted prefix is explicit below. *)
+  match Fs_compat.read_private_jsonl_tail_locked_result file_path
+      ~max_bytes:Keeper_status_options_defaults.max_tail_bytes with
+  | Fs_compat.Private_file_succeeded tail -> of_tail tail
+  | Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
+    Log.Keeper.warn "recent history descriptor cleanup: %s"
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    of_tail value
+  | Private_file_failed error -> Error (Fs_compat.Private_jsonl_tail.error_to_string error)
+  | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+    Error (Fs_compat.Private_jsonl_tail.error_to_string error ^ "; " ^
+           Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
 ;;
 
 let of_turn turn_ref lines =

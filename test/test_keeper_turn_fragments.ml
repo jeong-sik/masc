@@ -267,7 +267,7 @@ let test_recent_messages_skip_tools_without_losing_provenance () =
   let read file roles limit =
     match Fragments.read_recent_messages ~session_dir:session.Keeper_types.session_dir
       ~roles ~limit file with
-    | Ok messages -> messages
+    | Ok window -> window.Fragments.messages
     | Error detail -> fail detail in
   (match read Fragments.Main [Types.User; Types.Assistant] 2 with
    | [ first; second ] ->
@@ -292,7 +292,7 @@ let test_recent_messages_distinguish_missing_and_corrupt () =
   with_session @@ fun session ->
   let read () = Fragments.read_recent_messages
       ~session_dir:session.Keeper_types.session_dir ~roles:[Types.Assistant] ~limit:1 Fragments.Main in
-  check bool "missing history is absent" true (read () = Ok []);
+  check bool "missing history is absent" true (read () = Ok {Fragments.messages=[];prefix_omitted=false});
   History.persist_message ~keeper_name ~turn_ref:(turn 1) session (message ~role:Types.Assistant "old reply");
   append_raw session Fragments.Main "{broken\n";
   match read () with
@@ -314,6 +314,20 @@ let test_recent_messages_reject_complete_json_without_newline () =
   | Ok _ -> fail "uncommitted JSON was presented as a previous reply"
 ;;
 
+let test_recent_messages_report_a_tool_only_window () =
+  with_session @@ fun session ->
+  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:"internal_assistant" session
+    (message ~role:Types.Assistant "older reply outside physical window");
+  (* One retained tool row alone exceeds the physical observation window. *)
+  History.persist_message ~keeper_name ~turn_ref:(turn 2) ~source:"internal_assistant" session
+    (message ~role:Types.Tool (String.make (Masc.Keeper_status_options_defaults.max_tail_bytes + 1) 'x'));
+  match Fragments.read_recent_messages ~session_dir:session.Keeper_types.session_dir
+      ~roles:[Types.Assistant] ~limit:1 Fragments.Internal with
+  | Ok {messages=[];prefix_omitted=true} -> ()
+  | Error detail -> fail detail
+  | Ok _ -> fail "a clipped no-match window became full-history absence"
+;;
+
 let () =
   run
     "keeper_turn_fragments"
@@ -324,6 +338,8 @@ let () =
             test_recent_messages_distinguish_missing_and_corrupt
         ; test_case "recent messages reject uncommitted valid JSON" `Quick
             test_recent_messages_reject_complete_json_without_newline
+        ; test_case "tool-only tail reports prefix omission" `Quick
+            test_recent_messages_report_a_tool_only_window
         ; test_case "a turn's fragments come back by its turn_ref" `Quick
             test_a_turns_fragments_come_back_by_its_turn_ref
         ; test_case "untagged lines belong to no turn; refusals count from the first named" `Quick

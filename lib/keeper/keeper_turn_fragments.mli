@@ -15,9 +15,7 @@
     [turn_ref] the decoder refuses is an [Error]: it is never read as
     untagged, because that would hide a turn's words behind a shape mistake.
 
-    The full [read] holds the file lock the writer holds. The observational
-    recent reader takes a file-end snapshot and reports an unterminated tail
-    as unavailable; neither accepts an uncommitted final row. *)
+    Readers hold the writer lock and never accept an uncommitted final row. *)
 
 type observed_message =
   { turn_ref : Ids.Turn_ref.t
@@ -62,18 +60,23 @@ val read
   -> file
   -> ((int * (line, read_error) result) list, string) result
 
+type recent_messages =
+  { messages : observed_message list
+  ; prefix_omitted : bool
+  }
+
 val read_recent_messages
   : session_dir:string
   -> roles:Agent_core.Types.role list
   -> limit:int
   -> file
-  -> (observed_message list, string) result
-(** Recent attributed messages in file order, for prompt observation only.
-    Reverse-scans until [limit] messages with the requested roles are found;
-    tool observations consume no slots. Whole message bodies and provenance
-    survive. Missing files yield [Ok []]; unreadable or malformed encountered
-    rows yield [Error], never a silently older excerpt. This observational
-    reader does not hold the append lock and must not advance durable cursors. *)
+  -> (recent_messages, string) result
+(** A locked, physically bounded history excerpt for prompt observation.
+    Reads the same byte window as Keeper status; tool rows consume no message
+    slots, but can exhaust the physical window. Prefix omission remains
+    explicit even with no matching message. Missing stores are empty; corrupt,
+    incomplete or unavailable sources are errors. Whole included messages keep
+    their provenance. This excerpt must not advance durable cursors. *)
 
 (** The fragments of [turn_ref] among [lines], in file order. *)
 val of_turn

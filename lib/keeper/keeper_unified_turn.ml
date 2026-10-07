@@ -888,7 +888,8 @@ let run_keeper_cycle
                    []
                in
                let recent_work = Keeper_recent_work.collect ~config ~meta in
-               let render_prompt observation =
+               let render_prompt tools observation =
+                 let recent_work = Keeper_recent_work.transmit ~base_path:config.base_path ~tools recent_work in
                  Keeper_unified_prompt.build_prompt
                      ~turn_decision
                      ?previous_turn_stop
@@ -903,20 +904,19 @@ let run_keeper_cycle
                      ()
                in
                let prompt_parts =
-                 Eio_guard.with_named_switch "turn:prompt" (fun () -> render_prompt observation)
+                 Eio_guard.with_named_switch "turn:prompt" (fun () -> render_prompt [] observation)
                in
                let { Keeper_unified_prompt.world_state; user_message } = prompt_parts in
-               let dynamic_context_for_tools = match meta.input_policy, observation.own_recent_actions with
-                 | Keeper_input_policy.Small, Ok turns ->
-                   Some (fun tools ->
-                     if Result.is_error (Keeper_recovery_transmission.require_reader tools)
-                     then world_state
-                     else Domain_pool_ref.submit_io_or_inline (fun () ->
+               let dynamic_context_for_tools = Some (fun tools ->
+                 Domain_pool_ref.submit_io_or_inline (fun () ->
+                   let observation = match meta.input_policy, observation.own_recent_actions with
+                     | Keeper_input_policy.Small, Ok turns ->
                        let own_recent_actions = Keeper_own_recent_actions.externalize_failures
                          ~base_path:config.base_path ~keeper_name:meta.name
                          ~policy:meta.input_policy ~tools turns in
-                       (render_prompt {observation with own_recent_actions=Ok own_recent_actions}).world_state))
-                 | Wide, _ | Small, Error _ -> None in
+                       {observation with own_recent_actions=Ok own_recent_actions}
+                     | Wide, _ | Small, Error _ -> observation in
+                   (render_prompt tools observation).world_state)) in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
                (* Ensure session dir tree for trace artifacts. *)

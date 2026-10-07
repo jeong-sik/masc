@@ -211,15 +211,11 @@ val find_latest_entry_result :
     [Ok None]; layout and I/O failures remain explicit. *)
 
 val find_latest_entry_in_file_result :
-  ?require_final_newline:bool -> string -> (recent_entry -> 'a option) -> ('a option, read_error) result
+  string -> (recent_entry -> 'a option) -> ('a option, read_error) result
 (** Single-file reverse scan using the same chunked reader as
     {!find_latest_entry_result}. Calls the callback newest-first until it
     selects a value or the file ends. Malformed rows reach the callback;
-    missing or non-regular files and I/O failures are errors.
-    [require_final_newline] defaults to false. When true, a nonempty file
-    whose final row lacks a newline is an explicit read error. The check and
-    reverse scan use the same opened descriptor and captured end offset, so
-    a subsequent append cannot introduce an uncommitted tail into the scan. *)
+    missing or non-regular files and I/O failures are errors. *)
 
 val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).

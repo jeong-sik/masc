@@ -1469,27 +1469,14 @@ let format_workspace_memory_observation = function
         "claims_digest", claims_digest;
         "digest_note", digest_note ] ^ "\n\n")
 
-let format_recent_work (work : Keeper_recent_work.t) =
-  let message_json (observed : Keeper_turn_fragments.observed_message) =
-    `Assoc
-      [ "turn_ref", Ids.Turn_ref.to_yojson observed.turn_ref
-      ; "recorded_at", `Float observed.recorded_at
-      ; "source", (match observed.source with None -> `Null | Some s -> `String s)
-      ; "message", Keeper_official_client_context_codec.message_to_json observed.message
-      ]
-  in
-  let observed_json = function
-    | Ok rows -> `Assoc [ "messages", `List (List.map message_json rows) ]
-    | Error detail -> `Assoc [ "unavailable", `String detail ]
-  in
-  match work.conversation, work.autonomous_reply with
-  | Ok [], Ok [] -> None
-  | _ ->
-    let evidence = `Assoc
-        [ "recent_conversation", observed_json work.conversation
-        ; "latest_autonomous_reply", observed_json work.autonomous_reply ] in
+let format_recent_work = function
+  | Keeper_recent_work.Absent -> None
+  | Evidence evidence ->
     Some (render_fragment Prompt_names.keeper_world_recent_work
-            [ "evidence", Yojson.Safe.to_string evidence ] ^ "\n\n")
+            [ "evidence", evidence ] ^ "\n\n")
+  | Unavailable detail ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work
+            [ "evidence", Yojson.Safe.to_string (`Assoc ["unavailable", `String detail]) ] ^ "\n\n")
 ;;
 
 let build_prompt_internal
@@ -1502,7 +1489,7 @@ let build_prompt_internal
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
-    ?(recent_work = Keeper_recent_work.empty)
+    ?(recent_work = Keeper_recent_work.Absent)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
   =

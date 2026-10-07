@@ -376,15 +376,10 @@ let test_no_digest_without_failures () =
 
 (* --- 1. Current Task layer --- *)
 
-let test_small_failed_payloads_remain_retrievable () =
+let artifact_reader ~base_path =
   let open Masc in
-  let module Actions = Masc.Keeper_own_recent_actions in
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs env#fs;
-  let base_path = Filename.temp_dir "small-action-payloads-" "" in
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
   let schema = Masc.Keeper_runtime_schemas_toml.artifact_read in
-  let reader = Tool_bridge.agent_core_tool_of_masc_with_execution_env
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~base_path
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
@@ -396,7 +391,17 @@ let test_small_failed_payloads_remain_retrievable () =
           ~start_time:(Tool_timing.start ()) ?data:execution.data ()
       | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name
           ~class_ ~start_time:(Tool_timing.start ()) execution.raw_output
-      | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred") in
+      | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred")
+;;
+
+let test_small_failed_payloads_remain_retrievable () =
+  let open Masc in
+  let module Actions = Masc.Keeper_own_recent_actions in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  let base_path = Filename.temp_dir "small-action-payloads-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let reader = artifact_reader ~base_path in
   let payload = "{\"patch\":\"" ^ String.make 32000 'x' ^ "\"}" in
   let detail = "Patch rejected: " ^ String.make 16000 'd' in
   let failed = call ~tool:"Edit" ~input:payload ~outcome:(Actions.Failed_call (Some detail)) in
@@ -1120,27 +1125,62 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
     persist 1 "direct_user" User "Review PR-ongoing through verdict" attribution;
     persist 1 "direct_assistant" Assistant "Read producer; consumer remains" [];
     persist 2 "internal_assistant" Assistant "Consumer inspected; publish pending verdict next" [];
-    let recent_work = Masc.Keeper_recent_work.collect ~config ~meta in
+    let source = Masc.Keeper_recent_work.collect ~config ~meta in
+    let tools = [artifact_reader ~base_path] in
+    let project ?(tools=tools) ?(base_path=base_path) source =
+      Masc.Keeper_recent_work.transmit ~base_path ~tools source in
+    let read_evidence = function
+      | Masc.Keeper_recent_work.Evidence text ->
+        (match Tool_output.decode_from_agent_core text with
+         | Tool_output.Decoded reference ->
+           let result = Masc.Keeper_artifact_read.handle ~base_path
+             ~args:(`Assoc ["sha256",`String reference.sha256; "offset",`Int 0;
+                           "max_bytes",`Int Masc.Keeper_artifact_read.maximum_max_bytes]) in
+           (match result.disposition,result.data with
+            | Tool_result.Completed (),Some json -> Yojson.Safe.Util.(json |> member "content" |> to_string)
+            | _ -> fail "the offered artifact reader could not recover recent work")
+         | Tool_output.Not_marker -> text
+         | Tool_output.Invalid_marker _ -> fail "invalid work artifact")
+      | Absent | Unavailable _ -> fail "work evidence missing" in
+    let recent_work = project source in
+    let evidence = read_evidence recent_work in
     let decision = WO.keeper_cycle_decision
         ~event_queue_triggers:[WO.Bootstrap_stimulus] ~meta base_observation in
     let prompt = Prompt.build_prompt ~turn_decision:decision
         ~current_task:Inputs.No_current_task ~recent_work ~observation:base_observation () in
-    List.iter (fun text -> check bool ("history reaches wake: " ^ text) true
-        (contains ~needle:text prompt.world_state))
+    List.iter (fun text -> check bool ("history recovered: " ^ text) true
+        (contains ~needle:text evidence))
       ["Review PR-ongoing through verdict"; "Read producer; consumer remains";
        "Consumer inspected; publish pending verdict next"; Ids.Turn_ref.to_string (turn 2)];
-    check bool "host attribution remains off provider text" false
-      (contains ~needle:Agent_core.Types.Input_speaker.key prompt.world_state);
+    check bool "host attribution remains off provider and artifact" false
+      (contains ~needle:Agent_core.Types.Input_speaker.key (prompt.world_state ^ evidence));
     let preview = Prompt.build_prompt_preview ~current_task:Inputs.No_current_task
         ~recent_work ~observation:base_observation () in
-    check bool "preview carries the same continuation evidence" true
-      (contains ~needle:"Consumer inspected; publish pending verdict next" preview.world_state);
-    let unavailable = { recent_work with Masc.Keeper_recent_work.autonomous_reply=Error "history unreadable" } in
-    let degraded = Prompt.build_prompt ~turn_decision:decision ~current_task:Inputs.No_current_task
-        ~recent_work:unavailable ~observation:base_observation () in
-    check bool "read failure remains visible" true (contains ~needle:"history unreadable" degraded.world_state);
+    (match recent_work with Evidence text ->
+      check bool "actual prompt carries the retrievable excerpt" true (contains ~needle:text prompt.world_state);
+      check bool "preview renderer preserves transmission" true (contains ~needle:text preview.world_state)
+     | _ -> fail "fixture has no excerpt");
+    let unavailable = { source with Masc.Keeper_recent_work.autonomous_reply=Error "history unreadable" } in
+    let degraded = read_evidence (project unavailable) in
+    check bool "read failure remains visible" true (contains ~needle:"history unreadable" degraded);
     check bool "other source survives failure" true
-      (contains ~needle:"Review PR-ongoing through verdict" degraded.world_state))
+      (contains ~needle:"Review PR-ongoing through verdict" degraded);
+    let large_text = String.make 8000 'x' ^ " resume the remaining review" in
+    persist 3 "direct_user" User large_text attribution;
+    let large = Masc.Keeper_recent_work.collect ~config ~meta in
+    let transmitted = project large in
+    check bool "large request remains retrievable" true (contains ~needle:large_text (read_evidence transmitted));
+    (match transmitted with Evidence text ->
+       check bool "raw large body is not pinned" false (contains ~needle:large_text text);
+       check bool "reference is smaller than original" true (String.length text < String.length large_text)
+     | _ -> fail "large request did not produce a reference");
+    (match project ~tools:[] large with Unavailable _ -> () | _ -> fail "missing reader admitted large pinned text");
+    let blocked = Filename.concat base_path "blocked-blob-root" in
+    Out_channel.with_open_bin blocked (fun out -> output_string out "not a directory");
+    match project ~base_path:blocked large with
+    | Unavailable _ -> ()
+    | _ -> fail "storage failure admitted large pinned text")
+
 ;;
 
 let () =

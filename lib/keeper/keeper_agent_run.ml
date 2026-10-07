@@ -1120,6 +1120,12 @@ let run_turn
         |> Result.map_error Keeper_repetition_snapshot.error_to_string
       | Some _, None -> Error "native Gate resume has no original direct execution"
       | None, _ -> Ok () in
+  (* An execution that ended without committing -- a server stop, a Keeper
+     stopped mid-turn -- left its readings as raw ledger rows only. They are
+     settled under their own turn before this execution starts counting. *)
+  Keeper_unsettled_spend.settle_before_execution
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.base_path)
+    ~agent_name:meta.name;
   let setup = match native_scope with
     | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok () -> Keeper_run_tools.prepare_agent_setup

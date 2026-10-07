@@ -1699,6 +1699,28 @@ let template_slot_names template =
   |> List.sort_uniq String.compare
 ;;
 
+(* Every Memory pass of a Keeper re-sends the selection rules, the Keeper's
+   instructions and its current Memory; the other slots change from pass to
+   pass. With the unchanging slots first, the provider serves that prefix
+   from its prompt cache for as long as the Memory is unchanged. *)
+let test_memory_prompt_puts_unchanging_slots_first () =
+  let unchanging =
+    [ "facts_budget"; "working_contexts_rule"; "keeper_id"; "keeper_instructions"; "current_memory" ]
+  in
+  let slots =
+    template_pieces (Prompt_registry.get_prompt Prompt_names.librarian)
+    |> List.filter_map (function Template_slot name -> Some name | Template_text _ -> None)
+  in
+  let rec split leading = function
+    | slot :: rest when List.mem slot unchanging -> split (slot :: leading) rest
+    | rest -> List.rev leading, rest
+  in
+  let leading, rest = split [] slots in
+  check (list string) "the unchanging slots lead, in this order" unchanging leading;
+  check (list string) "no unchanging slot follows a per-pass one" []
+    (List.filter (fun slot -> List.mem slot unchanging) rest)
+;;
+
 let test_template_slots_match_supplied_variables () =
   let supplied =
     match Runtime.librarian_prompt_variables (input ()) with
@@ -1790,6 +1812,33 @@ let occurrences ~needle text =
     | Some at -> count (at + step) (acc + 1)
   in
   count 0 0
+;;
+
+(* The pending-input organization pass neither judges nor carries Memory, so
+   its prompt carries no current fact. The Memory pass prompt does. *)
+let test_working_context_prompt_carries_no_current_memory () =
+  let probe = "memory-probe-claim-for-the-working-context-pass" in
+  let input = { (input ()) with current = Some { Librarian.facts = [ fact ~claim:probe ] } } in
+  let render key variables =
+    match
+      Prompt_registry.render_prompt_template key
+        (("working_contexts_rule", "working contexts rule fixture") :: variables)
+    with
+    | Ok rendered -> rendered
+    | Error detail -> failf "%s render failed: %s" key detail
+  in
+  check int "the Memory pass prompt carries the current fact" 1
+    (occurrences ~needle:probe
+       (render Prompt_names.librarian (Librarian.prompt_variables input)));
+  check int "the working-context pass prompt carries no current fact" 0
+    (occurrences ~needle:probe
+       (render Prompt_names.librarian_working_context
+          (Librarian.working_context_prompt_variables input)));
+  check bool "the working-context pass supplies no current_memory variable" false
+    (List.mem_assoc "current_memory" (Librarian.working_context_prompt_variables input));
+  check bool "the working-context template has no current_memory slot" false
+    (List.mem "current_memory"
+       (template_slot_names (Prompt_registry.get_prompt Prompt_names.librarian_working_context)))
 ;;
 
 let test_every_librarian_prompt_names_its_keeper () =
@@ -2258,6 +2307,10 @@ let () =
             test_repo_template_renders_keeper_instructions
         ; test_case "every librarian prompt names its Keeper" `Quick
             test_every_librarian_prompt_names_its_keeper
+        ; test_case "the working-context prompt carries no current memory" `Quick
+            test_working_context_prompt_carries_no_current_memory
+        ; test_case "the Memory prompt puts the unchanging slots first" `Quick
+            test_memory_prompt_puts_unchanging_slots_first
         ; test_case "goal criteria reach the librarian model input" `Quick
             test_repo_template_carries_goal_criteria
         ; test_case "rendered prompt is the template with every slot filled" `Quick

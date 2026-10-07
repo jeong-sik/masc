@@ -3,6 +3,25 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
+(* The one field of an Execute payload that measures the call instead of
+   answering it. Every payload below writes it under this name, and
+   [answer_of_output] leaves it out, so the repeat guard does not read two
+   identical runs as progress (2026-08-24: [gh auth status] four times, the
+   outputs differing only here). *)
+let execution_time_field = "execution_time_ms"
+
+let answer_of_output output_text =
+  match Yojson.Safe.from_string output_text with
+  | `Assoc fields ->
+    Some
+      (`Assoc
+          (List.filter
+             (fun (key, _) -> not (String.equal key execution_time_field))
+             fields))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+  | exception Yojson.Json_error _ -> None
+;;
+
 let elapsed_duration_ms ~start_time ~end_time =
   let elapsed_ms = (end_time -. start_time) *. 1000. in
   match classify_float elapsed_ms with
@@ -1046,7 +1065,7 @@ let handle_tool_execute_typed
                           ; "code", `String (Keeper_execute_output_files.error_code detail)
                           ; "status", status_json
                           ; "output", `String (String_util.sanitize_utf8 output)
-                          ; "execution_time_ms", `Int elapsed_ms
+                          ; execution_time_field, `Int elapsed_ms
                           ]
                           @ dispatched_model_location_fields ())
                        "Execute ran, but its complete output could not be preserved. The exit status and captured preview are retained; do not repeat the command to recover its output."))
@@ -1071,7 +1090,7 @@ let handle_tool_execute_typed
                     @ timeout_fields
                     @ output_fields
                     @ [ "typed", `Bool true
-                      ; "execution_time_ms", `Int elapsed_ms
+                      ; execution_time_field, `Int elapsed_ms
                       ])
                in
                (* The same call's audit fields, which the model does not read:
@@ -1126,7 +1145,7 @@ let handle_tool_execute_typed
                             ; "code", `String "execute_result_manifest_failed"
                             ; "status", status_json
                             ; "output", `String (String_util.sanitize_utf8 output)
-                            ; "execution_time_ms", `Int elapsed_ms
+                            ; execution_time_field, `Int elapsed_ms
                             ]
                             @ dispatched_model_location_fields ())
                          "Execute completed, but its result manifest could not be persisted.")))

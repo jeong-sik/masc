@@ -42,6 +42,7 @@ let gate approval_id =
       gp_execution_sandbox = None;
       gp_waiting_s = Some 12.;
       gp_phase = Tui_decode.Gate_human_required;
+      gp_judge_advice = None;
       gp_auto_judge_detail = None;
       gp_retry_request = None;
     }

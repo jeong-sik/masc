@@ -89,7 +89,7 @@ def unknown_and_resume(executable):
 
     _keyboard_harness.run_terminal_scenario(executable, description="Home unknown and explicit resume",
                             interact=interact, http_fixtures=fixtures,
-                            prepare_workspace=seed_goals)
+                            prepare_workspace=seed_goals, refresh=0.5)
 
 
 def requests_are_navigation(executable):
@@ -108,7 +108,8 @@ def requests_are_navigation(executable):
 
     _keyboard_harness.run_terminal_scenario(executable, description="Home requests open without deciding",
                             interact=interact, http_fixtures=fixtures,
-                            http_requests=requests, prepare_workspace=seed_goals)
+                            http_requests=requests, prepare_workspace=seed_goals,
+                            refresh=0.5)
 
 
 def automatic_gate_is_not_a_human_decision(executable):
@@ -139,7 +140,14 @@ def automatic_gate_is_not_a_human_decision(executable):
         assert b"appr-blocked" in frame
         assert b"appr-queued" not in frame and b"appr-judging" not in frame
         select_destination(process, fd, output, b"appr-blocked")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"AUTO JUDGE BLOCKED")
+        # The Gate detail's "state" field holds the phase text verbatim
+        # (bin/masc_tui_render_approvals.ml:39 Gate_blocked -> "auto judge
+        # blocked"), so the value itself is the needle; the label-only
+        # "AUTO JUDGE BLOCKED" heading the scenario once awaited is not a
+        # product string any more.
+        detail = _keyboard_harness.send_and_wait(
+            process, fd, output, b"\r", b"auto judge blocked")
+        assert b"auto judge blocked" in _keyboard_harness.screen_text(detail), detail
         assert_no_decision_posts(requests)
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         # A separate explicit human handoff retains its own identity.
@@ -155,7 +163,8 @@ def automatic_gate_is_not_a_human_decision(executable):
 
     _keyboard_harness.run_terminal_scenario(executable, description="Home excludes automatic Gate work",
                             interact=interact, http_fixtures=fixtures,
-                            http_requests=requests, prepare_workspace=seed_goals)
+                            http_requests=requests, prepare_workspace=seed_goals,
+                            refresh=0.5)
     assert_no_decision_posts(requests)
 
 
@@ -186,7 +195,8 @@ def refresh_preserves_destination(executable):
 
     _keyboard_harness.run_terminal_scenario(executable, description="Home refresh preserves selected identity",
                             interact=interact, http_fixtures=fixtures,
-                            http_requests=requests, prepare_workspace=seed_goals)
+                            http_requests=requests, prepare_workspace=seed_goals,
+                            refresh=0.5)
 
 
 def empty_roster_preserves_confirmation(executable):
@@ -218,7 +228,7 @@ def empty_roster_preserves_confirmation(executable):
 
     _keyboard_harness.run_terminal_scenario(executable, description="Home Keeper zero preserves decisions",
                             interact=interact, http_fixtures=fixtures,
-                            prepare_workspace=prepare)
+                            prepare_workspace=prepare, refresh=0.5)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,59 @@ export function parseJsonLikeData(data: unknown): unknown {
   }
 }
 
+// A single long string rendered whole (the 160M-char curator raw_response
+// incident) — or a container with tens of thousands of entries — floods the
+// DOM and freezes the whole page. Both limits are render guards only: the
+// data itself is passed through untouched.
+const MAX_STRING_CHARS = 4_000
+const STRING_PREVIEW_CHARS = 1_200
+const MAX_RENDERED_ITEMS = 200
+
+function LongStringLeaf({ data, label }: { data: string; label?: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const labelNode = label
+    ? html`<span class="text-[var(--color-fg-primary)] shrink-0 font-medium whitespace-nowrap">${label}:</span>`
+    : null
+  if (!expanded) {
+    const head = data.slice(0, STRING_PREVIEW_CHARS)
+    const tail = data.length > STRING_PREVIEW_CHARS + STRING_PREVIEW_CHARS
+      ? ` … ${data.slice(-STRING_PREVIEW_CHARS)}`
+      : data.slice(STRING_PREVIEW_CHARS)
+    return html`
+      <div class="font-mono text-sm leading-relaxed flex items-start gap-1.5 py-0.5 min-w-0 max-w-full">
+        ${labelNode}
+        <div class="min-w-0 break-words">
+          <span class="text-[var(--color-status-ok)] whitespace-pre-wrap break-words">"${head}${tail}"</span>
+          <button
+            type="button"
+            class="cursor-pointer hover:bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] px-1 ml-2 select-none text-left bg-transparent border-0 text-[var(--color-accent)]"
+            onClick=${() => setExpanded(true)}
+            aria-label=${`Expand ${data.length.toLocaleString()}-character string`}
+          >
+            전체 ${data.length.toLocaleString()}자 보기
+          </button>
+        </div>
+      </div>
+    `
+  }
+  return html`
+    <div class="font-mono text-sm leading-relaxed flex items-start gap-1.5 py-0.5 min-w-0 max-w-full">
+      ${labelNode}
+      <div class="min-w-0 break-words">
+        <span class="text-[var(--color-status-ok)] whitespace-pre-wrap break-words">"${data}"</span>
+        <button
+          type="button"
+          class="cursor-pointer hover:bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] px-1 ml-2 select-none text-left bg-transparent border-0 text-[var(--color-accent)]"
+          onClick=${() => setExpanded(false)}
+          aria-label="Collapse string"
+        >
+          접기
+        </button>
+      </div>
+    </div>
+  `
+}
+
 export function JsonViewer({ data, label, initialCollapsed = false, collapseNested = true, level = 0, ancestors = [] }: { data: unknown; label?: string; initialCollapsed?: boolean; collapseNested?: boolean; level?: number; ancestors?: object[] }) {
   const [collapsed, setCollapsed] = useState(initialCollapsed)
 
@@ -30,6 +83,9 @@ export function JsonViewer({ data, label, initialCollapsed = false, collapseNest
   if (!isObject) {
     let valueNode
     if (typeof data === 'string') {
+      if ((data as string).length > MAX_STRING_CHARS) {
+        return html`<${LongStringLeaf} data=${data as string} label=${label} />`
+      }
       valueNode = html`<span class="text-[var(--color-status-ok)] whitespace-pre-wrap break-words">"${data}"</span>`
     } else if (typeof data === 'number') {
       valueNode = html`<span class="text-[var(--color-status-warn)]">${data}</span>`
@@ -81,10 +137,16 @@ export function JsonViewer({ data, label, initialCollapsed = false, collapseNest
 
       ${!collapsed && html`
         <div class="pl-4 ml-1.5 border-l border-[var(--color-border-divider)] mt-1 flex flex-col gap-0.5 w-full min-w-0">
-          ${isArray
-            ? (data as unknown[]).map((val, idx) => html`<${JsonViewer} key=${idx} data=${val} label=${String(idx)} level=${level + 1} initialCollapsed=${collapseNested && level >= 2} collapseNested=${collapseNested} ancestors=${nextAncestors} />`)
-            : (entries as [string, unknown][]).map(([k, v]) => html`<${JsonViewer} key=${k} data=${v} label=${k} level=${level + 1} initialCollapsed=${collapseNested && level >= 2} collapseNested=${collapseNested} ancestors=${nextAncestors} />`)
-          }
+          ${(isArray
+            ? (data as unknown[]).slice(0, MAX_RENDERED_ITEMS)
+            : (entries as [string, unknown][]).slice(0, MAX_RENDERED_ITEMS)
+          ).map((entry, idx) => {
+            const [key, val] = isArray ? [String(idx), entry] : (entry as [string, unknown])
+            return html`<${JsonViewer} key=${key} data=${val} label=${key} level=${level + 1} initialCollapsed=${collapseNested && level >= 2} collapseNested=${collapseNested} ancestors=${nextAncestors} />`
+          })}
+          ${(isArray ? (data as unknown[]).length : entries.length) > MAX_RENDERED_ITEMS
+            ? html`<div class="text-[var(--color-fg-muted)] text-2xs py-0.5">… 나머지 ${((isArray ? (data as unknown[]).length : entries.length) - MAX_RENDERED_ITEMS).toLocaleString()}개 항목 미표시 (렌더 방어)</div>`
+            : null}
         </div>
       `}
     </div>

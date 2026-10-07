@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
+import { fireEvent } from '@testing-library/preact'
 import { JsonViewer, JsonViewerCard } from './json-viewer'
 
 describe('JsonViewer a11y', () => {
@@ -93,5 +94,58 @@ describe('JsonViewerCard a11y', () => {
       container,
     )
     expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+// Render guards: a single huge string leaf (the 160M-char curator
+// raw_response incident) or a very wide container must not flood the DOM on
+// first draw. The guards cap what is RENDERED, never what is held in data.
+describe('JsonViewer render guards', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('previews a huge string leaf with an expand control instead of flooding the DOM', () => {
+    const huge = 'x'.repeat(50_000)
+    render(html`<${JsonViewer} data=${{ raw_response: huge }} />`, container)
+    const text = container.textContent ?? ''
+    expect(text).not.toContain(huge)
+    const expand = container.querySelector('button[aria-label^="Expand "]')
+    expect(expand).not.toBeNull()
+    expect(expand!.textContent).toContain('50,000')
+  })
+
+  it('expands a huge string leaf only on explicit request', () => {
+    const huge = 'y'.repeat(20_000)
+    render(html`<${JsonViewer} data=${{ body: huge }} />`, container)
+    expect(container.textContent).not.toContain(huge)
+    fireEvent.click(container.querySelector('button[aria-label^="Expand "]')!)
+    expect(container.textContent).toContain(huge)
+  })
+
+  it('caps rendered items of a wide array and names the unrendered rest', () => {
+    const wide = Array.from({ length: 1_000 }, (_, i) => `item-${i}`)
+    render(html`<${JsonViewer} data=${wide} />`, container)
+    expect(container.textContent).toContain('item-0')
+    expect(container.textContent).toContain('item-199')
+    expect(container.textContent).not.toContain('item-200')
+    expect(container.textContent).toContain('800')
+  })
+
+  it('caps rendered entries of a wide object and names the unrendered rest', () => {
+    const wide: Record<string, string> = {}
+    for (let i = 0; i < 500; i++) wide[`k${i}`] = `v${i}`
+    render(html`<${JsonViewer} data=${wide} />`, container)
+    const text = container.textContent ?? ''
+    expect(text).toContain('k0')
+    expect(text).toContain('k199')
+    expect(text).not.toContain('k200:')
+    expect(text).toContain('300')
   })
 })

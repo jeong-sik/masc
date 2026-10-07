@@ -43,6 +43,7 @@ val dos_press : Masc_domain.tool_schema
 val dos_click : Masc_domain.tool_schema
 val dos_type : Masc_domain.tool_schema
 val dos_peek : Masc_domain.tool_schema
+val play_room : Masc_domain.tool_schema
 val dos_pass : Masc_domain.tool_schema
 val dos_save : Masc_domain.tool_schema
 val dos_restore : Masc_domain.tool_schema

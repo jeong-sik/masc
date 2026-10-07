@@ -22,6 +22,7 @@ let guide ~base =
     [ ("mcp_url", base ^ Server_mcp_transport_http.profile_label Server_mcp_transport_http.Seat)
     ; ("seat_url", base ^ Server_routes_http_routes_play_page.seat_path)
     ; ("screen_url", base ^ Server_routes_http_routes_play_screen.screen_path)
+    ; ("room_url", base ^ Server_routes_http_routes_play_room.path)
     ; ("moves", String.concat "\n" (List.map (move_section ~base) Server_routes_http_routes_dos.moves))
     ]
 

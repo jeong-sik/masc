@@ -217,6 +217,20 @@ let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args
       Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Evidence args with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
         | Error error -> lane_error error)
+  | Some Tool_schemas_misc.Misc_play_room ->
+      let speaker = match lane_access with
+        | Lane_addon_sources.Keeper _ -> Play_room.Keeper
+        | Operator_configuration | Unauthenticated -> Play_room.Participant in
+      Some (match Result.bind (Play_room.parse_action args) (fun action ->
+        Play_room.perform ~base_path:ctx.config.base_path ~who:lane_caller ~speaker
+          ~now:(Time_compat.now ()) action) with
+        | Ok snapshot -> Tool_result.make_ok ~tool_name:name ~start_time:start
+            ~data:(Play_room.snapshot_json snapshot) ()
+        | Error error ->
+            let class_ = match error with
+              | Play_room.Invalid_request _ | Conflict _ -> Tool_result.Workflow_rejection
+              | Unavailable _ -> Tool_result.Runtime_failure in
+            Tool_result.make_err ~tool_name:name ~start_time:start ~class_ (Play_room.error_message error))
   | Some Tool_schemas_misc.Misc_config ->
       Some (Tool_misc_introspection.handle_config ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_dashboard ->
@@ -342,6 +356,7 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_candle_purchase
   | Tool_schemas_misc.Misc_candle_equip
   | Tool_schemas_misc.Misc_candle_gift
+  | Tool_schemas_misc.Misc_play_room
   | Tool_schemas_misc.Misc_lane_updates -> false
   | Tool_schemas_misc.Misc_lane_action_status
   | Tool_schemas_misc.Misc_lane_inspect

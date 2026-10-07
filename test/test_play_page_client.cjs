@@ -918,3 +918,35 @@ test('an old acknowledgement cannot remove a different operation marker', async 
   assert.equal(storage.get('masc.play.invite'), 'fixture-token');
   assert.equal(page.requests.filter(r => r.method === 'POST').length, 1);
 });
+
+test('late auth failure after disconnect cannot clear a later invitation', async () => {
+  const storage = new Map();
+  let deferred = false, completeSeat;
+  const page = fixture(request => {
+    if (deferred && request.url === '/api/v1/play/seat') {
+      deferred = false;
+      return new Promise(resolve => { completeSeat = resolve; });
+    }
+    return request.url === '/api/v1/play/seat'
+      ? response({ ...seat, controller: null }) : normalReply(request);
+  }, { storage });
+  await page.settle();
+  deferred = true;
+  page.get('pass-to').handlers.focus();
+  await page.settle();
+  await page.get('leave').handlers.click();
+  assert.equal(storage.size, 0);
+  storage.set('masc.play.invite', 'later-token');
+  completeSeat(response({}, 401));
+  await page.settle();
+  assert.equal(storage.get('masc.play.invite'), 'later-token');
+});
+
+test('failure to load a retained credential never deletes the unread identity', async () => {
+  const storage = new Map([['masc.play.invite', 'unread-token']]);
+  storage.get = () => { throw new Error('storage read unavailable'); };
+  const page = fixture(normalReply, { storage, hash: '' });
+  await page.settle();
+  assert.equal(page.requests.length, 0);
+  assert.equal(Map.prototype.get.call(storage, 'masc.play.invite'), 'unread-token');
+});

@@ -93,7 +93,7 @@ let test_keeper_dispatch () = workspace (fun base ->
   let result = Masc.Tool_misc.dispatch ~lane_access:(Masc.Lane_addon_sources.Keeper "real-keeper")
     context ~name:"masc_play_room" ~args in
   (match result with
-   | Some result -> check bool "tool succeeds" true (Masc.Tool_result.is_success result)
+   | Some result -> check bool "tool succeeds" true (Tool_result.is_success result)
    | None -> fail "public room tool was not dispatched");
   let snapshot = read base ~now:(Unix.gettimeofday ()) () in
   let message = List.hd snapshot.messages in

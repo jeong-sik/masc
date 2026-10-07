@@ -54,7 +54,7 @@ let test_a_b_restart_a () =
   let state = record state b call in
   check (option (pair string int)) "new B does not inherit A" None (detector state b);
   let state = checkpoint_restore state in
-  let state = S.admit state (S.Resume a) |> require "resume A" in
+  let state = S.admit state (S.Fresh a) |> require "readmit A" in
   let state = record state a call in
   check (option (pair string int)) "resumed A reaches its own threshold"
     (Some ("Execute", 3)) (detector state a);
@@ -74,14 +74,12 @@ let test_same_fresh_and_two_plus_two () =
   check (option (pair string int)) "attempt split2+2 does not reset"
     (Some ("Execute", 4)) (detector state a)
 
-let test_unknown_resume_and_record () =
+let test_unknown_scope_record () =
   let missing = id "missing-operation" in
-  (match S.admit S.empty (S.Resume missing) with
-   | Error (S.Unknown_scope found) -> check bool "exact missing identity" true (Keeper_execution_scope_id.equal found missing)
-   | _ -> fail "unknown Resume became Fresh");
   let observation = Runtime.observation_of_call call |> require "observation" in
   match S.record S.empty ~scope:missing observation with
-  | Error (S.Unknown_scope _) -> ()
+  | Error (S.Unknown_scope found) ->
+    check bool "exact missing identity" true (Keeper_execution_scope_id.equal found missing)
   | _ -> fail "observation invented admission"
 
 let test_observations_are_valid_before_save () =
@@ -294,7 +292,7 @@ let test_shared_identity_and_snapshot_codec () =
   let reversed = S.admit S.empty (S.Fresh b) |> require "reverse B" in
   let reversed = S.admit reversed (S.Fresh a) |> require "reverse A" in
   let reversed = S.record reversed ~scope:a observation |> require "reverse record A" in
-  let reversed = S.admit reversed (S.Resume b) |> require "reverse active B" in
+  let reversed = S.admit reversed (S.Fresh b) |> require "reverse active B" in
   check bool "equal ignores map insertion order" true (S.equal first reversed);
   check bool "scope membership includes empty admitted frame" true
     (List.equal Keeper_execution_scope_id.equal [a; b] (S.scope_ids first));
@@ -314,8 +312,8 @@ let test_shared_identity_and_snapshot_codec () =
   let decoded = Yojson.Safe.to_string expected |> Yojson.Safe.from_string
     |> S.of_json |> require "pure snapshot wire roundtrip" in
   check bool "pure journal codec equals runtime projection" true (S.equal first decoded);
-  let resumed_a = S.admit decoded (S.Resume a) |> require "select A" in
-  check bool "active identity is part of equality" false (S.equal first resumed_a);
+  let readmitted_a = S.admit decoded (S.Fresh a) |> require "select A" in
+  check bool "active identity is part of equality" false (S.equal first readmitted_a);
   let twice = S.record decoded ~scope:a observation |> require "second observation" in
   check bool "observation multiplicity is part of equality" false (S.equal first twice);
   check bool "missing empty frame is not equivalent to admitted empty frame" false
@@ -326,7 +324,7 @@ let () =
     [ "scope", [ test_case "shared identity and canonical pure snapshot" `Quick test_shared_identity_and_snapshot_codec
                ; test_case "A B checkpoint restart A" `Quick test_a_b_restart_a
                ; test_case "idempotent Fresh and2+2" `Quick test_same_fresh_and_two_plus_two
-               ; test_case "unknown Resume and record" `Quick test_unknown_resume_and_record
+               ; test_case "record needs an admitted scope" `Quick test_unknown_scope_record
                ; test_case "valid observations before save" `Quick test_observations_are_valid_before_save
                ; test_case "invalid checkpoint preserves target" `Quick test_invalid_snapshot_does_not_clear_target
                ; test_case "restore cannot replace runtime evidence" `Quick test_restore_does_not_replace_runtime_evidence

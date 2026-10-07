@@ -33,6 +33,7 @@ let pending ?(waiting_s = Some 90.) ?(phase = Decode.Gate_judging) ~keeper ~tool
   ; gp_execution_sandbox = None
   ; gp_waiting_s = waiting_s
   ; gp_phase = phase
+  ; gp_judge_advice = None
   ; gp_auto_judge_detail = None
   ; gp_retry_request = None
   }

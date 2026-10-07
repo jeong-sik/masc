@@ -1154,6 +1154,63 @@ def close_model_form(process, fd, output) -> None:
         raise AssertionError("cancelling model settings lost the Models table")
 
 
+def run_runtime_roster_model_settings(executable: str) -> None:
+    """Runtime All e and Config c share one account-bound model form."""
+    store = LaneStore()
+    runtime_id = "codex_subscription.luna"
+    selected = _keyboard_runtime.runtime_resolved_runtime(
+        runtime_id, "Selected Codex account", "gpt-6-luna", provider_id="codex_subscription")
+    assert isinstance(store.body, dict)
+    assert isinstance(store.body["runtimes"], list)
+    store.body["runtimes"][0] = selected
+    store.body["default_runtime"] = selected
+    for lane in store.lanes:
+        lane["runtime_ids"] = [runtime_id if value == "runtime-a" else value for value in lane["runtime_ids"]]
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = model_settings_config()
+    requests: _keyboard_harness.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.palette_go(process, fd, output, b"go Runtime", b"MASC System / Runtime")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=100,
+            needle=b"MASC System / Runtime", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"USED BY")
+        screen = _keyboard_harness.screen_text(bytes(output))
+        for runtime in (runtime_id, "runtime-b", "runtime-c", "runtime-d", "runtime-e"):
+            if runtime.encode() not in screen:
+                raise AssertionError(f"All runtime roster omitted {runtime!r}: {screen!r}")
+        _keyboard_harness.send_and_wait(process, fd, output, b"e", "Edit model · codex_subscription".encode())
+        assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[C", b"500000_")
+        assert_model_form(output, provider="codex_subscription", model="luna", context="500000_")
+        press(process, fd, output, b"\x1b")
+        screen = _keyboard_harness.screen_text(bytes(output))
+        if b"Context: 272000 tokens (binding)" not in screen:
+            raise AssertionError(f"cancel applied the requested preset to the source: {screen!r}")
+        _keyboard_harness.send_and_wait(process, fd, output, b"c", "Copy model · codex_subscription".encode())
+        _keyboard_harness.send_and_wait(process, fd, output, b"\t", b"272000_")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[C", b"luna-c500k")
+        screen = _keyboard_harness.screen_text(bytes(output))
+        if "Copy model · codex_subscription".encode() not in screen or b"500000_" not in screen:
+            raise AssertionError(f"Runtime copy lost the selected account or preset: {screen!r}")
+        press(process, fd, output, b"\x1b")
+        screen = _keyboard_harness.screen_text(bytes(output))
+        if "Copy model · codex_subscription".encode() in screen:
+            raise AssertionError(f"Esc left the copy draft open: {screen!r}")
+        writes = [(path, body) for path, body in requests if path in (
+            ROUTING_PATH, _keyboard_runtime.RUNTIME_CONFIG_RAW_PATH,
+            "/api/v1/runtime/config/raw/preview", "/api/v1/runtime/config/model")]
+        if writes:
+            raise AssertionError(f"opening, changing or cancelling a shared draft posted a write: {writes!r}")
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(executable,
+        description="Runtime All opens shared model Edit and Copy with context presets",
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+        terminal_cols=120)
+
+
 def run_provider_jump(executable: str) -> None:
     """[d] on an HTTP slot opens the shared account/model form.
     The picker retains focus until closed; cancelling the form writes nothing."""
@@ -1759,6 +1816,7 @@ if __name__ == "__main__":
     run_concurrent_edit(os.path.abspath(sys.argv[1]))
     run_invalid_runtime_config(os.path.abspath(sys.argv[1]))
     run_filter(os.path.abspath(sys.argv[1]))
+    run_runtime_roster_model_settings(os.path.abspath(sys.argv[1]))
     run_provider_jump(os.path.abspath(sys.argv[1]))
     run_cli_binding_jump(os.path.abspath(sys.argv[1]))
     run_default_route(os.path.abspath(sys.argv[1]))

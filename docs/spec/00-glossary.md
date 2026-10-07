@@ -99,6 +99,20 @@ status: reference
   [Mcp.connect](../../packages/agent_core/lib/protocol/mcp.mli),
   [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
 
+**Lane Add-on Sampling Outcome (Lane Add-on 샘플링 결과)**
+: `Lane_addon_sampling`이 호스트 소유 모델 호출 하나의 종단 상태를 적는 닫힌 네 값
+  (`status`). `answered`는 호스트가 유효한 응답을 돌려준 경우, `host_error`는 invoke
+  콜백이 문자열 오류를 돌려준 경우(정책 거절인지 제공자 실패인지 이 경계는 가르지
+  않는다), `invalid_response`는 응답이 패키지 바이트 봉투를 넘거나 모델 정체성이 비어
+  있는 경우, `outcome_unknown`은 invoke 중 예기치 않은 예외로 결과를 확정할 수 없는
+  경우다. `host_error`·`invalid_response`·`outcome_unknown`은 패키지에 중립 상태로만
+  노출되고, 원문은 호스트 증거 저장소에 남는다.
+  경계: 여기의 `outcome_unknown`은 **Lane Action Receipt & Uncertainty** 항목의 같은
+  이름과 다른 층이다 — 저쪽은 파견된 액션의 내구 결과가 없는 상태이고, 이쪽은 모델
+  호출 자체가 예외로 끝난 상태다. 두 값 모두 임의 재실행을 정당화하지 않는다.
+  → [Lane_addon_sampling](../../lib/lane_addon/lane_addon_sampling.mli) ·
+  [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
+
 **HITL**
 : Human-in-the-Loop의 약어. Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는
   경로다. 사람의 답을 기다리는 동안에도 다른 Keeper의 턴이나 상관없는 작업은 계속 돈다.
@@ -232,9 +246,10 @@ status: reference
   verifier·HITL auto judge·board attention 레인이 `Priority`다
   (`Standalone_lane.admission_class`). 이 값은 그 provider에서 `max-concurrent`를
   선언한 binding에만 붙는다. 그런 binding이 없거나 공식 클라이언트 provider이면
-  설정을 읽을 때 거절한다. 실행 중인 서버는 계정이 처음 받은 칸 수와 연속 한도를
-  재시작할 때까지 쓰므로, 허가 중인 계정의 두 값을 바꾸는 설정 저장과
-  `masc runtime-resume`은 거절된다.
+  설정을 읽을 때 거절한다. 한 계정의 binding은 칸 수와 연속 한도를 같게 선언해야
+  하고, 다르면 설정 저장과 로드에서 거절한다. 설정 저장이나 `masc runtime-resume`으로
+  두 값을 바꾸면 실행 중인 서버에 바로 반영된다. 칸이 늘면 기다리던 요청이 바로
+  허가를 받고, 줄면 쓰는 요청 수가 새 칸 수 아래로 내려갈 때까지 새 허가를 내주지 않는다.
   줄을 선 요청은 기다림이 끝날 때 `masc.provider_admission.waited` 이벤트를 하나 남긴다.
   기다림은 제공자가 보낸 429 관측인 Runtime Rate Limit이나 후보 실패 분류의
   `Binding Admission`과 다른 단계다.

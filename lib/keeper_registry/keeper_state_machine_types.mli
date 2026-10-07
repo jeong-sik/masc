@@ -38,7 +38,6 @@ type event =
     }
   | Operator_pause
   | Operator_resume
-  | Operator_stop of { remove_meta : bool; }
   | Stop_requested
   | Drain_complete
   | Fiber_started
@@ -46,16 +45,12 @@ type event =
       http_status : int option;
     }
   | Supervisor_restart_attempt of { attempt : int; }
-  | Credential_archived
   | Operator_clear_requested of { preserve_system : bool; reason : string; }
 val event_to_string : event -> string
 type entry_action =
     Start_drain
-  | Schedule_restart of { delay_sec : float; }
   | Publish_lifecycle of { event_name : string; detail : string; }
   | Cleanup_and_unregister
-  | Trigger_immediate_cleanup
-  | Cancel_pending_agent_core
 type transition_result = {
   prev_phase : phase;
   new_phase : phase;

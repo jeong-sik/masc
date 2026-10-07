@@ -3807,6 +3807,11 @@ type gate_pending = {
   gp_execution_sandbox : string option;
   gp_waiting_s : float option;
   gp_phase : gate_pending_phase;
+  gp_judge_advice : Keeper_approval_queue_rules_types.hitl_context_summary option;
+      (** What Auto Judge wrote when it handed the row to a person: its
+          rationale and the questions it wants answered. Present exactly when
+          the phase is [Gate_human_required]; the server sets that phase only
+          from such a summary. *)
   gp_auto_judge_detail : string option;
       (** The durable reason why Auto Judge handed this row back or stopped.
           It is intentionally separate from the phase: [blocked] without its
@@ -3818,9 +3823,18 @@ type gate_pending = {
           safely rearmed; it can still be decided by a human. *)
 }
 
+type gate_mode =
+  | Gate_mode of Keeper_gate_mode.t
+  | Unrecognised_gate_mode of string
+
+let gate_mode_of_wire raw =
+  match Keeper_gate_mode.of_string raw with
+  | Some mode -> Gate_mode mode
+  | None -> Unrecognised_gate_mode raw
+
 type gate_lane_modes = {
-  glm_workspace : string;
-  glm_external : string;
+  glm_workspace : gate_mode;
+  glm_external : gate_mode;
 }
 
 (* An always-allow rule standing behind the queue. It answers a request
@@ -4026,6 +4040,25 @@ let gate_auto_judge_detail_of_json json =
   | _, `String detail when String.trim detail <> "" -> Some detail
   | _ -> None
 
+(* The summary is read with the server's own decoder. A row the server put in
+   [human_required] always carries an available summary, so its absence is a
+   wire error, not a row to draw without the judge's reasons. *)
+let gate_judge_advice_of_json ~phase json =
+  match phase with
+  | Gate_human_required ->
+    (match
+       Keeper_approval_queue_rules_types.summary_status_of_yojson_with_error
+         (member "summary_status" json)
+     with
+     | Ok (Keeper_approval_queue_rules_types.Summary_available summary) -> Ok (Some summary)
+     | Ok
+         ( Keeper_approval_queue_rules_types.Summary_not_requested
+         | Keeper_approval_queue_rules_types.Summary_pending
+         | Keeper_approval_queue_rules_types.Summary_failed _ ) ->
+       Error "a human_required gate row carries no Auto Judge summary"
+     | Error detail -> Error ("gate summary_status: " ^ detail))
+  | Gate_queued | Gate_judging | Gate_blocked -> Ok None
+
 (* The server owns the full parser and repeats the compare-and-swap checks.
    The TUI only carries the exact five fields it observed, and only advertises
    rearm for the three dispositions the server explicitly permits. A failed
@@ -4070,6 +4103,7 @@ let decode_gate_pending json =
     | _ -> None
   in
   let* gp_phase = gate_pending_phase_of_json json in
+  let* gp_judge_advice = gate_judge_advice_of_json ~phase:gp_phase json in
   Ok
     {
       gp_id;
@@ -4087,16 +4121,20 @@ let decode_gate_pending json =
         snd (gate_execution_site ~operation:gp_operation input);
       gp_waiting_s;
       gp_phase;
+      gp_judge_advice;
       gp_auto_judge_detail = gate_auto_judge_detail_of_json json;
       gp_retry_request = gate_retry_request_of_json ~id:gp_id json;
     }
 
 let decode_gate_lane_modes json =
   let* workspace = required_object_field json "gate_mode" in
-  let* glm_workspace = required_string_field workspace "mode" in
+  let* workspace_mode = required_string_field workspace "mode" in
   let* external_lane = required_object_field json "external_gate_mode" in
-  let* glm_external = required_string_field external_lane "mode" in
-  Ok { glm_workspace; glm_external }
+  let* external_mode = required_string_field external_lane "mode" in
+  Ok
+    { glm_workspace = gate_mode_of_wire workspace_mode
+    ; glm_external = gate_mode_of_wire external_mode
+    }
 
 let decode_gate_rule json =
   let* gr_id = required_string_field json "id" in
@@ -4242,7 +4280,7 @@ let decode_keeper_gate_settings json =
     rows "modes" (fun item ->
       let* keeper = required_string_field item "keeper_name" in
       let* mode = required_string_field item "mode" in
-      Ok (keeper, mode))
+      Ok (keeper, gate_mode_of_wire mode))
   in
   let* exact_lanes =
     rows "exact_lanes" (fun item ->
@@ -7432,13 +7470,13 @@ let play_revoke_http_error ~status_code ~body =
       (Tui_terminal_text.sanitize_terminal_text detail) status_code
   | Error _ -> http_status_error ~status_code ~body
 
-(* The play routes refuse with [{error: <code>, message: <sentence>}] and add
-   what is missing ([missing]) or who holds the name ([taken_by]) as a further
-   field. [http_status_error] reads only [error], which is the code, and would
-   leave the operator with "HTTP 409: not_ready". A refusal about the
-   credential (401, 403) is worded where the credential is known, a status
-   that is not a client refusal is not a refusal, and a body with no sentence
-   in it has nothing to add, so all three answer [None]. *)
+(* The play routes refuse through [Server_refusal.json]:
+   [{error: <sentence>, code: <code>}] plus what is missing ([missing]) or who
+   holds the name ([taken_by]). [http_status_error] shows the sentence but
+   drops those two fields. A refusal about the credential (401, 403) is worded
+   where the credential is known, a status that is not a client refusal is not
+   a refusal, and a body with no sentence in it has nothing to add, so all
+   three answer [None]. *)
 let play_invite_refusal ~status_code ~body =
   if status_code < 400 || status_code >= 500 || status_code = 401 || status_code = 403
   then None
@@ -7466,5 +7504,5 @@ let play_invite_refusal ~status_code ~body =
           in
           Printf.sprintf "HTTP %d: %s%s" status_code sentence
             (if details = [] then "" else " (" ^ String.concat "; " details ^ ")"))
-        (text "message")
+        (text "error")
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)

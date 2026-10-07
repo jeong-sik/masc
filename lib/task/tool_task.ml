@@ -211,9 +211,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       | Masc_domain.Task (Masc_domain.Task_error.InvalidId _)
       | Masc_domain.Agent _
       | Masc_domain.Auth _
-      | Masc_domain.System _
-      | Masc_domain.RateLimitExceeded _
-      | Masc_domain.CacheError _ -> Some "task_done_lifecycle_rejected"
+      | Masc_domain.System _ -> Some "task_done_lifecycle_rejected"
     in
     workflow_rejection_result
       ~tool_name

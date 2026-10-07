@@ -1,4 +1,4 @@
-(** Pulse — the beating heart of any Space.
+(** Pulse — a tick engine for background work that runs until it is shut down.
 
     Implementation notes:
     - [Eio.Fiber.first] races timer vs nudge-wait. First to complete wins.
@@ -28,10 +28,6 @@ type rhythm = {
   quiet   : int * int;
 }
 
-type lifecycle =
-  | Always_on
-  | Bounded of (beat -> bool)
-
 type stats = {
   total_beats   : int;
   total_nudges  : int;
@@ -50,7 +46,6 @@ type any_clock = Clock : _ Eio.Time.clock -> any_clock
 type t = {
   clock      : any_clock;
   mutable rhythm : rhythm;
-  lifecycle  : lifecycle;
   mutable consumers : (module Consumer) list;
   (* nudge signaling — Stream is cancellation-safe under Fiber.first *)
   nudge_stream : string Eio.Stream.t;
@@ -160,7 +155,7 @@ let is_shutdown t =
   | Some () -> true
   | None -> false
 
-(** One tick: determine trigger, make beat, dispatch consumers, check lifecycle. *)
+(** One tick: determine trigger, make beat, dispatch consumers. *)
 let tick t trigger =
   t.seq <- t.seq + 1;
   let beat = {
@@ -172,15 +167,6 @@ let tick t trigger =
   (match trigger with Nudge _ -> t.total_nudges <- t.total_nudges + 1 | Rhythm | Demand -> ());
   Log.Pulse.debug "beat #%d trigger=%s" beat.seq (trigger_to_string trigger);
   dispatch_consumers t beat;
-  (* Check bounded lifecycle *)
-  (match t.lifecycle with
-   | Always_on -> ()
-   | Bounded pred ->
-     if pred beat && not (is_shutdown t) then begin
-       Log.Pulse.info "bounded lifecycle condition met at beat #%d" beat.seq;
-       (* fire-and-forget: the bool only reports first-resolver status. *)
-       ignore (Eio.Promise.try_resolve t.shutdown_r () : bool)
-     end);
   beat
 
 (** The main pulse loop. Races timer vs nudge vs shutdown on each iteration.
@@ -226,13 +212,12 @@ let loop t =
 
 (* ── Public API ──────────────────────────────────────────────── *)
 
-let create ~clock ~rhythm ~lifecycle ~consumers =
+let create ~clock ~rhythm ~consumers =
   let ac = Clock clock in
   let (shutdown_p, shutdown_r) = Eio.Promise.create () in
   {
     clock = ac;
     rhythm;
-    lifecycle;
     consumers;
     nudge_stream = Eio.Stream.create 1;
     nudge_mutex  = Eio.Mutex.create ();
@@ -246,21 +231,12 @@ let create ~clock ~rhythm ~lifecycle ~consumers =
 
 let run ~sw t =
   Atomic.set t.alive true;
-  match t.lifecycle with
-  | Always_on ->
-    Eio.Fiber.fork_daemon ~sw (fun () ->
-      (* Safe: finally is mutable field write — no I/O, no exception risk *)
-      Fun.protect
-        (fun () -> loop t; `Stop_daemon)
-        ~finally:(fun () -> Atomic.set t.alive false)
-    )
-  | Bounded _ ->
-    Eio.Fiber.fork ~sw (fun () ->
-      (* Safe: finally is mutable field write — no I/O, no exception risk *)
-      Fun.protect
-        (fun () -> loop t)
-        ~finally:(fun () -> Atomic.set t.alive false)
-    )
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    (* Safe: finally is mutable field write — no I/O, no exception risk *)
+    Fun.protect
+      (fun () -> loop t; `Stop_daemon)
+      ~finally:(fun () -> Atomic.set t.alive false)
+  )
 
 let nudge t ~reason =
   Eio.Mutex.use_rw ~protect:true t.nudge_mutex (fun () ->

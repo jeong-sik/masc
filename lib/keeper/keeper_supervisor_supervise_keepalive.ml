@@ -163,11 +163,6 @@ let supervise_keepalive
            (Printexc.to_string exn))
   in
   let log_transaction_error = function
-    | Keeper_keepalive_launch_transaction.Shutdown_reserved operation_id ->
-      Log.Keeper.warn
-        "supervisor launch skipped %s because shutdown operation %s owns admission"
-        meta.name
-        (Keeper_shutdown_types.Operation_id.to_string operation_id)
     | Keeper_keepalive_launch_transaction.Intake_token_not_live ->
       Log.Keeper.error
         "supervisor launch rejected an inactive durable-intake token for %s"

@@ -67,9 +67,6 @@ type roster_failure =
   | Roster_unreachable of string
   | Roster_malformed of string
 
-val roster_identity_unavailable : roster_failure
-(** The failure of a roster read that could not name the workspace to ask. *)
-
 val roster_failure_message : credential_sent:bool -> roster_failure -> string
 (** One terminal line naming the failure and, where there is one, the action
     that clears it.

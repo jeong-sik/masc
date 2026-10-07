@@ -22,7 +22,6 @@ type conflict =
   }
 
 type warning =
-  | Manifest_parent_sync_unconfirmed of string
   | Runtime_config_parent_sync_unconfirmed of string
   | Lock_release_unconfirmed of string
   | Runtime_config_lock_release_unconfirmed of string
@@ -64,7 +63,6 @@ type error =
 
 type 'a publication =
   | Commit of 'a
-  | Commit_with_warnings of 'a * warning list
   | Commit_then_publish of warning list * (unit -> 'a)
   | Rollback of 'a
 
@@ -164,11 +162,6 @@ let error_to_string = function
     Printf.sprintf "keeper manifest publication raised (path %s): %s" path detail
 
 let warning_to_yojson = function
-  | Manifest_parent_sync_unconfirmed detail ->
-    `Assoc
-      [ "code", `String "keeper_manifest_parent_sync_unconfirmed"
-      ; "detail", `String detail
-      ]
   | Runtime_config_parent_sync_unconfirmed detail ->
     `Assoc
       [ "code", `String "runtime_config_parent_sync_unconfirmed"
@@ -719,8 +712,6 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
           | Error error -> rollback error
           | Ok (Commit value) ->
             finish_commit [] (fun () -> value)
-          | Ok (Commit_with_warnings (value, publication_warnings)) ->
-            finish_commit publication_warnings (fun () -> value)
           | Ok (Commit_then_publish (publication_warnings, after_commit)) ->
             finish_commit publication_warnings after_commit
           | Ok (Rollback value) ->

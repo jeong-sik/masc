@@ -28,7 +28,7 @@
       tool-call log, not duplicated in manifest lineage rows.
 
     - {b Layer 4 — Payload}: [payload_role] ([Model_input],
-      [Operator_evidence], [Checkpoint], [Memory_store]).  Classifies the
+      [Operator_evidence], [Checkpoint]).  Classifies the
       semantic role of the decision data.  SSOT is the caller contract
       at the injection point.
 
@@ -47,7 +47,6 @@ type payload_role =
   | Model_input
   | Operator_evidence
   | Checkpoint
-  | Memory_store
 
 type source_clock =
   | Wall

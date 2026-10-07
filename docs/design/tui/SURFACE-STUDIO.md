@@ -3,6 +3,10 @@
 The implementation builds on measured viewport budgets. It is not a claim of
 installed or production behavior until current-head executable evidence exists.
 
+The shared visual direction is now [TUI layout language](LAYOUT-LANGUAGE.md):
+airy content, quiet pane separators, stable list columns and a focused selection.
+The [seven-screen preview](layout-language-preview.html) uses sample data.
+
 References inspected on 2026-09-30:
 
 - [btop](https://github.com/aristocratos/btop): named panels separate observations.

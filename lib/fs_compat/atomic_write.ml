@@ -293,7 +293,6 @@ type capability_write_stage =
   | Sync_parent
   | Remove_staging_directory
   | Close_staging_directory
-  | Discharge_prepared_recovery_obligation
   | Discharge_bound_recovery_obligation
   | Cleanup_close
   | Cleanup_verify_identity
@@ -370,9 +369,6 @@ type capability_write_failure =
   }
 
 type capability_recovery_phase =
-  | Recovery_validate_owner
-  | Recovery_open_registry
-  | Recovery_open_store
   | Recovery_prepare
   | Recovery_preserve_unbound
   | Recovery_bind
@@ -510,8 +506,6 @@ let capability_write_stage_to_string = function
   | Sync_parent -> "sync_parent"
   | Remove_staging_directory -> "remove_staging_directory"
   | Close_staging_directory -> "close_staging_directory"
-  | Discharge_prepared_recovery_obligation ->
-    "discharge_prepared_recovery_obligation"
   | Discharge_bound_recovery_obligation ->
     "discharge_bound_recovery_obligation"
   | Cleanup_close -> "cleanup_close"
@@ -562,9 +556,6 @@ let capability_write_failure_to_string failure =
 ;;
 
 let capability_recovery_phase_to_string = function
-  | Recovery_validate_owner -> "validate_owner"
-  | Recovery_open_registry -> "open_registry"
-  | Recovery_open_store -> "open_store"
   | Recovery_prepare -> "prepare"
   | Recovery_preserve_unbound -> "preserve_unbound"
   | Recovery_bind -> "bind"
@@ -2803,10 +2794,6 @@ let is_atomic_orphan_name name =
   has_atomic_temp_shape ~prefix:atomic_tmp_prefix name
 ;;
 
-type atomic_orphan_cleanup_scope =
-  | Directory_only
-  | Directory_and_immediate_subdirectories
-
 type atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
   | Read_cleanup_directory
@@ -2891,7 +2878,7 @@ let same_inode left right =
   left.Unix.st_dev = right.Unix.st_dev && left.Unix.st_ino = right.Unix.st_ino
 ;;
 
-let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
+let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
   let recovered_name = ".recovered" in
   let empty_report = { inspected = 0; deleted = 0; preserved = 0; failures = [] } in
   let add_failure report ~operation ~path cause =
@@ -3049,7 +3036,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
        | exn -> (* cancel-guard-ok: Unix.mkdir performs no Eio operation *)
          None, record_exn report ~operation:Create_recovery_directory ~path exn)
   in
-  let ensure_recovery_directory report ~base_stat source =
+  let ensure_recovery_directory report ~base_stat =
     match
       ensure_child_directory
         report
@@ -3059,28 +3046,11 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
     with
     | None, report -> None, report
     | Some (recovered, recovered_stat), report ->
-      let first =
-        match source with
-        | `Root -> "root"
-        | `Child _ -> "children"
-      in
-      (match
-         ensure_child_directory
-           report
-           ~parent:recovered
-           ~parent_stat:recovered_stat
-           first
-       with
-       | None, report -> None, report
-       | Some (destination, destination_stat), report ->
-         (match source with
-          | `Root -> Some (destination, destination_stat), report
-          | `Child child ->
-            ensure_child_directory
-              report
-              ~parent:destination
-              ~parent_stat:destination_stat
-              child))
+      ensure_child_directory
+        report
+        ~parent:recovered
+        ~parent_stat:recovered_stat
+        "root"
   in
   let find_or_create_preserved_link
         report
@@ -3140,8 +3110,8 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
     in
     loop report 0
   in
-  let preserve_nonempty report ~base_stat ~dir ~dir_stat ~source name source_stat =
-    match ensure_recovery_directory report ~base_stat source with
+  let preserve_nonempty report ~base_stat ~dir ~dir_stat name source_stat =
+    match ensure_recovery_directory report ~base_stat with
     | None, report -> report
     | Some (destination, destination_stat), report ->
       let source_path = Filename.concat dir name in
@@ -3276,7 +3246,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
   in
   (* TEL-OK: this leaf returns every cleanup decision/failure in the typed
      [report]; the schema owner records that report to its metric namespace. *)
-  let handle_orphan report ~base_stat ~source ~dir ~dir_stat name =
+  let handle_orphan report ~base_stat ~dir ~dir_stat name =
     let path = Filename.concat dir name in
     match lstat report ~operation:Inspect_orphan path with
     | None, report ->
@@ -3290,9 +3260,9 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
     | Some stat, report when stat.Unix.st_size = 0 ->
       delete_empty report ~dir ~dir_stat ~source_stat:stat path
     | Some stat, report ->
-      preserve_nonempty report ~base_stat ~dir ~dir_stat ~source name stat
+      preserve_nonempty report ~base_stat ~dir ~dir_stat name stat
   in
-  let fold_directory report ~base_stat ~source ~dir ~dir_stat ~on_entry =
+  let fold_directory report ~base_stat ~dir ~dir_stat ~on_entry =
     let opened =
       try Ok (Unix.opendir dir) with
       | exn -> Error exn (* cancel-guard-ok: Unix.opendir performs no Eio operation, so Cancelled cannot originate in this body. *)
@@ -3318,7 +3288,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
           let report =
             if String.equal name "." || String.equal name ".."
             then report
-            else on_entry report ~base_stat ~source ~dir ~dir_stat name
+            else on_entry report ~base_stat ~dir ~dir_stat name
           in
           loop report
         | exception End_of_file -> report
@@ -3333,62 +3303,25 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
        | exn -> (* cancel-guard-ok: Unix.closedir performs no Eio operation, so Cancelled cannot originate in this body. *)
          record_exn report ~operation:Close_cleanup_descriptor ~path:dir exn)
   in
-  let scan_orphans report ~base_stat ~source ~dir ~dir_stat =
-    fold_directory
-      report
-      ~base_stat
-      ~source
-      ~dir
-      ~dir_stat
-      ~on_entry:(fun report ~base_stat ~source ~dir ~dir_stat name ->
-        if is_atomic_orphan_name name
-        then
-          handle_orphan
-            { report with inspected = report.inspected + 1 }
-            ~base_stat
-            ~source
-            ~dir
-            ~dir_stat
-            name
-        else report)
-  in
   let result =
     match inspect_owned_chain empty_report with
     | None, report -> report
     | Some base_stat, report ->
-      let report =
-        scan_orphans
-          report
-          ~base_stat
-          ~source:`Root
-          ~dir:base_path
-          ~dir_stat:base_stat
-      in
-      (match scope with
-       | Directory_only -> report
-       | Directory_and_immediate_subdirectories ->
-         fold_directory
-           report
-           ~base_stat
-           ~source:`Root
-           ~dir:base_path
-           ~dir_stat:base_stat
-           ~on_entry:(fun report ~base_stat ~source:_ ~dir ~dir_stat:_ name ->
-             if String.equal name recovered_name
-             then report
-             else (
-               let child = Filename.concat dir name in
-               match lstat report ~operation:Inspect_cleanup_root child with
-               | Some child_stat, report
-                 when child_stat.Unix.st_kind = Unix.S_DIR ->
-                 scan_orphans
-                   report
-                   ~base_stat
-                   ~source:(`Child name)
-                   ~dir:child
-                   ~dir_stat:child_stat
-               | Some _, report
-               | None, report -> report)))
+      fold_directory
+        report
+        ~base_stat
+        ~dir:base_path
+        ~dir_stat:base_stat
+        ~on_entry:(fun report ~base_stat ~dir ~dir_stat name ->
+          if is_atomic_orphan_name name
+          then
+            handle_orphan
+              { report with inspected = report.inspected + 1 }
+              ~base_stat
+              ~dir
+              ~dir_stat
+              name
+          else report)
   in
   { result with failures = List.rev result.failures }
 ;;

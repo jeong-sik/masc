@@ -206,7 +206,7 @@ let drawn_rows () =
   @ List.map
       (fun (name, pane) -> (name, footer_hints_code ~pane))
       [ ("Code / tree", Code_tree); ("Code / file", Code_file)
-      ; ("Code / overlays", Code_overlay); ("Code / history", Code_history)
+      ; ("Code / notes", Code_notes); ("Code / history", Code_history)
       ; ("Code / diff", Code_diff)
       ]
 
@@ -1957,6 +1957,8 @@ let test_runtime_footer_is_the_tables () =
     ; "a:new lane"; "x:drop candidate"; "J/K:move candidate"; "D:remove lane" ];
   Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
   Alcotest.(check bool) "and offer no failover to append" false (has all "e:add candidate");
+  Alcotest.(check bool) "all runtimes offer the selected model settings" true (has all "e:model settings");
+  Alcotest.(check bool) "keeper lanes keep their candidate action" false (has lanes "e:model settings");
   List.iter
     (fun piece ->
       Alcotest.(check bool) ("all runtimes offer no lane edit " ^ piece) false (has all piece))
@@ -1971,7 +1973,8 @@ let test_runtime_footer_is_the_tables () =
   in
   Alcotest.(check (list string)) "the sheet names the p walk once"
     [ "keeper lanes / all runtimes / service lanes" ] (labels "p");
-  Alcotest.(check (list string)) "and lists failover" [ "add candidate" ] (labels "e")
+  Alcotest.(check (list string)) "and names both mode-specific actions"
+    [ "model settings"; "add candidate" ] (labels "e")
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* The newest/oldest ends and f still belong to Acting. Logs owns the server
@@ -3137,9 +3140,7 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
      arrived. Projected from the table now, narrowed per pane. *)
   let file = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_file in
   let tree = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_tree in
-  let overlay =
-    Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_overlay
-  in
+  let notes = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_notes in
   let diff = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_diff in
   let history =
     Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_history
@@ -3168,24 +3169,24 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
          (holds hint tree))
     [ "K:hover"; "D:definition"; "R:references"; "b:blame"; "H:history" ];
   check Alcotest.bool "the tree moves" true (holds "j/k:move" tree);
-  (* An overlay covers the code, so the keys that act on it are gone while
-     it is up. *)
-  check Alcotest.bool "an overlay drops the code keys" false
-    (holds "b:blame" overlay);
+  (* The notes overlay covers the code, so the keys that act on it are gone
+     while it is up. *)
+  check Alcotest.bool "the notes overlay drops the code keys" false
+    (holds "b:blame" notes);
   (* Only history has records to open. Diff and notes do not handle Enter. *)
   check Alcotest.bool "history names the visible record action" true
     (holds "Enter:open" history);
-  check Alcotest.bool "diff or notes has no Enter action" false
-    (holds "Enter" overlay);
+  check Alcotest.bool "notes have no Enter action" false
+    (holds "Enter" notes);
   List.iter
     (fun (label, hints) ->
        check Alcotest.bool (label ^ " has no commit to open") false
          (holds "Enter (history)" hints))
-    [ ("the tree", tree); ("an open file", file); ("the diff", diff); ("history", history); ("diff or notes", overlay) ];
+    [ ("the tree", tree); ("an open file", file); ("the diff", diff); ("history", history); ("notes", notes) ];
   check Alcotest.bool "diff prioritizes its visible pan keys" true
     (String.starts_with ~prefix:"Shift-←/→:pan" diff);
-  check Alcotest.bool "overlay does not offer hidden file panning" false
-    (holds "Shift-Left" overlay)
+  check Alcotest.bool "notes do not offer hidden file panning" false
+    (holds "Shift-Left" notes)
 
 let test_code_asks_the_language_server_three_questions () =
   (* K hover, D definition, R references -- one family, one case each, and

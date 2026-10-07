@@ -36,9 +36,8 @@ let operation_wire_streams_mu = Stdlib.Mutex.create ()
 let ag_ui_terminal_event (event : Ag_ui.event) =
   match event.Ag_ui.event_type with
   | Ag_ui.Run_finished | Ag_ui.Run_error -> true
-  | Run_started | Step_started | Step_finished | Text_message_start
-  | Text_message_content | Text_message_end | Tool_call_start
-  | Tool_call_args | Tool_call_end | State_snapshot | State_delta
+  | Run_started | Text_message_start | Text_message_content
+  | Text_message_end | Tool_call_start | Tool_call_args | Tool_call_end
   | Custom -> false
 
 let note_operation_wire_opened ~operation_id =
@@ -1952,9 +1951,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
         ~extra_mentions:operation_extra_mentions
         ()
       |> Result.map (fun _ -> ())
-    | Keeper_chat_store.Already_persisted _
-    | Keeper_chat_store.Already_persisted_upstream ->
-      Ok ()
+    | Keeper_chat_store.Already_persisted_upstream -> Ok ()
   in
   let append_queued_assistant_once ~content ?(tool_calls = []) ?blocks ?turn_ref () =
     persist_operation_attempt
@@ -2924,7 +2921,7 @@ let persist_batch_user_rows ~base_dir ~keeper_name members =
         ~source:operation.source ~input in
       let source = decoded.source in
       match source.user_row_origin with
-      | Keeper_chat_store.Already_persisted _ | Already_persisted_upstream -> Ok ()
+      | Keeper_chat_store.Already_persisted_upstream -> Ok ()
       | Needs_append ->
         let* request_id = Keeper_chat_delivery_identity.Request_id.of_string
           (Keeper_chat_operation.Operation_id.to_string operation.operation_id) in
@@ -3481,10 +3478,9 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
           (not sent)
           || match event.Ag_ui.event_type with
              | Ag_ui.Run_finished | Ag_ui.Run_error -> true
-             | Run_started | Step_started | Step_finished | Text_message_start
-             | Text_message_content | Text_message_end | Tool_call_start
-             | Tool_call_args | Tool_call_end | State_snapshot | State_delta
-             | Custom -> false
+             | Run_started | Text_message_start | Text_message_content
+             | Text_message_end | Tool_call_start | Tool_call_args
+             | Tool_call_end | Custom -> false
         then finish ()
       in
       let send_live ~seq event =

@@ -1930,6 +1930,63 @@ let find_removal ~keepers_dir ~keeper_id target =
     | Error error -> Journal_unreadable (Dated_jsonl.read_error_to_string error))
 ;;
 
+type archived_fact =
+  { original : Keeper_memory_os_types.fact
+  ; removal : removal
+  }
+
+let read_dropped ~keepers_dir ~keeper_id ~current_facts =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    let seen = ref (Set_util.StringSet.of_list (List.map memory_id current_facts)) in
+    let archived = ref [] in
+    let visit = function
+      | Dated_jsonl.Malformed_json { detail; _ } -> Some detail
+      | Dated_jsonl.Parsed json ->
+        match journal_entry_of_json json with
+        | Error detail -> Some detail
+        | Ok (Journal_failed _ | Journal_quarantined _) -> None
+        | Ok (Journal_committed { recorded_at; revision; source; change; dropped }) ->
+          (* Additions in the same commit win, matching find_removal. Latest
+             mentions suppress older removals even when their reason is absent. *)
+          List.iter (fun fact -> seen := Set_util.StringSet.add (memory_id fact) !seen)
+            change.added;
+          List.iter
+            (fun fact ->
+               let identity = memory_id fact in
+               if not (Set_util.StringSet.mem identity !seen) then (
+                 seen := Set_util.StringSet.add identity !seen;
+                 let reason = Option.bind dropped (List.find_map
+                   (fun (statement : dropped_statement) ->
+                      if String.equal statement.memory_id identity
+                      then Some statement.reason else None)) in
+                 match reason with
+                 | None -> ()
+                 | Some reason ->
+                   archived :=
+                     { original = fact
+                     ; removal =
+                         { removed_in_revision = revision
+                         ; removed_at = recorded_at
+                         ; removed_by = source
+                         ; removed_origin = fact.origin.kind
+                         ; drop_reason = Some reason
+                         }
+                     } :: !archived))
+            change.removed;
+          None
+    in
+    match Unix.lstat path with
+    | _ ->
+      (match Dated_jsonl.find_latest_entry_in_file_result path visit with
+       | Ok None -> Ok (List.rev !archived)
+       | Ok (Some detail) -> Error detail
+       | Error error -> Error (Dated_jsonl.read_error_to_string error))
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+    | exception Unix.Unix_error (code, fn, arg) ->
+      Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
+;;
+
 (* An exact retraction batch: its plan id and the error that reports pending
    journal evidence for the snapshot it wrote. *)
 type 'error retraction_plan =

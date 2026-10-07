@@ -38,7 +38,7 @@ PTY 테스트는 느리고, 머신 부하에 따라 결과가 바뀌고, 화면�
 | v0.50.0 RC 에서 실패한 테스트 파일 | 21개 | run `37547627776`, `test-suite.log` |
 | 그 21개 중 P0·P1 제품 결함 | 0개 | 아래 판정 |
 | 그 21개 중 지금 바로 지울 수 있는 것 | 0개 | 아래 판정 |
-| `masc_tui.ml` 에 복사된 작업공간 신원 확인(다르면 거절) | 22곳 | `workspace_identity <> Workspace_identity_match` |
+| `masc_tui.ml` 에 복사된 작업공간 신원 확인(다르면 거절) | 20곳 | `workspace_identity <> Workspace_identity_match`, main `2b8d72c580` |
 | 같은 확인을 반대로 쓴 곳(같으면 진행) | 19곳 | `Workspace_identity_match, Some …`, `= Workspace_identity_match` |
 | `masc_tui.ml` 에 복사된 Task 상세 스크롤 초기화 | 10곳 (열기 6, 비우기 4) | `task_detail_scroll <- 0` |
 
@@ -65,7 +65,7 @@ RC 실패 21개를 하나씩 읽은 결과다.
 
 1. **결정이 실행 파일 안에 있다.** 단위 테스트가 닿지 못하니, 한 줄짜리 판단도
    TUI 전체를 띄워서 확인한다.
-2. **같은 결정이 복사돼 있다.** 신원 확인 41곳(두 가지 모양), Task 상세 스크롤 초기화 10곳.
+2. **같은 결정이 복사돼 있다.** 신원 확인 39곳(두 가지 모양), Task 상세 스크롤 초기화 10곳.
    한 곳을 고치면 나머지는 그대로 남는다. PTY 는 그중 몇 경로만 지난다.
 3. **PTY 테스트는 화면 출력에 묶여 있다.** 보호하려는 동작(예: "신원이 확인되지
    않으면 POST 하지 않는다")은 멀쩡한데, 그 앞의 "새 프레임을 기다림"이 깨져서
@@ -152,7 +152,7 @@ val decision_authority
 | 2 | Home: `masc_tui_home` 의 순수 함수(`home_decision_rows`, `home_selected_action`, `home_decision_window`, `reconcile_home_request_detail`)에 `test_tui_home.ml` 추가 | 없음 | `home_decision_cards` 의 선택·창·중복 주장 |
 | 3 | Answering: `overlay ~width` 에 긴 이름·CJK 단위 테스트 | 없음 | `answering_layout` 의 너비 주장 |
 | 4 | Runtime: 권한 칸이 4줄인 픽스처로 짧은 화면 단위 테스트(#41452 가 고친 결함의 재발 방지) | 없음 | `runtime_status` 의 선택 줄 주장 |
-| 5 | 신원을 확인하는 자리를 모양과 상관없이 모두 찾아(지금 41곳) `decision_authority` 하나로. 메시지·Task 를 보내는 경로(`launch_keeper_request`, `launch_task_dispatch`, 대기 입력 재개)가 먼저 | 있음(41곳) | `home_identity_decision`, 여러 파일의 "신원 미확인이면 거절" 주장 |
+| 5 | 신원을 확인하는 자리를 모양과 상관없이 모두 찾아(지금 39곳) `decision_authority` 하나로. 메시지·Task 를 보내는 경로(`launch_keeper_request`, `launch_task_dispatch`, 대기 입력 재개)가 먼저 | 있음(39곳) | `home_identity_decision`, 여러 파일의 "신원 미확인이면 거절" 주장 |
 | 6 | Task 상세 열기 6곳을 `open_task_detail` 로, 비우기 4곳을 `clear_task_detail` 로. 빈 사유 취소 결정 꺼내기 | 있음 | `task_metadata_viewport` 의 따라가기·빈 사유 주장 |
 | 7 | Goal 두 번 누르기(확인 뒤 POST 한 번) 결정 꺼내기 | 있음 | `goal_detail_viewport` 의 POST 주장 |
 | 8 | Answering·Home 키 처리 단계를 순수 step 함수로 | 있음 | `answering_layout`, `home_*` 의 키 주장 |

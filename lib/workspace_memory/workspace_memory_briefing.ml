@@ -85,11 +85,18 @@ let model_input previous selected = `Assoc
   ["previous_summary", (match previous with None -> `Null | Some text -> `String text);
    "entries", `List (List.map source_json selected)]
 
-let prepare ~sources ~contract ~max_input_bytes ~render t =
+let render_batch ~render ~state ~selected ~remaining =
+  match state.building with
+  | None -> Error "briefing batch has no active pass"
+  | Some building ->
+    let input = model_input building.text selected in
+    let* rendered_prompt = render input in
+    Ok { state; selected; remaining; input; rendered_prompt }
+
+let prepare ~sources ~contract ~render t =
   let* () = validate_sources sources in
   if not (needs_refresh ~sources ~contract t) then Ok None
   else if not (nonblank contract) then Error "briefing contract must be nonblank"
-  else if max_input_bytes <= 0 then Error "briefing provider input capacity must be positive"
   else
     let sources = List.sort (fun (a : source) b -> String.compare a.id b.id) sources in
     let keys = source_keys sources in
@@ -98,20 +105,20 @@ let prepare ~sources ~contract ~max_input_bytes ~render t =
       | Some _ -> start_pass ~sources ~contract None
       | None -> start_pass ~sources ~contract t.published in
     let state = { t with building = Some building } in
-    let rec select selected last = function
-      | [] -> Ok last
-      | source :: rest as remaining ->
-        let proposed = source :: selected in
-        let input = model_input building.text (List.rev proposed) in
-        let* rendered_prompt = render input in
-        if String.length rendered_prompt > max_input_bytes then
-          (match last with
-           | None -> Error ("briefing source and previous summary exceed provider input capacity: " ^ source.id)
-           | Some batch -> Ok (Some { batch with remaining }))
-        else
-          let batch = { state; selected = List.rev proposed; remaining = rest; input; rendered_prompt } in
-          select proposed (Some batch) rest in
-    select [] None building.remaining
+    let* batch = render_batch ~render ~state ~selected:building.remaining ~remaining:[] in
+    Ok (Some batch)
+
+let narrow ~render batch =
+  match batch.selected with
+  | [] | [_] -> Ok None
+  | _ :: _ :: _ ->
+    (* Bisection after an actual size refusal, not an estimated byte/token
+       allowance. Both halves retain complete source entries. *)
+    let prefix_length = List.length batch.selected / 2 in
+    let selected = List.take prefix_length batch.selected in
+    let remaining = List.drop prefix_length batch.selected @ batch.remaining in
+    let* smaller = render_batch ~render ~state:batch.state ~selected ~remaining in
+    Ok (Some smaller)
 
 let output_schema = `Assoc
   ["type", `String "object";

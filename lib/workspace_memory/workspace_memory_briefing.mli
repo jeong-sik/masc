@@ -40,7 +40,6 @@ val prepared_state : batch -> t
 val prepare
   : sources:source list
   -> contract:string
-  -> max_input_bytes:int
   -> render:(Yojson.Safe.t -> (string, string) result)
   -> t
   -> (batch option, string) result
@@ -49,10 +48,20 @@ val prepare
     Additions alone reuse the previous summary and send only new entries.
     Deletions or changed source contents rebuild without old summary prose.
     Model input contains only [previous_summary] and selected [entries].
-    Selects a nonempty prefix that fits the actual rendered provider input
-    bound; an entry that cannot fit is an explicit error. Sources must have
-    unique, nonblank ids and nonblank text. No new evidence (or no sources)
-    returns [Ok None] without rendering or model work. *)
+    Prepares all remaining entries without estimating provider capacity.
+    Sources must have unique, nonblank ids and nonblank text. No new evidence
+    (or no sources) returns [Ok None] without rendering or model work. *)
+
+val narrow
+  : render:(Yojson.Safe.t -> (string, string) result)
+  -> batch
+  -> (batch option, string) result
+(** Call only after the provider rejects this batch for input size. Bisects
+    the selected entries, retaining a whole-entry prefix and prepending its
+    suffix to the existing remainder. The fixed target, prior summary, and
+    unconsumed durable state remain unchanged. No prose is truncated.
+    [Ok None] means one indivisible entry remains: report the refusal rather
+    than dropping evidence or retrying the same batch. *)
 
 val output_schema : Yojson.Safe.t
 val decode_output : Yojson.Safe.t -> (string, string) result

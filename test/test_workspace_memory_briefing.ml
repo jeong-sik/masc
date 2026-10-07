@@ -3,8 +3,9 @@ let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let batch = function Some batch -> batch | None -> Alcotest.fail "expected briefing work"
 let source ?(kind = B.Claim) id text : B.source = { id; kind; text }
 let render input = Ok ("Summarize workspace evidence:\n" ^ Yojson.Safe.to_string input)
-let prepare ?(contract = "fixture-prompt-and-schema") ?(limit = max_int) sources state =
-  get (B.prepare ~sources ~contract ~max_input_bytes:limit ~render state)
+let prepare ?(contract = "fixture-prompt-and-schema") sources state =
+  get (B.prepare ~sources ~contract ~render state)
+let after_size_refusal request = batch (get (B.narrow ~render request))
 let finish ?contract sources text state =
   get (B.accept (batch (prepare ?contract sources state)) ~text)
 let member name = function
@@ -38,7 +39,7 @@ let test_shared_summary_reuse () =
     Alcotest.(check bool) "provider admission is unnecessary" false
       (B.needs_refresh ~sources ~contract:"fixture-prompt-and-schema" state);
     let result = B.prepare ~sources ~contract:"fixture-prompt-and-schema"
-      ~max_input_bytes:0 ~render:(fun _ -> Alcotest.fail "current briefing was rendered") state in
+      ~render:(fun _ -> Alcotest.fail "current briefing was rendered") state in
     match get result with None -> () | Some _ -> Alcotest.fail "current briefing called model")
     [sources; List.rev sources];
   expect_current [] state "";
@@ -67,20 +68,21 @@ let test_additions_deletions_and_changed_contract () =
 
 let test_fixed_pass_survives_restart_and_new_additions () = with_directory (fun directory ->
   let a = source "a" "First entry" and b = source "b" "Other entry" and c = source "c" "Third entry" in
-  let limit = String.length (B.rendered_prompt (batch (prepare [a] B.empty))) in
-  let first = batch (prepare ~limit [a; b] B.empty) in
+  let first = after_size_refusal (batch (prepare [a; b] B.empty)) in
   Alcotest.(check int) "first chunk selected" 1 (B.selected_count first);
   Alcotest.(check int) "one remains" 1 (B.remaining_count first);
   get (B.save ~directory (B.prepared_state first));
   let restored = get (B.load ~directory) in
-  let retry = batch (prepare ~limit [a; b; c] restored) in
+  let retry_all = batch (prepare [a; b; c] restored) in
+  Alcotest.(check (list string)) "unanswered target survives restart" ["a"; "b"] (entry_ids retry_all);
+  let retry = after_size_refusal retry_all in
   Alcotest.(check (list string)) "unanswered chunk retried after restart" ["a"] (entry_ids retry);
   Alcotest.(check int) "new addition did not move the fixed target" 1 (B.remaining_count retry);
   let partial = get (B.accept retry ~text:"A") in
   get (B.save ~directory partial);
   (match B.observe ~sources:[a; b] (get (B.load ~directory)) with
    | B.Missing -> () | _ -> Alcotest.fail "partial summary leaked as publication");
-  let next = batch (prepare ~limit [a; b; c] (get (B.load ~directory))) in
+  let next = batch (prepare [a; b; c] (get (B.load ~directory))) in
   Alcotest.(check (list string)) "consumed raw entry not replayed" ["b"] (entry_ids next);
   Alcotest.(check bool) "semantic partial summary reused" true (previous next = `String "A");
   let finished = get (B.accept next ~text:"AB") in
@@ -88,7 +90,7 @@ let test_fixed_pass_survives_restart_and_new_additions () = with_directory (fun 
   let finished = get (B.load ~directory) in
   expect_current [a; b] finished "AB";
   expect_stale [a; b; c] finished "AB";
-  let addition = batch (prepare ~limit [a; b; c] finished) in
+  let addition = batch (prepare [a; b; c] finished) in
   Alcotest.(check (list string)) "later pass consumes new addition" ["c"] (entry_ids addition);
   let all = get (B.accept addition ~text:"ABC") in
   get (B.save ~directory all);
@@ -97,15 +99,13 @@ let test_fixed_pass_survives_restart_and_new_additions () = with_directory (fun 
 let test_interrupted_refresh_keeps_publication_and_deletion_resets () = with_directory (fun directory ->
   let a = source "a" "First entry" and b = source "b" "Other entry" and c = source "c" "Third entry" in
   let old = finish [a] "A" B.empty in
-  let one = batch (prepare [a; b] old) in
-  let limit = String.length (B.rendered_prompt one) in
-  let update = batch (prepare ~limit [a; b; c] old) in
+  let update = after_size_refusal (batch (prepare [a; b; c] old)) in
   get (B.save ~directory (B.prepared_state update));
   (* Invalid model output leaves the persisted pass and old summary intact. *)
   (match B.accept update ~text:" \n" with Error _ -> () | Ok _ -> Alcotest.fail "blank output consumed evidence");
   let restored = get (B.load ~directory) in
   expect_stale [a; b; c] restored "A";
-  let partial = get (B.accept (batch (prepare ~limit [a; b; c] restored)) ~text:"AB") in
+  let partial = get (B.accept (after_size_refusal (batch (prepare [a; b; c] restored))) ~text:"AB") in
   get (B.save ~directory partial);
   let reset = batch (prepare [b; c] (get (B.load ~directory))) in
   Alcotest.(check bool) "deleted consumed source invalidates partial prose" true (previous reset = `Null);
@@ -139,17 +139,49 @@ let test_strict_storage_and_output () = with_directory (fun directory ->
   Alcotest.(check string) "strict model answer" "Valid summary"
     (get (B.decode_output (`Assoc ["briefing", `String "Valid summary"]))))
 
-let test_capacity_and_invalid_sources_do_not_consume () =
+let test_actual_refusal_narrows_without_losing_entries () =
+  let prior = source "prior" "Already summarized evidence" in
+  let published = finish [prior] "Existing semantic summary" B.empty in
+  let entries = List.map (fun id -> source id ("Uncut source: " ^ id ^ "\n확인할 원문 전체"))
+    ["a"; "b"; "c"; "d"; "e"] in
+  let sources = prior :: entries in
+  let full = batch (prepare sources published) in
+  Alcotest.(check (list string)) "prepare offers all remaining entries"
+    ["a"; "b"; "c"; "d"; "e"] (entry_ids full);
+  Alcotest.(check string) "rendered request is the complete input"
+    (get (render (B.input full))) (B.rendered_prompt full);
+  let half = after_size_refusal full in
+  Alcotest.(check (list string)) "first refusal selects whole prefix" ["a"; "b"] (entry_ids half);
+  Alcotest.(check int) "first suffix retained" 3 (B.remaining_count half);
+  let single = after_size_refusal half in
+  Alcotest.(check (list string)) "second refusal selects one entry" ["a"] (entry_ids single);
+  Alcotest.(check int) "suffix prepended to earlier remainder" 4 (B.remaining_count single);
+  Alcotest.(check bool) "previous semantic summary unchanged" true
+    (previous single = `String "Existing semantic summary");
+  Alcotest.(check bool) "whole source text preserved" true
+    (member "entries" (B.input single) = `List [
+      `Assoc ["id", `String "a"; "kind", `String "claim";
+              "text", `String (List.hd entries).text]]);
+  (match get (B.narrow ~render:(fun _ -> Alcotest.fail "single entry was rendered again") single) with
+   | None -> () | Some _ -> Alcotest.fail "single entry was truncated or repeated");
+  (* Refusal is not consumption. A restart still has the entire original pass. *)
+  let retry = batch (prepare sources (B.prepared_state single)) in
+  Alcotest.(check (list string)) "refused evidence is still pending"
+    ["a"; "b"; "c"; "d"; "e"] (entry_ids retry);
+  (match B.narrow ~render:(fun _ -> Error "template unavailable") full with
+   | Error "template unavailable" -> () | _ -> Alcotest.fail "narrow render error hidden");
+  let partial = get (B.accept single ~text:"Prior plus A") in
+  expect_stale sources partial "Existing semantic summary";
+  let next = batch (prepare sources partial) in
+  Alcotest.(check (list string)) "all split suffixes resume in order"
+    ["b"; "c"; "d"; "e"] (entry_ids next);
+  expect_current sources (get (B.accept next ~text:"All evidence summarized")) "All evidence summarized"
+
+let test_invalid_sources_and_render_failure_do_not_consume () =
   let a = source "a" "Complete uncut source" in
-  let full = batch (prepare [a] B.empty) in
-  let size = String.length (B.rendered_prompt full) in
-  let exact = batch (prepare ~limit:size [a] B.empty) in
-  Alcotest.(check string) "exact rendered capacity fits" (B.rendered_prompt full) (B.rendered_prompt exact);
-  (match B.prepare ~sources:[a] ~contract:"fixture" ~max_input_bytes:(size - 1) ~render B.empty with
-   | Error _ -> () | Ok _ -> Alcotest.fail "oversized source was dropped or truncated");
-  (match B.prepare ~sources:[a; a] ~contract:"fixture" ~max_input_bytes:max_int ~render B.empty with
+  (match B.prepare ~sources:[a; a] ~contract:"fixture" ~render B.empty with
    | Error _ -> () | Ok _ -> Alcotest.fail "duplicate source identity accepted");
-  (match B.prepare ~sources:[a] ~contract:"fixture" ~max_input_bytes:max_int
+  (match B.prepare ~sources:[a] ~contract:"fixture"
       ~render:(fun _ -> Error "template unavailable") B.empty with
    | Error "template unavailable" -> () | _ -> Alcotest.fail "render failure hidden")
 
@@ -160,4 +192,5 @@ let () = Alcotest.run "Workspace memory briefing"
      Alcotest.test_case "fixed pass resumes and eventually publishes under additions" `Quick test_fixed_pass_survives_restart_and_new_additions;
      Alcotest.test_case "failed refresh preserves old publication and removal resets" `Quick test_interrupted_refresh_keeps_publication_and_deletion_resets;
      Alcotest.test_case "strict storage and model output" `Quick test_strict_storage_and_output;
-     Alcotest.test_case "rendered capacity and invalid source boundary" `Quick test_capacity_and_invalid_sources_do_not_consume]]
+     Alcotest.test_case "actual refusal bisects without losing whole entries" `Quick test_actual_refusal_narrows_without_losing_entries;
+     Alcotest.test_case "invalid source and render failure boundary" `Quick test_invalid_sources_and_render_failure_do_not_consume]]

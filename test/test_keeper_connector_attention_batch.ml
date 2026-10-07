@@ -364,40 +364,6 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
        |> Result.value ~default:(-1)))
 ;;
 
-let test_transient_board_prefix_keeps_connector_content_within_admission_limit () =
-  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
-  @@ fun () ->
-  with_ctx "connector-after-transient" (fun ~base_path ~keeper_name ~meta ~ctx ->
-    let board = board_attention_stimulus ~label:"unavailable-head" ~arrived_at:1.0 in
-    let messages = List.init 3 (fun index ->
-      connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"C-bounded"
-        ~message_id:(string_of_int index) ~arrived_at:(Float.of_int (index + 2))
-        ~content:(Printf.sprintf "connector content %d" index))
-    in
-    List.iter (enqueue_exn ~base_path keeper_name) (board :: messages);
-    Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
-    let intake =
-      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
-        ~ctx ~meta_after_triage:meta ~pending_board_events:[]
-    in
-    let expected = List.take 2 messages |> List.map (fun (source : Q.stimulus) -> source.post_id) in
-    check (list string) "readable connector members fill the limit after the failed Board row"
-      expected
-      (Keeper_heartbeat_source_batch.stimuli intake.source_batch
-       |> List.map (fun (source : Q.stimulus) -> source.post_id));
-    check (list string) "every admitted member retains its recorded content"
-      (List.map (fun id -> "connector-attention:" ^ id) expected)
-      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.post_id)
-         intake.pending_board_events);
-    check (list string) "recorded message bodies reach the turn in order"
-      [ "connector content 0"; "connector content 1" ]
-      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
-         intake.pending_board_events);
-    check int "unadmitted and admitted sources remain pending before ACK" 4
-      (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
-       |> Result.map Q.length |> Result.value ~default:(-1)))
-;;
-
 let test_unread_connector_sources_survive_other_completed_work ~failure () =
   List.iter (fun count ->
     with_ctx (Printf.sprintf "connector-unread-%d" count)
@@ -435,11 +401,11 @@ let test_unread_connector_sources_survive_other_completed_work ~failure () =
           (first.event_queue_triggers = []);
         check bool "independently scheduled work survives unread connector content" true
           (Keeper_heartbeat_loop.should_run_turn_after_event_intake
-             ~scheduled:true ~consumed_stimulus_count:0
+             ~scheduled:true
              ~event_queue_intake_error:first.event_queue_intake_error);
         check bool "unread content does not create an unscheduled turn" false
           (Keeper_heartbeat_loop.should_run_turn_after_event_intake
-             ~scheduled:false ~consumed_stimulus_count:0
+             ~scheduled:false
              ~event_queue_intake_error:first.event_queue_intake_error);
         let bootstrap : Q.stimulus =
           { post_id = "readable-other-work"; urgency = Q.Low; arrived_at = 10.; payload = Q.Bootstrap } in
@@ -452,7 +418,7 @@ let test_unread_connector_sources_survive_other_completed_work ~failure () =
            |> List.map (fun (source : Q.stimulus) -> source.post_id));
         check bool "unrelated admitted work can still run" true
           (Keeper_heartbeat_loop.should_run_turn_after_event_intake
-             ~scheduled:true ~consumed_stimulus_count:1
+             ~scheduled:true
              ~event_queue_intake_error:mixed.event_queue_intake_error);
         let complete batch =
           match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
@@ -1607,10 +1573,6 @@ let () =
             "admits only one exact HITL resolution per turn"
             `Quick
             test_one_intake_admits_only_one_hitl_resolution
-        ; test_case
-            "transient Board prefix preserves bounded connector content"
-            `Quick
-            test_transient_board_prefix_keeps_connector_content_within_admission_limit
         ; test_case "missing connector file survives other completion and restoration" `Quick
             (test_unread_connector_sources_survive_other_completed_work ~failure:`Missing_file)
         ; test_case "missing connector rows survive other completion and restoration" `Quick

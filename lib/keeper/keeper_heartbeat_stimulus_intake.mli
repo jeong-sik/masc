@@ -13,40 +13,32 @@ open Keeper_execution
 
 (** [pending_board_event_of_stimulus ~meta_after_triage stim] wraps a
     stimulus into a pending board event, threading the keeper meta's
-    continuity summary. [Error unavailable] reports a failed board read
-    (board-unavailable-result); this function only reports, it does not
-    decide disposition — see [pending_board_events_of_stimulus_result] for
-    the consuming layer's classify + drop/retain behavior. *)
+    continuity summary. [Error unavailable] reports a Board read that answered
+    no row; [pending_board_events_of_stimulus_result] consumes it. *)
 val pending_board_event_of_stimulus
   :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
   -> (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
 
-(** Closed consumption result for an Event-Layer stimulus. A transient Board
-    read or unread Connector store cannot become an empty successful rendering: it retains
-    the exact pending queue selection for a later heartbeat. A missing referenced
-    Connector item retains only its own selection, allowing readable siblings. *)
+(** Closed consumption result for an Event-Layer stimulus. An unread
+    Connector store cannot become an empty successful rendering: it retains the
+    exact pending queue selection for a later heartbeat. A missing referenced
+    Connector item retains only its own selection, allowing readable siblings.
+    A Board read that answered no row is consumed as an empty event. *)
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
-  | Stimulus_retry_later of
-      Keeper_world_observation_board_signal.board_unavailable
   | Stimulus_connector_retry_later of Keeper_external_attention.read_error
   | Stimulus_connector_missing of string (** Missing event ID. *)
 
-(** Pure disposition boundary for one rendered Board event. Permanent
-    unavailability is consumed as an empty event; transient unavailability
-    remains a typed retry. *)
+(** Pure boundary for one rendered Board event. A read that answered no row
+    is consumed as an empty event. *)
 val classify_pending_board_event_result
   :  (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
   -> stimulus_intake_result
 
 (** [pending_board_events_of_stimulus_result ~meta_after_triage stim] renders
     [stim] into zero-or-one pending board events. On [Error unavailable] it
-    classifies the failure via
-    {!Keeper_world_observation_board_signal.disposition_of_unavailable},
-    logs and counts it, and returns either [Stimulus_consumed []] for a
-    permanent failure or [Stimulus_retry_later unavailable] for a transient
-    failure. *)
+    logs and counts the read and returns [Stimulus_consumed []]. *)
 val pending_board_events_of_stimulus_result
   :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
@@ -54,8 +46,6 @@ val pending_board_events_of_stimulus_result
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
-  | Transient_board_read of
-      Keeper_world_observation_board_signal.board_unavailable
   | Connector_read_failed of Keeper_external_attention.read_error
   | Connector_item_missing of string (** Missing event ID, not a whole-store failure. *)
 
@@ -108,8 +98,6 @@ type heartbeat_event_intake = {
 
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Otel_metric_store and logs only after consumption is known.
-    A transient Board read returns [Stimulus_retry_later] without incrementing
-    the consumed counter.
 
     [?connector_attention_items] (RFC-0377 P1-1): for a [Connector_attention]
     stimulus, a preloaded (event_id, item) association to resolve [stim]'s
@@ -213,10 +201,3 @@ val heartbeat_event_intake
   -> meta_after_triage:keeper_meta
   -> pending_board_events:Keeper_world_observation.pending_board_event list
   -> heartbeat_event_intake
-
-module For_testing : sig
-  (** Force the next [count] Board stimulus reads to report a transient
-      [Io_error], allowing the durable retry path to be exercised without a
-      real store outage. *)
-  val force_transient_board_reads : int -> unit
-end

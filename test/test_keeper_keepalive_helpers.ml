@@ -1340,7 +1340,7 @@ let test_comments_address_post_and_direct_parent_only () =
         | _ -> assert false in
       check bool "missing direct parent is unavailable, not a guessed recipient" true
         (match KWOBS.wake_reason ~meta:parent_author ~signal with
-         | KWOBS.Unavailable { error = Board.Comment_not_found _; _ } -> true
+         | KWOBS.Unavailable { error = Board.Read_comment_not_found _; _ } -> true
          | _ -> false))
 ;;
 

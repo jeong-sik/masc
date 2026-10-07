@@ -59,13 +59,10 @@ val heartbeat_event_intake :
   heartbeat_event_intake
 
 (** Source-authority gate applied after world scheduling. A durable selection
-    failure blocks dispatch. A transient Board read remains pending but does
-    not suppress other sources already admitted from the same snapshot; when
-    it is the only source, no turn is dispatched. An unread Connector store or
-    missing item retains its sources but preserves independent world scheduling. *)
+    failure blocks dispatch. An unread Connector store or missing item retains
+    its sources but preserves independent world scheduling. *)
 val should_run_turn_after_event_intake :
   scheduled:bool ->
-  consumed_stimulus_count:int ->
   event_queue_intake_error:
     Keeper_heartbeat_stimulus_intake.event_queue_intake_error option ->
   bool

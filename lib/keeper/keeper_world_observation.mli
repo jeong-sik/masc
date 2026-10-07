@@ -419,11 +419,9 @@ val pending_board_event_of_external_attention :
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
     and [Schedule_due] produce [Some];
     [Bootstrap] returns [None] (no prompt injection).
-    [Error unavailable] means the underlying board read for [Board_signal] /
-    [Board_attention] failed (board-unavailable-result). Callers classify via
-    {!Keeper_world_observation_board_signal.disposition_of_unavailable} and
-    decide whether to drop or retain the stimulus — this function only
-    reports the read failure, it does not decide. *)
+    [Error unavailable] means the board read for [Board_signal] /
+    [Board_attention] answered no row: the post was swept or the queued id
+    does not parse. Reading again gives the same answer. *)
 val pending_board_event_of_stimulus :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->

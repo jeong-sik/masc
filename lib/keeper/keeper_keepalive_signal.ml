@@ -461,10 +461,9 @@ let deliver_addressed_board_signal
 (* A relevance read touches the board store only on the [Thread_participants]
    route ([Board_signal.wake_reason] re-reads the post and its comments); the
    [Targets] and [Broadcast] routes are payload-only and never answer
-   [Unavailable]. When the read is unavailable the push path does not retry:
-   the lane's own cursor scan ([Keeper_world_observation.collect_board_events])
-   re-reads posts and comments after its cursor on the next cycle, keeps the
-   cursor on a transient failure, and delivers what this push could not. *)
+   [Unavailable]. A read is served from memory, so [Unavailable] means the
+   post was swept or an id does not parse, and reading again would give the
+   same answer. *)
 let wakeup_relevant_keeper_for_board_signal
       ?dispatch_attention
       ~(config : Workspace.config)
@@ -651,29 +650,15 @@ let wakeup_relevant_keeper_for_board_signal
                Keeper_metrics.(to_string KeepaliveSignalFailures)
                ~labels:[ ("keeper", meta.name); ("phase", "board_signal_read") ]
                ();
-             (match
-                Keeper_world_observation_board_signal.disposition_of_unavailable
-                  unavailable
-              with
-              | Keeper_world_observation_board_signal.Permanent ->
-                (* A permanently unavailable read (e.g. the post was swept
-                   from the store) can never resolve; the cursor scan skips it
-                   the same way. *)
-                Log.Keeper.warn
-                  "board signal relevance read permanently unavailable, lane dropped: \
-                   keeper=%s post=%s error=%s"
-                  meta.name
-                  signal.post_id
-                  (Keeper_world_observation_board_signal.unavailable_to_string
-                     unavailable)
-              | Keeper_world_observation_board_signal.Transient ->
-                Log.Keeper.warn
-                  "board signal relevance read unavailable, left to the lane's \
-                   cursor scan: keeper=%s post=%s error=%s"
-                  meta.name
-                  signal.post_id
-                  (Keeper_world_observation_board_signal.unavailable_to_string
-                     unavailable))
+             (* The post was swept or an id does not parse; the cursor scan
+                skips it the same way. *)
+             Log.Keeper.warn
+               "board signal relevance read unavailable, lane dropped: \
+                keeper=%s post=%s error=%s"
+               meta.name
+               signal.post_id
+               (Keeper_world_observation_board_signal.unavailable_to_string
+                  unavailable)
            | Keeper_world_observation_board_signal.Available
                Keeper_board_audience.Ignore ->
              Otel_metric_store.inc_counter

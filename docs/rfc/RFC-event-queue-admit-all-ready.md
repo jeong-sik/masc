@@ -104,8 +104,6 @@ Checkpointed 사이클은 ack 없이 같은 head 를 다시 읽는다 (128 사�
 | `Connector_attention` | RFC-0377 §3 유지 — 턴당 대화 하나. 정렬상 첫 `Connector_attention` 의 대화만 admit, 다른 대화는 잔류 |
 | 그 외 (`Board_signal`, `Board_attention`, `Bootstrap`, `Fusion_completed`, `Schedule_due`, `Completion_authority_rejected`, `Task_cancelled`, `Workspace_message`) | 준비된 것 전부 |
 
-- Board 읽기가 일시 실패한 항목(`Stimulus_retry_later`)은 지금처럼 그 항목만 이번 사이클에서 빼고 나머지는
-  admit 한다. 첫 실패 항목이 `event_queue_intake_error` 에 남는 것도 그대로.
 - 배치 건수·대기 창·"너무 오래된 것 버리기" 는 두지 않는다. 배치 건수는 유입/드레인 속도의 사실이지 제어
   대상이 아니다 (RFC-0377 §3 과 같은 입장). §7 의 바이트 경계는 예외다.
 - 턴 컨텍스트 투영 순서는 큐 순서(urgency → 도착)와 같다.

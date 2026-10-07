@@ -100,7 +100,6 @@ let run base_path prompt_root =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in
   Eio.Switch.on_release sw (fun () ->
-    Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 0;
     Board_dispatch.reset_for_test ();
     Board.reset_global_for_test ();
     Keeper_registry.For_testing.clear ();
@@ -211,22 +210,12 @@ data: [DONE]
     ~settle_deferred_runtime_lane:(function
       | Some _ -> failwith "unexpected runtime failover"
       | None -> ()) in
-  Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
-  let first = cycle meta in
-  require (not first.stimuli_acked) "transient read was ACKed";
-  require (Exact_output_fixture.post_count server = 0) "transient read dispatched a model request";
-  require (Keeper_event_queue.to_list (queue config keeper_name) = pending)
-    "transient read changed the durable pending source";
-  require (not (evidence config stimulus_id).event_queue_ack_seen) "transient read persisted ACK evidence";
-  let reloaded = Keeper_event_queue_persistence.load_result ~base_path ~keeper_name |> get Fun.id in
-  require (Keeper_event_queue.to_list reloaded = pending)
-    "durable reload lost caught-up source after failed intake";
-  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:first.meta);
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta);
   require (Keeper_event_queue.to_list (queue config keeper_name) = pending)
     "advanced catchup cursor lost or duplicated the still-pending source";
   let second_done, signal_second_done = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-    Eio.Promise.resolve signal_second_done (cycle first.meta));
+    Eio.Promise.resolve signal_second_done (cycle meta));
   Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
     (fun () -> Eio.Promise.await provider_entered);
   let operation_id = Keeper_chat_operation.Operation_id.of_string
@@ -391,5 +380,5 @@ let test_board_source_is_acked_after_completed_turn () =
 let () =
   Alcotest.run "keeper_board_turn_ack"
     [ "continuity",
-      [ Alcotest.test_case "missed live Board source survives catchup and failure until real turn ACK"
+      [ Alcotest.test_case "missed live Board source survives catchup until real turn ACK"
           `Quick test_board_source_is_acked_after_completed_turn ] ]

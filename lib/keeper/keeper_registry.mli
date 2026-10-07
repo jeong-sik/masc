@@ -545,7 +545,6 @@ val set_tool_usage_entry :
     Prefer this over [set_state] for new code. *)
 val dispatch_event :
   base_path:string ->
-  ?origin:lifecycle_event_origin ->
   string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
@@ -554,14 +553,12 @@ val dispatch_event :
     a same-name replacement lane. *)
 val dispatch_event_exact :
   registry_entry ->
-  ?origin:lifecycle_event_origin ->
   Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 val dispatch_event_exact_for_lifecycle :
   Keeper_lifecycle_reservation.token ->
   registry_entry ->
-  ?origin:lifecycle_event_origin ->
   Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
@@ -569,7 +566,6 @@ val dispatch_event_exact_for_lifecycle :
     causes a phase transition. *)
 val dispatch_event_with_audit :
   base_path:string ->
-  ?origin:lifecycle_event_origin ->
   ?events_fired:Keeper_state_machine.event list ->
   ?selected_event:Keeper_state_machine.event ->
   string -> Keeper_state_machine.event ->
@@ -580,7 +576,6 @@ val dispatch_event_with_audit :
     that previously swallowed transition errors silently. *)
 val dispatch_event_unit :
   base_path:string ->
-  ?origin:lifecycle_event_origin ->
   string -> Keeper_state_machine.event -> unit
 
 (** Get the fine-grained phase of a keeper. *)

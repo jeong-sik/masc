@@ -468,9 +468,9 @@ let test_refusal_advance_survives_the_durable_round_trip ~http_status ~kind () =
     | Ok _ -> fail "accepted a refusal kind inconsistent with its HTTP status"
 ;;
 
-let test_output_limit_preserves_cause_and_durable_evidence () =
+let test_output_limit_preserves_cause_and_durable_evidence ~content () =
   let result, posts =
-    with_server ~first_response:(openai_response ~finish_reason:"length" "{}")
+    with_server ~first_response:(openai_response ~finish_reason:"length" content)
     @@ fun ~net ~clock ~base_url ->
     with_catalog ~base_url @@ fun snapshot ->
     EO.execute_flow_once ~net ~clock
@@ -519,7 +519,7 @@ let test_output_limit_preserves_cause_and_durable_evidence () =
     reject field (replace "attempt" (replace field value (member "attempt" limited_step)) limited_step))
     ["dispatch_count", `Int 0; "raw_response_sha256", `Null;
      "provider_trace_sha256", `Null; "http_status", `Int 413;
-     "phase", `String "before_dispatch"];
+     "phase", `String "before_dispatch"; "phase", `String "terminal"];
   let outcome = member "outcome" limited_step in
   reject "unknown failure field"
     (replace "outcome" (replace "failure"
@@ -552,7 +552,9 @@ let () =
             (test_refusal_advance_survives_the_durable_round_trip
                ~http_status:529 ~kind:"overloaded")
         ; test_case "output limit cause and durable round trip" `Quick
-            test_output_limit_preserves_cause_and_durable_evidence
+            (test_output_limit_preserves_cause_and_durable_evidence ~content:"{}")
+        ; test_case "empty output limit cause and durable round trip" `Quick
+            (test_output_limit_preserves_cause_and_durable_evidence ~content:"")
         ; test_case
             "typed projection failure"
             `Quick

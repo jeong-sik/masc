@@ -1751,6 +1751,12 @@ let execution_error_cause ~http_status ~dispatch = function
        Provider_response_refused
          { http_status; refusal = Context_overflow; retry_after_s = None }
      | None -> Completion_failed { error; dispatch })
+  (* Empty OpenAI/GLM content is rejected by the provider parser before JSON
+     normalization. Its typed stop reason still proves an output limit. *)
+  | Exec.Provider_error
+      (Http_client.ProviderFailure
+         { kind = Http_client.Empty_completion { stop_reason = Types.MaxTokens }; _ }) ->
+    Output_limit_reached
   (* An empty answer the provider stopped at its window is the same refusal in
      another shape. [Retry.overflow_of_empty_completion] is the one rule for
      which empty answers those are. *)

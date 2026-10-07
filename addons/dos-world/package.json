@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {"test": "node --test test/world.test.mjs"},
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "emulators": "8.4.2",
     "pngjs": "7.0.0"
   }

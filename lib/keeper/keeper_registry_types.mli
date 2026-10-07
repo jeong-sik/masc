@@ -528,14 +528,6 @@ val registry_key_parts : string -> (string * string, string) result
 val completed_turn_outcome_of_observation :
   turn_observation -> Keeper_transition_audit.completed_turn_outcome
 
-(** Dispatch origin for post-turn lifecycle events. *)
-type lifecycle_event_origin =
-  | Generic_dispatch
-  | Post_turn_lifecycle
-
-(** Pure converter for diagnostic / log labels. *)
-val lifecycle_event_origin_to_string : lifecycle_event_origin -> string
-
 (** Pure: derive the next [pending_turn_measurement] field after observing
     [event] at wall-clock [now], preserving the prior value when the event
     is not a [Context_measured]. *)

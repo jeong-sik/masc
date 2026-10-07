@@ -1313,3 +1313,28 @@ test('changed activity does not accelerate refused explicit reconnect writes', a
   await page.poll(4700);
   assert.equal(attempts, 2, 'new authority may retry once its independent reconnect cadence is due');
 });
+
+for (const initiallyConnected of [true, false]) {
+  test(`idle free-controller participation observes external ${initiallyConnected ? 'departure' : 'reconnect'} without a move`, async () => {
+    const storage = new Map([['masc.play.invite', 'fixture-token']]);
+    let connected = initiallyConnected;
+    const page = fixture(request => request.url === '/api/v1/play/seat'
+      ? response({ ...seat, controller:null, connected }) : request.url.includes('/live?')
+        ? response({ ...frame, activity:[] }) : normalReply(request), { storage, hash:'' });
+    await page.settle();
+    await page.poll(5000); // First idle scan acknowledges the unchanged empty activity.
+    const reads = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
+    const before = reads();
+    assert.equal(page.padButton.disabled, !initiallyConnected);
+    connected = !initiallyConnected;
+    await page.poll(4999);
+    assert.equal(reads(), before, 'ordinary frame polls do not rescan credentials');
+    assert.equal(page.padButton.disabled, !initiallyConnected);
+    await page.poll(1);
+    assert.equal(reads(), before + 1, 'participation is refreshed even with no controller or activity');
+    assert.equal(page.padButton.disabled, initiallyConnected);
+    assert.equal(page.get('send-text').disabled, initiallyConnected);
+    assert.equal(page.requests.some(request => request.method === 'POST'), false, 'observation neither reconnects nor sends input');
+    assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  });
+}

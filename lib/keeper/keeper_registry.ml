@@ -345,8 +345,6 @@ let set_started_at_for_test ~base_path name started_at =
 type wakeup_intent =
   | Reactive_signal
   | Scheduled_signal
-  | Goal_signal
-  | Supervisor_resume
   | Hitl_resolution
   | Broadcast_signal
   | Attention_result
@@ -356,8 +354,6 @@ type wakeup_intent =
 let wakeup_intent_to_wire = function
   | Reactive_signal -> "reactive_signal"
   | Scheduled_signal -> "scheduled_signal"
-  | Goal_signal -> "goal_signal"
-  | Supervisor_resume -> "supervisor_resume"
   | Hitl_resolution -> "hitl_resolution"
   | Broadcast_signal -> "broadcast_signal"
   | Attention_result -> "attention_result"

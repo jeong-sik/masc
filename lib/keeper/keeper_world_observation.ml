@@ -571,7 +571,7 @@ let pending_board_event_of_board_observation
   : (pending_board_event, Board_signal.board_unavailable) result
   =
   let matched = Board_signal.match_observation ~meta ~observation in
-  match Board_dispatch.get_post ~post_id:observation.post_id with
+  match Board_dispatch.read_post ~post_id:observation.post_id with
   | Error error ->
     Error
       { Board_signal.operation = Board_signal.Get_post
@@ -1186,7 +1186,8 @@ type board_replay_failure =
 
     Replay each new post/comment through the same audience route as live
     delivery. Historical participation is not an address. Cursor progress
-    follows complete posts; a transient source failure retains its boundary. *)
+    follows complete posts; a failed candidate-storage write retains its
+    boundary. *)
 let collect_board_events_with_cursor_policy
       ~advance_cursor
       ~(base_path : string)
@@ -1227,38 +1228,20 @@ let collect_board_events_with_cursor_policy
     in
     let new_count = List.length posts in
     let mention_count = ref 0 in
-    (* Board-unavailable-result: classify + log + count a failed read
-       encountered mid-scan, without raising. [Permanent] means this one post
-       can never resolve (e.g. swept from the store) — the caller skips it
-       and keeps scanning. [Transient] means the caller stops scanning here
-       and returns what it already has, so the cursor is not advanced past
-       the blocked post and the same post is retried next cycle (preserves
-       the pre-existing "retained cursor" semantics, now via Result instead
-       of exception + re-raise). *)
+    (* A read that answers no row mid-scan names a post that was swept or an
+       id that does not parse. Reading again gives the same answer, so the
+       scan counts it, logs it and moves past that post. *)
     let log_and_count_unavailable ~context (unavailable : Board_signal.board_unavailable) =
-      let disposition = Board_signal.disposition_of_unavailable unavailable in
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ObservationQueryFailures)
         ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
         ();
-      (match disposition with
-       | Board_signal.Permanent ->
-         Log.Keeper.warn
-           "board event collection (%s): permanently unavailable, skipping post_id=%s \
-            keeper=%s: %s"
-           context
-           unavailable.Board_signal.post_id
-           meta.name
-           (Board_signal.unavailable_to_string unavailable)
-       | Board_signal.Transient ->
-         Log.Keeper.warn
-           "board event collection (%s): retained cursor (transient unavailable) \
-            post_id=%s keeper=%s: %s"
-           context
-           unavailable.Board_signal.post_id
-           meta.name
-           (Board_signal.unavailable_to_string unavailable));
-      disposition
+      Log.Keeper.warn
+        "board event collection (%s): unavailable, skipping post_id=%s keeper=%s: %s"
+        context
+        unavailable.Board_signal.post_id
+        meta.name
+        (Board_signal.unavailable_to_string unavailable)
     in
     let signal_after_cursor (p : Board.post) created_at =
       match base_cursor with
@@ -1342,7 +1325,7 @@ let collect_board_events_with_cursor_policy
     in
     let events_of_post (p : Board.post) =
       let post_id = Board.Post_id.to_string p.id in
-      match Board_dispatch.get_comments ~post_id with
+      match Board_dispatch.read_comments ~post_id with
       | Error error -> Error (Source_unavailable { Board_signal.operation = Board_signal.Get_comments; post_id; error })
       | Ok comments ->
         let post_signal : Board_dispatch.board_signal =
@@ -1389,9 +1372,8 @@ let collect_board_events_with_cursor_policy
             meta.name (Board.Post_id.to_string p.id) detail;
           List.rev acc, last_cursor
         | Error (Source_unavailable unavailable) ->
-          (match log_and_count_unavailable ~context:"signal replay" unavailable with
-           | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
-           | Board_signal.Transient -> List.rev acc, last_cursor)
+          log_and_count_unavailable ~context:"signal replay" unavailable;
+          consume_posts (Some next_cursor) acc rest
     in
     let final_events, last_cursor = consume_posts None [] posts in
     if advance_cursor

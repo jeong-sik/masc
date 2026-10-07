@@ -342,13 +342,6 @@ let origin_display_to_string = function
   | Masc_tui_message_layout.Origin_bare -> "off"
 ;;
 
-let origin_display_of_string = function
-  | "row" -> Some Masc_tui_message_layout.Origin_row
-  | "inline" -> Some Masc_tui_message_layout.Origin_inline
-  | "off" -> Some Masc_tui_message_layout.Origin_bare
-  | _ -> None
-;;
-
 (* The chat modes worth a place in the header.
 
    Reasoning starts hidden, tools compact, and the memory journal at its
@@ -2888,8 +2881,6 @@ type scrolled = {
    declared separately in [sc_overflow_takes_row]; a surface whose chrome
    moves has to move the typed layout in the same change. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
-let lanes_listing_chrome ~load_error ~action_error =
-  listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
 (* A listing draws a reading of the selected row under its list, and both are
    paid for out of the same frame. The reading was given exactly one row and
@@ -3509,16 +3500,6 @@ type metrics_section =
   | Section_fleet
   | Section_resources
   | Section_tools
-
-let next_metrics_section = function
-  | Section_fleet -> Section_resources
-  | Section_resources -> Section_tools
-  | Section_tools -> Section_fleet
-
-let prev_metrics_section = function
-  | Section_fleet -> Section_tools
-  | Section_resources -> Section_fleet
-  | Section_tools -> Section_resources
 
 let metrics_section_label = function
   | Section_fleet -> "Engine & Scheduler"

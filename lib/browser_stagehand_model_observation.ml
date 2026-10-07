@@ -45,6 +45,7 @@ let execution = function
   | Provider_response_refused { http_status; refusal; retry_after_s = _ } ->
     cause "provider_response_refused"
       ["http_status", `Int http_status; "refusal", `String (Exact.provider_refusal_to_string refusal)]
+  | Output_limit_reached -> simple "output_limit_reached"
   | Incomplete_output -> simple "incomplete_output"
   | Missing_output -> simple "missing_output"
   | Ambiguous_output count -> cause "ambiguous_output" ["count", `Int count]

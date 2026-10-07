@@ -154,7 +154,7 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
     && attempt.http_status = Some http_status
     && Option.is_some attempt.provider_trace_sha256
     && Option.is_some attempt.raw_response_sha256
-  | Invalid_json_output, (Response_received | Terminal) ->
+  | (Output_limit_reached | Invalid_json_output), (Response_received | Terminal) ->
     attempt.dispatch_count = 1
     && successful_http_status attempt.http_status
     && Option.is_some attempt.provider_trace_sha256
@@ -165,7 +165,7 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
   | Serialized_request_refused _, (Before_dispatch | Terminal)
   | Rate_limited _, (Before_dispatch | Terminal)
   | (Overloaded _ | Server_error _), (Before_dispatch | Terminal)
-  | Invalid_json_output, Before_dispatch -> false
+  | (Output_limit_reached | Invalid_json_output), Before_dispatch -> false
 ;;
 
 let check_http_status ~ordinal field = function

@@ -453,6 +453,7 @@ let test_size_verdict_table () =
       , sent (Http.ProviderTerminal { kind = Http.Session_conflict; message = "" })
       , false )
     ; "completion failed, wiring rejected", sent (Http.AcceptRejected { reason = "" }), false
+    ; "output limit", E.Output_limit_reached, true
     ; "incomplete output", E.Incomplete_output, true
     ; "missing output", E.Missing_output, true
     ; "ambiguous output", E.Ambiguous_output 2, true

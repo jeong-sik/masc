@@ -172,6 +172,7 @@ let test_every_execution_cause_renders_distinctly () =
     ; Provider_response_refused { http_status = 400; refusal = Input_capacity; retry_after_s = None }
     ; Provider_response_refused { http_status = 400; refusal = Network_error; retry_after_s = None }
     ; Provider_response_refused { http_status = 408; refusal = Timeout; retry_after_s = None }
+    ; Output_limit_reached
     ; Incomplete_output
     ; Missing_output
     ; Ambiguous_output 3
@@ -197,7 +198,7 @@ let test_every_execution_cause_renders_distinctly () =
                  Http.ProviderFailure { kind = Http.Hard_quota { retry_after = None }; message = "" }
              ; dispatch = Generation_dispatch_started
              }))
-       (Exact_output.execution_error_cause_to_string Incomplete_output))
+       (Exact_output.execution_error_cause_to_string Output_limit_reached))
 ;;
 
 let require_ok label = function

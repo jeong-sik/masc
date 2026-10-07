@@ -1385,13 +1385,18 @@ let test_normalization_error_classes () =
     | Ok _ | Error _ -> fail (label ^ " lost response-received evidence")
   in
   run
-    "incomplete"
+    "output limit"
     (anthropic_response
        ~stop_reason:"max_tokens"
        {|[{"type":"text","text":"{\"name\":\"accepted\"}"}]|})
     (function
-    | EO.Incomplete_output -> true
+    | EO.Output_limit_reached -> true
     | _ -> false);
+  List.iter (fun stop_reason ->
+    run stop_reason
+      (anthropic_response ~stop_reason {|[{"type":"text","text":"{}"}]|})
+      (function EO.Incomplete_output -> true | _ -> false))
+    ["refusal"; "unrecognized-fixture-stop"];
   run "missing" (anthropic_response "[]") (function
     | EO.Missing_output -> true
     | _ -> false);

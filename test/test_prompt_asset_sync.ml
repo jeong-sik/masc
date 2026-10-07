@@ -1113,6 +1113,67 @@ let test_a_retired_file_that_cannot_go_stays_listed () =
         check (list string) "the next pass retires it" [ "prompts/retired/old.md" ]
           next.Managed_asset_sync.removed)
 
+(* A promoted edit whose reset fails leaves the current file without the
+   embedded copy and adds nothing to [failed]. Retirement still waits:
+   whether a file is in place is not read off the report. Root writes
+   anywhere, so the case is skipped there. *)
+let test_a_failed_reset_after_promotion_retires_nothing () =
+  if Unix.geteuid () = 0 then ()
+  else
+    with_workspace (fun ~base ~prompts ->
+        let (_ : Managed_asset_sync.sync_result) =
+          prompt_sync_with ~assets:(retired_nested :: prompt_embedded) ~base ~prompts
+        in
+        write_file (Filename.concat prompts "curator.md") edited_curator;
+        let blocked =
+          with_read_only prompts (fun () ->
+              prompt_sync_with ~assets:prompt_embedded ~base ~prompts)
+        in
+        (match edits blocked with
+         | [ (_, Managed_asset_sync.Promoted_reset_failed { key; reason = _ }) ] ->
+           check string "the edit is promoted" "curator" key
+         | found -> failf "expected one failed reset, found %d" (List.length found));
+        check (list string) "nothing retired" [] blocked.Managed_asset_sync.removed;
+        check bool "the retired text is still readable" true
+          (Sys.file_exists (Filename.concat prompts "retired/old.md"));
+        let next = prompt_sync_with ~assets:prompt_embedded ~base ~prompts in
+        check (list string) "the next pass retires it" [ "prompts/retired/old.md" ]
+          next.Managed_asset_sync.removed)
+
+(* The edit of a retired file is kept beside it and then the file cannot be
+   deleted: an earlier pass left the same copy, and the directory is
+   read-only now. The failure names where the edit is, and the next pass
+   reports the edit once the file goes. *)
+let test_a_retired_file_that_cannot_go_names_its_kept_edit () =
+  if Unix.geteuid () = 0 then ()
+  else
+    with_workspace (fun ~base ~prompts ->
+        let (_ : Managed_asset_sync.sync_result) =
+          prompt_sync_with ~assets:(retired_nested :: prompt_embedded) ~base ~prompts
+        in
+        let retired_dir = Filename.concat prompts "retired" in
+        let edited = "---\ndescription: old\n---\nOld text, edited.\n" in
+        let preserved = preserved_name "old.md" edited in
+        write_file (Filename.concat retired_dir "old.md") edited;
+        write_file (Filename.concat retired_dir preserved) edited;
+        let blocked =
+          with_read_only retired_dir (fun () ->
+              prompt_sync_with ~assets:prompt_embedded ~base ~prompts)
+        in
+        (match blocked.Managed_asset_sync.failed with
+         | [ ("prompts/retired/old.md", msg) ] ->
+           check bool "the failure names the kept edit" true (mentions ~line:msg preserved)
+         | found -> failf "expected one failure, found %d" (List.length found));
+        check int "no edit reported while the file stays" 0
+          (List.length blocked.Managed_asset_sync.operator_edits);
+        let next = prompt_sync_with ~assets:prompt_embedded ~base ~prompts in
+        check (list (pair string outcome_testable)) "the next pass reports it once the file goes"
+          [ ( "prompts/retired/old.md"
+            , Managed_asset_sync.Preserved_retired
+                { preserved_at = Filename.concat retired_dir preserved } )
+          ]
+          (edits next))
+
 let () =
   run "prompt_asset_sync"
     [
@@ -1199,5 +1260,9 @@ let () =
             test_a_failed_current_write_retires_nothing_until_the_next_pass;
           test_case "a retired file that cannot go stays listed" `Quick
             test_a_retired_file_that_cannot_go_stays_listed;
+          test_case "a failed reset after promotion retires nothing" `Quick
+            test_a_failed_reset_after_promotion_retires_nothing;
+          test_case "a retired file that cannot go names its kept edit" `Quick
+            test_a_retired_file_that_cannot_go_names_its_kept_edit;
         ] );
     ]

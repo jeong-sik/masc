@@ -126,12 +126,14 @@ val sync
     Deletion reaches only what masc owned: the runtime
     [managed-assets.json] the previous pass wrote lists the paths it placed
     there, and a listed path the embedded set no longer carries is removed.
-    Removal waits until every current asset is in place: a pass where any
-    current asset failed retires nothing, so text a release moved into
-    another file is never deleted before the file that now holds it is
-    written. A retired file whose bytes differ from its recorded digest was
-    edited, and the edit is written beside it before it is removed
-    ([Preserved_retired]); if that write fails the file stays.
+    Removal waits until every current asset holds its embedded copy: a pass
+    that leaves any of them otherwise (a failed write, or a reset that failed
+    after the edit became an override) retires nothing, so text a release
+    moved into another file is never deleted before the file that now holds
+    it is written. A retired file whose bytes differ from its recorded digest
+    was edited, and the edit is written beside it before it is removed
+    ([Preserved_retired]); if that write fails the file stays, and if the
+    removal fails the reported failure names where the edit is kept.
     A file that was in no manifest is the operator's and stays. The
     manifest is then rewritten from the current set plus the retired paths
     still in place ([managed_by], [schema], sorted [paths], and [sha256]

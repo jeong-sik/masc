@@ -6155,8 +6155,14 @@
   astring
   masc
   masc.runtime
+  masc_tui_ansi
   masc_tui_answering
-  masc_tui_message_layout))
+  masc_tui_frame
+  masc_tui_message_layout
+  masc_tui_render_prim
+  masc_tui_render_schedule
+  masc_tui_types
+  unix))
 
 (test
  (name test_tui_chat_activity)

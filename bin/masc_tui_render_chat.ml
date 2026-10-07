@@ -248,26 +248,27 @@ let folded_thinking_summary ~render body =
   in
   match lines with
   | [] -> body
-  (* Logical lines can wrap to hundreds of rows when providers omit newline
-     deltas. Preserve short notes, including unrecorded-step facts. *)
-  | [_] when (match render () with [] | [_] -> true | _ -> false) -> body
-  | [_] -> "Reasoning · 1 line folded · Ctrl-R"
-  (* A turn that reasons between every call draws this once a round, eight
-     rounds a turn. At 61 cells the sentence was the widest thing in the pane
-     and said the same "or /thinking to expand" each time; the key stays, the
-     footer and /help carry the rest. Two lines or more, so always plural. *)
   | lines ->
-      Printf.sprintf "Reasoning · %d lines folded · Ctrl-R" (List.length lines)
+      let count = List.length lines in
+      let summary = Printf.sprintf "Reasoning · %d %s folded · Ctrl-R"
+        count (if count = 1 then "line" else "lines") in
+      (* Formatting syntax is not visible width, and the summary can wrap
+         too. Folding is useful only when it actually saves terminal rows. *)
+      if List.length (render summary) < List.length (render body)
+      then summary
+      else body
 
 
 let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry) =
   if entry.style = Message_layout.Thinking && state.msg_reasoning_visibility = Reasoning_folded then
     let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
       ~inner_width:(max 1 (framed_inner_width chat_cols)) entry in
-    let markdown = cached_chat_markdown ~link_previews_mode:state.link_previews_mode
-        ~theme:(Chat_theme.snapshot ()) in
+    let context = Chat_theme.body_context (Chat_theme.snapshot ()) entry.style in
+    (* Measure only the thought's Markdown. Preview cards are annotations,
+       and measuring raw text must not replace the draw cache's folded body
+       under the same growing-entry identity on every delta. *)
     { entry with body = folded_thinking_summary
-        ~render:(fun () -> markdown ~entry ~width) entry.body }
+        ~render:(chat_markdown ~context ~width) entry.body }
   else entry
 
 let tool_projection_mode (state : state) =

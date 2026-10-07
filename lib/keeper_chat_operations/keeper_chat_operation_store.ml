@@ -2177,11 +2177,16 @@ let update_direct_native_call store ~now ~operation_id ~execution_digest change 
           let* ready = semantic_transition ~now Semantic.Confirm_sources created in
           semantic_transition ~now Semantic.Begin_execution ready
         | None, (Keeper_native_call.Checkpoint _ | Keeper_native_call.Terminal _ | Keeper_native_call.Acknowledge _) ->
-          Error (Integrity_error "native call has no owning execution") in
+          Error (Invalid_input "native call has no owning execution") in
+      (* A stale callback rejects that request; it does not establish that the
+         authoritative row is damaged. Owner fences only storage failures. *)
       let* replacement = Keeper_native_call.transition execution.native_call change
-        |> Result.map_error (fun detail -> Integrity_error detail) in
+        |> Result.map_error (fun detail -> Invalid_input detail) in
       let* next = Semantic.update_native_call ~now ~expected:execution.native_call ~replacement execution
-        |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error)) in
+        |> Result.map_error (function
+          | Semantic.Invalid_transition detail -> Invalid_input detail
+          | (Semantic.Invalid_record _ | Semantic.Revision_exhausted) as error ->
+            Integrity_error (Semantic.error_to_string error)) in
       expected_commit := Some (next, ());
       match current with
       | None -> insert_semantic store.db next

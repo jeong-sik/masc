@@ -3098,6 +3098,22 @@ let test_startup_requeues_exact_native_call () =
       (Keeper_native_call.equal_state observed (Keeper_native_call.Active call));
     Owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
       ~observed ~call |> owner_ok;
+    let advanced_checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:checkpoint.trace_id ~turn_count:2
+      ~canonical_checkpoint_bytes:"native progress after restart" |> Result.get_ok in
+    Owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~call_id:call.call_id ~observed:checkpoint ~checkpoint:advanced_checkpoint |> owner_ok;
+    (match Owner.checkpoint_direct_native_call owner ~operation_id
+       ~execution_digest:operation.execution_digest ~call_id:call.call_id
+       ~observed:checkpoint ~checkpoint:advanced_checkpoint with
+     | Error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _)) -> ()
+     | Error error -> fail ("stale callback fenced Owner: " ^ Owner.error_to_string error)
+     | Ok () -> fail "stale callback was accepted");
+    (match Owner.direct_native_call owner ~operation_id |> owner_ok with
+     | Keeper_native_call.Active current ->
+       check bool "stale callback keeps committed checkpoint" true
+         (Keeper_checkpoint_ref.equal current.checkpoint advanced_checkpoint)
+     | _ -> fail "stale callback changed active native state");
     Owner.terminal_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
       ~call_id:call.call_id ~disposition:{Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;
         recovery=Agent_core.Agent.Retire} |> owner_ok;
@@ -5247,7 +5263,7 @@ let () =
             "startup interrupts Running without requeue"
             `Quick
             test_startup_interrupts_running_without_requeue
-        ; test_case "startup requeues exact native call" `Quick test_startup_requeues_exact_native_call
+        ; test_case "native restart and stale callback preserve Owner progress" `Quick test_startup_requeues_exact_native_call
         ; test_case
             "registry start leaves a failure row for a restart-interrupted request"
             `Quick

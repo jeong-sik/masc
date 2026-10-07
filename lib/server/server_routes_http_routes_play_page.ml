@@ -3,7 +3,7 @@
 
     [GET /play] is public: the page carries no data. It takes the bearer from
     the link's fragment, drops it from the address bar, and keeps it in
-    memory only. It loads nothing from elsewhere; a CSP with a fresh nonce
+    the tab session for reload recovery. It loads nothing from elsewhere; a CSP with a fresh nonce
     lets only its own inline script and style run.
 
     [GET /api/v1/play/seat] answers who the bearer is, who holds the DOS
@@ -79,6 +79,7 @@ h2 { font-size:13px; color:var(--dim); margin:4px 0; font-weight:600; }
 </head>
 <body>
 <main>
+  <div class="row"><strong>DOS · 같이 하기</strong><button id="leave" type="button">연결 끊기</button></div>
   <div id="turn">연결하는 중이에요</div>
   <div id="screen-wrap" tabindex="0" aria-label="게임 화면. 누르고 키보드로 조작해요"><canvas id="screen" width="320" height="200"></canvas></div>
   <div id="status"></div>
@@ -157,14 +158,33 @@ const KEY_NAMES = {
   F6: 'f6', F7: 'f7', F8: 'f8', F9: 'f9', F10: 'f10'
 };
 
-const token = location.hash.slice(1);
+const SESSION_KEY = 'masc.play.invite';
+let token = location.hash.slice(1);
+try {
+  if (token !== '') sessionStorage.setItem(SESSION_KEY, token);
+  else token = sessionStorage.getItem(SESSION_KEY) || '';
+} catch (_) { /* A browser may deny storage; the original link still works. */ }
 history.replaceState(null, '', location.pathname + location.search);
+// Opening an invitation again in this tab can be only a fragment navigation.
+// Re-enter initialization after disconnect or for the same invitation. A new
+// identity must not abandon a still-valid controller held by this connection.
+window.addEventListener('hashchange', () => {
+  const invitation = location.hash.slice(1);
+  if (invitation === '') return;
+  if (!ended && invitation !== token) {
+    history.replaceState(null, '', location.pathname + location.search);
+    setStatus('invitation', '새 초대를 열려면 현재 연결을 먼저 끊은 뒤 새 초대 링크를 다시 열어 주세요.');
+    return;
+  }
+  location.reload();
+});
 
 const el = (id) => document.getElementById(id);
 const canvas = el('screen');
 const ctx = canvas.getContext('2d');
 let me = null;
 let controller = null;
+let controllerRecoverable = false;
 let controllerError = null;
 let machine = false;
 let since = null;
@@ -172,7 +192,9 @@ let lastActivityKey = null;
 let latestSeatRequest = null;
 let handoffRead = null;
 let ended = false;
+let disconnecting = false;
 let sending = Promise.resolve();
+let textSending = false;
 // The saves name the seat last reported (null: nothing loaded), and the one
 // the pad on screen was read for (undefined: not read yet, or the last read
 // failed). The pad is read again while the two differ.
@@ -190,12 +212,20 @@ function setStatus(source, text) {
 }
 
 function setControlsEnabled(enabled) {
-  for (const node of document.querySelectorAll('button, input, select')) node.disabled = !enabled;
+  for (const node of document.querySelectorAll('button, input, select')) {
+    if (node.id !== 'leave') node.disabled = !enabled;
+  }
+  el('leave').disabled = ended || disconnecting;
 }
 
 function end(text) {
   ended = true;
+  token = '';
+  try { sessionStorage.removeItem(SESSION_KEY); } catch (_) { /* Storage can be disabled. */ }
+  setStatus('disconnect', '');
+  setStatus('invitation', '');
   setControlsEnabled(false);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   el('turn').className = '';
   el('turn').textContent = text;
 }
@@ -213,9 +243,14 @@ async function api(method, path, body) {
   return { status: response.status, json };
 }
 
+function canMove() {
+  return machine && controllerError === null && !ended && !disconnecting
+    && (controller === null || controller === me || controllerRecoverable);
+}
+
 function renderTurn() {
   const turn = el('turn');
-  setControlsEnabled(machine && controllerError === null && !ended);
+  setControlsEnabled(canMove());
   if (!machine) {
     turn.className = '';
     turn.textContent = '지금 켜진 게임이 없어요.';
@@ -228,6 +263,9 @@ function renderTurn() {
   } else if (controller === me) {
     turn.className = 'mine';
     turn.textContent = '내 차례예요 (' + me + ')';
+  } else if (controllerRecoverable) {
+    turn.className = '';
+    turn.textContent = controller + ' 님이 떠났어요. 먼저 누르는 사람이 이어받아요.';
   } else {
     turn.className = '';
     turn.textContent = controller + ' 님 차례예요';
@@ -262,16 +300,17 @@ async function refreshSeat() {
   try {
     r = await api('GET', SEAT_PATH);
   } catch (_) {
-    if (ended || latestSeatRequest !== request) return false;
+    if (ended || latestSeatRequest !== request) return null;
     controllerError = '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.';
     renderTurn();
     setStatus('seat', controllerError);
-    return false;
+    return null;
   }
-  if (ended || latestSeatRequest !== request) return false;
+  if (ended || latestSeatRequest !== request) return null;
   if (r.status !== 200 || !r.json || typeof r.json.machine !== 'boolean'
       || typeof r.json.name !== 'string'
       || !(r.json.controller === null || typeof r.json.controller === 'string')
+      || typeof r.json.controller_recoverable !== 'boolean'
       || !(r.json.controller_error === undefined || typeof r.json.controller_error === 'string')
       || !(r.json.saves_name === null || typeof r.json.saves_name === 'string')
       || !Array.isArray(r.json.participants)
@@ -279,17 +318,22 @@ async function refreshSeat() {
     controllerError = '자리 정보를 읽지 못했어요 (' + r.status + ')';
     renderTurn();
     setStatus('seat', controllerError);
-    return false;
+    return null;
   }
   me = r.json.name;
   controller = r.json.controller;
+  controllerRecoverable = r.json.controller_recoverable;
   controllerError = r.json.controller_error ?? null;
   machine = r.json.machine;
   renderTurn();
   renderPassTargets(r.json.participants);
   seatSavesName = r.json.saves_name;
   setStatus('seat', controllerError ?? '');
-  return controllerError === null;
+  // Return this response's authority as well as rendering it. A concurrent
+  // live response may change the shared projection before a caller resumes.
+  return controllerError === null
+    ? { name: r.json.name, machine: r.json.machine, controller: r.json.controller }
+    : null;
 }
 
 // A pointer opening also focuses the select. Those events share one read;
@@ -421,6 +465,7 @@ async function poll() {
       latestSeatRequest = null;
       machine = false;
       controller = null;
+      controllerRecoverable = false;
       seatSavesName = null;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       setStatus('frame', '지금 켜진 게임이 없어요.');
@@ -437,20 +482,62 @@ async function poll() {
     // Machine activity prompts a seat read; failed reads remain pending.
     // Opening the handoff selector refreshes participants independently.
     const key = activity.length === 0 ? '' : JSON.stringify(activity[0]) + '#' + activity.length;
-    if (key !== lastActivityKey && await refreshSeat()) lastActivityKey = key;
+    // Expiry and Keeper stops need not move the machine. An observer must
+    // still discover that its holder departed, so a real move can recover it.
+    const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
+    if ((key !== lastActivityKey || waitingForController) && await refreshSeat()) lastActivityKey = key;
     await syncPad();
   }
 }
 
 function send(path, body) {
   sending = sending.then(async () => {
-    if (ended || !machine || controllerError !== null) return;
+    if (!canMove()) return false;
     const r = await api('POST', path, body);
-    if (ended) return;
-    if (!r.json || r.json.ok !== true) setStatus('action', (r.json && (r.json.message || r.json.error)) || ('요청이 거절됐어요 (' + r.status + ')'));
+    if (ended) return false;
+    const applied = r.status >= 200 && r.status < 300 && r.json && r.json.ok === true;
+    if (!applied) setStatus('action', (r.json && (r.json.message || r.json.error)) || ('요청이 거절됐어요 (' + r.status + ')'));
     else setStatus('action', '');
     await refreshSeat();
-  }).catch(() => setStatus('action', '보내지 못했어요. 연결을 확인해 주세요.'));
+    return applied;
+  }).catch(() => {
+    setStatus('action', '전송 결과를 확인하지 못했어요. 화면을 확인한 뒤 다시 시도해 주세요.');
+    return false;
+  });
+  return sending;
+}
+
+async function disconnect() {
+  if (ended || disconnecting) return;
+  disconnecting = true;
+  setControlsEnabled(false);
+  setStatus('disconnect', '조종권을 확인하고 연결을 끊고 있어요.');
+  try {
+    // A previously admitted move can acquire a formerly free controller.
+    // Drain it before observing/releasing our seat, and admit no new moves.
+    await sending;
+    if (ended) return;
+    const seat = await refreshSeat();
+    if (ended) return;
+    if (seat === null) {
+      if (!ended) setStatus('disconnect', '조종권을 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
+      return;
+    }
+    if (seat.machine && seat.controller === seat.name) {
+      const r = await api('POST', '/api/v1/dos/pass', {});
+      if (ended) return;
+      if (!(r.status >= 200 && r.status < 300 && r.json && r.json.ok === true)) {
+        setStatus('disconnect', '조종권 반납을 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
+        return;
+      }
+    }
+    end('연결을 끊었어요. 다시 들어오려면 받은 초대 링크를 열어 주세요.');
+  } catch (_) {
+    if (!ended) setStatus('disconnect', '조종권 반납 결과를 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
+  } finally {
+    disconnecting = false;
+    if (!ended) renderTurn();
+  }
 }
 
 function press(key) { send('/api/v1/dos/press', { keys: [key] }); }
@@ -486,9 +573,11 @@ window.addEventListener('gamepadconnected', () => {
 });
 el('send-text').addEventListener('click', () => {
   const text = el('text').value;
-  if (text === '') return;
-  el('text').value = '';
-  send('/api/v1/dos/type', { text });
+  if (text === '' || textSending) return;
+  textSending = true;
+  send('/api/v1/dos/type', { text }).then(applied => {
+    if (applied && el('text').value === text) el('text').value = '';
+  }).finally(() => { textSending = false; });
 });
 el('text').addEventListener('keydown', (event) => { if (event.key === 'Enter') el('send-text').click(); });
 // Invites and Keeper seats can change while the machine is idle. Refresh
@@ -506,6 +595,7 @@ el('pass').addEventListener('click', () => {
   const to = el('pass-to').value;
   send('/api/v1/dos/pass', to === RELEASE_OPTION ? {} : { to });
 });
+el('leave').addEventListener('click', disconnect);
 
 setControlsEnabled(false);
 if (token === '') {
@@ -534,30 +624,43 @@ let serve_page _request reqd =
 (* Read under the machine's lock, off the Eio domain. No machine: nobody holds
    it. The screen read fails in no other way the lane documents, but each is
    named, so a new one is not read as "free". *)
-let controller_json () =
+let controller_json ~transaction ~config ~now =
   match Tool_misc_dos_lane.off_domain Dos_lane.screen with
   | Ok { Dos_lane.controller; saves_name; _ } ->
+    let recoverable = match controller with
+      | None -> false
+      | Some holder ->
+        Option.is_some (Keeper_dos_controller.holder_left ~transaction ~config ~now holder)
+    in
     [ ("machine", `Bool true)
     ; ("controller", Json_util.string_opt_to_json controller)
+    ; ("controller_recoverable", `Bool recoverable)
     ; ("saves_name", Json_util.string_opt_to_json saves_name)
     ]
-  | Error Dos_lane.No_machine -> [ ("machine", `Bool false); ("controller", `Null); ("saves_name", `Null) ]
+  | Error Dos_lane.No_machine ->
+    [ ("machine", `Bool false); ("controller", `Null)
+    ; ("controller_recoverable", `Bool false); ("saves_name", `Null) ]
   | Error
       (( Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved | Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
        | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
        | Dos_lane.Other_program _ ) as err) ->
     [ ("machine", `Bool true); ("controller", `Null); ("saves_name", `Null)
+    ; ("controller_recoverable", `Bool false)
     ; ("controller_error", `String (Dos_lane.error_to_string err)) ]
 
 let seat_response ~config ~name =
-  match Play_seat.hand_to config ~now:(Time_compat.now ()) with
+  let snapshot = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+    let now = Time_compat.now () in
+    Result.map (fun participants ->
+      `Assoc
+        ((("name", `String name) :: controller_json ~transaction ~config ~now)
+         @ [ ("participants", `List (List.map (fun p -> `String p) participants)) ]))
+      (Play_seat.hand_to_in_transaction ~transaction config ~now))
+    |> Result.map_error Masc_domain.masc_error_to_string |> Result.join in
+  match snapshot with
   | Error detail ->
     `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
-  | Ok participants ->
-    ( `OK
-    , `Assoc
-        ((("name", `String name) :: controller_json ())
-         @ [ ("participants", `List (List.map (fun p -> `String p) participants)) ]) )
+  | Ok seat -> `OK, seat
 
 let add_routes router =
   router

@@ -666,6 +666,26 @@ status: reference
   (RFC-0468 §3.2). 접수 응답은 실행 완료를 뜻하지 않는다.
   → [Keeper_chat_operation_payload](../../lib/keeper/keeper_chat_operation_payload.mli)
 
+**Keeper Turn Slot Admission Priority (키퍼 턴 슬롯 진입 우선순위)**
+: 한 Keeper 파이버(`Owner` fiber)의 단일 실행 슬롯(`turn slot`)이 해제되었을 때, 큐에 대기 중인
+  청구 가능한 직접 입력(`claimable queued chat operation`)이 자율 턴(`autonomous turn`)보다
+  항상 먼저 슬롯을 획득하는 엄격한 우선순위 규칙(#41654). 자율 레인이 바쁜 슬롯을 반복
+  관측하더라도 진입 순서는 바뀌지 않으며, 이전 RFC-0373 방향(direction 2)의 유예 부채
+  한도(`autonomous_deferral_debt_cap`) 메커니즘은 폐기되었다. 슬롯을 요청했다가 거절당한
+  자율 레인은 큐잉된 직접 오퍼레이션이 모두 소진되어 슬롯이 완전히 비었을 때
+  `notify_turn_slot_released` 신호로 깨어나 실행을 재개한다.
+  → [Keeper_owner](../../lib/keeper/keeper_owner.mli)
+
+**Cancelled Chat Terminal Retention (취소된 채팅 종단 보존)**
+: Keeper 채팅 오퍼레이션이 취소되거나 실패했을 때, 라이브 SSE 스트림 구독자가 이미 연결을
+  끊었더라도(`subscriber disconnected`) 취소 종단 이벤트(`Cancelled` terminal event)를 작업
+  저널(`Keeper_chat_event_log`)에 동기적으로 확정 기록(`append_result`)하는 계약(#41657).
+  라이브 투영 전에 저널 커밋을 먼저 보장함으로써, 재연결한 클라이언트가 오퍼레이션 저널을
+  통해 취소 상태를 일관되게 재생(replay)하고 완료되지 않는 영구 대기 상태에 빠지는 것을
+  방지한다.
+  → [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
+  [Server_routes_http_keeper_stream](../../lib/server/server_routes_http_keeper_stream.mli)
+
 **Speaker Authority (화자 권한)**
 : Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
   추측하지 않고 진입 경로와 Keeper 레지스트리 대조로 구조적으로 결정한다(RFC-0223 §3,

@@ -541,7 +541,12 @@ let test_nested_read_owners_retire_without_losing_selection () =
   state.schedule_wake_history_inflight <- Some "schedule-a";
   state.patch_modal_open <- true;
   state.patch_modal_path <- Some "lib/example.ml";
+  state.resource_pending_uri <- Some "masc://selected/resource";
+  state.prompts_librarian_input_requested <- Some "librarian-input";
+  state.prompts_librarian_input_loading <- true;
   suspend_workspace_readings state;
+  Alcotest.(check (option string)) "resource URI survives retirement" (Some "masc://selected/resource") state.resource_pending_uri;
+  Alcotest.(check (option string)) "Librarian target survives retirement" (Some "librarian-input") state.prompts_librarian_input_requested;
   Alcotest.(check bool) "catalog owner can be restarted" true
     (state.runtime_catalog_reading = Runtime_catalog_unread);
   Alcotest.(check bool) "catalog generation retired" true

@@ -3433,8 +3433,14 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
 
 let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
   let module Login = Masc_tui_account_login in
-  if account_login_action_is_read action && not (server_authority_ready state) then
-    suspend_account_login_read view
+  let needs_identity = match action with Login.Nothing | Close | Cancel -> false | _ -> true in
+  if needs_identity && not (server_authority_ready state) then begin
+    if account_login_action_is_read action then suspend_account_login_read view
+    else begin
+      view.input_pending <- false;
+      view.notice <- "Workspace identity is unconfirmed; account action was not sent."
+    end
+  end
   else begin
   let host = server_peer_host and port = state.port in
   let check_workspace = capture_workspace_check state ~mailbox in
@@ -3451,8 +3457,10 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   state.account_login_readings <- List.filter (fun (reading, _) -> reading != view) state.account_login_readings;
   if account_login_action_is_read action then
     state.account_login_readings <- (view, generation) :: state.account_login_readings;
-  let post path body = Masc_tui_http.post_json ~host ~port ~path ~body:(Yojson.Safe.to_string body) in
-  let post_setup path body = Masc_tui_http.post_setup_json ~host ~port ~path ~body:(Yojson.Safe.to_string body) in
+  let post path body = Result.bind (check_workspace ()) (fun () ->
+    Masc_tui_http.post_json ~host ~port ~path ~body:(Yojson.Safe.to_string body)) in
+  let post_setup path body = Result.bind (check_workspace ()) (fun () ->
+    Masc_tui_http.post_setup_json ~host ~port ~path ~body:(Yojson.Safe.to_string body)) in
   let login_path id = "/api/v1/setup/accounts/login/" ^ id in
   let enqueue result = enqueue_async mailbox (Account_login_json (view, generation, action, result)) in
   let start_job f = match Eio_context.get_switch_opt () with
@@ -3465,7 +3473,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
            | _ -> view.cancel_stream <- Some (fun () -> Eio.Cancel.cancel cancellation (Failure "login panel superseded")));
           Fun.protect ~finally:(fun () ->
             if generation = view.generation then
-              match action with Login.Input _ -> () | _ -> view.cancel_stream <- None) f)
+              match action with Login.Input _ -> () | _ -> view.cancel_stream <- None)
+            (fun () -> match check_workspace () with Error detail -> enqueue (Error detail) | Ok () -> f ()))
         with
         | Eio.Cancel.Cancelled _ as exn -> if generation = view.generation then raise exn
         | Unix.Unix_error _ | Sys_error _ | Eio.Io _ | Yojson.Json_error _ ->
@@ -3501,7 +3510,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
            let on_chunk, complete = Login.decoder ~integration_id:provider.id (fun event ->
                enqueue_async mailbox (Account_login_event (view,generation,event))) in
              let body=`Assoc (["integration_id",`String provider.id] @ (match reference with Some r->["account_ref",`String r] | None->[])) |> Yojson.Safe.to_string in
-             let result = Masc_tui_http.post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk in
+             let result = Result.bind (check_workspace ()) (fun () ->
+               Masc_tui_http.post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk) in
              match result with
              | Ok () when complete () -> ()
              | Ok () | Error _ -> enqueue (Error "로그인 결과를 받지 못했습니다. r로 상태를 다시 확인하세요.")))
@@ -3717,6 +3727,7 @@ let launch_librarian_input_load state ~mailbox ~prompt_key =
     state.prompts_librarian_input_error <- None
   end;
   state.prompts_librarian_input_loading <- true;
+  state.prompts_librarian_input_requested <- Some prompt_key;
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (Librarian_input_loaded (prompt_key, result)))
@@ -8402,14 +8413,29 @@ let msx_frame_of_live ~previous_live ~previous_frame
 (* A read of the MSX screen through the live route, asked with the counter
    of the picture drawn from the last one. An unchanged answer leaves the
    frame alone. *)
-let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
-  let result =
+let with_msx_observation state ~mailbox read apply =
+  let check = capture_workspace_check state ~mailbox in
+  match check () with
+  | Error detail -> state.msx_notice <- Some detail
+  | Ok () ->
+      let result = read () in
+      (match check () with
+       | Error detail -> state.msx_notice <- Some detail
+       | Ok () -> apply result)
+
+let observe_msx_carts state ~mailbox =
+  with_msx_observation state ~mailbox
+    (fun () -> Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port)
+    (fun carts -> state.msx_carts <- carts)
+
+let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) ~mailbox =
+  with_msx_observation state ~mailbox (fun () ->
     (* The decoder has checked that MSX has no activity feed. Only its
        picture answer is needed by the MSX view. *)
     Result.map fst
       (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-         Masc.Machine_lane.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
-  in
+         Masc.Machine_lane.Msx ~since:(Masc_tui_machine_live.since state.msx_live)))
+    (fun result ->
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
    | Some view ->
@@ -8426,7 +8452,7 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
   | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame ->
       msx_pending_poll := Poll_ready Advancing;
       if clear_notice then state.msx_notice <- None
-  | Poll_ready _ | Poll_pending _ | Poll_observing _ -> ()
+  | Poll_ready _ | Poll_pending _ | Poll_observing _ -> ())
 ;;
 
 (* The MSX door opens on the load menu (RFC-0439 3.7): the human picks a game
@@ -8449,9 +8475,8 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false
   end;
-  observe_msx_frame ~clear_notice:true state;
-  state.msx_carts <-
-    Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
+  observe_msx_frame ~clear_notice:true state ~mailbox;
+  observe_msx_carts state ~mailbox;
   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
   Masc_tui_msx.open_menu ~write:write_to_terminal state;
   (* A first DOS read may carry a full screen. Let the menu accept keys while
@@ -11619,6 +11644,7 @@ let enter_config_pane state ~mailbox pane =
   state.runtime_params_cursor <- 0;
   state.runtime_param_edit <- None;
   state.runtime_params_notice <- None;
+  state.prompts_librarian_input_requested <- None;
   state.prompts_librarian_input <- None;
   state.prompts_librarian_input_error <- None;
   state.prompts_librarian_input_loading <- false;
@@ -12107,6 +12133,17 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
           | Some "*" -> launch_all_memory_facts_load state ~mailbox
           | Some keeper_name -> launch_memory_facts_load state ~mailbox ~keeper_name
           | None -> ())
+     | _ -> ());
+    (match state.view with
+     | Resources -> Option.iter (fun uri ->
+         Masc_tui_resources_requests.launch_read state ~host:server_peer_host
+           ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+           ~check:(capture_workspace_check state ~mailbox) ~uri) state.resource_pending_uri
+     | Config when state.config_pane = Config_prompts ->
+         (match state.prompts_librarian_input_requested, selected_prompt_for_state state with
+          | Some prompt_key, Some row when String.equal row.Tui_decode.pr_key prompt_key ->
+              launch_librarian_input_load state ~mailbox ~prompt_key
+          | _ -> ())
      | _ -> ());
     if state.context_inspector_open then Option.iter (fun keeper_name ->
       launch_context_inspector_load state ~mailbox ~keeper_name) state.context_inspector_keeper;
@@ -15276,6 +15313,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              (retry (detail ^ " (play revoke outcome unknown)")))
   | Librarian_input_loaded (prompt_key, result) ->
+      if state.prompts_librarian_input_requested = Some prompt_key then
+        state.prompts_librarian_input_requested <- None;
       let still_selected =
         match selected_prompt_for_state state with
         | Some row -> String.equal row.Tui_decode.pr_key prompt_key
@@ -20156,7 +20195,7 @@ and is loaded on demand through keeper_skill.
                   (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
                   state.msx_menu_open <- false;
                   state.machine_source <- Masc.Machine_lane.Msx;
-                  observe_msx_frame state;
+                  observe_msx_frame state ~mailbox:async_messages;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
                   render_spectator state
               | Error message ->
@@ -20173,7 +20212,7 @@ and is loaded on demand through keeper_skill.
              machine -- not as a game key, a checkpoint or a disk change. *)
           render_spectator state
       | Some "f8" ->
-          state.msx_carts <- Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
+          observe_msx_carts state ~mailbox:async_messages;
           Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
       | Some (("f6" | "f7") as name) ->
           let restore = name = "f7" in
@@ -20183,7 +20222,7 @@ and is loaded on demand through keeper_skill.
           state.msx_notice <- Some (match result with
             | Ok () -> if restore then "Restored quick checkpoint" else "Saved quick checkpoint"
             | Error message -> "Checkpoint failed: " ^ message);
-          observe_msx_frame state;
+          observe_msx_frame state ~mailbox:async_messages;
           state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
           render_spectator state
       | Some "esc" ->
@@ -20210,7 +20249,7 @@ and is loaded on demand through keeper_skill.
                    Masc_tui_http.post_msx_press ~host:server_peer_host
                      ~port:state.port ~keys:[ server_key ])
                with
-               | Ok _ -> observe_msx_frame ~clear_notice:true state
+               | Ok _ -> observe_msx_frame ~clear_notice:true state ~mailbox:async_messages
                | Error detail -> state.msx_notice <- Some detail);
               state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
               render_spectator state

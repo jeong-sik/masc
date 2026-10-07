@@ -5324,6 +5324,7 @@ type state = {
   mutable prompts_librarian_input: (string * string list) option;
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
+  mutable prompts_librarian_input_requested: string option;
   (* Prompt presets (#32777). The pane holds the listing, the name being
      typed for a save, the preset armed for a restore or delete, and the last report —
      which stays on screen because it is the only place the skipped keys and
@@ -6590,7 +6591,6 @@ let suspend_workspace_readings state =
   state.msg_journal_inflight <- [];
   state.context_inspector_loading <- false;
   state.prompts_librarian_input_loading <- false;
-  state.resource_pending_uri <- None;
   state.msx_live_in_flight <- None;
   state.dos_live_in_flight <- None
 
@@ -8707,6 +8707,7 @@ let create_state
   prompts_librarian_input = None;
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
+  prompts_librarian_input_requested = None;
   exact_activity_sessions = [];
   exact_activity_open = None;
   exact_activity_generation = 0;

@@ -4857,6 +4857,15 @@ type play_invite =
   ; shown_name : string option
   }
 
+type play_change_kind = Issue_invite of string | Revoke_invite of string
+type play_change_request = {
+  change_ticket : unit ref;
+  change_workspace : workspace_input_identity;
+  change_kind : play_change_kind;
+}
+type play_change = Sending_invite_change of play_change_request | Unknown_invite_change of play_change_request
+type play_change_outcome = Change_confirmed | Change_unknown
+
 type keeper_priority_control = {
   priority_generation : int;
   priority_requests : Masc_tui_keeper_chat_projection.request list;
@@ -5162,7 +5171,7 @@ type state = {
   mutable play_invite_scroll: int;
   (* Serialize issue and revoke across chat/Collab owners, including a closed
      view: a delayed receipt must not revive or erase a reissued card. *)
-  mutable play_mutation_inflight: bool;
+  mutable play_changes: play_change list;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -8223,6 +8232,80 @@ let withdraw_play_invite_workspace state
       state.play_invite <- retained;
       state.play_invite_quarantine <- None
 
+let play_change_request = function
+  | Sending_invite_change request | Unknown_invite_change request -> request
+
+let workspace_change_origin state =
+  match state.workspace_identity, workspace_input_identity_of_server state.server_identity with
+  | Workspace_identity_match, Some origin -> Ok origin
+  | (Workspace_identity_unread | Workspace_identity_mismatch _), _
+  | Workspace_identity_match, None ->
+      Error "Invite changes require a verified server matching this TUI's local workspace."
+
+let current_play_change state origin =
+  List.find_opt (fun change -> (play_change_request change).change_workspace = origin) state.play_changes
+
+let play_change_pending_notice = "An invite change is still pending; wait for its result."
+let play_change_unknown_notice request =
+  let action, name = match request.change_kind with
+    | Issue_invite name -> "issue", name | Revoke_invite name -> "revoke", name in
+  Printf.sprintf "Invite %s for %s has an unknown outcome. Further changes are blocked; open Collab and use u only after verifying the original server request has finished."
+    action (Masc.Tui_terminal_text.sanitize_terminal_text name)
+
+let play_change_access state =
+  match workspace_change_origin state with
+  | Error detail -> Masc_tui_collab.Read_only detail
+  | Ok origin ->
+      match current_play_change state origin with
+      | None -> Masc_tui_collab.Writable
+      | Some (Sending_invite_change _) -> Masc_tui_collab.Pending play_change_pending_notice
+      | Some (Unknown_invite_change request) -> Masc_tui_collab.Uncertain (play_change_unknown_notice request)
+
+let begin_play_change state kind =
+  match workspace_change_origin state with
+  | Error detail -> Error detail
+  | Ok origin ->
+      match current_play_change state origin with
+      | Some (Sending_invite_change _) -> Error play_change_pending_notice
+      | Some (Unknown_invite_change request) -> Error (play_change_unknown_notice request)
+      | None ->
+          let request = {change_ticket = ref (); change_workspace = origin; change_kind = kind} in
+          state.play_changes <- Sending_invite_change request :: state.play_changes;
+          Ok request
+
+let finish_play_change state request outcome =
+  let matches change = (play_change_request change).change_ticket == request.change_ticket in
+  let owns = List.exists matches state.play_changes in
+  if owns then state.play_changes <- List.filter_map (fun change ->
+    if not (matches change) then Some change else match outcome with
+    | Change_confirmed -> None
+    | Change_unknown -> Some (Unknown_invite_change request)) state.play_changes;
+  owns
+
+let withdraw_play_changes state =
+  state.play_changes <- List.map (function
+    | Sending_invite_change request -> Unknown_invite_change request
+    | Unknown_invite_change _ as change -> change) state.play_changes
+
+let resolve_play_change state =
+  match workspace_change_origin state with
+  | Error detail -> Error detail
+  | Ok origin ->
+      match current_play_change state origin with
+      | Some (Unknown_invite_change request) ->
+          ignore (finish_play_change state request Change_confirmed);
+          Ok ()
+      | Some (Sending_invite_change _) -> Error play_change_pending_notice
+      | None -> Error "There is no unknown invite change in this workspace."
+
+let withdraw_machine_control state =
+  state.machine_interaction <- Observe_machine;
+  state.msx_open <- false;
+  state.msx_menu_open <- false;
+  state.msx_live <- Masc_tui_machine_live.Unread;
+  state.msx_frame <- None;
+  state.msx_live_in_flight <- None
+
 (* The overlays that take every key while they are open. Each answers its own
    keys and swallows the rest in its dispatch arm, so nothing drawn under it --
    the composer, a surface binding, a press on a row -- may act first. Every
@@ -8397,7 +8480,7 @@ let create_state
   play_invite = { cards = []; shown_name = None };
   play_invite_quarantine = None;
   play_invite_scroll = 0;
-  play_mutation_inflight = false;
+  play_changes = [];
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;

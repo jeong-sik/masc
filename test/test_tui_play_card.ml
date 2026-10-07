@@ -315,6 +315,8 @@ let test_local_link_explains_device_scope () =
       | Card.Note text -> Some text | _ -> None) |> String.concat " " in
     check bool ("local address " ^ host) local (contains ~sub:"this computer only" notes))
     ["localhost:8935", true; "127.5.2.1:8935", true; "[::1]:8935", true;
+     "[::ffff:127.0.0.1]:8935", true; "[::ffff:127.5.2.1]:8935", true;
+     "[::ffff:192.168.0.7]:8935", false;
      "play.example.test", false]
 ;;
 

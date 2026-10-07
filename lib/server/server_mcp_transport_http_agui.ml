@@ -111,7 +111,8 @@ let handle_ag_ui_events ~deps request reqd =
                     | Some last_id ->
                       (* No AG-UI client reads a replay gap yet, so only the
                          deliveries are sent. *)
-                      (Sse.replay_after_for_session ~session_id
+                      (Sse.replay_after_for_session
+                     ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~session_id
                          ~kind:Sse.Observer last_id).Sse.deliveries
                       |> List.filter (fun delivery ->
                         if send_raw info (ag_ui_event_of_masc_event delivery)

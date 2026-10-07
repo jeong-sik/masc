@@ -3073,7 +3073,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                      Option.iter (fun event ->
                        let operation_id = Keeper_chat_operation.Operation_id.to_string member_id in
                        note_operation_wire_event ~base_path ~keeper_name ~operation_id event;
-                       Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq:(Some seq) ~event;
+                       Keeper_chat_broadcast.operation_event ~base_path ~keeper_name ~operation_id ~seq:(Some seq) ~event;
                        publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq:(Some seq) event) projected;
                      member_id, projection) projections in
                    let is_terminal = Server_keeper_chat_agui_projection.is_terminal event in
@@ -3348,7 +3348,7 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
        (match wire with
         | Some Wire_started -> note_operation_wire_event ~base_path ~keeper_name ~operation_id event
         | Some Wire_terminal_sent | None -> ());
-       Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq ~event;
+       Keeper_chat_broadcast.operation_event ~base_path ~keeper_name ~operation_id ~seq ~event;
        publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq event)
   | Keeper_owner.Operation_deferred -> ()
   | Keeper_owner.Operation_succeeded _ ->

@@ -90,7 +90,6 @@ let transient_retry_route =
 let deterministic_route ~detail =
   Keeper_runtime_failure_route.Exhausted_visible_alive
     { terminal = Keeper_runtime_failure_route.Deterministic_request
-    ; provenance = Keeper_runtime_failure_route.Agent_core_api_error
     ; detail
     }
 ;;

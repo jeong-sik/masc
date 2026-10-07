@@ -383,12 +383,7 @@ let test_masc_internal_terminal_classes () =
        (internal_err
           (Keeper_internal_error.Internal_contract_rejected { reason = "empty" }))
    with
-   | KFR.Exhausted_visible_alive
-       { terminal = KFR.Internal_opaque
-       ; provenance = KFR.Masc_internal_error
-       ; _
-       } ->
-     ()
+   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque; _ } -> ()
    | other ->
      Alcotest.failf "internal contract rejection should remain opaque, got %s"
        (KFR.route_kind_label other));
@@ -402,18 +397,14 @@ let test_masc_internal_terminal_classes () =
 let test_non_provider_families_judge () =
   let raw_internal = Agent_core.Error.Internal "boom" in
   (match route_of_agent_core_error raw_internal with
-   | KFR.Exhausted_visible_alive
-       { terminal = KFR.Internal_opaque; provenance = KFR.Agent_core_internal_error; _ } ->
-     ()
+   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque; _ } -> ()
    | other ->
      Alcotest.failf "raw Internal should exhaust, got %s" (KFR.route_kind_label other));
   (match route_of_masc_error raw_internal with
-   | KFR.Exhausted_visible_alive
-       { terminal = KFR.Internal_opaque; provenance = KFR.Masc_internal_error; _ } ->
-     ()
+   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque; _ } -> ()
    | other ->
      Alcotest.failf
-       "MASC-produced raw Internal must preserve its actual boundary, got %s"
+       "MASC-produced raw Internal should exhaust, got %s"
        (KFR.route_kind_label other));
   match
     route_of_agent_core_error
@@ -458,7 +449,7 @@ let test_response_observed_per_class () =
   let rotate rotate = KFR.Rotate_now { rotate } in
   let terminal terminal =
     KFR.Exhausted_visible_alive
-      { terminal; provenance = KFR.Masc_internal_error; detail = "" }
+      { terminal; detail = "" }
   in
   let check_observed expected route =
     Alcotest.(check bool)
@@ -624,7 +615,7 @@ let test_route_resumes_on_same_path_per_class () =
   let rotate rotate = KFR.Rotate_now { rotate } in
   let terminal terminal =
     KFR.Exhausted_visible_alive
-      { terminal; provenance = KFR.Masc_internal_error; detail = "" }
+      { terminal; detail = "" }
   in
   let check_resumes expected (label, route) =
     Alcotest.(check bool)

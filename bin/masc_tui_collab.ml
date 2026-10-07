@@ -1,4 +1,5 @@
-type form = Browsing | Name of string | Hours of string * string | Confirm_revoke of string
+type form = Browsing | Name of string | Hours of string * string | Confirm_revoke of string | Confirm_resolution
+type write_access = Writable | Pending of string | Uncertain of string | Read_only of string
 type inventory = Loading | Listed of Masc.Tui_decode.play_invite_row list | Failed of string
 type read = Read of unit ref
 type mutation = Mutation of unit ref
@@ -10,13 +11,20 @@ type t = {
   form : form;
   pending : mutation option;
   message : string option;
+  write_access : write_access;
 }
 type action = Stay | Close | Watch of Masc.Machine_lane.t | Game_menu | Refresh
-  | Issue of mutation * string * int | Revoke of mutation * string | Open_link of string
+  | Issue of mutation * string * int | Revoke of mutation * string | Open_link of string | Resolve_unknown
 
 let create () = { owner = ref (); read = None; inventory = Loading; selected = None;
-  form = Browsing; pending = None; message = None }
+  form = Browsing; pending = None; message = None; write_access = Writable }
 let owner t = t.owner
+let write_access t access =
+  let form = match t.form, access with
+    | (Name _ | Hours _ | Confirm_revoke _), (Pending _ | Uncertain _ | Read_only _)
+    | Confirm_resolution, (Writable | Pending _ | Read_only _) -> Browsing
+    | form, _ -> form in
+  {t with write_access = access; form}
 let loading t =
   let read = Read (ref ()) in
   {t with inventory = Loading; read = Some read}, read
@@ -42,11 +50,11 @@ let settled t mutation = match t.pending with
   | Some _ | None -> t
 let text_input_active t = match t.form with
   | Name _ | Hours _ -> true
-  | Browsing | Confirm_revoke _ -> false
+  | Browsing | Confirm_revoke _ | Confirm_resolution -> false
 let paste t text = match t.form with
   | Name value -> {t with form = Name (value ^ text)}
   | Hours (name, value) -> {t with form = Hours (name, value ^ text)}
-  | Browsing | Confirm_revoke _ -> t
+  | Browsing | Confirm_revoke _ | Confirm_resolution -> t
 let rows t = match t.inventory with Listed rows -> rows | Loading | Failed _ -> []
 let selected t = List.find_opt (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) (rows t)
 let move t delta =
@@ -64,7 +72,9 @@ let edit value key = match key with
 
 let key t key =
   match t.form, key with
-  | (Name _ | Hours _ | Confirm_revoke _), ("esc" | "cancel") -> {t with form = Browsing; message = None}, Stay
+  | (Name _ | Hours _ | Confirm_revoke _ | Confirm_resolution), ("esc" | "cancel") -> {t with form = Browsing; message = None}, Stay
+  | Confirm_resolution, ("\r" | "enter") -> {t with form = Browsing}, Resolve_unknown
+  | Confirm_resolution, _ -> t, Stay
   | Name name, ("\r" | "enter") ->
       (match Masc.Play_invite.Name.of_string name with
        | Error reason -> {t with message = Some reason}, Stay
@@ -85,8 +95,17 @@ let key t key =
   | Browsing, "d" -> t, Watch Masc.Machine_lane.Dos
   | Browsing, "g" -> t, Game_menu
   | Browsing, "r" -> t, Refresh
+  | Browsing, "u" ->
+      (match t.write_access with
+       | Uncertain _ -> {t with form = Confirm_resolution; message = None}, Stay
+       | Writable | Pending _ | Read_only _ -> t, Stay)
   | Browsing, ("j" | "down") -> move t 1, Stay
   | Browsing, ("k" | "up") -> move t (-1), Stay
+  | Browsing, ("n" | "x") when t.write_access <> Writable ->
+      let message = match t.write_access with
+        | Pending text | Uncertain text | Read_only text -> text
+        | Writable -> "" in
+      {t with message = Some message}, Stay
   | Browsing, "n" when Option.is_none t.pending -> {t with form = Name ""; message = None}, Stay
   | Browsing, "x" when Option.is_none t.pending ->
       (match selected t with
@@ -97,9 +116,13 @@ let key t key =
   | Browsing, _ -> t, Stay
 
 let hints t = match t.form with
-  | Browsing -> "m:MSX  d:DOS  g:games  n:invite  j/k:choose  Enter:link  x:revoke  r:refresh  Esc:back"
+  | Browsing ->
+      "m:MSX  d:DOS  g:games  j/k:choose  Enter:link  r:refresh  Esc:back"
+      ^ (match t.write_access with Writable -> "  n:invite  x:revoke"
+         | Uncertain _ -> "  u:resolve unknown" | Pending _ | Read_only _ -> "")
   | Name _ | Hours _ -> "Enter:continue  Ctrl-U:clear  Backspace:delete  Esc:cancel"
   | Confirm_revoke _ -> "Enter:revoke this invite  Esc:cancel"
+  | Confirm_resolution -> "Enter:I verified the server request finished  Esc:keep blocked"
 
 let lines ~height t =
   let heading = ["Shared machines · observation does not send game input";
@@ -108,12 +131,19 @@ let lines ~height t =
     | Name value -> ["Player name: " ^ value ^ "▌"; "Lowercase letters and digits; start with a letter."]
     | Hours (name, value) -> ["Player: " ^ name; "Expires in hours: " ^ value ^ "▌"]
     | Confirm_revoke name -> ["Revoke " ^ name ^ "? Their link stops working and their controller is released."]
+    | Confirm_resolution ->
+        ["Resolve the unknown invite change?"
+        ; "Verify the original request cannot still complete (logs/server stop)."
+        ; "Then inspect final invites. A refresh alone is not completion proof."
+        ; "Enter: I verified this. Esc: keep changes blocked."]
     | Browsing -> [] in
-  let message = match t.message with None -> [] | Some text -> [text] in
+  let access = match t.write_access with Writable -> []
+    | Pending text | Uncertain text | Read_only text -> [text] in
+  let message = access @ (match t.message with None -> [] | Some text -> [text]) in
   let body = match t.inventory with
     | Loading -> ["Reading invites…"]
     | Failed error -> ["Could not read invites: " ^ error; "r retries the read; machine observation remains available."]
-    | Listed [] -> ["No invites. Press n to create a play link."]
+    | Listed [] -> [if t.write_access = Writable then "No invites. Press n to create a play link." else "No invites."]
     | Listed rows ->
         let available = max 1 (height - List.length heading - List.length form - List.length message - 2) in
         let index = match List.find_index (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) rows with

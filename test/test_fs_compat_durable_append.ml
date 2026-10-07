@@ -591,6 +591,25 @@ let test_private_jsonl_append_cuts_incomplete_tail () =
   cut_then_append ~complete:"" ~fragment:"{\"row\":1}"
 ;;
 
+(* A journal observation row carries no receipt and is written through the
+   stable append. After a crash left a torn last row, that append cuts the
+   fragment and writes, the same as the plain append above. *)
+let test_private_jsonl_stable_append_cuts_incomplete_tail () =
+  let suffix = "{\"row\":3}\n" in
+  let cut_then_append ~complete ~fragment =
+    with_temp_jsonl (complete ^ fragment) @@ fun path ->
+    (match Fs_compat.append_private_jsonl_durable_stable_result path suffix with
+     | Ok _ -> ()
+     | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+    check string
+      (Printf.sprintf "%S is cut and the complete rows kept" fragment)
+      (complete ^ suffix)
+      (Fs_compat.load_file path)
+  in
+  cut_then_append ~complete:"{\"row\":1}\n" ~fragment:"{\"row\":2";
+  cut_then_append ~complete:"" ~fragment:"{\"row\":1}"
+;;
+
 (* An offset-checked caller conditioned its write on the length it saw,
    fragment included, so the fragment is refused and left in place. *)
 let test_private_jsonl_append_at_end_offset_refuses_incomplete_tail () =
@@ -1388,6 +1407,10 @@ let () =
             "private JSONL offset append refuses incomplete tail"
             `Quick
             test_private_jsonl_append_at_end_offset_refuses_incomplete_tail
+        ; test_case
+            "private JSONL stable append cuts incomplete tail"
+            `Quick
+            test_private_jsonl_stable_append_cuts_incomplete_tail
         ; test_case
             "private JSONL append rejects incomplete suffix"
             `Quick

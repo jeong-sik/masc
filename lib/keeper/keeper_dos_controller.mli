@@ -11,12 +11,23 @@ val holder_left :
     its bearer is checked by ({!Play_invite.expired}), only where every request
     must carry a credential. This includes a Worker that took a free controller
     through a direct move, even though Workers are not handoff targets.
+    [Participant_departed]: the current credential generation explicitly left
+    through the play-session endpoint. Its bearer stays valid for reconnect.
     [No_credential]: a name
     that is not a Keeper and has no credential file, only where every request
     must carry a credential (auth enabled, [require_token]). A credential file
     that cannot be read, and a missing one where a request needs no token,
     keep the controller. [transaction] must be the current admission for
     [config]'s workspace; keep it through the resulting controller effect. *)
+
+type participation_error = Credential_changed | Participation_unavailable of string
+val set_participation : config:Workspace.config -> who:string -> token:string ->
+  Play_participation.t -> (unit, participation_error) result
+(** Revalidate the exact current credential and expiry under Auth admission.
+    Departure persists ineligibility and releases this holder while retaining
+    the same admission used by incoming handoffs. Reconnection restores
+    eligibility without taking control. Board publication occurs after release
+    of Auth. The bearer remains valid for explicit reconnect. *)
 
 val before_move :
   config:Workspace.config -> who:string -> (unit, Masc_domain.masc_error) result

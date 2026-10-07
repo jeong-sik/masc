@@ -12,7 +12,7 @@ const script = source.match(/let page_script =\s*\{play\|">([\s\S]*?)<\/script>/
 assert.ok(script, 'the script served by /play exists');
 
 const activity = [{ at: 1, who: 'operator', action: 'pass minsu' }];
-const seat = { name: 'minsu', machine: true, controller: 'minsu', controller_recoverable: false, saves_name: 'game',
+const seat = { name: 'minsu', connected:true, machine: true, controller: 'minsu', controller_recoverable: false, saves_name: 'game',
   participants: ['minsu', 'operator'] };
 const frame = { state: 'changed', change_count: 3, incarnation: 'machine-1',
   screen: { format: 'rgb8', width: 1, height: 1, rgb_base64: '/wAA' }, activity };
@@ -21,7 +21,8 @@ const layout = { saves_name: 'game', buttons: [
 ] };
 const response = (json, status = 200) => ({ status, json: async () => json });
 
-function fixture(reply, { storage = new Map(), hash = '#fixture-token' } = {}) {
+function fixture(reply, { storage = new Map(), hash = '#fixture-token',
+  sessionReply = ({ body }) => response({ ok:true, connected:body.connected }) } = {}) {
   const nodes = new Map();
   function element() {
     return { textContent: '', className: '', value: '', hidden: false,
@@ -73,12 +74,14 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token' } = {}) {
     navigator: { getGamepads: () => [] },
     requestAnimationFrame() {},
     atob,
-    crypto: require('node:crypto').webcrypto,
+    crypto: { getRandomValues: values => require('node:crypto').webcrypto.getRandomValues(values) },
+    TextEncoder,
     performance: { now: () => now },
     setTimeout: fn => timers.push(fn),
     fetch: async (url, init) => {
       const request = { url, authorization: init.headers.Authorization, method: init.method, body: init.body && JSON.parse(init.body) };
       requests.push(request);
+      if (url === '/api/v1/play/session') return sessionReply(request);
       return reply(request);
     },
   });
@@ -536,16 +539,15 @@ test('a departed holder becomes recoverable without any machine activity', async
 test('disconnect releases its own controller before forgetting the credential', async () => {
   const storage = new Map();
   let release;
-  const page = fixture(request => request.method === 'POST'
-    ? new Promise(resolve => { release = () => resolve(response({ ok: true })); })
-    : normalReply(request), { storage });
+  const page = fixture(normalReply, { storage, sessionReply: () =>
+    new Promise(resolve => { release = () => resolve(response({ ok:true, connected:false })); }) });
   await page.settle();
   const disconnected = page.get('leave').handlers.click();
   await page.settle();
   assert.equal(page.get('leave').disabled, true);
   assert.equal(storage.get('masc.play.invite'), 'fixture-token');
   assert.deepEqual(page.requests.filter(request => request.method === 'POST'), [{
-    url: '/api/v1/dos/pass', authorization: 'Bearer fixture-token', method: 'POST', body: {},
+    url: '/api/v1/play/session', authorization: 'Bearer fixture-token', method: 'POST', body: { connected:false },
   }]);
   release();
   await disconnected;
@@ -559,7 +561,7 @@ test('a spectator disconnects without releasing another participant', async () =
     ? response({ ...seat, controller: 'operator' }) : normalReply(request), { storage });
   await page.settle();
   await page.get('leave').handlers.click();
-  assert.equal(page.requests.some(request => request.method === 'POST'), false);
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:false }]);
   assert.equal(storage.size, 0);
 });
 
@@ -569,7 +571,7 @@ for (const [name, release] of [
 ]) {
   test(`a ${name} disconnect retains its credential across reload for recovery`, async () => {
     const storage = new Map();
-    const page = fixture(request => request.method === 'POST' ? release() : normalReply(request), { storage });
+    const page = fixture(normalReply, { storage, sessionReply:release });
     await page.settle();
     await page.get('leave').handlers.click();
     assert.equal(storage.get('masc.play.invite'), 'fixture-token');
@@ -580,8 +582,8 @@ for (const [name, release] of [
     await recovered.settle();
     assert.ok(recovered.requests.every(request => request.authorization === 'Bearer fixture-token'));
     await recovered.get('leave').handlers.click();
-    assert.equal(recovered.requests.some(request => request.method === 'POST'), false);
-    assert.equal(storage.size, name === 'unknown' ? 2 : 0);
+    assert.equal(recovered.requests.some(request => request.method === 'POST'), name !== 'unknown');
+    assert.equal(storage.size, name === 'unknown' ? 3 : 0);
     if (name === 'unknown') {
       assert.match(recovered.get('status').textContent, /운영자에게 초대 회수/);
       assert.equal(recovered.padButton.disabled, true);
@@ -589,7 +591,7 @@ for (const [name, release] of [
   });
 }
 
-test('disconnect keeps the credential when its current seat cannot be read', async () => {
+test('disconnect relies on the atomic server transition even when seat reads fail', async () => {
   const storage = new Map();
   let failSeat = false;
   const page = fixture(request => failSeat && request.url === '/api/v1/play/seat'
@@ -597,8 +599,8 @@ test('disconnect keeps the credential when its current seat cannot be read', asy
   await page.settle();
   failSeat = true;
   await page.get('leave').handlers.click();
-  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
-  assert.equal(page.requests.some(request => request.method === 'POST'), false);
+  assert.equal(storage.get('masc.play.invite'), undefined);
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:false }]);
   assert.equal(page.padButton.disabled, true);
 });
 
@@ -610,11 +612,10 @@ test('disconnect drains an admitted move that acquires control and suppresses qu
     if (request.method === 'POST' && request.url === '/api/v1/dos/type') {
       return new Promise(resolve => { finishMove = () => { holder = 'minsu'; resolve(response({ ok: true })); }; });
     }
-    if (request.method === 'POST' && request.url === '/api/v1/dos/pass') {
-      return new Promise(resolve => { finishRelease = () => { holder = null; resolve(response({ ok: true })); }; });
-    }
     return normalReply(request);
-  }, { storage });
+  }, { storage, sessionReply: () => new Promise(resolve => {
+    finishRelease = () => { holder = null; resolve(response({ ok:true, connected:false })); };
+  }) });
   await page.settle();
   page.get('text').value = '123';
   page.get('send-text').handlers.click();
@@ -629,7 +630,7 @@ test('disconnect drains an admitted move that acquires control and suppresses qu
   finishMove();
   await page.settle();
   assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.url),
-    ['/api/v1/dos/type', '/api/v1/dos/pass']);
+    ['/api/v1/dos/type', '/api/v1/play/session']);
   assert.equal(storage.get('masc.play.invite'), 'fixture-token');
   finishRelease();
   await disconnected;
@@ -637,32 +638,28 @@ test('disconnect drains an admitted move that acquires control and suppresses qu
   assert.equal(storage.size, 0);
 });
 
-test('disconnect uses its owned-seat receipt when a stale live response says no machine', async () => {
+test('a stale live response cannot bypass the atomic disconnect transition', async () => {
   const storage = new Map();
-  let defer = false, completeSeat, completeLive;
+  let defer = false, completeDisconnect, completeLive;
   const page = fixture(request => {
-    if (defer && request.method === 'GET' && request.url === '/api/v1/play/seat') {
-      return new Promise(resolve => { completeSeat = resolve; });
-    }
     if (defer && request.url.startsWith('/api/v1/lane-addons/live')) {
       return new Promise(resolve => { completeLive = resolve; });
     }
     return normalReply(request);
-  }, { storage });
+  }, { storage, sessionReply: () => new Promise(resolve => { completeDisconnect = resolve; }) });
   await page.settle();
   defer = true;
   const poll = page.poll();
   const disconnected = page.get('leave').handlers.click();
   await page.settle();
-  // These responses resume in adjacent microtasks: the fresh seat applies,
-  // then the old live poll resets shared machine state before disconnect runs.
+  // A stale projection cannot turn the explicit disconnect into local-only cleanup.
   defer = false;
-  completeSeat(response(seat));
+  completeDisconnect(response({ ok:true, connected:false }));
   completeLive(response({ state: 'no_machine', activity }));
   await Promise.all([poll, disconnected]);
   assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => ({
     url: request.url, body: request.body,
-  })), [{ url: '/api/v1/dos/pass', body: {} }]);
+  })), [{ url: '/api/v1/play/session', body: { connected:false } }]);
   assert.equal(storage.size, 0);
 });
 
@@ -694,7 +691,7 @@ test('a different invitation requires disconnecting the current holder first', a
   assert.equal(page.requests.some(request => request.method === 'POST'), false);
   await page.get('leave').handlers.click();
   assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.url),
-    ['/api/v1/dos/pass']);
+    ['/api/v1/play/session']);
   assert.equal(storage.size, 0);
   page.navigateFragment('#replacement-token');
   assert.equal(page.reloads, 1);
@@ -706,10 +703,8 @@ test('a different invitation requires disconnecting the current holder first', a
 
 test('an uncertain release cannot be bypassed by opening a different invitation', async () => {
   const storage = new Map();
-  const page = fixture(request => {
-    if (request.method === 'POST') throw new Error('release acknowledgement lost');
-    return normalReply(request);
-  }, { storage });
+  const page = fixture(normalReply, { storage,
+    sessionReply: () => { throw new Error('release acknowledgement lost'); } });
   await page.settle();
   await page.get('leave').handlers.click();
   page.navigateFragment('#replacement-token');
@@ -950,3 +945,140 @@ test('failure to load a retained credential never deletes the unread identity', 
   assert.equal(page.requests.length, 0);
   assert.equal(Map.prototype.get.call(storage, 'masc.play.invite'), 'unread-token');
 });
+
+test('credential removal failure keeps disconnect retryable and game input disabled', async () => {
+  const storage = new Map();
+  let connected = true;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected }) : normalReply(request), { storage,
+    sessionReply: ({ body }) => { connected = body.connected; return response({ ok:true, connected }); } });
+  await page.settle();
+  storage.delete = key => { if (key === 'masc.play.invite') throw new Error('storage revoked'); return Map.prototype.delete.call(storage, key); };
+  await page.get('leave').handlers.click();
+  assert.equal(connected, false);
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  assert.match(page.get('status').textContent, /지우지 못했어요/);
+  assert.equal(page.get('leave').disabled, false);
+  await page.poll();
+  assert.equal(page.padButton.disabled, true);
+  assert.equal(page.requests.some(request => request.url === '/api/v1/play/session' && request.body.connected), false,
+    'ordinary polling cannot reconnect a departed participant');
+  storage.delete = key => Map.prototype.delete.call(storage, key);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.size, 0);
+});
+
+test('opening a departed invitation reconnects explicitly without a game move', async () => {
+  let connected = false;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected, controller:null }) : normalReply(request), {
+    sessionReply: ({ body }) => { connected = body.connected; return response({ ok:true, connected }); }
+  });
+  await page.settle();
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => [request.url, request.body]),
+    [['/api/v1/play/session', { connected:true }]]);
+  assert.equal(page.padButton.disabled, false);
+});
+
+test('an old initial seat response cannot reconnect after a newer document disconnects', async () => {
+  const storage = new Map();
+  let completeSeat;
+  const old = fixture(request => request.url === '/api/v1/play/seat'
+    ? new Promise(resolve => { completeSeat = resolve; }) : normalReply(request), { storage });
+  const current = fixture(normalReply, { storage, hash:'' });
+  await current.settle();
+  await current.get('leave').handlers.click();
+  assert.equal(storage.size, 0);
+  completeSeat(response({ ...seat, connected:false, controller:null }));
+  await old.settle();
+  assert.equal(old.requests.some(request => request.method === 'POST'), false);
+  assert.equal(storage.size, 0);
+});
+
+test('a pending old operation cannot reactivate a departed invitation on reload', async () => {
+  const storage = new Map([['masc.play.invite', 'fixture-token'],
+    ['masc.play.pending', JSON.stringify({ token:'fixture-token', operation:'old' })]]);
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected:false }) : normalReply(request), { storage, hash:'' });
+  await page.settle();
+  assert.equal(page.requests.some(request => request.method === 'POST'), false);
+  assert.equal(page.padButton.disabled, true);
+});
+
+test('missing participation authority is not treated as a connected session', async () => {
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected:undefined }) : normalReply(request));
+  await page.settle();
+  assert.equal(page.padButton.disabled, true);
+  assert.match(page.get('status').textContent, /자리 정보를 읽지 못/);
+});
+
+for (const [count, remaining] of [[0, '123'], [1, '23'], [3, '']]) {
+  test(`a DOS text receipt for ${count} keys retains exactly the unpressed suffix`, async () => {
+    const page = fixture(request => request.url === '/api/v1/dos/type'
+      ? response({ ok:true, data:{ keys_pressed:count } }) : normalReply(request));
+    await page.settle();
+    page.get('text').value = '123';
+    page.get('send-text').handlers.click();
+    await page.settle();
+    assert.equal(page.get('text').value, remaining);
+    assert.equal(page.requests.filter(request => request.method === 'POST').length, 1, 'no automatic suffix replay');
+    if (remaining) assert.match(page.get('status').textContent, /일부만 입력/);
+  });
+}
+
+test('a partial text receipt preserves a draft edited while the request ran', async () => {
+  let finish;
+  const page = fixture(request => request.url === '/api/v1/dos/type'
+    ? new Promise(resolve => { finish = () => resolve(response({ ok:true, data:{ keys_pressed:1 } })); }) : normalReply(request));
+  await page.settle();
+  page.get('text').value = '123';
+  page.get('send-text').handlers.click();
+  await page.settle();
+  page.get('text').value = '456';
+  finish();
+  await page.settle();
+  assert.equal(page.get('text').value, '456');
+});
+
+for (const count of [undefined, -1, 4, 0.5]) {
+  test(`an invalid text count ${count} keeps the entire draft with an explanation`, async () => {
+    const page = fixture(request => request.url === '/api/v1/dos/type'
+      ? response({ ok:true, data:{ keys_pressed:count } }) : normalReply(request));
+    await page.settle();
+    page.get('text').value = '123';
+    page.get('send-text').handlers.click();
+    await page.settle();
+    assert.equal(page.get('text').value, '123');
+    assert.match(page.get('status').textContent, /글자 수를 확인하지 못/);
+  });
+}
+
+
+test('a reopened departed invitation reconnects after a transient initial seat failure', async () => {
+  let reads = 0, connected = false;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? ++reads === 1 ? response({}, 503) : response({ ...seat, connected, controller:null }) : normalReply(request), {
+    sessionReply: ({ body }) => { connected = body.connected; return response({ ok:true, connected }); }
+  });
+  await page.settle();
+  assert.equal(page.padButton.disabled, true);
+  await page.poll();
+  assert.equal(page.padButton.disabled, false);
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:true }]);
+  await page.poll();
+  assert.equal(page.requests.filter(request => request.method === 'POST').length, 1);
+});
+
+for (const [count, remaining] of [[1, '가x'], [3, 'x']]) {
+  test(`a ${count}-byte text acknowledgement preserves Unicode boundaries`, async () => {
+    const page = fixture(request => request.url === '/api/v1/dos/type'
+      ? response({ ok:true, data:{ keys_pressed:count } }) : normalReply(request));
+    await page.settle();
+    page.get('text').value = '가x';
+    page.get('send-text').handlers.click();
+    await page.settle();
+    assert.equal(page.get('text').value, remaining);
+    if (count === 1) assert.match(page.get('status').textContent, /글자 중간/);
+  });
+}

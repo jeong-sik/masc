@@ -954,12 +954,8 @@ def tab_until(
 ) -> bytes:
     """Press Tab until the screen shows [needle], or give up after a lap.
 
-    Name the surface the walk is going to, not one on the way. The ring is
-    not fixed: Masc_tui_surface_navigation.is_surface_active leaves Approvals out of it
-    while nothing is pending, so a walk that stopped there first burned
-    every press on a screen that did not exist. Six scenarios used it as a
-    waypoint to Board, and a seventh fabricated a pending tool approval in
-    its fixtures to keep the waypoint alive.
+    Name the surface the walk is going to, not one on the way: a stop on
+    the way couples the scenario to the ring's order.
     """
     for _ in range(TAB_CYCLE_BOUND):
         read_available(master_fd, output)

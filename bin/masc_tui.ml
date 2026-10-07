@@ -6124,12 +6124,12 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
    call this; so does board compose when its handler declines the key, so
    "Tab falls through" stays true while composing. *)
 let cycle_surface state ~mailbox ~backwards =
-  let ring = Masc_tui_surface_navigation.visible_surface_ring state in
+  let ring = Masc_tui_types.surface_ring in
   let count = List.length ring in
   if count > 0 then begin
     let step = if backwards then count - 1 else 1 in
     let index =
-      (Masc_tui_surface_navigation.visible_surface_ring_index state state.view + step) mod count
+      (Masc_tui_surface_navigation.surface_ring_index state state.view + step) mod count
     in
     goto_surface state ~mailbox (fst (List.nth ring index))
   end

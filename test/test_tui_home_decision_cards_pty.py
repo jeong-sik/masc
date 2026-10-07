@@ -412,7 +412,10 @@ def planning_backlog_failure_recovers(executable):
         _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Open tasks: (nothing here is a reading)")
         failed = _keyboard_harness.screen_text(bytes(output))
         assert b"links not read" not in failed, failed
-        assert b"Open tasks  (none)" not in failed, failed
+        # The product draws the empty-reading state only in the colon form
+        # (the same form the positive needle above waits for), so the
+        # negative must read that form or it can never fail.
+        assert b"Open tasks: (none)" not in failed, failed
         seed_operator_task(base)
         # An auxiliary archive error must not impersonate a primary failure.
         (Path(base) / ".masc" / "tasks-archive.json").write_text("{unreadable archive")

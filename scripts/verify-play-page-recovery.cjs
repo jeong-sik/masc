@@ -18,11 +18,15 @@ async function main() {
     assert.ok(found, `page_${name}`);
     return found[1];
   });
-  const html = parts.join('fixture-nonce');
+  const note = source.match(/let agent_note =([\s\S]*?)let page_script =/)[1];
+  const fragments = [...note.matchAll(/\{play\|([\s\S]*?)\|play\}/g)].map(match => match[1]);
+  assert.equal(fragments.length, 3);
+  const agentNote = fragments.join('/play/agent.md');
+  const html = parts[0] + 'fixture-nonce' + parts[1] + agentNote + 'fixture-nonce' + parts[2];
   await mkdir(output, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   const requests = [], errors = [];
-  let seatReads = 0, frameReads = 0, passed = false, ejected = false, padPressed = false, invited = false;
+  let seatReads = 0, frameReads = 0, passed = false, ejected = false, padPressed = false, invited = false, released = false;
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     page.on('pageerror', error => errors.push(error.message));
@@ -35,7 +39,8 @@ async function main() {
       if (url.pathname === '/api/v1/play/seat') {
         seatReads += 1;
         if (seatReads <= 2) return route.fulfill({ status: 503, json: { error: 'fixture-unavailable' } });
-        json = { name: 'minsu', machine: !ejected, controller: ejected ? null : passed ? 'operator' : 'minsu',
+        json = { name: 'minsu', machine: !ejected, controller: ejected || released ? null : passed ? 'operator' : 'minsu',
+          controller_recoverable: false,
           saves_name: ejected ? null : 'game', participants: invited ? ['minsu', 'operator', 'newplayer'] : ['minsu', 'operator'] };
       } else if (url.pathname === '/api/v1/play/pad') {
         if (request.method() === 'POST') {
@@ -46,8 +51,13 @@ async function main() {
           ? { saves_name: 'game', buttons: [{ button: 'BTN_SOUTH', label: '결정', keys: ['return'] }] }
           : { ok: true };
       } else if (url.pathname === '/api/v1/dos/pass') {
-        assert.deepEqual(request.postDataJSON(), { to: 'operator' });
-        passed = true;
+        if (request.postDataJSON().to === 'operator') {
+          assert.deepEqual(request.postDataJSON(), { to: 'operator' });
+          passed = true;
+        } else {
+          assert.deepEqual(request.postDataJSON(), {});
+          released = true;
+        }
         json = { ok: true };
       } else if (url.pathname === '/api/v1/lane-addons/live') {
         frameReads += 1;
@@ -71,6 +81,10 @@ async function main() {
     assert.ok(seatReads >= 3);
     assert.equal(new URL(page.url()).hash, '');
     await page.screenshot({ path: resolve(output, 'play-recovered-mobile.png'), fullPage: true });
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례'));
+    await page.waitForFunction(() => document.getElementById('screen').width === 1);
+    assert.deepEqual(await pixel(), [255, 0, 0, 255]);
     await page.locator('#pad [data-button="BTN_SOUTH"]').click();
     await page.waitForFunction(() => document.getElementById('status').textContent === '');
     await page.locator('#pass-to').focus();
@@ -81,18 +95,30 @@ async function main() {
     await page.locator('#pass-to').selectOption('operator');
     await page.locator('#pass').click();
     await page.waitForFunction(() => document.getElementById('turn').textContent === 'operator 님 차례예요');
+    assert.equal(await page.locator('#send-text').isDisabled(), true);
     await page.screenshot({ path: resolve(output, 'play-passed-mobile.png'), fullPage: true });
     ejected = true;
     await page.waitForFunction(() => document.getElementById('status').textContent.includes('켜진 게임이 없어요'));
     assert.deepEqual(await pixel(), [0, 0, 0, 0]);
     await page.screenshot({ path: resolve(output, 'play-ejected-mobile.png'), fullPage: true });
+    await page.locator('#leave').click();
+    await page.waitForFunction(() => sessionStorage.getItem('masc.play.invite') === null);
+    ejected = false;
+    passed = false;
+    await page.goto('http://play.fixture/play#fixture-token');
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례'));
+    await page.locator('#leave').click();
+    await page.waitForFunction(() => sessionStorage.getItem('masc.play.invite') === null);
+    assert.equal(released, true, 'disconnect must release its controller before forgetting the credential');
     assert.deepEqual(errors, []);
     assert.equal(padPressed, true);
     const receipt = { scope: 'Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.',
       source_sha256: createHash('sha256').update(source).digest('hex'),
       browser_version: browser.version(), seat_reads: seatReads, frame_reads: frameReads,
       checks: ['seat recovers without machine activity', 'failed frame is fetched again',
-        'pad click sends input', 'reopening focused selector discovers idle invite', 'pass updates controller', 'eject clears pixels'],
+        'same-tab reload reconnects', 'pad click sends input', 'reopening focused selector discovers idle invite',
+        'pass updates controller and disables input', 'eject clears pixels', 'disconnect removes tab credential',
+        'controller disconnect releases before forgetting the credential'],
       requests, errors };
     await writeFile(resolve(output, 'play-browser.json'), JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify({ result: 'PASS', output, checks: receipt.checks }));

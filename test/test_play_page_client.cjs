@@ -140,10 +140,11 @@ test('a failed seat read retries without a new move and restores playable contro
   });
   await page.settle();
   assert.match(page.get('status').textContent, /자리/);
-  await page.poll();
-  assert.equal(seatReads, 2);
+  assert.equal(seatReads, 2, 'the first observed activity immediately retries the initial failed read');
   assert.equal(page.padButton.disabled, true);
-  await page.poll();
+  await page.poll(300);
+  assert.equal(seatReads, 2, 'unchanged activity does not bypass the recovery cadence');
+  await page.poll(4700);
   assert.equal(seatReads, 3, 'retry the same activity after the seat recovers');
   assert.match(page.get('turn').textContent, /내 차례/);
   assert.equal(page.get('status').textContent, '');
@@ -1192,15 +1193,14 @@ for (const count of [undefined, -1, 4, 0.5]) {
 }
 
 
-test('a reopened departed invitation reconnects after a transient initial seat failure', async () => {
+test('first observed activity reconnects a departed invitation after a transient initial seat failure', async () => {
   let reads = 0, connected = false;
   const page = fixture(request => request.url === '/api/v1/play/seat'
     ? ++reads === 1 ? response({}, 503) : response({ ...seat, connected, controller:null }) : normalReply(request), {
     sessionReply: ({ body }) => { connected = body.connected; return response({ ok:true, connected }); }
   });
   await page.settle();
-  assert.equal(page.padButton.disabled, true);
-  await page.poll();
+  assert.equal(reads, 3, 'initial failure, immediate activity read, and connected confirmation');
   assert.equal(page.padButton.disabled, false);
   assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:true }]);
   await page.poll();
@@ -1219,3 +1219,97 @@ for (const [count, remaining] of [[1, '가x'], [3, 'x']]) {
     if (count === 1) assert.match(page.get('status').textContent, /글자 중간/);
   });
 }
+
+for (const [name, receipt, remaining] of [
+  ['successful', response({ ok:true, data:{ keys_pressed:1 } }), '23'],
+  ['refused', response({ ok:false, message:'try later' }, 409), '123'],
+]) {
+  test(`disconnect drains a ${name} write without waiting for its stalled seat projection`, async () => {
+    const storage = new Map();
+    let afterWrite = false, finishProjection;
+    const page = fixture(request => {
+      if (request.url === '/api/v1/dos/type') { afterWrite = true; return receipt; }
+      if (afterWrite && request.url === '/api/v1/play/seat')
+        return new Promise(resolve => { finishProjection = resolve; });
+      return normalReply(request);
+    }, { storage });
+    await page.settle();
+    page.get('text').value = '123';
+    page.get('send-text').handlers.click();
+    await page.settle();
+    assert.equal(typeof finishProjection, 'function', 'post-write read really is pending');
+    assert.equal(storage.has('masc.play.pending'), false, 'write has a terminal receipt');
+    assert.equal(page.get('text').value, remaining, 'the text receipt does not wait for projection');
+    let disconnected = false;
+    page.get('leave').handlers.click().then(() => { disconnected = true; });
+    await page.settle();
+    assert.equal(disconnected, true, 'no read response is needed to finish departure');
+    assert.equal(storage.size, 0);
+    assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.url),
+      ['/api/v1/dos/type', '/api/v1/play/session']);
+    finishProjection(response(seat));
+    await page.settle();
+    assert.match(page.get('turn').textContent, /연결을 끊었어요/);
+    assert.equal(page.padButton.disabled, true, 'late projection cannot revive ended controls');
+    assert.equal(storage.size, 0);
+  });
+}
+
+test('new activity updates controller ownership immediately inside the recovery interval', async () => {
+  let controller = 'operator', version = 1;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, controller }) : request.url.includes('/live?')
+      ? response({ ...frame, activity:[{ at:version, who:controller, action:'handoff' }] }) : normalReply(request));
+  await page.settle();
+  const reads = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
+  const before = reads();
+  controller = 'minsu'; version += 1;
+  await page.poll(300);
+  assert.equal(reads(), before + 1);
+  assert.equal(page.padButton.disabled, false, 'new owner becomes playable before five seconds');
+  controller = 'operator'; version += 1;
+  await page.poll(300);
+  assert.equal(reads(), before + 2);
+  assert.equal(page.padButton.disabled, true, 'previous owner is disabled on the next changed frame');
+  await page.poll(4999);
+  assert.equal(reads(), before + 2, 'unchanged observer recovery keeps its cadence');
+  await page.poll(1);
+  assert.equal(reads(), before + 3, 'idle departure discovery still runs after five seconds');
+});
+
+test('a failed activity-triggered read retries unchanged activity only at the recovery cadence', async () => {
+  let version = 1, fail = false;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? fail ? response({}, 503) : response(seat) : request.url.includes('/live?')
+      ? response({ ...frame, activity:[{ at:version, who:'operator', action:'handoff' }] }) : normalReply(request));
+  await page.settle();
+  const reads = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
+  const before = reads();
+  fail = true; version += 1;
+  await page.poll(300);
+  assert.equal(reads(), before + 1);
+  assert.equal(page.padButton.disabled, true);
+  fail = false;
+  await page.poll(4999);
+  assert.equal(reads(), before + 1, 'failed acknowledgement is not a new activity edge');
+  await page.poll(1);
+  assert.equal(reads(), before + 2);
+  assert.equal(page.padButton.disabled, false);
+});
+
+test('changed activity does not accelerate refused explicit reconnect writes', async () => {
+  let version = 1, attempts = 0;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected:false, controller:null }) : request.url.includes('/live?')
+      ? response({ ...frame, activity:[{ at:version, who:'operator', action:'move' }] }) : normalReply(request), {
+    sessionReply: () => { attempts += 1; return response({ ok:false, error:'unavailable' }, 503); },
+  });
+  await page.settle();
+  assert.equal(attempts, 1, 'first activity does not immediately retry the refused reconnect');
+  version += 1;
+  await page.poll(300);
+  assert.equal(attempts, 1);
+  version += 1;
+  await page.poll(4700);
+  assert.equal(attempts, 2, 'new authority may retry once its independent reconnect cadence is due');
+});

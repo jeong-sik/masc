@@ -1494,12 +1494,6 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
 
 ;;
 
-let keeper_message_visible_messages ?messages (state : state) ~keeper_name =
-  keeper_message_visible_timeline ?messages state ~keeper_name
-  |> List.map fst
-
-;;
-
 (* Which piece of its turn's bracket a row draws.
 
    A lone row of speech draws nothing. One thing said is not a hierarchy, and

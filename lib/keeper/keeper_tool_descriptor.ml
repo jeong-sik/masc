@@ -3069,6 +3069,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "candle_catalog" "keeper_candle_catalog" ~readonly:true
   ; masc_misc_descriptor "candle_purchase" "keeper_candle_purchase" ~readonly:false
   ; masc_misc_descriptor "candle_equip" "keeper_candle_equip" ~readonly:false
+  ; masc_misc_descriptor "candle_gift" "keeper_candle_gift" ~readonly:false
   (* MSX lane (RFC-0439 §3.5): the shared machine is one piece of state, so
      none of these opts into concurrent batches. *)
   ; masc_misc_descriptor "msx_load" "masc_msx_load" ~readonly:false

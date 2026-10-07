@@ -113,12 +113,7 @@ let advice =
 
 let address_advice card =
   let local = match Uri.host (Uri.of_string card.link) with
-    | Some host ->
-        String.equal (String.lowercase_ascii host) "localhost"
-        || (match Ipaddr.of_string host with
-            | Ok (Ipaddr.V4 address) -> Ipaddr.V4.Prefix.mem address Ipaddr.V4.Prefix.loopback
-            | Ok (Ipaddr.V6 address) -> Ipaddr.V6.compare address Ipaddr.V6.localhost = 0
-            | Error _ -> false)
+    | Some host -> Masc_network_defaults.is_loopback_host host
     | None -> false
   in
   if local then

@@ -1245,6 +1245,20 @@ val read_private_jsonl_durable_locked_with_io_for_testing :
   after:Private_jsonl_cursor.t option ->
   (private_jsonl_snapshot, private_jsonl_transaction_error) result
 
+(** Append complete rows under the canonical in-process mutex and stable
+    sibling lock used by {!recover_private_jsonl_durable_locked_result}.
+    A torn final row is truncated and fsynced under that same lock before the
+    append; complete malformed rows are never removed. Existing-file appends
+    read only the final byte unless recovery is needed. Descriptor settlement
+    failures retain the committed cursor in the typed error. A contended
+    cross-process lock returns [Stable_lock_contended] without changing data.
+    All writers of a store using this operation must use the stable protocol;
+    data-inode locking and cached JSONL appends do not share its authority. *)
+val append_private_jsonl_durable_stable_result :
+  string ->
+  string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
 (** Append complete newline-terminated JSONL rows iff [expected] still names
     the exact store identity and end offset observed by the caller. All
     participants must use this stable-lock transaction family for [path]; the

@@ -65,6 +65,10 @@ receipt before replacing the current snapshot. If journal finalization fails,
 the receipt retains the reason and the snapshot retains the complete original.
 Later writers must finish that journal entry before replacing this evidence.
 Search reports the pending archive explicitly until a writer recovers it.
+All journal appenders and interrupted-tail recovery share a stable lock, so
+recovery cannot truncate another process's live append. If a snapshot cannot
+be decoded and is quarantined, its pending removal receipt moves aside first;
+both files retain their original bytes while subsequent writes can start fresh.
 This also covers explicit retractions and supersessions. Older missing journal
 entries are not reconstructed; absence is still not proof that a fact never
 existed. Entries without reason-bearing removals remain best-effort observations.

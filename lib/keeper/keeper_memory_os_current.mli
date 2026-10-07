@@ -615,8 +615,12 @@ val to_json : t -> Yojson.Safe.t
     refused with [rejection], to a fresh [.rejected-<now>] path and journal the
     quarantine -- exactly what a writer would do on its next commit, done once
     at boot under the same locks after the operator accepted it (RFC-0420).
-    [Ok] carries the path the bytes went to. [Error] names a snapshot that
-    could not be moved; it stays in place. *)
+    A pending removal receipt moves aside first, preserving its original
+    bytes even when it cannot be decoded. This prevents an active receipt
+    from requiring the quarantined snapshot's hash on the next write.
+    [Ok] carries the snapshot's rejected path. [Error] leaves the snapshot
+    in place and names any receipt that was already moved; that rejected
+    snapshot still refuses the next boot. *)
 val move_aside_for_keepers_dir
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> keepers_dir:string

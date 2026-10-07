@@ -744,7 +744,7 @@ let check_ordinary_removals_preserve_archive_until_journal_recovery ~torn_tail (
     Fs_compat.invalidate_cached_writer journal_path;
     Sys.remove journal_path;
     Unix.mkdir journal_path 0o700;
-    let committed = remove ~keepers_dir ~target ~reason in
+    let committed : Current.t = remove ~keepers_dir ~target ~reason in
     check int (label ^ " snapshot committed") 2 committed.revision;
     let read () =
       Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"

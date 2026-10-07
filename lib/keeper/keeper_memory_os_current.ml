@@ -1323,6 +1323,22 @@ let journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present =
     ]
 ;;
 
+(* Every journal writer and receipt recovery uses the canonical path mutex
+   and stable sibling lock. A data-file lock can be released by an unrelated
+   reader closing the journal; the sibling lock remains held through append. *)
+let append_journal_line_strict ~keepers_dir ~keeper_id json =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let suffix = Yojson.Safe.to_string json ^ "\n" in
+  match Fs_compat.append_private_jsonl_durable_stable_result path suffix with
+  | Ok _ -> Ok ()
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "memory journal durable append failed path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_transaction_error_to_string error))
+;;
+
 (* Lines without actual reason-bearing removals are observations: their
    snapshot already reached disk, so append failure warns. Destructive
    removals below use [append_journal_line_strict] and a prepared receipt so
@@ -1330,7 +1346,11 @@ let journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present =
    Cancellation is never absorbed. *)
 let append_journal_line ~keepers_dir ~keeper_id json =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  try Fs_compat.append_jsonl path json with
+  try
+    match append_journal_line_strict ~keepers_dir ~keeper_id json with
+    | Ok () -> ()
+    | Error detail -> Log.Keeper.warn "%s" detail
+  with
   | Eio.Cancel.Cancelled _ as error -> raise error
   | exn ->
     Log.Keeper.warn
@@ -1726,34 +1746,6 @@ let remove_retraction_plan_receipt ~keepers_dir ~keeper_id =
          (Printexc.to_string exn))
 ;;
 
-let append_journal_line_strict ~keepers_dir ~keeper_id json =
-  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let suffix = Yojson.Safe.to_string json ^ "\n" in
-  match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
-  | Fs_compat.Private_file_succeeded () -> Ok ()
-  | Fs_compat.Private_file_succeeded_with_cleanup_failure
-      { cleanup_failure; _ } ->
-    Error
-      (Printf.sprintf
-         "memory journal append committed but descriptor cleanup failed path=%s: %s"
-         path
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
-  | Fs_compat.Private_file_failed error ->
-    Error
-      (Printf.sprintf
-         "memory journal durable append failed path=%s: %s"
-         path
-         (Fs_compat.private_jsonl_append_error_to_string error))
-  | Fs_compat.Private_file_failed_with_cleanup_failure
-      { error; cleanup_failure } ->
-    Error
-      (Printf.sprintf
-         "memory journal durable append failed path=%s: %s; descriptor cleanup also failed: %s"
-         path
-         (Fs_compat.private_jsonl_append_error_to_string error)
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
-;;
-
 let append_removal_journal_and_clear_receipt
       ~keepers_dir ~keeper_id ~snapshot receipt
   =
@@ -2035,6 +2027,61 @@ type 'error equal_facts =
   | Keep_stored
   | Write_revision of 'error retraction_plan option
 
+(* Caller holds the aggregate and snapshot locks. Both boot and ordinary
+   writers must move the removal receipt with an undecodable snapshot. *)
+let quarantine_snapshot_and_receipt ~keepers_dir ~keeper_id ~snapshot_path ~now ~rejection =
+  let move path =
+    let rejected_path = unused_rejected_path ~snapshot_path:path ~now in
+    match Fs_compat.rename_noreplace path rejected_path with
+    | () -> Ok rejected_path
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception exn ->
+      Error
+        (Printf.sprintf
+           "current Memory OS file could not be moved aside path=%s rejected_path=%s: %s (rejected: %s)"
+           path
+           rejected_path
+           (Printexc.to_string exn)
+           rejection)
+  in
+  (* A receipt and its target snapshot carry one pending removal. Move
+     the receipt first: interruption then leaves the rejected snapshot
+     to refuse boot again, instead of an active receipt whose snapshot
+     has disappeared. Preserve raw bytes; a rejected snapshot cannot
+     prove either receipt hash, so it cannot authorize reconciliation. *)
+  let receipt_path = retraction_plan_receipt_path ~keepers_dir ~keeper_id in
+  let* moved_receipt =
+    match Fs_compat.exact_path_kind ~follow:false receipt_path with
+    | Fs_compat.Exact_missing -> Ok None
+    | Fs_compat.Exact_kind _ ->
+      let+ rejected_receipt_path = move receipt_path in
+      Log.Keeper.warn
+        ~keeper_name:keeper_id
+        "memory removal receipt quarantined path=%s rejected_path=%s"
+        receipt_path
+        rejected_receipt_path;
+      Some rejected_receipt_path
+    | Fs_compat.Exact_unknown ->
+      Error
+        (Printf.sprintf
+           "current Memory OS removal receipt could not be inspected path=%s; snapshot was not moved"
+           receipt_path)
+  in
+  match move snapshot_path with
+  | Ok rejected_path ->
+    append_snapshot_quarantine ~keepers_dir ~keeper_id ~now ~rejection ~rejected_path;
+    Ok rejected_path
+  | Error detail ->
+    Error
+      (match moved_receipt with
+       | None -> detail
+       | Some rejected_receipt_path ->
+         Printf.sprintf
+           "%s; removal receipt is preserved at %s and the rejected snapshot stays in place"
+           detail
+           rejected_receipt_path)
+;;
+
 let update_locked_with_output
       ?on_committed
       ?clock
@@ -2118,32 +2165,17 @@ let update_locked_with_output
                    The bytes move aside instead of being overwritten by the
                    commit below, because recovering by destroying the only copy
                    of the rejected state is not recovery. *)
-                let rejected_path = unused_rejected_path ~snapshot_path ~now in
-                (match Fs_compat.rename snapshot_path rejected_path with
-                 | () ->
-                   append_snapshot_quarantine
-                     ~keepers_dir
-                     ~keeper_id
-                     ~now
-                     ~rejection
-                     ~rejected_path;
-                   Log.Keeper.warn
-                     ~keeper_name:keeper_id
-                     "memory os snapshot quarantined rejected_path=%s rejection=%s"
-                     rejected_path
-                     rejection;
-                   Ok (None, None)
-                 | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-                 | exception exn ->
-                   (* Failing here keeps the wedge, which is the lesser harm:
-                      the alternative overwrites the rejected bytes. *)
-                   Error
-                     (store_error
-                        (Printf.sprintf
-                           "current Memory OS snapshot could not be moved aside path=%s: %s (rejected: %s)"
-                           snapshot_path
-                           (Printexc.to_string exn)
-                           rejection))))
+                let* rejected_path =
+                  quarantine_snapshot_and_receipt
+                    ~keepers_dir ~keeper_id ~snapshot_path ~now ~rejection
+                  |> Result.map_error store_error
+                in
+                Log.Keeper.warn
+                  ~keeper_name:keeper_id
+                  "memory os snapshot quarantined rejected_path=%s rejection=%s"
+                  rejected_path
+                  rejection;
+                Ok (None, None))
          in
          let snapshot =
            match previous, snapshot_content with
@@ -3263,17 +3295,6 @@ let move_aside_for_keepers_dir ?clock ~keepers_dir ~keeper_id ~now ~rejection ()
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
   Keeper_memory_os_aggregate_lock.with_lock ?clock ~keepers_dir ~keeper_id (fun () ->
     File_lock_eio.with_lock ?clock snapshot_path (fun () ->
-      let rejected_path = unused_rejected_path ~snapshot_path ~now in
-      match Fs_compat.rename snapshot_path rejected_path with
-      | () ->
-        append_snapshot_quarantine ~keepers_dir ~keeper_id ~now ~rejection ~rejected_path;
-        Ok rejected_path
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn ->
-        Error
-          (Printf.sprintf
-             "current Memory OS snapshot could not be moved aside path=%s: %s (rejected: %s)"
-             snapshot_path
-             (Printexc.to_string exn)
-             rejection)))
+      quarantine_snapshot_and_receipt
+        ~keepers_dir ~keeper_id ~snapshot_path ~now ~rejection))
 ;;

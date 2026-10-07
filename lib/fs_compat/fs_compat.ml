@@ -3061,11 +3061,33 @@ let private_jsonl_last_complete_row_length bytes =
   | None -> 0
 ;;
 
-(* Process-start or verified prepared-transaction recovery: a torn tail left
-   by a mid-append crash is truncated to the last complete row under the stable
-   lock, then reading resumes. General reads keep hard-failing on
-   [Incomplete_transaction_tail];
-   only recovery callers may opt into truncation. *)
+(* Called only under the stable sibling lock, with a writable descriptor.
+   Recovery reads the complete store; ordinary appends enter here only after
+   detecting an incomplete final row. General readers never truncate. *)
+let private_jsonl_recover_snapshot fd =
+  let ( let* ) = Result.bind in
+  let capture operation f =
+    private_jsonl_capture operation f
+    |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+  in
+  let* stats = capture Inspect_transaction_data (fun () -> Unix.fstat fd) in
+  let* actual = private_jsonl_cursor_of_stats stats in
+  match private_jsonl_validate_complete_tail fd stats.Unix.st_size with
+  | Ok () ->
+    private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size
+    |> Result.map (fun bytes -> { bytes; cursor = actual })
+  | Error (Incomplete_transaction_tail { end_offset }) ->
+    let* bytes = private_jsonl_read_exact fd ~from:0 ~end_offset in
+    let complete_length = private_jsonl_last_complete_row_length bytes in
+    let* () = capture Truncate_transaction_data (fun () ->
+      Unix.ftruncate fd complete_length) in
+    let* () = capture Sync_transaction_data (fun () -> Unix.fsync fd) in
+    let* truncated_stats = capture Inspect_transaction_data (fun () -> Unix.fstat fd) in
+    let* cursor = private_jsonl_cursor_of_stats truncated_stats in
+    Ok { bytes = String.sub bytes 0 complete_length; cursor }
+  | Error _ as error -> error
+;;
+
 let recover_private_jsonl_durable_locked_with_io ~io path =
   let success snapshot = Snapshot_succeeded snapshot in
   with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir:_ ~path ->
@@ -3078,65 +3100,7 @@ let recover_private_jsonl_durable_locked_with_io ~io path =
       ~close_fd:io.close_fd
       ~success
       fd
-      (fun () ->
-         match private_jsonl_capture Inspect_transaction_data (fun () -> Unix.fstat fd) with
-         | Error failure -> Error (Private_jsonl_operation_failed failure)
-         | Ok stats ->
-           (match private_jsonl_cursor_of_stats stats with
-            | Error _ as error -> error
-            | Ok actual ->
-              (match private_jsonl_validate_complete_tail fd stats.Unix.st_size with
-               | Ok () ->
-                 private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size
-                 |> Result.map (fun bytes -> { bytes; cursor = actual })
-               | Error (Incomplete_transaction_tail { end_offset }) ->
-                 (match private_jsonl_read_exact fd ~from:0 ~end_offset with
-                  | Error _ as error -> error
-                  | Ok bytes ->
-                    let complete_length = private_jsonl_last_complete_row_length bytes in
-                    (match
-                       private_jsonl_capture Truncate_transaction_data (fun () ->
-                         Unix.ftruncate fd complete_length)
-                     with
-                     | Error failure -> Error (Private_jsonl_operation_failed failure)
-                     | Ok () ->
-                       (match
-                          private_jsonl_capture Sync_transaction_data (fun () ->
-                            Unix.fsync fd)
-                        with
-                        | Error failure -> Error (Private_jsonl_operation_failed failure)
-                        | Ok () ->
-                          (match
-                             private_jsonl_capture Inspect_transaction_data (fun () ->
-                               Unix.fstat fd)
-                           with
-                           | Error failure ->
-                             Error (Private_jsonl_operation_failed failure)
-                           | Ok truncated_stats ->
-                             (match private_jsonl_cursor_of_stats truncated_stats with
-                              | Error _ as error -> error
-                              | Ok cursor ->
-                                Ok
-                                  { bytes = String.sub bytes 0 complete_length
-                                  ; cursor
-                                  })))))
-               (* Recovery is scoped to [Incomplete_transaction_tail]; every
-                  other typed failure propagates exactly as the general read
-                  path surfaces it. *)
-               | Error
-                   ( Stable_lock_contended _
-                   | Unexpected_stable_lock_permissions _
-                   | Invalid_stable_lock_state _
-                   | Cursor_mismatch _
-                   | Unexpected_transaction_file_kind _
-                   | Ambiguous_transaction_file_identity _
-                   | Transaction_path_binding_changed _
-                   | Invalid_transaction_suffix
-                   | Private_jsonl_operation_failed _
-                   | Rewrite_stage_failed _
-                   | Rewrite_published_durability_unknown _
-                   | Transaction_settlement_failed _
-                   | Transaction_append_failed _ ) as error -> error)))
+      (fun () -> private_jsonl_recover_snapshot fd)
 ;;
 
 let recover_private_jsonl_durable_locked_result path =
@@ -3268,91 +3232,79 @@ let private_jsonl_replace_locked ~dir path content =
                         { cursor = Some cursor; failure }))))))
 ;;
 
-let append_private_jsonl_durable_locked_at_cursor_with_io ~io path ~expected suffix =
+let append_private_jsonl_durable_stable_with_io ~io path ~expected suffix =
   if String.equal suffix ""
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_transaction_suffix
   else
+    let ( let* ) = Result.bind in
+    let check_cursor actual =
+      match expected with
+      | Some expected when not (Private_jsonl_cursor.equal expected actual) ->
+        Error (Cursor_mismatch { expected; actual })
+      | None | Some _ -> Ok ()
+    in
     let success cursor = Cursor_succeeded cursor in
     with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir ~path ->
-    match
+    let* existing =
       private_jsonl_open_existing
-        ~close_fd:io.close_fd
-        path
-        [ Unix.O_RDWR; Unix.O_APPEND ]
-    with
-    | Error _ as error -> error
-    | Ok None ->
-      let actual = Private_jsonl_cursor.Missing in
-      if not (Private_jsonl_cursor.equal expected actual)
-      then Error (Cursor_mismatch { expected; actual })
-      else private_jsonl_replace_locked ~dir path suffix
-    | Ok (Some fd) ->
+        ~close_fd:io.close_fd path [ Unix.O_RDWR; Unix.O_APPEND ]
+    in
+    match existing with
+    | None ->
+      let* () = check_cursor Private_jsonl_cursor.Missing in
+      private_jsonl_replace_locked ~dir path suffix
+    | Some fd ->
       private_jsonl_with_fd
         ~close_operation:Close_transaction_data
         ~close_fd:io.close_fd
         ~success
         fd
         (fun () ->
-           match private_jsonl_capture Inspect_transaction_data (fun () -> Unix.fstat fd)
-           with
-           | Error failure -> Error (Private_jsonl_operation_failed failure)
-           | Ok stats ->
-             (match private_jsonl_cursor_of_stats stats with
-              | Error _ as error -> error
-              | Ok actual ->
-                if not (Private_jsonl_cursor.equal expected actual)
-                then Error (Cursor_mismatch { expected; actual })
-                else (
-                  match private_jsonl_validate_complete_tail fd stats.Unix.st_size with
-                  | Error _ as error -> error
-                  | Ok () ->
-                    (match private_jsonl_capture Set_transaction_data_permissions (fun () ->
-                       Unix.fchmod fd 0o600)
-                     with
-                     | Error failure ->
-                       Error (Private_jsonl_operation_failed failure)
-                     | Ok () ->
-                       (* See POSIX lseek: O_APPEND owns writes; this resets reads. *)
-                       ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
-                       (match
-                          append_fd_durable
-                            ~io:durable_append_unix_io
-                            ~fd
-                            ~original_length:stats.Unix.st_size
-                            suffix
-                        with
-                        | Error append_error ->
-                          Error (Transaction_append_failed append_error)
-                        | Ok () ->
-                          (match private_jsonl_capture Inspect_transaction_data (fun () ->
-                             Unix.fstat fd)
-                           with
-                           | Error failure ->
-                             Error (Private_jsonl_operation_failed failure)
-                           | Ok committed_stats ->
-                             private_jsonl_cursor_of_stats committed_stats))))))
+           let capture operation f =
+             private_jsonl_capture operation f
+             |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+           in
+           let* stats = capture Inspect_transaction_data (fun () -> Unix.fstat fd) in
+           let* actual = private_jsonl_cursor_of_stats stats in
+           let* () = check_cursor actual in
+           let* append_from =
+             match private_jsonl_validate_complete_tail fd stats.Unix.st_size with
+             | Ok () -> Ok stats.Unix.st_size
+             | Error (Incomplete_transaction_tail _ as error) ->
+               (match expected with
+                | Some _ -> Error error
+                | None ->
+                  private_jsonl_recover_snapshot fd
+                  |> Result.map (fun snapshot -> String.length snapshot.bytes))
+             | Error error -> Error error
+           in
+           let* () = capture Set_transaction_data_permissions (fun () ->
+             Unix.fchmod fd 0o600) in
+           let* () =
+             append_fd_durable ~io:durable_append_unix_io ~fd
+               ~original_length:append_from suffix
+             |> Result.map_error (fun error -> Transaction_append_failed error)
+           in
+           let* committed_stats = capture Inspect_transaction_data (fun () -> Unix.fstat fd) in
+           private_jsonl_cursor_of_stats committed_stats)
+;;
+
+let append_private_jsonl_durable_stable_result path suffix =
+  append_private_jsonl_durable_stable_with_io
+    ~io:private_jsonl_transaction_unix_io path ~expected:None suffix
 ;;
 
 let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
-  append_private_jsonl_durable_locked_at_cursor_with_io
-    ~io:private_jsonl_transaction_unix_io
-    path
-    ~expected
-    suffix
+  append_private_jsonl_durable_stable_with_io
+    ~io:private_jsonl_transaction_unix_io path ~expected:(Some expected) suffix
 ;;
 
 let append_private_jsonl_durable_locked_at_cursor_with_io_for_testing
-      ~io
-      path
-      ~expected
-      suffix
+      ~io path ~expected suffix
   =
-  append_private_jsonl_durable_locked_at_cursor_with_io
-    ~io
-    path
-    ~expected
-    suffix
+  append_private_jsonl_durable_stable_with_io
+    ~io path ~expected:(Some expected) suffix
 ;;
 
 let rewrite_private_jsonl_durable_locked_at_cursor_with_io

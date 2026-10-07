@@ -461,7 +461,11 @@ def hidden_roster_releases_focus(binary: str, *, resize: bool) -> None:
         _keyboard_harness.drain_until_quiet(process, fd, output)
         if resize:
             _keyboard_harness.resize_and_wait(process, fd, output, rows=TALL_ROWS, columns=109,
-                              needle=chat_title(b"alpha"))
+                              needle=b"KEEPERS")
+            # Left opened a navigator. At narrow widths it becomes a full
+            # list until explicitly dismissed; the draft remains behind it.
+            assert draft not in b"\n".join(screen(output).values())
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", chat_title(b"alpha"))
         else:
             _keyboard_harness.send_and_wait(process, fd, output, b"\x02", chat_title(b"alpha"))
         _keyboard_harness.drain_until_quiet(process, fd, output)
@@ -497,7 +501,7 @@ def hidden_roster_releases_focus(binary: str, *, resize: bool) -> None:
         _keyboard_harness.drain_until_quiet(process, fd, output)
         close_chat(process, fd, output)
 
-    reason = "resize" if resize else "Ctrl-B"
+    reason = "narrow navigator dismissal" if resize else "Ctrl-B"
     _keyboard_harness.run_terminal_scenario(binary, description=f"chat roster {reason} hands focus back to the composer",
                             interact=interact, http_fixtures=_keyboard_harness.keeper_runtime_http_fixtures(),
                             terminal_cols=COLUMNS)

@@ -8,6 +8,17 @@ module Grant_key = struct
     | order -> order
 end
 module Grants = Set.Make (Grant_key)
+module Gift_key = struct
+  type t = string * string * string
+  let compare (from_keeper, to_keeper, reason) (from_keeper', to_keeper', reason') =
+    match String.compare from_keeper from_keeper' with
+    | 0 ->
+      (match String.compare to_keeper to_keeper' with
+       | 0 -> String.compare reason reason'
+       | order -> order)
+    | order -> order
+end
+module Gifts = Set.Make (Gift_key)
 
 type t =
   { balances : int Names.t
@@ -18,6 +29,7 @@ type t =
   ; burned : Z.t
   ; paid_goals : Goals.t
   ; grants : Grants.t
+  ; gifts : Gifts.t
   ; owned : Keeper_portrait_item.t list Names.t
   ; selections : (Keeper_portrait_item.slot * Candle_event.equipment_choice) list Names.t
   }
@@ -32,6 +44,9 @@ type error =
   | Negative_purchase of string
   | Invalid_grant of { keeper : string; amount_milli : int }
   | Duplicate_grant of { keeper : string; reason : string }
+  | Invalid_gift of { from_keeper : string; to_keeper : string; amount_milli : int }
+  | Duplicate_gift of { from_keeper : string; to_keeper : string; reason : string }
+  | Unowned_gift of { keeper : string; item : Keeper_portrait_item.t }
   | Unowned_equipment of {keeper : string; item : Keeper_portrait_item.t}
   | Wrong_equipment_slot of Keeper_portrait_item.t
   | Already_owned of
@@ -61,6 +76,12 @@ let error_to_string = function
     Printf.sprintf "invalid grant of %d milli-Candle to %s" amount_milli keeper
   | Duplicate_grant { keeper; reason } ->
     Printf.sprintf "%s was already granted %S" keeper reason
+  | Invalid_gift { from_keeper; to_keeper; amount_milli } ->
+    Printf.sprintf "invalid gift of %d milli-Candle from %s to %s" amount_milli from_keeper to_keeper
+  | Duplicate_gift { from_keeper; to_keeper; reason } ->
+    Printf.sprintf "%s already gifted %S to %s" from_keeper reason to_keeper
+  | Unowned_gift { keeper; item } ->
+    Printf.sprintf "%s does not own %s" keeper (Keeper_portrait_item.id item)
   | Already_owned { keeper; item } ->
     Printf.sprintf "%s already owns %s" keeper (Keeper_portrait_item.id item)
   | Insufficient_balance { keeper; available_milli; required_milli } ->
@@ -73,7 +94,7 @@ let error_to_string = function
 
 let empty = { balances = Names.empty; last_at = Names.empty; half_life = None; through_at = None;
   issued = Z.zero; burned = Z.zero; paid_goals = Goals.empty; grants = Grants.empty;
-  owned = Names.empty; selections = Names.empty }
+  gifts = Gifts.empty; owned = Names.empty; selections = Names.empty }
 
 let half_life state = state.half_life
 
@@ -212,6 +233,68 @@ let grant state ~at ~keeper ~amount_milli ~reason =
       }
 ;;
 
+let gift state ~at ~from_keeper ~to_keeper ~amount_milli ~reason =
+  let* () = match state.half_life with None -> Error Missing_half_life | Some _ -> Ok () in
+  let* state = stamp state ~at in
+  let* state = advance_keeper state ~at ~keeper:from_keeper in
+  let* state = advance_keeper state ~at ~keeper:to_keeper in
+  let available_milli = balance state ~keeper:from_keeper in
+  let current = balance state ~keeper:to_keeper in
+  if amount_milli <= 0
+  then Error (Invalid_gift { from_keeper; to_keeper; amount_milli })
+  else if Gifts.mem (from_keeper, to_keeper, reason) state.gifts
+  then Error (Duplicate_gift { from_keeper; to_keeper; reason })
+  else if amount_milli > available_milli
+  then
+    Error
+      (Insufficient_balance { keeper = from_keeper; available_milli; required_milli = amount_milli })
+  else if amount_milli > max_int - current
+  then Error (Balance_overflow to_keeper)
+  else
+    (* A transfer: neither issuance nor burn moves. *)
+    Ok
+      { state with
+        balances =
+          Names.add to_keeper (current + amount_milli)
+            (Names.add from_keeper (available_milli - amount_milli) state.balances)
+      ; last_at = Names.add to_keeper at (Names.add from_keeper at state.last_at)
+      ; gifts = Gifts.add (from_keeper, to_keeper, reason) state.gifts
+      }
+;;
+
+let gift_item state ~at ~from_keeper ~to_keeper ~item =
+  let* () = match state.half_life with None -> Error Missing_half_life | Some _ -> Ok () in
+  let* state = stamp state ~at in
+  let* state = advance_keeper state ~at ~keeper:from_keeper in
+  let* state = advance_keeper state ~at ~keeper:to_keeper in
+  let from_items = owned state ~keeper:from_keeper in
+  let to_items = owned state ~keeper:to_keeper in
+  if not (List.mem item from_items)
+  then Error (Unowned_gift { keeper = from_keeper; item })
+  else if List.mem item to_items
+  then Error (Already_owned { keeper = to_keeper; item })
+  else
+    (* A worn item comes off the giver: only the gifted item's own
+       selection falls back to Default; anything else worn stays worn,
+       and the receiver's look is untouched. *)
+    let slot = Keeper_portrait_item.slot item in
+    let from_choices =
+      match Names.find_opt from_keeper state.selections with
+      | None -> []
+      | Some choices ->
+        (match List.assoc_opt slot choices with
+         | Some (Candle_event.Item worn) when worn = item -> List.remove_assoc slot choices
+         | Some (Candle_event.Default | Candle_event.Item _) | None -> choices) in
+    Ok
+      { state with
+        last_at = Names.add to_keeper at (Names.add from_keeper at state.last_at)
+      ; owned =
+          Names.add to_keeper (item :: to_items)
+            (Names.add from_keeper (List.filter ((<>) item) from_items) state.owned)
+      ; selections = Names.add from_keeper from_choices state.selections
+      }
+;;
+
 let choices state ~keeper =
   match Names.find_opt keeper state.selections with Some choices -> choices | None -> []
 
@@ -249,6 +332,11 @@ let of_events ~at events =
            purchase state ~at:event.at ~keeper:p.keeper ~item:p.item ~amount_milli:p.amount_milli
          | Candle_event.Granted g ->
            grant state ~at:event.at ~keeper:g.keeper ~amount_milli:g.amount_milli ~reason:g.reason
+         | Candle_event.Gifted g ->
+           gift state ~at:event.at ~from_keeper:g.from_keeper ~to_keeper:g.to_keeper
+             ~amount_milli:g.amount_milli ~reason:g.reason
+         | Candle_event.Gifted_item g ->
+           gift_item state ~at:event.at ~from_keeper:g.from_keeper ~to_keeper:g.to_keeper ~item:g.item
          | Candle_event.Snapshot _
          | Candle_event.Payout_owed _
          | Candle_event.Candidates _

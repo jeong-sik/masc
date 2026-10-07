@@ -77,13 +77,6 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = true
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-1"
-    ; api_name = "glm-5.1"
-    ; context = 202752
-    ; tools = true
-    ; thinking = true
-    ; vision = false
-    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-2"
     ; api_name = "glm-5.2"
     ; context = 1048576
@@ -174,13 +167,6 @@ let ollama_cloud_seed_cases =
     ; tools = true
     ; thinking = true
     ; vision = false
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-qwen3-5-397b"
-    ; api_name = "qwen3.5:397b"
-    ; context = 262144
-    ; tools = true
-    ; thinking = true
-    ; vision = true
     }
   ]
 
@@ -3105,79 +3091,12 @@ let test_runtime_config_validation_admits_official_client_runtime () =
     failf "an official-client Keeper runtime with only a window must load: %s" detail
 ;;
 
-(* The running server keeps an account's first admission allowance until it
-   restarts, so a save that would give an admitted account other values is
-   refused, and one that keeps them is applied. *)
-let test_a_save_that_changes_an_admitted_allowance_is_refused () =
-  with_config_save_model_catalog @@ fun () ->
-  let content ~binding ~provider =
-    Printf.sprintf
-      "[providers.local]\n\
-       protocol = \"openai-compatible-http\"\n\
-       endpoint = \"http://127.0.0.1:1/admitted-allowance/v1\"\n%s\
-       \n\
-       [models.sample]\n\
-       api-name = \"sample\"\n\
-       max-context = 1024\n\
-       \n\
-       [local.sample]\n%s\
-       \n\
-       [runtime]\n\
-       default = \"local.sample\"\n"
-      provider
-      binding
-  in
-  let snapshot = Runtime.For_testing.snapshot () in
-  let path = Filename.temp_file "admitted_allowance_" ".toml" in
-  let save text = Runtime.save_config_text ~runtime_config_path:path text in
-  Fun.protect
-    ~finally:(fun () ->
-      Runtime.For_testing.restore snapshot;
-      try Sys.remove path with
-      | Sys_error _ -> ())
-    (fun () ->
-       let admitted = content ~binding:"max-concurrent = 2\n" ~provider:"" in
-       (match save admitted with
-        | Ok _receipt -> ()
-        | Error detail -> failf "the first save should apply: %s" detail);
-       (match
-          List.find_opt
-            (fun (runtime : Runtime_instance.t) -> String.equal runtime.id "local.sample")
-            (Runtime.get_runtimes ())
-        with
-        | None -> fail "local.sample should be published"
-        | Some runtime ->
-          Eio_main.run (fun _env ->
-            Llm_provider.Provider_admission.with_admission
-              ~config:(agent_core_provider_config runtime)
-              (fun () -> ())));
-       let refused label text =
-         match save text with
-         | Ok _receipt -> failf "%s should be refused while the account is admitted" label
-         | Error detail ->
-           List.iter
-             (fun needle ->
-                check bool (label ^ " names " ^ needle) true
-                  (String_util.contains_substring detail needle))
-             [ "local.sample"; "Stop the server" ]
-       in
-       refused "more permits" (content ~binding:"max-concurrent = 3\n" ~provider:"");
-       refused
-         "a run limit"
-         (content
-            ~binding:"max-concurrent = 2\n"
-            ~provider:"admission-priority-run-limit = 3\n");
-       match save (admitted ^ "# the same allowance\n") with
-       | Ok _receipt -> ()
-       | Error detail -> failf "a save that keeps the allowance should apply: %s" detail)
-;;
-
 (* Two bindings of one account, so both share one admission identity. *)
-let two_binding_allowance_content ~endpoint ~sample ~lane =
+let two_binding_allowance_content ?(provider = "") ~endpoint ~sample ~lane () =
   Printf.sprintf
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
-     endpoint = %S\n\
+     endpoint = %S\n%s\
      \n\
      [models.sample]\n\
      api-name = \"sample\"\n\
@@ -3196,13 +3115,31 @@ let two_binding_allowance_content ~endpoint ~sample ~lane =
      [runtime]\n\
      default = \"local.sample\"\n"
     endpoint
+    provider
     sample
     lane
 ;;
 
-(* Saves [first], then admits one request for [admitted_id], so the running
-   process holds that runtime's allowance for the account. *)
-let with_admitted_save ~first ~admitted_id f =
+let published_provider_config id =
+  match
+    List.find_opt
+      (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id)
+      (Runtime.get_runtimes ())
+  with
+  | None -> failf "%s should be published" id
+  | Some runtime -> agent_core_provider_config runtime
+;;
+
+let admitted_permits config =
+  match Llm_provider.Provider_admission.snapshot_for ~config with
+  | Some snapshot -> snapshot.max_slots
+  | None -> fail "the account should have an admission scheduler"
+;;
+
+(* Saves [first] to a temporary runtime.toml and admits one request on
+   local.sample, so the running process holds a scheduler for the account.
+   [f] gets the file and the config that request was admitted with. *)
+let with_admitted_account ~first f =
   with_config_save_model_catalog @@ fun () ->
   let snapshot = Runtime.For_testing.snapshot () in
   let path = Filename.temp_file "admitted_allowance_" ".toml" in
@@ -3215,77 +3152,94 @@ let with_admitted_save ~first ~admitted_id f =
        (match Runtime.save_config_text ~runtime_config_path:path first with
         | Ok _receipt -> ()
         | Error detail -> failf "the first save should apply: %s" detail);
-       (match
-          List.find_opt
-            (fun (runtime : Runtime_instance.t) -> String.equal runtime.id admitted_id)
-            (Runtime.get_runtimes ())
-        with
-        | None -> failf "%s should be published" admitted_id
-        | Some runtime ->
-          Eio_main.run (fun _env ->
-            Llm_provider.Provider_admission.with_admission
-              ~config:(agent_core_provider_config runtime)
-              (fun () -> ())));
-       f ~path)
+       let admitted = published_provider_config "local.sample" in
+       Eio_main.run (fun _env ->
+         Llm_provider.Provider_admission.with_admission ~config:admitted (fun () -> ()));
+       f ~path ~admitted)
 ;;
 
-let published_max_concurrent id =
-  match
-    List.find_opt
-      (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id)
-      (Runtime.get_runtimes ())
-  with
-  | None -> failf "%s should stay published" id
-  | Some runtime ->
-    (agent_core_provider_config runtime).Llm_provider.Provider_config.max_concurrent_requests
-;;
-
-(* A disagreement the running config already had is not this save's doing,
-   so it does not block an unrelated save; a save that changes it is
-   refused. *)
-let test_a_save_is_refused_only_for_the_disagreement_it_introduces () =
+(* A save that changes an admitted account's allowance applies to the
+   running scheduler, and a request built from the earlier config runs
+   under the new allowance. *)
+let test_a_save_changes_an_admitted_allowance_live () =
   let content =
-    two_binding_allowance_content ~endpoint:"http://127.0.0.1:1/introduced-allowance/v1"
+    two_binding_allowance_content ~endpoint:"http://127.0.0.1:1/live-allowance/v1"
   in
-  with_admitted_save ~first:(content ~sample:2 ~lane:3) ~admitted_id:"local.sample"
-  @@ fun ~path ->
-  let save text = Runtime.save_config_text ~runtime_config_path:path text in
-  (match save (content ~sample:2 ~lane:3 ^ "# an unrelated edit\n") with
+  with_admitted_account ~first:(content ~sample:2 ~lane:2 ())
+  @@ fun ~path ~admitted ->
+  (match
+     Runtime.save_config_text
+       ~runtime_config_path:path
+       (content ~provider:"admission-priority-run-limit = 3\n" ~sample:3 ~lane:3 ())
+   with
    | Ok _receipt -> ()
-   | Error detail -> failf "an unrelated save should apply: %s" detail);
-  (match save (content ~sample:2 ~lane:4) with
-   | Ok _receipt -> fail "a save that changes the disagreement should be refused"
-   | Error detail ->
-     check bool "names the runtime it changes" true
-       (String_util.contains_substring detail "local.lane");
-     check bool "spells the setting as the file does" true
-       (String_util.contains_substring detail "max-concurrent = 2"));
-  match save (content ~sample:2 ~lane:2) with
-  | Ok _receipt -> ()
-  | Error detail -> failf "a save that ends the disagreement should apply: %s" detail
+   | Error detail -> failf "a save that changes the allowance should apply: %s" detail);
+  let saved = published_provider_config "local.sample" in
+  check (option int) "the new runtime declares the new limit" (Some 3)
+    saved.admission_priority_run_limit;
+  check int "the running scheduler takes the new permit count" 3 (admitted_permits saved);
+  check
+    int
+    "a request from the earlier config is admitted"
+    1
+    (Eio_main.run (fun _env ->
+       Llm_provider.Provider_admission.with_admission ~config:admitted (fun () -> 1)))
 ;;
 
-(* [masc runtime-resume] republishes the file on disk through the degraded
-   initializer; a hand edit that changes an admitted allowance is refused
-   there too, and the running runtimes stay as they were. *)
-let test_a_resume_that_changes_an_admitted_allowance_is_refused () =
+(* [masc runtime-resume] republishes the file on disk; a hand edit of an
+   admitted account's allowance applies there too. *)
+let test_a_resume_changes_an_admitted_allowance_live () =
   let content =
     two_binding_allowance_content ~endpoint:"http://127.0.0.1:1/resumed-allowance/v1"
   in
-  with_admitted_save ~first:(content ~sample:2 ~lane:2) ~admitted_id:"local.sample"
-  @@ fun ~path ->
+  with_admitted_account ~first:(content ~sample:2 ~lane:2 ())
+  @@ fun ~path ~admitted ->
   let oc = open_out path in
-  output_string oc (content ~sample:3 ~lane:2);
+  output_string oc (content ~sample:4 ~lane:4 ());
   close_out oc;
   (match Runtime.init_default_degraded_report ~config_path:path with
-   | Ok _ -> fail "a resume that changes an admitted allowance should be refused"
+   | Ok _ -> ()
    | Error error ->
-     check bool "names the runtime" true
-       (String_util.contains_substring
-          (Runtime.strict_init_error_to_string error)
-          "local.sample"));
-  check (option int) "the running runtime keeps its allowance" (Some 2)
-    (published_max_concurrent "local.sample")
+     failf "the resume should apply: %s" (Runtime.strict_init_error_to_string error));
+  check int "the running scheduler takes the new permit count" 4 (admitted_permits admitted)
+;;
+
+(* Runtimes on one account must declare one allowance; a file that gives
+   them different values is refused at save and at load, and names each
+   runtime with what it declares. *)
+let test_runtimes_on_one_account_that_disagree_are_refused () =
+  with_config_save_model_catalog @@ fun () ->
+  let content =
+    two_binding_allowance_content
+      ~endpoint:"http://127.0.0.1:1/disagreeing-allowance/v1"
+      ~sample:2
+      ~lane:3
+      ()
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "disagreeing_allowance_" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       let names_both label detail =
+         List.iter
+           (fun needle ->
+              check bool (label ^ " names " ^ needle) true
+                (String_util.contains_substring detail needle))
+           [ "local.sample: max-concurrent = 2"; "local.lane: max-concurrent = 3" ]
+       in
+       (match Runtime.save_config_text ~runtime_config_path:path content with
+        | Ok _receipt -> fail "a save with two allowances on one account should be refused"
+        | Error detail -> names_both "the save" detail);
+       let oc = open_out path in
+       output_string oc content;
+       close_out oc;
+       match Runtime.init_default_degraded_report ~config_path:path with
+       | Ok _ -> fail "a load with two allowances on one account should be refused"
+       | Error error -> names_both "the load" (Runtime.strict_init_error_to_string error))
 ;;
 
 let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
@@ -7043,12 +6997,12 @@ let () =
             test_runtime_toml_rejects_a_priority_run_limit_on_an_official_client;
           test_case "repo glm-coding runtimes carry the priority run limit" `Quick
             test_repo_glm_coding_runtimes_carry_the_priority_run_limit;
-          test_case "a save that changes an admitted allowance is refused" `Quick
-            test_a_save_that_changes_an_admitted_allowance_is_refused;
-          test_case "a save is refused only for the disagreement it introduces" `Quick
-            test_a_save_is_refused_only_for_the_disagreement_it_introduces;
-          test_case "a resume that changes an admitted allowance is refused" `Quick
-            test_a_resume_that_changes_an_admitted_allowance_is_refused;
+          test_case "a save changes an admitted allowance live" `Quick
+            test_a_save_changes_an_admitted_allowance_live;
+          test_case "a resume changes an admitted allowance live" `Quick
+            test_a_resume_changes_an_admitted_allowance_live;
+          test_case "runtimes on one account that disagree are refused" `Quick
+            test_runtimes_on_one_account_that_disagree_are_refused;
           test_case "judgment lanes join the priority queue" `Quick
             test_judgment_lanes_join_the_priority_queue;
           test_case "repetition samplers off the ollama wire are rejected" `Quick

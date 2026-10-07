@@ -1,6 +1,12 @@
 (** Keeper_tool_execute_runtime — owner of the typed Shell IR execution
     pipeline and its public Keeper execution boundary. *)
 
+(** The answer of an Execute payload for the repeat guard: the payload without
+    its execution time, which measures the call and changes on every run.
+    [None] for output that is not a JSON object, such as a failure the tool
+    bridge rewrote; the guard then hashes the whole output. *)
+val answer_of_output : string -> Yojson.Safe.t option
+
 val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->

@@ -135,6 +135,11 @@ let rank_many_with ~queries ~texts ~max_results =
   | Some 0, _, _ | _, [], _ | _, _, false ->
     Ok (List.map (fun _ -> []) queries, empty_stats)
   | _, _ :: _, true ->
+    (* Building and querying the table is one SQLite call per row, and a
+       caller's fiber cannot yield inside it. The workspace curator ranks the
+       whole workspace ledger: on domain 0 that held the server's HTTP answers
+       and logs for tens of seconds (2026-10-07). *)
+    Domain_pool_ref.submit_cpu_or_inline @@ fun () ->
     (try
        with_database (Sqlite3.db_open ":memory:") (fun db ->
          let* () =

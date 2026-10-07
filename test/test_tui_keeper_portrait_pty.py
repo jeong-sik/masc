@@ -276,8 +276,19 @@ def portrait_as_pixels(binary: str) -> None:
         assert fields.get(b"f") == b"100", "the portrait is not sent as RGBA PNG"
         assert b"o" not in fields, "the portrait requests Kitty transport inflation"
         assert not portrait_rows(rows), "real pixels were drawn as a mosaic as well"
-        assert row_of(rows, b"Current Work") == identity + 4, \
-            "the facts did not leave the picture its rows"
+        # The pixel picture rides over its 4-row band beside the facts; the
+        # facts it leaves there are Identity, Name and Paused, and it must not
+        # evict them. #40024 added the Candle balance fact and #40180 gave it a
+        # long `disabled` reason, so the fact block is now taller than
+        # identity + 4 -- the picture's own band rows still hold the facts.
+        # (`identity` is the heading above Name:, never the tab strip's tab.)
+        assert IDENTITY in rows.get(identity, b""), f"no Identity heading: {rows!r}"
+        for needle in (NAME_ROW, PAUSED_ROW):
+            assert identity <= row_of(rows, needle) < identity + PIXEL_BAND_ROWS, \
+                f"the facts did not leave the picture its rows: {needle!r} at " \
+                f"{row_of(rows, needle)}, band {identity}..{identity + PIXEL_BAND_ROWS}: {rows!r}"
+        assert row_of(rows, b"Current Work") > row_of(rows, PAUSED_ROW), \
+            f"the facts did not leave the picture its rows: {rows!r}"
         # Item text that needs the full width must remove the actual Kitty
         # placement as well as its reserved columns. Mosaic-only proof cannot
         # detect a pixel overlay left above the text.
@@ -511,8 +522,12 @@ def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
             os.write(fd, b"r")
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output, held.is_set, timeout=10)
             identity["base"] = str(base) + "-other-workspace"
-            await_frame(process, fd, output, lambda frame: "▸Items".encode() not in frame
-                        and b"Balance 12.500 Candle" not in frame)
+            # The boundary withdraws the account's tokens; the Items tab stays
+            # (kept with the detail now) and reloads, so wait for the old
+            # balance to leave rather than for the tab to close.
+            await_frame(process, fd, output, lambda frame:
+                        b"Balance 12.500 Candle" not in frame
+                        and b"Loading Item account" in frame)
             previous_reads = identity["matched_reads"]
             identity["base"] = str(base)
             # Two serial full-refresh probes prove the first matching result
@@ -520,9 +535,10 @@ def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: identity["matched_reads"] >= previous_reads + 2, timeout=10)
             balance[0] = "13000"
-            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
-            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "▸Items".encode())
-            await_frame(process, fd, output, lambda frame: b"Balance 13.000 Candle" in frame)
+            # The detail stayed open across the mismatch, so its Items tab is
+            # still shown (reloading). Reopen it through the roster, which the
+            # withdrawn detail leaves with the chosen tab retained.
+            reopen_alpha_items(process, fd, output, b"Balance 13.000 Candle")
             # Masc_tui_http.default_timeout_sec is 10 seconds. Releasing
             # after that would test a timeout instead of a late successful read.
             assert held_at[0] is not None and time.monotonic() - held_at[0] < 10
@@ -717,7 +733,14 @@ def item_account_follows_workspace_authority(binary: str) -> None:
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: held.calls > calls_before_refresh, timeout=10.0)
             phase[0] = "unread"
-            await_frame(process, fd, output, b"MASC Keepers")
+            # #40696 keeps the detail navigation across an unread authority, so
+            # the screen stays on the keeper detail (whose keepers the boundary
+            # has cleared) rather than returning to the roster. Wait for the
+            # Item account to withdraw instead of for the roster heading.
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                lambda: not any(b"Balance " in row or b"1.000 owned" in row
+                                for row in last_frame_rows(output).values()), timeout=10.0), \
+                f"unread health retained account authority: {last_frame_rows(output)!r}"
             assert not any(b"Balance 13.000" in row or b"1.000 owned" in row
                            for row in last_frame_rows(output).values()), "unread health retained account authority"
             calls_after_withdrawal = held.calls
@@ -912,8 +935,12 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
             _keyboard_harness.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
             identity["unread"] = True
             if boundary == "identity":
+                # #40696 keeps the detail navigation across an unread
+                # authority, so the surface stays on the keeper detail (its
+                # keepers cleared) rather than returning to the roster. Wait
+                # for the Item account to withdraw instead of the roster.
                 frame(process, fd, output, lambda text:
-                      b"MASC Keepers" in text and b"Balance 12.500 Candle" not in text)
+                      b"No keeper selected." in text and b"Balance 12.500 Candle" not in text)
             else:
                 frame(process, fd, output, lambda text: b"Account unavailable:" in text)
             balance[0] = "13000"
@@ -927,7 +954,7 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
             if boundary == "identity":
-                frame(process, fd, output, lambda text: b"MASC Keepers" in text and b"Balance " not in text)
+                frame(process, fd, output, lambda text: b"No keeper selected." in text and b"Balance " not in text)
             else:
                 frame(process, fd, output, lambda text: b"Account unavailable:" in text)
             # Keep authority unread until the late response has settled.
@@ -941,7 +968,7 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
             assert _keyboard_harness.drain_until_quiet(process, fd, output), "late response did not settle"
             text = b"\n".join(last_frame_rows(output).values())
             if boundary == "identity":
-                assert b"MASC Keepers" in text
+                assert b"No keeper selected." in text
             else:
                 assert b"Account unavailable:" in text
             assert b"Balance 13.000 Candle" not in text

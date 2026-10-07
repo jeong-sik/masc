@@ -1643,6 +1643,9 @@ let start_keeper_loops_owned
   (* Event_bus → SSE bridge: relay both Agent Core and MASC buses to dashboard. *)
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:masc_event_bus;
+  (* Admission waits go on the MASC bus once its relay is subscribed, so
+     every reported wait reaches agent-core-events. *)
+  Provider_admission_events.install ~sw masc_event_bus;
   (* Telemetry feedback loop: observe Agent Core per-turn signals without
      deserializing provider/model-bearing payloads. *)
   Keeper_telemetry_consumer.spawn_subscriber ~sw ~clock ~bus:event_bus;

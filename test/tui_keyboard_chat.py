@@ -2711,7 +2711,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             b"\x1b[B",
-            b"\x1b[7m \xc2\xb7 beta",
+            keeper_row_selected(b"beta"),
         )
         send_and_wait(
             process,

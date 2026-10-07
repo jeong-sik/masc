@@ -58,7 +58,10 @@ type restore_report =
   ; runtime_result : runtime_result
   }
 
-val autosave_prefix : string
+val autosave_name : string
+(** The one preset a restore writes the live state into before applying.
+    Each restore replaces it, so it holds the state from before the latest
+    restore and nothing older. *)
 
 val is_valid_name : string -> bool
 (** [[A-Za-z0-9._-]+], and neither "." nor "..". *)
@@ -76,13 +79,32 @@ val load : base_path:string -> string -> (snapshot, string) result
 val list : base_path:string -> listing
 
 val restore : base_path:string -> string -> (restore_report, string) result
-(** Saves the current state as [_autosave-<stamp>] (a free name is picked
-    if the stamp is taken), then applies the named preset surface by surface.
+(** Loads the named preset, saves the current state as {!autosave_name}
+    over the previous one, then applies the loaded preset surface by surface.
+    Restoring {!autosave_name} undoes the latest restore for the prompt
+    overrides and the runtime assignments, which a restore sets exactly.
+    Keeper instructions and exact-output lanes are written only for the
+    keepers and lanes a preset holds, so a keeper that had no instructions
+    keeps what the latest restore gave it, and a lane that restore added
+    stays. The autosave then holds the state the undo replaced.
     Only the load and the autosave can fail the whole call; each surface
     reports what it applied and what it skipped. An override that no
     longer renders under the prompt's current contract is skipped with that
     reason, as the boot-time restore would refuse it. One written against an
     older default body is applied. *)
+
+type delete_error =
+  | Delete_invalid_name of string
+  | Delete_not_found of string  (** no preset directory by that name *)
+  | Delete_failed of { name : string; reason : string }
+      (** the directory is there and removing it failed *)
+
+val delete : base_path:string -> string -> (unit, delete_error) result
+(** Removes the named preset directory without loading it first, so a preset
+    listed as unreadable is removed the same way as one that loads.
+    {!autosave_name} is a preset like any other here. *)
+
+val delete_error_to_string : delete_error -> string
 
 val runtime_text_with :
   current_assignments:(string * string) list ->

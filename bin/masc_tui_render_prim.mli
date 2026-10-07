@@ -243,6 +243,7 @@ val surface_chrome :
   overflow:overflow ->
   ?frame:chrome_frame ->
   ?status:Masc_tui_footer.status_item list ->
+  ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->
@@ -251,6 +252,8 @@ val surface_chrome :
   hints:string ->
   body:(budget:int -> chrome_body -> unit) ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+(** [sidebar] reserves its width from [cols] and draws beside the body,
+    above the full-width footer. The body must wrap for the remaining width. *)
 
 val connection_badge : Masc_tui_types.state -> string
 

@@ -12,6 +12,10 @@ type catalog_entry =
   ; price : Candle_config.price
   }
 
+val catalog_entry_to_yojson : catalog_entry -> Yojson.Safe.t
+(** One catalog row as the Keeper tool and the dashboard both send it:
+    [id], [slot], [price_status], and [price_milli] when priced. *)
+
 type receipt =
   { account : account
   ; item : Keeper_portrait_item.t

@@ -1569,22 +1569,44 @@ let test_concurrent_execution_opt_ins_are_exact () =
   in
   Alcotest.(check (list string))
     "only explicitly audited handlers opt into concurrent batches"
-    [ "keeper_artifact_read"
+    (* B4 audited every entry below the pre-existing set: each note names the
+       sharing it was cleared against. A new Concurrent descriptor fails here
+       until its audit lands alongside it. *)
+    [ (* Vision sub-call over net; ledger writes ride the store's Eio.Mutex. *)
+      "keeper_analyze_image"
+    ; "keeper_artifact_read"
     ; "keeper_candle_catalog"
     ; "keeper_capability_search"
+    (* LSP turn-pool server table is Eio.Mutex-guarded. *)
+    ; "keeper_code_query"
     ; "keeper_constitution_read"
+    (* Revalidate write-during-read is source-store file-lock serialized;
+       appends ride the per-path mutex. *)
+    ; "keeper_context_status"
     ; "keeper_lane_status"
     ; "keeper_library_read"
     ; "keeper_library_search"
+    (* File reads and pure ranking; revalidate serialized by the file lock,
+       appends by the per-path mutex, log-once flag an Atomic. *)
+    ; "keeper_memory_search"
     ; "keeper_portrait_read"
+    (* Artifact fetch plus static validation; catalog cache is Atomic. *)
+    ; "keeper_skill_validate"
     ; "keeper_surface_read"
     ; "keeper_tasks_audit"
     ; "keeper_tasks_list"
     ; "keeper_tools_list"
+    (* Session-manager state is an Atomic over an immutable map. *)
+    ; "keeper_voice_agent"
+    ; "keeper_voice_sessions"
+    (* One bridge subprocess per call; script-path cache is mutex-guarded. *)
+    ; "keeper_webmcp_list"
     ; "keeper_workspace_memory_read"
     ; "masc_agent_card"
     ; "masc_agent_fitness"
     ; "masc_agent_timeline"
+    (* Ask-store reads behind a mutex-guarded version cache. *)
+    ; "masc_ask_status"
     ; "masc_board_curation_read"
     ; "masc_board_hearths"
     ; "masc_board_list"
@@ -1596,10 +1618,26 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_board_sub_board_list"
     ; "masc_browser_read"
     ; "masc_browser_tabs"
+    (* Backlog reads plus assertion evaluation; nothing written. *)
+    ; "masc_check"
     ; "masc_config"
+    (* Config reads plus pure text generation; no shared state. *)
+    ; "masc_dashboard"
+    (* One HTTPS list call plus pure row rendering. *)
+    ; "masc_file_list"
     ; "masc_fusion_status"
     ; "masc_get_metrics"
     ; "masc_goal_list"
+    (* Keeper file reads plus pure check evaluation. *)
+    ; "masc_keeper_audit"
+    (* Owner-registry reads behind its Eio.Mutex. *)
+    ; "masc_keeper_delegate_list"
+    ; "masc_keeper_delegate_status"
+    (* Registry and roster reads; list cache is Atomic with CAS install. *)
+    ; "masc_keeper_list"
+    ; "masc_keeper_status"
+    (* Approval-queue Atomics; only function-local tables built. *)
+    ; "masc_keeper_waiting_inventory"
     (* Receipt reads use the owner-domain action serializer, including orphan
        recovery. They do not wait for package execution or submit new input. *)
     ; "masc_lane_action_status"
@@ -1608,8 +1646,18 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_lane_declaration_read"
     ; "masc_lane_inspect"
     ; "masc_lane_slice"
+    (* Directory listing plus whole-file reads; no shared state. *)
+    ; "masc_library_list"
+    ; "masc_library_read"
+    ; "masc_library_search"
     ; "masc_plan_get_task"
     ; "masc_run_list"
+    (* Whole-file schedule loads; writers hold the file lock. *)
+    ; "masc_schedule_get"
+    ; "masc_schedule_list"
+    ; "masc_schedule_notes_list"
+    (* Backlog reads under the file lock plus pure rendering. *)
+    ; "masc_status"
     ; "masc_task_history"
     ; "masc_tasks"
     ; "masc_tool_help"
@@ -1634,6 +1682,17 @@ let test_concurrent_opt_ins_are_statically_read_only () =
         (descriptor.internal_name
          ^ " opts into concurrent batches without a static read-only hint")
     | (Descriptor.Ordinary Descriptor.Serial | Descriptor.Terminal), _ -> ())
+
+let test_run_plan_is_a_serial_write () =
+  (* Run_eio.update_plan writes run.json and the plan mirror. It was declared
+     readonly:true, which would have admitted the write to Concurrent batches
+     and Async admission on the hint. B4 corrected the declaration; this pins
+     the correction. *)
+  let descriptor = required_internal_descriptor "masc_run_plan" in
+  Alcotest.(check bool) "run_plan is not read-only" true
+    (Descriptor.readonly_static_hint descriptor = Some false);
+  Alcotest.(check bool) "run_plan stays serial" true
+    (descriptor.Descriptor.execution = Descriptor.Ordinary Descriptor.Serial)
 
 let test_readonly_policy_is_descriptor_input_aware () =
   let public_input =
@@ -2287,6 +2346,10 @@ let () =
             "concurrent execution opt-ins are statically read-only"
             `Quick
             test_concurrent_opt_ins_are_statically_read_only
+        ; test_case
+            "run plan is a serial write"
+            `Quick
+            test_run_plan_is_a_serial_write
         ; test_case
             "descriptor owns the read-only metadata projection"
             `Quick

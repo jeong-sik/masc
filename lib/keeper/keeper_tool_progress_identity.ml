@@ -93,31 +93,18 @@ let stored_output_identity_json ~sha256 ~bytes ~mime =
     ]
 ;;
 
-(* Measurement is not identity. The Execute envelope writes
-   [execution_time_ms] into the payload the model reads
-   (keeper_tool_execute_runtime.ml), so two byte-identical answers to the
-   same command hash apart on that one field, and the repeated-call yield in
-   keeper_agent_run.ml (threshold 3) could never see an Execute loop —
-   observed live 2026-08-24: a keeper repeated [gh auth status] four times in
-   one run, the four outputs differing only at execution_time_ms
-   (1170/1471/...). Identity therefore hashes the answer: output that parses
-   as JSON is digested with that field dropped at every depth. Output that is
-   not JSON keeps the byte hash. *)
-let measurement_field = "execution_time_ms"
-
-let rec drop_measurement = function
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.filter (fun (key, _) -> not (String.equal key measurement_field))
-       |> List.map (fun (key, value) -> key, drop_measurement value))
-  | `List items -> `List (List.map drop_measurement items)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as json -> json
-;;
-
+(* What is hashed is the tool's answer, not its receipt. A field that changes
+   on every call -- Execute's execution time, a memory write's snapshot
+   revision and timestamp -- would otherwise make two identical results hash
+   apart, and the repeated-call yield in keeper_agent_run.ml (threshold 3)
+   would never see the loop: [gh auth status] four times on 2026-08-24, twelve
+   memory claims rewritten 1,861 times on 2026-10-05. Which part of an output
+   is the answer is the tool's to say ({!Keeper_tool_answer}); this module
+   names no field. A tool that reads the whole output as its answer keeps the
+   canonical JSON digest, and output that is not JSON keeps the byte hash. *)
 let inline_output_fingerprint value =
   match Yojson.Safe.from_string value with
-  | json -> Some (digest_json (drop_measurement json))
+  | json -> Some (digest_json json)
   | exception Yojson.Json_error _ ->
     let text =
       value
@@ -127,16 +114,18 @@ let inline_output_fingerprint value =
     Some (sha256_hex text)
 ;;
 
-let output_fingerprint output_text =
+let output_fingerprint ~tool_name output_text =
   match Tool_output.decode_from_agent_core output_text with
   | Tool_output.Decoded { sha256; bytes; mime; _ } ->
     Some (digest_json (stored_output_identity_json ~sha256 ~bytes ~mime))
   | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-    inline_output_fingerprint output_text
+    (match Keeper_tool_answer.answer ~tool_name ~output_text with
+     | Some answer -> Some (digest_json answer)
+     | None -> inline_output_fingerprint output_text)
 ;;
 
-let digest_tool_output ~tool_name:_ output_text =
-  output_fingerprint output_text
+let digest_tool_output ~tool_name output_text =
+  output_fingerprint ~tool_name output_text
 ;;
 
 let compute_tool_io ~tool_name ~input ~output_text =

@@ -93,6 +93,7 @@ let make_gate_pending ~id ~keeper : Decode.gate_pending =
   ; gp_execution_sandbox = None
   ; gp_waiting_s = Some 10.0
   ; gp_phase = Decode.Gate_queued
+  ; gp_judge_advice = None
   ; gp_auto_judge_detail = None
   ; gp_retry_request = None
   }

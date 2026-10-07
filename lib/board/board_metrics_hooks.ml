@@ -10,7 +10,6 @@
 (** Outcome of an attempt to start the board dispatch flusher actor. *)
 type flusher_outcome =
   | Switch_finished  (** Switch was already finished when startup ran. *)
-  | Cas_exhausted    (** CAS contention exhausted the retry budget. *)
 
 type observer = {
   observe_persist_lock_acquire_sec : float -> unit;

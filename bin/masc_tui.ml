@@ -2076,11 +2076,11 @@ let inflight_by_request_id state request_id =
    replacements of the same words with the reasoning lost at the first
    (RFC-0412 §3.3). A log with no entries is not kept: the POST never left, or
    the stream never opened, and there is nothing to draw. *)
-let settle_live_turn state (request : Keeper_chat.request) =
+let settle_live_turn state (request : Keeper_chat.request) ~record =
   match inflight_entry_by_request_id state request.Keeper_chat.request_id with
   | Some entry
     when Keeper_chat.same_request_identity entry.sent_request request ->
-      settle_turn_log state entry
+      settle_turn_log_ended_by state entry ~record
   | Some _ | None -> ()
 
 (* Ask the server to interrupt the turn this request opened.
@@ -15358,7 +15358,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             Keeper_chat.error_certainty ~was_unverified:false error
             <> Keeper_chat.Outcome_unverified
       in
-      if terminal then settle_live_turn state request;
+      if terminal then
+        settle_live_turn state request
+          ~record:(Keeper_chat.operation_record_of_result result);
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
@@ -16068,7 +16070,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Some entry when Keeper_chat.same_request_identity entry.sent_request request ->
            Masc_tui_types.retain_preflight_inputs state [entry]
        | Some _ | None -> ());
-      settle_live_turn state request;
+      settle_live_turn state request ~record:None;
       (match inflight_by_request_id state request.Keeper_chat.request_id with
        | Some current when Keeper_chat.same_request_identity current request ->
            drop_inflight state request;

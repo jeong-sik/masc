@@ -210,6 +210,20 @@ val protocol_error : ?acceptance_observed:bool -> stream_error -> error
 val error_acceptance_observed : error -> bool
 val error_certainty : ?was_unverified:bool -> error -> error_certainty
 
+(** What the server's operation record says about a request whose closing
+    event never reached this screen. *)
+type operation_record =
+  | Operation_succeeded
+  | Operation_failed
+  | Operation_cancelled
+
+(** The operation record a result was read from, when the result carries no
+    closing event of its own: the server answered a repeat of an operation it
+    had already settled ([Replayed_succeeded], [Replayed_failed],
+    [Replayed_cancelled]). [None] for every result whose stream delivered the
+    ending, and for every failure that proves nothing about the operation. *)
+val operation_record_of_result : (response, error) result -> operation_record option
+
 (** Whether the failure means this process could not authenticate, rather than
     anything about the operation it asked about. Reconciliation reads use this:
     on a 401 the operation is untouched and still on the server, so the caller

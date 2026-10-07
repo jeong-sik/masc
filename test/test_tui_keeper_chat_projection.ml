@@ -354,6 +354,34 @@ let test_terminal_replay_states () =
     ; "Cancelled", (function Chat.Replayed_cancelled -> true | _ -> false)
     ]
 
+let test_operation_record_names_only_a_replayed_ending () =
+  let record_name = function
+    | None -> "none"
+    | Some Chat.Operation_succeeded -> "succeeded"
+    | Some Chat.Operation_failed -> "failed"
+    | Some Chat.Operation_cancelled -> "cancelled"
+  in
+  let record_of events =
+    Chat.operation_record_of_result
+      (Result.map_error (fun error -> Chat.protocol_error error) (decode events))
+  in
+  List.iter
+    (fun (state, expected) ->
+       check string (state ^ " replay is the server's operation record") expected
+         (record_name (record_of [ acceptance ~state () ])))
+    [ "Succeeded", "succeeded"; "Failed", "failed"; "Cancelled", "cancelled" ];
+  check string "a stream that delivered its ending names no record" "none"
+    (record_name
+       (record_of
+          [ acceptance (); run_started; text_start; reply_details (); text_end
+          ; run_finished ]));
+  check string "a stream cut while the operation runs proves nothing" "none"
+    (record_name (record_of [ acceptance (); run_started ]));
+  check string "a transport failure proves nothing about the operation" "none"
+    (record_name
+       (Chat.operation_record_of_result
+          (Error (Chat.Transport_error "connection reset"))))
+
 let test_terminal_replay_flushes_buffered_completion () =
   match
     decode
@@ -1514,6 +1542,8 @@ let () =
         ; test_case "media-only visible reply" `Quick
             test_media_only_visible_reply
         ; test_case "terminal replay states" `Quick test_terminal_replay_states
+        ; test_case "operation record names only a replayed ending" `Quick
+            test_operation_record_names_only_a_replayed_ending
         ; test_case "terminal replay flushes buffered completion" `Quick
             test_terminal_replay_flushes_buffered_completion
         ; test_case "current wire only" `Quick test_current_wire_only

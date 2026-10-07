@@ -7437,6 +7437,18 @@ let settle_turn_log state (entry : inflight) =
   | Some _ | None -> ()
 ;;
 
+(* Settle a log whose request the server ended without a closing event
+   reaching it. The transcript is closed from the operation record first:
+   settling alone keeps the log and leaves its transcript Working, which the
+   pane draws as a running turn. [None] settles the log as it stands. *)
+let settle_turn_log_ended_by state (entry : inflight) ~record =
+  Option.iter
+    (Masc_tui_keeper_chat_transcript.close_from_operation_record
+       ~now:(Unix.gettimeofday ()) entry.log.tl_transcript)
+    record;
+  settle_turn_log state entry
+;;
+
 (* The strict decode's row for a completed turn, or nothing when the settled
    log stands for the turn and draws its reply itself
    ([Masc_tui_keeper_chat_transcript.drawn]). *)

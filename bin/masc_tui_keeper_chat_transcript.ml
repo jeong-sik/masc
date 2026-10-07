@@ -2211,6 +2211,30 @@ let apply ~now t delta =
   bump t;
   apply_delta ~now t delta
 
+(* A stop or a restart settles the operation on the server without writing its
+   closing event, so the journal stops where the turn was cut and this log
+   never sees RUN_FINISHED or RUN_ERROR. The end is known only from the
+   operation record the server answered a repeat with. Only a turn still open
+   is closed; one a delta already ended keeps its own ending. This is not a
+   rejection: the server ran the request, so [rejection] stays empty. *)
+let close_from_operation_record ~now t (record : Projection.operation_record) =
+  match t.phase with
+  | Stream_ended | Stream_failed _ -> ()
+  | Waiting | Working ->
+      (match record with
+       | Projection.Operation_succeeded -> t.phase <- Stream_ended
+       | Operation_failed ->
+           t.phase <-
+             Stream_failed
+               "the server recorded this request as failed; its closing event never reached this screen"
+       | Operation_cancelled ->
+           t.phase <-
+             Stream_failed
+               "the server recorded this request as cancelled; its closing event never reached this screen");
+      t.ended_at <- Some now;
+      settle t ~now;
+      bump t
+
 (* Replay source identity and event clocks without inventing a run age. *)
 let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
   let t = create_for_source ~keeper_name:(Masc_tui_keeper_chat_log.keeper_name log)

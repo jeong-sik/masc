@@ -300,6 +300,13 @@ val settled_at : t -> float option
     span a block drawn from this transcript covered. *)
 
 val apply : now:float -> t -> Masc_tui_keeper_chat_live.delta -> unit
+
+val close_from_operation_record :
+  now:float -> t -> Masc_tui_keeper_chat_projection.operation_record -> unit
+(** Ends a turn whose closing event never reached the log, from what the
+    server's operation record says about the request. A turn already ended by
+    a delta is left as it is. Unlike {!note_rejection} it does not claim the
+    server refused the request. *)
 (** [now] stamps a tool call as it opens, so the progress row can say how long
     the call in flight has been open rather than only how long the turn has. *)
 (** Fold one delta in. Tool deltas join only by their server-owned stream

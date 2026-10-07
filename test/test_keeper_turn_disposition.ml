@@ -12,7 +12,7 @@ module Status_blocker = Masc.Keeper_status_bridge_blocker
    - [of_wire] is best-effort. Recognised app strings round-trip.
      Recognised runtime wires (RFC-0042) round-trip via projection.
      Parametrised runtime payloads (Provider_runtime_error of string,
-     Agent_core_error of string, Exception_unhandled of string) and
+     Agent_core_error of string) and
      unrecognised legacy wires deserialise to [Unknown { raw_error }];
      no round-trip is possible without a wire-prefix scheme that
      RFC-0042 explicitly defers (§3.1 "intentionally flat"). *)
@@ -81,9 +81,6 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Provider_runtime_error "p"
     , D.Provider_error (Code.Provider_runtime_error "p") )
   ; "Fiber", Code.Fiber_unresolved, D.Provider_error Code.Fiber_unresolved
-  ; ( "Exception"
-    , Code.Exception_unhandled "x"
-    , D.Provider_error (Code.Exception_unhandled "x") )
   ; ( "Sdk"
     , Code.of_core_error_wire "api_error_server:502"
     , D.Provider_error (Code.of_core_error_wire "api_error_server:502") )

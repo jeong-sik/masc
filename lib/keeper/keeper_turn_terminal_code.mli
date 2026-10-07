@@ -36,9 +36,6 @@ type t =
   (** [Keeper_registry.Operator_interrupt]: the current turn was cancelled
           by an explicit operator request, typically from the dashboard
           "stop current turn" action. *)
-  | Exception_unhandled of string
-  (** [Keeper_registry.Exception]: payload is the exception
-          message. *)
   | Agent_core_error of
       { wire : string
       ; timeout : agent_core_timeout option

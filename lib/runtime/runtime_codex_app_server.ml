@@ -988,8 +988,9 @@ let agent_message_content_of_item ~stage item =
   | Some (`String "agentMessage") ->
     (* The app-server schema requires [text] to be a string, not a non-empty
        string. In particular, a tool-only turn may complete an agent-message
-       item with empty text after the tool result has been committed. Such an
-       item is valid protocol but is not a visible assistant-message candidate. *)
+       item with empty text after the tool result has been committed. An
+       explicit final_answer may also choose no update; keep that distinct
+       from a completed turn with no assistant item at all. *)
     let* text = required_string_any stage "text" fields in
     let* phase = optional_string stage "phase" fields in
     Ok (Some (phase, text))
@@ -998,11 +999,15 @@ let agent_message_content_of_item ~stage item =
   | None -> protocol_error stage "item is missing type"
 ;;
 
+let retained_agent_message = function
+  | Some (Some "final_answer", _) as message -> message
+  | Some (_, text) when String.trim text = "" -> None
+  | message -> message
+;;
+
 let agent_message_of_item ~stage item =
   let* message = agent_message_content_of_item ~stage item in
-  match message with
-  | Some (_, text) when String.trim text = "" -> Ok None
-  | _ -> Ok message
+  Ok (retained_agent_message message)
 ;;
 
 (* Model items and host-owned dynamic calls do not prove a native effect.
@@ -1246,8 +1251,8 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
         in
         let text =
           match
-            visible_text terminal_final,
-            visible_text seen_final,
+            terminal_final,
+            seen_final,
             visible_text terminal_fallback,
             visible_text seen_fallback
           with
@@ -1751,9 +1756,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
             Ok ()
           end else protocol_error stage "completed agent message conflicts with streamed text"
     in
-    let message = match message with
-      | Some (_, text) when String.trim text = "" -> None
-      | _ -> message in
+    let message = retained_agent_message message in
     let seen_final, seen_fallback =
       match message with
       | Some (Some "final_answer", text) -> Some text, seen_fallback

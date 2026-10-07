@@ -256,7 +256,7 @@ let test_turn_with_tool_and_approval () =
        match result with
        | Error error -> fail (Serve.error_to_string error)
        | Ok turn ->
-         check string "reply" "MASC_MUSE_OK" turn.text;
+         check (option string) "reply" (Some "MASC_MUSE_OK") turn.text;
          check string "streamed" "MASC_MUSE_OK" (Buffer.contents deltas);
          check (option string) "session ready" (Some "s-1") !session_ready;
          check int "tool calls" 1 turn.tool_calls;
@@ -316,7 +316,7 @@ let test_compaction_reaches_the_stream () =
        match result, !observed with
        | Error error, _ -> fail (Serve.error_to_string error)
        | Ok turn, [ compaction ] ->
-         check string "the turn still completes" "MASC_MUSE_OK" turn.text;
+         check (option string) "the turn still completes" (Some "MASC_MUSE_OK") turn.text;
          check bool "automatic compaction" true
            (compaction.Msp.trigger = Some Msp.Compaction_auto
             && compaction.Msp.outcome = Some Msp.Compaction_compacted);
@@ -431,7 +431,7 @@ let test_selected_homes_do_not_inherit_other_account_roots () =
                 @ [ Write agent_completed; Write turn_completed ])
                (fun result _ ->
                   match result with
-                  | Ok turn -> check string "selected account turn completed" "MASC_MUSE_OK" turn.text
+                  | Ok turn -> check (option string) "selected account turn completed" (Some "MASC_MUSE_OK") turn.text
                   | Error error -> fail (Serve.error_to_string error))))
         [ Runtime_native_tools.Native_read, true
         ; Runtime_native_tools.Native_full, false
@@ -473,7 +473,7 @@ let test_prepared_home_is_bound_to_exact_selected_account () =
         (Expect_launch {home; native_read=true} :: handshake_and_session ~granted:[]
          @ [Write agent_completed; Write turn_completed])
         (fun result _ -> match result with
-         | Ok turn -> check string "matching account completes" "MASC_MUSE_OK" turn.text
+         | Ok turn -> check (option string) "matching account completes" (Some "MASC_MUSE_OK") turn.text
          | Error error -> fail (Serve.error_to_string error)))
       [home_a, prepared; alias_a, prepared_alias];
     Unix.unlink alias_a;
@@ -486,7 +486,7 @@ let test_prepared_home_is_bound_to_exact_selected_account () =
       (Expect_launch {home=home_a; native_read=true} :: handshake_and_session ~granted:[]
        @ [Write agent_completed; Write turn_completed])
       (fun result _ -> match result with
-       | Ok turn -> check string "retarget cannot split child roots from auth" "MASC_MUSE_OK" turn.text
+       | Ok turn -> check (option string) "retarget cannot split child roots from auth" (Some "MASC_MUSE_OK") turn.text
        | Error error -> fail (Serve.error_to_string error)))
 ;;
 
@@ -561,7 +561,7 @@ let test_session_identity_is_verified_before_admission () =
        @ resume_steps @ [Read; Write (with_id turn_id turn_ack); Write turn_started;
                           Write agent_completed; Write turn_completed])
       (fun result requests ->
-        (match result with Ok turn -> check string "matching session completes" "MASC_MUSE_OK" turn.text
+        (match result with Ok turn -> check (option string) "matching session completes" (Some "MASC_MUSE_OK") turn.text
          | Error error -> fail (Serve.error_to_string error));
         check int "matching identity persists once" 1 !ready;
         check bool "only a resume selects the model"
@@ -625,7 +625,7 @@ let test_resumed_session_model_is_selected_before_admission () =
       (fun result requests ~ready ~sent:_ ->
         (match result with
          | Ok turn ->
-           check string "re-selected session completes" "MASC_MUSE_OK" turn.text;
+           check (option string) "re-selected session completes" (Some "MASC_MUSE_OK") turn.text;
            check (option string) "the turn names the selected model" (Some requested) turn.model
          | Error error -> fail (Serve.error_to_string error));
         check int "re-selected session persists once" 1 ready;
@@ -956,7 +956,7 @@ let test_session_approval_mode_is_verified_before_admission () =
           Write turn_started; Write agent_completed; Write turn_completed])
         (fun result requests ->
           (match result with
-           | Ok turn -> check string "verified mode completes" "MASC_MUSE_OK" turn.text
+           | Ok turn -> check (option string) "verified mode completes" (Some "MASC_MUSE_OK") turn.text
            | Error error -> fail (Serve.error_to_string error));
           check int "verified mode persists once" 1 !ready;
           check int "verified mode dispatches once" 1 !sent;
@@ -1092,7 +1092,7 @@ let test_absent_durability_admits_the_v1_durable_host () =
      @ [ Write agent_completed; Write turn_completed ])
     (fun result _ ->
        match result with
-       | Ok turn -> check string "v1 durable turn completed" "MASC_MUSE_OK" turn.text
+       | Ok turn -> check (option string) "v1 durable turn completed" (Some "MASC_MUSE_OK") turn.text
        | Error error -> fail (Serve.error_to_string error))
 ;;
 

@@ -3668,7 +3668,8 @@ let production_keeper_meta ~base_path ~trace_id =
   | Error detail -> fail ("production Keeper meta fixture failed: " ^ detail)
 ;;
 
-let run_production_keeper_turn_with_projection ~write_cost_ledger ~after_turn
+let run_production_keeper_turn_with_input ~turn_kind ~input_speaker ~world_observation
+    ~write_cost_ledger ~after_turn
     ~dynamic_context_for_tools
     ~http_requests ~base_path ~trace_id
     ~user_message ~cli_path ~model ~turn_instructions =
@@ -3784,9 +3785,9 @@ candidates = ["projection.http", "codex.codex"]
                                            "--- Turn-specific instructions ---\n" ^ ti)
                                     })
                                 ~user_message
-                                ~input_speaker:
-                                  (Keeper_input_speaker.Person Keeper_input_speaker.Owner)
-                                ~turn_kind:Turn_record.Direct
+                                ~input_speaker
+                                ~turn_kind
+                                ?world_observation
                                 ~skill_snapshot:
                                   (Skill_catalog_snapshot.config_unreadable
                                      ~detail:"test fixture has no Skill publication")
@@ -3797,6 +3798,16 @@ candidates = ["projection.http", "codex.codex"]
                                  still the published one. *)
                               after_turn settlement;
                               settlement.Keeper_agent_run.result))))))
+;;
+
+let run_production_keeper_turn_with_projection ~write_cost_ledger ~after_turn
+    ~dynamic_context_for_tools ~http_requests ~base_path ~trace_id
+    ~user_message ~cli_path ~model ~turn_instructions =
+  run_production_keeper_turn_with_input
+    ~turn_kind:Turn_record.Direct
+    ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+    ~world_observation:None ~write_cost_ledger ~after_turn ~dynamic_context_for_tools
+    ~http_requests ~base_path ~trace_id ~user_message ~cli_path ~model ~turn_instructions
 ;;
 
 let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace_id
@@ -6165,6 +6176,54 @@ let assert_official_client_turn_boundary ~base_path ~trace_id =
                lines)))
 ;;
 
+(* Both wire delivery forms must survive the real Keeper caller. A missing
+   item remains a protocol error; an explicit quiet final may become the
+   existing No_visible_reply outcome only on a wake without new input. *)
+let test_production_keeper_quiet_final_contract () =
+  let blank_item =
+    {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"message-1","text":"","phase":"final_answer"}}}|} in
+  let blank_terminal =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","id":"message-1","text":"","phase":"final_answer"}],"status":"completed"}}}|} in
+  let missing_terminal =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|} in
+  let observation = { Keeper_world_observation.pending_messages = []; pending_board_events = [];
+            idle_seconds = 0; active_goals = Ok []; unclaimed_task_count = 0;
+            claimable_tasks = []; held_task_skills = []; failed_task_count = 0;
+            scheduled_automation = Keeper_world_observation.empty_scheduled_automation_observation;
+            approval_authority = {revision=1; state=Approval_authority_complete; pending=[]};
+            backlog_revision = Some 1; running_keeper_fiber_count = 0;
+            connected_surfaces = []; connected_surface_failures = [];
+            own_recent_board_posts = []; fleet_messages = []; own_recent_actions = Ok [] } in
+  let wake = Keeper_input_speaker.Host_prompt (Autonomous_wake {answered_asks=[]}) in
+  List.iter (fun (label, turn_kind, input_speaker, tail, expected_quiet) ->
+    let base_path = temp_workspace "masc-codex-quiet-" in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture ([init_result; account_chatgpt; thread_result; turn_result] @ tail)
+        (fun cli_path ->
+          let result = run_production_keeper_turn_with_input
+            ~turn_kind ~input_speaker ~world_observation:(Some observation)
+            ~write_cost_ledger:false ~after_turn:ignore ~dynamic_context_for_tools:None
+            ~http_requests:None ~base_path ~trace_id:("quiet-" ^ label)
+            ~user_message:"Continue any available work; finish quietly if nothing changed."
+            ~cli_path ~model:"gpt-fixture" ~turn_instructions:None in
+          match expected_quiet, result with
+          | true, Ok result ->
+            check string label "" result.response_text;
+            check bool "completed without a visible reply" true
+              (result.turn_outcome = Keeper_turn_outcome.No_visible_reply)
+          | false, Error _ -> ()
+          | true, Error error -> failf "%s: %s" label (Agent_core.Error.to_string error)
+          | false, Ok _ -> failf "%s silently lost an expected reply" label)))
+    [ "streamed", Turn_record.Autonomous, wake, [blank_item; missing_terminal], true
+    ; "terminal", Turn_record.Autonomous, wake, [blank_terminal], true
+    ; "missing", Turn_record.Autonomous, wake, [missing_terminal], false
+    ; "direct", Turn_record.Direct, Keeper_input_speaker.Person Owner, [blank_terminal], false
+    ; "answered", Turn_record.Autonomous,
+        Keeper_input_speaker.Host_prompt (Autonomous_wake {answered_asks=[Owner]}),
+        [blank_terminal], false
+    ]
+;;
+
 let test_production_keeper_dispatches_codex_runtime () =
   let base_path = temp_workspace "masc-codex-production-" in
   Fun.protect
@@ -7769,6 +7828,8 @@ let () =
             "Keeper starts fresh on a changed Codex tool surface"
             `Quick
             test_keeper_starts_fresh_on_changed_tool_surface
+        ; test_case "production Keeper quiet final preserves input obligations" `Quick
+            test_production_keeper_quiet_final_contract
         ; test_case
             "production Keeper dispatches Codex runtime"
             `Quick

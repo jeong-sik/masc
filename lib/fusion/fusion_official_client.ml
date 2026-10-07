@@ -546,7 +546,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Some reported -> reported
          | None -> execution.model
        in
-       succeeded { text = result.text; model; usage = optional_usage muse_usage result.usage }
+       succeeded
+         { text = Option.value result.text ~default:""
+         ; model; usage = optional_usage muse_usage result.usage }
      | Error error -> Error (Muse_failure error))
 ;;
 

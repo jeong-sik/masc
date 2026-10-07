@@ -336,7 +336,7 @@ let content_of_wire_message raw =
    newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
-let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
+let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report
@@ -371,7 +371,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                     let run () =
                       Result.map
                         (fun selected -> selected.Keeper_turn_driver.run_result)
-                        (Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                        (Keeper_turn_driver.run_named ?accept ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                            ~runtime_id:"claude.claude"
                            ~keeper_name:"claude-fixture"
                            ~base_path
@@ -3687,6 +3687,32 @@ let test_a_working_state_that_displaces_nothing_goes () =
       (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
+let test_quiet_result_preserves_claude_output_presence () =
+  let absent = {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"quiet"}|} in
+  let null_result = {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"quiet","result":null}|} in
+  List.iter (fun (label, final, policy, quiet) ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture [Emit (assistant ~turn_id:"quiet" ""); Emit final] (fun cli_path ->
+        match run_keeper_turn ~accept:(Keeper_tooling.Response.accepts_response ~policy)
+            ~base_path ~cli_path ~goal:"Continue useful work or finish quietly if nothing changed." () with
+        | Error _ when not quiet -> ()
+        | Error error -> failf "%s: %s" label (Agent_core.Error.to_string error)
+        | Ok _ when not quiet -> failf "%s was incorrectly accepted as quiet" label
+        | Ok run_result ->
+          match Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+              ~response_policy:policy ~runtime_id:"claude.claude" ~initial_messages:[]
+              ~run_result ~text:"" ~tool_names:[] () with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok text -> check string label "" text)))
+    [ "explicit", result ~turn_id:"quiet" "", Keeper_tooling.Response.Allow_quiet_final, true
+    ; "absent", absent, Allow_quiet_final, false
+    ; "null", null_result, Allow_quiet_final, false
+    ; "direct", result ~turn_id:"quiet" "", Require_progress, false
+    ; "failure", generic_provider_rejection, Allow_quiet_final, false
+    ]
+;;
+
 let () =
   (* Pin the prompt directory explicitly. Under dune the registry falls back to
      [DUNE_SOURCEROOT], but a test executable run directly has neither that
@@ -3697,7 +3723,9 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    [ ( "quiet completion", [test_case "explicit result survives adapter and caller acceptance" `Quick
+        test_quiet_result_preserves_claude_output_presence] )
+    ; ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick
             test_result_only_usage_keeps_client_turn_scope

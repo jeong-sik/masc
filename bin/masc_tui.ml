@@ -10804,7 +10804,14 @@ let apply_server_identity_reading state reading =
   (* A withdrawal invalidates outstanding roster reads even if the same
      workspace becomes ready again before those reads finish. *)
   if not (same_currency_workspace state.server_identity (Result.to_option reading))
-  then withdraw_currency_authority state;
+  then begin
+    (* The first identity read of a booting TUI carries no previous answer,
+       so there is nothing to withdraw: the observation is empty anyway and
+       the pending read may establish it. Bumping the generation here would
+       consume the read's own authorization and leave a fresh TUI silent
+       until a later refresh. A withdrawn workspace bumps for real. *)
+    if state.server_identity <> None then withdraw_currency_authority state
+  end;
   let same_item_authority =
     match state.server_identity, reading with
     | Some previous, Ok current ->
@@ -10968,8 +10975,35 @@ let apply_http_surfaces state ~mailbox results =
   if Http_refresh_order.is_current state.http_refresh_order
        results.http_scoped.http_refresh_ticket then begin
   let previous_items = visible_item_revision state in
+  let currency_authority = {
+    car_generation = state.candle_authority_generation;
+    car_identity = state.server_identity;
+  } in
   apply_server_identity_reading state results.http_server_identity;
   if Result.is_ok results.http_server_identity then begin
+    (* The full refresh carries its own scoped surfaces, its roster among
+       them. Identity application can withdraw currency authority even when
+       this response has the current ticket (a same-port replacement, ready
+       or not); only the dispatch generation and workspace together
+       authorize that roster, exactly as a scoped refresh already requires.
+       Without this drop the read's own payload re-establishes the amounts
+       under the authority it just withdrew, and the mismatch screen shows
+       foreign currency until the next tick. *)
+    let same_workspace =
+      (match currency_authority.car_identity with
+       | None ->
+         (* First establishment ever: no authority was held when this read
+            dispatched, so it may found one. A read dispatched after a
+            withdrawal carries None too, but then the generation has already
+            left zero and only an authorized read may answer. *)
+         state.candle_authority_generation = 0
+       | Some _ ->
+         currency_authority.car_generation = state.candle_authority_generation
+         && same_currency_workspace currency_authority.car_identity state.server_identity)
+    in
+    let results = if same_workspace then results
+      else { results with http_scoped =
+        { results.http_scoped with http_keeper_roster = None } } in
     apply_overview_load state results.http_overview;
     if state.workspace_identity = Workspace_identity_match then
       Option.iter (apply_approval_observation state) results.http_approvals;
@@ -11004,6 +11038,16 @@ let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
   apply_server_identity_reading state identity;
   apply_keeper_roster_load state
     (Error (Keeper_control.Roster_unreachable "server booting"));
+  (* The roster failure above keeps its keeper diagnostic, but it also
+     re-establishes a candle reading from an authority the identity reading
+     just withdrew (a booting server is a different workspace until it is
+     ready). Help would then draw "Candle details" from a withdrawn
+     authority. Only the withdrawal may answer here. *)
+  if (match state.server_identity with
+      | None -> false
+      | Some { Tui_decode.sid_state_ready = Some false; _ } -> true
+      | Some _ -> false)
+  then state.candle_observation <- None;
   Option.iter
     (fun ao_ticket ->
        apply_approval_observation state
@@ -11014,6 +11058,17 @@ let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
 
 let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket =
   apply_server_identity_reading state (Error detail);
+  (* The surface loads that would answer the roster never ran: the identity
+     reading failed first. Leave the answer that roster loader gives while
+     the workspace identity is unavailable, so Help keeps its diagnostic
+     instead of a withdrawn silence; the withdrawal above already removed
+     the stale amounts. A transport failure is not an identity answer, so it
+     keeps the silence. *)
+  if not unreachable then
+    state.candle_observation <-
+      Some (Error (Keeper_control.roster_failure_message
+        ~credential_sent:(Masc_tui_http.operator_token_present ())
+        (Keeper_control.Roster_malformed "Server workspace identity is unavailable")));
   Option.iter (fun ao_ticket ->
     apply_approval_observation state {ao_ticket; ao_result = Error detail}) approval_ticket;
   state.connection_status <-

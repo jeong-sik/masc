@@ -250,6 +250,12 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+type content_block =
+  | Partial_block of { message_id : string; index : int }
+  | Assistant_block of { uuid : string; ordinal : int }
+
+type content_channel = Text_content | Thinking_content
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -257,12 +263,15 @@ type stream_event =
       }
   | Text_delta of
       { message_id : string option
+      ; block : content_block
       ; text : string
       }
   | Thinking_delta of
       { message_id : string option
+      ; block : content_block
       ; text : string
       }
+  | Content_block_stopped of { block : content_block; channel : content_channel }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -1357,38 +1366,45 @@ let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~
 (* Partial SDK frames precede the complete assistant block. Keep the current
    text block so its later complete envelope contributes only missing bytes.
    Complete blocks remain the source for terminal text and usage accounting. *)
-type partial_stream =
-  { mutable message_id : string option
-  ; mutable text_blocks : (string * int * Buffer.t) list
-  ; mutable thinking_blocks : (string * int * Buffer.t) list
+type partial_phase = Streaming | Wire_stopped | Envelope_complete | Content_closed
+
+type partial_block =
+  { identity : content_block
+  ; message_id : string
+  ; index : int
+  ; channel : content_channel
+  ; buffer : Buffer.t
+  ; mutable phase : partial_phase
   }
 
-type partial_channel = Text | Thinking
+type partial_stream =
+  { mutable message_id : string option
+  ; mutable blocks : partial_block list
+  ; completed_envelopes : ((string * int), (content_channel * string)) Hashtbl.t
+  }
 
-let partial_blocks partial = function
-  | Text -> partial.text_blocks
-  | Thinking -> partial.thinking_blocks
+let emit_content ~on_stream_event ~response_emitted ~message_id ~block channel text =
+  if text <> "" then match channel with
+  | Text_content ->
+      response_emitted := true;
+      emit_stream_event on_stream_event (Text_delta {message_id; block; text})
+  | Thinking_content ->
+      emit_stream_event on_stream_event (Thinking_delta {message_id; block; text})
 ;;
 
-let set_partial_blocks partial channel blocks =
-  match channel with
-  | Text -> partial.text_blocks <- blocks
-  | Thinking -> partial.thinking_blocks <- blocks
-;;
-
-let emit_partial_text ~on_stream_event ~response_emitted ~message_id channel text =
-  if text <> "" then
-    match channel with
-    | Text ->
-        response_emitted := true;
-        emit_stream_event on_stream_event (Text_delta {message_id; text})
-    | Thinking -> emit_stream_event on_stream_event (Thinking_delta {message_id; text})
+let close_partial ~on_stream_event block =
+  if block.phase <> Content_closed then begin
+    block.phase <- Content_closed;
+    Buffer.clear block.buffer;
+    emit_stream_event on_stream_event
+      (Content_block_stopped {block=block.identity; channel=block.channel})
+  end
 ;;
 
 let partial_text_value stage channel fields =
   match channel with
-  | Text -> text_value stage fields
-  | Thinking ->
+  | Text_content -> text_value stage fields
+  | Thinking_content ->
       let* value = required_member stage "thinking" fields in
       (match value with
        | `String text -> Ok text
@@ -1403,7 +1419,7 @@ let partial_block_index stage fields =
 ;;
 
 let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
-    ~on_stream_event partial fields =
+    ~on_stream_event (partial : partial_stream) fields =
   let stage = "partial stream event" in
   let* session_id = required_string stage "session_id" fields in
   if session_id <> expected_session_id then
@@ -1431,21 +1447,22 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* kind = required_string stage "type" block in
         (match kind with
          | ("text" | "thinking") as kind ->
-             let channel = if kind = "text" then Text else Thinking in
+             let channel = if kind = "text" then Text_content else Thinking_content in
              let* text = partial_text_value stage channel block in
-             let buffer = Buffer.create 256 in
-             Buffer.add_string buffer text;
              let* message_id = match partial.message_id with
                | Some id -> Ok id
                | None -> protocol_error stage "content block has no message start" in
-             if List.exists (fun (id, held_index, _) -> id = message_id && held_index = index)
-                 (partial.text_blocks @ partial.thinking_blocks) then
+             if List.exists (fun (held : partial_block) -> held.message_id = message_id && held.index = index)
+                 partial.blocks then
                protocol_error stage "content block index already started"
              else begin
-               set_partial_blocks partial channel
-                 (partial_blocks partial channel @ [message_id, index, buffer]);
-               emit_partial_text ~on_stream_event ~response_emitted
-                 ~message_id:partial.message_id channel text;
+               let buffer = Buffer.create 256 in
+               Buffer.add_string buffer text;
+               let identity = Partial_block {message_id; index} in
+               partial.blocks <- partial.blocks @
+                 [{identity; message_id; index; channel; buffer; phase=Streaming}];
+               emit_content ~on_stream_event ~response_emitted
+                 ~message_id:partial.message_id ~block:identity channel text;
                Ok ()
              end
          | "tool_use" | "redacted_thinking" -> Ok ()
@@ -1457,46 +1474,75 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* kind = required_string stage "type" delta in
         (match kind with
          | ("text_delta" | "thinking_delta") as kind ->
-             let channel = if kind = "text_delta" then Text else Thinking in
+             let channel = if kind = "text_delta" then Text_content else Thinking_content in
              let* text = partial_text_value stage channel delta in
-             let held = List.find_opt (fun (id, held_index, _) ->
-               Some id = partial.message_id && held_index = index) (partial_blocks partial channel) in
+             let held = List.find_opt (fun (held : partial_block) ->
+               Some held.message_id = partial.message_id && held.index = index
+               && held.channel = channel) partial.blocks in
              (match held with
-              | Some (_, _, buffer) ->
-                  Buffer.add_string buffer text;
-                  emit_partial_text ~on_stream_event ~response_emitted
-                    ~message_id:partial.message_id channel text;
+              | Some held when held.phase = Streaming ->
+                  Buffer.add_string held.buffer text;
+                  emit_content ~on_stream_event ~response_emitted
+                    ~message_id:partial.message_id ~block:held.identity channel text;
                   Ok ()
-              | _ -> protocol_error stage "content delta has no matching message/channel block")
+              | _ -> protocol_error stage "content delta has no matching open message/channel block")
          | "input_json_delta" | "signature_delta" | "citations_delta" -> Ok ()
          | other -> protocol_error stage ("unsupported content delta type " ^ other))
     | "content_block_stop" ->
         let* index = partial_block_index stage event in
-        (* Empty blocks have no complete assistant envelope. Retain nonempty
-           stopped blocks until their per-block or aggregate envelope lands. *)
-        List.iter (fun channel ->
-          set_partial_blocks partial channel
-            (List.filter (fun (id, held_index, buffer) ->
-              not (Some id = partial.message_id && held_index = index && Buffer.length buffer = 0))
-              (partial_blocks partial channel))) [Text; Thinking];
+        List.iter (fun (held : partial_block) ->
+          if Some held.message_id = partial.message_id && held.index = index then begin
+            (* Empty blocks have no complete assistant envelope. Nonempty
+               blocks close only after reconciliation, including a late suffix. *)
+            match held.phase with
+            | Streaming when Buffer.length held.buffer = 0 -> close_partial ~on_stream_event held
+            | Streaming -> held.phase <- Wire_stopped
+            | Envelope_complete -> close_partial ~on_stream_event held
+            | Wire_stopped | Content_closed -> ()
+          end) partial.blocks;
         Ok ()
     | "message_delta" | "message_stop" | "ping" -> Ok ()
     | other -> protocol_error stage ("unsupported partial event type " ^ other)
 ;;
 
-let complete_partial_text partial ~channel ~message_id text =
-  if String.equal text "" then Ok text
-  else match List.find_opt (fun (id, _, buffer) ->
-      Some id = message_id && Buffer.length buffer > 0) (partial_blocks partial channel) with
-  | Some (id, index, buffer) ->
-      let prefix = Buffer.contents buffer in
-      if String.starts_with ~prefix text then begin
-        set_partial_blocks partial channel
-          (List.filter (fun (held_id, held_index, _) ->
-             held_id <> id || held_index <> index) (partial_blocks partial channel));
-        Ok (String.sub text (String.length prefix) (String.length text - String.length prefix))
-      end else protocol_error "assistant content" "complete block conflicts with streamed content"
-  | None -> Ok text
+let complete_partial_text (partial : partial_stream) ~on_stream_event ~response_emitted
+    ~channel ~message_id ~uuid ~ordinal text =
+  let envelope = uuid, ordinal in
+  match Hashtbl.find_opt partial.completed_envelopes envelope with
+  | Some previous when previous = (channel, text) -> Ok ()
+  | Some _ -> protocol_error "assistant content" "replayed complete block changed"
+  | None ->
+      let held = List.find_opt (fun (held : partial_block) ->
+        Some held.message_id = message_id && held.channel = channel
+        && (match held.phase with Streaming | Wire_stopped -> true
+             | Envelope_complete | Content_closed -> false)
+        && (if text = "" then Buffer.length held.buffer = 0
+            else Buffer.length held.buffer > 0)) partial.blocks in
+      let* () = match held with
+      | Some held ->
+          let prefix = Buffer.contents held.buffer in
+          if not (String.starts_with ~prefix text) then
+            protocol_error "assistant content" "complete block conflicts with streamed content"
+          else begin
+            let remaining = String.sub text (String.length prefix)
+                (String.length text - String.length prefix) in
+            emit_content ~on_stream_event ~response_emitted ~message_id
+              ~block:held.identity channel remaining;
+            Buffer.add_string held.buffer remaining;
+            (match held.phase with
+             | Streaming -> held.phase <- Envelope_complete
+             | Wire_stopped -> close_partial ~on_stream_event held
+             | Envelope_complete | Content_closed -> ());
+            Ok ()
+          end
+      | None ->
+          let block = Assistant_block {uuid; ordinal} in
+          emit_content ~on_stream_event ~response_emitted ~message_id ~block channel text;
+          if text <> "" then emit_stream_event on_stream_event
+            (Content_block_stopped {block; channel});
+          Ok () in
+      Hashtbl.add partial.completed_envelopes envelope (channel, text);
+      Ok ()
 ;;
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
@@ -1551,7 +1597,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         Some model
     in
     let texts_rev = ref [] in
-    let* () = List.fold_left (fun result block ->
+    let* () = List.fold_left (fun result (ordinal, block) ->
       let* () = result in
       match block with
       | Assistant_text text ->
@@ -1559,24 +1605,20 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
            | Api_error_diagnostic -> Ok ()
            | Model_response ->
                texts_rev := text :: !texts_rev;
-               let* remaining = complete_partial_text partial_stream ~channel:Text ~message_id text in
-               if remaining <> "" then emit_stream_event on_stream_event
-               (Text_delta {message_id; text=remaining});
-               Ok ())
+               complete_partial_text partial_stream ~on_stream_event ~response_emitted
+                 ~channel:Text_content ~message_id ~uuid ~ordinal text)
       | Assistant_thinking text ->
           (match origin with
            | Api_error_diagnostic -> Ok ()
            | Model_response ->
-               let* remaining = complete_partial_text partial_stream ~channel:Thinking ~message_id text in
-               if remaining <> "" then emit_stream_event on_stream_event
-                 (Thinking_delta {message_id; text=remaining});
-               Ok ())
+               complete_partial_text partial_stream ~on_stream_event ~response_emitted
+                 ~channel:Thinking_content ~message_id ~uuid ~ordinal text)
       | Assistant_native_tool observation ->
           native_tool_attempted := true;
           Option.iter (fun call_id -> Hashtbl.replace native_tool_calls call_id observation)
             (Runtime_native_tools.call_id observation);
           emit_stream_event on_stream_event (Native_tool_started observation);
-          Ok ()) (Ok ()) blocks in
+          Ok ()) (Ok ()) (List.mapi (fun ordinal block -> ordinal, block) blocks) in
     let texts = List.rev !texts_rev in
     if List.exists (fun text -> String.length text > 0) texts then response_emitted := true;
     await_terminal
@@ -1966,7 +2008,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event
-    ~partial_stream:{message_id=None; text_blocks=[]; thinking_blocks=[]}
+    ~partial_stream:{message_id=None; blocks=[]; completed_envelopes=Hashtbl.create 8}
     ~stream_started:(ref false)
     ~response_emitted:(ref false)
 ;;

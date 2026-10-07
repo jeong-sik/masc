@@ -1053,7 +1053,7 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
   let reports = ref [] in
   let on_stream_event = function
     | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Conversation_compacted
     | Usage_reported _ | Turn_finished _ -> ()
   in
@@ -1127,7 +1127,7 @@ let test_quota_refusal_still_reports_the_turns_spend () =
       reported :=
         (turn_id, model, usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens)
         :: !reported
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1156,7 +1156,7 @@ let test_quota_refusal_before_any_response_reports_no_spend () =
   let reported = ref 0 in
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1174,7 +1174,7 @@ let test_result_of_another_session_reports_no_spend () =
   let reported = ref 0 in
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1291,7 +1291,8 @@ let test_api_diagnostic_preserves_prior_text () =
        |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:true;
        match List.rev !events with
        | [ Turn_started { model = "claude-fixture"; _ }
-         ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
+         ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK"; _ }
+         ; Content_block_stopped {channel=Text_content; _}
          ] ->
          ()
        | _ -> fail "diagnostic changed the real response stream")
@@ -1325,7 +1326,7 @@ let test_api_diagnostic_preserves_native_effects () =
                     true
                   | Turn_started _ | Usage_windows_reported _ | Conversation_compacted
                   | Usage_reported _ -> false
-                  | Text_delta _ | Thinking_delta _
+                  | Text_delta _ | Thinking_delta _ | Content_block_stopped _
                   | Dynamic_tool_started _
                   | Dynamic_tool_finished _
                   | Turn_finished _ -> fail "native-only turn emitted response content")
@@ -1433,7 +1434,8 @@ let test_real_identical_prose_is_still_response () =
             |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:true;
             match List.rev !events with
             | [ Turn_started _
-              ; Text_delta { message_id = None; text = "You've hit your limit" }
+              ; Text_delta { message_id = None; text = "You've hit your limit"; _ }
+              ; Content_block_stopped {channel=Text_content; _}
               ] -> ()
             | _ -> fail "ordinary assistant prose was hidden"))
     [ None; Some (`Bool false) ]
@@ -1472,7 +1474,8 @@ let test_valid_response_after_api_diagnostic () =
       check string "real response" "MASC_CLAUDE_OK" turn.text;
       (match List.rev !events with
        | [ Turn_started { turn_id = "assistant-fixture-1"; model = "claude-fixture" }
-         ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
+         ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK"; _ }
+         ; Content_block_stopped {channel=Text_content; _}
          ; Turn_finished { text = "MASC_CLAUDE_OK" }
          ] -> ()
        | _ -> fail "diagnostic started or polluted response stream")
@@ -1833,10 +1836,11 @@ let test_partial_text_streams_before_complete_block () =
       | Ok _ ->
         match List.rev !events with
         | [Turn_started {turn_id="msg-partial"; model="claude-fixture"};
-           Text_delta {message_id=Some "msg-partial"; text="MASC_"};
-           Text_delta {message_id=Some "msg-partial"; text="CLAUDE_"};
-           Text_delta {message_id=Some "msg-partial"; text=" "};
-           Text_delta {message_id=Some "msg-partial"; text="OK"};
+           Text_delta {message_id=Some "msg-partial"; text="MASC_"; _};
+           Text_delta {message_id=Some "msg-partial"; text="CLAUDE_"; _};
+           Text_delta {message_id=Some "msg-partial"; text=" "; _};
+           Text_delta {message_id=Some "msg-partial"; text="OK"; _};
+           Content_block_stopped {block=Partial_block {message_id="msg-partial"; index=0}; channel=Text_content};
            Turn_finished {text="MASC_CLAUDE_ OK"}] -> ()
         | _ -> fail "partial text must arrive as separate deltas without repeating the complete block")
 ;;
@@ -1858,7 +1862,7 @@ let test_partial_thinking_preserves_complete_suffix () =
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok _ ->
           let thinking = List.rev !events |> List.filter_map (function
-            | Runtime_claude_code.Thinking_delta {message_id; text} -> Some (message_id, text)
+            | Runtime_claude_code.Thinking_delta {message_id; text; _} -> Some (message_id, text)
             | _ -> None) in
           check (list (pair (option string) string)) "only missing thinking suffix follows the delta"
             [Some "msg-thinking", "Inspect "; Some "msg-thinking", "the state"] thinking)
@@ -1878,6 +1882,20 @@ let test_partial_thinking_rejects_text_block () =
       | Ok _ -> fail "thinking was accepted into an assistant text block")
 ;;
 
+let test_partial_delta_after_stop_is_rejected () =
+  let frame event = "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  with_fixture [
+    Emit (frame {|{"type":"message_start","message":{"id":"closed","model":"claude-fixture"}}|});
+    Emit (frame {|{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"before"}}|});
+    Emit (frame {|{"type":"content_block_stop","index":0}|});
+    Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"late"}}|});
+    Emit assistant; Emit result]
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "a closed partial block accepted a provider delta")
+;;
+
 let test_four_partial_messages_preserve_all_blocks () =
   let frame event = Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
       "session_id", `String "__SESSION__"; "event", event]) in
@@ -1888,8 +1906,8 @@ let test_four_partial_messages_preserve_all_blocks () =
   let piece index text = frame (`Assoc ["type", `String "content_block_delta";
       "index", `Int index; "delta", `Assoc ["type", `String "text_delta"; "text", `String text]]) in
   let stop index = frame (`Assoc ["type", `String "content_block_stop"; "index", `Int index]) in
-  let complete id texts = Yojson.Safe.to_string (`Assoc ["type", `String "assistant"; "parent_tool_use_id", `Null;
-      "session_id", `String "__SESSION__"; "uuid", `String (id ^ "-complete");
+  let complete ~uuid id texts = Yojson.Safe.to_string (`Assoc ["type", `String "assistant"; "parent_tool_use_id", `Null;
+      "session_id", `String "__SESSION__"; "uuid", `String uuid;
       "message", `Assoc ["id", `String id; "model", `String "claude-fixture";
         "content", `List (List.map (fun text -> `Assoc ["type", `String "text"; "text", `String text]) texts)]]) in
   let citation = frame (`Assoc ["type", `String "content_block_delta"; "index", `Int 0;
@@ -1903,24 +1921,30 @@ let test_four_partial_messages_preserve_all_blocks () =
   List.iter (fun aggregate ->
     let events = ref [] in
     let n = [start "n"; block 0; piece 0 "A"; citation] in
-    let n = if aggregate then n @ [stop 0; tool_start; complete "n" ["A"]]
-      else n @ [complete "n" ["A"]; stop 0; tool_start] in
+    let n = if aggregate then n @ [stop 0; tool_start; complete ~uuid:"n-a" "n" ["A"]]
+      else n @ [complete ~uuid:"n-a" "n" ["A"]; stop 0; tool_start] in
     let n1 = [start "n+1"; block 0; stop 0; block 1; piece 1 "B";
-      complete "n+1" (if aggregate then [""; "B"] else ["B"]); stop 1] in
+      complete ~uuid:"n1-b" "n+1" (if aggregate then [""; "B"] else ["B"]); stop 1] in
     let n2 = [start "n+2"; block 0; piece 0 "C"; stop 0] in
     let n3 = [start "n+3"; block 0; piece 0 "C"; stop 0; block 1; piece 1 "D"] in
-    let n3 = if aggregate then n3 @ [stop 1; complete "n+3" ["C"; "D"]]
+    let n3 = if aggregate then n3 @ [stop 1; complete ~uuid:"n3-cd" "n+3" ["C"; "D"]]
       else (* n+2 arrives late; its prefix is scoped by message identity. *)
-        [complete "n+2" ["C"]] @ n3 @ [complete "n+3" ["C"];
-          complete "n+3" ["D"]; stop 1] in
-    let late = if aggregate then [complete "n+2" ["C"]] else [] in
+        [complete ~uuid:"n2-c" "n+2" ["C"]] @ n3 @ [complete ~uuid:"n3-c" "n+3" ["C"];
+          complete ~uuid:"n3-d" "n+3" ["D"]; stop 1] in
+    let late = if aggregate then [complete ~uuid:"n2-c" "n+2" ["C"]] else [] in
     with_fixture (List.map (fun json -> Emit json) (n @ n1 @ n2 @ n3 @ late @ [result]))
       (fun path ->
         match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
         | Error error -> fail (Runtime_claude_code.error_to_string error)
         | Ok _ ->
+            let n1_stops = List.rev !events |> List.filter_map (function
+              | Runtime_claude_code.Content_block_stopped
+                  {block=Partial_block {message_id="n+1"; index}; channel=Text_content} -> Some index
+              | _ -> None) in
+            check (list int) "empty envelope cannot consume the next nonempty partial block"
+              [0; 1] n1_stops;
             let pieces = List.rev !events |> List.filter_map (function
-              | Runtime_claude_code.Text_delta {message_id; text} -> Some (message_id, text)
+              | Runtime_claude_code.Text_delta {message_id; text; _} -> Some (message_id, text)
               | _ -> None) in
             check (list (pair (option string) string)) "four messages retain each partial block once"
               [Some "n", "A"; Some "n+1", "B"; Some "n+2", "C";
@@ -1960,7 +1984,8 @@ let test_stream_events_preserve_text_and_tool_identity () =
       | Ok _ ->
         match List.rev !events with
         | [ Turn_started { turn_id = "assistant-fixture-1"; model = "claude-fixture" }
-          ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
+          ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK"; _ }
+         ; Content_block_stopped {channel=Text_content; _}
           ; Dynamic_tool_started
               { call_id = "call-1"
               ; tool_name = "masc_probe"
@@ -2002,7 +2027,8 @@ let test_stream_events_preserve_native_tool_origin () =
               ; tool_name = Some "Read"
               ; origin = Runtime_native_tools.Built_in
               }; completion = _ }
-          ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
+          ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK"; _ }
+         ; Content_block_stopped {channel=Text_content; _}
           ; Turn_finished { text = "MASC_CLAUDE_OK" }
           ] -> ()
         | _ -> fail "Claude native tool activity was not kept distinct from MASC tools")
@@ -2708,7 +2734,8 @@ let () =
             test_native_read_preapproves_read_tools
         ] )
     ; ( "admission"
-      , [ test_case "validation is process-free" `Quick test_validation_is_process_free
+      , [ test_case "partial delta after stop rejected" `Quick test_partial_delta_after_stop_is_rejected
+        ; test_case "validation is process-free" `Quick test_validation_is_process_free
         ; test_case "prompt transmission boundary" `Quick test_prompt_transmission_boundary
         ; test_case
             "subscription auth and env scrub"

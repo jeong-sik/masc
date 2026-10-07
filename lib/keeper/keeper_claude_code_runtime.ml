@@ -182,39 +182,60 @@ let claude_stream_callback ?on_native_tool_completion ?receipts ~keeper_name ~qu
         | Runtime_claude_code.Conversation_compacted -> on_compacted ()
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
-        | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
-    let thinking_indexes = Hashtbl.create 8 in
+    let content_indexes = Hashtbl.create 8 in
+    let closed_content = Hashtbl.create 8 in
+    let first_text = ref true in
+    let last_text_index = ref None in
+    let fresh_text_index () =
+      if !first_text then (first_text := false; 0)
+      else let index = !next_tool_index in incr next_tool_index; index
+    in
+    let content_index block channel =
+      match Hashtbl.find_opt content_indexes (block, channel) with
+      | Some index -> index
+      | None ->
+          let index = match channel with
+            | Runtime_claude_code.Text_content -> fresh_text_index ()
+            | Thinking_content ->
+                let index = !next_tool_index in incr next_tool_index; index in
+          Hashtbl.add content_indexes (block, channel) index;
+          index
+    in
+    let stop_content index =
+      if not (Hashtbl.mem closed_content index) then begin
+        Hashtbl.add closed_content index ();
+        emit (Agent_core.Types.ContentBlockStop {index})
+      end
+    in
     let tool_indexes = Hashtbl.create 8 in
     let native_tool_indexes = Hashtbl.create 8 in
     (* Each [message.id] is one model response; the text blocks it carries are
        one assistant message, and the next response's text is the next. *)
     let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
-    let emit_text text =
-      emit
-        (Agent_core.Types.ContentBlockDelta
-           { index = 0; delta = Agent_core.Types.TextDelta text })
+    let emit_text ~index text =
+      emit (Agent_core.Types.ContentBlockDelta
+        { index; delta = Agent_core.Types.TextDelta text })
     in
     Some
       (function
         | Runtime_claude_code.Turn_started { turn_id; model } ->
           emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
-        | Runtime_claude_code.Text_delta { message_id; text } ->
-          emit_text
+        | Runtime_claude_code.Text_delta { message_id; block; text } ->
+          let index = content_index block Runtime_claude_code.Text_content in
+          last_text_index := Some index;
+          emit_text ~index
             (Keeper_official_client_text_stream.forward text_stream ~message:message_id text)
-        | Runtime_claude_code.Thinking_delta { message_id; text } ->
-          let index = match Hashtbl.find_opt thinking_indexes message_id with
-            | Some index -> index
-            | None ->
-                let index = !next_tool_index in
-                incr next_tool_index;
-                Hashtbl.add thinking_indexes message_id index;
-                index in
+        | Runtime_claude_code.Thinking_delta { block; text; _ } ->
+          let index = content_index block Runtime_claude_code.Thinking_content in
           emit (Agent_core.Types.ContentBlockDelta
             { index; delta = Agent_core.Types.ThinkingDelta text })
+        | Runtime_claude_code.Content_block_stopped {block; channel} ->
+          Option.iter stop_content (Hashtbl.find_opt content_indexes (block, channel))
         | Runtime_claude_code.Dynamic_tool_started
             { call_id; tool_name; arguments } ->
           Keeper_official_client_text_stream.tool_row text_stream;
@@ -298,8 +319,12 @@ let claude_stream_callback ?on_native_tool_completion ?receipts ~keeper_name ~qu
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
         | Runtime_claude_code.Turn_finished { text } ->
-          Option.iter
-            emit_text
+          Option.iter (fun remainder ->
+            let index = match !last_text_index with
+              | Some index when not (Hashtbl.mem closed_content index) -> index
+              | Some _ | None -> fresh_text_index () in
+            emit_text ~index remainder;
+            stop_content index)
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
           emit
             (Agent_core.Types.MessageDelta

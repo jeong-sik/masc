@@ -1441,6 +1441,7 @@ let test_keeper_streams_text_and_tool_events () =
                    ; usage = None
                    }
                ; ContentBlockDelta { index = 0; delta = TextDelta "MASC_" }
+               ; ContentBlockStop {index=0}
                ; ContentBlockStart
                    { index = 1
                    ; content_type = "tool_use"
@@ -1453,7 +1454,8 @@ let test_keeper_streams_text_and_tool_events () =
                    }
                ; ContentBlockStop { index = 1 }
                ; ContentBlockDelta
-                   { index = 0; delta = TextDelta "CLAUDE_STREAM" }
+                   { index = 2; delta = TextDelta "CLAUDE_STREAM" }
+               ; ContentBlockStop {index=2}
                ; MessageDelta { stop_reason = Some EndTurn; usage = None }
                ; MessageStop
                ] ->
@@ -1470,21 +1472,21 @@ let test_keeper_streams_text_and_tool_events () =
    id, the text after the tool result under the next id, and a result
    carrying that last text). The text goes through Yojson so a Korean
    answer stays JSON; [%S] would write OCaml byte escapes. *)
-let response_frame ~turn_id ~message_id block =
+let response_frame ~uuid ~message_id block =
   Printf.sprintf
     {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-%s","message":{"id":"%s","role":"assistant","model":"claude-fixture","content":[%s]}}|}
-    turn_id
+    uuid
     message_id
     (Yojson.Safe.to_string block)
 ;;
 
 let response_text ~turn_id ~message_id text =
-  response_frame ~turn_id ~message_id
+  response_frame ~uuid:(turn_id ^ "-" ^ message_id) ~message_id
     (`Assoc [ "type", `String "text"; "text", `String text ])
 ;;
 
 let response_native_tool ~turn_id ~message_id ~call_id ~tool_name =
-  response_frame ~turn_id ~message_id
+  response_frame ~uuid:(turn_id ^ "-" ^ message_id ^ "-" ^ call_id) ~message_id
     (`Assoc
         [ "type", `String "tool_use"; "id", `String call_id; "name", `String tool_name ])
 ;;
@@ -1515,7 +1517,7 @@ let test_keeper_preserves_claude_thinking_before_tools () =
   let events = ref [] in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     with_fixture
-      [Emit (response_frame ~turn_id:"thinking-turn" ~message_id:"thinking-message"
+      [Emit (response_frame ~uuid:"thinking-envelope" ~message_id:"thinking-message"
           (`Assoc ["type", `String "thinking"; "thinking", `String "Inspect the state";
             "signature", `String "opaque-signature"]));
        Emit (response_native_tool ~turn_id:"thinking-turn" ~message_id:"thinking-message"
@@ -1533,15 +1535,66 @@ let test_keeper_preserves_claude_thinking_before_tools () =
             (match List.rev !events with
              | [Agent_core.Types.MessageStart _;
                 ContentBlockDelta {index=1; delta=ThinkingDelta "Inspect the state"};
+                ContentBlockStop {index=1};
                 ContentBlockStart {index=2; content_type="native_tool_use";
                   tool_id=Some "thinking-tool"; tool_name=Some "Read"};
                 ContentBlockStart {index=2; content_type="native_tool_use";
                   tool_id=Some "thinking-tool"; tool_name=Some "Read"};
                 ContentBlockStop {index=2};
                 ContentBlockDelta {index=0; delta=TextDelta "Answer"};
+                ContentBlockStop {index=0};
                 MessageDelta _; MessageStop] -> ()
              | _ -> fail "thinking, native tool, and answer lost their order or separate indices");
             check string "thinking does not enter final response" "Answer" (keeper_response_text turn)))
+;;
+
+let test_partial_content_boundaries_keep_message_and_channel_identity () =
+  let frame event = Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
+    "session_id", `String "__SESSION__"; "parent_tool_use_id", `Null; "event", event]) in
+  let message id = frame (`Assoc ["type", `String "message_start";
+    "message", `Assoc ["id", `String id; "model", `String "claude-fixture"]]) in
+  let block index kind = frame (`Assoc ["type", `String "content_block_start";
+    "index", `Int index; "content_block", `Assoc ["type", `String kind; kind, `String ""]]) in
+  let piece index kind text = frame (`Assoc ["type", `String "content_block_delta";
+    "index", `Int index; "delta", `Assoc ["type", `String (kind ^ "_delta"); kind, `String text]]) in
+  let stop index = frame (`Assoc ["type", `String "content_block_stop"; "index", `Int index]) in
+  let complete ~uuid id kind text = response_frame ~uuid ~message_id:id
+      (`Assoc ["type", `String kind; kind, `String text]) in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let events = ref [] in
+    with_fixture [
+      Emit (message "old"); Emit (block 0 "text"); Emit (piece 0 "text" "Before");
+      Emit (complete ~uuid:"old-envelope" "old" "text" "Before"); Emit (stop 0); Emit (stop 0);
+      Emit (response_native_tool ~turn_id:"native" ~message_id:"native" ~call_id:"background" ~tool_name:"Read");
+      Emit (message "thinking"); Emit (block 0 "thinking"); Emit (piece 0 "thinking" "Inspect ");
+      Emit (stop 0);
+      Emit (message "answer"); Emit (block 0 "text"); Emit (piece 0 "text" "An");
+      Emit (native_tool_result ~call_id:"background" ~content:"done");
+      (* The old thinking envelope completes after the answer is open. *)
+      Emit (complete ~uuid:"thinking-envelope" "thinking" "thinking" "Inspect state");
+      Emit (piece 0 "text" "swer"); Emit (stop 0);
+      Emit (complete ~uuid:"answer-envelope" "answer" "text" "Answer");
+      Emit (complete ~uuid:"answer-envelope" "answer" "text" "Answer"); Emit (stop 0);
+      Emit (complete ~uuid:"same-first" "same" "text" "echo");
+      Emit (complete ~uuid:"same-second" "same" "text" "echo");
+      Emit (complete ~uuid:"same-second" "same" "text" "echo");
+      Emit (result_text ~turn_id:"finished" "echoecho")]
+      (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"BOUNDARIES"
+          ~on_event:(fun event -> events := event :: !events) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ ->
+            let observed = List.rev !events |> List.filter_map (function
+              | Agent_core.Types.ContentBlockDelta {index; delta=TextDelta text} -> Some (`Text (index,text))
+              | ContentBlockDelta {index; delta=ThinkingDelta text} -> Some (`Thinking (index,text))
+              | ContentBlockStart {index; content_type="native_tool_use"; _} -> Some (`Tool index)
+              | ContentBlockStop {index} -> Some (`Stop index)
+              | _ -> None) in
+            check bool "only the exact completed content closes, once" true
+              (observed = [`Text (0,"Before"); `Stop 0; `Tool 1;
+                `Thinking (2,"Inspect "); `Text (3,"\n\nAn"); `Stop 1;
+                `Thinking (2,"state"); `Stop 2; `Text (3,"swer"); `Stop 3;
+                `Text (4,"\n\necho"); `Stop 4; `Text (5,"echo"); `Stop 5])))
 ;;
 
 let test_native_completion_reaches_tui () =
@@ -1603,8 +1656,9 @@ let test_keeper_streams_two_claude_responses_apart () =
            | Ok turn ->
              let events = List.rev !events in
              (match events with
-              | [ Agent_core.Types.MessageStart { id = "assistant-turn-apart-1"; _ }
+              | [ Agent_core.Types.MessageStart { id = _; _ }
                 ; ContentBlockDelta { index = 0; delta = TextDelta "확인할게요." }
+                ; ContentBlockStop {index=0}
                 ; ContentBlockStart
                     { index = 1
                     ; content_type = "native_tool_use"
@@ -1612,7 +1666,8 @@ let test_keeper_streams_two_claude_responses_apart () =
                     ; tool_name = Some "Bash"
                     }
                 ; ContentBlockStop { index = 1 }
-                ; ContentBlockDelta { index = 0; delta = TextDelta "\n\n완료" }
+                ; ContentBlockDelta { index = 2; delta = TextDelta "\n\n완료" }
+                ; ContentBlockStop {index=2}
                 ; MessageDelta { stop_reason = Some EndTurn; usage = None }
                 ; MessageStop
                 ] -> ()
@@ -3770,7 +3825,8 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    [ ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
+        ; test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick
             test_result_only_usage_keeps_client_turn_scope

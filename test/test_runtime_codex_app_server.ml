@@ -496,6 +496,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
                 { call_id = "call-1"; tool_name = "masc_probe"; arguments }
             ; Dynamic_tool_finished { call_id = "call-1" }
             ; Text_delta {item_id=Some "message-1"; delta="SUBSCRIPTION_OK"}
+            ; Text_completed { item_id = Some "message-1"; source = Item_content }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] ->
             check string
@@ -542,7 +543,8 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
                }; completion = _ }
            ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
            ; Text_delta {item_id=Some "message-1"; delta="SUBSCRIPTION_OK"}
-           ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
+           ; Text_completed { item_id = Some "message-1"; source = Item_content }
+            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
            ] -> ()
          | _ -> fail "Codex native command activity was projected as a MASC tool")
 ;;
@@ -2268,7 +2270,7 @@ let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn
     | Runtime_codex_app_server.Usage_reported
         { frame = Runtime_codex_app_server.Context_window_filled _; _ } ->
       fail "a counted frame was read as a fill"
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
     | Usage_windows_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
@@ -2647,6 +2649,7 @@ let test_mcp_item_outlasting_the_idle_window_completes () =
                 ; origin = Runtime_native_tools.Mcp_wrapper
                 }; completion = _ }
             ; Text_delta { item_id = Some "message-1"; delta = "MASC_SUBSCRIPTION_OK" }
+            ; Text_completed { item_id = Some "message-1"; source = Item_content }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
           | _ -> fail "the MCP call was not observed as a tool item"))
@@ -2672,6 +2675,7 @@ let test_sleep_item_outlasting_the_idle_window_completes () =
          (match List.rev !stream_events with
           | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
             ; Text_delta { item_id = Some "message-1"; delta = "MASC_SUBSCRIPTION_OK" }
+            ; Text_completed { item_id = Some "message-1"; source = Item_content }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
           | _ -> fail "a sleep was projected as a tool"))
@@ -3119,7 +3123,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
   let reports = ref [] in
   let on_stream_event = function
     | Runtime_codex_app_server.Usage_windows_reported report -> reports := report :: !reports
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
     | Usage_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
@@ -4752,6 +4756,7 @@ let test_keeper_projects_codex_live_stream () =
             ; ContentBlockStop { index = 1 }
             ; ContentBlockDelta
                 { index = 0; delta = TextDelta "SUBSCRIPTION_OK" }
+            ; ContentBlockStop { index = 0 }
             ; MessageDelta { stop_reason = Some EndTurn; usage = None }
             ; MessageStop
             ] ->
@@ -4827,8 +4832,10 @@ let test_keeper_separates_codex_agent_messages () =
          (match events with
           | [ MessageStart { id = "turn-1"; model = "gpt-fixture"; usage = None }
             ; ContentBlockDelta { index = 0; delta = TextDelta "확인할게요." }
-            ; ContentBlockDelta { index = 0; delta = TextDelta "\n\n완" }
-            ; ContentBlockDelta { index = 0; delta = TextDelta "료" }
+            ; ContentBlockStop { index = 0 }
+            ; ContentBlockDelta { index = 1; delta = TextDelta "\n\n완" }
+            ; ContentBlockDelta { index = 1; delta = TextDelta "료" }
+            ; ContentBlockStop { index = 1 }
             ; MessageDelta { stop_reason = Some EndTurn; usage = None }
             ; MessageStop
             ] -> ()
@@ -4875,9 +4882,52 @@ let test_keeper_preserves_codex_reasoning_and_tool_order () =
             let stopped = List.rev !events |> List.filter_map (function
               | Agent_core.Types.ContentBlockStop {index} -> Some index | _ -> None) in
             check (list int) "repeated native start retains its block" [3; 3] native_indices;
-            check (list int) "native end closes the original block" [3] stopped;
+            check (list int) "each model part and native occurrence closes once" [1; 2; 3; 0] stopped;
             check string "reasoning is not the assistant answer" "MASC_SUBSCRIPTION_OK"
               (keeper_response_text result))) [false; true]
+;;
+
+(* Provider item completion closes its own content, even while another item
+   or a background command is open. No newline is needed to observe the end. *)
+let test_keeper_codex_content_boundaries () =
+  let delta id text = Yojson.Safe.to_string (`Assoc ["method", `String "item/agentMessage/delta";
+    "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+      "itemId", `String id; "delta", `String text]]) in
+  let complete id text = Yojson.Safe.to_string (`Assoc ["method", `String "item/completed";
+    "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+      "item", `Assoc ["type", `String "agentMessage"; "id", `String id;
+        "text", `String text; "phase", `String "commentary"]]]) in
+  let events = ref [] in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+      commentary_delta; commentary_completed;
+      native_command_started; delta "message-1" "MASC_";
+      native_command_completed; delta "message-1" "SUBSCRIPTION_OK";
+      item_completed;
+      {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","delta":"later"}}|};
+      item_completed;
+      complete "other" "later"; turn_completed]
+    (fun cli_path -> match run_keeper_turn ~cli_path ~model:"gpt-fixture"
+        ~on_event:(fun event -> events := event :: !events) () with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok _ ->
+          let observed = List.rev !events |> List.filter_map (function
+            | Agent_core.Types.ContentBlockDelta {index; delta=TextDelta text} -> Some (`Text (index,text))
+            | ContentBlockStart {index; content_type="native_tool_use"; _} -> Some (`Tool index)
+            | ContentBlockStop {index} -> Some (`Stop index)
+            | _ -> None) in
+          check bool "exact content and native boundaries preserve producer order" true
+            (observed = [`Text (0,"확인할게요."); `Stop 0; `Tool 1;
+              `Text (2,"\n\nMASC_"); `Stop 1; `Text (2,"SUBSCRIPTION_OK"); `Stop 2;
+              `Text (3,"later"); `Stop 3]))
+;;
+
+let test_codex_content_delta_after_completion_is_rejected () =
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+      item_completed; agent_message_delta; turn_completed]
+    (fun path -> match run_fixture path with
+      | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "a closed provider item accepted a late delta")
 ;;
 
 let test_native_completion_reaches_tui () =
@@ -5038,6 +5088,7 @@ let test_agent_message_delta_without_item_id_streams () =
           | [ Turn_started _
             ; Text_delta { item_id = None; delta = "MASC_" }
             ; Text_delta { item_id = None; delta = "SUBSCRIPTION_OK" }
+            ; Text_completed { item_id = Some "message-1"; source = Adopted_anonymous_content }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
           | _ -> fail "an agentMessage delta without an itemId did not stream unnamed"))
@@ -5053,6 +5104,7 @@ let test_completed_message_streams_without_delta () =
       match List.rev !events with
       | [Runtime_codex_app_server.Turn_started _;
          Text_delta {item_id=Some "message-1"; delta="MASC_SUBSCRIPTION_OK"};
+         Text_completed {item_id=Some "message-1"; source=Item_content};
          Turn_finished {text="MASC_SUBSCRIPTION_OK"}] -> ()
       | _ -> fail "completed assistant item must reach live output before the turn ends")
 ;;
@@ -7523,7 +7575,9 @@ let () =
             test_completed_message_streams_without_delta
         ; test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
     ; ( "last projection"
-      , [ test_case "empty overflow retry survives the next production turn" `Quick
+      , [ test_case "keeper exact content boundaries" `Quick test_keeper_codex_content_boundaries
+        ; test_case "late content delta is rejected" `Quick test_codex_content_delta_after_completion_is_rejected
+        ; test_case "empty overflow retry survives the next production turn" `Quick
             test_production_empty_retry_boundary_survives_the_next_turn
         ; test_case "later claim refusal preserves the earlier projection" `Quick
             (test_production_last_projection ~http_predecessor:true ~reject_codex:true)

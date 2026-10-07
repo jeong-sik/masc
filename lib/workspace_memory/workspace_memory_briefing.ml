@@ -17,6 +17,7 @@ type batch =
   ; input : Yojson.Safe.t
   ; rendered_prompt : string
   }
+type preparation = Unchanged | Cleanup of t | Prepared of batch
 
 let ( let* ) = Result.bind
 let empty = { published = None; building = None }
@@ -99,7 +100,11 @@ let render_batch ~render ~state ~selected ~remaining =
 
 let prepare ~sources ~contract ~render t =
   let* () = validate_sources sources in
-  if not (needs_refresh ~sources ~contract t) then Ok None
+  if not (needs_refresh ~sources ~contract t) then
+    match sources, t.building with
+    | [], _ -> Ok (if is_empty t then Unchanged else Cleanup empty)
+    | _ :: _, Some _ -> Ok (Cleanup { t with building = None })
+    | _ :: _, None -> Ok Unchanged
   else if not (nonblank contract) then Error "briefing contract must be nonblank"
   else
     let sources = List.sort (fun (a : source) b -> String.compare a.id b.id) sources in
@@ -110,7 +115,7 @@ let prepare ~sources ~contract ~render t =
       | None -> start_pass ~sources ~contract t.published in
     let state = { t with building = Some building } in
     let* batch = render_batch ~render ~state ~selected:building.remaining ~remaining:[] in
-    Ok (Some batch)
+    Ok (Prepared batch)
 
 let narrow ~render batch =
   match batch.selected with

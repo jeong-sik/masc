@@ -5,7 +5,9 @@ let batch = function Some batch -> batch | None -> Alcotest.fail "expected brief
 let source ?(kind = B.Claim) id text : B.source = { id; kind; text }
 let render input = Ok ("Summarize workspace evidence:\n" ^ Yojson.Safe.to_string input)
 let prepare ?(contract = fixture_contract) sources state =
-  get (B.prepare ~sources ~contract ~render state)
+  match get (B.prepare ~sources ~contract ~render state) with
+  | B.Prepared batch -> Some batch
+  | B.Unchanged | B.Cleanup _ -> None
 let after_size_refusal request = batch (get (B.narrow ~render request))
 let finish ?contract sources text state =
   get (B.accept (batch (prepare ?contract sources state)) ~text)
@@ -41,7 +43,7 @@ let test_shared_summary_reuse () =
       (B.needs_refresh ~sources ~contract:fixture_contract state);
     let result = B.prepare ~sources ~contract:fixture_contract
       ~render:(fun _ -> Alcotest.fail "current briefing was rendered") state in
-    match get result with None -> () | Some _ -> Alcotest.fail "current briefing called model")
+    match get result with B.Unchanged -> () | B.Cleanup _ | B.Prepared _ -> Alcotest.fail "current briefing performed work")
     [sources; List.rev sources];
   expect_current [] state "";
   (match prepare [] state with None -> () | Some _ -> Alcotest.fail "empty ledger called model")
@@ -136,6 +138,49 @@ let test_interrupted_refresh_keeps_publication_and_deletion_resets () = with_dir
   let changed = batch (prepare [a; changed_b; c] partial) in
   Alcotest.(check bool) "changed pass source invalidates partial prose" true (previous changed = `Null))
 
+let test_no_refresh_discards_obsolete_pass () = with_directory (fun directory ->
+  let a = source "a" "Published evidence" in
+  let b = source "b" "Deleted raw evidence" in
+  let c = source "c" "Another deleted entry" in
+  let published = finish [a] "A" B.empty in
+  let pending = batch (prepare [a; b] published) in
+  let partial = get (B.accept
+      (after_size_refusal (batch (prepare [a; b; c] published))) ~text:"AB") in
+  List.iter (fun state ->
+    get (B.save ~directory state);
+    let restored = get (B.load ~directory) in
+    Alcotest.(check bool) "A still has a complete publication" false
+      (B.needs_refresh ~sources:[a] ~contract:fixture_contract restored);
+    let cleaned = match get (B.prepare ~sources:[a] ~contract:fixture_contract
+        ~render:(fun _ -> Alcotest.fail "cleanup rendered model input") restored) with
+      | B.Cleanup state -> state
+      | B.Unchanged | B.Prepared _ -> Alcotest.fail "obsolete pass was not returned for persistence" in
+    get (B.save ~directory cleaned);
+    let restored = get (B.load ~directory) in
+    expect_current [a] restored "A";
+    let stored = In_channel.with_open_bin (B.path ~directory) In_channel.input_all
+      |> Yojson.Safe.from_string in
+    Alcotest.(check bool) "deleted raw evidence and partial prose removed from disk" true
+      (member "building" stored = `Null);
+    (match get (B.prepare ~sources:[a] ~contract:fixture_contract
+        ~render:(fun _ -> Alcotest.fail "clean state rendered model input") restored) with
+     | B.Unchanged -> ()
+     | B.Cleanup _ | B.Prepared _ -> Alcotest.fail "clean state performed more work");
+    let returned = batch (prepare [a; b] restored) in
+    Alcotest.(check (list string)) "reappearing source is summarized again" ["b"]
+      (entry_ids returned);
+    Alcotest.(check bool) "obsolete partial summary is not resumed" true
+      (previous returned = `String "A"))
+    [B.prepared_state pending; partial];
+  let cleaned = match get (B.prepare ~sources:[] ~contract:fixture_contract
+      ~render:(fun _ -> Alcotest.fail "empty cleanup rendered model input")
+      (B.prepared_state pending)) with
+    | B.Cleanup state -> state
+    | B.Unchanged | B.Prepared _ -> Alcotest.fail "empty evidence did not clear state" in
+  get (B.save ~directory cleaned);
+  Alcotest.(check bool) "empty cleanup survives restart" true
+    (B.is_empty (get (B.load ~directory))))
+
 let test_strict_storage_and_output () = with_directory (fun directory ->
   let sources = [source "a" "Evidence"] in
   (match B.observe ~sources ~contract:fixture_contract (get (B.load ~directory)) with B.Missing -> () | _ -> Alcotest.fail "missing artifact was not empty");
@@ -214,6 +259,7 @@ let () = Alcotest.run "Workspace memory briefing"
      Alcotest.test_case "changed prompt is stale even when refresh cannot start" `Quick test_changed_contract_is_stale_before_or_after_failed_refresh;
      Alcotest.test_case "fixed pass resumes and eventually publishes under additions" `Quick test_fixed_pass_survives_restart_and_new_additions;
      Alcotest.test_case "failed refresh preserves old publication and removal resets" `Quick test_interrupted_refresh_keeps_publication_and_deletion_resets;
+     Alcotest.test_case "no refresh persists obsolete pass cleanup" `Quick test_no_refresh_discards_obsolete_pass;
      Alcotest.test_case "strict storage and model output" `Quick test_strict_storage_and_output;
      Alcotest.test_case "actual refusal bisects without losing whole entries" `Quick test_actual_refusal_narrows_without_losing_entries;
      Alcotest.test_case "invalid source and render failure boundary" `Quick test_invalid_sources_and_render_failure_do_not_consume]]

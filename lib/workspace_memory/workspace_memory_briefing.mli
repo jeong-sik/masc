@@ -27,7 +27,8 @@ val observe : sources:source list -> contract:string -> t -> observation
 
 val needs_refresh : sources:source list -> contract:string -> t -> bool
 (** False for empty evidence or an identical published source/contract set.
-    The worker may skip provider admission entirely in that case. *)
+    The worker may skip provider admission entirely in that case, but must
+    still call [prepare] to persist any obsolete-pass cleanup. *)
 
 type batch
 val input : batch -> Yojson.Safe.t
@@ -39,22 +40,26 @@ val prepared_state : batch -> t
     New additions wait for the next pass; removal or modification of a target
     source resets the pass on the next [prepare]. *)
 
+type preparation = Unchanged | Cleanup of t | Prepared of batch
+
 val prepare
   : sources:source list
   -> contract:string
   -> render:(Yojson.Safe.t -> (string, string) result)
   -> t
-  -> (batch option, string) result
+  -> (preparation, string) result
 (** [contract] identifies the effective prompt and output schema. A changed
     contract rebuilds from current entries, without reusing the old summary.
     Additions alone reuse the previous summary and send only new entries.
     Deletions or changed source contents rebuild without old summary prose.
     Model input contains only [previous_summary] and selected [entries].
     Prepares all remaining entries without estimating provider capacity.
-    Sources must have unique, nonblank ids and nonblank text. No new evidence
-    (or no sources) returns [Ok None] without rendering or model work. When
-    all sources disappear, the owner must persist [empty] to discard old
-    publication and in-progress source bodies even though no model is needed. *)
+    Sources must have unique, nonblank ids and nonblank text. Call before
+    provider admission, even when [needs_refresh] is false. [Unchanged] needs
+    no write or model work. [Cleanup state] must be saved without model work:
+    it discards an obsolete pass while retaining the current publication, or
+    clears all state when all sources disappear. Only [Prepared batch] renders
+    model input and needs inference. *)
 
 val narrow
   : render:(Yojson.Safe.t -> (string, string) result)

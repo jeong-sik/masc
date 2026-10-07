@@ -316,6 +316,7 @@ type error =
   | Turn_failed of string
   | Turn_failed_with_observation of
       { detail : string
+      ; api_error_status : int option
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
@@ -1324,6 +1325,7 @@ let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~
     Error
       (Turn_failed_with_observation
          { detail = terminal_failure_detail ()
+         ; api_error_status
          ; tool_effect_attempted
          ; response_emitted
          })

@@ -30,15 +30,17 @@
     that pad in place of the plain keys row, and reads a physical gamepad in
     the standard mapping onto the same buttons. A pad read that fails shows the keys row and a
     status line, and the next poll reads it again. Each button press carries
-    the saves name its layout was read for.
+    the saves name its layout was read for. A stalled layout read is replaced
+    at the slower seat recovery cadence without stopping frame polling.
 
     [POST /api/v1/play/room] provides one public conversation shared by the
     workspace's MSX/DOS viewers, invited participants, operators and Keepers.
     History, chat and presence are independent of game input and controller
     ownership; a spectator can speak while another participant controls DOS.
     Room polling starts independently of the first seat read and continues
-    on its own timer when a game read remains pending. Every room receipt
-    must include its authenticated [viewer]; self marks use that identity
+    on its own timer when a game read remains pending. It
+    replaces a stalled read at the seat recovery cadence without retrying a
+    pending message. Every room receipt must include its authenticated [viewer]; self marks use that identity
     independently of the DOS seat response.
     Each page instance has its own presence client. Session storage preserves
     the chat draft and any unconfirmed message's client/message identifiers

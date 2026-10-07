@@ -26,6 +26,7 @@ async function main() {
   await mkdir(output, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   const requests = [], errors = [];
+  let roomReads = 0, padReads = 0;
   let seatReads = 0, frameReads = 0, passed = false, ejected = false, padPressed = false, invited = false, released = false, connected = true;
   const messages = [
     { id:1, at:1, who:'keeper-a', speaker:'keeper', machine:'dos', text:'같이 보고 있어요.' },
@@ -43,6 +44,7 @@ async function main() {
       let json;
       if (url.pathname === '/api/v1/play/room') {
         const body = request.postDataJSON();
+        if (body.action === 'read' && ++roomReads === 1) return new Promise(() => {});
         if (body.action === 'say') messages.push({ id:messages.length + 1, at:3, who:'minsu', speaker:'participant', machine:body.machine, text:body.text });
         json = { viewer:'minsu', messages, members, has_more:false, presence_seconds:60 };
       } else if (url.pathname === '/api/v1/play/seat') {
@@ -52,6 +54,7 @@ async function main() {
           controller_recoverable: false,
           saves_name: ejected ? null : 'game', participants: (invited ? ['minsu', 'operator', 'newplayer'] : ['minsu', 'operator']).filter(name => connected || name !== 'minsu') };
       } else if (url.pathname === '/api/v1/play/pad') {
+        if (request.method() === 'GET' && ++padReads === 1) return new Promise(() => {});
         if (request.method() === 'POST') {
           assert.deepEqual(request.postDataJSON(), { button: 'BTN_SOUTH', saves_name: 'game' });
           assert.equal(connected, true);
@@ -105,8 +108,12 @@ async function main() {
       .getContext('2d').getImageData(0, 0, 1, 1).data]);
     assert.deepEqual(await pixel(), [255, 0, 0, 255]);
     assert.ok(seatReads >= 3);
+    await page.locator('#pad [data-button="BTN_SOUTH"]').waitFor({ state:'visible' });
+    assert.ok(padReads >= 2, 'stalled pad recovers without navigation');
     assert.equal(new URL(page.url()).hash, '');
     await page.waitForFunction(() => document.getElementById('room-messages').textContent.includes('다음 차례'));
+    assert.ok(roomReads >= 2, 'stalled room recovers without navigation');
+    await page.screenshot({ path:resolve(output, 'play-stalled-reads-recovered.png'), fullPage:true });
     await page.locator('#chat-text').fill('Keeper 둘과 함께 관전합니다.');
     await page.locator('#chat-send').click();
     await page.waitForFunction(() => document.getElementById('chat-text').value === '');
@@ -203,8 +210,8 @@ async function main() {
     assert.equal(padPressed, true);
     const receipt = { scope: 'Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.',
       source_sha256: createHash('sha256').update(source).digest('hex'),
-      browser_version: browser.version(), seat_reads: seatReads, frame_reads: frameReads,
-      checks: ['seat recovers without machine activity', 'failed frame is fetched again',
+      browser_version: browser.version(), seat_reads: seatReads, frame_reads: frameReads, room_reads:roomReads, pad_reads:padReads,
+      checks: ['stalled room read recovers automatically', 'stalled pad read recovers while frames continue', 'seat recovers without machine activity', 'failed frame is fetched again',
         'several Keepers share public conversation', 'guest sends public message',
         'one viewport switches DOS and MSX without splitting conversation',
         'MSX live response renders green pixels before DOS red pixels return', 'room layout fits phone and desktop',

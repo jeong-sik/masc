@@ -555,11 +555,11 @@ function roomRequest(body) {
 
 function refreshRoom(replace = true) {
   if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || roomDetached) return;
-  // A normal pulse leaves a slow read intact. Explicit navigation or a send
-  // supersedes it; elapsed time alone does not revoke observation ownership.
-  if (roomBusy && !replace) return;
+  // Preserve slow reads between pulses, but renew a stalled observation at
+  // the seat recovery cadence. This never retries or abandons a room write.
+  if (roomBusy && !replace && performance.now() - roomReadRequest.startedAt < SEAT_POLL_MS) return;
   if (roomReadAbort) roomReadAbort.abort();
-  const request = {};
+  const request = { startedAt:performance.now() };
   roomReadRequest = request;
   roomBusy = true;
   setRoomControls();
@@ -917,13 +917,27 @@ function restartFrames() {
 }
 
 function refreshFramePad(revision, signal) {
-  if (framePadRequest !== null || seatSavesName === padFor) return;
-  const request = {};
+  if (seatSavesName === padFor) return;
+  if (framePadRequest !== null) {
+    if (performance.now() - framePadRequest.startedAt < SEAT_POLL_MS) return;
+    framePadRequest.cancel();
+  }
+  // A layout has its own cancellation scope: replacing a stalled read must
+  // keep the spectator frames running. Changing views cancels both scopes.
+  const abort = new AbortController();
+  const cancel = () => {
+    signal.removeEventListener('abort', cancel);
+    abort.abort();
+  };
+  signal.addEventListener('abort', cancel, { once:true });
+  if (signal.aborted) cancel();
+  const request = { startedAt:performance.now(), cancel };
   framePadRequest = request;
-  void syncPad(signal).catch(() => {
-    if (!ended && !signal.aborted && revision === viewRevision)
+  void syncPad(abort.signal).catch(() => {
+    if (!ended && !abort.signal.aborted && revision === viewRevision && framePadRequest === request)
       setStatus('pad', '패드 배치를 읽지 못했어요. 다시 읽고 있어요.');
   }).finally(() => {
+    signal.removeEventListener('abort', cancel);
     if (framePadRequest === request) framePadRequest = null;
   });
 }

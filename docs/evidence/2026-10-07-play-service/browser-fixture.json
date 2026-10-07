@@ -1,10 +1,14 @@
 {
   "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
-  "source_sha256": "9fb299a6ac0936d58eab8f0042d1464654419c94fae531b75a10f1fb7742e69f",
+  "source_sha256": "bbfd93f1e6f15202e96f7cf2c470270f2a336dba97f67ff3ab72715b2eb36b7f",
   "browser_version": "149.0.7827.55",
   "seat_reads": 16,
-  "frame_reads": 23,
+  "frame_reads": 40,
+  "room_reads": 8,
+  "pad_reads": 4,
   "checks": [
+    "stalled room read recovers automatically",
+    "stalled pad read recovers while frames continue",
     "seat recovers without machine activity",
     "failed frame is fetched again",
     "several Keepers share public conversation",
@@ -83,11 +87,6 @@
       "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
     },
     {
-      "method": "POST",
-      "path": "/api/v1/play/room",
-      "query": ""
-    },
-    {
       "method": "GET",
       "path": "/api/v1/lane-addons/live",
       "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
@@ -121,11 +120,6 @@
       "method": "GET",
       "path": "/api/v1/lane-addons/live",
       "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/play/room",
-      "query": ""
     },
     {
       "method": "GET",
@@ -151,6 +145,111 @@
       "method": "GET",
       "path": "/api/v1/play/seat",
       "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
     },
     {
       "method": "GET",

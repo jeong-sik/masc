@@ -1943,8 +1943,8 @@ test('frames keep polling while a pad read hangs', async () => {
     return gameReply(request);
   });
   await page.settle();
-  await page.poll();
-  await page.poll();
+  await page.poll(300);
+  await page.poll(300);
   assert.equal(page.rendered.length, 3);
   assert.equal(padReads, 1, 'frame polling does not duplicate a pending pad read');
 });
@@ -1963,4 +1963,75 @@ test('an empty-activity frame retries a failed pad without requiring new seat ac
   await page.poll(300);
   assert.equal(padReads, 2);
   assert.equal(page.get('pad').hidden, false);
+});
+
+
+test('ordinary room pulses recover a stalled read and reject its late receipt', async () => {
+  let attempts = 0, oldSignal, finish;
+  const page = fixture(gameReply, { roomReply: (_request, signal) => {
+    if (++attempts === 1) {
+      oldSignal = signal;
+      return new Promise(resolve => { finish = () => resolve(response({ ...emptyRoom,
+        messages:[roomMessage(1, 'stale room')] })); });
+    }
+    return response({ ...emptyRoom, messages:[roomMessage(2, 'recovered room')] });
+  } });
+  await page.settle();
+  await page.roomTick();
+  await page.roomTick();
+  assert.equal(oldSignal.aborted, false, 'a slow observation survives ordinary short pulses');
+  await page.roomTick();
+  assert.equal(oldSignal.aborted, true);
+  assert.equal(attempts, 2);
+  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'recovered room');
+  finish();
+  await page.settle();
+  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'recovered room');
+  assert.equal(page.roomRequests.some(r => r.body.action === 'say'), false);
+});
+
+test('a stalled pad retries independently while frames continue and discards its late result', async () => {
+  let attempts = 0, oldSignal, finish;
+  const page = fixture((request, signal) => {
+    if (request.url === '/api/v1/play/pad' && ++attempts === 1) {
+      oldSignal = signal;
+      return new Promise(resolve => { finish = () => resolve(response({ ...layout,
+        buttons:[{button:'BTN_SOUTH', label:'stale', keys:['escape']}] })); });
+    }
+    return gameReply(request);
+  });
+  await page.settle();
+  assert.equal(page.get('keys').hidden, false);
+  await page.poll(300);
+  assert.equal(attempts, 1);
+  assert.equal(oldSignal.aborted, false);
+  const frames = page.rendered.length;
+  await page.poll(5000);
+  assert.equal(oldSignal.aborted, true);
+  assert.equal(attempts, 2);
+  assert.ok(page.rendered.length > frames);
+  assert.equal(page.padButton.textContent, '결정');
+  assert.equal(page.get('keys').hidden, true);
+  finish();
+  await page.settle();
+  assert.equal(page.padButton.textContent, '결정');
+  assert.equal(page.requests.some(r => r.method === 'POST'), false, 'observation never resends input');
+});
+
+test('changing spectator cancels its stalled pad without stopping the next view', async () => {
+  let oldSignal;
+  const page = fixture((request, signal) => {
+    if (request.url === '/api/v1/play/pad') {
+      oldSignal = signal;
+      return new Promise(() => {});
+    }
+    return gameReply(request);
+  });
+  await page.settle();
+  const frames = page.rendered.length;
+  page.get('machine-view').value = 'msx';
+  page.get('machine-view').handlers.change();
+  await page.settle();
+  assert.equal(oldSignal.aborted, true);
+  assert.ok(page.rendered.length > frames);
 });

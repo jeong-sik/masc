@@ -488,8 +488,8 @@ status: reference
 : Board_attention lane이 판정할 게시물 하나. 어떤 모델 호출보다 먼저 durable하게
   저장되고, 생애가 `Pending → Judged → Consumed`다. 다시 해도 같은 결과가 나올 실패일
   때만 격리(`Quarantine`, 상태값 `Quarantined`) 상태가 되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
-  않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 레인이 거친 모든 슬롯이 계정 한도(쿼터
-  소진, 속도 제한, 과부하, 결제 거절) 때문에 거절했으면 후보는 `Pending`으로 남아 다음 판정을
+  않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 레인이 거친 모든 슬롯이 쓸 수 없는 상태(쿼터
+  소진, 속도 제한, 과부하, 결제 거절, 보내기 전 네트워크 실패) 때문에 거절했으면 후보는 `Pending`으로 남아 다음 판정을
   기다린다. 판정은 소유 lane이 그 후보
   판정을 durable하게 적용·소비할 때만 넘어가고, 전달 실패는 마지막 실패 증거를 남길
   뿐 후보를 소비하지 않는다. 대기 작업에는 벽시계 만료가 없다. **`Runtime` 항목과
@@ -518,7 +518,7 @@ status: reference
     격리 원인과 호출 정체성은 보존하고, 찾을 수 없는 세부 내용은 만들어내지 않는다
     (`Restored_candidate_quarantine`).
   - `Running`에서 `Ready`로 돌아가는 길은 둘이다. 재시작 복구는 진행 정도와 상관없이
-    끊긴 실행을 모두 돌려보낸다. 레인이 거친 모든 슬롯이 계정 한도 때문에 거절하면 워커가
+    끊긴 실행을 모두 돌려보낸다. 레인이 거친 모든 슬롯이 쓸 수 없는 상태 때문에 거절하면 워커가
     `defer`로 돌려보낸다. 판정은 읽기만 하는 모델 호출이라 다시 보내도 토큰만 더 쓴다.
   - 워커는 `Ready` 루트 가운데 모델 호출이 필요 없는 루트(이미 판정·소비·격리됐거나
     원장에 없는 후보)를 먼저 처리한다. 그다음 가장 오래된 `Pending` 후보의 루트를 잡는다.
@@ -536,7 +536,7 @@ status: reference
   다시 살피는 길일 뿐 격리 해제가 아니며, 격리와 지연(`defer`)은 다른 층위다.
   - 격리 원인 카테고리(`quarantine_failure_category`): 닫힌 12개 값이다.
     `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(슬롯이
-    모두 실패했지만 전부 계정 한도 때문에 거절한 것은 아님. 입력 크기·형식 거절, 결과를 알 수 없는
+    모두 실패했지만 전부 쓸 수 없는 상태 때문에 거절한 것은 아님. 입력 크기·형식 거절, 결과를 알 수 없는
     요청, 쓸 수 없는 답, 타입으로 읽을 수 없는 CLI 거절이 여기에 든다)·`Exact_flow_bookkeeping_failed`(장부
     기록 실패)·`Exact_completion_failed`(완료 단계 실패)·`Domain_output_invalid`·`Execution_provenance_mismatch`·`Unexpected_worker_failure`·`Exact_execution_quarantined`(호출
     단계 미기록)·`Exact_execution_interrupted`(프로세스 재시작으로 끊긴 실행. 재시작
@@ -803,11 +803,11 @@ status: reference
   (실행 경로 이름)와 이름이 겹치지만 다른 축이다.
   → [keeper_runtime_failure_route](../../lib/keeper_runtime/keeper_runtime_failure_route.mli)
 
-**Candidate Fault (후보 실패 원인 판정)**
-: 한 후보(provider·모델·자격 증명·계정을 묶은 바인딩)가 실패했을 때, 그 실패가 이 후보 때문인지 답하는 닫힌 판정(`Candidate_fault.t`). exact 후보 순회(Librarian·`verifier_exact`·HITL
+**Candidate Fault (후보 책임 판정)**
+: 한 후보(provider·모델·자격 증명·계정을 묶은 바인딩)가 실패했을 때, 그 실패가 이 후보 쪽 일인지 답하는 닫힌 판정(`Candidate_fault.t`). exact 후보 순회(Librarian·`verifier_exact`·HITL
   판정·Board attention)와 Keeper 후보 순회가 같은 오류에 같은 답을 하도록 둘 다 이 판정 하나를
   읽는다(#38913). 값은 셋이다.
-  - `Binding of binding_fact`: 이 바인딩 때문이라, 다음 후보가 같은 입력을 받아도 된다.
+  - `Binding of binding_fact`: 이 바인딩 쪽 일이라, 다음 후보가 같은 입력을 받아도 된다.
     원인은 열셋이다 — `Credential`(401, 죽은 키), `Account_access`(403, 계정이 거절됨: 다 쓴
     구독 창·없는 권한·플랜이 받지 않는 클라이언트·정지된 계정), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
     `Server`(5xx), `Window`(창 초과, 또는 창에서 멈춘 빈 답), `Body_limit`(413),
@@ -817,13 +817,13 @@ status: reference
     본문이 기한 안에 오지 않음).
     401과 403을 두 원인으로 나눈 것은 Keeper 후보 순회가 403 뒤에만 provider 사용량을 읽기 때문이다.
     한 원인으로 두면 route 가 원래 오류에서 둘을 다시 가르는 두 번째 표가 생긴다(#38975, #39254).
-  - `Unattributed`: 거절은 왔지만, 어느 후보 때문인지 응답이 기계가 읽는 꼴로 말하지 않는다.
+  - `Unattributed`: 거절은 왔지만, 어느 후보 쪽 일인지 응답이 기계가 읽는 꼴로 말하지 않는다.
     기록에도 모른다고 남긴다.
-  - `Unknown_after_dispatch`: 결과를 모르거나 이 바인딩 때문인지 가를 수 없다. 이름과 달리
+  - `Unknown_after_dispatch`: 결과를 모르거나 이 바인딩 쪽 일인지 가를 수 없다. 이름과 달리
     보냈는지 모르는 전송 오류(`NetworkError`, #38931)와 보내기 전 배선 실패(`Not_dispatched`
     타임아웃·`AcceptRejected`·`ProviderTerminal`·`ProviderFailure`)도 이 값이다. 다시 보내도
     되는지는 이 판정이 아니라 순회의 효과 규칙이 정한다.
-  판정은 누구 때문인지만 답하고, 다음 후보로 넘길지는 순회가 정한다 — exact 후보 순회는
+  판정은 누구 쪽 일인지만 답하고, 다음 후보로 넘길지는 순회가 정한다 — exact 후보 순회는
   Exact-output route의 슬롯 전진 조건이, Keeper 후보 순회는 `lane_should_retry`의 predicate가
   정한다. 공식 클라이언트가 만드는 provider 오류(`Llm_provider.Error.provider_error`)는 이
   판정 밖이다(#38776). 영수증에 적히는 Failure Route도 API 오류(`Retry.api_error`)의 class를
@@ -1367,7 +1367,7 @@ status: reference
   있다. 같은 기계가 그 뒤 또 자동 저장할 때는 옮기지 않고 `autosave` 를 그대로 갈아 쓴다.
   기계가 없을 때 — 기계가 필요한 호출의 거절(`masc_dos_screen`·`masc_dos_peek` 등)과
   프로그램 이름 없이 부른 `masc_dos_load` 의 인벤토리 응답 — 는 이 자동 저장이 있는지,
-  무엇인지(프로그램, 진행 턴 수, 저장한 사람, 시각), 어떻게 되살리는지
+  무엇인지(프로그램, 실행한 명령어 수, 저장한 사람, 시각), 어떻게 되살리는지
   (`masc_dos_restore slot=autosave`)를 `autosave` 필드로 알려 준다. 파일이 있는데 읽히지
   않으면(다른 체크포인트 형식, 손상) `autosave: {"unreadable": 이유}` 로 그렇게 말한다.
   되살리는 것은 언제나 사람의 몫이고, 서버가 스스로 되살리지 않는다.
@@ -2783,9 +2783,9 @@ status: reference
   앞머리가 아니라 정상 수용된 전체 범위를 구성하게 한다(#38286).
   위치는 번호와 digest의 쌍이라, 손에 든 History가 같은 번호를 같은 Message로
   열 때만 쓴다(`for_history`). History의 Atom 개수는 비교하지 않는다.
-  RFC 코퍼스는 이 자리를 **시작 위치 근거**라 부른다.
+  RFC 코퍼스는 이 자리를 **씨앗**이라 부른다. 이 사전은 뜻이 드러나게 시작 위치 근거라고 풀어 쓴다.
   **다른 뜻**: `RFC-0457:85·150`의 "씨앗 설정"은 초기 예시 config를 가리키는 다른
-  말이다 — 이 항목의 시작 위치 근거와 구분한다.
+  말이다 — 이 항목의 씨앗과 구분한다.
   → [Keeper_carried_front.seed](../../lib/keeper/keeper_carried_front.mli)
 
 **Carried Front (요청에 넣을 기록의 첫 위치)**
@@ -3200,8 +3200,8 @@ status: reference
     되살아나지 않으며, 회차 도중 없어진 기억을 이어붙이는(supersedes 또는 absorbs) 새
     claim은 저장하지 않고 실행 기록(`run` 출력)에 `claims_not_applied`로 남긴다.
     원장의 `Revised` 이벤트는 커밋이 실제로 수행한 `supersedes`에만 기록되어 대체된
-    기억은 Keeper가 직접 준 대신하는 기록 하나만 보존하며, 다른 대신 기록은 스냅숏에 남지
-    않은 대체 대상 기억은 퇴역하지 않고 현재 Fact로 남는다(#38231·#38267·#38317).
+    기억은 Keeper가 직접 준 대신하는 기록 하나만 보존하며, 대신하는 기록 중 어느 것도 스냅숏에
+    남지 않은 대체 대상 기억은 퇴역하지 않고 현재 Fact로 남는다(#38231·#38267·#38317).
   - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
     적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
     커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고

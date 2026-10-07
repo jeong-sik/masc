@@ -253,6 +253,8 @@ let test_an_invite_chats_through_the_seat_with_auth_on () =
       | None -> fail "room call produced no result" in
     check bool "authenticated room call succeeds" false
       (member "isError" result = Some (`Bool true));
+    check bool "viewer metadata uses the authenticated Player" true
+      (Option.bind (member "structuredContent" result) (member "viewer") = Some (`String "pi"));
     (match Option.bind (member "structuredContent" result) (member "messages") with
      | Some (`List [_]) -> ()
      | _ -> fail "the authenticated MCP response must include the room message");

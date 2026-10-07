@@ -45,12 +45,13 @@ with tempfile.TemporaryDirectory(prefix='masc-play-candidate-') as base:
                 return json.loads(raw)
             request={'action':'say','client_id':'browser1','machine':'dos','message_id':'one','text':'함께 보기'}
             first=room_post(player,request)
+            assert first['viewer']=='guestproof'
             assert first['messages'][0]['who']=='guestproof'
             assert len(room_post(player,request)['messages'])==1
             room_post(player,{**request,'text':'different'},409)
             room_post(player,{**request,'who':'forged'},400)
             reply={'action':'say','client_id':'tui1','machine':'msx','message_id':'reply','text':'TUI reply'}
-            room_post(admin,reply)
+            assert room_post(admin,reply)['viewer']=='play-proof'
             status,raw=req(room,token=player);assert status==200
             messages=json.loads(raw)['messages'];assert [m['text'] for m in messages]==['함께 보기','TUI reply']
             assert req(room+'?before=bogus',token=player)[0]==400

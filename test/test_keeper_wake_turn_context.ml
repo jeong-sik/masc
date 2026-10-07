@@ -1107,7 +1107,7 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
   let base_path = Filename.temp_dir "autonomous-work-context-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     let config = Masc.Workspace.default_config base_path in
-    let trace_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let session = Masc.Keeper_context_core.create_session ~session_id:trace_id
       ~base_dir:(Masc.Keeper_fs.session_store_path config) in
     let turn n = Ids.Turn_ref.make ~trace_id ~absolute_turn:n in

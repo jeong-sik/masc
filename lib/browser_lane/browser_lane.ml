@@ -25,6 +25,7 @@ type scene_view = Content | Regions
 
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
+  | Hover_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Click_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
   | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport }
@@ -84,6 +85,8 @@ let interaction_args ~tab_id ~expected_url action =
     | Scroll_at {point;viewport;x;y} -> ["action", `String "scroll_at";
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport;
         "x",`Int x; "y",`Int y]
+    | Hover_at {point;viewport} -> ["action", `String "hover_at";
+        "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
     | Click_at {point;viewport} -> ["action", `String "click_at";
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
     | Drag {from;to_;viewport} -> ["action", `String "drag";

@@ -14,7 +14,14 @@ scenes, document references, and semantic interactions; command arguments are
 JSON data, never supplied JavaScript.
 
 Screenshot coordinate input uses the existing document/viewport guard followed
-by BiDi pointer or wheel actions. This is not an atomic snapshot/input
+by BiDi pointer or wheel actions. `hover_at` uses one `pointerMove`, with no
+button press, on the selected live BiDi tab or the automation lane. Copy the
+observed `expectedUrl`, `viewport` and normalized `point` from a fresh capture.
+Extension-only live clients reject this action before injecting input with
+`trusted_hover_requires_live_bidi_connection`; the operator must explicitly
+attach the already-enabled loopback Remote Agent with `--bidi-url`. This does
+not convert extension tab IDs to BiDi tab IDs: read the attached client's tabs
+and capture again. Stagehand rejects trusted hover before input. This is not an atomic snapshot/input
 transaction: the operator can still change the page after validation. There is
 no write replay. An unknown outcome stops this live client. Reads and interactions
 share the existing host command deadline; connection setup has that same bound.

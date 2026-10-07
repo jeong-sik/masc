@@ -66,7 +66,7 @@ let read t context args =
   | None | Some (`Bool false) -> script t context
       "const chars=Array.from(document.body?.innerText??''); const cap=arguments[0].cap; return {url:location.href,title:document.title,text:chars.slice(0,cap).join(''),chars:chars.length,truncated:chars.length>cap};" (obj ["cap",`Int cap])
   | _ -> Error "invalid includeHtml"
-type pointer_motion = Click_pointer | Drag_pointer of Browser_lane.Pointer.point
+type pointer_motion = Hover_pointer | Click_pointer | Drag_pointer of Browser_lane.Pointer.point
   | Wheel_pointer of { x : int; y : int }
 let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start motion =
   let before result = Result.map_error (fun e -> Before_effect e) result in
@@ -76,12 +76,15 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   let move p = obj (["type",str "pointerMove";"origin",str "viewport"] @ coords p) in
   let button name = obj ["type",str name;"button",`Int 0] in
   let source = match motion with
+    | Hover_pointer ->
+      obj ["type",str "pointer";"id",str "masc-pointer";"parameters",obj ["pointerType",str "mouse"];
+        "actions",`List [move start]]
     | Wheel_pointer {x;y} ->
       obj ["type",str "wheel";"id",str "masc-wheel";"actions",`List [obj
         (["type",str "scroll";"deltaX",`Int x;"deltaY",`Int y;"origin",str "viewport"] @ coords start)]]
     | Click_pointer | Drag_pointer _ ->
       let middle=match motion with Drag_pointer finish->[move finish]
-        | Click_pointer | Wheel_pointer _->[] in
+        | Hover_pointer | Click_pointer | Wheel_pointer _->[] in
       obj ["type",str "pointer";"id",str "masc-pointer";"parameters",obj ["pointerType",str "mouse"];
         "actions",`List ([move start;button "pointerDown"] @ middle @ [button "pointerUp"])] in
   (* No replay after dispatch. Release is itself a protocol action and remains
@@ -90,7 +93,7 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   let released=ref (Ok ()) in
   let applied=Eio.Switch.run (fun sw ->
     (match motion with
-    | Wheel_pointer _ -> ()
+    | Hover_pointer | Wheel_pointer _ -> ()
     | Click_pointer | Drag_pointer _ -> Eio.Switch.on_release sw (fun ()->
       released:=Result.map (fun _->()) (t.command "input.releaseActions" (obj ["context",str context]))));
     t.command "input.performActions" (obj ["context",str context;"actions",`List [source]])) in
@@ -98,7 +101,7 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   let* ()=unknown !released in
   let* after = unknown (page t context) in
   let* old_url = unknown (string "url" observed) in
-  let action=match motion with Click_pointer->"click_at"|Drag_pointer _->"drag"|Wheel_pointer _->"scroll_at" in
+  let action=match motion with Hover_pointer->"hover_at"|Click_pointer->"click_at"|Drag_pointer _->"drag"|Wheel_pointer _->"scroll_at" in
   match after with `Assoc fields -> Ok (obj (("action",str action)::("urlBefore",str old_url)::fields))
   | _ -> Error (Outcome_unknown "invalid post-input observation")
 let dispatch t ~verb args =
@@ -132,6 +135,7 @@ let dispatch t ~verb args =
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
       let* request=pre (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live))::fields))) in
       (match request.action with
+      | Browser_lane.Hover_at {point;viewport} -> pointer t context args ~viewport ~start:point Hover_pointer
       | Browser_lane.Click_at {point;viewport} -> pointer t context args ~viewport ~start:point Click_pointer
       | Browser_lane.Scroll_at {point;viewport;x;y} -> pointer t context args ~viewport ~start:point (Wheel_pointer {x;y})
       | Browser_lane.Drag {from;to_;viewport} -> pointer t context args ~viewport ~start:from (Drag_pointer to_)

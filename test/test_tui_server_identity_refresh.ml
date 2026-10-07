@@ -302,6 +302,92 @@ let test_writes_wait_for_a_confirmed_identity () =
   Alcotest.(check (option string)) "a moved authority refuses"
     (Some "Workspace authority withdrawn") (refusal ())
 
+let test_partial_identity_keeps_definite_mismatches () =
+  let local = "/workspace/a" in
+  let original = identity local in
+  let different_partial_paths =
+    [ { original with sid_base_path = "/workspace/b"; sid_masc_root = "" }
+    ; { original with sid_base_path = ""; sid_masc_root = "/workspace/b/.masc" } ] in
+  List.iter (fun observed ->
+    List.iter (fun previous ->
+      match Masc_tui_types.next_workspace_identity ~previous ~local_base_path:local (Ok observed) with
+      | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+      | Workspace_identity_unread | Workspace_identity_match
+      | Workspace_identity_match_unconfirmed _ ->
+        Alcotest.fail "one missing path hid the other path's definite mismatch")
+      [ Masc_tui_types.Workspace_identity_match
+      ; Workspace_identity_match_unconfirmed "health failed" ])
+    different_partial_paths;
+  List.iter (fun observed ->
+    match Masc_tui_types.next_workspace_identity
+        ~previous:Workspace_identity_match ~local_base_path:local
+        (Ok { observed with sid_state_ready = Some false }) with
+    | Masc_tui_types.Workspace_identity_unread -> ()
+    | Workspace_identity_match | Workspace_identity_mismatch _
+    | Workspace_identity_match_unconfirmed _ ->
+      Alcotest.fail "a booting replacement must withdraw the retained match")
+    different_partial_paths;
+  List.iter (fun observed ->
+    match Masc_tui_types.next_workspace_identity
+        ~previous:Workspace_identity_match ~local_base_path:local (Ok observed) with
+    | Masc_tui_types.Workspace_identity_match_unconfirmed _ -> ()
+    | Workspace_identity_unread | Workspace_identity_match | Workspace_identity_mismatch _ ->
+      Alcotest.fail "a missing path without contradictory evidence must stay unconfirmed")
+    [ { original with sid_base_path = "" }; { original with sid_masc_root = "" } ]
+
+let test_deletion_inventory_waits_for_reconfirmed_workspace () =
+  let open Masc_tui_types in
+  let module Deletions = Masc_tui_keeper_control in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let record keeper_name : Deletions.deletion_row =
+    { operation = Deletions.Configuration_removal
+        { Masc.Keeper_configuration_removal.operation_id = Masc.Keeper_shutdown_types.Operation_id.generate ()
+        ; keeper_name; actor = "test"; source_sha256 = ""; source_path = ""
+        ; requested_at = ""; updated_at = ""
+        ; state = Masc.Keeper_configuration_removal.Cleanup_required "pending cleanup"
+        ; last_error = None }
+    ; completed = false; can_retry = true }
+  in
+  let first = record "workspace-a-first" in
+  let selected = record "workspace-a-selected" in
+  let a : Deletions.deletion_inventory = { operations = [ first; selected ]; errors = [] } in
+  let b : Deletions.deletion_inventory = { operations = [ record "workspace-b" ]; errors = [] } in
+  let begin_read () = match begin_keeper_deletions_read state with
+    | Some generation -> generation
+    | None -> Alcotest.fail "confirmed workspace should admit inventory read" in
+  apply_keeper_deletions_read state ~generation:(begin_read ()) (Ok a);
+  state.keeper_deletions_cursor <- 1;
+  let before_failure = begin_read () in
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Error "health unavailable");
+  (* The identity transition retires only the request, not its cached rows. *)
+  suspend_keeper_deletions_read state;
+  let check_preserved label =
+    Alcotest.(check bool) (label ^ ": A inventory remains visible") true
+      (state.keeper_deletions = Some (Ok a));
+    Alcotest.(check int) (label ^ ": selected row stays selected") 1 state.keeper_deletions_cursor in
+  apply_keeper_deletions_read state ~generation:before_failure (Ok b);
+  check_preserved "B responds during uncertainty";
+  Alcotest.(check (option int)) "D/r does not launch an unconfirmed read" None
+    (begin_keeper_deletions_read state);
+  (* Completion checks identity itself as well as generation. *)
+  apply_keeper_deletions_read state ~generation:state.keeper_deletions_generation (Ok b);
+  check_preserved "matching generation cannot replace unconfirmed rows";
+  apply_keeper_deletions_read state ~generation:state.keeper_deletions_generation (Error "HTTP 503");
+  check_preserved "failed unconfirmed read";
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Ok (identity "/workspace/a"));
+  apply_keeper_deletions_read state ~generation:before_failure (Ok b);
+  check_preserved "late response remains stale after A reconfirms";
+  let refreshed = { a with operations = [ selected; first ] } in
+  apply_keeper_deletions_read state ~generation:(begin_read ()) (Ok refreshed);
+  Alcotest.(check bool) "a new confirmed read replaces the inventory" true
+    (state.keeper_deletions = Some (Ok refreshed));
+  Alcotest.(check int) "selection follows its operation after reorder" 0 state.keeper_deletions_cursor
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
@@ -329,5 +415,9 @@ let () =
             test_unread_after_a_match_keeps_it_unconfirmed
         ; Alcotest.test_case "writes wait for a confirmed identity" `Quick
             test_writes_wait_for_a_confirmed_identity
+        ; Alcotest.test_case "a missing path does not hide a mismatch" `Quick
+            test_partial_identity_keeps_definite_mismatches
+        ; Alcotest.test_case "deletion inventory waits for workspace reconfirmation" `Quick
+            test_deletion_inventory_waits_for_reconfirmed_workspace
         ] )
     ]

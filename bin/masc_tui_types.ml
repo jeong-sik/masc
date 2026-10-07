@@ -152,13 +152,15 @@ let workspace_identity_of_paths ~local_base_path (identity : Tui_decode.server_i
   let local_masc_root = canonical_path
     (Filename.concat local_base_path Common.masc_dirname) in
   let server_masc_root = canonical_path identity.sid_masc_root in
-  if String.equal local_base_path "" || String.equal server_base_path ""
-     || String.equal server_masc_root ""
+  if String.equal local_base_path ""
   then Workspace_identity_unread
-  else if String.equal local_base_path server_base_path
-       && String.equal local_masc_root server_masc_root
-  then Workspace_identity_match
-  else Workspace_identity_mismatch { local_base_path; server_base_path }
+  else if
+    (server_base_path <> "" && not (String.equal local_base_path server_base_path))
+    || (server_masc_root <> "" && not (String.equal local_masc_root server_masc_root))
+  then Workspace_identity_mismatch { local_base_path; server_base_path }
+  else if String.equal server_base_path "" || String.equal server_masc_root ""
+  then Workspace_identity_unread
+  else Workspace_identity_match
 ;;
 
 let workspace_identity_of_refresh ~local_base_path reading =
@@ -6408,6 +6410,43 @@ let server_authority_ready state =
       && not (String.equal identity.sid_base_path "")
       && not (String.equal identity.sid_masc_root "")
   | None -> false
+
+(* The deletion overlay keeps its confirmed inventory while identity is
+   unavailable. Invalidate the read generation as well: reconfirming A must
+   not admit a reply that was in flight during an uncertain A -> B -> A. *)
+let suspend_keeper_deletions_read state =
+  state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+  state.keeper_deletions_loading <- false
+
+let begin_keeper_deletions_read state =
+  if not (server_authority_ready state) || state.keeper_deletions_loading then None
+  else (
+    state.keeper_deletions_loading <- true;
+    state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+    Some state.keeper_deletions_generation)
+
+let apply_keeper_deletions_read state ~generation
+    (result : (Masc_tui_keeper_control.deletion_inventory, string) result) =
+  if generation = state.keeper_deletions_generation then (
+    state.keeper_deletions_loading <- false;
+    if server_authority_ready state then (
+      let selected = match state.keeper_deletions with
+        | Some (Ok inventory) -> List.nth_opt inventory.operations state.keeper_deletions_cursor
+        | Some (Error _) | None -> None in
+      state.keeper_deletions <- Some result;
+      match result with
+      | Error _ -> ()
+      | Ok inventory ->
+        let same_operation row = match selected with
+          | None -> false
+          | Some previous -> Masc.Keeper_shutdown_types.Operation_id.equal
+              (Masc_tui_keeper_control.deletion_operation_id row)
+              (Masc_tui_keeper_control.deletion_operation_id previous) in
+        let rec find index = function
+          | [] -> None
+          | row :: rest -> if same_operation row then Some index else find (index + 1) rest in
+        state.keeper_deletions_cursor <- (match find 0 inventory.operations with
+          | Some index -> index | None -> 0)))
 
 (* Why a write launched under [authority] must not go out now: the workspace
    moved since launch, or the server identity is not confirmed (unread, or a

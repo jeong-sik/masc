@@ -3237,28 +3237,25 @@ let launch_verification_evidence_load state ~mailbox task_id =
 let launch_keeper_deletions state ~mailbox ?retry () =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
-  if not state.keeper_deletions_loading then (
-    state.keeper_deletions_loading <- true;
-    state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
-    let generation = state.keeper_deletions_generation in
+  let identity = state.server_identity in
+  match begin_keeper_deletions_read state with
+  | None -> ()
+  | Some generation ->
     let host, port = server_peer_host, state.port in
     let run () =
       let result =
         try
           let ( let* ) = Result.bind in
           let check_authority () =
-            if authority = state.workspace_authority then Ok ()
-            else Error "Workspace authority withdrawn" in
+            if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+            else if generation <> state.keeper_deletions_generation then Error "Deletion inventory request superseded"
+            else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+            else Ok () in
           let* () = check_authority () in
+          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
           let* () = match retry with
             | None -> Ok ()
             | Some (row : Keeper_control.deletion_row) ->
-              let* () = match state.workspace_identity with
-                | Workspace_identity_unread ->
-                  Error "Workspace identity has not been read; deletion retry unavailable"
-                | Workspace_identity_match_unconfirmed _ ->
-                  Error "Workspace identity is unconfirmed; deletion retry unavailable"
-                | Workspace_identity_match | Workspace_identity_mismatch _ -> Ok () in
               let keeper_name = Keeper_control.deletion_keeper_name row in
               let operation_id = Masc.Keeper_shutdown_types.Operation_id.to_string (Keeper_control.deletion_operation_id row) in
               let body = Yojson.Safe.to_string (`Assoc ["keeper_name", `String keeper_name;
@@ -3277,7 +3274,10 @@ let launch_keeper_deletions state ~mailbox ?retry () =
           let* () = check_authority () in
           let* json = Masc_tui_http.get_json ~host ~port
             ~path:"/api/v1/dashboard/keepers/deletions" in
-          Keeper_control.decode_deletion_inventory json
+          let* inventory = Keeper_control.decode_deletion_inventory json in
+          let* () = check_authority () in
+          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          Ok inventory
         with Eio.Cancel.Cancelled _ as exn -> raise exn
            | exn -> Error (Printexc.to_string exn)
       in
@@ -3286,7 +3286,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
     match Eio_context.get_switch_opt () with
     | Some sw -> fork_workspace_job state ~sw run
     | None -> enqueue_async mailbox (Keeper_deletions_loaded
-        (generation, Error "Eio switch is unavailable")))
+        (generation, Error "Eio switch is unavailable"))
 
 let tree_diff_base_ref = "HEAD"
 
@@ -10953,7 +10953,8 @@ let apply_server_identity_reading state reading =
       ~local_base_path:state.local_base_path reading
   with
   | Workspace_identity_match_unconfirmed _ as unconfirmed ->
-    state.workspace_identity <- unconfirmed
+    state.workspace_identity <- unconfirmed;
+    suspend_keeper_deletions_read state
   | Workspace_identity_unread | Workspace_identity_match
   | Workspace_identity_mismatch _ as next ->
     (match state.workspace_identity, next with
@@ -11282,6 +11283,7 @@ let resume_reads_after_authority_change state ~mailbox ~(before : read_authority
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
+    if state.keeper_deletions_open then launch_keeper_deletions state ~mailbox ();
     (* Navigation can precede the first confirmed identity, and its Lane
        read was cancelled with the old authority. The loader keeps its own
        in-flight guard. *)
@@ -14295,23 +14297,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Board_post_refresh_done (request, result) ->
       Masc_tui_board_updates.apply_board_post_load state ~report_error:(add_event state "error") request result
   | Keeper_deletions_loaded (generation, result) ->
-      if generation = state.keeper_deletions_generation then (
-        state.keeper_deletions_loading <- false;
-        let selected = match state.keeper_deletions with
-          | Some (Ok inventory) -> List.nth_opt inventory.operations state.keeper_deletions_cursor
-          | _ -> None in
-        state.keeper_deletions <- Some result;
-        match result with
-        | Error _ -> ()
-        | Ok inventory ->
-          let same_operation row = match selected with
-            | None -> false
-            | Some previous -> Masc.Keeper_shutdown_types.Operation_id.equal
-                (Keeper_control.deletion_operation_id row) (Keeper_control.deletion_operation_id previous) in
-          let rec find i = function
-            | [] -> None | row :: rest -> if same_operation row then Some i else find (i + 1) rest in
-          state.keeper_deletions_cursor <- (match find 0 inventory.operations with
-            | Some i -> i | None -> 0))
+      apply_keeper_deletions_read state ~generation result
   | Keeper_action_done (origin, keeper_name, action, result) ->
       let origin_matches =
         Option.for_all

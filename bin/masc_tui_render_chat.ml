@@ -3027,6 +3027,26 @@ let render_keeper_message (state : state) =
             List.map (fun (_, _, item) -> item) due @ (item :: merge (index + 1) rest later)
       in
       let merged = merge 0 committed_tagged placed in
+      (* Persisted inputs and their projected log share exact request metadata.
+         Keep each identity once in merged order without parsing speech or
+         removing attempt diagnostics. Shared batch execution IDs follow the
+         same rule even when more than one committed request names them. *)
+      let seen_diagnostics = Hashtbl.create 16 in
+      let request_owners = chat_request_owners state ~keeper_name in
+      let merged = List.map (fun (tag, (entry : Message_layout.entry)) ->
+        let request_id, execution_id = match tag with
+          | Tagged_row message -> message.me_request_id,
+              request_owner request_owners message.me_request_id
+          | Tagged_block log -> Masc_tui_types.turn_log_request_id log,
+              Masc_tui_types.turn_log_execution_id log in
+        let identities = request_diagnostics ~tools:state.msg_tool_visibility
+            ~request_id ~execution_id in
+        let diagnostics = List.filter (fun text ->
+          if not (List.mem text identities) then true
+          else if Hashtbl.mem seen_diagnostics text then false
+          else (Hashtbl.add seen_diagnostics text (); true)) entry.diagnostics in
+        if diagnostics = entry.diagnostics then tag, entry
+        else tag, {entry with diagnostics}) merged in
       (* A turn opens once and closes once, wherever its rows ended up: the
          corners of every request a block belongs to are set here, over the
          merged order, so a block placed before its request's failure row

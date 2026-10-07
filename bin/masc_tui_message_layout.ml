@@ -1943,7 +1943,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
              the rows under it continue the line the stub started rather than
              each standing alone. *)
           | Rail_stands -> if index = 0 then Rail_stands else Rail_says
-          | Rail_closes -> if index = last then Rail_closes else Rail_says
+          | Rail_closes -> if index = last && (last > 0 || entry.diagnostics = []) then Rail_closes else Rail_says
           (* Only the first row joins. A wrapped arrival keeps its body under
              the join without drawing a second one, and it never picks up the
              turn's own line: the turn it landed inside did not produce it. *)
@@ -1975,15 +1975,23 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       })
   in
   let diagnostic_rows =
-    entry.diagnostics
-    |> List.concat_map (fun text ->
-         text |> String.split_on_char '\n'
-         |> List.concat_map (split_cells ~max_cells:(Int.max 1 (inner_width - 2))))
-    |> List.map (fun text ->
-         { style = Status; kind = Metadata Diagnostic; shade = Shade_none;
-           text = String.make indent ' ' ^ "  " ^ text; gutter = "";
-           gutter_rail_cells = 0; gutter_clock_cells = 0; gutter_label_at = 0;
-           action = Action_none })
+    let chunks = entry.diagnostics
+      |> List.concat_map (fun text ->
+           text |> String.split_on_char '\n'
+           |> List.concat_map (split_cells ~max_cells:body_width)) in
+    let margin, rail_cells, _, _ = Option.value gutter ~default:("", 0, 0, 0) in
+    let blank = fit_width "" (display_width margin) in
+    List.mapi (fun index text ->
+      let rail = match entry.turn_rail with
+        | Rail_none | Rail_joins _ -> Rail_none
+        | Rail_closes when List.length body_rows = 1 && index = List.length chunks - 1 -> Rail_closes
+        | Rail_opens | Rail_says | Rail_does | Rail_stands | Rail_closes -> Rail_says in
+      { style = Status; kind = Metadata Diagnostic; shade = Shade_none;
+        text = "  " ^ text;
+        gutter = (if rail_cells = 0 then "" else turn_rail_gutter rail)
+          ^ String.make indent ' ' ^ blank;
+        gutter_rail_cells = rail_cells + indent; gutter_clock_cells = 0;
+        gutter_label_at = rail_cells + indent; action = Action_none }) chunks
   in
   let body_with_diagnostics = match body_rows with
     | [] -> diagnostic_rows

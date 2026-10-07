@@ -3010,6 +3010,17 @@ let test_scrolled_styled_meter_rows () =
     check bool "each row closes before footer" true (String.ends_with ~suffix:reset row);
     check bool "meter and wide glyphs obey cells" true (Layout.display_width row <= 12)) rows
 
+let test_diagnostics_continue_the_turn_rail () =
+  List.iter (fun rail ->
+    let source = { (entry Layout.Keeper "keeper" "request" "first\nlast") with
+      turn_rail=rail; diagnostics=["request exact-id"] } in
+    let rows = Layout.visible_rows ~inner_width:80 ~height:100 [source] in
+    let diagnostic = List.find (fun (r : Layout.row) -> r.kind = Layout.Metadata Layout.Diagnostic) rows in
+    check bool "expanded metadata continues the body rail" true (holds diagnostic.gutter "│");
+    check bool "expanded row includes its rail in width" true (diagnostic.gutter_rail_cells > 0))
+    [Layout.Rail_opens; Rail_closes]
+;;
+
 let test_diagnostics_keep_the_message_opening () =
   let source = entry Layout.Keeper "keeper" "request-id"
       (String.concat "\n" (List.init 20 (Printf.sprintf "body-%02d"))) in
@@ -3025,6 +3036,7 @@ let test_diagnostics_keep_the_message_opening () =
 
 let () =
   test_diagnostics_keep_the_message_opening ();
+  test_diagnostics_continue_the_turn_rail ();
   run "tui_message_layout"
     [
       ( "scrolled styles", [test_case "styled quota cells keep blanks and close each row" `Quick test_scrolled_styled_meter_rows] );

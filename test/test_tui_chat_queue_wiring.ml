@@ -4972,7 +4972,7 @@ let test_expanded_chat_diagnostics_preserve_settled_identity () =
   check string "expansion preserves speech" "unaltered reply" expanded.body;
   check bool "settled full ID has a visible diagnostic row" true
     (List.mem ("request " ^ request_id) expanded.diagnostics);
-  let rows = Masc_tui_message_layout.rows_of_entry ~inner_width:80 ~previous:None expanded in
+  let rows = Masc_tui_message_layout.visible_rows ~inner_width:80 ~height:100 [expanded] in
   check bool "diagnostic does not masquerade as speech" true
     (List.exists (fun (row : Masc_tui_message_layout.row) -> match row.kind with
       | Metadata Diagnostic -> Astring.String.is_infix ~affix:request_id row.text
@@ -4986,11 +4986,19 @@ let test_expanded_chat_diagnostics_preserve_settled_identity () =
        Live.Text "first reply";
        Live.Runtime_attempt_started {runtime_id=Some "next-runtime"; attempt_index=Some 1};
        Live.Text "second reply"] in
+  state.msg_history <- [chat_entry ~request_id:logged.sent_request.request_id
+    ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+    ~text:"persisted operator input" ~at:9. ()];
   state.msg_settled_logs <- [logged.log];
   let frame, _ = Masc_tui_render_chat.render_keeper_message state in
   let screen = String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
   check bool "merged settled block keeps request diagnostics" true
     (Astring.String.is_infix ~affix:logged.sent_request.request_id screen);
+  let diagnostics = frame.Masc_tui_frame_presenter.lines
+    |> List.map Masc_tui_theme.strip_sgr
+    |> List.filter (fun text -> Astring.String.is_infix
+         ~affix:("request " ^ logged.sent_request.request_id) text) in
+  check int "persisted input and settled block name the request once" 1 (List.length diagnostics);
   check bool "merged settled block keeps superseded runtime diagnostics" true
     (Astring.String.is_infix ~affix:"first-runtime" screen);
   state.msg_settled_logs <- [];

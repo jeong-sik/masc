@@ -358,7 +358,6 @@ let working_context_prompt_variables (inp : input) =
   ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
-  ; "current_memory", format_current_selection_for_prompt inp.current
   ; "working_context", Yojson.Safe.to_string (Keeper_librarian_context.prompt_json inp.working_context)
   ]
 ;;

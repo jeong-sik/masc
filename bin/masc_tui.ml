@@ -12086,7 +12086,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (match state.view with
      | Keepers Keeper_runtime_pick -> launch_runtime_catalog_load state ~mailbox
      | Keepers Keeper_calls -> Option.iter (fun keeper ->
-         launch_keeper_calls_load ~force:true state ~mailbox keeper.k_name) (selected_keeper state)
+         launch_keeper_calls_load ~force:true state ~mailbox keeper.Tui_decode.k_name) (selected_keeper state)
      | Verification ->
          (match state.verification, state.verification_detail_request_id with
           | Some snapshot, Some request_id ->

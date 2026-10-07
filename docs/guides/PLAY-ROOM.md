@@ -1,9 +1,9 @@
 # Shared game room
 
-TUI Collab and Play links use one public game conversation per workspace.
-MSX and DOS views select the picture to watch; messages remain in the same room
-and include the selected machine. Sending a room message never advances either
-machine and does not take the DOS controller.
+The public room API and `masc_play_room` Keeper tool provide one game
+conversation per workspace. Each message names MSX or DOS, and both machines
+share the same history. Sending a room message never advances either machine
+and does not take the DOS controller.
 
 Only deliberate room messages are shared. Keeper transcripts, workspace
 broadcasts, private instructions and invite credentials are not copied here.

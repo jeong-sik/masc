@@ -1,4 +1,0 @@
-Keep streamed secret buffers with their content channels across native tool
-lifecycle events, and preserve authored Text/Thinking chunk order through
-source-aware masking. Reserve withheld model indices before conflicting tool
-headers, and attribute deferred output without rescanning completed chunks.

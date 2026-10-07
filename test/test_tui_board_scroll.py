@@ -92,8 +92,8 @@ SIDE_READ_PANE_LEAST = 120
 SIDE_COLUMNS = ACTING_PANE_COLUMNS + ROSTER_PANE_COLUMNS + SIDE_READ_PANE_LEAST
 # In the stacked layout a comment starts near the read pane's left edge
 # (column 40 at 34 + 6). At the side-by-side minimum it starts after the
-# 78-column post and the 2-column gutter, at 34 + 78 + 2 = 114. Anything in
-# the right half of the read pane can only be beside the post. Columns are
+# 78-column post and the comment pane's margins. Anything in the right half
+# of the read pane can only be beside the post. Columns are
 # screen cells, not bytes: a box-drawing rule is one cell and three UTF-8 bytes.
 SIDE_COMMENT_COLUMN_LEAST = ROSTER_PANE_COLUMNS + SIDE_READ_PANE_LEAST // 2
 
@@ -134,7 +134,9 @@ def run_side_by_side(executable: str) -> None:
                           needle=b"Comment 000", controls=(h.FULL_REDRAW,))
         h.read_available(fd, output)
         _, beside = comment_row(output)
-        at = beside.decode("utf-8", "replace").index("Comment 000")
+        text = beside.decode("utf-8", "strict")
+        comment_at = text.index("Comment 000")
+        at = h.fixture_cell_width(text[:comment_at])
         if at < SIDE_COMMENT_COLUMN_LEAST:
             # The whole screen, not just this row: whether the columns right of
             # the read pane hold the acting pane or nothing decides whether the
@@ -142,9 +144,15 @@ def run_side_by_side(executable: str) -> None:
             raise AssertionError(
                 f"the comment starts at column {at}, not in the right-hand column: " + repr(beside)
                 + "\nscreen:\n" + h.screen_text(bytes(output)).decode("utf-8", "replace"))
-        if beside[:at].count("│".encode()) < 2:
+        body = re.search(r"Side body line \d{2}", text[:comment_at])
+        if body is None or not text[body.end():comment_at].isspace():
             raise AssertionError(
                 f"at {SIDE_COLUMNS} columns the comment has no separate body/comment columns: " + repr(beside))
+        # Full-screen panes use whitespace margins, so a box rule is not
+        # evidence of the split. Both actual texts must share this row with
+        # the layout's two-cell gutter and remain inside the read pane.
+        assert h.fixture_cell_width(text[body.end():comment_at]) >= 2, beside
+        assert at + len("Comment 000") <= ROSTER_PANE_COLUMNS + SIDE_READ_PANE_LEAST, beside
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Board read comments beside the post",

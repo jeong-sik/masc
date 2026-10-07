@@ -305,7 +305,9 @@ val add_comment :
 val read_comments :
   post_id:string ->
   (Board.comment list, Board.board_read_error) Result.t
-(** The comments on [post_id], oldest first, from the in-memory store. *)
+(** The comments on [post_id], oldest first, from the in-memory store. A post
+    that does not exist answers [Ok []], the same as a post with no comments;
+    use {!read_post} to tell them apart. *)
 
 val get_comments :
   post_id:string ->

@@ -434,6 +434,7 @@ let claude_answer answer =
   emit
     (`Assoc
        [ "type", `String "assistant"
+       ; "parent_tool_use_id", `Null
        ; "session_id", `String "__SESSION__"
        ; "uuid", `String "answer-assistant"
        ; "message", `Assoc

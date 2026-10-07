@@ -1151,7 +1151,7 @@ if mode == "claude":
     send({"type":"control_response", "response":{"subtype":"success",
         "request_id":initialize["request_id"], "response":{}}})
     sys.stdin.readline()
-    send({"type":"assistant", "session_id":sid, "uuid":"assistant-1", "message":{
+    send({"type":"assistant","parent_tool_use_id":None, "session_id":sid, "uuid":"assistant-1", "message":{
         "role":"assistant", "model":"paid-fixture", "content":[{"type":"text", "text":"paid partial"}]}})
     send({"type":"result", "subtype":"error_during_execution", "is_error":True,
         "session_id":sid, "uuid":"turn-1", "errors":["paid failure"], "result":"paid failure",

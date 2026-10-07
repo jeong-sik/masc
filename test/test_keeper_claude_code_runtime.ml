@@ -17,7 +17,7 @@ let auth_subscription =
 
 let assistant ~turn_id text =
   Printf.sprintf
-    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-%s","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":%S}]}}|}
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-%s","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":%S}]}}|}
     turn_id
     text
 ;;
@@ -55,7 +55,7 @@ let prompt_too_long_result =
    2026-09-19 as "terminal subtype=success api_status=unknown
    reason=blocking_limit: Prompt is too long". *)
 let blocking_limit_diagnostic =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-blocking-limit-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}]}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-blocking-limit-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}]}}|}
 ;;
 
 let blocking_limit_result =
@@ -65,7 +65,7 @@ let blocking_limit_result =
 (* The same CLI context_limit stop cause, with a different diagnostic. The
    typed terminal reason, not either sentence, selects the shrink path. *)
 let rapid_refill_breaker_diagnostic =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-rapid-refill-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Autocompact is thrashing"}]}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-rapid-refill-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Autocompact is thrashing"}]}}|}
 ;;
 
 let rapid_refill_breaker_result =
@@ -121,7 +121,7 @@ let mcp_tool_call ~request_id ~tool_name ~arguments =
 
 let native_tool_call_block ~turn_id ~call_id ~tool_name =
   Printf.sprintf
-    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-%s","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"%s","name":"%s"}]}}|}
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-%s","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"%s","name":"%s"}]}}|}
     turn_id
     call_id
     tool_name
@@ -132,6 +132,18 @@ let native_tool_result ~call_id ~content =
     {|{"type":"user","session_id":"__SESSION__","uuid":"user-native-result-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":%S}]}}|}
     call_id
     content
+;;
+
+let parent_tool_assistant =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"parent-assistant","message":{"id":"parent-message","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"parent-agent","name":"Agent","input":{}}],"usage":{"input_tokens":200,"output_tokens":1,"cache_read_input_tokens":5}}}|}
+;;
+
+let child_tool_assistant =
+  {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-assistant","message":{"id":"child-message","role":"assistant","model":"child-model","content":[{"type":"tool_use","id":"child-read","name":"Read","input":{}}],"usage":{"input_tokens":900,"output_tokens":1,"cache_read_input_tokens":90}}}|}
+;;
+
+let child_tool_result =
+  {|{"type":"user","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"child-read","is_error":false,"content":"child tool output"}]}}|}
 ;;
 
 type fixture_step =
@@ -766,6 +778,8 @@ let test_refused_turn_reports_its_spend_to_the_keeper () =
        in
        with_fixture
          [ Emit (assistant ~turn_id:"quota-usage" "partial answer")
+         ; Emit child_tool_assistant
+         ; Emit child_tool_result
          ; Emit rate_limit_rejected
          ; Emit
              {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-usage","result":"not inspected","api_error_status":429,"terminal_reason":"api_error","usage":{"input_tokens":5000,"output_tokens":30,"cache_read_input_tokens":4000}}|}
@@ -841,7 +855,7 @@ let test_real_two_request_turn_routes_spend_and_occupancy_apart () =
    travels. *)
 let test_assistant_usage_without_result_usage_keeps_spend_unavailable () =
   let counted_assistant =
-    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-counted","message":{"id":"msg-counted","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"USAGE_OK"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-counted","message":{"id":"msg-counted","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"USAGE_OK"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
   in
   let base_path = temp_workspace () in
   Fun.protect
@@ -864,6 +878,30 @@ let test_assistant_usage_without_result_usage_keeps_spend_unavailable () =
                   | Some context ->
                     check int "occupancy is the request's inclusive input" 205
                       context.input_tokens))))
+;;
+
+let test_child_tool_metadata_does_not_replace_root_observation () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let native_actions = ref [] in
+    with_fixture
+      [Emit parent_tool_assistant; Emit child_tool_assistant; Emit child_tool_result;
+       Emit result_with_aggregate_usage]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"CHILD_METADATA"
+            ~on_official_client_native_action:(fun ~runtime_id:_ ~official_turn:_ ~identity ~tool_name ->
+              native_actions := (identity, tool_name) :: !native_actions) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok turn ->
+            check string "Keeper response model belongs to the root" "claude-fixture"
+              turn.response.model;
+            (match turn.runtime_observation with
+             | Some {request_context=Some context; _} ->
+                 check int "Keeper root occupancy excludes child input and cache" 205
+                   context.input_tokens
+             | _ -> fail "root request context was dropped");
+            check bool "child native effect still reaches the observer" true
+              (List.mem (Runtime_native_tools.Call_id "child-read", "Read") !native_actions)))
 ;;
 
 let checkpoint_with_messages
@@ -1434,7 +1472,7 @@ let test_keeper_streams_text_and_tool_events () =
    answer stays JSON; [%S] would write OCaml byte escapes. *)
 let response_frame ~turn_id ~message_id block =
   Printf.sprintf
-    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-%s","message":{"id":"%s","role":"assistant","model":"claude-fixture","content":[%s]}}|}
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-%s","message":{"id":"%s","role":"assistant","model":"claude-fixture","content":[%s]}}|}
     turn_id
     message_id
     (Yojson.Safe.to_string block)
@@ -2855,7 +2893,9 @@ let test_repeated_tool_stop_records_pre_result_turn_identity () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture repeated_tool_fixture (fun cli_path ->
+       with_fixture
+         ([Emit parent_tool_assistant; Emit child_tool_assistant; Emit child_tool_result]
+          @ repeated_tool_fixture) (fun cli_path ->
          let attempt =
            run_direct_attempt
              ~base_path
@@ -2867,6 +2907,11 @@ let test_repeated_tool_stop_records_pre_result_turn_identity () =
          (match attempt.result with
           | Error error -> fail (Agent_core.Error.to_string error)
           | Ok result ->
+            (match result.runtime_observation with
+             | Some {request_context=Some context; _} ->
+                 check int "host stop retains root occupancy after child activity" 205
+                   context.input_tokens
+             | _ -> fail "host stop dropped root request context");
             (match result.stop_reason with
              | Runtime_agent.Yielded_after_repeated_tool_call
                  { tool_name; repeated_count; _ } ->
@@ -3735,6 +3780,8 @@ let () =
             test_real_two_request_turn_routes_spend_and_occupancy_apart
         ; test_case "assistant usage without result usage keeps spend unavailable" `Quick
             test_assistant_usage_without_result_usage_keeps_spend_unavailable
+        ; test_case "child tool metadata does not replace the root observation" `Quick
+            test_child_tool_metadata_does_not_replace_root_observation
         ] )
     ; ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes

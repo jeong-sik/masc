@@ -137,5 +137,6 @@ val wake_reason
   -> signal:Board_dispatch.board_signal
   -> wake_reason option board_read
 (** [Available None] means the structural reactive pipeline found no
-    deterministic address for this keeper. [Unavailable _] preserves a typed
-    Board read failure so callers can retain durable work and avoid acking it. *)
+    deterministic address for this keeper. [Unavailable _] names the Board read
+    that answered no row (the post was swept or an id does not parse); reading
+    again gives the same answer, so callers consume the source. *)

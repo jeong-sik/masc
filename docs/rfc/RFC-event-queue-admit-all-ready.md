@@ -162,7 +162,7 @@ taskmaster 의 18건은 한 턴에서 한 행이 되고 한 번에 사라진다.
    schedule 1(occurrence 3) + connector 2.
 2. disposition test (`batch_disposition_of_cycle_outcome` 직접 호출, 같은 파일): `Failed`(각 terminal_class 대표값) →
    큐 변화 0, pending 그대로; `Completed` → 전부 `Turn_completed`.
-3. 일시 Board 읽기 실패 (`test_keeper_board_unavailable.ml` 확장): 5건 중 2번째만 `Io_error` → 4건 admit, 1건 잔류, `event_queue_intake_error` 에 그 1건.
+3. Connector 읽기 실패 (`test_keeper_connector_attention_batch.ml` 확장): 5건 중 2번째만 읽기에 실패 → 4건 admit, 1건 잔류, `event_queue_intake_error` 에 그 1건.
 4. 라이브 재측정(PR 본문에 before/after): taskmaster pending 71 → 첫 완료 턴 뒤 잔량; 24h acks/h 대 도착/h;
    `Turn_attempt_terminal` 건수는 0(종류 삭제); 같은 `schedule_id` 로 한 턴에 ack 된 occurrence 수.
 5. 컨텍스트: admit 전부를 실은 턴의 `extra_system_context_bytes` 분포를 wire-capture 로 기록(§1.3 기준선과 비교).

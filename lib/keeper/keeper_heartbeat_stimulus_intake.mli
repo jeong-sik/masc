@@ -59,9 +59,10 @@ val event_queue_intake_error_to_string : event_queue_intake_error -> string
 val event_queue_intake_error_reason_label : event_queue_intake_error -> string
 
 (** Only durable selection corruption/read failures count as a crashed cycle.
-    Board and Connector source reads are retry conditions: they retain the exact
-    source without advancing Keeper failure state. Other admitted sources may
-    still dispatch in the same turn. *)
+    Connector source reads are retry conditions: they retain the exact source
+    without advancing Keeper failure state. A Board read that answers no row is
+    not: the source is consumed. Other admitted sources may still dispatch in
+    the same turn. *)
 val event_queue_intake_error_counts_as_cycle_failure :
   event_queue_intake_error -> bool
 
@@ -169,12 +170,10 @@ val reconcile_spent_selection
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events] reads one exact durable queue snapshot in queue
     order, until the configured number of sources is admitted, a hard error
-    occurs, or the snapshot ends. Transient Board reads do not spend an
-    admission slot; the earliest transient diagnostic is kept.
-    Retiring a permanently absent Board source or a spent grant does not
+    occurs, or the snapshot ends. Retiring an absent Board source or a spent grant does not
     admit work into the turn, so it does not spend an admission slot either.
     The admission limit does not bound read attempts: when every eligible source
-    is transiently unavailable, intake scans all of them. The Connector ID limit
+    is unavailable or retired, intake scans all of them. The Connector ID limit
     bounds requested IDs, not bytes read from the attention store.
 
     RFC-0377's routing boundary remains: only members of the first ready
@@ -193,7 +192,7 @@ val reconcile_spent_selection
     so separate sources on one post remain visible. A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
     left the pending map, while later ready stimuli can still be selected.
-    A transient Board read keeps that exact source pending and sets
+    A Connector read that fails keeps that exact source pending and sets
     [event_queue_intake_error]. It does not prevent other selections in the
     same snapshot from being admitted and dispatched. *)
 val heartbeat_event_intake

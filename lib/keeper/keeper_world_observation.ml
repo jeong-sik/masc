@@ -1186,7 +1186,8 @@ type board_replay_failure =
 
     Replay each new post/comment through the same audience route as live
     delivery. Historical participation is not an address. Cursor progress
-    follows complete posts; a transient source failure retains its boundary. *)
+    follows complete posts; a failed candidate-storage write retains its
+    boundary. *)
 let collect_board_events_with_cursor_policy
       ~advance_cursor
       ~(base_path : string)

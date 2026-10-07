@@ -1,5 +1,5 @@
 (* Board catchup, the Owner-internal turn and durable ACK use production code.
-   The fixture seeds the runtime registry, injects one transient Board read and
+   The fixture seeds the runtime registry and
    supplies a loopback model response to a short Board preview. It calls the
    cycle directly, so the outer heartbeat scheduler and its admission checks
    are outside this test. No sandbox tools are invoked. *)
@@ -352,7 +352,7 @@ data: [DONE]
   let summary = `Assoc
     ["post_id", `String post_id; "keeper", `String keeper_name
     ; "model_response", `String "synthetic loopback protocol"
-    ; "transient_pending_preserved", `Bool true; "completed_ack", `Bool true
+    ; "completed_ack", `Bool true
     ; "next_tick_duplicate", `Bool false; "http_requests", `Int 1] in
   json (Filename.concat base_path "probe-result.json") summary;
   print_endline (Yojson.Safe.to_string summary)

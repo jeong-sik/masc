@@ -33,12 +33,13 @@ let subset left right = Keys.subset (Keys.of_list left) (Keys.of_list right)
 let summary (publication : publication) =
   { source_ids = List.map fst publication.keys; text = publication.text }
 
-let observe ~sources t =
+let observe ~sources ~contract t =
   match sources, t.published with
   | [], _ -> Current { source_ids = []; text = "" }
   | _ :: _, None -> Missing
   | _ :: _, Some published ->
-    if source_keys sources = published.keys then Current (summary published)
+    if String.equal published.contract contract && source_keys sources = published.keys
+    then Current (summary published)
     else Stale (summary published)
 
 let input batch = batch.input
@@ -124,6 +125,10 @@ let output_schema = `Assoc
   ["type", `String "object";
    "properties", `Assoc ["briefing", `Assoc ["type", `String "string"; "minLength", `Int 1]];
    "required", `List [`String "briefing"]; "additionalProperties", `Bool false]
+
+let contract ~template =
+  Digestif.SHA256.(digest_string
+    (Yojson.Safe.to_string (`List [`String template; output_schema])) |> to_hex)
 
 let exact_fields what names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields

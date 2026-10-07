@@ -1,9 +1,10 @@
 module B = Masc.Workspace_memory_briefing
+let fixture_contract = B.contract ~template:"fixture-prompt-and-schema"
 let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let batch = function Some batch -> batch | None -> Alcotest.fail "expected briefing work"
 let source ?(kind = B.Claim) id text : B.source = { id; kind; text }
 let render input = Ok ("Summarize workspace evidence:\n" ^ Yojson.Safe.to_string input)
-let prepare ?(contract = "fixture-prompt-and-schema") sources state =
+let prepare ?(contract = fixture_contract) sources state =
   get (B.prepare ~sources ~contract ~render state)
 let after_size_refusal request = batch (get (B.narrow ~render request))
 let finish ?contract sources text state =
@@ -16,10 +17,10 @@ let entry_ids batch = match member "entries" (B.input batch) with
   | `List entries -> List.map (fun row -> match member "id" row with
       | `String id -> id | _ -> Alcotest.fail "expected source id") entries
   | _ -> Alcotest.fail "expected entries"
-let expect_current sources state text = match B.observe ~sources state with
+let expect_current ?(contract = fixture_contract) sources state text = match B.observe ~sources ~contract state with
   | B.Current summary -> Alcotest.(check string) "published summary" text summary.text
   | B.Missing | B.Stale _ -> Alcotest.fail "expected current briefing"
-let expect_stale sources state text = match B.observe ~sources state with
+let expect_stale ?(contract = fixture_contract) sources state text = match B.observe ~sources ~contract state with
   | B.Stale summary -> Alcotest.(check string) "last publication survives" text summary.text
   | B.Missing | B.Current _ -> Alcotest.fail "expected stale briefing"
 let with_directory f =
@@ -31,14 +32,14 @@ let write path text = Out_channel.with_open_bin path (fun oc -> Out_channel.outp
 
 let test_shared_summary_reuse () =
   let sources = [source "a" "The report is complete"; source ~kind:B.Conflict "b" "Deployment date is disputed"] in
-  (match B.observe ~sources B.empty with B.Missing -> () | _ -> Alcotest.fail "missing became available");
+  (match B.observe ~sources ~contract:fixture_contract B.empty with B.Missing -> () | _ -> Alcotest.fail "missing became available");
   let state = finish sources "Report complete; deployment date remains disputed." B.empty in
   (* Different Keepers get the same complete publication, in either source order. *)
   List.iter (fun sources ->
     expect_current sources state "Report complete; deployment date remains disputed.";
     Alcotest.(check bool) "provider admission is unnecessary" false
-      (B.needs_refresh ~sources ~contract:"fixture-prompt-and-schema" state);
-    let result = B.prepare ~sources ~contract:"fixture-prompt-and-schema"
+      (B.needs_refresh ~sources ~contract:fixture_contract state);
+    let result = B.prepare ~sources ~contract:fixture_contract
       ~render:(fun _ -> Alcotest.fail "current briefing was rendered") state in
     match get result with None -> () | Some _ -> Alcotest.fail "current briefing called model")
     [sources; List.rev sources];
@@ -62,9 +63,30 @@ let test_additions_deletions_and_changed_contract () =
   Alcotest.(check bool) "same id with changed text rebuilds" true (previous rebuild = `Null);
   let changed_kind = { b with kind = B.Conflict } in
   expect_stale [a; changed_kind] both "Report complete; deployment pending.";
-  let contract = batch (prepare ~contract:"revised-prompt-and-schema" [a; b] both) in
+  let contract = batch (prepare ~contract:(B.contract ~template:"revised-prompt-and-schema") [a; b] both) in
   Alcotest.(check bool) "contract change rebuilds" true (previous contract = `Null);
   Alcotest.(check (list string)) "contract rebuild sees all sources" ["a"; "b"] (entry_ids contract)
+
+let test_changed_contract_is_stale_before_or_after_failed_refresh () =
+  let sources = [source "a" "Workspace evidence"] in
+  let published = finish sources "Previous briefing" B.empty in
+  let revised_contract = B.contract ~template:"Revised briefing instructions" in
+  expect_current sources published "Previous briefing";
+  (* The new prompt is already effective, even if provider admission has not
+     occurred and there is no building state or model result yet. *)
+  expect_stale ~contract:revised_contract sources published "Previous briefing";
+  Alcotest.(check bool) "changed template requires refresh" true
+    (B.needs_refresh ~sources ~contract:revised_contract published);
+  (match B.prepare ~sources ~contract:revised_contract
+      ~render:(fun _ -> Error "template could not render") published with
+   | Error _ -> () | Ok _ -> Alcotest.fail "failed rendering became a prepared refresh");
+  expect_stale ~contract:revised_contract sources published "Previous briefing";
+  expect_current ~contract:revised_contract [] published "";
+  let refreshed = batch (prepare ~contract:revised_contract sources published) in
+  expect_stale ~contract:revised_contract sources (B.prepared_state refreshed) "Previous briefing";
+  let updated = get (B.accept refreshed ~text:"Revised briefing") in
+  expect_current ~contract:revised_contract sources updated "Revised briefing";
+  expect_stale sources updated "Revised briefing"
 
 let test_fixed_pass_survives_restart_and_new_additions () = with_directory (fun directory ->
   let a = source "a" "First entry" and b = source "b" "Other entry" and c = source "c" "Third entry" in
@@ -80,7 +102,7 @@ let test_fixed_pass_survives_restart_and_new_additions () = with_directory (fun 
   Alcotest.(check int) "new addition did not move the fixed target" 1 (B.remaining_count retry);
   let partial = get (B.accept retry ~text:"A") in
   get (B.save ~directory partial);
-  (match B.observe ~sources:[a; b] (get (B.load ~directory)) with
+  (match B.observe ~sources:[a; b] ~contract:fixture_contract (get (B.load ~directory)) with
    | B.Missing -> () | _ -> Alcotest.fail "partial summary leaked as publication");
   let next = batch (prepare [a; b; c] (get (B.load ~directory))) in
   Alcotest.(check (list string)) "consumed raw entry not replayed" ["b"] (entry_ids next);
@@ -116,7 +138,7 @@ let test_interrupted_refresh_keeps_publication_and_deletion_resets () = with_dir
 
 let test_strict_storage_and_output () = with_directory (fun directory ->
   let sources = [source "a" "Evidence"] in
-  (match B.observe ~sources (get (B.load ~directory)) with B.Missing -> () | _ -> Alcotest.fail "missing artifact was not empty");
+  (match B.observe ~sources ~contract:fixture_contract (get (B.load ~directory)) with B.Missing -> () | _ -> Alcotest.fail "missing artifact was not empty");
   let state = finish sources "Summary" B.empty in
   get (B.save ~directory state);
   get (B.save ~directory (finish (source "b" "More evidence" :: sources) "Updated" state));
@@ -189,6 +211,7 @@ let () = Alcotest.run "Workspace memory briefing"
   ["behavior", [
      Alcotest.test_case "one shared publication avoids repeated model work" `Quick test_shared_summary_reuse;
      Alcotest.test_case "additions reuse; deletion and contract changes rebuild" `Quick test_additions_deletions_and_changed_contract;
+     Alcotest.test_case "changed prompt is stale even when refresh cannot start" `Quick test_changed_contract_is_stale_before_or_after_failed_refresh;
      Alcotest.test_case "fixed pass resumes and eventually publishes under additions" `Quick test_fixed_pass_survives_restart_and_new_additions;
      Alcotest.test_case "failed refresh preserves old publication and removal resets" `Quick test_interrupted_refresh_keeps_publication_and_deletion_resets;
      Alcotest.test_case "strict storage and model output" `Quick test_strict_storage_and_output;

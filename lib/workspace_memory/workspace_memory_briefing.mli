@@ -15,13 +15,14 @@ val save : directory:string -> t -> (unit, string) result
 (** Missing file is [empty]; malformed state and I/O failures are errors.
     Writes use strict atomic replacement. Eio cancellation propagates. *)
 
-val observe : sources:source list -> t -> observation
-(** Freshness compares the exact set of (id, kind, text) identities, independent
-    of source order. Reusing an id with changed content makes the summary stale.
+val observe : sources:source list -> contract:string -> t -> observation
+(** Freshness requires the current prompt/schema contract and exact set of
+    (id, kind, text) identities, independent of source order. A changed contract
+    or source makes the summary stale even before its refresh can start.
     No published summary means [Missing]. The empty source set is the exception:
     it is always [Current {source_ids = []; text = ""}], where empty text means
     there is no workspace evidence to summarize, not a failed model response.
-    This read does not depend on the worker's prompt contract. *)
+    The caller resolves the effective template and passes [contract ~template]. *)
 
 val needs_refresh : sources:source list -> contract:string -> t -> bool
 (** False for empty evidence or an identical published source/contract set.
@@ -64,6 +65,9 @@ val narrow
     than dropping evidence or retrying the same batch. *)
 
 val output_schema : Yojson.Safe.t
+val contract : template:string -> string
+(** Stable identity of the effective template and [output_schema], shared by
+    publishers and readers. Both must resolve the same effective template. *)
 val decode_output : Yojson.Safe.t -> (string, string) result
 (** Exactly [{"briefing": <nonblank string>}], with no additional fields. *)
 

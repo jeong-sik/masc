@@ -754,8 +754,9 @@ status: reference
   → [Observer event](../../bin/masc_tui_observer.mli), [Activity 라벨](../../bin/masc_tui_acting.ml)
 
 **Runtime Attempt**
-: Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도. 코드는 같은 것을
-  provider attempt라고도 부른다(`Keeper_provider_attempt_effect`, `provider_attempt_outcomes`).
+: Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도. 코드 일부는 같은 것을
+  provider attempt라고 부른다(`Keeper_provider_attempt_effect`, `provider_attempt_outcomes`) —
+  용어집은 Runtime Attempt 한 이름으로 통일한다.
 
 **Failure Route (실패 경로)**
 : Keeper turn이 실패했을 때 그 실패를 타입으로 분류한 관측(`Keeper_runtime_failure_route.route`).
@@ -2152,22 +2153,21 @@ status: reference
   Keeper 는 자기가 만든 `Todo` 를 자동 claim 대상에서 뺀다.
 
 **Assignee**
-: `Claimed`, `InProgress`, `AwaitingVerification` 에 적힌 에이전트 이름. 앞의 둘에서는
-  지금 일을 맡은 쪽이고, `AwaitingVerification` 에서는 제출한 쪽이다.
-
-**Producer**
-: 판정 쪽 코드가 제출한 에이전트를 부르는 이름. Task 레코드에서는
-  `AwaitingVerification.assignee`에 적힌다(→ Assignee). 반려 기록
-  (`pending_completion_rejection`)에는 `producer`로 적힌다. verification 레코드의 외부
-  스키마 키 `worker`는 Task 소유권이나 관계를 찾는 데 쓰지 않는다.
+: Task 를 맡거나 맡아서 완료를 낸 에이전트(`assignee`). Task 전이 상태(`Claimed`,
+  `InProgress`, `AwaitingVerification`)에 적힌 에이전트 이름과 판정 쪽 코드가 부르는
+  반려 기록의 `producer`·verification 레코드의 외부 스키마 키 `worker`가 모두 이 한
+  사람의 별칭이다. 앞의 두 상태에서는 지금 일을 맡은 쪽이고, `AwaitingVerification`
+  에서는 완료를 제출한 쪽이다. 옛 문서의 "Submitter"는 이 항목을 가리킨다.
   → [Types_core](../../lib/types/types_core.mli)
 
 **Claim**
 : `Todo` 인 Task 를 맡는 전이. 한 에이전트는 `Claimed` 와 `InProgress` 를 합쳐 하나만
   가질 수 있고, 이 검사는 claim 할 때만 한다. Keeper 의 claim 은 곧바로 Start 를 이어
   보낸다.
-  **다른 뜻**: Memory 쪽의 `claim`은 전이가 아니라 Fact의 문장 필드다(→ Fact).
-  "새 claim"은 Librarian이 새로 적자고 낸 Fact를 말한다.
+  **다른 뜻과 구별한다**: Memory 쪽의 `claim`은 전이가 아니라 Fact의 문장 필드다(→ Fact).
+  "새 claim"은 Librarian이 새로 적자고 낸 Fact를 말한다. Task 소유 기록을 가리킬 때는
+  이 전이 상태(`Claimed`/`InProgress`)로 읽고, 소스 결속 기록의 `claim_id`(→ Shared Fact)
+  와는 다른 것이다.
 
 **Release**
 : 맡은 쪽이 Task 를 `Todo` 로 돌려놓는 전이. Handoff Context 를 남긴다.
@@ -2175,7 +2175,7 @@ status: reference
 **Submission**
 : 맡은 쪽이 증거와 함께 완료를 내는 전이(`Submit_for_verification`). 상태는
   `AwaitingVerification` 이 되고 새 Verification ID 를 받는다. 판정을 기다리는 Task 는
-  claim 한도에 세지 않는다. Producer 는 기다리는 중에 다시 낼 수 있고 그때마다 id 가
+  claim 한도에 세지 않는다. Assignee 는 기다리는 중에 다시 낼 수 있고 그때마다 id 가
   바뀐다.
 
 **Verification ID**
@@ -2183,7 +2183,7 @@ status: reference
   운영자 판정(`POST /api/v1/verification/verdict`)은 읽은 `verification_id`를
   필수로 요구하며, 백로그 잠금 아래에서 지금 id와 다르면
   `Task_error.VerificationSuperseded`(HTTP 409)로 거절된다. 판정자가 증거를
-  읽는 사이에 Producer가 재제출한 경우, 낡은 판정이 새 제출에 붙는 것을 막는다.
+  읽는 사이에 Assignee가 재제출한 경우, 낡은 판정이 새 제출에 붙는 것을 막는다.
 
 **Completion Authority**
 : 판정을 내리는 쪽. 서버 안의 판정 에이전트(`System_llm_agent`)이거나 인증된 HTTP
@@ -2191,7 +2191,7 @@ status: reference
 
 **Verdict**
 : `Verdict_approved` 또는 `Verdict_rejected { reason }`. 승인은 `Done`, 반려는
-  Producer 의 `InProgress` 다.
+  Assignee 의 `InProgress` 다.
 
 **Handoff Context**
 : Task 에 붙어 다니는 인계 메모. summary, reason, next_step, evidence_refs, updated_by
@@ -2212,7 +2212,8 @@ status: reference
 
 **Operator Attention**
 : 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는
-  `Held_without_actor`, `Producer_record_unreadable` 이다.
+  `Held_without_actor`, `Producer_record_unreadable`(Assignee 의 기록을 읽지
+  못한 것)이다.
   **다른 뜻**: attention이라는 말은 세 곳이 더 쓴다. **Board Attention Candidate**는
   Keeper가 반응할지 판정할 게시물이다. Dashboard 브리핑의 attention 항목
   (`Dashboard_attention.attention_item`)과 TUI 개요 화면의 attention 항목
@@ -2675,8 +2676,10 @@ status: reference
   pocket(`Keeper_librarian_context.pocket`)이고, 지금 저장된 pocket 묶음이
   `Keeper_librarian_context.snapshot`의 `pockets`다. Keeper 이름에 묶인다. cluster 사이에서
   무엇을 같이 쓰는지는 **Cluster** 항목에 적었다.
-  **다른 뜻**: 코드의 `Keeper_types.working_context`는 이 묶음이 아니라 실행 중인
-  Keeper가 쥔 Checkpoint 하나를 감싼 값이다(**Checkpoint** 항목). 이름만 같다.
+  **다른 뜻 두 개와 구별한다.** ① 코드의 `Keeper_types.working_context`는 이 묶음이 아니라
+  실행 중인 Keeper가 쥔 Checkpoint 하나를 감싼 값이다(**Checkpoint** 항목) — 이름만 같다.
+  ② 라우트·설정 쪽의 `working-context`/`working_contexts`는 이 묶음을 가리키는
+  저장소·경로 이름이다. 용어집에서 Working Context는 이 묶음 하나만 가리킨다.
   `[typesafeai] context_review = true`이면 새 정리 전체의 의미 보존을 JEV Choice로
   평가한다. 원본의 요청·제약·약속과 다음 행동 제안을 함께 보며, 합치는 이전 정리의
   참조 원문도 포함한다. `needs_revision`이면 새 정리의 게시만 보류한다. 미평가·실패·
@@ -2966,8 +2969,8 @@ status: reference
 : `keeper_memory_search`는 먼저 쿼리에 맞는 소스 결속 주장과 그 경로·다이제스트를 고른 뒤, 그 후보만 잠금 아래에서 재검증한다. 쿼리에 맞지 않는 소스는 읽거나 무효화하지 않고 저장된 채 미검증으로 둔다. 매칭 후보의 읽기가 끝나지 않으면 본문을 보류하고 `source_verification.status="incomplete"`와 재조회 안내를 돌려준다. 검증된 현재 결과를 가린 뒤가 아니라 후보 검증·제외 후 `limit`을 적용하므로 오래되거나 확인할 수 없는 후보가 유효한 뒤쪽 결과를 밀어내지 않는다.
   → [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.mli) · [keeper_tool_memory_runtime](../../lib/keeper/keeper_tool_memory_runtime.ml)
 
-**Workspace Memory Ledger (작업공간 기억 원장)**
-: Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.
+**Shared Fact (작업공간 기억 원장 행)**
+: Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
 
 **Continuity Snapshot (하던 일 저장본)**
@@ -3054,40 +3057,41 @@ status: reference
   → [Keeper_continuity_observation](../../lib/keeper/keeper_continuity_observation.mli),
   [dashboard 투영](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
 
-**Librarian Round (Librarian 회차)**
-: Librarian이 한 번 도는 일. Keeper마다 따로 돌고, 같은 신호(서버 기동·턴 끝·받은 일
+**Librarian Pass (Librarian 회차)**
+: Librarian이 한 번 도는 일. 코드의 이름은 pass 다 — 식별자(`invalid_arg "librarian pass: …"` 등)에는 pass 를 쓰고 `round` 는 주석과 사용자 노출 메시지 일부에만 남는다(`Keeper_librarian_durable_consumer`·
+  `Keeper_librarian_continuity`). Keeper마다 따로 돌고, 같은 신호(서버 기동·턴 끝·받은 일
   변경)에 깨어난다. 두 가지가 있다.
-  - durable 회차(`Keeper_librarian_durable_consumer`): 끝난 턴을 읽어 Memory OS에 적고
+  - durable pass(`Keeper_librarian_durable_consumer`): 끝난 턴을 읽어 Memory OS에 적고
     읽은 위치(Read Position)를 옮긴다. Agent Core 턴은 checkpoint의 atom으로, 공식
     클라이언트 턴은 그 trace의 history 파일에서 `turn_ref`가 가리키는 조각으로 읽는다.
     두 위치(atom 위치·공식 클라이언트 위치)는 각각 따로 옮기며, `commit`이 Memory OS snapshot
     커밋을 보고할 때만 옮긴다. 공식 클라이언트 턴 쪽이 읽을 수 없는 거절 경계선에서
     멈추더라도(`Keeper_librarian_range.Official_stop`), 이 정지는 공식 위치만 세우며 atom 쪽은
-    독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 회차가
+    독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 pass 가
     `Official_range_stopped`로 종료된다(#38475).
-  - 연속성 회차(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 회차.
+  - 연속성 pass(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 pass.
     완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 그 구간의 기억을 durable
-    회차가 아직 저장하지 않았으면 이 회차가 기억을 먼저 저장하고, 저장이 끝난 뒤에만
-    스냅숏을 쓴다. 이렇게 기억을 저장할 때는 durable 회차가 같은 구간에 싣는 것을 그대로
-    싣는다. 그 메시지의 도구 호출과, 그 턴 동안 들어온 상대방 발화다. durable 회차의
-    위치 파일은 고치지 않는다. 대신 durable 회차가 다음에
-    돌 때 연속성 회차가 저장한 구간(그 영수증과 게시된 스냅숏)을 보고, 그 구간은 모델에
+    pass 가 아직 저장하지 않았으면 이 pass 가 기억을 먼저 저장하고, 저장이 끝난 뒤에만
+    스냅숏을 쓴다. 이렇게 기억을 저장할 때는 durable pass 가 같은 구간에 싣는 것을 그대로
+    싣는다. 그 메시지의 도구 호출과, 그 턴 동안 들어온 상대방 발화다. durable pass 의
+    위치 파일은 고치지 않는다. 대신 durable pass 가 다음에
+    돌 때 연속성 pass 가 저장한 구간(그 영수증과 게시된 스냅숏)을 보고, 그 구간은 모델에
     다시 보내지 않고 위치만 그 끝으로 옮긴다.
-  두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
-  librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식(wide-range
+  두 pass 는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
+  librarian-lifecycle §4.3). durable pass 는 실패 종류를 보지 않고, 실패 표식(wide-range
   failure marker)을 루프 메모리에 두고 가장 오래된 한 턴으로 좁힌다. 단, 공식 정지
-  (`Official_range_stopped`)로 끝난 회차는 이 마커를 해제하여 이후 회차가 atom 백로그
-  전체를 정상적으로 읽도록 보장한다(#38475). 연속성 회차는 실패 종류를 보고 크기
-  때문인 실패에서만 좁히며, 좁힌 폭(Continuity Width)을 다음 회차로 넘긴다.
+  (`Official_range_stopped`)로 끝난 pass 는 이 마커를 해제하여 이후 pass 가 atom 백로그
+  전체를 정상적으로 읽도록 보장한다(#38475). 연속성 pass 는 실패 종류를 보고 크기
+  때문인 실패에서만 좁히며, 좁힌 폭(Continuity Width)을 다음 pass 로 넘긴다.
   → [keeper_librarian_durable_consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli) · [keeper_librarian_range](../../lib/keeper/keeper_librarian_range.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
 **Continuity Lag (요약이 밀린 정도)**
-: 연속성 회차가 얼마나 뒤처졌나 — Librarian의 읽은 위치(Read Position)의 `end_atom`에서
+: 연속성 pass 가 얼마나 뒤처졌나 — Librarian의 읽은 위치(Read Position)의 `end_atom`에서
   연속성 스냅숏이 덮은 끝(`Keeper_continuity_observation.frontier.end_atom`)을 뺀 atom 수.
   같은 trace를 가리킬 때만 세고, 스냅숏이 앞서면 세지 않는다. health JSON의
-  `continuity_unread_atoms`이고 TUI는 `continuity behind <n>`으로 그린다. durable 회차의
+  `continuity_unread_atoms`이고 TUI는 `continuity behind <n>`으로 그린다. durable pass 의
   밀림(`Keeper_librarian_durable_consumer.unread`의 `atoms`·`official`, health의
-  `unread_atom_turns`·`unread_official_turns`)과 다른 값이다 — 두 회차는 따로 밀리므로
+  `unread_atom_turns`·`unread_official_turns`)과 다른 값이다 — 두 pass 는 따로 밀리므로
   한 숫자가 둘을 대신하지 못한다(RFC librarian-lifecycle §4.9). 스냅숏이 없거나, 두 파일
   중 하나를 못 읽거나, 두 파일이 다른 trace를 가리키거나, 스냅숏이 앞서면 `null`
   ("말할 수 없음")이다. 그 넷은 따라잡은 Keeper가 아니므로 0으로 적지 않는다. fleet
@@ -3096,16 +3100,16 @@ status: reference
   잴 수 있는 Keeper가 다 가려진다.
   → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
 
-**Continuity Width (연속성 회차의 폭)**
-: 연속성 회차가 한 번에 읽을 수 있는 atom 수의 상한. 크기 때문에 거절당한 회차가 좁힌
-  값을 다음 회차가 이어받는다. (keepers dir, keeper)별로 그 값을 잰 trace와 함께 루프
+**Continuity Width (연속성 pass 의 폭)**
+: 연속성 pass 가 한 번에 읽을 수 있는 atom 수의 상한. 크기 때문에 거절당한 pass 가 좁힌
+  값을 다음 pass 가 이어받는다. (keepers dir, keeper)별로 그 값을 잰 trace와 함께 루프
   메모리에 둔다(`keeper_librarian_queue_refresh.ml`의 `limited_widths`). trace가 바뀌면
   atom 번호가 다시 매겨지므로 비교하지 않고 새 값으로 바꾸고, 같은 trace 안에서는 더
-  좁은 값만 남는다. 끝 atom이 아니라 폭을 남기므로 커밋한 회차 다음에는 같은 자리가
+  좁은 값만 남는다. 끝 atom이 아니라 폭을 남기므로 커밋한 pass 다음에는 같은 자리가
   아니라 그다음 자리를 읽는다. 좁히는 것은 작은 요청이 같은 벽을 피할 수 있는 실패뿐이고,
   그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli`의 `not_committed` 필드)가 들고, 원인별 판정
   규칙은 RFC-librarian-lifecycle §4.3이 정한다. 마지막 후보 하나가 아니라 후보를 차례로
-  시도한 전체 결과로 판정한다. 폭은 backlog를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
+  시도한 전체 결과로 판정한다. 폭은 backlog 를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
   거절했던 범위가 이제 들어간다는 증거가 아니다. 루프
   메모리에만 있으므로 서버가 재시작하면 폭은 사라지고 다시 전부 읽기부터 시작한다(RFC
   librarian-lifecycle §4.3).
@@ -3125,7 +3129,8 @@ status: reference
   공식 클라이언트는 자체 문맥 처리를 사용하므로 선택값과 실제 적용 여부를 구분한다.
 
 **Fact**
-: Memory OS의 기억 하나. 문장(`claim`), `category`, 처음·마지막으로 본 시각,
+: Memory OS의 기억 하나. 문장 필드(`claim` — 이 문서에서 Fact의 문장을 가리킬 때만
+  claim 을 쓴다), `category`, 처음·마지막으로 본 시각,
   `origin`, `basis`로 이뤄진다. id 필드는 없고 Memory ID는 `claim` 글자의
   SHA-256이다. 글자가 하나라도 다르면 다른 Fact다. 처음·마지막으로 기록된 시각
   (`first_seen`, `last_seen`)은 둘 다 Fact가 기록된 시각(write time)이며, 상태가

@@ -46,7 +46,7 @@ def run(executable):
         os.write(master_fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(executable, description="Answering fits long ASCII and CJK names without losing lane or age",
-                            interact=inspect_running, http_fixtures=fixtures, refresh=0.5)
+                            interact=inspect_running, http_fixtures=fixtures)
 
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/turns"] = (200, {
@@ -71,7 +71,7 @@ def run(executable):
         os.write(master_fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(executable, description="Answering scrolls unavailable rows with movement, page and edge keys",
-                            interact=inspect_unavailable, http_fixtures=fixtures, refresh=0.5)
+                            interact=inspect_unavailable, http_fixtures=fixtures)
 
     for page_key, move_key, target in ((b"\x1b[6~", b"j", b"beta"),
                                       (b"\x1b[F", b"k", b"alpha")):
@@ -121,7 +121,7 @@ def run(executable):
 
         _keyboard_harness.run_terminal_scenario(executable,
             description="Answering ignores invisible Enter then follows " + move_key.decode() + " back to a visible target",
-            interact=inspect_paged_selection, http_fixtures=fixtures, refresh=0.5)
+            interact=inspect_paged_selection, http_fixtures=fixtures)
     print("tui answering layout: PASS")
 
 

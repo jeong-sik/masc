@@ -316,7 +316,9 @@ val write_list_sidebar :
     board of a hundred and ninety-eight -- and the row spells the pair the way
     the surface's own header does. A list that is filtered rather than paged
     passes [None]; it is asked of every caller so that a list with nothing
-    more to hold says so. *)
+    more to hold says so. The index has one quiet right separator and keeps
+    the same label columns whether focused or not. A focused selection fills
+    its row; an unfocused selection keeps a caret without claiming focus. *)
 
 val write_list_sidebar_selection :
   Buffer.t ->

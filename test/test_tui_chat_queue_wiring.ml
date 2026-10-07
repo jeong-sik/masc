@@ -3083,6 +3083,28 @@ let test_thinking_fold_tracks_origin_body_budget () =
     (body Layout.Origin_row)
 ;;
 
+let test_formatting_does_not_fold_a_fitting_thought () =
+  let module Layout = Masc_tui_message_layout in
+  List.iter (fun origin ->
+    List.iter (fun decorate ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.msg_origin_display <- origin;
+      state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+      let set text = state.msg_history <- [chat_entry ~request_id:"formatted-thought"
+        ~role:Tui_types.Message_thinking ~text ~at:1. ()] in
+      let entry () = match Masc_tui_render_chat.keeper_message_layout_entries
+          state ~keeper_name:"alpha" ~chat_cols:80 with
+        | [entry] -> entry | _ -> fail "expected one thought" in
+      set "x";
+      let width = Layout.entry_body_cells ~origin ~inner_width:(Masc_tui_ansi.framed_inner_width 80) (entry ()) in
+      let text = decorate (String.make width 'x') in
+      set text;
+      state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+      check string "visible one-row Markdown remains readable" text (entry ()).Layout.body)
+      [(fun s -> "**" ^ s ^ "**"); (fun s -> "*" ^ s ^ "*"); (fun s -> "`" ^ s ^ "`")])
+    [Layout.Origin_inline; Origin_row; Origin_bare]
+;;
+
 let test_folded_single_line_reasoning_stays_compact () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -5257,6 +5279,8 @@ let () =
             test_a_journal_revision_draws_its_facts_in_columns
         ; test_case "a failing librarian is named on the header" `Quick
             test_a_failing_librarian_is_named_on_the_header
+        ; test_case "formatting does not fold fitting thoughts" `Quick
+            test_formatting_does_not_fold_a_fitting_thought
         ; test_case "a folded reasoning block is the count and the key" `Quick
             test_a_folded_reasoning_block_is_the_count_and_the_key
         ; test_case "thinking fold follows origin body budget" `Quick

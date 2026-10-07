@@ -241,7 +241,7 @@ let cached_chat_markdown ~link_previews_mode ~theme =
    Markdown colours. *)
 (* How many reasoning lines a folded block stands for. The count is the
    non-blank lines, matching what the unfolded block draws. *)
-let folded_thinking_summary ~width body =
+let folded_thinking_summary ~render body =
   let lines =
     String.split_on_char '\n' body
     |> List.filter (fun line -> String.trim line <> "")
@@ -250,7 +250,7 @@ let folded_thinking_summary ~width body =
   | [] -> body
   (* Logical lines can wrap to hundreds of rows when providers omit newline
      deltas. Preserve short notes, including unrecorded-step facts. *)
-  | [line] when Message_layout.display_width line <= width -> body
+  | [_] when (match render () with [] | [_] -> true | _ -> false) -> body
   | [_] -> "Reasoning · 1 line folded · Ctrl-R"
   (* A turn that reasons between every call draws this once a round, eight
      rounds a turn. At 61 cells the sentence was the widest thing in the pane
@@ -264,7 +264,10 @@ let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry
   if entry.style = Message_layout.Thinking && state.msg_reasoning_visibility = Reasoning_folded then
     let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
       ~inner_width:(max 1 (framed_inner_width chat_cols)) entry in
-    { entry with body = folded_thinking_summary ~width entry.body }
+    let markdown = cached_chat_markdown ~link_previews_mode:state.link_previews_mode
+        ~theme:(Chat_theme.snapshot ()) in
+    { entry with body = folded_thinking_summary
+        ~render:(fun () -> markdown ~entry ~width) entry.body }
   else entry
 
 let tool_projection_mode (state : state) =

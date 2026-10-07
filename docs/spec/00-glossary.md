@@ -686,6 +686,29 @@ status: reference
   → [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
   [Server_routes_http_keeper_stream](../../lib/server/server_routes_http_keeper_stream.mli)
 
+**Keeper Direct Native Call (키퍼 직접 네이티브 호출)**
+: 한 직접 Keeper 채팅 오퍼레이션(`Keeper_chat_operation`) 안에서 실행되는 단일
+  네이티브 Agent API 호출 단위(#41655). 입력 접수(`input admission`) 직후이자
+  도구/효과 실행 전에 포착된 정확한 체크포인트를 불변의 시드(`seed_checkpoint`)로
+  보존한다. 상태 전이는 `No_native_call` → `Active` → `Terminal_unacknowledged`를
+  따르며, 진행 중인 호출의 새 체크포인트는 시드를 보존한 채 전진(`advance`)한다.
+  서버 재시작 복구 시 durable Core scope에서 활성 호출을 복원하거나, 저널이 이미
+  종료된 경우 미확인 종단 영수증(`Terminal_unacknowledged`)으로 정산하여 유실된
+  응답을 지어내지 않는다. 알 수 없거나 보존되지 않은 효과가 있는 호출은 제공자
+  재시도(fallback)가 격리(fencing)된다.
+  → [Keeper_native_call](../../lib/keeper_chat_operations/keeper_native_call.mli) ·
+  [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli)
+
+**Native Result Retention (네이티브 실행 결과 보존)**
+: 네이티브 API 호출의 정규 결과(canonical results)를 해당 호출의 transcript와
+  대조·검증하는 제약 계약(#41655). 접수된 정확한 시드(`seed_checkpoint`) 이전의
+  메시지나 결과는 이후의 호출을 해소(discharge)할 수 없으며, transcript에 보존된
+  각 결과 발생(occurrence)은 최대 하나의 정규 결과만 해소할 수 있다. 도구 시도가
+  접수된 후의 재시작 복구에서는 정규 정산된(settled) 루트 도구 결과를 모두 보존하고
+  transcript를 엄격히 결속하며, 예외는 확인된 퇴역 이력 절단(`retired_history_cut`)뿐이다.
+  → [Keeper_native_result_retention](../../lib/keeper/keeper_native_result_retention.mli) ·
+  [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli)
+
 **Speaker Authority (화자 권한)**
 : Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
   추측하지 않고 진입 경로와 Keeper 레지스트리 대조로 구조적으로 결정한다(RFC-0223 §3,
@@ -3054,6 +3077,19 @@ status: reference
   카운터는 그 셋을 따른다([`keeper_official_client_host.ml`](../../lib/keeper/keeper_official_client_host.ml)).
   요약이 빠져도 turn은 거절하지 않고 WARN으로 알린다.
   → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
+
+**Recent Work Context (최근 작업 발췌)**
+: 자율 턴(`autonomous turn`)이 직전 직접 대화의 요청과 이전 자율 턴의 결론을
+  유실하지 않고 이어받을 수 있도록 제공하는 유계된 이력 발췌(#41675). 직접 대화
+  이력(`conversation`)과 최신 내부 어시스턴트 메시지(`autonomous_reply`)를
+  독립적으로 수집하여, 자율 루프의 긴 반복 실행이 사용자의 원래 요청을 밀어내지
+  (`displace`) 않도록 보장한다. 인라인 표시 한도를 넘는 큰 발췌는 현재 도구
+  표면이 정규 아티팩트 판독기(`keeper_artifact_read`)를 제공할 때만 내용 주소화된
+  아티팩트(`Evidence of string`)로 결속되며, 판독기 부재나 저장 실패 시 인라인으로
+  되돌리지 않고 누락(`Unavailable`) 상태를 명시한다. 이 발췌는 완료된 역사적
+  증거일 뿐이며 새로운 할 일 목록이나 열린 의무가 아니다.
+  → [Keeper_recent_work](../../lib/keeper/keeper_recent_work.mli) ·
+  [Keeper Unified Prompt](../../lib/keeper/keeper_unified_prompt.mli)
 
 **Extra System Context (턴별 문맥)**
 : Keeper hook이 매 turn 새로 조립해 provider 지시 표면에 얹는 `System` 메시지.

@@ -45,34 +45,39 @@ def main() -> int:
     if args.command == "stop":
         with (state / "control.lock").open("a") as control:
             fcntl.flock(control, fcntl.LOCK_EX)
+            # Record stop even before a spawned child takes the service lease.
+            stop.touch()
             if running(state):
-                stop.touch()
                 print("stop requested; the current sweep will finish safely")
             else:
                 print("already stopped")
         return 0
     if args.command == "start":
-        if running(state):
-            print("already running")
-            return 0
-        with (state / "service.log").open("a") as log:
-            child = subprocess.Popen(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve()),
-                    "run",
-                    "--base-path",
-                    str(base),
-                    "--idle-hours",
-                    str(args.idle_hours),
-                    "--interval-seconds",
-                    str(args.interval_seconds),
-                ],
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=log,
-                start_new_session=True,
-            )
+        with (state / "control.lock").open("a") as control:
+            fcntl.flock(control, fcntl.LOCK_EX)
+            if running(state):
+                print("already running")
+                return 0
+            # Only a new admitted start may clear an earlier stop request.
+            stop.unlink(missing_ok=True)
+            with (state / "service.log").open("a") as log:
+                child = subprocess.Popen(
+                    [
+                        sys.executable,
+                        str(Path(__file__).resolve()),
+                        "run",
+                        "--base-path",
+                        str(base),
+                        "--idle-hours",
+                        str(args.idle_hours),
+                        "--interval-seconds",
+                        str(args.interval_seconds),
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=True,
+                )
         for _ in range(50):
             if running(state):
                 print(f"started; state: {state}")
@@ -90,14 +95,13 @@ def main() -> int:
         (state / "service.lock").open("a") as lease,
         (state / "control.lock").open("a") as control,
     ):
-        # Serialize making the service visible and clearing a stale stop marker
-        # with stop itself, so startup cannot erase an acknowledged request.
+        # Serialize service admission with stop; the spawned child must retain
+        # any request acknowledged after its parent admitted the start.
         fcntl.flock(control, fcntl.LOCK_EX)
         try:
             fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return 0
-        stop.unlink(missing_ok=True)
         (state / "service.log").write_text("")
         (state / "config.json").write_text(
             json.dumps(

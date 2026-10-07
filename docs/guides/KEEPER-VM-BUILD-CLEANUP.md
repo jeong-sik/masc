@@ -74,7 +74,9 @@ python3 scripts/keeper-vm-cleaner.py stop --base-path /path/to/workspace
 retention. Set `--idle-hours` and `--interval-seconds` on `start` to change those
 settings; stop an existing service before changing its configuration. Duplicate
 starts leave the existing service running. Stop requests finish the current
-sweep before exiting and never signal a PID from a stale file.
+sweep before exiting and never signal a PID from a stale file. A stop sent
+while `start` is still bringing the service up is kept: that service exits
+before its first sweep, and only the next `start` clears the request.
 
 State and the latest sweep/error reports are bounded files under
 `<base-path>/.masc/maintenance/keeper-vm-cleaner/`. `config.json` identifies the

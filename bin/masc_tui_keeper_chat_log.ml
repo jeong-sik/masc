@@ -97,7 +97,7 @@ let decode_operation_state ~operation_id json =
       else if id <> operation_id then Error "operation identity does not match the requested source"
       else
         let* state = string "state" in
-        match state with
+        (match state with
         | "Queued" -> Ok Queued
         | "Running" -> let* started_at = timestamp "started_at" in Ok (Running { started_at })
         | "Succeeded" ->
@@ -112,7 +112,7 @@ let decode_operation_state ~operation_id json =
             let* outcome_ref = optional_string "outcome_ref" in
             Ok (Failed { completed_at; failure = { kind; detail; outcome_ref } })
         | "Cancelled" -> let* completed_at = timestamp "completed_at" in Ok (Cancelled { completed_at })
-        | _ -> Error ("unknown operation state: " ^ state)
+        | _ -> Error ("unknown operation state: " ^ state))
   | _ -> Error "operation is not an object"
 ;;
 

@@ -485,14 +485,16 @@ let bow_knot g x y =
   let bx, by = bow_centre g in
   circle x y bx by 0.025
 
-(* Head items sit on the wax top, under the flame and between the horns: the
-   flame rises from the middle above the wax top and the horns leave the top
-   corners, so the band across the middle is the free row. Both stay below
-   the flame's round body at the centre and inside the horns' bases at the
-   sides. *)
-let crown_centre g = (0.0, g.top +. 0.055)
+(* Head items sit on the wax rim, under the flame and between the horns.
+   The flame owns their overlap in the middle; the crown's side teeth fit
+   inside the horns' bases. *)
 let crown_half_width = 0.15
 let crown_band_half_height = 0.026
+(* Rest the band's lower edge on the wax rim. A band embedded in the wax's
+   outline becomes the same ink as that rim in the small Info mosaic, even
+   though the full-size crown has a different paint. Its own silhouette must
+   remain above the wax; the flame still owns any overlap at the centre. *)
+let crown_centre g = (0.0, g.top -. crown_band_half_height)
 
 let crown_field g x y =
   let cx, cy = crown_centre g in

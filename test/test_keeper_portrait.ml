@@ -203,6 +203,29 @@ let test_every_item_shows () =
   let dishes = List.map (fun base -> draw ~equipment:{ bare with base } base_body 96) all_base_items in
   Alcotest.(check int) "each dish is its own" (List.length all_base_items) (distinct dishes)
 
+(* The crown rests on the wax rim instead of sinking into it. Sunk into the
+   wax, its band took the rim's ink in the small Info mosaic and the crown
+   could not be seen. So the band must reach the pixel row just above the
+   rim, beside the flame and outside the teeth. The mosaic is as wide as the
+   terminal allows up to 96 pixels; at the smallest sizes a pixel is taller
+   than the band and the rim row holds it, so those are not asked. *)
+let test_crown_rests_on_the_wax_rim () =
+  let _, top, _, _ = D.For_testing.wax_bounds base_body in
+  List.iter
+    (fun n ->
+      let bare_image = D.render base_body bare (size n) in
+      let crowned = D.render base_body { bare with head = Crown } (size n) in
+      List.iter
+        (fun side_x ->
+          let x, rim_row = D.For_testing.pixel_of_point (size n) (side_x, top) in
+          let y = rim_row - 1 in
+          Alcotest.(check bool)
+            (Printf.sprintf "%d px: the crown band is above the rim at x=%.2f" n side_x)
+            false
+            (fst (D.pixel bare_image ~x ~y) = fst (D.pixel crowned ~x ~y)))
+        [ -0.13; 0.13 ])
+    [ 48; 96 ]
+
 let test_size_and_alpha () =
   Alcotest.(check bool) "too small" true (D.size_of_int (D.min_size - 1) = None);
   Alcotest.(check bool) "too large" true (D.size_of_int (D.max_size + 1) = None);
@@ -685,6 +708,7 @@ let () =
         [
           Alcotest.test_case "every body variant shows" `Quick test_every_body_variant_shows;
           Alcotest.test_case "every item shows" `Quick test_every_item_shows;
+          Alcotest.test_case "the crown rests on the wax rim" `Quick test_crown_rests_on_the_wax_rim;
           Alcotest.test_case "size and alpha" `Quick test_size_and_alpha;
           Alcotest.test_case "outline rings the silhouette" `Quick test_outline_rings_the_silhouette;
           Alcotest.test_case "ink line is one width" `Quick test_ink_line_is_one_width;

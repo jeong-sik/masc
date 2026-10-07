@@ -2678,7 +2678,7 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
       launch_msx_poll state ~mailbox
   | Poll_pending _ | Poll_observing _ | Poll_ready Outcome_unknown -> ()
   | Poll_ready (Observing refusal) ->
-      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority } in
+      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority; poll_reading = state.workspace_read_authority } in
       let since = Masc_tui_machine_live.since state.msx_live in
       msx_pending_poll := Poll_observing (request,refusal);
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
@@ -2688,7 +2688,7 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
             Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.poll_port Masc.Machine_lane.Msx ~since)
             (Masc_tui_http.fetch_msx_activity ~host:server_peer_host ~port:request.poll_port))
   | Poll_ready Advancing ->
-      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority } in
+      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority; poll_reading = state.workspace_read_authority } in
       msx_pending_poll := Poll_pending request;
       let run () =
         let frame =
@@ -12081,6 +12081,43 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
        Its request went out under the old authority, and a surface outside
        the bundle has no tick of its own to recover it. *)
     launch_surface_reads state ~mailbox state.view;
+    (* Retained nested readers own their selection independently of the list
+       underneath. Reissue their observations without resetting navigation. *)
+    (match state.view with
+     | Keepers Keeper_runtime_pick -> launch_runtime_catalog_load state ~mailbox
+     | Keepers Keeper_calls -> Option.iter (fun keeper ->
+         launch_keeper_calls_load ~force:true state ~mailbox keeper.k_name) (selected_keeper state)
+     | Verification ->
+         (match state.verification, state.verification_detail_request_id with
+          | Some snapshot, Some request_id ->
+              List.find_opt (fun row -> String.equal row.Tui_decode.vr_request_id request_id)
+                snapshot.Tui_decode.vs_requests
+              |> Option.iter (fun row -> launch_verification_evidence_load state ~mailbox row.Tui_decode.vr_task_id)
+          | _ -> ())
+     | Schedules -> Option.iter (fun schedule_id ->
+         launch_schedule_wake_history_load state ~mailbox ~schedule_id) state.schedule_detail_id
+     | Lanes ->
+         (match state.lanes_mode with
+          | Lanes_run_list lane -> launch_lane_runs_load state ~mailbox ~lane
+          | Lanes_run_detail (_, run_id) -> launch_lane_run_detail_load state ~mailbox ~run_id
+          | Lanes_measurement_detail sha256 -> launch_measurement_artifact_load state ~mailbox ~sha256
+          | Lanes_overview | Lanes_inventory_detail _ -> ())
+     | Memory ->
+         (match state.memory_facts_keeper with
+          | Some "*" -> launch_all_memory_facts_load state ~mailbox
+          | Some keeper_name -> launch_memory_facts_load state ~mailbox ~keeper_name
+          | None -> ())
+     | _ -> ());
+    if state.context_inspector_open then Option.iter (fun keeper_name ->
+      launch_context_inspector_load state ~mailbox ~keeper_name) state.context_inspector_keeper;
+    if state.repository_changes_open then
+      (match state.repository_changes_scope, state.repository_changes_diff_path with
+       | Some scope, Some path ->
+           launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader ~scope ~path
+       | _ -> ());
+    if state.patch_modal_open then Option.iter (fun path ->
+      launch_repository_changes_diff_load state ~mailbox ~reader:Patch_diff_reader
+        ~scope:Tui_decode.Repository_change_project ~path) state.patch_modal_path;
     if state.keeper_deletions_open then launch_keeper_deletions state ~mailbox ();
     (match state.browser_history with
      | Some {resume=Some resume; _} -> launch_browser_history state ~mailbox
@@ -15942,9 +15979,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            (* A scope change invalidates presentation, not knowledge of an
               in-flight mutation. A lost reply remains unknown until an
               explicit current-scope frame read succeeds. *)
-           msx_pending_poll := Poll_ready (Masc_tui_msx_tick.policy_after_tick result);
+           let observation_current = request.poll_port = state.port
+             && workspace_reply_admitted state ~authority:request.poll_authority
+                  ~reading:(Some request.poll_reading) ~kind:Workspace_observation in
+           msx_pending_poll := Poll_ready
+             (if observation_current then Masc_tui_msx_tick.policy_after_tick result
+              else Outcome_unknown);
            (match result with
-            | _ when request.poll_port <> state.port || request.poll_authority <> state.workspace_authority ->
+            | _ when not observation_current ->
                 ()
             | Error detail ->
                 (* A lost HTTP response does not prove the server stopped its

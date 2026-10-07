@@ -6484,7 +6484,10 @@ let suspend_voice_wizard_read state =
     | Wizard.Save_unanswered {request; _} ->
         Option.value ~default:session (Wizard.voice_wizard_after_reread session ~request
           (Error "workspace identity is unconfirmed; the save outcome is still unknown"))
-    | Save_not_sent | Save_sending _ | Save_probing _ | Save_settled
+    | Save_probing request ->
+        Option.value ~default:session (Wizard.voice_wizard_after_probe session ~request
+          (Error "Configuration saved; endpoint probe retired while workspace identity was unconfirmed."))
+    | Save_not_sent | Save_sending _ | Save_settled
     | Save_needs_reopen _ -> session) state.voice_wizard
 
 (* Observation receipts have a shorter lifetime than admitted operations.
@@ -6557,6 +6560,10 @@ let suspend_workspace_readings state =
   state.connectors_inflight <- false;
   state.connectors_reload_after_inflight <- false;
   state.memory_health_inflight <- false;
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
+  (match state.runtime_catalog_reading with
+   | Runtime_catalog_loading -> state.runtime_catalog_reading <- Runtime_catalog_unread
+   | Runtime_catalog_unread | Runtime_catalog_failed _ | Runtime_catalog_read -> ());
   state.runtime_config_read <- `Idle;
   state.runtime_params_loading <- false;
   state.standalone_lanes_inflight <- false;

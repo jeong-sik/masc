@@ -80,7 +80,7 @@ type preset_sink =
 (* The UI domain owns these refs. A posted tick is a mutation: closing its
    view invalidates presentation, never cancels or retries the request. Keep
    the pending request until its terminal mailbox result, even across reopen. *)
-type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority }
+type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority; poll_reading : unit ref }
 
 (* A DOS read changes nothing on the server. The current view owns one read;
    reopening may start another without waiting for an old view's HTTP timeout.
@@ -620,6 +620,7 @@ let rec workspace_message_is_read = function
   | Voice_agent_voices_loaded _
   | Voice_wizard_reread _
   | Voice_config_loaded _
+  | Voice_wizard_probed _
   | Board_post_refresh_done _
   | Keeper_chat_history_loaded _
   | Keeper_chat_copy_loaded _
@@ -711,7 +712,6 @@ let rec workspace_message_is_read = function
   | Voice_wizard_saved _
   | Msx_frame_loaded _
   | Voice_agent_voice_saved _
-  | Voice_wizard_probed _
   | Voice_level _
   | Voice_transcribed _
   | Voice_silent _

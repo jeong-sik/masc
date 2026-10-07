@@ -524,6 +524,40 @@ let test_unknown_voice_save_read_retirement () =
   suspend_voice_wizard_read state;
   check_retired ()
 
+let test_nested_read_owners_retire_without_losing_selection () =
+  let open Masc_tui_types in
+  let module Wizard = Masc_tui_voice_wizard_session in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  let opened = Wizard.voice_wizard_open ~section:Voice_setup.Tts
+      ~provider:Voice_wizard.Elevenlabs ~revision:"saved" in
+  state.voice_wizard <- Some {opened with vws_save=Wizard.Save_probing 7};
+  state.runtime_catalog_reading <- Runtime_catalog_loading;
+  let generation = state.runtime_catalog_generation in
+  state.context_inspector_open <- true;
+  state.context_inspector_keeper <- Some "alpha";
+  state.context_inspector_loading <- true;
+  state.schedule_detail_id <- Some "schedule-a";
+  state.schedule_wake_history_inflight <- Some "schedule-a";
+  state.patch_modal_open <- true;
+  state.patch_modal_path <- Some "lib/example.ml";
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "catalog owner can be restarted" true
+    (state.runtime_catalog_reading = Runtime_catalog_unread);
+  Alcotest.(check bool) "catalog generation retired" true
+    (state.runtime_catalog_generation > generation);
+  Alcotest.(check bool) "context owner released" false state.context_inspector_loading;
+  Alcotest.(check (option string)) "context selection retained" (Some "alpha") state.context_inspector_keeper;
+  Alcotest.(check (option string)) "schedule owner released" None state.schedule_wake_history_inflight;
+  Alcotest.(check (option string)) "schedule selection retained" (Some "schedule-a") state.schedule_detail_id;
+  Alcotest.(check (option string)) "patch selection retained" (Some "lib/example.ml") state.patch_modal_path;
+  (match state.voice_wizard with
+   | Some ({vws_save=Wizard.Save_settled; _} as session) ->
+       Alcotest.(check bool) "retired probe cannot populate the wizard" true
+         (Option.is_none (Wizard.voice_wizard_after_probe session ~request:7 (Ok ["foreign endpoint"])));
+       Alcotest.(check bool) "saved draft is preserved" true (session.vws_draft = opened.vws_draft)
+   | _ -> Alcotest.fail "probe still owns the saved wizard")
+
 let test_discarded_bundle_retires_readings_before_reconfirming_a () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
@@ -566,7 +600,9 @@ let test_preset_selection_waits_without_owning_an_unconfirmed_read () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "discarded bundle retires readings before reconfirming A" `Quick
+      , [ Alcotest.test_case "nested read owners retire without losing selection" `Quick
+            test_nested_read_owners_retire_without_losing_selection
+        ; Alcotest.test_case "discarded bundle retires readings before reconfirming A" `Quick
             test_discarded_bundle_retires_readings_before_reconfirming_a
         ; Alcotest.test_case "preset selection waits without an unconfirmed read" `Quick
             test_preset_selection_waits_without_owning_an_unconfirmed_read

@@ -80,7 +80,7 @@ type preset_sink =
 (* The UI domain owns these refs. A posted tick is a mutation: closing its
    view invalidates presentation, never cancels or retries the request. Keep
    the pending request until its terminal mailbox result, even across reopen. *)
-type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority }
+type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority; poll_reading : unit ref }
 
 (* A DOS read changes nothing on the server. The current view owns one read;
    reopening may start another without waiting for an old view's HTTP timeout.

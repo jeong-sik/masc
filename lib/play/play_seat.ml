@@ -7,19 +7,19 @@ let keeper_names config =
       List.sort_uniq String.compare (persisted @ Keeper_meta_store.configured_keeper_names config))
     (Keeper_meta_store.keeper_names_result config)
 
-let participant_names ~keepers ~now credentials =
-  let seated (cred : Masc_domain.agent_credential) =
+let eligible_credentials ~now credentials =
+  let eligible (cred : Masc_domain.agent_credential) =
     match cred.role with
     | Masc_domain.Admin | Masc_domain.Player ->
       (match Play_invite.expired ~now cred with
-       | Ok false -> Some cred.agent_name
-       | Ok true -> None
+       | Ok false -> true
+       | Ok true -> false
        | Error (Masc_domain.Credential_expiry.Invalid_timestamp stamp) ->
          Log.Auth.warn "Play seat cannot read credential expiry for %s: %S" cred.agent_name stamp;
-         None)
-    | Masc_domain.Worker -> None
+         false)
+    | Masc_domain.Worker -> false
   in
-  List.sort_uniq String.compare (keepers @ List.filter_map seated credentials)
+  List.filter eligible credentials
 
 let connected_credentials ~transaction ~base_path credentials =
   let ( let* ) = Result.bind in
@@ -36,9 +36,11 @@ let connected_credentials ~transaction ~base_path credentials =
 let participants_in_transaction ~transaction ~base_path ~keepers ~now =
   let ( let* ) = Result.bind in
   let* credentials = Auth.list_current_credentials_in_transaction transaction in
+  let credentials = eligible_credentials ~now credentials in
   let* credentials, departed = connected_credentials ~transaction ~base_path credentials in
   let keepers = List.filter (fun name -> not (List.mem name departed)) keepers in
-  Ok (participant_names ~keepers ~now credentials)
+  let names = List.map (fun (cred : Masc_domain.agent_credential) -> cred.agent_name) credentials in
+  Ok (List.sort_uniq String.compare (keepers @ names))
 
 let participants ~base_path ~keepers ~now =
   Auth.with_credential_transaction base_path (fun transaction ->

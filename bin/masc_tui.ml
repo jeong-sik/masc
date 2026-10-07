@@ -2222,14 +2222,16 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
    at the first endpoint that answers. *)
 
 let launch_voice_wizard_probe state ~mailbox ~request message =
+  let enqueue_async = workspace_enqueue state in
+  let check = capture_workspace_check state ~mailbox in
   let host = server_peer_host in
   let port = state.port in
   let payload = Yojson.Safe.to_string (`Assoc [ "message", `String message ]) in
   let run () =
     let result =
-      Masc_tui_http.post_json_with_timeout
+      Result.bind (check ()) (fun () -> Masc_tui_http.post_json_with_timeout
         ~timeout_sec:Masc_tui_http.voice_probe_timeout_sec
-        ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload
+        ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload)
     in
     enqueue_async mailbox (Voice_wizard_probed (request, result))
   in
@@ -2393,6 +2395,12 @@ let voice_setup_section_kinds state (section : Voice_setup.section) =
 
 let launch_voice_wizard_save state ~mailbox
     (session : Masc_tui_voice_wizard_session.voice_wizard_session) =
+  match write_authority_refusal state state.workspace_authority with
+  | Some detail ->
+    state.voice_wizard <- Some { session with vws_status = Some detail }
+  | None ->
+  let enqueue_async = workspace_enqueue state in
+  let check = capture_workspace_check state ~mailbox in
   let alongside =
     voice_setup_section_kinds state session.vws_draft.Voice_wizard.section
   in
@@ -2422,8 +2430,10 @@ let launch_voice_wizard_save state ~mailbox
     let run () =
       let reply =
         match
-          Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
-            ~body:payload
+          (match check () with
+           | Error detail -> Masc_tui_http.Post_refused detail
+           | Ok () -> Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
+               ~body:payload)
         with
         | Masc_tui_http.Post_answered json ->
           (match voice_setup_revision json with
@@ -2542,6 +2552,12 @@ let launch_voice_agent_voices state ~mailbox ~kind ~api_key_env =
 
 let launch_voice_agent_voice_save state ~mailbox
       (session : Masc_tui_types.voice_agent_session) =
+  match write_authority_refusal state state.workspace_authority with
+  | Some detail ->
+    state.voice_agent_voices <- Some { session with vas_status = Some detail }
+  | None ->
+  let enqueue_async = workspace_enqueue state in
+  let check = capture_workspace_check state ~mailbox in
   match Masc_tui_types.voice_agent_selected session with
   | None ->
     state.voice_agent_voices
@@ -2568,8 +2584,10 @@ let launch_voice_agent_voice_save state ~mailbox
     let run () =
       let result =
         match
-          Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
-            ~body:payload
+          (match check () with
+           | Error detail -> Masc_tui_http.Post_refused detail
+           | Ok () -> Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
+               ~body:payload)
         with
         | Masc_tui_http.Post_answered json -> Ok json
         | Masc_tui_http.Post_refused message -> Error message
@@ -11280,6 +11298,9 @@ let apply_server_identity_reading state reading =
 
 let apply_refused_workspace_identity state ~detail latest =
   let reading = retire_refused_workspace_readings state ~detail latest in
+  (match !msx_pending_poll with
+   | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
+   | Poll_ready _ | Poll_pending _ -> ());
   apply_server_identity_reading state reading
 
 (* Scoped navigation reads carry the identity observed before their datasets.
@@ -12281,6 +12302,8 @@ let apply_approval_decision_completion state generation approval decision result
 let start_approval_decision state approval decision ~mailbox =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
+  let identity = state.server_identity in
+  let reading = Some state.workspace_read_authority in
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot decide: workspace identity is unverified"
   else
@@ -12295,19 +12318,27 @@ let start_approval_decision state approval decision ~mailbox =
     state.home_decision_inflight <- state.home_opened_request;
     let host = server_peer_host in
     let port = state.port in
+    let confirm () =
+      Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+        (fun () -> Masc_tui_http.post_operator_confirm ~host ~port
+          ~token:approval.ap_token ~decision)
+    in
+    let reload () =
+      if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
+      then load_approvals ~host ~port
+      else Error "Approval result retained; workspace identity is unconfirmed"
+    in
     let run_action () =
       let result =
         try
-          Masc_tui_http.post_operator_confirm ~host ~port
-            ~token:approval.ap_token ~decision
+          confirm ()
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
       let approvals =
         try
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-          else load_approvals ~host ~port with
+          reload () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error ("approvals reload failed: " ^ Printexc.to_string exn)
       in
@@ -12319,16 +12350,15 @@ let start_approval_decision state approval decision ~mailbox =
     | None ->
         let result =
           try
-            Masc_tui_http.post_operator_confirm ~host ~port
-              ~token:approval.ap_token ~decision
+            confirm ()
           with exn -> Error (Printexc.to_string exn)
         in
         let approvals =
           try
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-          else load_approvals ~host ~port with
+          reload () with
           | exn -> Error ("approvals reload failed: " ^ Printexc.to_string exn)
         in
+        let result, approvals = workspace_operation_reply state ~authority ~reading (result, approvals) in
         apply_approval_decision_completion state generation approval decision
           result approvals
 
@@ -12929,6 +12959,7 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
       report_action state "error" "Workspace identity is unconfirmed; action unavailable"
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   let enqueue_async = workspace_enqueue state in
+  let check = capture_workspace_check state ~mailbox in
   state.schedule_cancel_error <- None;
   report_action state "system"
     (Printf.sprintf "cancelling schedule %s" schedule_id);
@@ -12936,7 +12967,8 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   let port = state.port in
   let run_cancel () =
     let result =
-      match Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id with
+      match Result.bind (check ())
+        (fun () -> Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id) with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
     in
@@ -17930,6 +17962,11 @@ let main
   let http_scoped_refresh_inflight = ref false in
   let scoped_refresh_followup = ref No_scoped_followup in
   let async_messages = Eio.Stream.create 32 in
+  let workspace_write_ready action =
+    match write_authority_refusal state state.workspace_authority with
+    | None -> true
+    | Some detail -> report_action state "error" (action ^ ": " ^ detail); false
+  in
   let last_loop_at_ns = ref (Mtime_clock.elapsed_ns ()) in
   let presented_surface_reference () =
     match state.view with
@@ -18463,6 +18500,7 @@ let main
   in
   let start_harness_label ~notes_hash ~(verdict : [ `Approve | `Reject ])
       ~reason ~described =
+    if workspace_write_ready "Harness label" then
     let check = capture_workspace_check state ~mailbox:async_messages in
     let enqueue_async = workspace_enqueue state in
     let host = server_peer_host in
@@ -18500,6 +18538,7 @@ let main
                    (if approved then "approve" else "reject")))
   in
   let handle_harness_overrule () =
+    if workspace_write_ready "Harness label" then
     match harness_cursor_verdict () with
     | None -> ()
     | Some row -> (
@@ -19187,6 +19226,7 @@ and is loaded on demand through keeper_skill.
           ~prompt_key:row.Tui_decode.pr_key
   in
   let handle_prompt_edit () =
+    if workspace_write_ready "Prompt edit" then
     let check = capture_workspace_check state ~mailbox:async_messages in
     match selected_prompt () with
     | None -> report_action state "error" "prompts not loaded yet; r to reload"
@@ -19221,6 +19261,7 @@ and is loaded on demand through keeper_skill.
   (* Clearing is not editing to empty: it returns the prompt to the file's
      words, which is a different outcome from an override holding "". *)
   let handle_prompt_clear () =
+    if workspace_write_ready "Prompt clear" then
     let check = capture_workspace_check state ~mailbox:async_messages in
     match selected_prompt () with
     | None -> report_action state "error" "prompts not loaded yet; r to reload"
@@ -19503,6 +19544,7 @@ and is loaded on demand through keeper_skill.
      names every field the route reads, with the two that have no sensible
      default left empty. *)
   let handle_repository_add () =
+    if workspace_write_ready "Repository add" then
     let check = capture_workspace_check state ~mailbox:async_messages in
     match Masc_tui_editor.editor_command () with
     | None ->

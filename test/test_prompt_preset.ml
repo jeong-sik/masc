@@ -260,7 +260,7 @@ let test_invalid_name_is_refused () =
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
     check bool "a path segment is not a name" false (Preset.is_valid_name "../x");
     check bool "an empty name is refused" false (Preset.is_valid_name "");
-    check bool "a stamp is a name" true (Preset.is_valid_name "_autosave-20260903T120000Z");
+    check bool "the autosave name is a name" true (Preset.is_valid_name Preset.autosave_name);
     (match Preset.capture ~base_path ~name:"bad name" ~description:"" with
      | Error _ -> ()
      | Ok _ -> fail "a name with a space captured"))
@@ -287,8 +287,7 @@ let test_restore_puts_the_saved_state_back () =
      | Preset.Runtime_unchanged -> ()
      | Preset.Runtime_committed -> fail "runtime.toml did not drift, nothing to commit"
      | Preset.Runtime_failed message -> fail ("runtime part failed: " ^ message));
-    check bool "the autosave carries the prefix" true
-      (String.starts_with ~prefix:Preset.autosave_prefix report.Preset.autosave);
+    check string "the restore names the autosave" Preset.autosave_name report.Preset.autosave;
     let autosave = or_fail (Preset.load ~base_path report.Preset.autosave) in
     check string "the autosave holds the state from before the restore" "Afternoon override."
       (List.hd autosave.Preset.prompt_overrides).Override.value;
@@ -377,20 +376,84 @@ let test_override_that_cannot_render_is_skipped_with_the_reason () =
       (Prompt_registry.get_prompt prompt_key))
 ;;
 
-let test_two_restores_keep_two_autosaves () =
+(* A restore replaces the autosave rather than adding one: however many
+   restores run, the list holds one autosave, and it holds the state from
+   before the latest. *)
+let test_a_second_restore_replaces_the_autosave () =
   let open Alcotest in
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    set_override ~base_path "Morning override.";
     let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
     or_fail (Preset.save ~base_path morning);
-    let first = or_fail (Preset.restore ~base_path "morning") in
+    set_override ~base_path "Noon override.";
+    let _first = or_fail (Preset.restore ~base_path "morning") in
+    set_override ~base_path "Evening override.";
     let second = or_fail (Preset.restore ~base_path "morning") in
-    check bool "the second autosave has its own name" true
-      (not (String.equal first.Preset.autosave second.Preset.autosave));
+    check string "the second restore writes the same autosave" Preset.autosave_name
+      second.Preset.autosave;
     let names =
       List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) (Preset.list ~base_path).Preset.presets
     in
-    check bool "both autosaves are listed" true
-      (List.mem first.Preset.autosave names && List.mem second.Preset.autosave names))
+    check (list string) "one autosave beside the saved preset"
+      [ Preset.autosave_name; "morning" ] (List.sort String.compare names);
+    let autosave = or_fail (Preset.load ~base_path Preset.autosave_name) in
+    check string "the autosave holds the state from before the latest restore"
+      "Evening override." (List.hd autosave.Preset.prompt_overrides).Override.value)
+;;
+
+(* A save that fails partway leaves the preset it was replacing whole. The
+   autosave is the one copy of the state from before a restore, so a restore
+   whose autosave fails must not cost the previous one. The instruction file
+   for a keeper name longer than a file name may be fails after the overrides
+   and runtime files are written. *)
+let test_a_failed_save_keeps_the_preset_it_was_replacing () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    set_override ~base_path "Morning override.";
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    let broken =
+      { morning with
+        Preset.prompt_overrides = []
+      ; instructions = [ String.make 300 'k', "Never written." ]
+      }
+    in
+    (match Preset.save ~base_path broken with
+     | Ok () -> fail "an instruction file with a 304-byte name was written"
+     | Error _ -> ());
+    let kept = or_fail (Preset.load ~base_path "morning") in
+    check string "the saved override is still there" "Morning override."
+      (List.hd kept.Preset.prompt_overrides).Override.value;
+    check (list (pair string string)) "the saved instructions are still there"
+      morning.Preset.instructions kept.Preset.instructions;
+    let listing = Preset.list ~base_path in
+    check (list string) "only the saved preset is listed" [ "morning" ]
+      (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
+    check (list string) "nothing is unreadable" [] (List.map fst listing.Preset.unreadable);
+    let staging = Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging" in
+    check (array string) "no holder is left behind" [||] (Sys.readdir staging))
+;;
+
+(* Restoring the autosave undoes the latest restore: the state from before it
+   comes back, and the autosave then holds the state the undo replaced. *)
+let test_restoring_the_autosave_undoes_the_latest_restore () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    set_override ~base_path "Morning override.";
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    set_override ~base_path "Evening override.";
+    let _restore = or_fail (Preset.restore ~base_path "morning") in
+    check string "the morning override is live" "Morning override."
+      (Prompt_registry.get_prompt prompt_key);
+    let undo = or_fail (Preset.restore ~base_path Preset.autosave_name) in
+    check string "the evening override is back" "Evening override."
+      (Prompt_registry.get_prompt prompt_key);
+    check string "the undo reports the autosave as restored" Preset.autosave_name
+      undo.Preset.restored;
+    let autosave = or_fail (Preset.load ~base_path Preset.autosave_name) in
+    check string "the autosave now holds the state the undo replaced" "Morning override."
+      (List.hd autosave.Preset.prompt_overrides).Override.value)
 ;;
 
 (* The list and the detail read a preset one way. A preset whose overrides
@@ -612,8 +675,12 @@ let () =
             test_override_written_against_an_older_default_still_restores
         ; Alcotest.test_case "an override that cannot render is skipped with the reason" `Quick
             test_override_that_cannot_render_is_skipped_with_the_reason
-        ; Alcotest.test_case "two restores keep two autosaves" `Quick
-            test_two_restores_keep_two_autosaves
+        ; Alcotest.test_case "a second restore replaces the autosave" `Quick
+            test_a_second_restore_replaces_the_autosave
+        ; Alcotest.test_case "a failed save keeps the preset it was replacing" `Quick
+            test_a_failed_save_keeps_the_preset_it_was_replacing
+        ; Alcotest.test_case "restoring the autosave undoes the latest restore" `Quick
+            test_restoring_the_autosave_undoes_the_latest_restore
         ] )
     ]
 ;;

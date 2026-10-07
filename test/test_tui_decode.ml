@@ -9380,7 +9380,7 @@ let restore_payload : Yojson.Safe.t =
     ; ( "report"
       , `Assoc
           [ ("restored", `String "morning")
-          ; ("autosave", `String "_autosave-20260903T103201Z")
+          ; ("autosave", `String "_autosave")
           ; ( "prompt_overrides"
             , `Assoc
                 [ ("effect", `String "immediate")
@@ -9413,7 +9413,7 @@ let test_decode_preset_restore_reads_each_surface () =
   match Tui_decode.decode_preset_restore restore_payload with
   | Error detail -> Alcotest.fail detail
   | Ok report ->
-    Alcotest.(check string) "autosave" "_autosave-20260903T103201Z" report.Tui_decode.prr_autosave;
+    Alcotest.(check string) "autosave" "_autosave" report.Tui_decode.prr_autosave;
     Alcotest.(check (list string)) "overrides applied" [ "keeper" ]
       report.Tui_decode.prr_prompt_overrides.Tui_decode.pp_applied;
     Alcotest.(check (list (pair string string))) "overrides skipped"

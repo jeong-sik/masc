@@ -17,7 +17,8 @@
    take effect at three different moments; the report names each:
    overrides at once, instructions at the keeper's next up, runtime through
    the runtime.toml commit path (which re-publishes the exact-output lanes in
-   process). The current state is saved first as [_autosave-<stamp>]. *)
+   process). The current state is saved first as [_autosave], over the one
+   the previous restore left. *)
 
 let ( let* ) = Result.bind
 
@@ -80,7 +81,7 @@ let overrides_file = "prompt_overrides.json"
 let runtime_file = "runtime.json"
 let instructions_dir = "instructions"
 let instructions_extension = ".txt"
-let autosave_prefix = "_autosave-"
+let autosave_name = "_autosave"
 
 let is_valid_name name =
   (not (String.equal name ""))
@@ -104,19 +105,6 @@ let runtime_toml_path ~base_path =
 ;;
 
 let now_iso () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
-
-(* [YYYYMMDDTHHMMSSZ], a stamp that is also a valid preset name segment. *)
-let compact_stamp () =
-  let tm = Unix.gmtime (Unix.gettimeofday ()) in
-  Printf.sprintf
-    "%04d%02d%02dT%02d%02d%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
-;;
 
 (* The filesystem boundary raises; a preset call answers with [Error]. *)
 let guard f =
@@ -474,53 +462,71 @@ let instruction_file dir keeper =
   Filename.concat (Filename.concat dir instructions_dir) (keeper ^ instructions_extension)
 ;;
 
-(* A re-save under the same name must not leave a previous keeper's file
-   behind, or [load] would hand it back as part of the preset. *)
-let clear_instruction_files dir =
-  let instructions = Filename.concat dir instructions_dir in
-  if Sys.file_exists instructions && Sys.is_directory instructions
-  then
-    Fs_compat.read_dir instructions
-    |> List.iter (fun file ->
-      if Filename.check_suffix file instructions_extension
-      then Sys.remove (Filename.concat instructions file))
+let remove_quietly dir =
+  match guard (fun () -> Ok (Fs_compat.remove_tree dir)) with
+  | Ok () | Error _ -> ()
 ;;
 
-(* The manifest goes last and the old one goes first, so a save that stops
-   midway leaves a directory without a manifest — unreadable to [load] and
-   listed under [unreadable] — never an old manifest over new files. *)
+(* Holders for presets being written, beside [presets/] so the list never
+   reads one and on the same file system so a holder's directory can be
+   renamed into [presets/]. *)
+let staging_dir ~base_path =
+  Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging"
+;;
+
+(* Every file of [s] into [dir], which does not exist yet. *)
+let write_preset_files dir (s : snapshot) =
+  let* () = mkdir_p (Filename.concat dir instructions_dir) in
+  let* () =
+    Override.save ~path:(Filename.concat dir overrides_file) s.prompt_overrides
+    |> Result.map_error Override.error_to_string
+  in
+  let* () =
+    Fs_compat.save_file_atomic
+      (Filename.concat dir runtime_file)
+      (Yojson.Safe.pretty_to_string
+         (runtime_to_json ~assignments:s.assignments ~lanes:s.lanes)
+       ^ "\n")
+  in
+  let* () =
+    List.fold_left
+      (fun acc (keeper, text) ->
+        let* () = acc in
+        Fs_compat.save_file_atomic (instruction_file dir keeper) text)
+      (Ok ())
+      s.instructions
+  in
+  Fs_compat.save_file_atomic
+    (Filename.concat dir manifest_file)
+    (Yojson.Safe.pretty_to_string (manifest_to_json (manifest_of_snapshot s)) ^ "\n")
+;;
+
+(* The preset is written whole into a fresh holder, then put in place in one
+   step: renamed in when the name is new, exchanged with the old directory
+   when it is not. A save that stops midway leaves the preset it was
+   replacing as it was, which matters most for the autosave, the one copy of
+   the state from before a restore. The holder goes afterwards, and with it
+   the directory that was replaced. *)
 let save ~base_path (s : snapshot) =
   if not (is_valid_name s.name)
   then Error ("invalid preset name: " ^ s.name)
   else
     guard (fun () ->
-    let dir = preset_dir ~base_path s.name in
-    let* () = mkdir_p (Filename.concat dir instructions_dir) in
-    let manifest = Filename.concat dir manifest_file in
-    if Sys.file_exists manifest then Sys.remove manifest;
-    clear_instruction_files dir;
-    let* () =
-      Override.save ~path:(Filename.concat dir overrides_file) s.prompt_overrides
-      |> Result.map_error Override.error_to_string
-    in
-    let* () =
-      Fs_compat.save_file_atomic
-        (Filename.concat dir runtime_file)
-        (Yojson.Safe.pretty_to_string
-           (runtime_to_json ~assignments:s.assignments ~lanes:s.lanes)
-         ^ "\n")
-    in
-    let* () =
-      List.fold_left
-        (fun acc (keeper, text) ->
-          let* () = acc in
-          Fs_compat.save_file_atomic (instruction_file dir keeper) text)
-        (Ok ())
-        s.instructions
-    in
-    Fs_compat.save_file_atomic
-      manifest
-      (Yojson.Safe.pretty_to_string (manifest_to_json (manifest_of_snapshot s)) ^ "\n"))
+      let target = preset_dir ~base_path s.name in
+      let* () = mkdir_p (presets_dir ~base_path) in
+      let* () = mkdir_p (staging_dir ~base_path) in
+      let holder = Filename.temp_dir ~temp_dir:(staging_dir ~base_path) (s.name ^ "-") "" in
+      let staged = Filename.concat holder s.name in
+      let published =
+        let* () = write_preset_files staged s in
+        guard (fun () ->
+          if Sys.file_exists target
+          then Fs_compat.exchange_paths staged target
+          else Fs_compat.rename_noreplace staged target;
+          Ok ())
+      in
+      remove_quietly holder;
+      published)
 ;;
 
 let read_manifest dir =
@@ -791,20 +797,11 @@ let restore_runtime ~base_path ~assignments ~lanes =
          | Error message -> Runtime_failed message))
 ;;
 
-(* The stamp has one-second resolution; a second restore inside that second
-   takes the next free suffix rather than overwriting the first autosave. *)
-let fresh_autosave_name ~base_path =
-  let stamp = autosave_prefix ^ compact_stamp () in
-  let rec pick n =
-    let candidate = if n = 0 then stamp else Printf.sprintf "%s-%d" stamp n in
-    if Sys.file_exists (preset_dir ~base_path candidate) then pick (n + 1) else candidate
-  in
-  pick 0
-;;
-
 let restore ~base_path name =
+  (* The target is read before the autosave is written, so restoring the
+     autosave itself applies what it held, not the state just captured. *)
   let* target = load ~base_path name in
-  let autosave = fresh_autosave_name ~base_path in
+  let autosave = autosave_name in
   let* current =
     capture ~base_path ~name:autosave ~description:("state before restoring " ^ name)
   in

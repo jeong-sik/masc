@@ -158,10 +158,9 @@ let run (ctx : ctx)
       with a delivery identity to append under. One collector for the whole
       turn: the run's attempt boundaries reach it through the observation
       hook, so a failed candidate's rows are quarantined the way the chat
-      lane quarantines them (#33127). The run's third stream callback,
-      on_tool_result_ready, is deliberately not handed over: it would make
-      tool-log write failures fatal for the turn (Keeper_run_tools_setup's
-      commit-required rule), which is the chat lane's policy. *)
+      lane quarantines them (#33127). Live visibility below separately observes
+      committed tool results without changing this lane's best-effort tool-log
+      failure policy. *)
    let tool_projection =
      match hitl_resolution with
      | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_approved; _ } ->
@@ -171,6 +170,15 @@ let run (ctx : ctx)
         identity. *)
      | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_rejected _; _ } | None ->
        None
+   in
+   let turn_ref =
+     Ids.Turn_ref.make
+       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+       ~absolute_turn:keeper_turn_id
+   in
+   let live_stream =
+     Keeper_autonomous_stream.create ~base_path:config.base_path
+       ~keeper_name:meta.name ~turn_ref
    in
    let deferred_runtime_lane_ref = ref None in
    (* Every candidate to error, as the runtime walk names it, newest first,
@@ -276,12 +284,14 @@ let run (ctx : ctx)
                  ~trajectory_acc
                  ?shared_context
                  ?event_bus
-                 ?on_event:
-                   (Option.map Keeper_loop_tool_projection.on_event tool_projection)
-                 ?on_tool_stream_observation:
-                   (Option.map
-                      Keeper_loop_tool_projection.on_tool_stream_observation
-                      tool_projection)
+                 ~on_event:(fun event ->
+                   Keeper_autonomous_stream.on_event live_stream event;
+                   Option.iter (fun projection -> Keeper_loop_tool_projection.on_event projection event) tool_projection)
+                 ~on_tool_stream_observation:(fun observation ->
+                   Keeper_autonomous_stream.on_tool_stream_observation live_stream observation;
+                   Option.iter (fun projection -> Keeper_loop_tool_projection.on_tool_stream_observation projection observation) tool_projection)
+                 ~on_tool_result_ready:(Keeper_autonomous_stream.on_tool_result_ready live_stream)
+                 ~tool_result_commit_policy:Keeper_hooks_agent_core.Observe_commit
                  ?trace_link:(trace_link ())
                  ~on_checkpoint_stage:
                    (Keeper_turn_driver_try_provider.observe_checkpoint_stage
@@ -495,11 +505,26 @@ let run (ctx : ctx)
      long time. Runaway detection is owned by stream idle, provider attempt
      liveness, tool-level timeouts, max-turn limits, and the optional
      supervisor stale-turn watchdog. *)
-  let result, turn_state = run_once turn_state in
+  let result, turn_state =
+    match run_once turn_state with
+    | (result, _) as settled ->
+      Keeper_autonomous_stream.finish live_stream
+        (match result with
+         | Ok result -> Keeper_autonomous_stream.Completed
+             { reply = result.Keeper_agent_run.response_text; turn_outcome = result.turn_outcome }
+         | Error error -> Keeper_autonomous_stream.Failed (Agent_core.Error.to_string error));
+      settled
+    | exception (Eio.Cancel.Cancelled _ as exn) ->
+      Keeper_autonomous_stream.finish live_stream Keeper_autonomous_stream.Cancelled;
+      raise exn
+    | exception exn ->
+      Keeper_autonomous_stream.finish live_stream (Keeper_autonomous_stream.Failed (Printexc.to_string exn));
+      raise exn
+  in
   (* A continuation turn follows an approval replay, so its tool rows are
      delivered under that approval's identity, beside the lifecycle rows the
      queue already wrote for it. Any other autonomous turn has no delivery
-     identity of its own yet and stays unprojected, as before. The identity
+     identity of its own; its live events use the turn journal instead. The identity
      is per approval, not per turn: should a second tool-executing turn ever
      continue the same approval, its rows read as already present and are
      said so, not dropped silently. *)

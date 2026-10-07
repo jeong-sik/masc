@@ -1846,9 +1846,9 @@ def chat_visibility_modes_interaction(
                 "chat navigation, composer, operational identity and key footer "
                 f"did not occupy separate ordered rows: {observed_rows!r}"
             )
-        if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
-            raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
-        # The lane word went: the skill row leads with its mark and the
+        if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
+            raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
+        # The skill row leads with its mark, lane label and the
         # skill's name, with the badge padding and SGR runs between -- the
         # same token-split shape the tool-lane needles above take, because
         # a literal "◆ ci-red-attribution" never exists as contiguous
@@ -1891,28 +1891,10 @@ def chat_visibility_modes_interaction(
                 raise AssertionError(
                     f"skill detail leaked into the compact frame: {initial!r}"
                 )
-        # The lane word is gone for good: a revert that puts SKILL back on
-        # the badge must fail here, not pass silently. Stripped, because
-        # the badge's SGR runs make a raw-byte absence shape-dependent.
-        if b"SKILL" in CSI_RE.sub(b"", initial):
-            raise AssertionError(f"the lane word SKILL is back: {initial!r}")
+        if b"SKILL" not in CSI_RE.sub(b"", initial):
+            raise AssertionError(f"the skill lane lacks its label: {initial!r}")
 
-        folded = send_and_wait(
-            process, master_fd, output, b"\x12", b"reasoning:folded"
-        )
-        # The fold marker's wording changed: the count line is the thinking
-        # lane's mark and its padding over "2 reasoning steps · text not
-        # recorded" (no lane word -- the mark says the lane); for this
-        # one-line count row the old "Reasoning / N line(s) folded" label
-        # does not exist (it still fires for multi-line thinking bodies).
-        if b"2 reasoning steps" not in folded or b"text not recorded" not in folded:
-            raise AssertionError(f"folded reasoning did not draw its count: {folded!r}")
-
-        # \x12 flips reasoning visibility and the renderer answers with a
-        # diff frame: the header tag (reasoning:folded -> reasoning:full)
-        # is what gets re-emitted. The thinking-lane count row is unchanged
-        # by the flip, so it is not redrawn -- asserting its reappearance
-        # here starves even though the row stays on screen.
+        # Reasoning starts folded; one press opens the full content.
         full = send_and_wait(
             process,
             master_fd,

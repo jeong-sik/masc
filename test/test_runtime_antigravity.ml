@@ -638,6 +638,38 @@ let test_stream_events_preserve_exact_native_tool_steps () =
          | _ -> fail "Antigravity tool step lost its exact provider identity")
 ;;
 
+let test_repeated_active_native_step_keeps_one_chat_occurrence () =
+  let events = ref [] in
+  List.iter (fun terminal_state ->
+    events := [];
+    with_fixture
+      [init ();
+       step ~index:7 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ();
+       step ~index:7 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ();
+       step ~index:7 ~state:terminal_state ~step_type:"tool" ~tool_name:"run_command" ();
+       result ()]
+      (fun path ->
+        match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+        | Error error -> fail (Runtime_antigravity.error_to_string error)
+        | Ok _ ->
+            let stream = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events) in
+            let module Bridge = Keeper_chat_agent_core_stream_bridge in
+            let _, chat = List.fold_left (fun (state, all) event ->
+              let translated = Bridge.translate ~redact_text:Fun.id
+                  ~base_dir:(Filename.dirname path) ~stream_scope:0 state event in
+              translated.bridge_state, all @ translated.chat_events)
+              (Bridge.empty_state (), []) stream in
+            let native = List.filter_map (function
+              | Keeper_chat_events.Native_tool_start tool -> Some (true, tool.occurrence.block_index)
+              | Native_tool_end tool -> Some (false, tool.occurrence.block_index)
+              | _ -> None) chat in
+            check (list (pair bool int)) "repeated active frames open one row and terminal step closes it"
+              [true, 1; false, 1] native;
+            check bool "native observation is not a MASC execution receipt" false
+              (List.exists (function Keeper_chat_events.Tool_result_ready _ -> true | _ -> false) chat)))
+    ["DONE"; "ERROR"]
+;;
+
 let test_successful_official_client_turn () =
   with_fixture
     [ init ()
@@ -1630,6 +1662,8 @@ let () =
             "stream preserves exact native tool steps"
             `Quick
             test_stream_events_preserve_exact_native_tool_steps
+        ; test_case "repeated native active step retains one chat occurrence" `Quick
+            test_repeated_active_native_step_keeps_one_chat_occurrence
         ; test_case
             "resume identity and argv"
             `Quick

@@ -460,12 +460,13 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                 ^ Keeper_chat_events.stream_protocol_error_summary error)
             : (unit, error) result);
         continue ()
-    | Tool_call_start _ ->
+    | Tool_call_start _ | Native_tool_start _ ->
         refresh_activity ();
         continue ()
     | Tool_call_args _
     | Tool_call_args_snapshot _
     | Tool_call_end _
+    | Native_tool_end _
     (* An approval prompt has no operator on a connector channel: nobody is
        sitting there to answer y/n, and posting the question would ask a room
        to decide something it cannot. Approval is offered on the operator's

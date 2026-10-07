@@ -1168,6 +1168,9 @@ type keeper_turn_state =
       lane : keeper_turn_lane;
       started_at_unix : float;
       interrupt_token : string;
+      turn_ref : Ids.Turn_ref.t option;
+          (** Current autonomous journal identity, absent for another lane or
+              before the autonomous producer has entered its turn. *)
       preview : keeper_turn_preview option;
     }
       (** [started_at_unix] is the server owner clock's epoch reading; derive

@@ -488,7 +488,7 @@
  ; drifted by two.
  ; masc.sse_event for the agent lifecycle payloads, read with the generated
  ; readers of the contract the bridge writes them with (RFC-0004).
- (libraries masc masc.sse_event atdgen-runtime agent_core
+ (libraries masc masc.sse_event masc.masc_types atdgen-runtime agent_core
   masc_tui_keeper_chat_projection masc_tui_sse_lines yojson))
 
 (library
@@ -1472,6 +1472,7 @@
   masc_tui_code_lexer
   masc_tui_memo
   masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_history
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_diff
   masc_tui_keeper_chat_live
@@ -1824,6 +1825,8 @@
  (wrapped false)
  (modules masc_tui_render_chat)
  (libraries masc_tui_message_input
+  masc.masc_types
+  masc_tui_keeper_chat_live
   masc.keeper_portrait
   masc_tui_pick_list
   masc_tui_render_prim
@@ -1851,6 +1854,7 @@
   masc_tui_frame_presenter
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_diff
+  masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_control
   masc_tui_markdown

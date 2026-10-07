@@ -844,6 +844,7 @@ let run_turn
       ?on_event
       ?on_tool_stream_observation
       ?on_tool_result_ready
+      ?tool_result_commit_policy
       ?approval_gate
       ?(trajectory_acc : Trajectory.accumulator option)
       ?direct_resume
@@ -1160,6 +1161,7 @@ let run_turn
       ?continuation_channel
       ?on_tool_stream_observation
       ?on_tool_result_ready
+      ?tool_result_commit_policy
       ?hitl_resolution
       ?on_gate_deferred
       ?composition_plan_index

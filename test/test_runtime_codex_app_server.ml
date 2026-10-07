@@ -2268,7 +2268,7 @@ let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn
     | Runtime_codex_app_server.Usage_reported
         { frame = Runtime_codex_app_server.Context_window_filled _; _ } ->
       fail "a counted frame was read as a fill"
-    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
     | Usage_windows_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
@@ -3119,7 +3119,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
   let reports = ref [] in
   let on_stream_event = function
     | Runtime_codex_app_server.Usage_windows_reported report -> reports := report :: !reports
-    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
     | Usage_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
@@ -4839,6 +4839,58 @@ let test_keeper_separates_codex_agent_messages () =
 
 (* [itemId] stays optional on an agentMessage delta (#28010): a frame that
    omits it or sends it blank still streams, and names no item. *)
+let test_keeper_preserves_codex_reasoning_and_tool_order () =
+  let completed =
+    {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"reasoning","id":"reasoning-1","summary":["Inspect the state"],"content":["Trace the event"]}}}|} in
+  List.iter (fun partial ->
+    let events = ref [] in
+    let deltas = if partial then
+      [ {|{"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"reasoning-1","summaryIndex":0,"delta":"Inspect "}}|}
+      ; {|{"method":"item/reasoning/textDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"reasoning-1","contentIndex":0,"delta":"Trace "}}|}
+      ] else [] in
+    with_fixture
+      ([init_result; account_chatgpt; thread_result; turn_result] @ deltas
+       @ [completed; completed; native_command_started; native_command_started; native_command_completed;
+          item_completed; turn_completed])
+      (fun cli_path ->
+        match run_keeper_turn ~cli_path ~model:"gpt-fixture"
+            ~on_event:(fun event -> events := event :: !events) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok result ->
+            let observed = List.rev !events |> List.filter_map (function
+              | Agent_core.Types.ContentBlockDelta {index; delta=ThinkingDelta text} ->
+                  Some (index, text)
+              | _ -> None) in
+            check (list (pair int string)) "reasoning parts keep separate indices and no duplicate completion"
+              (if partial then [1, "Inspect "; 2, "Trace "; 1, "the state"; 2, "the event"]
+               else [1, "Inspect the state"; 2, "Trace the event"]) observed;
+            check bool "native tool follows reasoning using a distinct block" true
+              (List.exists (function
+                 | Agent_core.Types.ContentBlockStart
+                     {index=3; content_type="native_tool_use"; tool_id=Some "native-command-1"; _} -> true
+                 | _ -> false) !events);
+            let native_indices = List.rev !events |> List.filter_map (function
+              | Agent_core.Types.ContentBlockStart {index; content_type="native_tool_use"; _} -> Some index
+              | _ -> None) in
+            let stopped = List.rev !events |> List.filter_map (function
+              | Agent_core.Types.ContentBlockStop {index} -> Some index | _ -> None) in
+            check (list int) "repeated native start retains its block" [3; 3] native_indices;
+            check (list int) "native end closes the original block" [3] stopped;
+            check string "reasoning is not the assistant answer" "MASC_SUBSCRIPTION_OK"
+              (keeper_response_text result))) [false; true]
+;;
+
+let test_codex_reasoning_rejects_wrong_turn () =
+  with_fixture
+    [init_result; account_chatgpt; thread_result; turn_result;
+     {|{"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread-1","turnId":"other-turn","itemId":"reasoning-1","summaryIndex":0,"delta":"foreign"}}|};
+     item_completed; turn_completed]
+    (fun path -> match run_fixture path with
+      | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "reasoning from another turn entered the active stream")
+;;
+
 let test_agent_message_delta_without_item_id_streams () =
   let stream_events = ref [] in
   with_fixture
@@ -7333,7 +7385,10 @@ let test_native_action_observer_keeps_exact_provider_identity () =
 
 let () =
   run "runtime codex app-server"
-    [ ( "RPC capacity", [test_case "blank completion closes identity across four messages" `Quick
+    [ ( "reasoning", [test_case "Keeper retains reasoning before native tools and answer" `Quick
+            test_keeper_preserves_codex_reasoning_and_tool_order
+        ; test_case "reasoning belongs to the active turn" `Quick test_codex_reasoning_rejects_wrong_turn] )
+    ; ( "RPC capacity", [test_case "blank completion closes identity across four messages" `Quick
             test_blank_completion_closes_identity_across_four_messages
         ; test_case "anonymous completion closes current item" `Quick
             test_anonymous_completion_closes_current_item

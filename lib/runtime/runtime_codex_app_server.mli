@@ -201,6 +201,8 @@ type elicitation_mode = Form | Openai_form | Url
 
 type elicitation_cancel_reason = Host_input_unavailable
 
+type reasoning_part = Summary of int | Content of int
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -214,6 +216,13 @@ type stream_event =
           agentMessage item the piece belongs to, so a reader can tell two
           assistant messages of one turn apart. [None] when the frame omits
           it or sends it blank; the delta still streams (#28010). *)
+  | Thinking_delta of
+      { item_id : string
+      ; part : reasoning_part
+      ; delta : string
+      }
+      (** Provider-exposed reasoning text, identified by item and summary/content
+          part. Completed items contribute only the suffix not already streamed. *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string

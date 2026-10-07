@@ -204,12 +204,18 @@ type stream_event =
       { message_id : string option
       ; text : string
       }
-      (** One text block of an [assistant] frame, whole: this client reads
-          complete frames, not partial deltas. [message_id] is the frame's
+      (** A partial text delta or the missing suffix of a complete [assistant]
+          block. [message_id] is the frame's
           [message.id]. The CLI writes each content block of a response as
           its own frame under the same id, so blocks sharing an id are one
           assistant message and a new id is the next one. [None] when the
           frame carries no id. *)
+  | Thinking_delta of
+      { message_id : string option
+      ; text : string
+      }
+      (** Provider-exposed thinking text from partial or complete assistant
+          blocks. Opaque signatures and redacted payloads are not text. *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string

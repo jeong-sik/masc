@@ -1466,6 +1466,10 @@ let test_response_stop_preserves_pending_work () =
     check bool "empty chunks do not invent resumed output" false
       (contains ~needle:"STREAMING" stopped || contains ~needle:"THINKING" stopped);
     feed t [tool_started "pending" "Execute"; tool_ended "pending"];
+    let pending = Transcript.tool_calls t in
+    feed t [Live.Stream_model_stopped];
+    check bool "response stop preserves existing pending execution" true
+      (pending = Transcript.tool_calls t);
     check bool "pending execution stays pending after provider stop" true
       (contains ~needle:"awaiting results: Execute" (progress_text t));
     feed t [tool_result "pending" "executed"; Live.Stream_model_started

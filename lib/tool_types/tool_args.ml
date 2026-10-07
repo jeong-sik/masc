@@ -55,7 +55,6 @@ type error_code =
   | Rate_limited          (** Too many requests *)
   | Timeout               (** Operation timed out *)
   | External_service_unavailable (** An external service or transport is unavailable *)
-  | Not_implemented       (** Feature exists in schema but not in runtime *)
   | Internal_error        (** Unexpected server-side failure *)
   | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound) *)
   | Unavailable           (** A store this build cannot read (RFC-0444: the goal store). The
@@ -70,7 +69,6 @@ let error_code_to_string = function
   | Rate_limited -> "rate_limited"
   | Timeout -> "timeout"
   | External_service_unavailable -> "external_service_unavailable"
-  | Not_implemented -> "not_implemented"
   | Internal_error -> "internal_error"
   | Precondition_failed -> "precondition_failed"
   | Unavailable -> "goal_store_unavailable"
@@ -82,7 +80,7 @@ let failure_class_of_error_code : error_code -> Tool_result.tool_failure_class =
   | Conflict | Precondition_failed -> Tool_result.Workflow_rejection
   | Rate_limited | Timeout | External_service_unavailable | Unavailable ->
     Tool_result.Dependency_unavailable
-  | Internal_error | Not_implemented -> Tool_result.Runtime_failure
+  | Internal_error -> Tool_result.Runtime_failure
 
 (** {1 Raw JSON String Builders}
 
@@ -197,8 +195,6 @@ type field_constraint =
   | Non_empty         (** string field must not be empty after trimming *)
   | Type_string       (** value must be a JSON string *)
   | Type_int          (** value must be a JSON integer *)
-  | Type_float        (** value must be a JSON number *)
-  | Type_bool         (** value must be a JSON boolean *)
   | Min_int of int    (** integer must be >= min *)
   | Max_int of int    (** integer must be <= max *)
   | One_of of string list  (** string must be one of the listed values *)
@@ -208,8 +204,6 @@ let field_constraint_to_string = function
   | Non_empty -> "non_empty"
   | Type_string -> "type_string"
   | Type_int -> "type_int"
-  | Type_float -> "type_float"
-  | Type_bool -> "type_bool"
   | Min_int v -> Printf.sprintf "min_int(%d)" v
   | Max_int v -> Printf.sprintf "max_int(%d)" v
   | One_of vs -> Printf.sprintf "one_of(%s)" (String.concat "," vs)

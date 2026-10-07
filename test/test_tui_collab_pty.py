@@ -237,8 +237,9 @@ def run_pending_revoke(executable):
             key(b"nxq", b"MASC Dashboard")
             key(b":go Collab\r", "› beta".encode())
             key(b"n", b"An invite change is still pending")
-            key(b"x", b"An invite change is still pending")
-            key(b"q", b"MASC Dashboard")
+            # x repeats the blocked notice and may produce no terminal diff.
+            # q must still close Browsing, proving x did not open a form.
+            key(b"xq", b"MASC Dashboard")
             key(b":go Collab\r", "› beta".encode())
             refreshed_expiry = "2031-02-03T04:05:06Z"
             rows[0]["expires_at"] = refreshed_expiry
@@ -298,8 +299,8 @@ def run_issue_after_reopen(executable):
             key(b"q", b"MASC Dashboard")
             key(b":go Collab\r", "› guest".encode())
             key(b"x", b"An invite change is still pending")
-            key(b"n", b"An invite change is still pending")
-            key(b"q", b"MASC Dashboard")
+            # n also leaves the same notice; q is the visible input barrier.
+            key(b"nq", b"MASC Dashboard")
             key(b":go Collab\r", "› guest".encode())
             start = len(output)
             gate.release.set()
@@ -406,8 +407,7 @@ def run_workspace_withdrawal(executable):
             key(b":go Collab\r", "› shared".encode())
             key(b"\r", b"one-time link is not retained")
             key(b"n", b"matching this TUI's local workspace")
-            key(b"x", b"matching this TUI's local workspace")
-            key(b"q", b"MASC Dashboard")
+            key(b"xq", b"MASC Dashboard")  # Repeated refusal need not redraw.
             assert old_link.encode() not in output[boundary:], "A's retained card leaked into B"
             assert late_link.encode() not in output[boundary:], "A's late issue repopulated B's card store"
             assert issued == [("a", "shared"), ("a", "late")], issued

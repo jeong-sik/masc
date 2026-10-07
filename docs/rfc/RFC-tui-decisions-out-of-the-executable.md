@@ -106,7 +106,11 @@ val decision_authority
 - 단위 테스트가 어떤 주장을 확인하게 되면, 같은 주장을 보던 PTY 단언을 지운다.
 - 파일의 보호 주장이 모두 옮겨지면 파일을 지운다. `test/dune` 의 규칙과 그 파일을
   import 하는 다른 PTY 파일도 같이 정리한다.
-- 옮기는 PR 과 지우는 PR 을 나눈다. 옮기는 PR 은 동작을 바꾸지 않는다.
+- 제품 코드를 옮기는 PR 과 PTY 를 지우는 PR 을 나눈다. 옮기는 PR 은 동작을 바꾸지 않는다.
+- 테스트만 고치는 조각(1~4번)은 한 PR 에서 옮기고 지운다. 리뷰어가 새 확인과 지운 확인을
+  나란히 봐야 같은 주장인지 판단할 수 있다.
+- 지우기 전에 그 파일만 누르던 키가 있는지 찾는다. 있으면 남는 PTY 파일로 옮긴다.
+  1번에서 접힘 키(`d`)와 출력 칸의 Home 이 그랬다.
 
 ### 3.4 PTY 에 남기는 것
 
@@ -140,7 +144,7 @@ val decision_authority
 
 | 순서 | 조각 | `masc_tui.ml` 수정 | 끝나면 지울 수 있는 것 |
 |---|---|---|---|
-| 1 | Librarian: 진짜 생산자 JSON 을 `Tui_decode` 로 읽는 단언을 기존 OCaml 테스트에 추가 | 없음 | `test_tui_librarian_absorb_gate.py`, `test_tui_librarian_context_review.py` |
+| 1 | Librarian: 진짜 생산자 JSON 을 `Tui_decode` 로 읽는 단언을 기존 OCaml 테스트에 추가 (#41626) | 없음 | `test_tui_librarian_absorb_gate.py`, `test_tui_librarian_context_review.py` |
 | 2 | Home: `masc_tui_home` 의 순수 함수(`home_decision_rows`, `home_selected_action`, `home_decision_window`, `reconcile_home_request_detail`)에 `test_tui_home.ml` 추가 | 없음 | `home_decision_cards` 의 선택·창·중복 주장 |
 | 3 | Answering: `overlay ~width` 에 긴 이름·CJK 단위 테스트 | 없음 | `answering_layout` 의 너비 주장 |
 | 4 | Runtime: 권한 칸이 4줄인 픽스처로 짧은 화면 단위 테스트(#41452 가 고친 결함의 재발 방지) | 없음 | `runtime_status` 의 선택 줄 주장 |

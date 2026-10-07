@@ -173,28 +173,39 @@ def full_http_loss_retains_local_work_and_draft(executable):
             ), fixtures.failed_paths
             h.drain_until_quiet(process, fd, output)
             screen = h.screen_text(bytes(output))
-            assert draft in screen and "Keepers ▸ beta ▸ chat".encode() in screen and b"Esc:Dashboard" in screen, screen
+            # Losing workspace authority closes the chat (6c7ca1bf97): the
+            # draft is set aside for this workspace, not shown or sent.
+            assert b"MASC Keepers (not loaded)" in screen and draft not in screen, screen
             home.assert_no_decision_posts(requests)
-        h.send_and_wait(process, fd, output, b"\r",
-                        b"Cannot send: workspace identity is unverified")
-        blocked = cards.frame(process, fd, output, "all-http-503-send-blocked")
-        assert b"workspace identity is unverified" in blocked, blocked
-        assert b"draft retained" in blocked and draft in blocked, blocked
-        assert "Keepers ▸ beta ▸ chat".encode() in blocked and b"Esc:Dashboard" in blocked, blocked
         assert_no_chat_delivery()
-        home.assert_no_decision_posts(requests)
         h.send_and_wait(process, fd, output, b"\x1b", b"Last conversation beta unavailable")
         visible = cards.frame(process, fd, output, "all-http-503-local-work")
-        for label in (b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode(),
+        for label in (b"Goal confirmations not read", b"Operator tasks not read",
                       b"Last conversation beta unavailable", b"not fully read"):
             assert label in visible, (label, visible)
+        # Unverified authority withdraws decision cards; the local Goal and
+        # its Tasks stay on disk (checked below) and return once admitted.
+        for label in (b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode()):
+            assert label not in visible, ("unverified Home retained an actionable card", label, visible)
         assert b"No decision is waiting" not in visible, visible
         assert b"workspace identity not read" in visible, visible
-        # Unverified Home offers no history reader; the unsent draft was
-        # witnessed above before returning to this nonactionable context.
+        # Unverified Home offers no history reader; the unsent draft is
+        # checked again below, once the workspace is admitted.
         assert b"read history" not in visible and b"Continue with beta" not in visible, visible
         assert backlog(base).read_bytes() == original
         assert_no_chat_delivery()
+        # The same workspace answering again gives the set-aside draft back.
+        fixtures.lost.clear()
+        h.send_and_wait(process, fd, output, b"r", b"Continue with beta")
+        recovered = h.screen_text(bytes(output))
+        for label in (b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode()):
+            assert label in recovered, ("admitted Home did not restore its cards", label, recovered)
+        cards.select_home(process, fd, output, b"Continue with beta", destinations=6)
+        h.send_and_wait(process, fd, output, b"\r", draft)
+        assert draft in h.screen_text(bytes(output)), "the original workspace did not restore its draft"
+        assert_no_chat_delivery()
+        # Leave the composer before requesting exit: q is draft text in chat.
+        h.send_and_wait(process, fd, output, b"\x1b", b"Continue with beta")
         os.write(fd, b"q")
 
     cards.run(executable, "Home full HTTP loss hides the history shortcut and retains local Goal Tasks and unsent draft",
@@ -244,6 +255,10 @@ def task_cancel_editor_replacement(executable):
 
         def interact(process, fd, _slave, output, base):
             original = backlog(base).read_bytes()
+            # The mismatch footer includes both workspace identity and the
+            # action refusal. Give this exact-reason assertion room for both.
+            h.resize_and_wait(process, fd, output, rows=40, columns=240,
+                              needle=b"MASC Dashboard")
             h.wait_for_output(process, fd, output, TASK_A.encode(), start=0, timeout=10)
             cards.select_home(process, fd, output, TASK_A.encode(), destinations=4)
             h.send_and_wait(process, fd, output, b"\r", b"exact-detail-claimed-a")
@@ -257,7 +272,7 @@ def task_cancel_editor_replacement(executable):
             start = len(output)
             (editor_root / "release").write_text("1")
             h.wait_for_output(process, fd, output,
-                              b"workspace changed before the action completed",
+                              b"Workspace identity changed or is unavailable; request withdrawn",
                               start=start, timeout=10)
             assert backlog(base).read_bytes() == original
             assert not [body for path, body in requests if path == "/mcp"
@@ -328,7 +343,8 @@ def task_cancel_previous_workspace_receipt(executable):
 
             fixtures["/health"] = health
             fixtures["/health?full=1"] = health
-            fixtures["/mcp"] = h.RequestHttpResponse(rpc)
+            fixtures["/mcp"] = h.RequestHttpResponse(
+                rpc, get_response=(405, {"error": "MCP event stream is unavailable"}))
             history_path = "/api/v1/dashboard/tasks/history"
             previous_history = fixtures.get(history_path, (404, {"error": "no fixture history"}))
 
@@ -340,6 +356,8 @@ def task_cancel_previous_workspace_receipt(executable):
 
         def interact(process, fd, _slave, output, _base):
             try:
+                h.resize_and_wait(process, fd, output, rows=40, columns=240,
+                                  needle=b"MASC Dashboard")
                 h.wait_for_output(process, fd, output, TASK_A.encode(), start=0, timeout=10)
                 cards.select_home(process, fd, output, TASK_A.encode(), destinations=4)
                 h.send_and_wait(process, fd, output, b"\r", b"exact-detail-claimed-a")

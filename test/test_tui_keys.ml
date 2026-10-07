@@ -1038,7 +1038,8 @@ let test_dashboard_and_work_task_footers () =
   in
   let dashboard = Masc_tui_keys.footer_hints Overview in
   check str "Dashboard names destination keys and the shared keys"
-    "j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit" dashboard;
+    "Left:Keepers  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit"
+    dashboard;
   List.iter
     (fun item ->
       Alcotest.(check bool) ("Dashboard offers no task key " ^ item) false

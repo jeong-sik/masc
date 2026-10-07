@@ -18,6 +18,7 @@ import tempfile
 import termios
 import threading
 import time
+import unicodedata
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
@@ -1037,6 +1038,30 @@ def frame_containing(
             f"could not isolate frame containing {needle!r}: {segment!r}"
         )
     return segment[frame_start : frame_end + len(FRAME_END)]
+
+
+def row_cell_width(text: str) -> int:
+    """Display cells a drawn row occupies, the same rule the region harness
+    uses for its pane reads: wide (W/F) glyphs take two cells, everything else
+    one. Cell geometry, not byte indexes, is what layout asserts must compare."""
+    return sum(2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
+               for character in text)
+
+
+def marker_cells(rows: dict[int, bytes], needle: bytes) -> tuple[int, int, int]:
+    """(row, first cell, last cell+1) of the first drawn occurrence of needle.
+    Cells are screen cells counted from column 0 with the harness width rule,
+    not byte offsets into the decoded row."""
+    for row in sorted(rows):
+        text = rows[row].decode("utf-8", "replace")
+        byte_at = text.encode("utf-8").find(needle)
+        if byte_at < 0:
+            continue
+        prefix = text.encode("utf-8")[:byte_at].decode("utf-8", "replace")
+        start = row_cell_width(prefix)
+        end = start + row_cell_width(needle.decode("utf-8", "replace"))
+        return row, start, end
+    raise AssertionError(f"marker not on screen: {needle!r}")
 
 
 def fixture_cell_width(text: str) -> int:

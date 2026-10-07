@@ -130,21 +130,48 @@ def run_side_by_side(executable: str) -> None:
         _, stacked = comment_row(output)
         if b"Side body line" in stacked:
             raise AssertionError("at 100 columns the comment shares a row with the post body: " + repr(stacked))
+        # Source access before the resize: both the post body and the comment
+        # original text are readable in the stacked layout.
+        if b"Side body line" not in h.screen_text(bytes(output)):
+            raise AssertionError("the post body source is not on the stacked screen")
         h.resize_and_wait(process, fd, output, rows=30, columns=SIDE_COLUMNS,
                           needle=b"Comment 000", controls=(h.FULL_REDRAW,))
         h.read_available(fd, output)
+        rows = h.screen_rows(bytes(output))
         _, beside = comment_row(output)
-        at = beside.decode("utf-8", "replace").index("Comment 000")
-        if at < SIDE_COMMENT_COLUMN_LEAST:
+        # The frame rule that used to sit between the columns is gone with the
+        # spacious list layout (#41558), so separation is asserted as geometry:
+        # where the two source texts sit in screen cells. Cells, not string
+        # byte indexes — a box rule or a wide glyph is one cell and three
+        # UTF-8 bytes.
+        comment_row_index, comment_start, _ = h.marker_cells(rows=rows, needle=b"Comment 000")
+        if comment_start < SIDE_COMMENT_COLUMN_LEAST:
             # The whole screen, not just this row: whether the columns right of
             # the read pane hold the acting pane or nothing decides whether the
             # test's width model or the pane reservation is wrong.
             raise AssertionError(
-                f"the comment starts at column {at}, not in the right-hand column: " + repr(beside)
+                f"the comment starts at cell {comment_start}, not in the right-hand column: " + repr(beside)
                 + "\nscreen:\n" + h.screen_text(bytes(output)).decode("utf-8", "replace"))
-        if beside[:at].count("│".encode()) < 2:
-            raise AssertionError(
-                f"at {SIDE_COLUMNS} columns the comment has no separate body/comment columns: " + repr(beside))
+        # The frame rule that used to sit between the columns is gone with the
+        # spacious list layout (#41558), so separation is asserted as geometry:
+        # any row that carries both the post body and the comment marker must
+        # hold them in disjoint cell ranges. Cells, not string byte indexes —
+        # a box rule or a wide glyph is one cell and three UTF-8 bytes, so the
+        # harness width rule turns byte hits into screen cells.
+        for row_index, line in sorted(rows.items()):
+            body_hit = re.search(rb"Side body line \d\d", line)
+            comment_at = line.find(b"Comment 000")
+            if body_hit is None or comment_at < 0:
+                continue
+            body_end = h.row_cell_width(line[:body_hit.start()].decode("utf-8", "replace")) \
+                + h.row_cell_width(body_hit.group(0).decode("utf-8", "replace"))
+            comment_cell = h.row_cell_width(line[:comment_at].decode("utf-8", "replace"))
+            if comment_cell < body_end:
+                raise AssertionError(
+                    f"row {row_index}: the comment starts at cell {comment_cell}, inside the post "
+                    f"body cells (body marker ends at {body_end}): " + repr(line))
+        if b"Side body line" not in h.screen_text(bytes(output)):
+            raise AssertionError("the post body source left the screen after the resize")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Board read comments beside the post",

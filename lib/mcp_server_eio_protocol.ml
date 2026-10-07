@@ -39,20 +39,17 @@ module Auth_requirement = struct
   type t =
     | Public
     | Requires_auth
-    | Internal_only
 end
 
 type auth_rejection_reason =
   | Missing_token
   | Invalid_token
   | Token_expired of string
-  | Internal_token_required
 
 let auth_rejection_message = function
   | Missing_token -> "Unauthorized: bearer token required"
   | Invalid_token -> "Unauthorized: invalid bearer token"
   | Token_expired agent -> Printf.sprintf "Unauthorized: bearer token expired for %s" agent
-  | Internal_token_required -> "Unauthorized: internal keeper token required"
 ;;
 
 let make_auth_error ~id reason =
@@ -65,13 +62,6 @@ let require_auth ~base_path ~requirement ~id ?auth_token () =
   else (
     match requirement with
     | Auth_requirement.Public -> Ok (auth_token, None)
-    | Internal_only ->
-      (match auth_token with
-       | None -> Error (make_auth_error ~id Internal_token_required)
-       | Some token ->
-         if Auth.verify_internal_keeper_token base_path ~token
-         then Ok (auth_token, None)
-         else Error (make_auth_error ~id Internal_token_required))
     | Requires_auth ->
       (match auth_token with
        | None -> Error (make_auth_error ~id Missing_token)

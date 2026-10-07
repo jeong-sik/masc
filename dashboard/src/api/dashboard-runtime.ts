@@ -999,10 +999,7 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
       identity_conflict_rows: costLedgerRows('identity_conflict_rows') }
   } else if (ledger?.state === 'unavailable') {
     costLedgerRead = { state: 'unavailable', detail: costLedgerDetail }
-  } else if (ledger != null) {
-    // A ledger record with an unrecognized state means the server is mid-
-    // publication; no record at all stays null so an empty initial cache is
-    // not read as a pending first aggregation.
+  } else if (ledger?.state === 'pending') {
     costLedgerRead = { state: 'pending' }
   }
   return {

@@ -2282,12 +2282,21 @@ let planning_phase_color = function
    Verifying and awaiting confirmation are stages only a Goal has, so their
    diamonds are theirs. *)
 let planning_rollup_row ~cols (rollup : planning_rollup) =
-  let total_goals =
-    (* Every phase counts, or the denominator drops the goals waiting on a
-       human and reports a completion share higher than the truth. *)
-    rollup.pr_active + rollup.pr_verifying + rollup.pr_awaiting_confirmation
-    + rollup.pr_done + rollup.pr_dropped
+  (* One list names every phase once: the counters draw from it and the
+     denominator sums it, so a phase on the row cannot be left out of the
+     total. A second, hand-written sum once left Paused and Blocked out and
+     overstated the share done. *)
+  let phases =
+    [ (Goal_phase.Executing, Masc_tui_theme.Glyph.progress_active, "Exec", rollup.pr_active)
+    ; (Goal_phase.Verifying, "◆", "Ver", rollup.pr_verifying)
+    ; (Goal_phase.Awaiting_confirmation, "◇", "Conf", rollup.pr_awaiting_confirmation)
+    ; (Goal_phase.Completed, Masc_tui_theme.Glyph.progress_done, "Done", rollup.pr_done)
+    ; (Goal_phase.Paused Goal_phase.Resume_executing, "Ⅱ", "Pause", rollup.pr_paused)
+    ; (Goal_phase.Blocked Goal_phase.Resume_executing, "!", "Block", rollup.pr_blocked)
+    ; (Goal_phase.Dropped, Masc_tui_theme.Glyph.progress_ended, "Drop", rollup.pr_dropped)
+    ]
   in
+  let total_goals = List.fold_left (fun total (_, _, _, value) -> total + value) 0 phases in
   let count = Printf.sprintf "  Goals: %s%d%s" Ansi.bold total_goals Ansi.reset in
   if total_goals = 0 then count
   else
@@ -2303,14 +2312,7 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
         Ansi.reset
     in
     Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
-      ([ (Goal_phase.Executing, Masc_tui_theme.Glyph.progress_active, "Exec", rollup.pr_active)
-       ; (Goal_phase.Verifying, "◆", "Ver", rollup.pr_verifying)
-       ; (Goal_phase.Awaiting_confirmation, "◇", "Conf", rollup.pr_awaiting_confirmation)
-       ; (Goal_phase.Completed, Masc_tui_theme.Glyph.progress_done, "Done", rollup.pr_done)
-       ; (Goal_phase.Paused Goal_phase.Resume_executing, "Ⅱ", "Pause", rollup.pr_paused)
-       ; (Goal_phase.Blocked Goal_phase.Resume_executing, "!", "Block", rollup.pr_blocked)
-       ; (Goal_phase.Dropped, Masc_tui_theme.Glyph.progress_ended, "Drop", rollup.pr_dropped)
-       ]
+      (phases
        |> List.filter_map (fun (phase, glyph, name, value) ->
               if value = 0 then None else Some (counter phase glyph name value))
        |> String.concat "  ")

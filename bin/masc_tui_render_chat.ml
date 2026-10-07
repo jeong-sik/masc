@@ -1889,7 +1889,8 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
             | Masc_tui_keeper_chat_transcript.Drawn_thinking _
             | Masc_tui_keeper_chat_transcript.Drawn_skill _
             | Masc_tui_keeper_chat_transcript.Drawn_tools _
-            | Masc_tui_keeper_chat_transcript.Drawn_status _ -> false)
+            | Masc_tui_keeper_chat_transcript.Drawn_status _
+            | Masc_tui_keeper_chat_transcript.Drawn_error _ -> false)
           (Masc_tui_keeper_chat_transcript.drawn live.tl_transcript)
     | Some _ | None -> false
   in
@@ -1915,7 +1916,7 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
                        && List.exists (fun (item : Keeper_chat_transcript.drawn_item) ->
                          match item.drawn with
                          | Drawn_text _ | Drawn_reply _ -> true
-                         | Drawn_thinking _ | Drawn_tools _ | Drawn_skill _ | Drawn_status _ -> false)
+                         | Drawn_thinking _ | Drawn_tools _ | Drawn_skill _ | Drawn_status _ | Drawn_error _ -> false)
                          (Keeper_chat_transcript.drawn log.tl_transcript))) turn_ref)) ->
         let style = Message_layout.Keeper in
         let label = keeper_name in
@@ -2286,6 +2287,7 @@ type settled_block_memo = {
   sbm_committed : bool;
       (** Which placement the block was projected with: a settled turn's,
           or the open placement an observed turn takes. *)
+  sbm_failure_in_live_status : bool;
   sbm_revision : int;
   sbm_member_ids : string list;
   sbm_timeline : (Masc_tui_types.msg_entry * float option) list;
@@ -2569,11 +2571,22 @@ let render_keeper_message (state : state) =
        read, and the merged list is reused whole while no block is live. That
        is what keeps an idle pane holding settled turns at the same per-frame
        cost it had before they were logs. *)
+    let failure_in_live_status turn_log =
+      Option.exists (fun live -> live == turn_log)
+        (Masc_tui_types.keeper_message_status_log state)
+    in
     let log_projection ~committed:_ (turn_log : Masc_tui_types.turn_log) =
       let transcript = turn_log.tl_transcript in
       let request_id = Masc_tui_types.turn_log_execution_id turn_log in
       let member_ids = Masc_tui_types.chat_execution_member_ids state
           ~keeper_name ~execution_id:request_id in
+      let committed_error =
+        List.exists
+          (fun (message : Masc_tui_types.msg_entry) ->
+            message.me_role = Message_error
+            && List.mem message.me_request_id member_ids)
+          committed_timeline_messages
+      in
       let request_label = Keeper_chat.compact_request_id request_id in
       let started_at = Keeper_chat_transcript.started_at transcript in
       let bounds_request (message : Masc_tui_types.msg_entry) =
@@ -2756,7 +2769,14 @@ let render_keeper_message (state : state) =
                     entry ~speaker:(label "") Message_layout.Keeper
                       (label keeper_label) (annotate_body text)
                 | Keeper_chat_transcript.Drawn_status text ->
-                    entry Message_layout.Status (label "STATUS") text)
+                    entry Message_layout.Status (label "STATUS") text
+                | Keeper_chat_transcript.Drawn_error _
+                  when failure_in_live_status turn_log || committed_error ->
+                    (* Only the focused live log has the footer's status;
+                       another source may have its session/history error. *)
+                    None
+                | Keeper_chat_transcript.Drawn_error text ->
+                    entry Message_layout.Error (label "ERROR") text)
              (Keeper_chat_transcript.drawn transcript)
       in
       { lb_log = turn_log; lb_request_id = request_id; lb_member_ids = member_ids; lb_insertion = insertion; lb_timeline_at = timeline_at;
@@ -2783,6 +2803,7 @@ let render_keeper_message (state : state) =
       | Some memo
         when memo.sbm_log == turn_log
              && memo.sbm_committed = committed
+             && memo.sbm_failure_in_live_status = failure_in_live_status turn_log
              && memo.sbm_revision = revision
              && memo.sbm_member_ids = member_ids
              && memo.sbm_timeline == committed_visible_timeline
@@ -2803,6 +2824,7 @@ let render_keeper_message (state : state) =
           Hashtbl.replace settled_block_memo key
             { sbm_log = turn_log;
               sbm_committed = committed;
+              sbm_failure_in_live_status = failure_in_live_status turn_log;
               sbm_revision = revision;
               sbm_member_ids = member_ids;
               sbm_timeline = committed_visible_timeline;

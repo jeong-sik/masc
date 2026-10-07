@@ -2311,6 +2311,7 @@ type drawn =
   | Drawn_text of string
   | Drawn_reply of string
   | Drawn_status of string
+  | Drawn_error of string
 
 type drawn_item =
   { at : float option
@@ -2367,7 +2368,7 @@ let with_noted_skills noted items =
         match item.drawn with
         | Drawn_skill skills -> skills
         | Drawn_thinking _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _
-        | Drawn_status _ ->
+        | Drawn_status _ | Drawn_error _ ->
             []
       in
       let items =
@@ -2377,7 +2378,7 @@ let with_noted_skills noted items =
             | Drawn_skill skills ->
                 { item with drawn = Drawn_skill (List.map exact skills) }
             | Drawn_thinking _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _
-            | Drawn_status _ ->
+            | Drawn_status _ | Drawn_error _ ->
                 item)
           items
       in
@@ -2422,7 +2423,7 @@ let drawn t =
     | { superseded = None
       ; drawn =
           ( Drawn_thinking _ | Drawn_skill _ | Drawn_tools _ | Drawn_reply _
-          | Drawn_status _ )
+          | Drawn_status _ | Drawn_error _ )
       ; _ } ->
         false
   in
@@ -2468,7 +2469,7 @@ let drawn t =
                    items)
             , Some (last + 1) ))
   in
-  match t.reply with
+  let items = match t.reply with
   | None -> items
   | Some { reply_text; reply_outcome = Masc.Keeper_turn_outcome.Visible_reply; _ }
     when String.trim reply_text <> "" -> (
@@ -2510,5 +2511,16 @@ let drawn t =
                 (safe_block
                    (turn_status_text ~reply:reply_text ~turn_ref:reply_turn_ref
                       reply_outcome))
+          } ]
+  in
+  match t.phase with
+  | Waiting | Working | Stream_ended -> items
+  | Stream_failed message ->
+      items
+      @ [ { at = t.ended_at
+          ; segment = t.segment
+          ; superseded = None
+          ; superseded_runtime_id = None
+          ; drawn = Drawn_error (safe_block message)
           } ]
 ;;

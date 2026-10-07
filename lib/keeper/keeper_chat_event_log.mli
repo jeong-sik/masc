@@ -88,6 +88,14 @@ val append :
     event is logged and skipped instead of appended. Only
     [Eio.Cancel.Cancelled] propagates. *)
 
+val append_result :
+  journal -> seq:int -> ts:float -> Keeper_chat_events.keeper_chat_event ->
+  (unit, string) result
+(** The same durable append with its commit result exposed. [Ok ()] confirms
+    the event was written and synced; a descriptor cleanup failure after that
+    commit is logged separately. [Error] never authorizes a live replay cursor.
+    Only [Eio.Cancel.Cancelled] propagates. *)
+
 (** Why a read of a journal produced no entries. *)
 type read_failure =
   | Journal_missing  (** No file at the path: nothing journaled yet, or pruned. *)

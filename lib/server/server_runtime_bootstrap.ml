@@ -607,6 +607,7 @@ let startup_failure_disposition ~state_ready =
 
 type owner_initialization_error =
   | Runtime_config_read_failed of string
+  | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
   | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
@@ -641,6 +642,9 @@ type activated_owner_state =
 let owner_initialization_error_to_string = function
   | Runtime_config_read_failed detail ->
     "runtime config observation failed: " ^ detail
+  | Native_execution_runtime_failed error ->
+    "native execution runtime initialization failed: "
+    ^ Runtime_agent_execution_runtime.initialization_error_to_string error
   | Keeper_config_recovery_failed report ->
     let detail = match report.Keeper_config_journal.outcome with
       | Journal_corrupt detail -> detail
@@ -1103,6 +1107,13 @@ let initialize_owner_state_blocking
       domain_mgr
   in
   install_domain_pool_references domain_pool;
+  (match Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr
+      ~domain_count:(Domain_pool.domain_count domain_pool) with
+   | Ok () ->
+     Log.Server.info "Native execution runtime created (%d codec domains)"
+       (Domain_pool.domain_count domain_pool)
+   | Error error ->
+     raise (Owner_initialization_failed (Native_execution_runtime_failed error)));
   Log.Server.info
     "Domain_pool created (%d shared domains, 1 independent snapshot codec domain) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);

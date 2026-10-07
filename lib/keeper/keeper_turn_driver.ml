@@ -1671,6 +1671,19 @@ let official_client_turn_start ~session_id ~recovery_view ~read_boundary =
       { reason = "a recovery view names no turn boundary" }
 ;;
 
+(* Native recovery evidence can close the retry boundary, but cannot erase an
+   effect already observed by the selected runtime adapter. *)
+let observe_native_attempt binding run ~idx ~runtime_id candidate =
+  let result, checkpoint, effect_disposition, dispatch = run ~idx ~runtime_id candidate in
+  let effect_disposition = match binding, effect_disposition with
+    | Some binding, Keeper_provider_attempt_effect.No_effect_observed ->
+      Keeper_direct_native_continuation.binding_effect_observation ~binding
+    | None, _
+    | Some _, (Keeper_provider_attempt_effect.Effect_attempted
+              | Keeper_provider_attempt_effect.Observation_unavailable) -> effect_disposition in
+  result, checkpoint, effect_disposition, dispatch
+;;
+
 let run_named
     ?(input_policy = Keeper_input_policy.default)
     ~runtime_id
@@ -1719,6 +1732,7 @@ let run_named
     ?enable_thinking
     ?cooperative_yield_probe
     ?agent_core_checkpoint
+    ?native_binding
     ?(continue_from_checkpoint = false)
     ?trace_link
     ?event_bus
@@ -1970,8 +1984,24 @@ let run_named
       ~walk:fresh_walk
       candidates
   in
+  let* native_runtime = match native_binding with
+    | None -> Ok None
+    | Some binding ->
+      let* admission = Keeper_direct_native_continuation.load ~binding
+        |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
+      (match admission with
+       | Keeper_direct_native_continuation.No_pending -> Ok None
+       | Resume resumed -> Ok (Some (Keeper_direct_native_continuation.runtime_id resumed))
+       | Terminal_pending _ -> Error (Agent_core.Error.Internal
+           "native terminal disposition awaits Owner acknowledgement")) in
   let* lane_candidate_ids =
-    match output_contract, deferred_runtime_lane with
+    match native_runtime with
+    | Some saved_runtime ->
+      let fallback = match Runtime.resolve_assignment runtime_id with
+        | `Lane lane -> Runtime_lane.ordered_candidates lane |> demote_quota_exhausted
+        | `Missing | `Unavailable _ -> [] in
+      Ok (saved_runtime :: List.filter (fun id -> not (String.equal id saved_runtime)) fallback)
+    | None -> (match output_contract, deferred_runtime_lane with
     | Tool_verdict, _ -> Ok [runtime_id]
     | Provider_default, Some hint -> Ok (deferred_runtime_ids hint)
     | Provider_default, None ->
@@ -1980,7 +2010,7 @@ let run_named
        | `Unavailable missing ->
          Error (Runtime_agent_core_runner.runtime_catalog_error_to_core_error
            ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
-       | `Lane lane -> Ok (Runtime_lane.ordered_candidates lane |> demote_quota_exhausted))
+       | `Lane lane -> Ok (Runtime_lane.ordered_candidates lane |> demote_quota_exhausted)))
   in
   if lane_candidate_ids = []
   then
@@ -2054,6 +2084,7 @@ let run_named
      input capabilities and one strip bound here was right for the head only
      (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_candidates =
+    if Option.is_some native_runtime then [] else
     match output_contract with
     | Tool_verdict -> []
     | Provider_default -> modality_reroute_candidates
@@ -2200,7 +2231,22 @@ let run_named
       | Missing_runtime _ -> false)
     ~provider_answered:(fun (named : named_run_result) -> run_result_answered named.run_result)
     ~emit_runtime_manifest
-    ~run_attempt:(fun ~idx ~runtime_id:attempt_runtime_id candidate ->
+    ~run_attempt:(observe_native_attempt native_binding (fun ~idx ~runtime_id:attempt_runtime_id candidate ->
+      let native_admission = match native_binding with
+        | None -> Ok None
+        | Some binding ->
+          let* admission = Keeper_direct_native_continuation.load ~binding
+            |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
+          (match admission with
+           | Keeper_direct_native_continuation.No_pending -> Ok None
+           | Resume resumed -> Ok (Some (Keeper_direct_native_continuation.runtime_id resumed))
+           | Terminal_pending (_, {Agent_core.Agent.recovery=Retire; _}) -> Ok None
+           | Terminal_pending (_, {Agent_core.Agent.recovery=Operator_repair_required Effect_outcome_unknown; _}) ->
+             Error (Agent_core.Error.Internal "native effect outcome requires reconciliation")) in
+      match native_admission with
+      | Error error -> Error error, None, Keeper_provider_attempt_effect.Observation_unavailable,
+          Keeper_attempt_dispatch.Rejected_before_dispatch
+      | Ok native_runtime ->
       match candidate with
       | Missing_runtime runtime_id ->
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
@@ -2214,7 +2260,14 @@ let run_named
             ~agent_cell ~built:agent_core_tools
         | _ -> agent_core_tools in
       let source_reader_ready =
-        if required_native_posture = Some Runtime_native_tools.Native_none
+        let native_ready = match native_runtime, runtime.Runtime_instance.execution with
+          | None, _ -> true
+          | Some saved, Runtime_execution.Agent_core _ -> String.equal saved attempt_runtime_id
+          | Some _, (Runtime_execution.Codex_app_server _ | Antigravity_cli _
+                    | Muse_serve _ | Claude_code _) -> false in
+        if not native_ready then Error (Agent_core.Error.Internal
+          "native recovery requires its saved Agent Core runtime")
+        else if required_native_posture = Some Runtime_native_tools.Native_none
            && not (Runtime_execution.supports_native_none runtime.Runtime_instance.execution) then
           Error (Keeper_required_tools.to_core_error
             {runtime_id=attempt_runtime_id;reason=Native_tools_cannot_be_disabled})
@@ -2269,12 +2322,12 @@ let run_named
           ; attempt_agent_core_checkpoint = agent_core_checkpoint
           ; attempt_replay_prefix_projection = replay_prefix_projection
           } =
-        match recovery_view with
-        | Some _ ->
+        match native_runtime, recovery_view with
+        | Some _, _ | None, Some _ ->
           {attempt_goal_blocks=goal_blocks;attempt_initial_messages=initial_messages;
            attempt_agent_core_checkpoint=agent_core_checkpoint;
            attempt_replay_prefix_projection=Keeper_replay_prefix.unchanged}
-        | None -> project_input_for_attempt
+        | None, None -> project_input_for_attempt
           ~project_images
           ~keeper_name
           ~emit_runtime_manifest
@@ -3118,6 +3171,8 @@ let run_named
             ; preserve_thinking = inference_policy.attempt_preserve_thinking
             ; cooperative_yield_probe
             ; agent_core_checkpoint
+            ; native_binding
+            ; native_retired_history_cut = None
             ; trace_link
             ; sw
             ; net
@@ -3151,7 +3206,7 @@ let run_named
           , Keeper_provider_attempt_effect.No_effect_observed
           , provider_attempt_dispatch ~request_serialized:!request_serialized
               outcomes.turn_result ))))
-       )))
+       ))))
     attempt_candidates
 
 

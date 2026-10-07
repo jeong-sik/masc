@@ -3060,6 +3060,68 @@ let test_pause_rechecks_pending_claim_admission () =
   check int "pending child was admitted once before pause" 1 !execution_count
 ;;
 
+let test_startup_requeues_exact_native_call () =
+  Eio_main.run @@ fun _env ->
+  let path = Filename.temp_file "keeper-owner-native-" ".sqlite3" in
+  Unix.unlink path;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path) (fun () ->
+    let operation_id = operation_id "kmsg-native-restart" in
+    let seed = Keeper_chat_operation_store.open_or_create ~path |> Result.get_ok in
+    ignore (Keeper_chat_operation_store.submit seed ~now:10. ~operation_id
+      ~source:operation_source ~input:(operation_input "retain original native input") |> Result.get_ok);
+    let operation = Keeper_chat_operation_store.claim_next seed ~now:11. |> Result.get_ok |> Option.get in
+    let checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:(Keeper_id.Trace_id.of_string "native-owner-trace" |> Result.get_ok)
+      ~turn_count:1 ~canonical_checkpoint_bytes:"exact owner seed" |> Result.get_ok in
+    let locator = Agent_core.Agent.execution_locator_of_yojson
+      (`Assoc ["version", `Int 1; "run_id", `String "execution-run-native-owner"]) |> Result.get_ok in
+    let call = Keeper_native_call.create
+      ~call_id:"019a0010-1000-7000-8000-000000000010" ~runtime_id:"native.primary"
+      ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
+      ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
+    Keeper_chat_operation_store.update_direct_native_call seed ~now:12. ~operation_id
+      ~execution_digest:operation.execution_digest
+      (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call}) |> Result.get_ok;
+    Keeper_chat_operation_store.close seed |> Result.get_ok;
+    Eio.Switch.run @@ fun sw ->
+    let owner = Owner.start ~sw
+      ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      ~operation_store_path:path ~now:(fun () -> 20.) ~operation_runner:None
+      ~on_turn_slot_released:None ~keeper_name:"native-restart"
+      ~initial_meta:(Some (make_meta "native-restart")) |> owner_ok in
+    check int "witnessed native operation not interrupted" 0 (List.length (Owner.restart_interrupted_operations owner));
+    let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+    check bool "Owner claims original operation" true (Chat_operation.Operation_id.equal operation_id resumed.operation_id);
+    check bool "Owner preserves input" true (operation.input = resumed.input);
+    let observed = Owner.direct_native_call owner ~operation_id |> owner_ok in
+    check bool "Owner restores exact native witness" true
+      (Keeper_native_call.equal_state observed (Keeper_native_call.Active call));
+    Owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~observed ~call |> owner_ok;
+    let advanced_checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:checkpoint.trace_id ~turn_count:2
+      ~canonical_checkpoint_bytes:"native progress after restart" |> Result.get_ok in
+    Owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~call_id:call.call_id ~observed:checkpoint ~checkpoint:advanced_checkpoint |> owner_ok;
+    (match Owner.checkpoint_direct_native_call owner ~operation_id
+       ~execution_digest:operation.execution_digest ~call_id:call.call_id
+       ~observed:checkpoint ~checkpoint:advanced_checkpoint with
+     | Error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _)) -> ()
+     | Error error -> fail ("stale callback fenced Owner: " ^ Owner.error_to_string error)
+     | Ok () -> fail "stale callback was accepted");
+    (match Owner.direct_native_call owner ~operation_id |> owner_ok with
+     | Keeper_native_call.Active current ->
+       check bool "stale callback keeps committed checkpoint" true
+         (Keeper_checkpoint_ref.equal current.checkpoint advanced_checkpoint)
+     | _ -> fail "stale callback changed active native state");
+    Owner.terminal_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~call_id:call.call_id ~disposition:{Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;
+        recovery=Agent_core.Agent.Retire} |> owner_ok;
+    ignore (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"native-owner-receipt" |> owner_ok);
+    check bool "Owner receipt retires native witness" true
+      (Keeper_native_call.equal_state Keeper_native_call.No_native_call (Owner.direct_native_call owner ~operation_id |> owner_ok)))
+;;
+
 let test_startup_interrupts_running_without_requeue () =
   Eio_main.run @@ fun _env ->
   let path = Filename.temp_file "keeper-owner-restart-" ".sqlite3" in
@@ -4964,125 +5026,84 @@ let test_create_waits_for_lifecycle_admission_before_installing_owner () =
          (Owner_registry.For_testing.installed_owner_count ~base_path))
 ;;
 
-(* RFC-0373 direction 2 (issue #38864): the chat lane is offered every freed
-   slot first, so a keeper whose chat queue is fed without end loses each
-   release to the queued chat turn, and the autonomous lane's losses are
-   consecutive by construction. Losing turns of scheduled work without end is
-   the defect; the deferral debt bounds it.
-
-   This is the issue's decisive test, and before the cap commit it is the
-   intended red: the chat turns run one after another and the autonomous
-   lane's consecutive refusals pass the bound. The numbers are stated, not
-   estimated:
-
-   - a fake clock turns each chat turn into 10 seconds, so no number hides
-     behind wall time;
-   - the queue always holds one claimable chat turn -- the executor refills it
-     before its own turn finishes -- so every freed slot is offered to chat
-     first, exactly as [start_child_if_needed] does;
-   - the autonomous lane asks again the moment it is refused, so the count of
-     refusals is the count of releases it lost. *)
-let debt_cap = 3
-let test_fed_chat_lane_owes_the_autonomous_lane_a_turn_within_the_debt_cap () =
+(* A waiting user message must keep its place when the keepalive observes
+   the same busy chat repeatedly. The live failure recorded four such
+   observations, then gave the released slot to fresh Board work. The
+   assertions below concern execution order and the saved wake, not a bound
+   on how many observations a lane may make. *)
+let test_pending_chat_survives_repeated_autonomous_observations () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
-  let now = ref 42.0 in
-  let tick () =
-    now := !now +. 10.0;
-    !now
-  in
-  let chat_turns = ref 0 in
-  let queued = ref 0 in
-  let feed owner =
-    incr queued;
-    let operation_id = operation_id ("kmsg-debt-cap-" ^ string_of_int !queued) in
-    ignore
-      (owner_ok
-         (Owner.submit_operation
-            owner
-            ~operation_id
-            ~source:operation_source
-            ~input:(operation_input "fed chat turn")))
-  in
-  let holder = ref None in
+  let first = operation_id "kmsg-first-question" in
+  let next = operation_id "kmsg-next-question" in
+  let started, resolve_started = Eio.Promise.create () in
+  let next_started, resolve_next_started = Eio.Promise.create () in
+  let release_first, resolve_first = Eio.Promise.create () in
+  let release_next, resolve_next = Eio.Promise.create () in
+  let executed = ref [] and released = ref 0 in
   let execute ~sw:_ ~keeper_name:_ ~claim =
-    (match claim () with
-     | Ok (Some _) -> incr chat_turns
-     | Ok None -> fail "fed chat runner found an empty queue"
-     | Error error -> fail (Owner.error_to_string error));
-    let owner =
-      match !holder with
-      | Some owner -> owner
-      | None -> fail "the test did not publish the owner for the feeder"
-    in
-    (* Refill before this turn settles, so the freed slot is contested. *)
-    Eio.Fiber.fork ~sw (fun () -> feed owner);
-    Owner.Operation_succeeded
-      { outcome_ref = "turn:debt-cap-" ^ string_of_int !chat_turns }
+    let operation = Option.get (owner_ok (claim ())) in
+    let id = operation.Chat_operation.operation_id in
+    executed := Chat_operation.Operation_id.to_string id :: !executed;
+    if Chat_operation.Operation_id.equal id first then (
+      Eio.Promise.resolve resolve_started ();
+      Eio.Promise.await release_first)
+    else (
+      check string "the queued follow-up took the slot"
+        (Chat_operation.Operation_id.to_string next)
+        (Chat_operation.Operation_id.to_string id);
+      Eio.Promise.resolve resolve_next_started ();
+      Eio.Promise.await release_next);
+    Owner.Operation_succeeded { outcome_ref = "answered" }
   in
-  let path = Filename.temp_file "keeper-owner-debt-cap-" ".sqlite3" in
+  let path = Filename.temp_file "keeper-owner-chat-handoff-" ".sqlite3" in
   Unix.unlink path;
   Eio.Switch.on_release sw (fun () ->
     if Sys.file_exists path then Unix.unlink path);
-  let owner =
-    owner_ok
-      (Owner.start
-         ~sw
-         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_store_path:path
-         ~now:tick
-         ~operation_runner:
-           (Some
-              Owner.
-                { ready = (fun ~keeper_name:_ -> true)
-                ; execute
-                ; on_execution_settled = noop_execution_settled
-                })
-         ~on_turn_slot_released:None
-         ~keeper_name:"debt-cap"
-         ~initial_meta:(Some (make_meta "debt-cap")))
+  let owner = owner_ok (Owner.start ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_store_path:path ~now:(fun () -> 42.0)
+    ~operation_runner:(Some Owner.
+      { ready = (fun ~keeper_name:_ -> true); execute
+      ; on_execution_settled = noop_execution_settled })
+    ~on_turn_slot_released:(Some (fun () -> incr released))
+    ~keeper_name:"chat-handoff"
+    ~initial_meta:(Some (make_meta "chat-handoff"))) in
+  let submit operation_id = ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id ~source:operation_source ~input:(operation_input "answer me"))) in
+  let observe_busy () =
+    match Owner.run_autonomous_if_idle owner (fun () ->
+      fail "autonomous work passed a claimable user message") with
+    | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ }))) -> ()
+    | Ok (`Busy other) -> fail (Owner.autonomous_block_to_string other)
+    | Ok (`Ran _) -> fail "autonomous work ran ahead of direct input"
+    | Ok `Interrupted -> fail "nothing interrupted this observation"
+    | Error error -> fail (Owner.error_to_string error)
   in
-  holder := Some owner;
-  feed owner;
-  let admitted, resolve_admitted = Eio.Promise.create () in
-  Eio.Fiber.fork ~sw (fun () ->
-    let refusals = ref 0 in
-    let rec poll () =
-      match Owner.run_autonomous_if_idle owner (fun () -> 42) with
-      | Ok (`Ran _) -> Eio.Promise.resolve resolve_admitted !refusals
-      | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ })))
-      | Ok (`Busy (Owner.Turn_busy None)) ->
-        incr refusals;
-        (* The bound keeps the intended red a clean failure instead of a
-           hang: without the cap this lane never runs and the loop never
-           ends. *)
-        if !refusals > debt_cap + 3
-        then Eio.Promise.resolve resolve_admitted !refusals
-        else poll ()
-      | Ok (`Busy block) ->
-        fail
-          ("autonomous lost the slot for the wrong reason: "
-           ^ Owner.autonomous_block_to_string block)
-      | Ok `Interrupted -> fail "nothing interrupted the autonomous lane"
-      | Error error -> fail (Owner.error_to_string error)
-    in
-    poll ());
-  let refusals_needed = Eio.Promise.await admitted in
-  check bool "the chat lane held the slot at all" true (!chat_turns > 0);
-  check bool
-    (Printf.sprintf
-       "the autonomous lane ran within %d consecutive refusals, got %d"
-       debt_cap refusals_needed)
-    true
-    (refusals_needed <= debt_cap);
-  (* Measured price of the cap: the forfeited releases are chat turns that
-     waited, so the keeper runs at most the two live turns plus the cap's
-     worth of held-back ones. *)
-  check bool
-    (Printf.sprintf "the cap prices the chat delay it buys (chat turns: %d)"
-       !chat_turns)
-    true
-    (!chat_turns <= 2 + debt_cap)
+  submit first;
+  Eio.Promise.await started;
+  submit next;
+  List.iter (fun () -> observe_busy ()) [ (); (); (); () ];
+  Eio.Promise.resolve resolve_first ();
+  ignore (await_terminal owner first 1_000);
+  (* This read is also decisive on the broken scheduler: it admits the
+     autonomous callback, so the regression fails without awaiting a chat
+     that the scheduler never started. *)
+  observe_busy ();
+  Eio.Promise.await next_started;
+  check (list string) "both direct messages run before autonomous work"
+    [ Chat_operation.Operation_id.to_string first
+    ; Chat_operation.Operation_id.to_string next ]
+    (List.rev !executed);
+  check int "no free-slot wake while the next message owns it" 0 !released;
+  Eio.Promise.resolve resolve_next ();
+  ignore (await_terminal owner next 1_000);
+  check int "the refused autonomous lane keeps its release wake" 1 !released;
+  match Owner.run_autonomous_if_idle owner (fun () -> "continued") with
+  | Ok (`Ran value) -> check string "autonomous work resumes" "continued" value
+  | Ok (`Busy other) -> fail (Owner.autonomous_block_to_string other)
+  | Ok `Interrupted -> fail "nothing interrupted the resumed autonomous work"
+  | Error error -> fail (Owner.error_to_string error)
 ;;
 
 let () =
@@ -5162,9 +5183,9 @@ let () =
             `Quick
             test_chat_lane_holder_blocks_autonomous_admission
         ; test_case
-            "a fed chat lane owes the autonomous lane a turn within the debt cap"
+            "pending chat survives repeated autonomous observations"
             `Quick
-            test_fed_chat_lane_owes_the_autonomous_lane_a_turn_within_the_debt_cap
+            test_pending_chat_survives_repeated_autonomous_observations
         ; test_case
             "turn slot release signals availability"
             `Quick
@@ -5242,6 +5263,7 @@ let () =
             "startup interrupts Running without requeue"
             `Quick
             test_startup_interrupts_running_without_requeue
+        ; test_case "native restart and stale callback preserve Owner progress" `Quick test_startup_requeues_exact_native_call
         ; test_case
             "registry start leaves a failure row for a restart-interrupted request"
             `Quick

@@ -723,6 +723,20 @@ let direct_checkpoint ~base_path ~keeper_name ~operation_id =
 let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_digest ~checkpoint =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.defer_direct_checkpoint owner ~operation_id ~execution_digest ~checkpoint)
+let direct_native_call ~base_path ~keeper_name ~operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_native_call owner ~operation_id)
+let bind_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~observed ~call =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.bind_direct_native_call owner ~operation_id ~execution_digest ~observed ~call)
+let checkpoint_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest ~call_id ~observed ~checkpoint)
+let terminal_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~call_id ~disposition =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.terminal_direct_native_call owner ~operation_id ~execution_digest ~call_id ~disposition)
+let acknowledge_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~call_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.acknowledge_direct_native_call owner ~operation_id ~execution_digest ~call_id)
 ;;
 let resume_direct_checkpoint ~base_path ~keeper_name ~operation_id ~observed =
   with_owner_command ~base_path ~keeper_name (fun owner ->

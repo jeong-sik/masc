@@ -667,50 +667,46 @@ let event_floats_are_finite = function
   | _ -> true
 ;;
 
-(* Fail-open by contract: stage 1 dual-writes next to keeper_chat_store, which
-   remains the durable record of record. A journal failure is logged, never
-   raised into the live path. The umbrella is required: the Fs_compat result
-   type covers only torn-tail cut/write/fsync/rollback failures, while mkdir,
-   openfile, fchmod, fsync_parent_directory, and lockf raise raw
-   [Unix.Unix_error]. *)
-let append journal ~seq ~ts event =
+(* The result covers raw filesystem exceptions too: mkdir/open/lock failures
+   can occur before the Fs_compat transaction produces its typed outcome. *)
+let append_result journal ~seq ~ts event =
   try
     if (not (float_is_finite ts)) || not (event_floats_are_finite event)
     then
-      Log.Keeper.error
-        "keeper_chat_event_log: refusing to journal non-finite float path=%s seq=%d"
-        journal.path
-        seq
+      Error (Printf.sprintf
+        "refusing to journal non-finite float path=%s seq=%d" journal.path seq)
     else begin
       let line = journaled_event_to_string { seq; ts; event } ^ "\n" in
       match Fs_compat.append_private_jsonl_durable_locked_result journal.path line with
-      | Fs_compat.Private_file_succeeded () -> ()
+      | Fs_compat.Private_file_succeeded () -> Ok ()
       | Fs_compat.Private_file_succeeded_with_cleanup_failure
           { value = (); cleanup_failure } ->
         Log.Keeper.error
           "keeper_chat_event_log: append succeeded with descriptor settlement failure path=%s: %s"
           journal.path
-          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+        Ok ()
       | Fs_compat.Private_file_failed error ->
-        Log.Keeper.error
-          "keeper_chat_event_log: journal append failed path=%s: %s"
-          journal.path
-          (Fs_compat.private_jsonl_append_error_to_string error)
+        Error (Fs_compat.private_jsonl_append_error_to_string error)
       | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-        Log.Keeper.error
-          "keeper_chat_event_log: journal append failed path=%s: %s; descriptor settlement failed: %s"
-          journal.path
+        Error (Printf.sprintf "%s; descriptor settlement failed: %s"
           (Fs_compat.private_jsonl_append_error_to_string error)
-          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
     end
   with
   | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
-  | exn ->
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let append journal ~seq ~ts event =
+  match append_result journal ~seq ~ts event with
+  | Ok () -> ()
+  | Error detail ->
     Log.Keeper.error
-      "keeper_chat_event_log: journal append raised path=%s seq=%d: %s"
+      "keeper_chat_event_log: journal append failed path=%s seq=%d: %s"
       journal.path
       seq
-      (Printexc.to_string exn)
+      detail
 ;;
 
 type read_failure =

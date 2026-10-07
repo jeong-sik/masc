@@ -1,3 +1,8 @@
+type native_continuation =
+  { binding : Keeper_direct_native_continuation.binding
+  ; resumed : Keeper_direct_native_continuation.resumed option
+  }
+
 type direct_continuation =
   | Checkpoint_continuation of Keeper_direct_checkpoint_continuation.admission
   | Runtime_continuation of Keeper_direct_runtime_continuation.admission
@@ -289,6 +294,7 @@ val run_turn
         up is read here, from the runtime the walk started on. Callers used to
         assert it, and the unified path asserted "a lane is pending" (#37108). *)
   -> ?direct_resume:direct_continuation
+  -> ?native_continuation:native_continuation
   -> ?official_task_reference:Keeper_official_task_reference.t
   -> ?on_gate_evidence_admitted:(Agent_core.Checkpoint.t -> (unit, string) result)
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane

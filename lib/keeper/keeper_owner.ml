@@ -355,7 +355,6 @@ type t =
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; on_turn_slot_released : (unit -> unit) option
   ; autonomous_lost_slot : bool ref
-  ; autonomous_deferral_debt : int ref
         (* Set when the autonomous lane asked for the slot and was refused,
            cleared when the release notification is delivered. Without it the
            notification fires after every turn, and since a woken keeper starts
@@ -428,19 +427,6 @@ let turn_in_flight_equal (left : turn_in_flight option) (right : turn_in_flight 
 
 let shutdown_operation_id_equal =
   Option.equal Keeper_shutdown_types.Operation_id.equal
-;;
-
-(* RFC-0373 direction 2: consecutive losses of the turn slot to the chat lane
-   become a value the next admission decision reads. The debt counts releases
-   the autonomous lane asked for and did not get while a chat turn held the
-   slot, resets to zero when an admitted autonomous turn settles, and at
-   [autonomous_deferral_debt_cap] the admission stops handing a freed slot to
-   the queued chat first: the handoff leaves the slot free, which is the owed
-   release signal the autonomous lane needs to take it. The cap is 3 -- one
-   less than the 5 consecutive cycles RFC-0373 measured a single 16.3-minute
-   chat hold to cost -- and it can delay a chat turn by at most the forfeited
-   releases. Owner-fiber-local like [autonomous_lost_slot]. *)
-let autonomous_deferral_debt_cap = 3
 ;;
 
 let publish_operation_projection t next =
@@ -1062,7 +1048,6 @@ let start
     ; child_active = ref false
     ; child_cancel = Atomic.make None
     ; autonomous_lost_slot = ref false
-    ; autonomous_deferral_debt = ref 0
     ; stopping_waiters = ref []
     ; shutdown_idle_waiters = ref []
     ; on_turn_slot_released
@@ -1285,26 +1270,13 @@ let start
       | Some runner when not (runner.ready ~keeper_name:t.keeper_name) -> ()
       | Some runner ->
         let inventory = Atomic.get t.operation_projection in
-        (* RFC-0373 direction 2: past the debt cap the freed slot goes to the
-           autonomous lane that lost [autonomous_deferral_debt_cap]
-           consecutive releases, so the queued chat is not started and the
-           slot is left free: the handoff branch of [Run_if_idle] reads a free
-           slot as the owed release signal and wakes that lane, and with no
-           autonomous waiter the next [Run_if_idle] admits it directly. An
-           admitted autonomous turn clears the debt elsewhere; nothing else
-           writes it, and every read here is on the command loop. *)
-        let autonomous_owed_slot =
-          !(t.autonomous_deferral_debt) >= autonomous_deferral_debt_cap
-        in
-        if autonomous_owed_slot
-        then
-          Log.Keeper.info
-            ~keeper_name:t.keeper_name
-            "deferral debt cap reached: the freed slot stays open for the autonomous lane (debt=%d)"
-            !(t.autonomous_deferral_debt);
+        (* A released slot belongs to claimable direct input first. Repeated
+           autonomous observations of the same busy slot must not change that
+           order, including when the running turn yielded to newer input.
+           [notify_turn_slot_released] wakes the refused autonomous lane once
+           no direct operation claims the slot. *)
         if
-          (not autonomous_owed_slot)
-          && inventory.has_claimable_queued
+          inventory.has_claimable_queued
           && Option.is_none inventory.running_operation_id
         then (
           t.child_active := true;
@@ -1970,27 +1942,16 @@ let start
                  | Some in_flight ->
                    (match lane with
                     | Autonomous ->
-                      t.autonomous_lost_slot := true;
-                      (* RFC-0373 direction 2: count the lost release, but
-                         only against the chat lane -- a maintenance or
-                         autonomous holder is not the queue that starves the
-                         autonomous lane, and the cap must not reorder around
-                         them. *)
-                      (match in_flight.lane with
-                       | Chat_operation ->
-                         t.autonomous_deferral_debt := !(t.autonomous_deferral_debt) + 1
-                       | Autonomous | Maintenance -> ())
+                      t.autonomous_lost_slot := true
                     | Chat_operation | Maintenance -> ());
                    Eio.Promise.resolve
                      resolve
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
                  | None ->
                    let run_admitted_turn () =
-                     (* The turn the debt existed for is running now. The
-                        Owner keeps its slot until the turn settles. A chat
-                        can be admitted only after a settled tool boundary
-                        cooperatively ends this turn or the turn completes.
-                        The debt clears at settlement. *)
+                     (* The Owner keeps its slot until the turn settles. A
+                        chat starts after a settled tool boundary yields this
+                        turn or the turn completes. *)
                      t.child_active := true;
                      publish_turn_in_flight
                        t
@@ -2072,9 +2033,6 @@ let start
                         match Atomic.get t.turn_in_flight with
                         | Some ({ lane = Chat_operation; _ } as chat) ->
                           t.autonomous_lost_slot := true;
-                          (* Same count as the poll refusal above: the lane
-                             lost this release to a chat turn. *)
-                          t.autonomous_deferral_debt := !(t.autonomous_deferral_debt) + 1;
                           Eio.Promise.resolve
                             resolve
                             (Ok (Autonomous_busy (Turn_busy (Some chat))))
@@ -2104,9 +2062,6 @@ let start
                 | Error (exn, backtrace) -> Ok (Autonomous_raised (exn, backtrace))
               in
               Eio.Promise.resolve autonomous_resolve response;
-              (* The turn the debt bought has finished, so its slot protection
-                 ends here: the next release starts a fresh cap count. *)
-              t.autonomous_deferral_debt := 0;
               Ok ()
           in
           t.child_active := false;

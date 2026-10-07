@@ -610,7 +610,7 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     (List.length (project "sampling-worker" output));
   check bool "projected receipt does not expose callback metadata" true
     (Yojson.Safe.Util.(List.hd (project "sampling-worker" output)
-      |> member "terminal" |> member "response" |> member "_meta") = `Null);
+      |> member "terminal" |> member "response_attestation" |> member "_meta") = `Null);
   check int "another worker cannot claim the host model receipt" 0
     (List.length (project "other-worker" output));
   let replay_path = Filename.concat dir (cid ^ ".replay-output") in
@@ -781,10 +781,15 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
       Yojson.Safe.Util.(invalid |> member "evidence" |> member "request") with
     | Ok reference -> reference | Error detail -> fail detail in
   let invalid_receipt = project "sampling-worker" (selected [invalid_request]) |> List.hd in
-  check bool "invalid-response receipt carries the package-safe retained response" true
-    (Yojson.Safe.Util.(invalid_receipt |> member "terminal" |> member "response") =
-      Mcp_protocol.Sampling.create_message_result_to_yojson
-        (Masc.Lane_addon_sampling.package_response retained_answer));
+  let attested = Yojson.Safe.Util.(invalid_receipt |> member "terminal" |> member "response_attestation") in
+  check string "invalid-response attestation preserves the retained model" retained_answer.model
+    Yojson.Safe.Util.(attested |> member "model" |> to_string);
+  let retained_text = match retained_answer.content with
+    | Mcp_protocol.Sampling.Text {text;_} -> text
+    | Image _ -> fail "expected retained text response" in
+  check string "invalid-response attestation binds the retained text bytes"
+    (Masc.Lane_addon_store.digest retained_text)
+    Yojson.Safe.Util.(attested |> member "content" |> member "text_sha256" |> to_string);
   check string "retained invalid response preserves the missing model identity" ""
     retained_answer.model;
   check bool "invalid-response raw host evidence keeps callback metadata" true
@@ -1047,9 +1052,115 @@ let test_receipt_projection_reads_shared_outcome_once () = with_fixture (fun _en
   let receipts = require (Sampling.retained_receipts ~store ~instance_id:"large-worker"
     ~max_bytes output) in
   check int "request and row share one terminal read within the 4 MiB envelope" 1 (List.length receipts);
-  check bool "projection preserves the complete 3 MiB answer" true
-    (Yojson.Safe.Util.(member "terminal" (List.hd receipts) |> member "response")
-     = S.create_message_result_to_yojson answer))
+  check string "projection attests the complete 3 MiB answer without repeating it"
+    (Store.digest (String.make (3 * 1024 * 1024) 'x'))
+    Yojson.Safe.Util.(member "terminal" (List.hd receipts) |> member "response_attestation"
+      |> member "content" |> member "text_sha256" |> to_string);
+  let outcome = List.nth (List.hd output.rows).evidence 1 in
+  check bool "raw immutable outcome still contains the complete answer" true
+    (Yojson.Safe.Util.(Store.read_blob store outcome |> require |> Yojson.Safe.from_string |> member "response")
+      = S.create_message_result_to_yojson answer))
+
+let test_sampling_attestation_binds_exact_utf8_and_image_data () = with_fixture (fun _env _sw dir _docker ->
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module Store = Masc.Lane_addon_store in
+  let module S = Mcp_protocol.Sampling in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let store = Store.create ~root:(Filename.concat dir "sampling-content-attestation") in
+  let package = {(package dir "sampling") with model_access=Types.Host_sampling} in
+  List.iter (fun (content, digest_key, expected) ->
+    let answer : S.create_message_result = {role=Assistant;content;model="exact-model";
+      stop_reason=Some "endTurn";_meta=Some (`Assoc ["masc.lane_host",`String "private"])} in
+    let broker = require (Sampling.create ~store ~package ~instance_id:"content-worker"
+      ~route:"fixture" ~invoke:(fun ~route:_ ~request:_ _ -> Ok answer) ()) in
+    let handler = require (Sampling.for_worker broker ~package ~instance_id:"content-worker") in
+    let params = require (S.create_message_params_of_yojson
+      (`Assoc ["messages",`List [];"maxTokens",`Int 1])) in
+    let output = require (Sampling.with_observation broker ~binding:(`Assoc []) ~sources:(`List [])
+      ~on_error:Fun.id (fun () -> Result.map (fun response ->
+        let refs = Option.get response.S._meta |> Yojson.Safe.Util.member "masc.lane_sampling" in
+        let evidence = List.map (fun key -> require (Types.evidence_of_json
+          (Yojson.Safe.Util.member key refs))) ["request";"outcome"] in
+        {Types.rows=[{id="answer";lane_id="response";kind=Types.Value;title="answer";
+          observed_at=1.;subject_id="subject";clock=None;actor=None;fields=[];evidence;related_ids=[]}];coverage=[]})
+        (handler params))) in
+    let receipt = require (Sampling.retained_receipts ~store ~instance_id:"content-worker"
+      ~max_bytes:package.resources.max_reply_bytes output) |> List.hd in
+    let attested = Yojson.Safe.Util.(receipt |> member "terminal" |> member "response_attestation") in
+    check string "attestation hashes exact UTF-8 content bytes" expected
+      Yojson.Safe.Util.(attested |> member "content" |> member digest_key |> to_string);
+    check string "model is still compared exactly" "exact-model"
+      Yojson.Safe.Util.(attested |> member "model" |> to_string);
+    check string "stop metadata is still compared exactly" "endTurn"
+      Yojson.Safe.Util.(attested |> member "stopReason" |> to_string);
+    check bool "private metadata is not projected" true
+      (Yojson.Safe.Util.member "_meta" attested = `Null);
+    let outcome = List.nth (List.hd output.rows).evidence 1 in
+    check bool "immutable response remains byte-complete including private metadata" true
+      (Yojson.Safe.Util.(Store.read_blob store outcome |> require |> Yojson.Safe.from_string |> member "response")
+        = S.create_message_result_to_yojson answer))
+    [S.Text {type_="text";text="안녕\n\000\127🙂"}, "text_sha256",
+      "80871beb7387500657c79cbbe134d4071ffaea1621910e0ef9cfa536f1ab763f";
+     S.Image {type_="image";data="YQ==";mime_type="image/png"}, "data_sha256",
+      "ff6c0e5a7b16bb6159c1a6a4e86c55fb088a5b00f8fe9c54defd72e3027786f8"])
+
+let test_large_sampling_sources_fit_without_duplicate_response_bodies () = with_fixture (fun _env _sw dir _docker ->
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module Store = Masc.Lane_addon_store in
+  let module Sources = Masc.Lane_addon_sources in
+  let module S = Mcp_protocol.Sampling in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let store = Store.create ~root:(Filename.concat dir "sampling-source-envelope") in
+  let max_bytes = 4 * 1024 * 1024 in
+  let package = {(package dir "sampling") with model_access=Types.Host_sampling;
+    resources={(package dir "sampling").resources with max_reply_bytes=max_bytes}} in
+  let params = require (S.create_message_params_of_yojson
+    (`Assoc ["messages",`List [];"maxTokens",`Int 1])) in
+  let make index =
+    let instance_id = "panel-" ^ string_of_int index in
+    let text = String.make 750000 (if index=1 then 'a' else 'b') in
+    let answer : S.create_message_result = {role=Assistant;content=Text {type_="text";text};
+      model="actual-panel";stop_reason=Some "endTurn";_meta=None} in
+    let broker = require (Sampling.create ~store ~package ~instance_id ~route:"fixture"
+      ~invoke:(fun ~route:_ ~request:_ _ -> Ok answer) ()) in
+    let handler = require (Sampling.for_worker broker ~package ~instance_id) in
+    let status : Types.coverage = {source_id=instance_id;incarnation=instance_id;
+      cursor=Some "1";complete=true;detail=None} in
+    let output = require (Sampling.with_observation broker ~binding:(`Assoc [])
+      ~sources:(`List []) ~on_error:Fun.id (fun () -> Result.map (fun response ->
+        let refs = Option.get response.S._meta |> Yojson.Safe.Util.member "masc.lane_sampling" in
+        let evidence = List.map (fun key -> require (Types.evidence_of_json
+          (Yojson.Safe.Util.member key refs))) ["request";"outcome"] in
+        {Types.rows=[{id="answer";lane_id=instance_id ^ "/fusion/computation";kind=Types.Value;
+          title="large panel";observed_at=1.;subject_id="analysis";clock=None;actor=None;
+          fields=["computation",`Assoc ["text",`String text];"model_evidence",refs;
+            "sampling_response",S.create_message_result_to_yojson response;"input_evidence",`List []];
+          evidence;related_ids=[]}];coverage=[status]}) (handler params))) in
+    let captured : Sources.lane_output = {installation_id=instance_id;instance_id;
+      run_id="run";configuration_revision="config";package_revision="package";
+      outputs=[];observation_seq=1;output;status} in
+    instance_id, captured in
+  let producers = List.map make [1;2] in
+  let binding = `Assoc ["sources",`List (List.map (fun (id,_) -> `Assoc [
+    "source_id",`String id;"kind",`String "lane_output";"installation_id",`String id;
+    "selection",`String "latest_completed"]) producers)] in
+  let acquired = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package
+    ~resolve_lane_output:(fun ~installation_id -> match List.assoc_opt installation_id producers with
+      | Some producer -> Ok producer | None -> Error "unknown producer") ~binding) in
+  check bool "combined source array stays within the configured ingress envelope" true
+    (String.length (Yojson.Safe.to_string acquired) <= max_bytes);
+  List.iter (fun source ->
+    check bool "both completed panels remain available" true
+      Yojson.Safe.Util.(source |> member "complete" |> to_bool);
+    let observation = Yojson.Safe.Util.(source |> member "observations" |> to_list |> List.hd) in
+    let row = Yojson.Safe.Util.(observation |> member "output" |> member "rows" |> to_list |> List.hd) in
+    check int "selected output still carries its exact response body" 750000
+      (String.length Yojson.Safe.Util.(row |> member "fields" |> member "sampling_response"
+        |> member "content" |> member "text" |> to_string));
+    let receipt = Yojson.Safe.Util.(observation |> member "sampling_receipts" |> to_list |> List.hd) in
+    check bool "receipt no longer repeats the full response" true
+      (Yojson.Safe.Util.(receipt |> member "terminal" |> member "response") = `Null))
+    Yojson.Safe.Util.(to_list acquired))
 
 let test_current_sampling_receipt_keeps_same_instance_input_lineage () = with_fixture (fun _env _sw dir _docker ->
   let module Sampling = Masc.Lane_addon_sampling in
@@ -1337,7 +1448,7 @@ let test_sampling_blob_failure_keeps_request_evidence () = List.iter (fun block_
       | Ok value -> value | Error detail -> fail detail in
     check int "downstream projection resolves the recovered outcome" 1 (List.length receipts);
     check string "receipt keeps actual model identity" "actual-model"
-      Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "response" |> member "model" |> to_string););
+      Yojson.Safe.Util.(List.hd receipts |> member "terminal" |> member "response_attestation" |> member "model" |> to_string););
   let saved_recovery = recovery_directory ^ ".saved" in
   Unix.rename recovery_directory saved_recovery;
   write recovery_directory "unavailable recovery directory";
@@ -1580,6 +1691,10 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling fallback rejects external hardlinks" `Quick
     (test_sampling_fallback_rejects_external_links "hardlink" (fun target path -> Unix.link target path));
   test_case "sampling reads preserve canonical failures" `Quick test_sampling_blob_read_preserves_canonical_failure;
+  test_case "sampling attestation binds exact UTF-8 and image bytes" `Quick
+    test_sampling_attestation_binds_exact_utf8_and_image_data;
+  test_case "large sampling sources omit repeated response bodies" `Quick
+    test_large_sampling_sources_fit_without_duplicate_response_bodies;
   test_case "current receipt keeps same-worker input lineage separate" `Quick
     test_current_sampling_receipt_keeps_same_instance_input_lineage;
   test_case "sampling retention error carries the receipt" `Quick test_sampling_retention_error_carries_receipt;

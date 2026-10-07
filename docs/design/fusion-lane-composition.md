@@ -294,6 +294,17 @@ not promoted into immutable claims. This separation lets a
 worker analyze an earlier request from its own instance while the host continues
 to reject an old receipt claimed as the result of new observation inputs.
 
+Host-projected sampling receipts carry `response_attestation` instead of another
+copy of the response body. Its `content.text` and `content.data` strings become
+`text_sha256` and `data_sha256`, calculated from their exact UTF-8 bytes without
+normalization or Base64 decoding. All other package-visible response fields are
+preserved and compared exactly. The consumer computes that same projection from
+the supplied response after removing only the broker's sampling coordinates;
+raw responses cannot supply either digest field. Host-only metadata remains
+private, and the immutable request/outcome blobs retain the complete original
+response and failure details. The strict attestation contract avoids repeating
+large answers inside the combined source ingress envelope.
+
 `fusion-compute` runs as an isolated package with `panel` or `judge` role. It
 requests model access through its declared host sampling route; the worker has
 no provider network or injected host credentials. The host persists the exact

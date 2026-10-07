@@ -256,9 +256,16 @@ let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =
     | Store.Read_failed detail -> detail in
   let member key = function `Assoc fields -> List.assoc_opt key fields | _ -> None in
   let same key expected json = member key json = Some (`String expected) in
+  let response_attestation fields =
+    `Assoc (List.map (function
+      | "content", `Assoc content -> "content", `Assoc (List.map (function
+          | ("text" | "data" as key), `String bytes ->
+              key ^ "_sha256", `String (Store.digest bytes)
+          | field -> field) content)
+      | field -> field) (List.remove_assoc "_meta" fields)) in
   let package_terminal = function
     | `Assoc fields -> `Assoc (List.map (function
-        | "response",`Assoc response -> "response",`Assoc (List.remove_assoc "_meta" response)
+        | "response",`Assoc response -> "response_attestation", response_attestation response
         | field -> field) (List.remove_assoc "error" fields))
     | json -> json in
   (* An outcome is both row evidence and a request's terminal. Resolve each

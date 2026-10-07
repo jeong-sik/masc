@@ -1,4 +1,5 @@
 """Shared consistency contract for a retained Fusion sampling result."""
+import hashlib
 import json
 
 from protocol import InvalidInput, boolean, decode_json, evidence, object_value, optional_string, string
@@ -62,6 +63,21 @@ def terminal_error(error, computation, refs):
     return terminal
 
 
+def response_attestation(response):
+    attested = dict(response)
+    content = dict(object_value(attested.get("content"), "sampling response content"))
+    if "text_sha256" in content or "data_sha256" in content:
+        raise InvalidInput("A raw sampling response cannot claim content digests")
+    for key in ("text", "data"):
+        if key in content:
+            value = content.pop(key)
+            if not isinstance(value, str):
+                raise InvalidInput("Sampling content must contain UTF-8 strings")
+            content[key + "_sha256"] = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    attested["content"] = content
+    return attested
+
+
 def validate_host_receipt(computation, fields, refs, row_evidence, receipts):
     retained = evidence(row_evidence)
     if any(ref not in retained or ref["uri"] != "lane-evidence:" + ref["sha256"]
@@ -81,7 +97,7 @@ def validate_host_receipt(computation, fields, refs, row_evidence, receipts):
     terminal = object_value(terminal, "host sampling terminal")
     response = fields.get("sampling_response")
     if response is not None:
-        actual = object_value(terminal.get("response"), "host sampling response")
+        actual = object_value(terminal.get("response_attestation"), "host sampling response attestation")
         if terminal.get("status") == "invalid_response" and computation["status"] == "invalid_response":
             failure = terminal_error(fields.get("sampling_error"), computation, refs)
             if failure.get("status") != terminal.get("status"):
@@ -96,14 +112,7 @@ def validate_host_receipt(computation, fields, refs, row_evidence, receipts):
             supplied["_meta"] = metadata
         else:
             supplied.pop("_meta", None)
-        expected = dict(actual)
-        expected_metadata = dict(expected["_meta"]) if isinstance(expected.get("_meta"), dict) else {}
-        expected_metadata.pop("masc.lane_sampling", None)
-        if expected_metadata:
-            expected["_meta"] = expected_metadata
-        else:
-            expected.pop("_meta", None)
-        if supplied != expected:
+        if response_attestation(supplied) != actual:
             raise InvalidInput("Computation differs from the host-retained sampling response")
     else:
         if terminal.get("status") != computation["status"]:

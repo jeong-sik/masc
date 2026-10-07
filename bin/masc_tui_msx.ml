@@ -26,7 +26,10 @@ type retained_frame = {
   pixels : Masc_tui_interactive.frame option;
 }
 let retained : retained_frame option ref = ref None
-let invalidate () = retained := None
+let rendered_menu_selection : (int * int * Masc_tui_types.msx_menu_entry) option ref = ref None
+let invalidate () =
+  retained := None;
+  rendered_menu_selection := None
 let image_may_exist = ref false
 let image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Msx_screen
 let placement_id = 1
@@ -560,6 +563,7 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
     | Some _ | None -> 0
   in
   let entry_rows = body_rows - status_rows in
+  let displayed_selection = ref None in
   (match entries, entry_rows with
    | _, 0 -> ()
    | [], _ ->
@@ -573,6 +577,7 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
        let visible = List.take entry_rows (List.drop start entries) in
        List.iter
          (fun entry ->
+           if is_selected state entry then displayed_selection := Some entry;
            let label = entry_label state entry in
            let text =
              if is_selected state entry then
@@ -586,9 +591,10 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   while !row < rows do line "" done;
   if rows > 1 then
     line ("\027[2m"
-      ^ fit_line cols (" " ^ menu_hints state.msx_menu_mode ~has_entries:(entries <> []))
+      ^ fit_line cols (" " ^ menu_hints state.msx_menu_mode ~has_entries:(Option.is_some !displayed_selection))
       ^ "\027[0m");
   write_batch ~write (Buffer.contents buf);
+  rendered_menu_selection := Option.map (fun entry -> rows, cols, entry) !displayed_selection;
   image_may_exist := false
 
 let open_menu ~(write : string -> unit) ?(mode = Masc_tui_types.Boot_game) (state : Masc_tui_types.state) =
@@ -601,7 +607,7 @@ let open_menu ~(write : string -> unit) ?(mode = Masc_tui_types.Boot_game) (stat
 let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
     menu_action =
   match key with
-  | "esc" -> Closed
+  | "esc" -> invalidate (); Closed
   | "up" | "k" ->
       move_selection state (-1);
       render_menu ~write state;
@@ -611,11 +617,16 @@ let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
       render_menu ~write state;
       Stay
   | "\r" | "\n" | "enter" | "return" | " " | "space" -> (
-      (* Enter picks the highlighted row only while it is on screen. *)
-      match state.msx_menu_selected with
-      | Some selected when List.exists (same_entry selected) (menu_entries state) ->
+      (* Only a successfully painted choice in the current viewport can act.
+         A tiny/error-only frame or failed write grants no hidden admission. *)
+      match !rendered_menu_selection, state.msx_menu_selected with
+      | Some (rows, cols, displayed), Some selected
+        when state.msx_open && state.msx_menu_open
+          && viewport_size () = (rows, cols)
+          && same_entry displayed selected
+          && List.exists (same_entry selected) (menu_entries state) ->
           action_of_entry selected
-      | Some _ | None ->
+      | (Some _ | None), (Some _ | None) ->
           render_menu ~write state;
           Stay)
   | _ ->

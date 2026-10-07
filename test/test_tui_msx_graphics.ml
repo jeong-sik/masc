@@ -393,6 +393,21 @@ let test_the_menu_does_not_scroll_its_title_off () =
      in
      seek 0)
 
+let test_failed_menu_output_cannot_authorize_a_choice () =
+  List.iter (fun mode ->
+    let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+    state.msx_carts <- ["game.rom"; "disk.dsk"];
+    Msx.open_menu ~write:ignore ~mode state;
+    (try Msx.render_menu ~write:(fun _ -> raise Exit) state with Exit -> ());
+    check bool "an unsuccessful menu frame cannot load or swap a hidden choice" true
+      (Msx.menu_consume ~write:ignore state "enter" = Msx.Stay);
+    check bool "the successful repaint restores the visible choice" true
+      (match mode, Msx.menu_consume ~write:ignore state "enter" with
+       | Types.Boot_game, Msx.Load "game.rom"
+       | Types.Change_disk, Msx.Swap_disk "disk.dsk" -> true
+       | _ -> false))
+    [Types.Boot_game; Types.Change_disk]
+
 (* ---------- activity sidebar ---------- *)
 
 let live_picture ?(w = 256) ?(h = 192) () : Masc_tui_machine_live.picture =
@@ -503,6 +518,8 @@ let () =
     ; ( "menu"
       , [ test_case "the menu does not scroll its title off" `Quick
             test_the_menu_does_not_scroll_its_title_off
+        ; test_case "failed output cannot authorize a hidden choice" `Quick
+            test_failed_menu_output_cannot_authorize_a_choice
         ] )
     ; ( "empty"
       , [ test_case "a connected server with no machine says so" `Quick

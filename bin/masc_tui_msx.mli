@@ -133,5 +133,7 @@ val menu_consume :
   write:(string -> unit) -> Masc_tui_types.state -> string -> menu_action
 (** One key while the menu is up. Up/down (or [k]/[j]) move the highlight and
     repaint, returning [Stay]; enter/space pick the highlighted row ([Watch] or
-    [Load name]); [esc] returns [Closed]. It never flips the open flags, so the
+    [Load name]) only after it was successfully drawn in the current viewport.
+    Hidden rows, a resized viewport and failed output require a repaint first.
+    [esc] returns [Closed]. It never flips the open flags, so the
     caller decides what a choice or a close does. *)

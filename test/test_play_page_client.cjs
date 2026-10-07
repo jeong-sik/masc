@@ -89,6 +89,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token',
   const settle = () => new Promise(resolve => setImmediate(resolve));
   return {
     get, padButton, rendered, requests, settle,
+    get timerCount() { return timers.length; },
     get reloads() { return reloads; },
     get hash() { return location.hash; },
     navigateFragment(hash) { context.location.hash = hash; windowHandlers.get('hashchange')?.(); },
@@ -139,8 +140,7 @@ test('a failed seat read retries without a new move and restores playable contro
   });
   await page.settle();
   assert.match(page.get('status').textContent, /자리/);
-  await page.poll();
-  assert.equal(seatReads, 2);
+  assert.equal(seatReads, 2, 'the initial activity immediately refreshes the seat');
   assert.equal(page.padButton.disabled, true);
   await page.poll();
   assert.equal(seatReads, 3, 'retry the same activity after the seat recovers');
@@ -1013,8 +1013,6 @@ test('explicit reconnect retries transient refusals while the machine stays idle
     }
   });
   await page.settle();
-  assert.equal(attempts, 1);
-  await page.poll();
   assert.equal(attempts, 2);
   await page.poll();
   assert.equal(attempts, 3);
@@ -1038,6 +1036,82 @@ test('a plain-text 413 settles the rejected input without losing its draft', asy
   assert.match(page.get('status').textContent, /413/);
   await page.get('leave').handlers.click();
   assert.equal(storage.size, 0, 'a refused input does not block departure');
+});
+
+test('a pre-dispatch 429 preserves the draft and allows a later retry', async () => {
+  const storage = new Map();
+  let attempts = 0;
+  const page = fixture(request => request.url === '/api/v1/dos/type'
+    ? ++attempts === 1 ? response({ error:'Too Many Requests', message:'Try later' }, 429)
+      : response({ ok:true, data:{ keys_pressed:3 } })
+    : normalReply(request), { storage });
+  await page.settle();
+  page.get('text').value = '123';
+  page.get('send-text').handlers.click();
+  await page.settle();
+  assert.equal(storage.has('masc.play.pending'), false);
+  assert.equal(page.get('text').value, '123');
+  assert.equal(page.padButton.disabled, false);
+  page.get('send-text').handlers.click();
+  await page.settle();
+  assert.equal(page.get('text').value, '');
+  assert.equal(attempts, 2);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.size, 0);
+});
+
+for (const status of [401, 403]) {
+  test(`storage-blocked observation ends on terminal authentication ${status}`, async () => {
+    const storage = new Map([['masc.play.invite', 'unread-identity']]);
+    storage.get = () => { throw new Error('storage blocked'); };
+    const page = fixture(() => response({}, status), { storage });
+    await page.settle();
+    assert.match(page.get('turn').textContent, /초대가 끝났거나 회수됐어요/);
+    assert.equal(page.get('leave').disabled, true);
+    assert.equal(page.requests.length, 1);
+    assert.equal(page.timerCount, 0);
+    assert.equal(Map.prototype.get.call(storage, 'masc.play.invite'), 'unread-identity');
+  });
+}
+
+test('disconnect does not wait for an initial seat read that never answers', async () => {
+  const storage = new Map();
+  let finishSeat;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? new Promise(resolve => { finishSeat = () => resolve(response({ ...seat, connected:false })); })
+    : normalReply(request), { storage });
+  await page.settle();
+  let completed = false;
+  page.get('leave').handlers.click().then(() => { completed = true; });
+  await page.settle();
+  assert.equal(completed, true);
+  assert.equal(storage.size, 0);
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:false }]);
+  finishSeat();
+  await page.settle();
+  assert.equal(page.requests.filter(request => request.method === 'POST').length, 1, 'late seat cannot reconnect');
+});
+
+test('disconnect drains an already admitted reconnect before departing', async () => {
+  const storage = new Map();
+  let finishReconnect;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected:false }) : normalReply(request), { storage,
+    sessionReply: ({ body }) => body.connected
+      ? new Promise(resolve => { finishReconnect = () => resolve(response({ ok:true, connected:true })); })
+      : response({ ok:true, connected:false }) });
+  await page.settle();
+  let completed = false;
+  page.get('leave').handlers.click().then(() => { completed = true; });
+  await page.settle();
+  assert.equal(completed, false);
+  assert.equal(page.requests.filter(request => request.method === 'POST').length, 1);
+  finishReconnect();
+  await page.settle();
+  assert.equal(completed, true);
+  assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body),
+    [{ connected:true }, { connected:false }]);
+  assert.equal(storage.size, 0);
 });
 
 test('an old initial seat response cannot reconnect after a newer document disconnects', async () => {
@@ -1118,7 +1192,7 @@ for (const count of [undefined, -1, 4, 0.5]) {
 test('a reopened departed invitation reconnects after a transient initial seat failure', async () => {
   let reads = 0, connected = false;
   const page = fixture(request => request.url === '/api/v1/play/seat'
-    ? ++reads === 1 ? response({}, 503) : response({ ...seat, connected, controller:null }) : normalReply(request), {
+    ? ++reads <= 2 ? response({}, 503) : response({ ...seat, connected, controller:null }) : normalReply(request), {
     sessionReply: ({ body }) => { connected = body.connected; return response({ ok:true, connected }); }
   });
   await page.settle();
@@ -1142,3 +1216,43 @@ for (const [count, remaining] of [[1, '가x'], [3, 'x']]) {
     if (count === 1) assert.match(page.get('status').textContent, /글자 중간/);
   });
 }
+
+
+test('disconnect drains the admitted write without waiting for its stalled seat projection', async () => {
+  let afterWrite = false, finishSeat;
+  const storage = new Map();
+  const page = fixture(request => {
+    if (request.method === 'POST') { afterWrite = true; return response({ok:true}); }
+    if (request.url === '/api/v1/play/seat' && afterWrite)
+      return new Promise(resolve => { finishSeat = () => resolve(response(seat)); });
+    return normalReply(request);
+  }, { storage });
+  await page.settle();
+  page.padButton.handlers.click();
+  await page.settle();
+  assert.ok(finishSeat, 'the post-write projection is held');
+  let departed = false;
+  page.get('leave').handlers.click().then(() => { departed = true; });
+  await page.settle();
+  assert.equal(departed, true, 'known mutation outcome allows departure before the read returns');
+  assert.equal(storage.size, 0);
+  finishSeat();
+  await page.settle();
+  assert.equal(page.padButton.disabled, true);
+});
+
+test('a new handoff refreshes authority before the unchanged-activity interval', async () => {
+  let changed = false;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') return response({...seat,controller:changed ? 'operator' : 'minsu'});
+    if (request.url === '/api/v1/play/pad') return response(layout);
+    return response({...frame,activity:changed ? [{at:2,who:'minsu',action:'pass operator'}] : activity});
+  });
+  await page.settle();
+  const reads = page.requests.filter(r => r.url === '/api/v1/play/seat').length;
+  changed = true;
+  await page.poll(300);
+  assert.equal(page.requests.filter(r => r.url === '/api/v1/play/seat').length, reads + 1);
+  assert.equal(page.padButton.disabled, true);
+  assert.match(page.get('turn').textContent, /operator/);
+});

@@ -326,6 +326,28 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
           "Antigravity Keeper stream callback raised (error=%s)"
           (Printexc.to_string exn)
     in
+    let text_indexes = Hashtbl.create 8 in
+    let closed_content = Hashtbl.create 8 in
+    let first_text = ref true in
+    let last_text_index = ref None in
+    let fresh_text_index () =
+      if !first_text then (first_text := false; 0)
+      else let index = !next_tool_index in incr next_tool_index; index
+    in
+    let text_index step_index =
+      match Hashtbl.find_opt text_indexes step_index with
+      | Some index -> index
+      | None ->
+          let index = fresh_text_index () in
+          Hashtbl.add text_indexes step_index index;
+          index
+    in
+    let stop_content index =
+      if not (Hashtbl.mem closed_content index) then begin
+        Hashtbl.add closed_content index ();
+        emit (Agent_core.Types.ContentBlockStop {index})
+      end
+    in
     let mcp_blocks = ref (Held []) in
     let emit_mcp_block event =
       match !mcp_blocks with
@@ -359,9 +381,11 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                  });
             release_mcp_blocks ()
           | Runtime_antigravity.Text_delta { step_index; text } ->
+            let index = text_index step_index in
+            last_text_index := Some index;
             emit
               (Agent_core.Types.ContentBlockDelta
-                 { index = 0
+                 { index
                  ; delta =
                      Agent_core.Types.TextDelta
                        (Keeper_official_client_text_stream.forward
@@ -369,6 +393,10 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                           ~message:step_index
                           text)
                  })
+          | Runtime_antigravity.Text_completed {step_index; ending=_} ->
+            (* No fallback to the latest or anonymous block: only the named
+               response that the runtime actually ended may close. *)
+            Option.iter stop_content (Hashtbl.find_opt text_indexes (Some step_index))
           | Runtime_antigravity.Native_tool_started observation ->
             Option.iter
               (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
@@ -432,9 +460,14 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                    })
               on_usage_report
           | Runtime_antigravity.Turn_finished { text } ->
+            let continuation = Keeper_official_client_text_stream.remainder text_stream ~final_text:text in
             Option.iter (fun remainder ->
+              let index = match continuation, !last_text_index with
+                | Some _, Some index when not (Hashtbl.mem closed_content index) -> index
+                | (Some _ | None), (Some _ | None) -> fresh_text_index () in
               emit (Agent_core.Types.ContentBlockDelta
-                {index=0; delta=Agent_core.Types.TextDelta remainder}))
+                {index; delta=Agent_core.Types.TextDelta remainder});
+              stop_content index)
               (Keeper_official_client_text_stream.finish_response text_stream ~final_text:text);
             emit
               (Agent_core.Types.MessageDelta

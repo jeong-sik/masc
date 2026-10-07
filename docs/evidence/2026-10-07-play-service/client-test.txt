@@ -1,0 +1,45 @@
+✔ a refused changed program displays its explanation after refreshing the seat (5.647458ms)
+✔ a refused denied handoff displays its explanation after refreshing the seat (1.414ms)
+✔ a failed seat read retries without a new move and restores playable controls (1.719625ms)
+✔ a frame rejected for wrong byte count is fetched again before acknowledging its mark (1.838208ms)
+✔ a frame rejected for invalid base64 is fetched again before acknowledging its mark (0.802959ms)
+✔ a failed seat request after an input retries while the activity feed is unchanged (0.922458ms)
+✔ eject clears the last picture and the game pad (0.768333ms)
+✔ no_machine hides the old pad while seat is unavailable and a loaded game restores controls (0.970209ms)
+✔ a malformed frame does not prevent new activity from refreshing the controller (0.938459ms)
+✔ choosing a handoff discovers an invite added while the machine stays idle (1.157625ms)
+✔ revoked access keeps controls disabled and stops sending moves (1.005125ms)
+✔ an older seat response cannot overwrite a newer poll result (0.949042ms)
+✔ reopening a focused handoff selector refreshes new invites once per opening (0.98675ms)
+✔ an unreadable controller disables moves and recovers without new machine activity (1.991ms)
+✔ a HTTP failure after a valid seat prevents input until ownership is readable again (0.990542ms)
+✔ a malformed seat after a valid seat prevents input until ownership is readable again (1.704833ms)
+✔ a missing controller departure authority after a valid seat prevents input until ownership is readable again (0.995791ms)
+✔ a invalid JSON after a valid seat prevents input until ownership is readable again (1.020791ms)
+✔ a transport failure after a valid seat prevents input until ownership is readable again (0.891334ms)
+✔ reloading reconnects the same tab and disconnect clears its credential (1.7545ms)
+✔ a revoked invitation clears the tab credential and a new link replaces it (1.195458ms)
+✔ another controller permits observation but no keyboard, pad or handoff mutation (3.250833ms)
+✔ text remains editable after a refused send outcome (0.833167ms)
+✔ text remains editable after a unknown send outcome (0.670875ms)
+✔ a pending text submission is sent once while a changed draft is retained (0.778417ms)
+✔ a departed holder becomes recoverable without any machine activity (1.029375ms)
+✔ disconnect releases its own controller before forgetting the credential (0.760375ms)
+✔ a spectator disconnects without releasing another participant (0.660084ms)
+✔ a refused disconnect retains its credential across reload for recovery (1.255458ms)
+✔ a unknown disconnect retains its credential across reload for recovery (1.164625ms)
+✔ disconnect keeps the credential when its current seat cannot be read (1.230791ms)
+✔ disconnect drains an admitted move that acquires control and suppresses queued input (1.008458ms)
+✔ disconnect uses its owned-seat receipt when a stale live response says no machine (0.870875ms)
+✔ reopening the invitation in a disconnected tab reloads authentication (1.179791ms)
+✔ a different invitation requires disconnecting the current holder first (1.052292ms)
+✔ an uncertain release cannot be bypassed by opening a different invitation (0.863584ms)
+✔ opening the same invitation while connected reloads without changing its identity (0.599208ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 138.913584

@@ -13,12 +13,12 @@ description = "Optional post title"
 [[params]]
 name = "body"
 type = "string"
-description = "Post body text (preferred alias for `content`)"
+description = "Post body text (preferred alias for `content`) Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[params]]
 name = "content"
 type = "string"
-description = "Post body text (alternative to `body`)"
+description = "Post body text (alternative to `body`) Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[params]]
 name = "author"
@@ -150,7 +150,7 @@ when present; omit for short untitled posts."""
 name = "content"
 type = "string"
 required = true
-description = "Post body text"
+description = "Post body text Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[keeper_projection.params]]
 name = "hearth"

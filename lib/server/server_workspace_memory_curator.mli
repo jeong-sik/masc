@@ -14,7 +14,10 @@ val request : base_path:string -> refresh
 
 val output_schema : Yojson.Safe.t
 
-type execution_failure = Input_too_large of string | Execution_failed of string
+type execution_failure =
+  | Input_too_large of string
+  | Output_too_large of string
+  | Execution_failed of string
 
 module For_testing : sig
   (** The production configuration predicate, with provider execution and

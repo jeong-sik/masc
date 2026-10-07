@@ -11,12 +11,25 @@ let ( let* ) = Result.bind
 
 let output_schema = Decision.output_schema
 
-type execution_failure = Input_too_large of string | Execution_failed of string
+type execution_failure =
+  | Input_too_large of string
+  | Output_too_large of string
+  | Execution_failed of string
 
 let execution_failure_detail = function
-  | Input_too_large detail | Execution_failed detail -> detail
+  | Input_too_large detail | Output_too_large detail | Execution_failed detail -> detail
 
-let size_rejection = function
+let execution_failure_fields failure =
+  let input_too_large, output_too_large = match failure with
+    | Input_too_large _ -> true, false
+    | Output_too_large _ -> false, true
+    | Execution_failed _ -> false, false in
+  ["error", `String (execution_failure_detail failure);
+   "input_too_large", `Bool input_too_large;
+   "output_too_large", `Bool output_too_large]
+
+let size_rejection (disposition : Exact.candidate_rejection_disposition) =
+  match disposition with
   | Exact.Input_capacity (Exact.Context_window_exceeded _
       | Exact.Token_capacity_rejected (Exact.Capacity_input_rejected _)) -> true
   | Exact.Runtime_slot_unavailable | Exact.Runtime_contract_rejected
@@ -31,7 +44,7 @@ let size_execution_failure (error : Exact.execution_error) =
   | Exact.Provider_response_refused
       { refusal = (Exact.Context_overflow | Exact.Request_body_refused | Exact.Input_capacity); _ } -> true
   | Exact.Provider_response_refused _ | Exact.Completion_failed _
-  | Exact.Response_body_deadline_exceeded | Exact.Incomplete_output
+  | Exact.Response_body_deadline_exceeded | Exact.Incomplete_output | Exact.Output_limit_reached
   | Exact.Missing_output | Exact.Ambiguous_output _ | Exact.Unexpected_output_content
   | Exact.Invalid_json_output -> false
 
@@ -44,6 +57,26 @@ let candidate_failure_detail = function
   | Exact.Flow_candidate_rejected rejection -> Exact.candidate_rejection_reason rejection
   | Exact.Flow_candidate_execution_failed { cause; _ } ->
     Exact.execution_error_cause_to_string cause.cause
+
+let output_limit_failure (error : Exact.execution_error) =
+  match error.cause with
+  | Exact.Output_limit_reached -> true
+  | Exact.Provider_response_refused _ | Exact.Completion_failed _
+  | Exact.Response_body_deadline_exceeded | Exact.Incomplete_output
+  | Exact.Missing_output | Exact.Ambiguous_output _ | Exact.Unexpected_output_content
+  | Exact.Invalid_json_output -> false
+
+let output_limit_candidate_failure = function
+  | Exact.Flow_candidate_rejected _ -> false
+  | Exact.Flow_candidate_execution_failed { cause; _ } -> output_limit_failure cause
+
+let output_limit_terminal_failure = function
+  | Exact.Flow_exact_execution_failed { cause; _ } -> output_limit_failure cause
+  | Exact.Flow_candidates_exhausted _ | Exact.Flow_attempt_already_started _
+  | Exact.Flow_attempt_start_failed _ | Exact.Flow_measurement_start_failed _
+  | Exact.Flow_before_measurement_dispatch_callback_failed _
+  | Exact.Flow_measurement_terminal_callback_failed _ | Exact.Flow_before_dispatch_callback_failed _
+  | Exact.Flow_before_advance_callback_failed _ -> false
 
 let size_terminal_failure = function
   | Exact.Flow_candidates_exhausted { rejection; _ } ->
@@ -110,6 +143,7 @@ let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requ
       | Ok _ -> Exact.Accept raw
       | Error detail -> Exact.Reject_and_advance detail in
     let size_refusals = ref [] in
+    let output_refusals = ref [] in
     let flow = Exact.execute_flow_once ~net ~clock
        ~before_measurement_dispatch:(fun _ -> Ok ())
        ~on_measurement_terminal:(fun _ -> Ok ())
@@ -117,6 +151,8 @@ let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requ
        ~before_advance:(fun ~failed ~next:_ ->
          if size_candidate_failure failed then
            size_refusals := candidate_failure_detail failed :: !size_refusals;
+         if output_limit_candidate_failure failed then
+           output_refusals := candidate_failure_detail failed :: !output_refusals;
          Ok ()) ~validate attempt in
     Runtime_exact_lane_backpressure.observe ~resolved flow;
     (match flow with
@@ -124,16 +160,22 @@ let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requ
        let candidate = Exact.flow_success_candidate success.transport_success in
        Ok (success.accepted, candidate.visit.identity.candidate_id)
      | Error (Exact.Flow_execution_terminal { cause; _ }) ->
-       let detail = String.concat "; " (List.rev !size_refusals @ [flow_failure cause]) in
+       let detail = String.concat "; "
+         (List.rev !size_refusals @ List.rev !output_refusals @ [flow_failure cause]) in
        let failure = match Exact.flow_execution_terminal_kind cause with
          | Exact.Advanceable_candidates_exhausted when !size_refusals <> [] || size_terminal_failure cause ->
            Input_too_large detail
+         | Exact.Advanceable_candidates_exhausted when !output_refusals <> [] || output_limit_terminal_failure cause ->
+           Output_too_large detail
          | Exact.Advanceable_candidates_exhausted | Exact.Non_advanceable_terminal -> Execution_failed detail in
        Error (Http_failed failure)
      | Error (Exact.Flow_semantic_candidates_exhausted { rejections; _ }) ->
-       let detail = String.concat "; " (List.rev !size_refusals @
+       let detail = String.concat "; " (List.rev !size_refusals @ List.rev !output_refusals @
          List.map (fun rejection -> rejection.Exact.rejection) (rejections.first :: rejections.rest)) in
-       Error (Http_failed (if !size_refusals <> [] then Input_too_large detail else Execution_failed detail)))
+       let failure = if !size_refusals <> [] then Input_too_large detail
+         else if !output_refusals <> [] then Output_too_large detail
+         else Execution_failed detail in
+       Error (Http_failed failure))
   | _ -> Error (Http_failed (Execution_failed "workspace curator execution context unavailable"))
 
 (* Exact owns provider admission and size evidence. Curator does not convert
@@ -271,18 +313,18 @@ let classify ~base_path ~prepare =
          | Ok () -> ()
          | Error error -> Log.Server.error "workspace curator completion %s: %s"
              run_id (Runs.completion_error_to_string error) in
-       let fail ?(input_too_large = false) detail =
+       let fail failure =
+         let detail = execution_failure_detail failure in
          complete (Runs.Failed { code = "workspace_curator_failed"; detail })
-           (`Assoc ["error", `String detail; "input_too_large", `Bool input_too_large;
-                    "semantic_verification", `String "not_performed"]);
+           (`Assoc (execution_failure_fields failure @ ["semantic_verification", `String "not_performed"]));
          Error (Curation_failed detail) in
        let outcome = try
          match execution.execute ~rendered_prompt:batch.rendered_prompt
              ~selected:batch.selected ~ledger:change.ledger with
-         | Error (Input_too_large detail) ->
-           ignore (fail ~input_too_large:true detail);
-           `Refused detail
-         | Error (Execution_failed detail) -> `Done (fail detail)
+         | Error ((Input_too_large _ | Output_too_large _) as failure) ->
+           ignore (fail failure);
+           `Refused (execution_failure_detail failure)
+         | Error (Execution_failed _ as failure) -> `Done (fail failure)
          | Ok (raw, slot) ->
          let result =
            let* assignments = Decision.decode ~selected:batch.selected raw in
@@ -291,7 +333,7 @@ let classify ~base_path ~prepare =
            let* () = Domain_pool_ref.submit_io_or_inline (fun () -> Ledger.save ~base_path updated) in
            Ok (raw, slot, updated) in
          `Done (match result with
-          | Error detail -> fail detail
+          | Error detail -> fail (Execution_failed detail)
           | Ok (raw, slot, updated) ->
             complete ~selected_slot:slot Runs.Succeeded
               (`Assoc [ "decision", raw
@@ -303,7 +345,7 @@ let classify ~base_path ~prepare =
        | Eio.Cancel.Cancelled _ as error ->
          Eio.Cancel.protect (fun () -> complete Runs.Cancelled (`Assoc ["cancelled", `Bool true]));
          raise error
-       | exn -> `Done (fail (Printexc.to_string exn))
+       | exn -> `Done (fail (Execution_failed (Printexc.to_string exn)))
        in
        match outcome with
        | `Done result -> result
@@ -369,16 +411,17 @@ let refresh_briefing ~base_path ~prepare =
         | Ok () -> ()
         | Error error -> Log.Server.error "workspace briefing completion %s: %s"
             run_id (Runs.completion_error_to_string error) in
-      let fail ?(input_too_large = false) detail =
+      let fail failure =
+        let detail = execution_failure_detail failure in
         complete (Runs.Failed { code = "workspace_curator_briefing_failed"; detail })
-          (`Assoc ["error", `String detail; "input_too_large", `Bool input_too_large]);
+          (`Assoc (execution_failure_fields failure));
         Error detail in
       let outcome = try
         match execution.summarize ~batch with
         | Error (Input_too_large detail) ->
-          ignore (fail ~input_too_large:true detail);
+          ignore (fail (Input_too_large detail));
           `Refused detail
-        | Error (Execution_failed detail) -> `Done (fail detail)
+        | Error ((Execution_failed _ | Output_too_large _) as failure) -> `Done (fail failure)
         | Ok (raw, slot) ->
         let result =
           let* text = Briefing.decode_output raw in
@@ -386,7 +429,7 @@ let refresh_briefing ~base_path ~prepare =
           let* () = Domain_pool_ref.submit_io_or_inline (fun () -> Briefing.save ~directory updated) in
           Ok (text, slot, updated) in
         `Done (match result with
-         | Error detail -> fail detail
+         | Error detail -> fail (Execution_failed detail)
          | Ok (text, slot, updated) ->
            let more = Briefing.needs_refresh ~sources ~contract updated in
            complete ~selected_slot:slot Runs.Succeeded
@@ -400,7 +443,7 @@ let refresh_briefing ~base_path ~prepare =
       | Eio.Cancel.Cancelled _ as error ->
         Eio.Cancel.protect (fun () -> complete Runs.Cancelled (`Assoc ["cancelled", `Bool true]));
         raise error
-      | exn -> `Done (fail (Printexc.to_string exn))
+      | exn -> `Done (fail (Execution_failed (Printexc.to_string exn)))
       in
       match outcome with
       | `Done result -> result

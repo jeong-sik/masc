@@ -15,6 +15,21 @@ let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
 let field name json = Yojson.Safe.Util.member name json
 let string = Yojson.Safe.Util.to_string
 
+type size_refusal = Input_refusal | Output_refusal
+
+let size_failure kind detail = match kind with
+  | Input_refusal -> Worker.Input_too_large detail
+  | Output_refusal -> Worker.Output_too_large detail
+
+let check_refusal_output kind (run : Runs.run) =
+  match Runs.get (Runs.global ()) ~run_id:run.run_id with
+  | Some { status = Runs.Completed { output; _ }; _ } ->
+    Alcotest.check json "input refusal is distinguished from output refusal"
+      (`Bool (kind = Input_refusal)) (field "input_too_large" output);
+    Alcotest.check json "output exhaustion has its own recorded cause"
+      (`Bool (kind = Output_refusal)) (field "output_too_large" output)
+  | _ -> Alcotest.fail "refused run has no completed output detail"
+
 let commit_facts ?(keeper_id = "writer") base_path claims =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let expected_revision = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
@@ -162,7 +177,7 @@ let test_missing_keeper_directory_preserves_existing_ledger () = with_base (fun 
      | _ -> Alcotest.fail "failed inventory published a briefing from unvalidated inventory");
     Worker.For_testing.stop ~base_path))
 
-let test_initial_inventory_drains_after_provider_size_refusal () = with_base (fun base_path clock ->
+let test_initial_inventory_drains_after_provider_size_refusal refusal = with_base (fun base_path clock ->
   List.iter (fun index ->
     commit ~keeper_id:("keeper-" ^ string_of_int index) base_path
       ("Distinct initial observation number " ^ string_of_int index))
@@ -176,7 +191,7 @@ let test_initial_inventory_drains_after_provider_size_refusal () = with_base (fu
       Ok (answer selected, "test.slot")
     | _ ->
       incr refused;
-      Error (Worker.Input_too_large "fixture provider accepts one fact per request") in
+      Error (size_failure refusal "fixture provider accepts one fact per request") in
   Eio.Switch.run (fun sw ->
     Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
     await_idle ~clock ~base_path;
@@ -201,6 +216,7 @@ let test_initial_inventory_drains_after_provider_size_refusal () = with_base (fu
          | _ -> false) in
     Alcotest.(check int) "each rejected classification attempt remains observable"
       !refused (List.length failures);
+    List.iter (check_refusal_output refusal) failures;
     Worker.For_testing.stop ~base_path))
 
 let accept_registry result =
@@ -814,7 +830,8 @@ let test_in_flight_addition_waits_for_fixed_briefing_pass () =
         let result = fixture_summarize ~batch in
         (match result with
          | Ok (output, _) -> first_summary := Some (field "briefing" output |> string)
-         | Error (Worker.Execution_failed detail | Worker.Input_too_large detail) -> Alcotest.fail detail);
+         | Error (Worker.Execution_failed detail | Worker.Input_too_large detail
+                 | Worker.Output_too_large detail) -> Alcotest.fail detail);
         result)
       else (
         let previous = match !first_summary with
@@ -832,15 +849,16 @@ let test_in_flight_addition_waits_for_fixed_briefing_pass () =
       check_delivery ~base_path (current_briefing base_path).text;
       Worker.For_testing.stop ~base_path))
 
-let failed_run_count ~base_path ~code =
+let failed_runs ~base_path ~code =
   let canonical = Unix.realpath base_path in
-  Runs.list_runs (Runs.global ()) |> List.fold_left (fun count (run : Runs.run) ->
-    if String.equal run.actor canonical && run.lane = Runs.Workspace_curator then
-      match run.status with
+  Runs.list_runs (Runs.global ()) |> List.filter (fun (run : Runs.run) ->
+    String.equal run.actor canonical && run.lane = Runs.Workspace_curator
+    && match run.status with
       | Runs.Completed { outcome = Runs.Failed failure; _ }
-        when String.equal failure.code code -> count + 1
-      | _ -> count
-    else count) 0
+        when String.equal failure.code code -> true
+      | _ -> false)
+
+let failed_run_count ~base_path ~code = List.length (failed_runs ~base_path ~code)
 
 let test_summary_narrows_only_after_provider_size_refusal () =
   with_base (fun base_path clock ->
@@ -858,7 +876,8 @@ let test_summary_narrows_only_after_provider_size_refusal () =
         let result = fixture_summarize ~batch in
         (match result with
          | Ok (output, _) -> successful := (field "briefing" output |> string) :: !successful
-         | Error (Worker.Input_too_large detail | Worker.Execution_failed detail) -> Alcotest.fail detail);
+         | Error (Worker.Input_too_large detail | Worker.Execution_failed detail
+                 | Worker.Output_too_large detail) -> Alcotest.fail detail);
         result in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
@@ -910,7 +929,7 @@ let test_non_size_failure_does_not_narrow_or_spin phase =
         (Worker.For_testing.is_idle ~base_path);
       Worker.For_testing.stop ~base_path))
 
-let test_single_source_refusal_keeps_previous_briefing_and_parks () =
+let test_size_refusal_keeps_previous_briefing_and_parks refusal =
   with_base (fun base_path clock ->
     commit base_path "Release still needs owner review";
     let refuse = ref false in
@@ -918,25 +937,30 @@ let test_single_source_refusal_keeps_previous_briefing_and_parks () =
     let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "classify.slot") in
     let summarize ~batch =
       attempts := Briefing.selected_count batch :: !attempts;
-      if !refuse then Error (Worker.Input_too_large "single source exceeds provider input")
+      if !refuse then Error (size_failure refusal "fixture provider refused the summary")
       else fixture_summarize ~batch in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
       await_idle ~clock ~base_path;
       let previous = current_briefing base_path in
       refuse := true;
-      commit ~keeper_id:"reviewer" base_path "A new review record remains to be inspected";
+      let added_claims = match refusal with
+        | Input_refusal -> ["A new review record remains to be inspected"]
+        | Output_refusal -> ["A new review record remains to be inspected";
+                             "The recorded decision still needs owner confirmation"] in
+      commit_facts ~keeper_id:"reviewer" base_path added_claims;
       await_idle ~clock ~base_path;
-      Alcotest.(check (list int)) "one successful initial source and one unsplittable refusal"
-        [1; 1] (List.rev !attempts);
+      Alcotest.(check (list int)) "a single input or any output refusal ends this attempt without narrowing"
+        [1; List.length added_claims] (List.rev !attempts);
       (match observed_briefing base_path with
        | Briefing.Stale retained ->
-         Alcotest.(check string) "unsplittable refusal preserves the published text"
+         Alcotest.(check string) "refusal preserves the published text"
            previous.text retained.text
        | Briefing.Current _ -> Alcotest.fail "refused new source was called summarized"
        | Briefing.Missing -> Alcotest.fail "refusal erased the prior publication");
-      Alcotest.(check int) "single-source refusal is retained once" 1
-        (failed_run_count ~base_path ~code:"workspace_curator_briefing_failed");
+      let failures = failed_runs ~base_path ~code:"workspace_curator_briefing_failed" in
+      Alcotest.(check int) "refusal is retained once" 1 (List.length failures);
+      List.iter (check_refusal_output refusal) failures;
       Alcotest.(check bool) "no empty-batch or immediate retry loop remains" true
         (Worker.For_testing.is_idle ~base_path);
       check_delivery ~base_path previous.text;
@@ -953,7 +977,9 @@ let () = Alcotest.run "workspace curator lane"
     ; Alcotest.test_case "missing Keeper directory preserves ledger" `Quick
         test_missing_keeper_directory_preserves_existing_ledger
     ; Alcotest.test_case "initial inventory drains after provider input refusal" `Quick
-        test_initial_inventory_drains_after_provider_size_refusal
+        (fun () -> test_initial_inventory_drains_after_provider_size_refusal Input_refusal)
+    ; Alcotest.test_case "initial inventory drains after provider output refusal" `Quick
+        (fun () -> test_initial_inventory_drains_after_provider_size_refusal Output_refusal)
     ; Alcotest.test_case "owner switch closes" `Quick test_owner_switch_liveness
     ; Alcotest.test_case "enable publication resumes existing fact" `Quick
         test_enable_publication_resumes_existing_fact
@@ -999,4 +1025,6 @@ let () = Alcotest.run "workspace curator lane"
     ; Alcotest.test_case "ordinary summary failure does not narrow or spin" `Quick
         (fun () -> test_non_size_failure_does_not_narrow_or_spin During_summary)
     ; Alcotest.test_case "single-source refusal preserves the briefing and parks" `Quick
-        test_single_source_refusal_keeps_previous_briefing_and_parks ] ]
+        (fun () -> test_size_refusal_keeps_previous_briefing_and_parks Input_refusal)
+    ; Alcotest.test_case "summary output refusal preserves the briefing without splitting sources" `Quick
+        (fun () -> test_size_refusal_keeps_previous_briefing_and_parks Output_refusal) ] ]

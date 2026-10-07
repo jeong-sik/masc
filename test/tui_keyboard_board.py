@@ -262,7 +262,10 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         # back rather than the width it already has.
         wide = send_and_wait(process, master_fd, output, b"z", b"z:list")
         wide_frame = frame_containing(wide, reference)
-        if b"Board (3)" in wide_frame:
+        if any(
+            b"Board" in row and b"(3)" in row
+            for row in screen_rows(bytes(output)).values()
+        ):
             raise AssertionError(
                 f"Board wide detail kept the list pane visible: {wide_frame!r}"
             )
@@ -273,9 +276,8 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         # Activity pane when the frame draws it (it does at 180 columns). From
         # the detail pane the press puts the pane's cursor on its first row,
         # painted in reverse video over the whole row; the row it lands on is
-        # the pane's "[Recent]" header. Focus is a caret on the pane title,
-        # not a key list (keys live in the footer), so the next press is
-        # observed by the caret coming back to the list.
+        # the pane's "[Recent]" header. The next press returns focus to the
+        # list, observed by the selected Bravo row gaining its reverse band.
         send_and_wait(
             process,
             master_fd,
@@ -283,7 +285,13 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
             b"\x1b[119;5u",
             re.compile(rb"\x1b\[7m(?:\x1b\[[0-9;]*m)*\[Recent\]"),
         )
-        send_and_wait(process, master_fd, output, b"\x1b[119;5u", "\u25b8 Board (3)".encode())
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[119;5u",
+            re.compile(rb"\x1b\[7m[^\x1b\r\n]*Bravo[^\x1b\r\n]*\x1b\[0m"),
+        )
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
         send_and_wait(process, master_fd, output, b"l", b"j/k:body")

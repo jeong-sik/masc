@@ -62,14 +62,6 @@ let list_keys t ~prefix =
     in
     Ok keys)
 
-let set_if_not_exists t key value =
-  with_lock t (fun () ->
-    if Hashtbl.mem t.data key
-    then Ok false
-    else (
-      Hashtbl.replace t.data key value;
-      Ok true))
-
 let clear t =
   with_lock t (fun () ->
     Hashtbl.clear t.data)

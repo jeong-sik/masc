@@ -524,18 +524,15 @@ For prompts, there are only three places to tell apart.
 | One Keeper's role | `instructions` in `.masc/config/keepers/<name>.toml` |
 | The detailed procedure for one tool | That skill |
 
-The shared body is provided in [Korean](../config/prompts/keeper.md) and
-[English](../config/prompts/keeper.en.md). Open `keeper` in the prompt editor
-and choose **한국어 / English** to switch the draft. Check the content, then
-press **오버라이드 적용** (apply override). An unsaved draft has to be saved
-or reset before another language can be chosen. The language choice changes
-only the shared behaviour guidance. The situational slots and tool schemas are
-shared, and it does not force a change to an individual Keeper's role
+The shared body is [config/prompts/keeper.md](../config/prompts/keeper.md).
+Open `keeper` in the prompt editor, edit the draft, then press
+**오버라이드 적용** (apply override). The override changes only the shared
+behaviour guidance; it does not change an individual Keeper's role
 instructions or answer language.
 
 Everything under `###` in `config/prompts/keeper.md` is a slot the runtime
-renders when it is needed. It does not send both language bodies at once, nor
-put all of these slots into every turn. Write the shared behaviour rules once
+renders when it is needed. It does not put all of these slots into every
+turn. Write the shared behaviour rules once
 in the body, and put only the assigned duties in the role instructions.
 
 The installed `.masc/config/prompts/` is the distributed copy. The server
@@ -543,11 +540,9 @@ aligns it with the embedded copy at start, so do not edit it directly. What
 you save in the editor is kept in `.masc/prompt_overrides.json` and applied
 to the prompts composed from then on. A valid override takes precedence over
 the distributed copy even after an upgrade, so to use the new default
-guidance, choose that language again in the editor and save, or clear the
-override. A slot override such as `keeper.identity` is a separate entry too.
+guidance, clear the override. A slot override such as `keeper.identity` is a separate entry too.
 
-There is no need to restore a whole preset just to change the language. Use
-presets to save and restore the roles, prompts, and model assignments of
+Use presets to save and restore the roles, prompts, and model assignments of
 several Keepers together. `constitution.xml` is a development contract, not a
 Keeper's system prompt.
 

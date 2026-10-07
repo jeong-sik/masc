@@ -82,6 +82,39 @@ let usage_delta ?(turns = 1) () : Reducer.usage_delta =
   }
 ;;
 
+(* A turn commit that adds one usage delta and keeps every other runtime
+   field. [meta] is the snapshot the owner holds, so the trace id matches and
+   the identity check passes. *)
+let usage_commit (meta : Keeper_meta_contract.keeper_meta) : Reducer.meta_command =
+  Commit_turn_runtime
+    { expected_trace_id = meta.runtime.trace_id
+    ; usage = usage_delta ()
+    ; counters = { proactive_count = 0; proactive_visible_count = 0 }
+    ; next_keeper_id = meta.keeper_id
+    ; next_trace_id = meta.runtime.trace_id
+    ; proactive_observation = Unchanged
+    ; usage_cursor = Unchanged
+    ; last_usage_resolution = Unchanged
+    ; message_scope_ack_id = Unchanged
+    ; updated_at = meta.updated_at
+    }
+;;
+
+let fixture_task_id =
+  match Keeper_id.Task_id.of_string "task-owner-fixture" with
+  | Ok task_id -> task_id
+  | Error detail -> failwith detail
+;;
+
+(* A metadata mutation for the tests that only need some committed change. *)
+let assign_task updated_at : Reducer.meta_command =
+  Set_current_task { task_id = Some fixture_task_id; updated_at }
+;;
+
+let holds_fixture_task (meta : Keeper_meta_contract.keeper_meta) =
+  Option.fold ~none:false ~some:(Keeper_id.Task_id.equal fixture_task_id) meta.current_task_id
+;;
+
 let reducer_ok = function
   | Ok transition -> transition.Reducer.state
   | Error error -> fail (Reducer.error_to_string error)
@@ -305,14 +338,15 @@ let rec await_terminal owner operation_id remaining =
 ;;
 
 let test_pure_reducer_adds_deltas_and_preserves_pause () =
+  let initial = make_meta "pure" in
   let state =
     ref
-      (match Reducer.create ~keeper_name:"pure" (Some (make_meta "pure")) with
+      (match Reducer.create ~keeper_name:"pure" (Some initial) with
        | Ok state -> state
        | Error error -> fail (Reducer.error_to_string error))
   in
   for index = 1 to 1_000 do
-    state := reducer_ok (Reducer.apply_meta !state (Add_usage (usage_delta ())));
+    state := reducer_ok (Reducer.apply_meta !state (usage_commit initial));
     if index = 500
     then
       state :=
@@ -356,7 +390,7 @@ let test_profile_update_preserves_owner_runtime_state () =
   let original = make_meta "profile" in
   let state =
     match Reducer.create ~keeper_name:original.name (Some original) with
-    | Ok state -> reducer_ok (Reducer.apply_meta state (Add_usage (usage_delta ())))
+    | Ok state -> reducer_ok (Reducer.apply_meta state (usage_commit original))
     | Error error -> fail (Reducer.error_to_string error)
   in
   let current = Option.get (Reducer.projection state).meta in
@@ -404,17 +438,18 @@ let test_profile_update_preserves_owner_runtime_state () =
 let test_actor_concurrent_commands_are_exact () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
+  let initial = make_meta "concurrent" in
   let owner =
     owner_ok
       (start_owner
       ~sw
       ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
       ~keeper_name:"concurrent"
-      ~initial_meta:(Some (make_meta "concurrent")))
+      ~initial_meta:(Some initial))
   in
   let commands =
     List.init 1_000 (fun _ () ->
-      ignore (owner_ok (Owner.apply_meta owner (Add_usage (usage_delta ())))))
+      ignore (owner_ok (Owner.apply_meta owner (usage_commit initial))))
   in
   let pause () =
     ignore
@@ -471,8 +506,8 @@ let test_mailbox_backpressures_without_drop () =
       (owner_ok
          (Owner.apply_meta
             owner
-            (Set_activation_mode
-               { mode = (if index mod 2 = 0 then Masc.Keeper_activation_mode.Autonomous else Manual)
+            (Set_current_task
+               { task_id = (if index mod 2 = 0 then Some fixture_task_id else None)
                ; updated_at = string_of_int index
                })));
     mark_completed ()
@@ -532,12 +567,7 @@ let test_a_cancelled_caller_stays_until_its_command_is_answered () =
        Eio.Cancel.sub (fun context ->
          Eio.Promise.resolve resolve_cancel_context context;
          ignore
-           (Owner.apply_meta
-              owner
-              (Set_activation_mode
-                 { mode = Masc.Keeper_activation_mode.Autonomous
-                 ; updated_at = "committed"
-                 })))
+           (Owner.apply_meta owner (assign_task "committed")))
      with
      | Eio.Cancel.Cancelled _ -> Atomic.set caller_unwound true);
     Eio.Promise.resolve resolve_caller_done ());
@@ -569,8 +599,7 @@ let test_a_cancelled_caller_stays_until_its_command_is_answered () =
     bool
     "the command committed before its caller returned"
     true
-    (Masc.Keeper_activation_mode.restore_owner
-       (Option.get (Owner.projection owner).meta).activation_mode)
+    (holds_fixture_task (Option.get (Owner.projection owner).meta))
 ;;
 
 let test_store_failure_fences_mutations () =
@@ -590,7 +619,7 @@ let test_store_failure_fences_mutations () =
   (match
      Owner.apply_meta
        owner
-       (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "must-not-publish" })
+       (assign_task "must-not-publish")
    with
    | Error (Owner.Store_unavailable "disk unavailable") -> ()
    | Error error -> fail ("wrong store error: " ^ Owner.error_to_string error)
@@ -598,11 +627,11 @@ let test_store_failure_fences_mutations () =
   check bool
     "failed persistence leaves projection unchanged"
     false
-    (Masc.Keeper_activation_mode.restore_owner (Option.get (Owner.projection owner).meta).activation_mode);
+    (holds_fixture_task (Option.get (Owner.projection owner).meta));
   (match
      Owner.apply_meta
        owner
-       (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "must-remain-fenced" })
+       (assign_task "must-remain-fenced")
    with
    | Error (Owner.Store_unavailable "disk unavailable") -> ()
    | Error error -> fail ("wrong fenced store error: " ^ Owner.error_to_string error)
@@ -618,7 +647,7 @@ let test_store_failure_fences_mutations () =
   (match
      Owner.apply_meta
        owner
-       (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "still-fenced-after-drain" })
+       (assign_task "still-fenced-after-drain")
    with
    | Error (Owner.Store_unavailable "disk unavailable") -> ()
    | Error error -> fail ("metadata fault was not preserved: " ^ Owner.error_to_string error)
@@ -628,7 +657,7 @@ let test_store_failure_fences_mutations () =
     check bool
       "store fence keeps exact projection readable"
       false
-      (Masc.Keeper_activation_mode.restore_owner (Option.get projection.meta).activation_mode)
+      (holds_fixture_task (Option.get projection.meta))
   | Error error -> fail ("store fence blocked exact projection: " ^ Owner.error_to_string error)
 ;;
 
@@ -679,7 +708,7 @@ let test_identity_and_delete_guards () =
     (owner_ok
        (Owner.apply_meta
           empty
-          (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "changed-before-delete" })));
+          (assign_task "changed-before-delete")));
   (match Owner.apply_meta empty (Delete_if_snapshot stale_digest) with
    | Error (Owner.Reducer_rejected Reducer.Snapshot_changed) -> ()
    | Error error -> fail ("wrong stale delete error: " ^ Owner.error_to_string error)
@@ -766,7 +795,7 @@ let test_shutdown_releases_full_mailbox_requests () =
     let result =
       Owner.apply_meta
         owner
-        (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = string_of_int index })
+        (assign_task (string_of_int index))
     in
     Eio.Stream.add results result
   in
@@ -807,7 +836,7 @@ let test_stopping_rejects_new_commands () =
   (match
      Owner.apply_meta
        owner
-       (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "rejected" })
+       (assign_task "rejected")
    with
    | Error (Owner.Reducer_rejected Reducer.Owner_stopping) -> ()
    | Error error -> fail ("wrong stopping error: " ^ Owner.error_to_string error)
@@ -3378,7 +3407,7 @@ let test_operation_store_failure_is_retried_at_the_next_mutation () =
        (match
           Owner.apply_meta
             owner
-            (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "recovers-on-use" })
+            (assign_task "recovers-on-use")
         with
         | Ok _ -> ()
         | Error error ->
@@ -3485,10 +3514,7 @@ let test_recovery_keeps_integrity_failure_fenced () =
          The two fault slots are independent: the commit does not clear the
          operation fault, and operation commands stay refused. *)
       (match
-         Owner.apply_meta owner
-           (Set_activation_mode
-              { mode = Masc.Keeper_activation_mode.Autonomous
-              ; updated_at = "meta-commits-through-op-fence" })
+         Owner.apply_meta owner (assign_task "meta-commits-through-op-fence")
        with
        | Ok _ -> ()
        | Error error ->
@@ -3601,11 +3627,7 @@ let test_availability_recovers_under_an_autonomous_child () =
       check bool "the drain reopened the store under the autonomous child" false
         (Owner.operation_projection owner).Owner.store_unavailable;
       (match
-         Owner.apply_meta
-           owner
-           (Set_activation_mode
-              { mode = Masc.Keeper_activation_mode.Autonomous
-              ; updated_at = "recovered-under-autonomous" })
+         Owner.apply_meta owner (assign_task "recovered-under-autonomous")
        with
        | Ok _ -> ()
        | Error error ->
@@ -3712,7 +3734,7 @@ let test_keeper_owners_do_not_cross_block () =
     ignore
       (Owner.apply_meta
          first
-         (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "blocked" })));
+         (assign_task "blocked")));
   Eio.Promise.await blocked;
   let accepted =
     owner_ok
@@ -4820,7 +4842,7 @@ let test_registry_reads_owner_atomic_projection () =
           Owner_registry.apply_meta
             ~base_path
             ~keeper_name:initial.name
-            (Add_usage (usage_delta ()))
+            (usage_commit initial)
         with
         | Ok (Some _) -> ()
         | Ok None -> fail "owner usage commit removed metadata"
@@ -4867,7 +4889,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
          | Error _ -> fail "failed to acquire lifecycle reservation"
        in
        let command =
-         Reducer.Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "reserved-command" }
+         assign_task "reserved-command"
        in
        (match Owner_registry.apply_meta ~base_path ~keeper_name:meta.name command with
         | Error (Owner_registry.Command_lifecycle_reserved _) -> ()
@@ -4883,7 +4905,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
             ~keeper_name:meta.name
             command
         with
-        | Ok (Some updated) -> check bool "reservation owner committed" true (Masc.Keeper_activation_mode.restore_owner updated.activation_mode)
+        | Ok (Some updated) -> check bool "reservation owner committed" true (holds_fixture_task updated)
         | Ok None -> fail "reservation owner removed metadata"
         | Error error -> fail (Owner_registry.command_error_to_string error));
        match Keeper_lifecycle_reservation.release token with

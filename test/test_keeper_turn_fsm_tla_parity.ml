@@ -77,12 +77,11 @@ let test_every_spec_action_exists_in_ocaml () =
     (tla_next_actions ())
 ;;
 
-(* The five below are OCaml-side refinements the spec does not model. Pinning
-   the set means adding a sixth fails here instead of widening the gap
+(* The four below are OCaml-side refinements the spec does not model. Pinning
+   the set means adding a fifth fails here instead of widening the gap
    quietly. *)
 let expected_ocaml_only =
   [ "GenericFail"
-  ; "NoToolCapableProvider"
   ; "PhaseGateOk"
   ; "PhaseGateSkip"
   ; "ProviderError"

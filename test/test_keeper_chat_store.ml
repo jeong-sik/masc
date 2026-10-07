@@ -5,7 +5,7 @@ module P = Masc.Otel_metric_store
 module KT = Masc.Keeper_turn
 
 (* The transcript-block prose this suite asserts ("without tool evidence")
-   lives in config/prompts/keeper.world.transcript.md, rendered through the
+   lives in the [world.transcript.*] slots of config/prompts/keeper.md, rendered through the
    prompt registry. Loading them into the registry is what
    [Prompt_defaults.init] does below; the registry locates config/prompts
    itself under Dune. *)

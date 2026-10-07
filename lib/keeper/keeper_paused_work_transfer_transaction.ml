@@ -27,7 +27,6 @@ type failure =
   | Source_owner_identity_changed
   | Target_owner_not_active
   | Target_owner_identity_changed
-  | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
   | Source_transfer_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Target_transfer_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
@@ -95,8 +94,6 @@ let failure_to_string = function
   | Target_owner_not_active -> "Transfer_owner target Keeper must be active"
   | Target_owner_identity_changed ->
     "Transfer_owner target trace identity changed"
-  | Continuation_binding_mismatch ->
-    "Transfer_owner continuation binding does not match the exact source event"
   | Source_queue_validation_failed detail ->
     "Transfer_owner source queue validation failed: " ^ detail
   | Source_transfer_shutdown_reserved operation_id ->

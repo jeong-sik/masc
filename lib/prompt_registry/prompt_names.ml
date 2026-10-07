@@ -154,9 +154,9 @@ let keeper_context_approval_authority_state_partial = "keeper.context.approval_a
 let keeper_context_approval_authority_state_unavailable = "keeper.context.approval_authority.state.unavailable"
 let keeper_context_approval_authority_footer = "keeper.context.approval_authority.footer"
 
-(* keeper.world.* — the unified turn frame's section prose. One group file per
+(* keeper.world.* — the unified turn frame's section prose. One marker group per
    Keeper_context_layers section (plus the frame preamble and the observation
-   event rows); each [### marker] slot in config/prompts/keeper.world.<group>.md
+   event rows); each [### world.<group>.<marker>] slot in config/prompts/keeper.md
    registers as keeper.world.<group>.<marker>. The bare [keeper.world] key is a
    historical dashboard name only — never a prompt key. *)
 let keeper_world_frame_frame = "keeper.world.frame.frame"
@@ -625,7 +625,6 @@ let exec_policy_cwd_existing_siblings_hint = "exec_policy.cwd_existing_siblings_
    renders around the caller-supplied [because]. *)
 let subset_rewrite_move_to_field = "subset_rewrite.move_to_field"
 let subset_rewrite_call_this_instead = "subset_rewrite.call_this_instead"
-let subset_rewrite_spell_it_as = "subset_rewrite.spell_it_as"
 
 (* tool_guidance.* — generic cross-domain tool-result guidance, one arm of
    [Tool_guidance.t] per key. *)

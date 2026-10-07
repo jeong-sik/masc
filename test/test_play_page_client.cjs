@@ -218,6 +218,36 @@ test('public-room failure does not prevent controller release and disconnect', a
   assert.equal(storage.get('masc.play.invite'), undefined);
 });
 
+test('a silent room leave cannot hold disconnect after controller release', async () => {
+  const storage = new Map();
+  let release;
+  const page = fixture(request => request.url === '/api/v1/dos/pass'
+    ? new Promise(resolve => { release = () => resolve(response({ ok:true })); })
+    : gameReply(request), {
+    storage,
+    roomReply: ({ body }) => body.action === 'leave'
+      ? new Promise(() => {}) : response(emptyRoom),
+  });
+  await page.settle();
+  let completed = false;
+  const disconnected = page.get('leave').handlers.click().then(() => { completed = true; });
+  await page.settle();
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+  assert.equal(completed, false, 'controller release still needs an acknowledgment');
+  assert.equal(page.roomRequests.some(request => request.body.action === 'leave'), false);
+  release();
+  await page.settle();
+  const leaves = page.roomRequests.filter(request => request.body.action === 'leave');
+  assert.equal(leaves.length, 1);
+  assert.equal(leaves[0].authorization, 'Bearer fixture-token');
+  assert.equal(completed, true, 'presence cleanup must not hold local disconnect');
+  await disconnected;
+  assert.equal(storage.get('masc.play.invite'), undefined);
+  assert.match(page.get('turn').textContent, /연결을 끊었어요/);
+  page.navigateFragment('#fixture-token');
+  assert.equal(page.reloads, 1, 'the disconnected tab can reopen its original invitation');
+});
+
 test('public chat preserves a Korean IME composition on Enter', async () => {
   const page = fixture(gameReply);
   await page.settle();

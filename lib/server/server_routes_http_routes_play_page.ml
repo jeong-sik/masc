@@ -744,9 +744,9 @@ async function disconnect() {
         return;
       }
     }
-    // A lost leave response only leaves presence until its lease expires.
-    // It cannot leave a controller behind after the release above succeeded.
-    await api('POST', ROOM_PATH, { action:'leave', client_id:roomClient, machine:viewMachine }).catch(() => null);
+    // Presence expires on its own; its cleanup cannot delay disconnect after
+    // the controller is released. Dispatch with our credential before end().
+    void api('POST', ROOM_PATH, { action:'leave', client_id:roomClient, machine:viewMachine }).catch(() => {});
     end('연결을 끊었어요. 다시 들어오려면 받은 초대 링크를 열어 주세요.');
   } catch (_) {
     if (!ended) setStatus('disconnect', '조종권 반납 결과를 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');

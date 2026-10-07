@@ -1493,8 +1493,8 @@ let model_phase_text ~now t =
     let word, since =
       match signal with
       | Model_started_at since -> "model started", since
-      | Reasoning_at since -> "reasoning", since
-      | Answering_at since -> "answering", since
+      | Reasoning_at since -> "THINKING · reasoning", since
+      | Answering_at since -> "STREAMING · answering", since
       | Tool_returned_at (tool_name, since) -> tool_name ^ " returned", since
     in
     if now -. since < quiet_after_s then Some word

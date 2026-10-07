@@ -1825,6 +1825,8 @@
  (wrapped false)
  (modules masc_tui_render_chat)
  (libraries masc_tui_message_input
+  masc.masc_types
+  masc_tui_keeper_chat_live
   masc.keeper_portrait
   masc_tui_pick_list
   masc_tui_render_prim

@@ -1322,11 +1322,9 @@ let test_runtime_failover_visibility_and_error_attribution () =
   check (option string) "current runtime is claude" (Some "claude-3-7-sonnet")
     (Transcript.current_runtime_id t);
   feed t [ Live.Text "streaming token" ];
-  (* A token names the phase, not the fact of streaming: the row's first
-     clause is what the model side is doing, then the runtime it is doing
-     it on. *)
-  check bool "a text token puts the model in the answering phase" true
-    (contains ~needle:"answering \xc2\xb7 [claude-3-7-sonnet]" (progress_text t));
+  (* A text token identifies answer streaming and the serving runtime. *)
+  check bool "a text token identifies answer streaming" true
+    (contains ~needle:"STREAMING · answering · [claude-3-7-sonnet]" (progress_text t));
   feed t
     [ Live.Runtime_attempt_started
         { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
@@ -1392,7 +1390,8 @@ let test_the_row_names_the_model_phase_between_tool_calls () =
     (contains ~needle:"model started, nothing back for 4s" (progress_text ~now:(origin +. 5.) t));
   feed ~now:(origin +. 6.) t [ Live.Thinking "let me" ];
   let at_7 = progress_text ~now:(origin +. 7.) t in
-  check bool "a thinking delta is the reasoning phase" true (contains ~needle:"reasoning" at_7);
+  check bool "a thinking delta identifies the reasoning phase" true
+    (contains ~needle:"THINKING · reasoning" at_7);
   check bool "a pause under the threshold states no silence" false
     (contains ~needle:"nothing back" at_7);
   check bool "a stalled reasoning phase states how long" true

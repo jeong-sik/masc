@@ -24,12 +24,14 @@ open Masc_tui_render_prim
 module Context_state = Masc_tui_context_state
 module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
+module Keeper_chat_log = Masc_tui_keeper_chat_log
 module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Keeper_control = Masc_tui_keeper_control
 module Markdown = Masc_tui_markdown
 module Markdown_cache = Masc_tui_markdown_render_cache
 module Message_layout = Masc_tui_message_layout
+module Live = Masc_tui_keeper_chat_live
 module Observation_layout = Masc_tui_observation_layout
 module Tool_detail = Masc_tui_tool_detail
 
@@ -1597,21 +1599,14 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
     | Message_status -> "STATUS"
     | Message_local -> "LOCAL"
     | Message_error -> "ERROR"
-    (* No lane word on the work lanes: the mark already says which lane the
-       row is, so the badge holds the glyph and its padding and nothing
-       else. The column itself stays — [align_role_label] pads the empty
-       label to the same cells the words occupied. *)
-    | Message_tool -> ""
-    | Message_skill _ -> ""
-    | Message_thinking -> ""
+    | Message_tool -> "TOOLS"
+    | Message_skill _ -> "SKILL"
+    | Message_thinking -> "THINKING"
     | Message_memory -> "JOURNAL"
   in
-  (* Turn identity stays in the typed request id. The speaker glyph already
-     distinguishes USER, Keeper, Tool, Skill, and Journal, so prefixes such as
-     [TURN ·] and [↳] repeated or obscured the same fact instead of clarifying
-     it. Adjacent rows from the exact same request still fold as continuations
-     in [Message_layout]; a row resuming after another lane names its source
-     again. *)
+  (* The role label identifies the speaker or activity lane. Request and turn
+     headings are added after transcript rows join the committed timeline, so
+     one contiguous request group receives one identity heading. *)
   (* Who asked for a turn is one fact per turn, not one per row. It was the
      speaker label on every autonomous row, so the same keeper answered as
      itself when a person asked and as AUTO when nobody did -- two speakers for
@@ -1831,8 +1826,10 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
      metadata row, which every origin mode but [Origin_row] folds away -- so a
      line saying where it stands would have said it only to a reader who had
      already pressed Ctrl-F. The body is drawn whatever the mode. *)
-  let entry ~at ~label ~note ~body =
-    let style = Message_layout.User in
+  let entry ~at ~request_id ~label ~note ~body =
+    (* Pending input has not entered the conversation. It uses the composer's
+       local mark, not the arrow that means a submitted conversation row. *)
+    let style = Message_layout.Local in
     ({ style
      ; timestamp = keeper_message_clock at
      ; timeline_bucket = Some (keeper_message_timeline_bucket at)
@@ -1842,8 +1839,10 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
          Message_layout.align_role_label ~column:role_label_column ~style label
      ; role_label_mark_cells =
          Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
-     ; request_label = ""
-     ; body = note ^ "\n" ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true body
+     ; request_label = request_id
+     ; body = "YOU · " ^ note ^ " · 요청 "
+         ^ Keeper_chat.terminal_safe_text (Keeper_chat.compact_request_id request_id) ^ "\n"
+         ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true body
      ; journal = []
      ; markdown_source = Message_layout.Markdown_streaming
      ; turn_rail = Message_layout.Rail_none
@@ -1851,8 +1850,8 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
      }
       : Message_layout.entry)
   in
-  Masc_tui_types.keeper_message_waiting_requests state ~keeper_name
-  |> List.map (fun (request, delivery) ->
+  let requests = Masc_tui_types.keeper_message_waiting_requests state ~keeper_name in
+  let entries = List.map (fun (request, delivery) ->
       let at =
         match List.find_opt (fun (inflight : Masc_tui_types.inflight) ->
             Keeper_chat.same_request_identity inflight.sent_request request)
@@ -1865,13 +1864,27 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
             | Some item -> item.submitted_at
             | None -> Unix.gettimeofday ()
       in
-      let note = match delivery with
-        | Local_pending -> "전송 대기"
-        | Awaiting_receipt -> "전송 중 · 접수 확인 전"
-        | Keeper_queued -> "서버 접수 · 처리 대기"
-        | Rechecking_delivery -> "전달 확인 중 · 결과 미확인"
+      let label, note = match delivery with
+        | Local_pending -> "대기", "전송 대기 · 아직 보내지 않음"
+        | Awaiting_receipt -> "전송 중", "전송 중 · 서버 접수 확인 전"
+        | Keeper_queued -> "접수됨", "서버 접수됨 · 턴 반영 대기"
+        | Rechecking_delivery -> "미확인", "전달 확인 중 · 결과 미확인"
       in
-      entry ~at ~label:"YOU" ~note ~body:request.Keeper_chat.message)
+      entry ~at ~request_id:request.Keeper_chat.request_id ~label ~note
+        ~body:request.Keeper_chat.message) requests in
+  match entries with
+  | [] -> []
+  | first :: _ ->
+      let style = Message_layout.Status in
+      { first with style; timestamp = ""; timeline_bucket = None;
+          speaker = "대기 입력";
+          role_label = Message_layout.align_role_label
+            ~column:role_label_column ~style "대기 입력";
+          role_label_mark_cells = Message_layout.role_label_mark_cells
+            ~column:role_label_column ~style ();
+          request_label = "";
+          body = Printf.sprintf "대기 입력 %d건" (List.length requests)
+      } :: entries
 
 
 (* The polled tail is an excerpt for a turn whose journal is unavailable.
@@ -2179,6 +2192,102 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
       entries
 
 
+(* Whose a merged row is: a committed message's, or a block's log's. *)
+type tagged_row =
+  | Tagged_row of Masc_tui_types.msg_entry
+  | Tagged_block of Masc_tui_types.turn_log
+
+(* Bookkeeping belongs to the source logs even when they have no visible
+   transcript block. Keep every watcher: an unselected sibling can hold the
+   Run_started that proves a batch's inputs entered the execution. *)
+let identity_source_logs (state : state) ~keeper_name =
+  state.msg_settled_logs
+  @ List.map (fun (entry : Masc_tui_types.inflight) -> entry.log) state.msg_inflight
+  @ Option.to_list state.msg_live
+  |> List.filter (fun log -> String.equal (Masc_tui_types.turn_log_keeper_name log) keeper_name)
+  |> List.fold_left (fun logs log ->
+      if List.exists (( == ) log) logs then logs else log :: logs) []
+  |> List.rev
+
+let identity_source_revisions logs =
+  List.map (fun log ->
+    log, Keeper_chat_log.revision log.tl_log,
+    Keeper_chat_transcript.revision log.tl_transcript) logs
+
+let same_identity_source_revisions =
+  List.equal (fun (held, log_revision, transcript_revision)
+      (current, current_log_revision, current_transcript_revision) ->
+    held == current && log_revision = current_log_revision
+    && transcript_revision = current_transcript_revision)
+
+(* One pure decoration pass for both the frame and search's row measurement.
+   Only a row's own turn sequence or an autonomous journal's typed identity
+   supplies TURN: the latest Reply_details cannot label earlier continuations. *)
+let identify_chat_entries ~source_logs tagged_entries =
+  let owners = Hashtbl.create 16 and started = Hashtbl.create 16 in
+  List.iter (fun log ->
+    let request_id = Masc_tui_types.turn_log_request_id log in
+    let execution_id = Masc_tui_types.turn_log_execution_id log in
+    (* The transcript validates a binding's request and immutable execution
+       identity. A watcher still awaiting that binding cannot replace a
+       sibling's validated mapping with its initial self identity. *)
+    if not (String.equal request_id execution_id) then
+      Hashtbl.replace owners request_id execution_id) source_logs;
+  let owner id = Option.value (Hashtbl.find_opt owners id) ~default:id in
+  List.iter (fun log ->
+    if List.exists (fun (event : Keeper_chat_log.entry) ->
+        match event.delta with Live.Run_started -> true | _ -> false)
+        (Keeper_chat_log.entries log.tl_log)
+    then Hashtbl.replace started
+      (Masc_tui_types.turn_log_execution_id log) ()) source_logs;
+  let input_counts = Hashtbl.create 16 in
+  List.iter (fun (tag, _) -> match tag with
+    | Tagged_row message when message.me_turn_phase = Turn_input ->
+        let id = owner message.me_request_id in
+        let count = Option.value (Hashtbl.find_opt input_counts id) ~default:0 in
+        Hashtbl.replace input_counts id (count + 1)
+    | _ -> ()) tagged_entries;
+  let previous_request = ref None and previous_turn = ref None in
+  List.map (fun (tag, (entry : Message_layout.entry)) ->
+    let request_id, turn_sequence, reflected = match tag with
+      | Tagged_row message ->
+          let request_id = owner message.me_request_id in
+          let reflected = match message.me_role, message.me_identity with
+            | Message_user (Sent_by_operator _), Persisted_row _ -> true
+            | Message_user (Sent_by_operator _), (Session_row _ | Persisted_legacy_row _) ->
+                Hashtbl.mem started request_id
+            | _ -> false in
+          request_id, message.me_turn_sequence, reflected
+      | Tagged_block log ->
+          let sequence = match Keeper_chat_log.source log.tl_log with
+            | Operation _ -> None
+            | Autonomous_turn turn_ref -> Some (Ids.Turn_ref.absolute_turn turn_ref) in
+          Masc_tui_types.turn_log_execution_id log, sequence, false
+    in
+    let opens = request_id <> "" && !previous_request <> Some request_id in
+    if opens then previous_turn := None;
+    let names_turn = Option.exists (fun sequence ->
+        !previous_turn <> Some (request_id, sequence)) turn_sequence in
+    Option.iter (fun sequence -> previous_turn := Some (request_id, sequence)) turn_sequence;
+    if request_id <> "" then previous_request := Some request_id;
+    let heading =
+      if not (opens || names_turn) then []
+      else
+        let identity = Keeper_chat.terminal_safe_text
+            (Keeper_chat.compact_request_id request_id) in
+        let turn = match turn_sequence with
+          | Some sequence -> Printf.sprintf "TURN #%d · " sequence
+          | None -> "" in
+        let inputs = Option.value (Hashtbl.find_opt input_counts request_id) ~default:0 in
+        [turn ^ "요청 " ^ identity
+         ^ (if inputs > 1 then Printf.sprintf " · 입력 %d건" inputs else "")]
+    in
+    tag, {entry with request_label = request_id;
+      body = String.concat "\n"
+        (heading @ (if reflected then ["입력 반영됨"] else []) @ [entry.body])})
+    tagged_entries
+
+
 (* Where the pane has to scroll to put a message holding [query] on screen, and
    which message that is.
 
@@ -2221,6 +2330,10 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
     let messages = keeper_message_visible_messages state ~keeper_name in
     let entries =
       keeper_message_layout_entries state ~keeper_name ~chat_cols
+      |> List.combine messages
+      |> List.map (fun (message, entry) -> Tagged_row message, entry)
+      |> identify_chat_entries ~source_logs:(identity_source_logs state ~keeper_name)
+      |> List.map snd
     in
     let count = List.length entries in
     let ceiling =
@@ -2271,11 +2384,6 @@ type log_block = {
   lb_entries : log_entry list;
 }
 
-(* Whose a merged row is: a committed message's, or a block's log's. *)
-type tagged_row =
-  | Tagged_row of Masc_tui_types.msg_entry
-  | Tagged_block of Masc_tui_types.turn_log
-
 (* A settled block, per (keeper, request), until one of its inputs moves:
    the log's transcript (its revision: durable tool facts fold in after
    settle), the committed timeline it is placed in, the knobs its rows read,
@@ -2317,6 +2425,16 @@ type merged_blocks_memo = {
 }
 
 let merged_blocks_memo : merged_blocks_memo option ref = ref None
+
+type identified_entries_memo = {
+  iem_committed : Message_layout.entry list;
+  iem_blocks : log_block list;
+  iem_sources : (Masc_tui_types.turn_log * int * int) list;
+  iem_tagged : (tagged_row * Message_layout.entry) list;
+  iem_entries : Message_layout.entry list;
+}
+
+let identified_entries_memo : identified_entries_memo option ref = ref None
 
 
 let render_keeper_message (state : state) =
@@ -2728,20 +2846,20 @@ let render_keeper_message (state : state) =
                       then folded_thinking_summary (String.concat "\n" lines)
                       else String.concat "\n" lines
                     in
-                    entry Message_layout.Thinking (label "") (annotate_body body)
+                    entry Message_layout.Thinking (label "THINKING") (annotate_body body)
                 | Keeper_chat_transcript.Drawn_tools block ->
                     let projection =
                       Keeper_chat_transcript.project_tool_block
                         (tool_projection_mode state) block
                     in
                     let body = String.concat "\n" (projected_tool_rows projection) in
-                    entry (tool_block_style projection) (label "") (annotate_body body)
+                    entry (tool_block_style projection) (label "TOOLS") (annotate_body body)
                 | Keeper_chat_transcript.Drawn_skill skills ->
                     entry
                       (Message_layout.Skill
                          (skill_tone_of_state
                             (Keeper_chat_transcript.skill_block_state skills)))
-                      (label "")
+                      (label "SKILL")
                       (String.concat "\n"
                          (* Same fold as the committed rows: one counted row
                             per skill; each invocation's state, actions,
@@ -3028,15 +3146,24 @@ let render_keeper_message (state : state) =
                   };
               merged)
     in
-    (* With no block drawn, the entries the walk measures are the ones
-       [layout_entries_memo] holds across frames, and passing that very list
-       is what lets the walk keep its row counts: a fresh list of the same
-       entries is a different question to it. With settled blocks only, the
-       merged list above is that stable list. *)
-    let layout_entries =
-      match blocks with
-      | [] -> committed_layout_entries
-      | _ :: _ -> List.map snd tagged_layout_entries
+    let identity_sources = identity_source_logs state ~keeper_name in
+    let identity_revisions = identity_source_revisions identity_sources in
+    (* Preserve list identity while the sources are unchanged: the viewport
+       reuses its measured rows on idle repaints. *)
+    let tagged_layout_entries, layout_entries =
+      match !identified_entries_memo with
+      | Some memo when memo.iem_committed == committed_layout_entries
+          && List.length memo.iem_blocks = List.length blocks
+          && List.for_all2 ( == ) memo.iem_blocks blocks
+          && same_identity_source_revisions memo.iem_sources identity_revisions ->
+          memo.iem_tagged, memo.iem_entries
+      | Some _ | None ->
+          let tagged = identify_chat_entries ~source_logs:identity_sources tagged_layout_entries in
+          let entries = List.map snd tagged in
+          identified_entries_memo := Some {iem_committed = committed_layout_entries;
+            iem_blocks = blocks; iem_sources = identity_revisions;
+            iem_tagged = tagged; iem_entries = entries};
+          tagged, entries
     in
     (* The operator's unsettled lines sit at the end of the same stream, not
        in a slot below it. Appended after [tagged_layout_entries] on purpose:
@@ -3298,9 +3425,9 @@ let render_keeper_message (state : state) =
            | Working ->
                let heading =
                  if Keeper_chat_transcript.attempt live > 0 then
-                   "IN PROGRESS ON NEXT CANDIDATE"
+                   "TURN · IN PROGRESS ON NEXT CANDIDATE"
                  else
-                   "IN PROGRESS"
+                   "TURN · IN PROGRESS"
                in
                Masc_tui_answering.running_glyph ~frame:state.activity_frame,
                heading

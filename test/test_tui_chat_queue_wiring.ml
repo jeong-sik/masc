@@ -3438,8 +3438,8 @@ let test_approval_detail_scroll_accepts_the_rendered_clamp () =
 
 (* The header names what is unusual, not what is normal.
 
-   Reasoning hidden and tools compact are the quiet defaults: the answer is
-   primary, with work one shortcut away. Spelling those modes in every header
+   Reasoning folded and tools compact are the defaults: observed work stays
+   identifiable while its details remain one shortcut away. Spelling those modes in every header
    would spend width to describe the ordinary case.
 
    Every combination is listed rather than described, because the rule is
@@ -3468,35 +3468,35 @@ let test_the_header_names_only_unusual_modes () =
      = Masc_tui_message_layout.Origin_inline);
   check string "everything at its default says nothing" ""
     (summary ~origin:started.Tui_types.msg_origin_display memory_summary
-       hidden compact);
+       started.msg_reasoning_visibility compact);
   (* Both ends of the axis are named, because both are a choice now. A pane
      with no clock in it says so rather than looking like one whose keeper
      stopped stamping rows. *)
   check string "the bare gutter is named" "metadata:off"
-    (summary ~origin:Masc_tui_message_layout.Origin_bare memory_summary hidden
+    (summary ~origin:Masc_tui_message_layout.Origin_bare memory_summary folded
        compact);
   check string "full metadata is named" "metadata:full"
-    (summary ~origin:Masc_tui_message_layout.Origin_row memory_summary hidden
+    (summary ~origin:Masc_tui_message_layout.Origin_row memory_summary folded
        compact);
   check string "full reasoning alone" "reasoning:full"
     (summary memory_summary full compact);
-  check string "folded reasoning alone" "reasoning:folded"
-    (summary memory_summary folded compact);
+  check string "hidden reasoning is explicit" "reasoning:hidden"
+    (summary memory_summary hidden compact);
   check string "full tools alone" "tools:full"
-    (summary memory_summary hidden tools_full);
+    (summary memory_summary folded tools_full);
   check string "short results mode is named" "tools:results"
-    (summary memory_summary hidden Tui_types.Tools_results);
+    (summary memory_summary folded Tui_types.Tools_results);
   check string "journal off alone" "journal:off"
-    (summary memory_hidden hidden compact);
+    (summary memory_hidden folded compact);
   check string "full journal alone" "journal:full"
-    (summary memory_full hidden compact);
+    (summary memory_full folded compact);
   check string "two of them" "reasoning:full tools:full"
     (summary memory_summary full tools_full);
   check string "all three, in a fixed order"
     "journal:off reasoning:full tools:full"
     (summary memory_hidden full tools_full);
   check int "at rest it now costs nothing" 0
-    (String.length (summary memory_summary hidden compact));
+    (String.length (summary memory_summary folded compact));
   check int "all three deviations still fit as one compact label" 37
     (String.length (summary memory_hidden full tools_full))
 ;;
@@ -3590,7 +3590,7 @@ let test_chat_visibility_defaults_and_cycles () =
   let default =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
-  check string "reasoning starts out of the conversation hierarchy" "hidden"
+  check string "reasoning starts visibly folded" "folded"
     (Tui_types.reasoning_visibility_to_string default.msg_reasoning_visibility);
   check string "tool calls start as one activity summary" "compact"
     (Tui_types.tool_visibility_to_string default.msg_tool_visibility);
@@ -4051,6 +4051,30 @@ let test_batch_reply_follows_all_original_inputs () =
       [user "batch-owner" "FIRST_ORIGINAL_INPUT" 1.;
        user "batch-second" "REPEATED_ORIGINAL_INPUT" 2.;
        user "batch-third" "REPEATED_ORIGINAL_INPUT" 3.];
+    state.msg_settled_logs <- [follower; second; owner];
+    let verify_bound_inputs () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      let screen = String.concat "\n"
+          (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+      check bool "batch is identified before output exists" true
+        (Astring.String.is_infix ~affix:"입력 3건" screen);
+      check int "every bound input is reflected before output exists" 3
+        (List.length (Astring.String.cuts ~sep:"입력 반영됨" screen) - 1);
+      check int "one canonical request heading" 1
+        (List.length (Astring.String.cuts ~sep:"요청 batch-owner" screen) - 1);
+      check bool "raw invalid binding cannot rename the group" false
+        (Astring.String.is_infix ~affix:"forged-owner" screen)
+    in
+    verify_bound_inputs ();
+    state.msg_reasoning_visibility <- Tui_types.Reasoning_hidden;
+    Tui_types.turn_log_add ~now:3. owner ~seq:None (Live.Thinking "hidden thought");
+    verify_bound_inputs ();
+    let invalid = Tui_types.turn_log_create ~keeper_name:"alpha"
+        ~request_id:"unrelated-request" ~started_at:3. in
+    Tui_types.turn_log_add ~now:3. invalid ~seq:None
+      (Live.Batch_bound {operation_id="batch-third"; execution_id="forged-owner"});
+    state.msg_settled_logs <- invalid :: state.msg_settled_logs;
+    verify_bound_inputs ();
     let complete log ~seq =
       Tui_types.turn_log_add ~now:4. log ~seq:(Some seq) (visible_reply "ONE_BATCH_ANSWER");
       Tui_types.turn_log_add ~now:4. log ~seq:(Some (seq+1)) Live.Run_finished;
@@ -4559,10 +4583,119 @@ let test_verified_rejection_is_visible_without_mutating_original_input () =
     (List.hd state.msg_history).me_text
 ;;
 
+let test_delivery_states_and_observed_work_are_identifiable () =
+  let module Layout = Masc_tui_message_layout in
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    List.iter (fun columns ->
+      set_size (60, columns);
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+      state.msg_target_keeper_name <- Some "alpha";
+      let entry, item = preflight_input () in
+      let request = {entry.sent_request with Keeper_chat.message = "DISTINCT_INPUT"} in
+      let entry = {entry with Tui_types.sent_request = request} in
+      let input = chat_entry ~request_id:request.request_id
+          ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+          ~text:request.message ~at:1. () in
+      let input = {input with Tui_types.me_identity = Session_row
+          {request_id=request.request_id; turn_phase=Turn_input; operation_seq=0}} in
+      state.msg_history <- [input];
+      state.msg_inflight <- [entry];
+      state.msg_live <- Some entry.log;
+      entry.phase <- Tui_types.Turn_preflight {item with request};
+      let screen () =
+        let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+        String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+      let has text needle = Astring.String.is_infix ~affix:needle text in
+      let count text needle = List.length (Astring.String.cuts ~sep:needle text) - 1 in
+      let pending label =
+        List.iter (fun origin ->
+          state.msg_origin_display <- origin;
+          let text = screen () in
+          check int "pending input is displayed exactly once" 1 (count text "DISTINCT_INPUT");
+          check bool "pending area is explicit" true (has text "대기 입력 1건");
+          check bool "delivery state is explicit" true (has text label);
+          check bool "pending is never claimed as reflected" false (has text "입력 반영됨"))
+          [Layout.Origin_inline; Origin_bare; Origin_row] in
+      pending "아직 보내지 않음";
+      entry.phase <- Tui_types.Turn_streaming;
+      pending "서버 접수 확인 전";
+      Tui_types.turn_log_add ~now:2. entry.log ~seq:None
+        (Live.Accepted {admission=Queued; queue_length=1; interactive=None});
+      pending "턴 반영 대기";
+      entry.phase <- Tui_types.Turn_reconciling;
+      pending "결과 미확인";
+      entry.phase <- Tui_types.Turn_streaming;
+      Tui_types.turn_log_add ~now:3. entry.log ~seq:(Some 0) Live.Run_started;
+      state.msg_origin_display <- Layout.Origin_inline;
+      let started = screen () in
+      check int "run start promotes the original input exactly once" 1 (count started "DISTINCT_INPUT");
+      check bool "run start with no visible output still confirms input" true (has started "입력 반영됨");
+      check bool "started input leaves pending area" false (has started "대기 입력 1건");
+      Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 1) (Live.Thinking "OBSERVED_THOUGHT");
+      let thought = screen () in
+      check bool "default reasoning lane has its name" true (has thought "THINKING");
+      let occurrence : Live.tool_occurrence =
+        {stream_scope=0; block_index=1; provider_message_id=None; tool_call_id=Some "native-read"} in
+      Tui_types.turn_log_add ~now:5. entry.log ~seq:(Some 2)
+        (Live.Native_tool_started {occurrence; tool_name=Some "Read"});
+      Tui_types.turn_log_add ~now:6. entry.log ~seq:(Some 3) (Live.Native_tool_ended {occurrence});
+      Tui_types.turn_log_add ~now:7. entry.log ~seq:(Some 4) (Live.Text "OBSERVED_ANSWER");
+      let streaming = screen () in
+      List.iter (fun marker -> check bool ("default work label: " ^ marker) true (has streaming marker))
+        ["THINKING"; "TOOLS"; "STREAMING"; "OBSERVED_ANSWER"];
+      check string "display annotations do not alter recall" "DISTINCT_INPUT"
+        (List.hd state.msg_history).me_text)
+      [80; 140])
+;;
+
+let test_search_counts_visible_request_annotations () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (24, 120);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_history <- List.init 24 (fun index ->
+      let id = Printf.sprintf "search-%d" index in
+      let row = chat_entry ~request_id:id
+          ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+          ~text:(if index = 0 then "SEARCH_TARGET" else Printf.sprintf "newer input %d" index)
+          ~at:(100. +. float_of_int index) () in
+      let reply = chat_entry ~request_id:id ~turn_sequence:(index + 1)
+          ~role:Tui_types.Message_keeper ~text:"recorded reply"
+          ~at:(100.5 +. float_of_int index) () in
+      [{row with Tui_types.me_identity=Persisted_row id};
+       {reply with Tui_types.me_identity=Persisted_row (id ^ "-reply")}]) |> List.concat;
+    let newest, _ = Masc_tui_render_chat.render_keeper_message state in
+    check bool "turn number arriving after its input is visible" true
+      (List.exists (fun line -> Astring.String.is_infix ~affix:"TURN #24"
+          (Masc_tui_theme.strip_sgr line)) newest.Masc_tui_frame_presenter.lines);
+    match Masc_tui_render_chat.keeper_message_find_scroll state ~keeper_name:"alpha"
+        ~needle:"SEARCH_TARGET" ~older_than:None with
+    | None -> fail "search lost the original input"
+    | Some (scroll, _) ->
+        state.msg_scroll <- scroll;
+        let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+        check bool "request headings and receipt rows do not push the search result offscreen" true
+          (List.exists (fun line -> Astring.String.is_infix ~affix:"SEARCH_TARGET"
+              (Masc_tui_theme.strip_sgr line)) frame.Masc_tui_frame_presenter.lines))
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [ ( "rejected input", [test_case "refusal preserves original input" `Quick test_verified_rejection_is_visible_without_mutating_original_input] )
+    [ ( "visible delivery", [test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable; test_case "search counts annotations" `Quick test_search_counts_visible_request_annotations] )
+    ; ( "rejected input", [test_case "refusal preserves original input" `Quick test_verified_rejection_is_visible_without_mutating_original_input] )
     ; ( "status ownership",
         [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
         ; test_case "preflight recovery keeps newer input and full queue" `Quick test_preflight_recovery_keeps_newer_input_and_a_full_queue

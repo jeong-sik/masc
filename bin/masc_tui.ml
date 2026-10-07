@@ -499,7 +499,7 @@ let parse_args () =
   let workspace = ref "" in
   let refresh = ref 2.0 in
   let base_path = ref "" in
-  let reasoning_visibility = ref "hidden" in
+  let reasoning_visibility = ref "folded" in
   let tool_visibility = ref "compact" in
 
   let specs = [

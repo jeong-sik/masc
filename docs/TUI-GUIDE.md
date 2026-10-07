@@ -983,10 +983,10 @@ That separator is a viewport projection, not a transcript row, and remains
 readable under `NO_COLOR`.
 
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
-its own is drawn as what it did, not as a blank line. Reasoning starts hidden
-and tool calls start as one compact activity row, so the answer remains the
-strongest level in the pane. `Ctrl-R` cycles reasoning through hidden, folded,
-and full; `Ctrl-D` cycles tool details through compact, results, and full, so
+its own is drawn as what it did. Reasoning starts folded with a `THINKING`
+label; tool calls start as a compact activity row labelled `TOOLS`.
+`Ctrl-R` cycles reasoning through folded, full, and hidden; `Ctrl-D` cycles
+tool details through compact, results, and full, so
 full arguments and unfolded Gate history are two presses from compact. Results
 keeps one row per call and adds what the call answered: a short preview of the
 recorded output, `not seen` when the transcript never observed a return, and

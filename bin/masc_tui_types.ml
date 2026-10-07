@@ -344,7 +344,7 @@ let origin_display_to_string = function
 
 (* The chat modes worth a place in the header.
 
-   Reasoning starts hidden, tools compact, and the memory journal at its
+   Reasoning starts folded, tools compact, and the memory journal at its
    one-line summary, so the answer remains the strongest level in the pane.
    At rest those defaults say nothing unusual and therefore cost no header
    width.
@@ -382,8 +382,8 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
          | Masc_tui_message_layout.Origin_inline -> None
          | Masc_tui_message_layout.Origin_row -> Some "metadata:full")
       ; (match reasoning with
-         | Reasoning_hidden -> None
-         | (Reasoning_folded | Reasoning_full) as mode ->
+         | Reasoning_folded -> None
+         | (Reasoning_hidden | Reasoning_full) as mode ->
              Some ("reasoning:" ^ reasoning_visibility_to_string mode))
       ; (match tools with
          | Tools_compact -> None
@@ -8273,7 +8273,7 @@ let close_key_modals (state : state) =
   if state.context_inspector_open then close_context_inspector state
 
 let create_state
-    ?(reasoning_visibility = Reasoning_hidden)
+    ?(reasoning_visibility = Reasoning_folded)
     ?(tool_visibility = Tools_compact)
     ~workspace
     ?(local_base_path = "")

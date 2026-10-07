@@ -224,7 +224,7 @@ let departureConfirmed = false;
 // Only opening the invitation explicitly asks to rejoin a departed seat.
 // A reload may retain the bearer after confirmed departure if cleanup failed.
 let initialConnectIntent = invitation !== '' && !invitationConflict;
-let starting = Promise.resolve();
+let connecting = Promise.resolve();
 let sending = Promise.resolve();
 let textSending = false;
 // The saves name the seat last reported (null: nothing loaded), and the one
@@ -276,13 +276,16 @@ function connectionSettled() {
   }
 }
 
-function end(text) {
+function end(text, { terminalAuth = false } = {}) {
   if (ended) return;
   initialConnectIntent = false;
+  // An observation-only document has never admitted a mutation. Retire its
+  // rejected in-memory bearer without touching storage it does not own.
+  const observationOnly = terminalAuth && documentId === null && !unsettled;
   // Check storage at the forget boundary too, including authentication
   // failures delivered to a restored document with an older cached state.
-  if (token !== '' && !connectionSettled()) return;
-  if (token !== '') {
+  if (!observationOnly && token !== '' && !connectionSettled()) return;
+  if (!observationOnly && token !== '') {
     try { sessionStorage.removeItem(SESSION_KEY); }
     catch (_) {
       setStatus('disconnect', '탭에 저장된 초대 연결을 지우지 못했어요. 연결 끊기를 다시 눌러 주세요.');
@@ -291,7 +294,9 @@ function end(text) {
     }
   }
   ended = true;
-  try { sessionStorage.removeItem(DOCUMENT_KEY); } catch (_) { /* No bearer remains in storage. */ }
+  if (!observationOnly) {
+    try { sessionStorage.removeItem(DOCUMENT_KEY); } catch (_) { /* No bearer remains in storage. */ }
+  }
   token = '';
   setStatus('disconnect', '');
   setStatus('invitation', '');
@@ -311,7 +316,7 @@ async function api(method, path, body) {
   let json = null;
   try { json = await response.json(); } catch (_) { json = null; }
   // Authentication/read failures do not settle an earlier admitted write.
-  if (!unsettled && (response.status === 401 || response.status === 403)) end('초대가 끝났거나 회수됐어요. 운영자에게 새 링크를 받아 주세요.');
+  if (!unsettled && (response.status === 401 || response.status === 403)) end('초대가 끝났거나 회수됐어요. 운영자에게 새 링크를 받아 주세요.', { terminalAuth:true });
   return { status: response.status, json };
 }
 
@@ -332,9 +337,9 @@ async function mutate(path, body) {
   try {
     const r = await api('POST', path, body);
     const success = r.status >= 200 && r.status < 300 && r.json?.ok === true;
-    // The request reader rejects an oversized body before route dispatch and
-    // may answer text/plain. This response proves no mutation was admitted.
-    const refusal = r.status === 413 || (r.status >= 400 && r.status < 600 && r.json &&
+    // Body-size and rate-limit refusals precede route dispatch. Their error
+    // bodies need not use the route's JSON shape; no mutation was admitted.
+    const refusal = r.status === 413 || r.status === 429 || (r.status >= 400 && r.status < 600 && r.json &&
       (r.json.ok === false || typeof r.json.auth_error_code === 'string' ||
        (typeof r.json.code === 'string' && typeof r.json.error === 'string')));
     if (!success && !refusal) throw new Error('unconfirmed operation response');
@@ -450,7 +455,8 @@ async function refreshSeat() {
   if (initialConnectIntent && controllerError === null && !disconnecting) {
     if (connected) initialConnectIntent = false;
     else if (connectionSettled()) {
-      const joined = await mutate(SESSION_PATH, { connected:true });
+      connecting = mutate(SESSION_PATH, { connected:true });
+      const joined = await connecting;
       if (!ended && joined?.status === 200 && joined.json?.ok === true && joined.json.connected === true) {
         initialConnectIntent = false;
         return refreshSeat();
@@ -640,12 +646,15 @@ async function disconnect() {
   if (ended || disconnecting) return;
   disconnecting = true;
   initialConnectIntent = false;
+  latestSeatRequest = null;
   setControlsEnabled(false);
   setStatus('disconnect', '조종권을 확인하고 연결을 끊고 있어요.');
   try {
     // A previously admitted move can acquire a formerly free controller.
     // Drain it before observing/releasing our seat, and admit no new moves.
-    await starting;
+    // Only an admitted reconnect can race departure. A pending initial
+    // authority read is invalidated above and cannot delay this mutation.
+    await connecting;
     await sending;
     if (ended) return;
     if (unsettled) {
@@ -751,8 +760,7 @@ setControlsEnabled(false);
 if (token === '') {
   end('링크에 초대 토큰이 없어요. 받은 링크를 그대로 열어 주세요.');
 } else {
-  starting = refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.'));
-  starting.finally(tick);
+  refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.')).finally(tick);
 }
 </script>
 </body>

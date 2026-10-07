@@ -409,12 +409,15 @@ let server_key = function
   | _ -> None
 ;;
 
+let close ~(write : string -> unit) (state : Masc_tui_types.state) =
+  invalidate ();
+  if !image_may_exist then write_batch ~write delete_image;
+  image_may_exist := false;
+  state.msx_open <- false
+
 let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
   if String.equal key "esc" then begin
-    invalidate ();
-    if !image_may_exist then write_batch ~write delete_image;
-    image_may_exist := false;
-    state.msx_open <- false;
+    close ~write state;
     false
   end
   else begin

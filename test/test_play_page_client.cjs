@@ -1474,6 +1474,64 @@ test('opening a departed invitation reconnects explicitly without a game move', 
   assert.equal(page.padButton.disabled, false);
 });
 
+test('reloading after departure cleanup fails does not rejoin without an invitation fragment', async () => {
+  const storage = new Map();
+  let connected = true;
+  const reply = request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected, controller:null }) : normalReply(request);
+  const sessionReply = ({ body }) => { connected = body.connected; return response({ ok:true, connected }); };
+  const page = fixture(reply, { storage, sessionReply });
+  await page.settle();
+  storage.delete = key => { if (key === 'masc.play.invite') throw new Error('storage revoked'); return Map.prototype.delete.call(storage, key); };
+  await page.get('leave').handlers.click();
+  assert.equal(connected, false);
+  const reloaded = fixture(reply, { storage, hash:'', sessionReply });
+  await reloaded.settle();
+  await reloaded.poll();
+  assert.equal(connected, false);
+  assert.equal(reloaded.padButton.disabled, true);
+  assert.equal(reloaded.requests.some(request => request.method === 'POST'), false);
+  const reopened = fixture(reply, { storage, sessionReply });
+  await reopened.settle();
+  assert.equal(connected, true, 'explicitly opening the invitation still rejoins');
+});
+
+test('explicit reconnect retries transient refusals while the machine stays idle', async () => {
+  let connected = false, attempts = 0;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected, controller:null }) : normalReply(request), {
+    sessionReply: ({ body }) => {
+      if (++attempts < 3) return response({ ok:false, error:'participation unavailable' }, 503);
+      connected = body.connected;
+      return response({ ok:true, connected });
+    }
+  });
+  await page.settle();
+  assert.equal(attempts, 2, 'first observed activity rechecks reconnect intent');
+  await page.poll();
+  assert.equal(attempts, 3);
+  assert.equal(page.padButton.disabled, false);
+  await page.poll();
+  assert.equal(attempts, 3, 'successful reconnect settles the intent');
+});
+
+test('a plain-text 413 settles the rejected input without losing its draft', async () => {
+  const storage = new Map();
+  const page = fixture(request => request.method === 'POST'
+    ? { status:413, json:async () => { throw new SyntaxError('plain text'); } }
+    : normalReply(request), { storage });
+  await page.settle();
+  page.get('text').value = 'too large';
+  page.get('send-text').handlers.click();
+  await page.settle();
+  assert.equal(page.get('text').value, 'too large');
+  assert.equal(storage.has('masc.play.pending'), false);
+  assert.equal(page.padButton.disabled, false);
+  assert.match(page.get('status').textContent, /413/);
+  await page.get('leave').handlers.click();
+  assert.equal(storage.size, 0, 'a refused input does not block departure');
+});
+
 test('an old initial seat response cannot reconnect after a newer document disconnects', async () => {
   const storage = new Map();
   let completeSeat;

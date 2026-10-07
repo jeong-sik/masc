@@ -786,20 +786,16 @@ let overview_pulse_text (state : state) ~now =
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
-     walking. Ten entries make that cost nothing -- it is an array so the
+     walking. Seven entries make that cost nothing -- it is an array so the
      renderer holds no row lookup that walks, with no exception to carry. *)
-  let ring = Array.of_list (Masc_tui_surface_navigation.visible_surface_ring state) in
+  let ring = Array.of_list Masc_tui_types.surface_ring in
   let n = Array.length ring in
-  let active = Masc_tui_surface_navigation.visible_surface_ring_index state state.view in
+  let active = Masc_tui_surface_navigation.surface_ring_index state state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
      badge would be texture, not information. *)
   let badge surface =
     match (surface : surface) with
-    | Approvals ->
-        (match Masc_tui_approvals_model.approvals_surface_pending state with
-         | 0 -> ""
-         | pending -> Printf.sprintf "\xc2\xb7%d" pending)
     | Planning ->
         (match state.verification with
          | Some snapshot when snapshot.Masc.Tui_decode.vs_total > 0 ->
@@ -813,8 +809,8 @@ let surface_strip (state : state) ~cols =
   in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
   let entry_width ~lo i =
-    (* Cells, not bytes: the Approvals badge's middle dot is two bytes and
-       one cell, and a byte count windows the strip one entry early. *)
+    (* Cells, not bytes: the badge's middle dot is two bytes and one cell,
+       and a byte count windows the strip one entry early. *)
     Message_layout.display_width (label i)
     + (if i = active then 1 else 0)
     + (if i > lo then 2 else 0)
@@ -859,18 +855,10 @@ let surface_strip (state : state) ~cols =
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
     let surface, _ = ring.(i) in
-    let is_alert =
-      match surface with
-      | Approvals -> Masc_tui_approvals_model.approvals_surface_pending state > 0
-      | _ -> false
-    in
     let entry =
       if i = active then
-        Ansi.bold
-        ^ (if is_alert then Theme.warn () else Theme.info ())
-        ^ Masc_tui_theme.Glyph.current_entry
+        Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry
         ^ label i ^ Ansi.reset
-      else if is_alert then Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset
       else Ansi.dim ^ label i ^ Ansi.reset
     in
     Buffer.add_string parts (pressable (Press_surface surface) entry)

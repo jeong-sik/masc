@@ -2164,6 +2164,7 @@ let test_promoted_live_output_survives_settlement_and_replay () =
         Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
       in
       let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:42. [] in
+      state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
       state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
       state.msg_target_keeper_name <- Some "alpha";
@@ -3564,7 +3565,7 @@ let test_approval_detail_scroll_accepts_the_rendered_clamp () =
    Every combination is listed rather than described, because the rule is
    about which of eight cases produce which string. *)
 let test_the_header_names_only_unusual_modes () =
-  let summary ?(origin = Masc_tui_message_layout.Origin_inline) memory
+  let summary ?(origin = Masc_tui_message_layout.Origin_bare) memory
       reasoning tools =
     Tui_types.chat_visibility_summary ~memory ~reasoning ~tools ~origin
   in
@@ -3581,18 +3582,15 @@ let test_the_header_names_only_unusual_modes () =
   in
   check
     bool
-    "the pane starts with the short clock"
+    "the pane starts without clocks"
     true
     (started.Tui_types.msg_origin_display
-     = Masc_tui_message_layout.Origin_inline);
+     = Masc_tui_message_layout.Origin_bare);
   check string "everything at its default says nothing" ""
     (summary ~origin:started.Tui_types.msg_origin_display memory_summary
        started.msg_reasoning_visibility compact);
-  (* Both ends of the axis are named, because both are a choice now. A pane
-     with no clock in it says so rather than looking like one whose keeper
-     stopped stamping rows. *)
-  check string "the bare gutter is named" "metadata:off"
-    (summary ~origin:Masc_tui_message_layout.Origin_bare memory_summary folded
+  check string "the optional short clock is named" "metadata:inline"
+    (summary ~origin:Masc_tui_message_layout.Origin_inline memory_summary folded
        compact);
   check string "full metadata is named" "metadata:full"
     (summary ~origin:Masc_tui_message_layout.Origin_row memory_summary folded
@@ -3666,9 +3664,7 @@ let test_every_header_mode_is_named_by_a_footer_key () =
   let summary =
     Tui_types.chat_visibility_summary ~memory:Tui_types.Memory_hidden
       ~reasoning:Tui_types.Reasoning_full ~tools:Tui_types.Tools_full
-      (* Every axis away from its default, which is the only state that names
-         all four. The short clock is the resting one now, so this reaches
-         for the row projection to move the metadata axis off it. *)
+      (* Every axis away from its default, so all four are named. *)
       ~origin:Masc_tui_message_layout.Origin_row
   in
   let axis_of part =
@@ -3715,12 +3711,8 @@ let test_chat_visibility_defaults_and_cycles () =
     (Tui_types.tool_visibility_to_string default.msg_tool_visibility);
   check string "Memory journal starts as one line per pass" "summary"
     (Tui_types.memory_visibility_to_string default.msg_memory_visibility);
-  (* The walk is unchanged; where it starts is not. One press from rest gives
-     the full row, a second the bare gutter, a third comes home -- so both
-     ends stay one press from the resting state in one direction or the
-     other. *)
-  check (list string) "the walk starts at the short clock and comes back"
-    [ "inline"; "row"; "off"; "inline" ]
+  check (list string) "the walk adds clocks and returns to reading"
+    [ "off"; "inline"; "row"; "off" ]
     (let rec collect count mode =
        if count = 0
        then [ Tui_types.origin_display_to_string mode ]
@@ -4258,6 +4250,10 @@ let test_observed_checkpoint_retains_earlier_output () =
           (Astring.String.is_infix ~affix:marker text))
         ["TEXT_BEFORE_CHECKPOINT"; "THINKING_BEFORE_CHECKPOINT"; "Inspect_before_checkpoint"] in
     retained "observed continuation waits";
+    check bool "idle continuation does not claim it is starting" false
+      (Astring.String.is_infix ~affix:"WAITING TO START" (screen ()));
+    check bool "default chat has no timestamp or dispatch span" false
+      (Astring.String.is_infix ~affix:"→" (screen ()));
     check bool "checkpoint remains open to later journal events" false
       (Tui_types.turn_log_holds_the_turn log);
     Tui_types.turn_log_add ~now:110. log ~seq:(Some 8) Live.Run_started;

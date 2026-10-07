@@ -172,7 +172,7 @@ try {
     token = retained;
     invitationConflict = invitation !== '' && invitation !== retained;
   } else if (token !== '') sessionStorage.setItem(SESSION_KEY, token);
-  unsettled = token !== '' && sessionStorage.getItem(PENDING_KEY) === token;
+  unsettled = token !== '' && sessionStorage.getItem(PENDING_KEY) !== null;
 } catch (_) { /* A browser may deny storage; the original link still works. */ }
 history.replaceState(null, '', location.pathname + location.search);
 // Opening an invitation again in this tab can be only a fragment navigation.
@@ -188,6 +188,9 @@ window.addEventListener('hashchange', () => {
   }
   location.reload();
 });
+// Restoring a document also restores its old JS heap. A newer document in
+// this tab may have dispatched a write or changed the retained identity.
+window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 
 const el = (id) => document.getElementById(id);
 const canvas = el('screen');
@@ -232,7 +235,32 @@ function setControlsEnabled(enabled) {
   el('leave').disabled = ended || disconnecting;
 }
 
+function connectionSettled() {
+  try {
+    const retained = sessionStorage.getItem(SESSION_KEY);
+    const pending = sessionStorage.getItem(PENDING_KEY);
+    if (retained !== token) {
+      unsettled = true;
+      setStatus('connection', '이 탭의 연결 정보가 바뀌었어요. 페이지를 새로고침해 주세요.');
+    }
+    if (pending !== null) unsettled = true;
+    if (unsettled) {
+      setControlsEnabled(false);
+      setStatus('action', UNKNOWN_MESSAGE);
+      return false;
+    }
+    return true;
+  } catch (_) {
+    setControlsEnabled(false);
+    setStatus('action', '브라우저에 연결 상태를 저장하지 못해 입력을 보내지 않았어요. 이 사이트의 탭 저장소를 허용해 주세요.');
+    return false;
+  }
+}
+
 function end(text) {
+  // Check storage at the forget boundary too, including authentication
+  // failures delivered to a restored document with an older cached state.
+  if (token !== '' && !connectionSettled()) return;
   ended = true;
   token = '';
   try { sessionStorage.removeItem(SESSION_KEY); } catch (_) { /* Storage can be disabled. */ }
@@ -259,12 +287,13 @@ async function api(method, path, body) {
 }
 
 async function mutate(path, body) {
-  if (unsettled) { setStatus('action', UNKNOWN_MESSAGE); return null; }
+  if (!connectionSettled()) return null;
+  let pending;
   try {
     // Persist before dispatch: closing/reloading the document can lose its
     // response while the authenticated server operation is still pending.
-    sessionStorage.setItem(SESSION_KEY, token);
-    sessionStorage.setItem(PENDING_KEY, token);
+    pending = JSON.stringify({ token, operation: crypto.randomUUID() });
+    sessionStorage.setItem(PENDING_KEY, pending);
   } catch (_) {
     setStatus('action', '브라우저에 연결 상태를 저장하지 못해 입력을 보내지 않았어요. 이 사이트의 탭 저장소를 허용해 주세요.');
     return null;
@@ -280,6 +309,8 @@ async function mutate(path, body) {
     if (!success && !refusal) throw new Error('unconfirmed operation response');
     // Only this operation's terminal response clears its marker. Seat/frame
     // reads are not ordered behind it, and cannot acknowledge it instead.
+    if (sessionStorage.getItem(SESSION_KEY) !== token || sessionStorage.getItem(PENDING_KEY) !== pending)
+      throw new Error('connection or operation changed before acknowledgement');
     sessionStorage.removeItem(PENDING_KEY);
     unsettled = false;
     if (r.status === 401 || r.status === 403) end('초대가 끝났거나 회수됐어요. 운영자에게 새 링크를 받아 주세요.');

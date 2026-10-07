@@ -63,7 +63,13 @@ The MASC server must be running to fetch these records.
 
 ## MSX
 
-`&` (also `:` then `go MSX`) takes the terminal over with the workspace MSX
+Open Collab with `&` or `:` then `go Collab`. `m` watches MSX and `d` watches
+DOS directly, including an empty machine's status. `Esc` returns to Collab.
+Observation reads the shared screen without advancing the machine or sending
+keys. MSX's `F5` explicitly switches between observation and control; only
+control sends game keys, advances frames, or offers checkpoint/disk actions.
+
+`g` in Collab (also `:` then `go MSX`) takes the terminal over with the workspace MSX
 machine (RFC-0439): a load menu first, listing the cartridge images in
 `<base-path>/.masc/msx/carts/`, then the screen of the game a Keeper or you
 loaded. `Esc` returns. The directory starts empty;
@@ -79,13 +85,31 @@ resize it; game input and turn changes go through the server's controller.
 
 ## Shared DOS play invites
 
-Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/play invite <name>
+In Collab, `n` asks for a player name and expiry hours, then issues a link.
+`j`/`k` select an invite, Enter opens its locally retained QR/link, `x` asks
+to revoke the selected invite, and `r` refreshes the inventory. This needs
+no selected Keeper. `:` then `go Play links` opens the same screen.
+`q` or `Esc` closes Collab. Closing and reopening it keeps this workspace's
+issued links; pending mutations still refresh the reopened inventory when
+their replies arrive. Losing workspace authority closes Collab and hides its
+retained links. They return when the same workspace is confirmed again; a
+confirmed different workspace clears them before its invite names can be used.
+Issue and revoke requests run one at a time across Collab and chat, including
+while their originating view is closed, so delayed replies cannot replace a
+newer credential's card.
+
+The Keeper chat composer also accepts `/play invites` to list invites, `/play invite <name>
 <hours>` issues one, `/play link` reopens the latest link issued in this TUI
 session, `/play link <name>` reopens an earlier link issued in this TUI
 session, and `/play revoke <name>` removes it. Issuance requires
 an admin operator credential, token-required authentication and
 `MASC_HTTP_BASE_URL`. A refusal shows the server's own sentence and what it
 says is missing, for example when auth is off or `require_token` is false.
+The server's default address is local. A link beginning with `localhost`,
+`127.*`, or `::1` works only on that computer; the card explains this before
+sharing. For another device, configure the server launch's `MASC_HTTP_BASE_URL`
+to an address it can reach through the listener or an authenticated reverse
+proxy. Changing the TUI connection address does not change issued links.
 
 The server shows the link once, so it goes on a card with a QR code and
 nowhere else: not the chat, not the footer, not the session log. `y` copies

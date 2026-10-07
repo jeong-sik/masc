@@ -14090,6 +14090,16 @@ let render_account_login state view =
       List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))) lines)
 
 
+let render_collab state view =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ~surface_key:"collab" ~title:(screen_title " MASC Collab")
+    ~hints:(Masc_tui_collab.hints view)
+    ~body:(fun ~budget c ->
+      Masc_tui_collab.lines ~height:budget view
+      |> List.iter (fun line -> c.push (fit_width
+          (Masc.Tui_terminal_text.sanitize_terminal_text line) (framed_inner_width cols))))
+
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"lanes"
@@ -14124,6 +14134,8 @@ let frame_choice (state : state) ~terminal_rows =
   | None -> match state.account_login with
   | Some view -> `Account_login view
   | None when state.palette_open -> `Palette
+  | None -> match state.collab with
+  | Some view -> `Collab view
   | None -> match state.lane_addons with
   | Some view -> `Lane_addons view
   | None ->
@@ -14164,6 +14176,7 @@ let render (state : state) =
     let frame, clamped = render_play_card state card in
     (frame, clamped, None, Overlay_drawn)
   | `Account_login view -> let frame, clamped = render_account_login state view in (frame,clamped,None,Overlay_drawn)
+  | `Collab view -> let frame, clamped = render_collab state view in (frame,clamped,None,Overlay_drawn)
   | `Lane_addons view ->
     let frame, clamped = render_lane_addons state view in
     (frame, clamped, None, Overlay_drawn)

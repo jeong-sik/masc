@@ -9807,3 +9807,5 @@
  (name test_h3_working_state_meaning)
  (modules test_h3_working_state_meaning)
  (libraries masc_test_deps))
+
+(include stanzas/test_h2_play_room.inc)

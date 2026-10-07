@@ -19,19 +19,26 @@ let before request =
       | Some n when n > 0 -> Ok (Some n)
       | None | Some _ -> Error (Play_room.Invalid_request "before must be a positive message id"))
   | _ -> Error (Play_room.Invalid_request "only one before query parameter is accepted")
+let read ~base_path request =
+  Result.bind (before request) (fun before ->
+    Play_room.read ~base_path ~now:(Time_compat.now ()) ~before)
+let perform ~base_path ~who body =
+  let action =
+    try Play_room.parse_action (Yojson.Safe.from_string body)
+    with Yojson.Json_error _ -> Error (Play_room.Invalid_request "body must be JSON")
+  in
+  Result.bind action (fun action ->
+    Play_room.perform ~base_path ~who ~speaker:Play_room.Participant
+      ~now:(Time_compat.now ()) action)
 let add_routes router =
   router
   |> Http.Router.get path (fun request reqd ->
     with_token_permission_auth ~permission:Masc_domain.CanPlayMachine (fun state name request reqd ->
       let config = Mcp_server.workspace_config state in
-      respond ~viewer:name request reqd (Result.bind (before request) (fun before ->
-        Play_room.read ~base_path:config.base_path ~now:(Time_compat.now ()) ~before))) request reqd)
+      respond ~viewer:name request reqd (read ~base_path:config.base_path request)) request reqd)
   |> Http.Router.post path (fun request reqd ->
     with_token_permission_auth ~permission:Masc_domain.CanPlayMachine (fun state name request reqd ->
       let config = Mcp_server.workspace_config state in
       Http.Request.read_body_async reqd (fun body ->
-        let action = try Play_room.parse_action (Yojson.Safe.from_string body)
-          with Yojson.Json_error _ -> Error (Play_room.Invalid_request "body must be JSON") in
-        respond ~viewer:name request reqd (Result.bind action (fun action ->
-          Play_room.perform ~base_path:config.base_path ~who:name ~speaker:Play_room.Participant
-            ~now:(Time_compat.now ()) action)))) request reqd)
+        respond ~viewer:name request reqd
+          (perform ~base_path:config.base_path ~who:name body))) request reqd)

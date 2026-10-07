@@ -883,7 +883,7 @@ let test_withdrawal_restores_only_input_before_the_first_post () =
     ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
     ~text:"unsent input" ~at:1. ()];
   Tui_types.retain_preflight_inputs state [entry];
-  check string "editable text restored" "unsent input" (Buffer.contents state.msg_input);
+  check string "editable text restored" "unsent input" (Masc_tui_message_input.contents state.msg_input);
   check bool "attachment bytes retained" true
     (state.msg_attachments = entry.sent_request.attachments);
   check bool "references retained" true (state.msg_references = entry.sent_request.references);
@@ -891,10 +891,10 @@ let test_withdrawal_restores_only_input_before_the_first_post () =
   check bool "restored composer is not queued" true
     (Masc_tui_keeper_chat_queue.is_empty state.msg_queued);
   List.iter (fun phase ->
-    Buffer.clear state.msg_input;
+    Masc_tui_message_input.clear state.msg_input;
     state.msg_attachments <- []; state.msg_references <- [];
     Tui_types.retain_preflight_inputs state [{entry with phase}];
-    check string "possibly sent input is never restored" "" (Buffer.contents state.msg_input);
+    check string "possibly sent input is never restored" "" (Masc_tui_message_input.contents state.msg_input);
     check bool "possibly sent input is never queued" true
       (Masc_tui_keeper_chat_queue.is_empty state.msg_queued))
     [Tui_types.Turn_streaming; Tui_types.Turn_reconciling]
@@ -904,7 +904,7 @@ let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
   let module Q = Masc_tui_keeper_chat_queue in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_target_keeper_name <- Some "alpha";
-  Buffer.add_string state.msg_input "newer composer";
+  Masc_tui_message_input.insert state.msg_input "newer composer";
   state.msg_references <- [Keeper_chat.Ref_url "https://example.invalid/new.png"];
   let entry, item = preflight_input () in
   let staged = Q.restore_unsent Q.empty item in
@@ -925,7 +925,7 @@ let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
   check bool "retained queued input remains in recall history" true
     (List.exists (fun (row : Tui_types.msg_entry) -> row.me_request_id = item.request.request_id)
        state.msg_history);
-  check string "newer composer untouched" "newer composer" (Buffer.contents state.msg_input);
+  check string "newer composer untouched" "newer composer" (Masc_tui_message_input.contents state.msg_input);
   check bool "newer reference untouched" true
     (state.msg_references = [Keeper_chat.Ref_url "https://example.invalid/new.png"]);
   check int "admission cap cannot discard prior accepted input" (Q.cap + 1) (Q.length state.msg_queued);
@@ -955,7 +955,7 @@ let test_preflight_recovery_preserves_order_and_steer_intent () =
     causal_parent_request_id=Some older_item.request.request_id; submission_seq=1} in
   let steer = {newer with Tui_types.phase=Tui_types.Turn_preflight steer_item} in
   Tui_types.retain_preflight_inputs state [steer];
-  check string "steer is not converted to a plain composer message" "" (Buffer.contents state.msg_input);
+  check string "steer is not converted to a plain composer message" "" (Masc_tui_message_input.contents state.msg_input);
   (match Q.waiting state.msg_queued with
    | [restored] -> check bool "steer intent and causal parent retained" true
        (restored.intent = Q.Steer_after_interrupt
@@ -963,7 +963,7 @@ let test_preflight_recovery_preserves_order_and_steer_intent () =
    | _ -> fail "expected retained steer");
   state.msg_queued <- Q.empty;
   state.keeper_interactive_waiting <- [];
-  Buffer.add_string state.msg_input "newer draft";
+  Masc_tui_message_input.insert state.msg_input "newer draft";
   (* Inflight owners are stored newest first; restore them in that order so
      each earlier item precedes the items restored before it. *)
   Tui_types.retain_preflight_inputs state [newer; older];
@@ -980,7 +980,7 @@ let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
   let module Q = Masc_tui_keeper_chat_queue in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_target_keeper_name <- Some "alpha";
-  Buffer.add_string state.msg_input "newer draft";
+  Masc_tui_message_input.insert state.msg_input "newer draft";
   let entry, item = preflight_input () in
   Tui_types.retain_preflight_inputs state [entry];
   let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later Enter" () in
@@ -1044,7 +1044,7 @@ let test_unmarked_input_cannot_escape_composer_or_recall_ownership () =
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.composer_focused <- true;
   state.coalesce_queued_input <- true;
-  Buffer.add_string state.msg_input "still composing";
+  Masc_tui_message_input.insert state.msg_input "still composing";
   check bool "unmarked fallback respects coalescing composer ownership" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
   state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
@@ -1084,7 +1084,7 @@ let test_empty_composer_cannot_reverse_already_queued_input () =
    | Error detail -> fail detail);
   Tui_types.retain_preflight_inputs state [entry];
   check string "older input cannot move behind newer queue through the composer"
-    "" (Buffer.contents state.msg_input);
+    "" (Masc_tui_message_input.contents state.msg_input);
   check bool "original input is retained ahead of newer input" true
     (List.map (fun (held : Q.item) -> held.request.request_id) (Q.waiting state.msg_queued)
       = [item.request.request_id; later.request_id]);
@@ -1125,7 +1125,7 @@ let test_offscreen_preflight_recovery_retains_its_owner () =
   state.msg_target_keeper_name <- Some "beta";
   let entry, item = preflight_input () in
   Tui_types.retain_preflight_inputs state [entry];
-  check string "alpha cannot fill beta's composer" "" (Buffer.contents state.msg_input);
+  check string "alpha cannot fill beta's composer" "" (Masc_tui_message_input.contents state.msg_input);
   (match Q.waiting state.msg_queued with
    | [restored] -> check bool "alpha payload remains alpha's" true (restored.request = item.request)
    | _ -> fail "expected exactly one retained alpha input")
@@ -3727,7 +3727,7 @@ let test_composing_holds_only_while_the_composer_is_live () =
   state.coalesce_queued_input <- true;
   state.msg_target_keeper_name <- Some "alpha";
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-  Buffer.add_string state.msg_input "half a";
+  Masc_tui_message_input.insert state.msg_input "half a";
   check bool "typing in the pane holds alpha's line" true
     (Tui_types.composing_for_keeper state "alpha");
   check bool "and nobody else's" false (Tui_types.composing_for_keeper state "beta");
@@ -3745,10 +3745,10 @@ let test_composing_holds_only_while_the_composer_is_live () =
   check bool "the row released does not" false
     (Tui_types.composing_for_keeper state "alpha");
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-  Buffer.clear state.msg_input;
+  Masc_tui_message_input.clear state.msg_input;
   check bool "an empty composer holds nothing" false
     (Tui_types.composing_for_keeper state "alpha");
-  Buffer.add_string state.msg_input "half a";
+  Masc_tui_message_input.insert state.msg_input "half a";
   state.coalesce_queued_input <- false;
   check bool "with coalescing off there is no hold at all" false
     (Tui_types.composing_for_keeper state "alpha")
@@ -4130,13 +4130,13 @@ let test_only_a_moving_skill_wears_the_live_mark () =
          | Masc_tui_message_layout.Skill_failure -> None)
        Keeper_chat_transcript.all_skill_states)
 
-let test_roster_default_follows_chat_without_rewriting_preference () =
+let test_roster_starts_hidden_until_explicitly_opened () =
   let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
   check bool "default is hidden outside chat" true (Tui_types.roster_pane_hidden state);
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-  check bool "entering chat shows the roster" false (Tui_types.roster_pane_hidden state);
+  check bool "entering chat keeps the roster closed" true (Tui_types.roster_pane_hidden state);
   state.view <- Tui_types.Keepers Tui_types.Keeper_detail;
-  check bool "Auto returns to the detail default" true (Tui_types.roster_pane_hidden state);
+  check bool "detail keeps the roster closed" true (Tui_types.roster_pane_hidden state);
   List.iter (fun (preference, hidden) ->
     state.roster_pane_preference <- preference;
     List.iter (fun surface ->
@@ -4151,7 +4151,7 @@ let test_hidden_chat_roster_releases_focus_without_changing_conversation () =
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.msg_target_keeper_name <- Some "alpha";
   state.keeper_cursor <- 1;
-  Buffer.add_string state.msg_input "alpha's unsent draft";
+  Masc_tui_message_input.insert state.msg_input "alpha's unsent draft";
   let threshold = Masc_tui_roster_pane.threshold_cols in
   List.iter (fun (preference, cols) ->
     state.roster_pane_preference <- preference;
@@ -4161,13 +4161,13 @@ let test_hidden_chat_roster_releases_focus_without_changing_conversation () =
       (state.keeper_message_focus = Tui_types.Right_pane);
     check (option string) "conversation preserved" (Some "alpha") state.msg_target_keeper_name;
     check int "roster selection preserved" 1 state.keeper_cursor;
-    check string "draft preserved" "alpha's unsent draft" (Buffer.contents state.msg_input);
+    check string "draft preserved" "alpha's unsent draft" (Masc_tui_message_input.contents state.msg_input);
     check bool "visibility preference preserved" true (state.roster_pane_preference = preference);
     state.roster_pane_preference <- Masc_tui_roster_pane.Shown;
     Tui_types.reconcile_keeper_message_focus state ~cols:threshold;
     check bool "returning roster does not steal focus" true
       (state.keeper_message_focus = Tui_types.Right_pane))
-    [Masc_tui_roster_pane.Auto, threshold - 1;
+    [Masc_tui_roster_pane.Hidden, threshold - 1;
      Masc_tui_roster_pane.Shown, threshold - 1;
      Masc_tui_roster_pane.Hidden, threshold];
   state.keeper_message_focus <- Tui_types.Left_pane;
@@ -4535,7 +4535,7 @@ let () =
         ] )
     ; ( "roster default"
       , [ test_case "chat default preserves explicit preference" `Quick
-            test_roster_default_follows_chat_without_rewriting_preference
+            test_roster_starts_hidden_until_explicitly_opened
         ; test_case "hidden roster releases focus and retains the conversation" `Quick
             test_hidden_chat_roster_releases_focus_without_changing_conversation ] )
     ; ( "queue"

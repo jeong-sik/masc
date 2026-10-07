@@ -21,10 +21,13 @@ async function waitFor(assertion: () => boolean, label: string): Promise<void> {
   throw new Error(`Timed out waiting for ${label}`)
 }
 
+function parameterRows(container: HTMLElement, label: string): Element[] {
+  return Array.from(container.querySelectorAll('[aria-label="runtime parameter detail"] > div'))
+    .filter(candidate => candidate.firstElementChild?.textContent === label)
+}
+
 function parameterValue(container: HTMLElement, label: string): string | undefined {
-  const row = Array.from(container.querySelectorAll('[aria-label="runtime parameter detail"] > div'))
-    .find(candidate => candidate.firstElementChild?.textContent === label)
-  return row?.lastElementChild?.textContent?.trim()
+  return parameterRows(container, label)[0]?.lastElementChild?.textContent?.trim()
 }
 
 describe('RuntimeMonitor', () => {
@@ -466,6 +469,10 @@ describe('RuntimeMonitor', () => {
     }
     expect(parameterValue(container, 'declared provider · context')).toBe(
       context.provider == null ? undefined : context.provider.toLocaleString('en-US'),
+    )
+    // One row per declared fact: a repeated label reads as two facts.
+    expect(parameterRows(container, 'declared provider · context')).toHaveLength(
+      context.provider == null ? 0 : 1,
     )
     expect(parameterValue(container, 'binding · context')).toBe(
       context.binding == null ? undefined : context.binding.toLocaleString('en-US'),

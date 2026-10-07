@@ -3298,7 +3298,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_link_preview masc_tui_image_preview
+ (libraries masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -3357,7 +3357,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries masc_tui_identity_model masc_tui_surface_navigation
+ (libraries masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -3749,6 +3749,11 @@
  unix))
 
 (test
+ (name test_tui_message_input)
+ (modules test_tui_message_input)
+ (libraries alcotest masc_tui_message_input masc_tui_message_layout))
+
+(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries
@@ -3904,7 +3909,7 @@
 (test
  (name test_tui_composer_projection)
  (modules test_tui_composer_projection)
- (libraries
+ (libraries masc_tui_message_input
  alcotest
 
  masc
@@ -6972,7 +6977,7 @@
 (test
  (name test_tui_browser_lane_text)
  (modules test_tui_browser_lane_text)
- (libraries yojson masc masc.browser_lane masc_tui_types masc_tui_message_layout))
+ (libraries masc_tui_message_input yojson masc masc.browser_lane masc_tui_types masc_tui_message_layout))
 
 (include stanzas/test_browser_downloads.inc)
 (include stanzas/test_browser_bidi_lifecycle.inc)

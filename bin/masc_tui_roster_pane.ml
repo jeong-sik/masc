@@ -1,8 +1,7 @@
-type preference = Auto | Hidden | Shown
+type preference = Hidden | Shown
 
-let effective_hidden preference ~in_chat =
+let effective_hidden preference =
   match preference with
-  | Auto -> not in_chat
   | Hidden -> true
   | Shown -> false
 
@@ -74,8 +73,8 @@ let shown ~hidden ~cols = (not hidden) && cols >= threshold_cols
 let toggle_hidden ~hidden ~cols =
   if cols < threshold_cols then None else Some (not hidden)
 
-let toggle_preference preference ~in_chat ~cols =
-  toggle_hidden ~hidden:(effective_hidden preference ~in_chat) ~cols
+let toggle_preference preference ~cols =
+  toggle_hidden ~hidden:(effective_hidden preference) ~cols
   |> Option.map (fun hidden -> if hidden then Hidden else Shown)
 
 let content_cols ~hidden ~cols =

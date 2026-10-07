@@ -174,8 +174,8 @@ val keeper_context_approval_authority_footer : string
 
 (** {1 keeper.world.* — unified turn frame section prose}
 
-    One group file per section under [config/prompts/keeper.world.<group>.md];
-    each [### marker] slot registers as [keeper.world.<group>.<marker>]. The
+    One marker group per section in [config/prompts/keeper.md]; each
+    [### world.<group>.<marker>] slot registers as [keeper.world.<group>.<marker>]. The
     bare [keeper.world] key is a historical dashboard name only, never a
     prompt key. *)
 
@@ -397,7 +397,6 @@ val exec_policy_cwd_existing_siblings_hint : string
 
 val subset_rewrite_move_to_field : string
 val subset_rewrite_call_this_instead : string
-val subset_rewrite_spell_it_as : string
 
 (** tool_guidance.* — generic cross-domain tool-result guidance, one arm of
     [Tool_guidance.t] per key. *)

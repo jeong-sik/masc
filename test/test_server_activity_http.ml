@@ -211,7 +211,7 @@ let test_runtime_prompt_assets_are_read_only_and_missing_visible () =
            ~prompts_dir
            ~embedded_files:
              [ "prompts/keeper.autonomous.wake.txt"
-             ; "prompts/harness.coding_keeper.txt"
+             ; "prompts/example.missing.txt"
              ; "prompts/keeper.md"
              ; "tools/ignored.txt"
              ]
@@ -219,7 +219,7 @@ let test_runtime_prompt_assets_are_read_only_and_missing_visible () =
        check int "only prompt txt assets" 2 (List.length assets);
        let open Yojson.Safe.Util in
        let missing = List.hd assets in
-       check string "sorted missing asset path" "harness.coding_keeper.txt"
+       check string "sorted missing asset path" "example.missing.txt"
          (missing |> member "path" |> to_string);
        check bool "missing asset remains visible" false
          (missing |> member "file_exists" |> to_bool);

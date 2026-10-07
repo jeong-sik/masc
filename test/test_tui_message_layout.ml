@@ -679,7 +679,7 @@ let test_input_viewport_keeps_latest_complete_scalars () =
 
 let test_input_cursor_uses_visible_terminal_cells () =
   let column terminal_cols input =
-    Layout.input_cursor_column ~terminal_cols ~input
+    Layout.input_cursor_column ~terminal_cols ~input_cells:(Layout.display_width input)
   in
   (* The caret is measured from the prefix the pane renders ("  > "), so what
      the operator typed and what the screen shows end at the same column. *)

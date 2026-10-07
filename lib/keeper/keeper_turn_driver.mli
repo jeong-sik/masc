@@ -372,7 +372,7 @@ val run_named :
 (** Run a single [Agent.run] call with MASC-driven runtime model fallback.
     MASC drives the runtime FSM directly: resolves runtime providers,
     resolves each candidate's model temperature before trying it with AGENT_CORE, and
-    uses [Runtime_fsm.decide] on failure.
+    asks [Runtime_attempt_fsm.should_try_next] on failure.
     The runtime loop runs inside a capacity-managed queue permit.
 
     [on_runtime_attempt_error] observes every typed candidate failure after

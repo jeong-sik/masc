@@ -71,13 +71,20 @@ let holds needle text =
 
 let test_the_index_says_what_the_board_holds () =
   let labels = [ "one"; "two"; "three" ] in
-  Alcotest.(check bool) "the page, then the board" true
-    (holds "Board (3 of 9)" (sidebar_title ~holding:(Some 9) labels));
-  Alcotest.(check bool) "a list with nothing more to hold keeps its own count"
-    true
-    (holds "Board (3)" (sidebar_title ~holding:None labels));
-  Alcotest.(check bool) "a page that carries everything says it once" true
-    (holds "Board (3)" (sidebar_title ~holding:(Some 3) labels))
+  let check_heading message ~holding ~count =
+    let rows =
+      sidebar_title ~holding labels
+      |> Masc_tui_theme.strip_sgr
+      |> String.split_on_char '\n'
+    in
+    Alcotest.(check bool) message true
+      (List.exists (fun row -> holds "Board" row && holds count row) rows)
+  in
+  check_heading "the page, then the board" ~holding:(Some 9) ~count:"(3 of 9)";
+  check_heading "a list with nothing more to hold keeps its own count"
+    ~holding:None ~count:"(3)";
+  check_heading "a page that carries everything says it once"
+    ~holding:(Some 3) ~count:"(3)"
 
 ;;
 

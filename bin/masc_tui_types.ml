@@ -3067,7 +3067,10 @@ let turn_log_holds_the_turn turn_log =
   match Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
   | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
   | Masc_tui_keeper_chat_transcript.Stream_ended ->
-      Option.is_some
+      Option.exists (fun (reply : Masc_tui_keeper_chat_transcript.reply) ->
+        match reply.reply_outcome with
+        | Masc.Keeper_turn_outcome.Continuation_checkpoint -> false
+        | Visible_reply | Terminal_effect_settled | Awaiting_gate_approval | No_visible_reply -> true)
         (Masc_tui_keeper_chat_transcript.reply turn_log.tl_transcript)
   | Masc_tui_keeper_chat_transcript.Waiting
   | Masc_tui_keeper_chat_transcript.Working ->
@@ -12091,14 +12094,37 @@ let keeper_message_status_log (state : state) =
   | None -> None
   | Some keeper_name ->
       let logs = selected_source_logs_for_keeper state keeper_name in
-      (match List.find_opt (fun log ->
-          Masc_tui_keeper_chat_transcript.phase log.tl_transcript = Working
-          && not (observed_log_has_ended state log)
-          && not (observed_log_is_unavailable state log)) logs with
+      let owned log =
+        List.exists (fun (entry : inflight) ->
+          turn_log_keeper_name entry.log = keeper_name
+          && turn_log_execution_id entry.log = turn_log_execution_id log)
+          state.msg_inflight
+      in
+      let autonomous log =
+        List.exists (fun (source, _) -> source = Masc_tui_keeper_chat_log.source log.tl_log)
+          (autonomous_journal_candidates ~keeper_name state.keeper_turns)
+      in
+      let observed log =
+        match Masc_tui_keeper_chat_log.operation_state log.tl_log with
+        | Some (Keeper_chat_operation.Running _) -> true
+        | Some (Queued | Succeeded _ | Failed _ | Cancelled _) | None -> false
+      in
+      let current log = owned log || autonomous log || observed log in
+      let working log =
+        Masc_tui_keeper_chat_transcript.phase log.tl_transcript = Working
+        && not (observed_log_has_ended state log)
+        && not (observed_log_is_unavailable state log)
+      in
+      let active = List.find_map (fun authority ->
+        List.find_opt (fun log -> authority log && working log) logs)
+        [owned; autonomous; observed] in
+      (match active with
        | Some log -> Some log
        | None ->
            match state.msg_live with
-           | Some log when turn_log_keeper_name log = keeper_name -> Some log
+           | Some log when turn_log_keeper_name log = keeper_name
+               && (Masc_tui_keeper_chat_transcript.phase log.tl_transcript <> Working
+                   || current log) -> Some log
            | Some _ | None ->
                List.find_opt (fun log ->
                  Masc_tui_keeper_chat_transcript.awaiting_continuation log.tl_transcript

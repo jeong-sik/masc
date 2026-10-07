@@ -81,6 +81,17 @@ val committed : t -> bool
 val revision : t -> int
 (** Bumped by every mutation; the memo key for anything derived from the log. *)
 
+val operation_state : t -> Keeper_chat_operation.state option
+val observe_operation_state : t -> Keeper_chat_operation.state option -> unit
+(** Exact operation read, separate from journal events and their replay cursor.
+    [None] means the operation read is unavailable. A terminal observation is
+    retained across later reads. Autonomous journals have no operation state. *)
+
+val decode_operation_state :
+  operation_id:string -> Yojson.Safe.t -> (Keeper_chat_operation.state, string) result
+(** Decode the operation API's state only after checking its schema and exact
+    operation identity. Unknown states and malformed terminal facts fail. *)
+
 type events_page =
   { source : journal_source
   ; events : Masc.Keeper_chat_event_log.journaled_event list

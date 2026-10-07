@@ -300,6 +300,10 @@ val settled_at : t -> float option
     span a block drawn from this transcript covered. *)
 
 val apply : now:float -> t -> Masc_tui_keeper_chat_live.delta -> unit
+
+val reconcile_operation : t -> Keeper_chat_operation.state -> unit
+(** Reconcile an exact durable operation state without fabricating journal
+    events or a reply. Preserve partial text, tools, and continuation history. *)
 (** [now] stamps a tool call as it opens, so the progress row can say how long
     the call in flight has been open rather than only how long the turn has. *)
 (** Fold one delta in. Tool deltas join only by their server-owned stream

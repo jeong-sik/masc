@@ -153,6 +153,25 @@ let page_json ?(schema = "masc.keeper_chat_events.v2") ?(next_since_offset = `In
     ; "next_since_offset", next_since_offset
     ]
 
+let test_decode_exact_operation_state () =
+  let body fields = `Assoc (["schema", `String "masc.keeper_chat_operation.v1";
+    "operation_id", `String "exact"] @ fields) in
+  let failed = ["state", `String "Failed"; "completed_at", `Float 4.;
+    "failure_kind", `String "Turn_cancelled"; "failure_detail", `String "stopped"] in
+  (match Log.decode_operation_state ~operation_id:"exact" (body failed) with
+   | Ok (Keeper_chat_operation.Failed {completed_at; failure}) ->
+       check (float 0.) "completion time" 4. completed_at;
+       check string "failure reason" "stopped" failure.detail
+   | _ -> fail "exact failed operation was not decoded");
+  List.iter (fun json ->
+    check bool "malformed or mismatched authority cannot settle a journal" true
+      (Result.is_error (Log.decode_operation_state ~operation_id:"exact" json)))
+    [ body ["state", `String "surprise"]
+    ; body ["state", `String "Cancelled"; "completed_at", `Float nan]
+    ; body ["state", `String "Failed"; "completed_at", `Float 4.]
+    ; `Assoc ["schema", `String "masc.keeper_chat_operation.v1";
+        "operation_id", `String "another"; "state", `String "Queued"] ]
+
 let test_decode_events_page () =
   let lines =
     [ line 0 1.0 (E.Run_started { run_id = "r"; thread_id = "keeper:keeper.one" })
@@ -813,7 +832,8 @@ let () =
             test_a_blank_reason_is_not_a_reason
         ] )
     ; ( "v2 page"
-      , [ test_case "decode events page" `Quick test_decode_events_page
+      , [ test_case "decode exact operation state" `Quick test_decode_exact_operation_state
+        ; test_case "decode events page" `Quick test_decode_events_page
         ; test_case "add_journaled holds undrawn positions" `Quick
             test_add_journaled_holds_undrawn_positions
         ; test_case "decode events error by code" `Quick

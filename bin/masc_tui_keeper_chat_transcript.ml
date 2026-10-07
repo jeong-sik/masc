@@ -2211,6 +2211,29 @@ let apply ~now t delta =
   bump t;
   apply_delta ~now t delta
 
+let reconcile_operation t (state : Keeper_chat_operation.state) =
+  match state with
+  | Queued | Running _ -> ()
+  | Failed { completed_at; failure } ->
+      (match t.phase with
+       | Stream_failed _ -> ()
+       | Waiting | Working | Stream_ended ->
+           apply ~now:completed_at t (Live.Run_failed { message = failure.detail }))
+  | Cancelled { completed_at } ->
+      (match t.phase with
+       | Stream_failed _ -> ()
+       | Waiting | Working | Stream_ended ->
+           apply ~now:completed_at t (Live.Run_failed { message = "요청이 취소되었습니다" }))
+  | Succeeded { completed_at; _ } ->
+      (match t.phase with
+       | Stream_ended | Stream_failed _ -> ()
+       | Waiting | Working ->
+           bump t;
+           t.phase <- Stream_ended;
+           t.ended_at <- Some completed_at;
+           settle t ~now:completed_at)
+;;
+
 (* Replay source identity and event clocks without inventing a run age. *)
 let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
   let t = create_for_source ~keeper_name:(Masc_tui_keeper_chat_log.keeper_name log)
@@ -2222,6 +2245,7 @@ let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
       apply ~now:(Option.value entry.at ~default:now) t entry.delta)
     (Masc_tui_keeper_chat_log.entries log);
   if not !timed then t.ended_at <- None;
+  Option.iter (reconcile_operation t) (Masc_tui_keeper_chat_log.operation_state log);
   t
 ;;
 

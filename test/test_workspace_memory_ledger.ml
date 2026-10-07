@@ -165,8 +165,9 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
      | Ledger.Available { briefing = Ok Briefing.Missing; _ } -> ()
      | _ -> Alcotest.fail "classified evidence without a summary was hidden or called summarized");
     let directory = Ledger.directory ~base_path in
-    let batch = match Briefing.prepare ~sources:(Ledger.briefing_sources ledger)
-        ~contract:"ledger-observation-fixture"
+    let template = (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective in
+    let contract = Briefing.contract ~template in
+    let batch = match Briefing.prepare ~sources:(Ledger.briefing_sources ledger) ~contract
         ~render:(fun value -> Ok (Yojson.Safe.to_string value)) Briefing.empty |> require with
       | Some batch -> batch
       | None -> Alcotest.fail "unsummarized ledger prepared no work" in
@@ -177,9 +178,20 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
     let observe_current () = match Ledger.observe ~base_path with
       | Ledger.Available { briefing = Ok (Briefing.Current summary); claim_count = 1; _ } ->
         Alcotest.(check string) "actual saved semantic text reaches the observation" text summary.text;
-        Alcotest.(check (list string)) "publication names the supporting claim" ["c1"] summary.source_ids
+        Alcotest.(check (list string)) "publication names the supporting claim" ["claim:c1"] summary.source_ids
       | _ -> Alcotest.fail "saved briefing was not observed as current" in
     observe_current (); observe_current ();
+    let superseded = match Briefing.prepare ~sources:(Ledger.briefing_sources ledger)
+        ~contract:(Briefing.contract ~template:(template ^ "\nPrior synthesis contract"))
+        ~render:(fun value -> Ok (Yojson.Safe.to_string value)) Briefing.empty |> require with
+      | Some batch -> Briefing.accept batch ~text |> require
+      | None -> Alcotest.fail "prior contract prepared no briefing" in
+    Briefing.save ~directory superseded |> require;
+    (match Ledger.observe ~base_path with
+     | Ledger.Available { briefing = Ok (Briefing.Stale summary); _ } ->
+       Alcotest.(check string) "superseded prompt is stale even before the worker starts" text summary.text
+     | _ -> Alcotest.fail "same sources hid a synthesis contract mismatch");
+    Briefing.save ~directory accepted |> require;
     let changed = decode (ledger_json ~claims:["c1", "Owner review has completed"]
       [ordinary_ref "writer" "Owner review has completed", claim_member "c1"]) in
     Ledger.save ~base_path changed |> require;
@@ -192,6 +204,24 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
     match Ledger.observe ~base_path with
     | Ledger.Available { briefing = Error _; claim_count = 1; _ } -> ()
     | _ -> Alcotest.fail "briefing corruption hid the readable ledger or claimed a summary")
+
+let test_briefing_keeps_claim_and_conflict_namespaces_distinct () =
+  let module Briefing = Masc.Workspace_memory_briefing in
+  let ledger = decode (ledger_json
+    ~claims:["shared-id", "Release review is pending"]
+    ~conflicts:["shared-id", "Keepers disagree about the release date"]
+    [ordinary_ref "writer" "Release review is pending", claim_member "shared-id";
+     ordinary_ref "reviewer" "Keepers disagree about the release date", conflict_member "shared-id"]) in
+  let sources = Ledger.briefing_sources ledger in
+  Alcotest.(check (list string)) "collection-local IDs remain separate briefing sources"
+    ["claim:shared-id"; "conflict:shared-id"]
+    (List.map (fun (source : Briefing.source) -> source.id) sources);
+  match Briefing.prepare ~sources ~contract:(Briefing.contract ~template:"fixture")
+      ~render:(fun value -> Ok (Yojson.Safe.to_string value)) Briefing.empty with
+  | Ok (Some batch) ->
+    Alcotest.(check int) "both complete bodies reach synthesis" 2 (Briefing.selected_count batch)
+  | Ok None -> Alcotest.fail "populated ledger prepared no briefing"
+  | Error detail -> Alcotest.fail detail
 
 let test_observe_empty_ledger_needs_no_briefing () =
   let module Briefing = Masc.Workspace_memory_briefing in
@@ -413,7 +443,9 @@ let () =
       , [ Alcotest.test_case "durable briefing is current, stale or explicitly unavailable" `Quick
             test_observe_reads_published_briefing_and_reports_staleness
         ; Alcotest.test_case "empty ledger needs no generated briefing" `Quick
-            test_observe_empty_ledger_needs_no_briefing ] )
+            test_observe_empty_ledger_needs_no_briefing
+        ; Alcotest.test_case "claim and conflict IDs remain separate" `Quick
+            test_briefing_keeps_claim_and_conflict_namespaces_distinct ] )
     ; ( "reconcile"
       , [ Alcotest.test_case "new facts follow store order" `Quick test_new_facts_follow_store_order
         ; Alcotest.test_case "unchanged facts are no work" `Quick test_unchanged_facts_are_no_work

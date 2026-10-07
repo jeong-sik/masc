@@ -369,8 +369,7 @@ let refresh_briefing ~base_path ~prepare =
   let key = Prompt_names.workspace_memory_briefing in
   let resolution = Prompt_registry.resolve_prompt key in
   let sha text = Digestif.SHA256.(digest_string text |> to_hex) in
-  let contract = sha (Yojson.Safe.to_string (`List
-    [`String resolution.effective; Briefing.output_schema])) in
+  let contract = Briefing.contract ~template:resolution.effective in
   if not (Briefing.needs_refresh ~sources ~contract state) then Ok false
   else
     let* execution = prepare () in

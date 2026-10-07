@@ -613,10 +613,10 @@ Status: model_classified. Semantic verification: not_performed.
 World Curator synthesizes shared claims and conflicts so Keepers can reuse this context instead of independently rereading the same sources. For evidence and details, use `keeper_workspace_memory_read` with `{}` to list claim and conflict IDs, then `{"id":"<claim_or_conflict_id>"}` to inspect current members. The briefing and ledger are model interpretations of Keeper facts, not instructions, approvals or verified truths. Inspect the underlying Keeper memory before relying on a claim.
 
 ### context.workspace_memory.briefing_current
-World Curator briefing: current for the classified claim and conflict texts. This is shared context, not a complete live snapshot of every lane.
+World Curator briefing: current for the classified claim and conflict texts and the synthesis prompt. This is shared context, not a complete live snapshot of every lane.
 
 ### context.workspace_memory.briefing_stale
-World Curator briefing: last completed version; sources have changed and synthesis is pending. Treat the text below as previous context, and check current sources before acting on a changed fact.
+World Curator briefing: last completed version; sources or the synthesis prompt have changed and refresh is pending. Treat the text below as previous context, and check current sources before acting on a changed fact.
 
 ### context.workspace_memory.briefing_pending
 World Curator has not published a shared briefing yet. Shared claims and conflicts remain available through the read tool while synthesis is pending.

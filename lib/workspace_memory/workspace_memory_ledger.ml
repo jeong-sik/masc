@@ -318,7 +318,10 @@ let save ~base_path t =
        | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)))
 
 let briefing_sources ledger =
-  let source kind (id, text) : Workspace_memory_briefing.source = { id; kind; text } in
+  let source kind (id, text) : Workspace_memory_briefing.source =
+    let namespace = match kind with Workspace_memory_briefing.Claim -> "claim:"
+      | Workspace_memory_briefing.Conflict -> "conflict:" in
+    { id = namespace ^ id; kind; text } in
   List.map (source Workspace_memory_briefing.Claim) (claims ledger)
   @ List.map (source Workspace_memory_briefing.Conflict) (conflicts ledger)
 
@@ -348,8 +351,10 @@ let observe ~base_path =
        | Ok ledger ->
          let ledger_sha256 = Digestif.SHA256.(digest_string
            (Yojson.Safe.to_string (to_json ledger)) |> to_hex) in
+         let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
+         let contract = Workspace_memory_briefing.contract ~template:resolution.effective in
          let briefing = Workspace_memory_briefing.load ~directory:(directory ~base_path)
-           |> Result.map (Workspace_memory_briefing.observe ~sources:(briefing_sources ledger)) in
+           |> Result.map (Workspace_memory_briefing.observe ~sources:(briefing_sources ledger) ~contract) in
          Available { ledger_sha256; claim_count = List.length (claims ledger);
                      conflict_count = List.length (conflicts ledger);
                      classified_count = List.length (dispositions ledger);

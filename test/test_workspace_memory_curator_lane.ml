@@ -64,9 +64,11 @@ let fixture_summarize ~batch =
     kind ^ " observation: " ^ text) entries in
   Ok (`Assoc ["briefing", `String (String.concat "\n" (previous @ texts))], "summary.slot")
 
-let await_idle ~clock ~base_path =
-  Eio.Time.with_timeout_exn clock 5. (fun () ->
-    while not (Worker.For_testing.is_idle ~base_path) do Eio.Fiber.yield () done)
+(* These passes perform real strict ledger/briefing writes. Await the owner
+   state rather than imposing a per-pass disk-latency deadline; the focused
+   runner supplies the suite hang guard, and callers assert the final work. *)
+let await_idle ~base_path =
+  while not (Worker.For_testing.is_idle ~base_path) do Eio.Fiber.yield () done
 
 let with_base f =
   Prompt_registry.set_markdown_dir "../config/prompts";
@@ -75,7 +77,7 @@ let with_base f =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     Eio_main.run (fun env -> f base_path env#clock))
 
-let test_changed_facts_update_ledger_and_no_work_is_silent () = with_base (fun base_path clock ->
+let test_changed_facts_update_ledger_and_no_work_is_silent () = with_base (fun base_path _clock ->
   commit base_path "Original observation";
   let calls = ref 0 in
   let execute ~rendered_prompt:_ ~selected ~ledger:_ =
@@ -89,28 +91,28 @@ let test_changed_facts_update_ledger_and_no_work_is_silent () = with_base (fun b
     Ok (answer selected, "test.slot") in
   Eio.Switch.run (fun sw ->
     Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
-    await_idle ~clock ~base_path;
+    await_idle ~base_path;
     Alcotest.(check int) "one initial model call" 1 !calls;
     let ledger = Ledger.load ~base_path |> require in
     Alcotest.(check int) "first fact assigned" 1 (List.length (Ledger.dispositions ledger));
     ignore (Worker.request ~base_path);
-    await_idle ~clock ~base_path;
+    await_idle ~base_path;
     Alcotest.(check int) "unchanged wake makes no model call" 1 !calls;
     commit ~keeper_id:"reviewer" base_path "Independent observation";
-    await_idle ~clock ~base_path;
+    await_idle ~base_path;
     Alcotest.(check int) "new fact makes one more call" 2 !calls;
     let ledger = Ledger.load ~base_path |> require in
     Alcotest.(check int) "both facts assigned" 2 (List.length (Ledger.dispositions ledger));
     Worker.For_testing.stop ~base_path))
 
-let test_failure_preserves_ledger_and_later_change_retries () = with_base (fun base_path clock ->
+let test_failure_preserves_ledger_and_later_change_retries () = with_base (fun base_path _clock ->
   commit base_path "First observation";
   let fail = ref true in
   let execute ~rendered_prompt:_ ~selected ~ledger:_ =
     if !fail then Error (Worker.Execution_failed "injected provider failure") else Ok (answer selected, "test.slot") in
   Eio.Switch.run (fun sw ->
     Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
-    await_idle ~clock ~base_path;
+    await_idle ~base_path;
     Alcotest.(check int) "failed answer stores no assignment" 0
       (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
     let canonical = Unix.realpath base_path in
@@ -121,18 +123,18 @@ let test_failure_preserves_ledger_and_later_change_retries () = with_base (fun b
         (Runs.list_runs (Runs.global ())));
     fail := false;
     commit ~keeper_id:"reviewer" base_path "New observation";
-    await_idle ~clock ~base_path;
+    await_idle ~base_path;
     Alcotest.(check int) "both pending facts assigned after recovery" 2
       (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
     Worker.For_testing.stop ~base_path))
 
-let test_invalid_model_answer_is_not_saved () = with_base (fun base_path clock ->
+let test_invalid_model_answer_is_not_saved () = with_base (fun base_path _clock ->
   commit base_path "Stable observation";
   let execute ~rendered_prompt:_ ~selected:_ ~ledger:_ =
     Ok (`Assoc ["decisions", `List []], "test.slot") in
   Eio.Switch.run (fun sw ->
     Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
-    await_idle ~clock ~base_path;
+    await_idle ~base_path;
     Alcotest.(check int) "invalid answer did not write an assignment" 0
       (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
     Worker.For_testing.stop ~base_path))
@@ -143,12 +145,12 @@ let test_owner_switch_liveness () = with_base (fun base_path clock ->
   match Eio.Time.with_timeout clock 5. (fun () ->
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
-      await_idle ~clock ~base_path);
+      await_idle ~base_path);
     Ok ()) with
   | Ok () -> ()
   | Error `Timeout -> Alcotest.fail "curator owner held its switch open")
 
-let test_missing_keeper_directory_preserves_existing_ledger () = with_base (fun base_path clock ->
+let test_missing_keeper_directory_preserves_existing_ledger () = with_base (fun base_path _clock ->
   let selected : Ledger.pending_fact list =
     [{ fact = Ledger.Ordinary { keeper_id = "writer"; claim_sha256 = String.make 64 'a' };
        claim = "Retained fact" }] in
@@ -166,7 +168,7 @@ let test_missing_keeper_directory_preserves_existing_ledger () = with_base (fun 
   let summarize ~batch = incr summaries; fixture_summarize ~batch in
   Eio.Switch.run (fun sw ->
     Worker.For_testing.start ~summarize ~sw ~base_path ~execute;
-    await_idle ~clock ~base_path;
+    await_idle ~base_path;
     Alcotest.(check bool) "owner did not fabricate the missing directory" false
       (Sys.file_exists keepers_dir);
     Alcotest.check json "previous ledger remains unchanged"
@@ -177,7 +179,7 @@ let test_missing_keeper_directory_preserves_existing_ledger () = with_base (fun 
      | _ -> Alcotest.fail "failed inventory published a briefing from unvalidated inventory");
     Worker.For_testing.stop ~base_path))
 
-let test_initial_inventory_drains_after_provider_size_refusal refusal = with_base (fun base_path clock ->
+let test_initial_inventory_drains_after_provider_size_refusal refusal = with_base (fun base_path _clock ->
   List.iter (fun index ->
     commit ~keeper_id:("keeper-" ^ string_of_int index) base_path
       ("Distinct initial observation number " ^ string_of_int index))
@@ -194,7 +196,7 @@ let test_initial_inventory_drains_after_provider_size_refusal refusal = with_bas
       Error (size_failure refusal "fixture provider accepts one fact per request") in
   Eio.Switch.run (fun sw ->
     Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
-    await_idle ~clock ~base_path;
+    await_idle ~base_path;
     Alcotest.(check int) "first attempt sends the whole pending inventory" 4
       (List.hd (List.rev !attempts));
     Alcotest.(check bool) "the provider actually refused an oversized request" true (!refused > 0);
@@ -248,14 +250,14 @@ let test_reenable_wakes_retained_facts () = with_base (fun base_path clock ->
       incr calls; Ok (answer selected, "curator-fixture") in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~execute;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "off owner parked without a model" 0 !calls;
       Alcotest.(check int) "off preserves unassigned fact" 0
         (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
       ignore (accept_registry (Registry.transact_replacement (prepare true)
         ~apply_write:(fun () -> Registry.Committed ())));
       (* No memory commit and no explicit Worker.request after re-enable. *)
-      await_calls ~clock calls 1; await_idle ~clock ~base_path;
+      await_calls ~clock calls 1; await_idle ~base_path;
       Alcotest.(check int) "retained fact assigned by publication wake" 1
         (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
       Alcotest.(check int) "one model pass" 1 !calls;
@@ -273,7 +275,7 @@ let test_fence_exit_retries_deferred_work outcome = with_base (fun base_path clo
       incr calls; Ok (answer selected, "curator-fixture") in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~execute;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "initial pass finished" 1 !calls;
       let before = accept_registry (Registry.current ()) in
       let prepared = match outcome with
@@ -283,7 +285,7 @@ let test_fence_exit_retries_deferred_work outcome = with_base (fun base_path clo
            | Some prepared -> prepared | None -> Alcotest.fail "retention lost registry") in
       let apply_write () =
         commit base_path "Fact committed during config write";
-        await_idle ~clock ~base_path;
+        await_idle ~base_path;
         Alcotest.(check int) "busy registry deferred new model work" 1 !calls;
         match outcome with
         | Raised -> raise Injected_config_write_failure
@@ -299,7 +301,7 @@ let test_fence_exit_retries_deferred_work outcome = with_base (fun base_path clo
          Alcotest.(check bool) "original exception preserved" true (outcome = Raised));
       Alcotest.(check bool) "fence exit keeps exact registry identity" true
         (before == accept_registry (Registry.current ()));
-      await_calls ~clock calls 2; await_idle ~clock ~base_path;
+      await_calls ~clock calls 2; await_idle ~base_path;
       Alcotest.(check int) "fact deferred during fence is now assigned" 1
         (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
       Worker.For_testing.stop ~base_path)))
@@ -313,10 +315,10 @@ let test_initial_publication_wakes_parked_owner () = with_base (fun base_path cl
       incr calls; Ok (answer selected, "curator-fixture") in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~execute;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "unpublished registry does not run model" 0 !calls;
       publish true;
-      await_calls ~clock calls 1; await_idle ~clock ~base_path;
+      await_calls ~clock calls 1; await_idle ~base_path;
       Alcotest.(check int) "first publication wakes pending fact" 1
         (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
       Worker.For_testing.stop ~base_path)))
@@ -337,12 +339,12 @@ let test_off_preserves_in_flight_and_reenable_resumes_next_fact () = with_base (
       publish false;
       commit base_path "Pending after off";
       Eio.Promise.resolve release_first ();
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "off did not cancel or start another pass" 1 !calls;
       Alcotest.(check int) "accepted decision finished" 1
         (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
       publish true;
-      await_calls ~clock calls 2; await_idle ~clock ~base_path;
+      await_calls ~clock calls 2; await_idle ~base_path;
       Alcotest.(check int) "re-enable processed the deferred change" 2 !calls;
       Worker.For_testing.stop ~base_path)))
 
@@ -361,12 +363,12 @@ let test_cancelled_owner_does_not_consume_another_owners_wake () = with_base (fu
         Eio.Switch.run (fun stopped ->
           Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw:stopped ~base_path
             ~execute:(execute stopped_calls);
-          await_idle ~clock ~base_path; await_idle ~clock ~base_path:other);
+          await_idle ~base_path; await_idle ~base_path:other);
         (match Worker.request ~base_path with
          | Worker.No_owner -> ()
          | Worker.Queued | Worker.Unavailable _ -> Alcotest.fail "stopped owner retained");
         publish true;
-        await_calls ~clock surviving_calls 1; await_idle ~clock ~base_path:other;
+        await_calls ~clock surviving_calls 1; await_idle ~base_path:other;
         Alcotest.(check int) "cancelled waiter ran no work" 0 !stopped_calls;
         Alcotest.(check int) "surviving owner processed pending fact" 1
           (List.length (Ledger.dispositions (Ledger.load ~base_path:other |> require)));
@@ -387,7 +389,7 @@ let with_registry f =
   Fun.protect ~finally:(fun () -> registry_ok (Registry.unpublish ())) f
 
 let test_enable_publication_resumes_existing_fact () = with_registry (fun () ->
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     let snapshot = curator_snapshot "http://127.0.0.1:9/v1" in
     registry_ok (Registry.publish ~lanes:[] snapshot) |> ignore;
     commit base_path "Existing fact before Curator is enabled";
@@ -396,12 +398,12 @@ let test_enable_publication_resumes_existing_fact () = with_registry (fun () ->
       incr calls; Ok (answer selected, "curator-test") in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~execute;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "disabled lane makes no call" 0 !calls;
       (match Registry.publish ~lanes:[{ curator_lane with slot_ids = [] }] snapshot with
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "empty lane publication unexpectedly succeeded");
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "rejected publication leaves the owner parked" 0 !calls;
       (* A subscriber can read the now-published registry: notifications must
          run after its mutex and private transaction fence are released. *)
@@ -409,14 +411,14 @@ let test_enable_publication_resumes_existing_fact () = with_registry (fun () ->
         ignore (registry_ok (Registry.current ()))) in
       Fun.protect ~finally:unsubscribe (fun () ->
         registry_ok (Registry.publish ~lanes:[curator_lane] snapshot) |> ignore);
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "enable retries without a new memory commit" 1 !calls;
       Alcotest.(check int) "existing fact classified" 1
         (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
       Worker.For_testing.stop ~base_path)))
 
 let test_transaction_recovery_is_relevant_and_committed () = with_registry (fun () ->
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     let before = curator_snapshot "http://127.0.0.1:9/v1" in
     let after = curator_snapshot "http://127.0.0.1:10/v1" in
     registry_ok (Registry.publish ~lanes:[curator_lane] before) |> ignore;
@@ -430,24 +432,24 @@ let test_transaction_recovery_is_relevant_and_committed () = with_registry (fun 
         ~excused_lane_ids:[] ~load_resolver_snapshot:(fun () -> Ok snapshot)) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "initial refused attempt" 1 !calls;
       registry_ok (Registry.publish ~lanes:[curator_lane] before) |> ignore;
       let unrelated = { curator_lane with id = "unrelated_exact" } in
       registry_ok (Registry.publish ~lanes:[curator_lane; unrelated] before) |> ignore;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "unchanged and unrelated publication do not retry" 1 !calls;
       let prepared = prepare after [curator_lane] in
       registry_ok (Registry.transact_replacement prepared
         ~apply_write:(fun () -> Registry.Not_committed ())) |> ignore;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "failed write does not retry" 1 !calls;
       let unsubscribe = Registry.subscribe_lane_changes ~lane_id:curator_lane.id
           (fun () -> failwith "injected subscriber failure") in
       Fun.protect ~finally:unsubscribe (fun () ->
         registry_ok (Registry.transact_replacement prepared
           ~apply_write:(fun () -> Registry.Committed ())) |> ignore);
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "committed bound endpoint change retries" 2 !calls;
       Alcotest.(check int) "pending fact classified" 1
         (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
@@ -480,7 +482,7 @@ let credential_snapshot ~curator_key ~other_key =
   | Error _ -> Alcotest.fail "credential fixture snapshot failed"
 
 let test_credential_publication_resumes_pending_fact () = with_registry (fun () ->
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     let before, before_observations = credential_snapshot ~curator_key:(Some "fixture-before")
         ~other_key:(Some "other-before") in
     let unrelated, unrelated_observations = credential_snapshot ~curator_key:(Some "fixture-before")
@@ -499,22 +501,22 @@ let test_credential_publication_resumes_pending_fact () = with_registry (fun () 
       else Ok (answer selected, "curator-test") in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "initial refusal leaves pending work" 1 !calls;
       registry_ok (Registry.publish ~runtime_observations:before_observations ~lanes:[curator_lane] before) |> ignore;
       registry_ok (Registry.publish ~runtime_observations:unrelated_observations ~lanes:[curator_lane] unrelated) |> ignore;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "same and unrelated credentials do not retry" 1 !calls;
       let prepared = registry_ok (Registry.prepare_replacement ~runtime_observations:after_observations
         ~lanes:[curator_lane] ~excused_lane_ids:[]
         ~load_resolver_snapshot:(fun () -> Ok after)) in
       registry_ok (Registry.transact_replacement prepared
         ~apply_write:(fun () -> Registry.Not_committed ())) |> ignore;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "failed credential publication does not retry" 1 !calls;
       registry_ok (Registry.transact_replacement prepared
         ~apply_write:(fun () -> Registry.Committed ())) |> ignore;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "committed credential rotation resumes unchanged fact" 2 !calls;
       Alcotest.(check int) "pending fact classified" 1
         (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
@@ -595,7 +597,7 @@ let test_publication_during_failed_call_keeps_wake () = with_registry (fun () ->
       registry_ok (Registry.publish ~lanes:[changed] snapshot) |> ignore;
       Alcotest.(check int) "publication starts no parallel call" 1 !calls;
       Eio.Promise.resolve release ();
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "in-flight failure does not consume recovery wake" 2 !calls;
       Worker.For_testing.stop ~base_path)))
 
@@ -658,7 +660,7 @@ let request_existing base_path = match Worker.request ~base_path with
   | Worker.Unavailable detail -> Alcotest.fail detail
 
 let test_briefing_reaches_turns_and_tracks_addition_and_deletion () =
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     commit base_path "The release gate is closed pending review";
     commit ~keeper_id:"reviewer" base_path "The release gate may have reopened, unverified";
     let classifications, summaries = ref 0, ref 0 in
@@ -676,23 +678,23 @@ let test_briefing_reaches_turns_and_tracks_addition_and_deletion () =
       Ok (`Assoc ["briefing", `String text], "summary.slot") in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       check_delivery ~base_path first; check_current_sources base_path;
       let published = current_briefing base_path in
-      request_existing base_path; await_idle ~clock ~base_path;
+      request_existing base_path; await_idle ~base_path;
       Alcotest.(check int) "unchanged request makes no classification call" 1 !classifications;
       Alcotest.(check int) "unchanged request makes no summary call" 1 !summaries;
       Alcotest.(check string) "unchanged summary is reused" published.text
         (current_briefing base_path).text;
       check_delivery ~base_path first;
       commit ~keeper_id:"operator" base_path "Deployment is paused until owner confirmation";
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "addition is classified once" 2 !classifications;
       Alcotest.check json "addition reuses the prior semantic summary" (`String first)
         (field "previous_summary" (List.hd !inputs));
       check_delivery ~base_path added; check_current_sources base_path;
       commit_facts ~keeper_id:"reviewer" base_path [];
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "deletion needs no new classification" 2 !classifications;
       Alcotest.(check int) "deletion-only update rebuilds the briefing" 3 !summaries;
       Alcotest.check json "deleted prose cannot enter the rebuilt summary" `Null
@@ -701,7 +703,7 @@ let test_briefing_reaches_turns_and_tracks_addition_and_deletion () =
       Worker.For_testing.stop ~base_path))
 
 let test_existing_ledger_gets_its_first_briefing_without_reclassification () =
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     commit base_path "Operators must confirm a reopened release gate";
     let context = Masc.Workspace_memory_context.collect ~base_path |> require in
     let change = Ledger.reconcile Ledger.empty (Masc.Workspace_memory_context.keepers context) in
@@ -716,7 +718,7 @@ let test_existing_ledger_gets_its_first_briefing_without_reclassification () =
       Alcotest.fail "already classified facts reached the classifier" in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "existing ledger gets a summary" 1 !calls;
       check_current_sources base_path;
       check_delivery ~base_path (current_briefing base_path).text;
@@ -725,7 +727,7 @@ let test_existing_ledger_gets_its_first_briefing_without_reclassification () =
 type classification_failure_fixture = Provider_error | Invalid_decision
 
 let test_existing_ledger_briefing_survives_new_classification_failure fault =
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     let retained_claim = "Owner review is required before opening the release gate" in
     let pending_claim = "A new report says the gate may have reopened" in
     commit base_path retained_claim;
@@ -755,7 +757,7 @@ let test_existing_ledger_briefing_survives_new_classification_failure fault =
       fixture_summarize ~batch in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "new fact classification failed once" 1 !classifications;
       Alcotest.(check int) "existing durable evidence still receives its first briefing" 1 !summaries;
       let first = current_briefing base_path in
@@ -763,7 +765,7 @@ let test_existing_ledger_briefing_survives_new_classification_failure fault =
       check_delivery ~base_path first.text;
       Alcotest.check json "failed classification leaves the ledger unchanged"
         (Ledger.to_json ledger) (Ledger.to_json (Ledger.load ~base_path |> require));
-      request_existing base_path; await_idle ~clock ~base_path;
+      request_existing base_path; await_idle ~base_path;
       Alcotest.(check int) "same pending fact remains retryable at the next request" 2 !classifications;
       Alcotest.(check (list (list string))) "both attempts classify only the same new fact"
         [[pending_claim]; [pending_claim]] (List.rev !selected_claims);
@@ -783,7 +785,7 @@ let test_existing_ledger_briefing_survives_new_classification_failure fault =
       Worker.For_testing.stop ~base_path))
 
 let test_failed_briefing_keeps_publication_and_request_resumes_same_input () =
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     commit base_path "Release evidence is awaiting owner review";
     let classifications, summaries = ref 0, ref 0 in
     let failing = ref false in
@@ -794,11 +796,11 @@ let test_failed_briefing_keeps_publication_and_request_resumes_same_input () =
       if !failing then Error (Worker.Execution_failed "injected summarizer failure") else fixture_summarize ~batch in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       let previous = current_briefing base_path in
       failing := true;
       commit ~keeper_id:"reviewer" base_path "Owner review has not completed";
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       (match observed_briefing base_path with
        | Briefing.Stale retained ->
          Alcotest.(check string) "failed replacement preserves the last successful text"
@@ -810,7 +812,7 @@ let test_failed_briefing_keeps_publication_and_request_resumes_same_input () =
       failing := false;
       (* This is the real owner request, not a model/helper retry. It proves
          recovery at an admitted wake, not an autonomous timer. *)
-      request_existing base_path; await_idle ~clock ~base_path;
+      request_existing base_path; await_idle ~base_path;
       Alcotest.(check int) "same classified input is not reclassified" 2 !classifications;
       Alcotest.(check int) "failed summary is retried at the next admitted wake" 3 !summaries;
       check_current_sources base_path;
@@ -818,7 +820,7 @@ let test_failed_briefing_keeps_publication_and_request_resumes_same_input () =
       Worker.For_testing.stop ~base_path))
 
 let test_in_flight_addition_waits_for_fixed_briefing_pass () =
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     commit base_path "Initial source remains valid";
     let calls = ref 0 in
     let first_summary = ref None in
@@ -843,7 +845,7 @@ let test_in_flight_addition_waits_for_fixed_briefing_pass () =
         fixture_summarize ~batch) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check int) "addition waits for one subsequent pass" 2 !calls;
       check_current_sources base_path;
       check_delivery ~base_path (current_briefing base_path).text;
@@ -861,7 +863,7 @@ let failed_runs ~base_path ~code =
 let failed_run_count ~base_path ~code = List.length (failed_runs ~base_path ~code)
 
 let test_summary_narrows_only_after_provider_size_refusal () =
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     let claims = ["Owner review remains pending"; "Deployment is paused until confirmation"] in
     commit_facts base_path claims;
     let attempts, inputs, successful = ref [], ref [], ref [] in
@@ -881,7 +883,7 @@ let test_summary_narrows_only_after_provider_size_refusal () =
         result in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check (list int)) "full input is refused, then both one-entry chunks succeed"
         [2; 1; 1] (List.rev !attempts);
       Alcotest.(check int) "the refusal is retained in the exact run registry" 1
@@ -902,7 +904,7 @@ let test_summary_narrows_only_after_provider_size_refusal () =
 type failed_phase = During_classification | During_summary
 
 let test_non_size_failure_does_not_narrow_or_spin phase =
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     commit_facts base_path ["Review is pending"; "Deployment needs confirmation"];
     let classifications, summaries = ref [], ref [] in
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
@@ -915,7 +917,7 @@ let test_non_size_failure_does_not_narrow_or_spin phase =
       Error (Worker.Execution_failed "fixture transport failure") in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check (list int)) "ordinary classification failure is not narrowed" [2]
         (List.rev !classifications);
       let expected_summary, code = match phase with
@@ -930,7 +932,7 @@ let test_non_size_failure_does_not_narrow_or_spin phase =
       Worker.For_testing.stop ~base_path))
 
 let test_size_refusal_keeps_previous_briefing_and_parks refusal =
-  with_base (fun base_path clock ->
+  with_base (fun base_path _clock ->
     commit base_path "Release still needs owner review";
     let refuse = ref false in
     let attempts = ref [] in
@@ -941,7 +943,7 @@ let test_size_refusal_keeps_previous_briefing_and_parks refusal =
       else fixture_summarize ~batch in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       let previous = current_briefing base_path in
       refuse := true;
       let added_claims = match refusal with
@@ -949,7 +951,7 @@ let test_size_refusal_keeps_previous_briefing_and_parks refusal =
         | Output_refusal -> ["A new review record remains to be inspected";
                              "The recorded decision still needs owner confirmation"] in
       commit_facts ~keeper_id:"reviewer" base_path added_claims;
-      await_idle ~clock ~base_path;
+      await_idle ~base_path;
       Alcotest.(check (list int)) "a single input or any output refusal ends this attempt without narrowing"
         [1; List.length added_claims] (List.rev !attempts);
       (match observed_briefing base_path with

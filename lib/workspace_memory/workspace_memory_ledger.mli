@@ -63,7 +63,9 @@ val save : base_path:string -> t -> (unit, string) result
 
 val briefing_sources : t -> Workspace_memory_briefing.source list
 (** Complete claim and conflict texts for shared semantic synthesis. Members
-    remain in the ledger; adding a member alone does not change these inputs. *)
+    remain in the ledger; adding a member alone does not change these inputs.
+    Briefing source IDs include their claim/conflict namespace; they are not
+    unqualified ledger IDs for the read tool. *)
 
 type observation =
   | Missing
@@ -74,7 +76,8 @@ type observation =
       ; conflict_count : int
       ; classified_count : int
       ; briefing : (Workspace_memory_briefing.observation, string) result
-            (** Last complete Curator synthesis, with source freshness.
+            (** Last complete Curator synthesis, with source and current
+                prompt/schema-contract freshness.
                 An unreadable briefing does not hide readable ledger metadata. *)
       }
 

@@ -3013,17 +3013,29 @@ let render_keeper_message (state : state) =
     let target_registered =
       keeper_available_for_new_message state keeper_name
     in
-    let command_window = keeper_message_command_window state ~terminal_rows:rows ~terminal_cols:cols in
-    let command_rows = match command_window with None -> 0 | Some (_, entries) -> 2 + List.length entries in
-    let status_rows = keeper_message_status_rows state ~terminal_cols:cols + command_rows in
-    let support_status_rows =
-      keeper_message_support_status_rows state ~status_rows
-    in
     (* Wide terminals keep the roster beside the chat, exactly as the detail
        view does; the chat lays out against its own pane width. *)
     let split = keeper_roster_pane_shown state ~cols in
     let chat_cols =
       Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state) ~cols
+    in
+    let projection = keeper_message_projection state ~keeper_name ~chat_cols in
+    let inner_width = max 1 (framed_inner_width chat_cols) in
+    let markdown = cached_chat_markdown ~link_previews_mode:state.link_previews_mode
+      ~theme:chat_theme in
+    let requested = requested_scroll_from_pin state ~keeper_name projection
+      ~markdown ~inner_width in
+    (* A search can pin a short conversation at scroll zero. If an arrival
+       precedes its first paint, the pin already restores a reading position
+       although the stored scroll is still zero. Reserve and draw its chrome
+       from that same requested position, before measuring the history. *)
+    let command_window = keeper_message_command_window ~scroll:requested state
+      ~terminal_rows:rows ~terminal_cols:cols in
+    let command_rows = match command_window with None -> 0 | Some (_, entries) -> 2 + List.length entries in
+    let status_rows = keeper_message_status_rows ~scroll:requested state
+      ~terminal_cols:cols + command_rows in
+    let support_status_rows =
+      keeper_message_support_status_rows ~scroll:requested state ~status_rows
     in
     let title, mode_suffix =
       (* Both features put a mode indicator here: memory arrived on main
@@ -3212,18 +3224,10 @@ let render_keeper_message (state : state) =
     let history_height =
       Message_layout.message_history_height ~terminal_rows:rows ~status_rows
     in
-    let projection = keeper_message_projection state ~keeper_name ~chat_cols in
     let layout_entries = projection.layout_entries in
-    let inner_width = max 1 (framed_inner_width chat_cols) in
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
        under a scroll position that was legal before it. *)
-    (* One capture, handed to both the measure and the draw, so the rows the
-       pane counts are the rows it paints. *)
-    let link_previews_mode = state.link_previews_mode in
-    let markdown = cached_chat_markdown ~link_previews_mode ~theme:chat_theme in
-    let requested = requested_scroll_from_pin state ~keeper_name projection
-      ~markdown ~inner_width in
     let window =
       Message_layout.clamped_scrolled_rows ~markdown
         ~origin:state.msg_origin_display ~inner_width ~height:history_height
@@ -3341,12 +3345,12 @@ let render_keeper_message (state : state) =
 
        At the oldest row with nothing more to fetch the distance says less
        than "start" does, which is the same reading [scroll_hint] takes. *)
-    (* Drawn on the stored position, which is what the budget above counted;
+    (* Drawn on the restored position, which is what the budget above counted;
        worded from the clamped one, which is where the frame actually is. The
        two agree except on the single frame after a shrinking history forces a
        clamp, and there the row says so rather than reporting a distance the
        pane did not move. *)
-    (if Masc_tui_types.keeper_message_reading_back state then
+    (if Masc_tui_types.keeper_message_reading_back ~scroll:requested state then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (if scroll <= 0 then
             "  \xe2\x86\x93 back at the newest row"

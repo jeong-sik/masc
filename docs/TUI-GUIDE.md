@@ -1017,8 +1017,10 @@ their physical body-row positions. Incoming input, broadcasts, streamed text,
 and settled journals therefore do not pull the view toward the tail. This also
 works when no raw history rows have been loaded. The canonical reply's typed
 alias keeps the same anchor when history and journal representations replace
-one another. Search installs its pin before the next frame; returning to the
-bottom releases it and resumes following output.
+one another. Search installs its pin before the next frame. If output arrives
+before that frame, the reading-back notice and command menu already reflect the
+restored position, so their row heights do not move the match on the next paint.
+Returning to the bottom releases the pin and resumes following output.
 
 These pins retain physical row ordinals, not source character offsets. A
 terminal resize or Markdown change that reflows the anchored entry can change

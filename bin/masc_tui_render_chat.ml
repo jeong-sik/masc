@@ -3272,7 +3272,7 @@ let render_keeper_message (state : state) =
             columns away from the caret; said here it is beside the line that
             is holding them up. Only while there is something to queue. *)
          let queue_hint =
-           if Buffer.length state.msg_input > 0 then
+           if Masc_tui_message_input.length state.msg_input > 0 then
              (match send_disposition state ~keeper_name with
               | Updates _ -> " · Enter:send update; Ctrl-T:queue"
               | Sends -> " · Enter:send")
@@ -3449,17 +3449,10 @@ let render_keeper_message (state : state) =
          if selected then box_line_selected chat_buf chat_cols content
          else box_line_styled chat_buf chat_cols ~style:(Theme.recede ()) content) entries;
        box_divider chat_buf chat_cols);
-    let input = Buffer.contents state.msg_input in
-    let composer =
-      Message_layout.composer_lines
-        ~max_rows:Message_layout.composer_max_rows input
-      |> List.map (Message_layout.input_viewport ~max_cells:(max 0 (chat_cols - 8)))
-    in
-    (* The cursor sits on the last composer line, which the row budget has
-       already made room for. *)
-    let visible_input =
-      match List.rev composer with [] -> "" | last :: _ -> last
-    in
+    let input = Masc_tui_message_input.contents state.msg_input in
+    let composer = Message_layout.composer_window
+      ~max_rows:Message_layout.composer_max_rows ~max_cells:(max 0 (chat_cols - 8))
+      ~cursor:(Masc_tui_message_input.cursor state.msg_input) input in
     (* Where the composer landed, not where a second copy of the pane's
        arithmetic predicted it would. The prediction only held while every row
        the pane drew was also counted in [keeper_message_status_rows]; a
@@ -3481,10 +3474,10 @@ let render_keeper_message (state : state) =
            already viewport-fitted draft leaves room for this exact prefix. *)
         box_line_styled chat_buf chat_cols ~style:chat_theme.Chat_theme.user_background
           ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.default_fg ^ line))
-      composer;
+      composer.lines;
 
     let input_row =
-      min (max 1 rows) (rows_above_composer + max 1 (List.length composer))
+      min (max 1 rows) (rows_above_composer + composer.cursor_row + 1)
     in
 
     (* Reuse the existing bottom spacer as input padding: the input has a
@@ -3598,7 +3591,7 @@ let render_keeper_message (state : state) =
     let slash_hint =
       match command_window with
       | Some _ -> Some "↑/↓:select  Tab/Enter:insert  Esc:close"
-      | None -> slash_hint_text ~restore:Ansi.default_fg (Buffer.contents state.msg_input)
+      | None -> slash_hint_text ~restore:Ansi.default_fg (Masc_tui_message_input.contents state.msg_input)
     in
     let footer_hints =
       if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
@@ -3670,7 +3663,7 @@ let render_keeper_message (state : state) =
     in
     let input_column =
       Message_layout.input_cursor_column ~terminal_cols:chat_cols
-        ~input:visible_input
+        ~input_cells:composer.cursor_cells
     in
     let cursor_column =
       input_column + if split then keeper_roster_pane_cols else 0

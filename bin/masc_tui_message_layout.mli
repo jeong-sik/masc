@@ -524,6 +524,15 @@ val split_styled_cells : max_cells:int -> string -> string list
     restores its inherited style and closes it, so rows can scroll separately. *)
 
 val input_viewport : max_cells:int -> string -> string
+
+val input_window : max_cells:int -> cursor:int -> string -> string * int
+(** Horizontally fit a draft around its byte cursor. Return the visible text
+    and the cursor column in cells, relative to that text. *)
+
+type composer_window = { lines : string list; cursor_row : int; cursor_cells : int }
+val composer_window : max_rows:int -> max_cells:int -> cursor:int -> string -> composer_window
+(** A newline-separated window containing the cursor. [cursor_row] is zero-based;
+    the number of rows is the same as {!composer_lines}. *)
 (** Keep the complete input when it fits. Overflow uses a leading […] and the
     newest complete-scalar suffix that fits in the remaining cells. *)
 
@@ -546,8 +555,8 @@ val scroll_position : scrolled_back:int -> older_exist:bool -> string option
     the footer without a row whose presence the pane's own height depends
     on. *)
 
-val input_cursor_column : terminal_cols:int -> input:string -> int
-(** One-based cursor column after the visible input, clamped to the spacer
+val input_cursor_column : terminal_cols:int -> input_cells:int -> int
+(** One-based cursor column after [input_cells] visible cells, clamped to the spacer
     immediately before the right border. Measured from the prefix the pane
     renders ([chat_input_prompt_prefix]), so the caret lands where the typed
     text ends. *)

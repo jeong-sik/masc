@@ -219,7 +219,8 @@ def open_chat(process, fd, output) -> None:
     _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
     _keyboard_harness.send_and_wait(process, fd, output, b"c", chat_title(b"alpha"))
     _keyboard_harness.drain_until_quiet(process, fd, output)
-    assert any(b"KEEPERS" in row for row in screen(output).values()), "wide chat must show its roster by default"
+    _keyboard_harness.send_and_wait(process, fd, output, b"\x02", b"KEEPERS")
+    assert any(b"KEEPERS" in row for row in screen(output).values()), "Ctrl-B pins the portrait roster"
 
 
 def assert_chat_intact(rows: dict[int, bytes], name: bytes) -> None:

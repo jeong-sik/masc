@@ -678,6 +678,13 @@ let slash_hint_text ~restore draft =
   | [] -> None
   | spans -> Some (String.concat "" (List.map paint spans))
 
+let composer_draft_window state ~cols ~prompt =
+  let draft = Terminal_text.single_line (Masc_tui_message_input.contents state.msg_input) in
+  let before = Terminal_text.single_line (Masc_tui_message_input.before_cursor state.msg_input) in
+  Message_layout.input_window
+    ~max_cells:(max 0 (cols - Message_layout.display_width prompt))
+    ~cursor:(String.length before) draft
+
 let composer_line state ~cols =
   if state.view = Overview && not state.composer_focused then
     Theme.recede () ^ fit_width " Choose a Keeper before writing · i:choose" cols ^ Ansi.reset
@@ -697,7 +704,7 @@ let composer_line state ~cols =
     | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) ->
         Ansi.dim
   in
-  let draft = Terminal_text.single_line composer.Composer.draft in
+  let draft, _ = composer_draft_window state ~cols ~prompt in
   let hint =
     match (composer.Composer.focus, composer.Composer.target) with
     (* A focused row draws the draft alone; the voice keys are on the key
@@ -714,7 +721,7 @@ let composer_line state ~cols =
      placed after the draft, does not move. *)
   let slash_hint =
     match composer.Composer.focus with
-    | Composer.Focused -> slash_hint_text ~restore:tone draft
+    | Composer.Focused -> slash_hint_text ~restore:tone composer.Composer.draft
     | Composer.Unfocused -> None
   in
   let body =
@@ -748,10 +755,8 @@ let composer_cursor state ~rows ~cols =
         Message_layout.display_width
           (composer_prompt_text ~voice:(voice_meter_text state) composer)
       in
-      let draft_cells =
-        Message_layout.display_width
-          (Terminal_text.single_line composer.Composer.draft)
-      in
+      let _, draft_cells = composer_draft_window state ~cols
+        ~prompt:(composer_prompt_text ~voice:(voice_meter_text state) composer) in
       Frame_presenter.Visible_at
         { row = rows
         ; column = Composer.cursor_column ~prompt_cells ~draft_cells ~terminal_cols:cols
@@ -1511,7 +1516,7 @@ let count_frame_lines buf =
     else !n + 1
 
 
-(* Resolve the chat default or explicit choice before applying the terminal's
+(* Resolve navigation visibility and the explicit choice before applying the terminal's
    width constraint; resizing never overwrites the reader's preference. *)
 let keeper_roster_pane_shown (state : state) ~cols =
   Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols

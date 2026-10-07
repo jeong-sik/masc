@@ -54,20 +54,35 @@ def run(executable, *, columns, no_color=False):
 
         h.send_and_wait(process, fd, output, LEFT, b"KEEPERS")
         h.send_and_wait(process, fd, output, b"\r", ALPHA)
+        assert b"KEEPERS" not in b"\n".join(screen(process, fd, output).values())
+        # A nonempty composer owns Left, including at byte zero. Insertion,
+        # deletion and bracketed paste must operate at its actual cursor.
+        h.send_and_wait(process, fd, output, "가나".encode(), "가나".encode())
+        h.write_all(fd, output, LEFT)
+        h.send_and_wait(process, fd, output, b"X", "가X나".encode())
+        h.write_all(fd, output, b"\x7f" + LEFT + LEFT)
+        h.send_and_wait(process, fd, output, b"\x1b[200~pasted\x1b[201~", "pasted가나".encode())
+        assert b"KEEPERS" not in b"\n".join(screen(process, fd, output).values())
+        h.write_all(fd, output, b"\x15")
+        h.send_and_wait(process, fd, output, LEFT, b"Enter:open")
+        h.send_and_wait(process, fd, output, RIGHT, ALPHA)
+        assert b"KEEPERS" not in b"\n".join(screen(process, fd, output).values())
         h.send_and_wait(process, fd, output, b"alpha-unsent-draft", b"alpha-unsent-draft")
-        if columns >= 110:
-            # Explicitly hide the automatic chat roster before opening with Left.
-            h.send_and_wait(process, fd, output, b"\x02", ALPHA)
-            assert b"KEEPERS" not in b"\n".join(screen(process, fd, output).values())
+        # Explicit next-Keeper retains drafts even while there is text.
+        h.send_and_wait(process, fd, output, b"\x07", BETA)
+        assert b"alpha-unsent-draft" not in b"\n".join(screen(process, fd, output).values())
+        h.send_and_wait(process, fd, output, b"beta-unsent-draft", b"beta-unsent-draft")
+        h.send_and_wait(process, fd, output, b"\x07", ALPHA)
+        assert b"alpha-unsent-draft" in b"\n".join(screen(process, fd, output).values())
+        h.write_all(fd, output, b"\x15")
         h.send_and_wait(process, fd, output, LEFT, b"Enter:open")
         h.send_and_wait(process, fd, output, DOWN, b"beta")
         h.send_and_wait(process, fd, output, b"\r", BETA)
-        assert b"alpha-unsent-draft" not in b"\n".join(screen(process, fd, output).values())
-        h.send_and_wait(process, fd, output, b"beta-unsent-draft", b"beta-unsent-draft")
+        assert b"beta-unsent-draft" in b"\n".join(screen(process, fd, output).values())
+        h.write_all(fd, output, b"\x15")
         h.send_and_wait(process, fd, output, LEFT, b"Enter:open")
         h.send_and_wait(process, fd, output, UP, b"alpha")
         h.send_and_wait(process, fd, output, b"\r", ALPHA)
-        assert b"alpha-unsent-draft" in b"\n".join(screen(process, fd, output).values())
 
         # Resizing keeps the visible navigator in charge of the arrows/Enter.
         h.send_and_wait(process, fd, output, LEFT, b"Enter:open")
@@ -84,7 +99,7 @@ def run(executable, *, columns, no_color=False):
                 h.drain_until_quiet(process, fd, output)
         h.send_and_wait(process, fd, output, b"\x1b", ALPHA)
         text = b"\n".join(screen(process, fd, output).values())
-        assert b"alpha-unsent-draft" in text, text
+        assert b"alpha-unsent-draft" not in text, text
         assert b"must-not-enter-draft" not in text, "navigator paste changed the draft"
         if columns >= 110:
             assert b"KEEPERS" not in text, "Left overwrote the hidden preference"

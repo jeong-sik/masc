@@ -336,15 +336,18 @@ roll-up of actual Skill invocation/delivery/action counts; and `all tools` is
 the registered catalog. Registration or availability does not prove actual
 use, and a missing retained receipt does not prove a Skill was never used.
 
-At 110 columns and wider, the keeper detail view keeps a roster pane on its
-left with the cursor marked; keys keep their detail meaning. Narrower
-terminals use the single-pane layout. `Ctrl-B` changes the roster preference
+The Keeper roster starts closed. At 110 columns and wider, `Ctrl-B` pins it
+beside the current surface with the cursor marked. Narrower terminals use
+the single-pane layout. `Ctrl-B` changes the roster preference
 only while the pane has room to show. Below 110 columns it reports the width
 requirement and leaves the preference unchanged, so resizing wider cannot
 reveal a hidden toggle that had no visible effect when it was pressed.
 
-From Dashboard (Overview) or a Keeper chat, press `Left` to open the Keeper
-list. `Up`/`Down` (or `j`/`k`) select a Keeper; `Enter` opens its chat.
+From Dashboard (Overview), press `Left` to open the Keeper list. In chat,
+`Left` opens it only when the input is empty and its cursor is at the start.
+With text present, `Left`/`Right` move the editing cursor; typing, paste,
+Backspace and Ctrl-W edit at that cursor. Even at the start of a nonempty
+draft, `Left` stays in the input. Use `Ctrl-G` to switch Keepers with a draft. `Up`/`Down` (or `j`/`k`) select a Keeper; `Enter` opens its chat.
 `Right`, `Esc`, or `Tab` returns to the screen you were reading without sending
 a message or interrupting the Keeper. Chat drafts stay with their Keeper when
 you switch. `Left` also opens a list hidden with `Ctrl-B`, without changing

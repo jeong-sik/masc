@@ -6182,7 +6182,7 @@ type state = {
   mutable system_logs_category: string option;
   mutable system_logs_detail_seq: int option;
   mutable system_logs_detail_scroll: int;
-  msg_input: Buffer.t;
+  msg_input: Masc_tui_message_input.t;
   mutable msg_command_menu: Masc_tui_command.menu_state;
   (* A draft restored from an unterminated terminal paste needs explicit
      confirmation before any chat send. Keep its owner across pane changes. *)
@@ -6533,7 +6533,6 @@ let retire_identity_login_expectations (state : state) =
 let roster_pane_hidden (state : state) =
   not state.keeper_navigation_open
   && Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
-       ~in_chat:(state.view = Keepers Keeper_message)
 
 (* Called at interaction and presentation boundaries with the surface width,
    after reserving any Activity pane. Visibility preference survives a resize;
@@ -7451,7 +7450,7 @@ let retain_preflight_inputs (state : state) entries =
          && state.msg_target_keeper_name = Some request.keeper_name
          && Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
               ~keeper_name:request.keeper_name = []
-         && Buffer.length state.msg_input = 0
+         && Masc_tui_message_input.length state.msg_input = 0
          && state.msg_attachments = [] && state.msg_references = []
          && Option.is_none state.msg_recall_replaces
       then begin
@@ -7460,7 +7459,7 @@ let retain_preflight_inputs (state : state) entries =
                && String.equal row.me_request_id request.request_id
                && match row.me_role with Message_user _ -> true | _ -> false))
           state.msg_history;
-        Buffer.add_string state.msg_input request.message;
+        Masc_tui_message_input.insert state.msg_input request.message;
         state.msg_attachments <- request.attachments;
         state.msg_references <- request.references;
         state.msg_attachments_since <- None
@@ -8046,7 +8045,7 @@ let composer_is_live (state : state) =
 let composing_for_keeper (state : state) keeper_name =
   state.coalesce_queued_input
   && composer_is_live state
-  && Buffer.length state.msg_input > 0
+  && Masc_tui_message_input.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
 (* A fresh Enter may bypass input held by an explicit stop. A refused
@@ -8278,9 +8277,9 @@ let create_state
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
   context_inspector_turn_back = 0;
-  (* Wide chat starts with its Keeper roster. Other surfaces keep their
-     full width until Ctrl-B records an explicit choice. *)
-  roster_pane_preference = Masc_tui_roster_pane.Auto;
+  (* Keep the reading surface full-width until Left opens the navigator
+     or Ctrl-B explicitly pins the roster. *)
+  roster_pane_preference = Masc_tui_roster_pane.Hidden;
   keeper_navigation_open = false;
   acting_pane_preference = Default_acting_pane;
   acting_pane_scroll = 0;
@@ -8841,7 +8840,7 @@ let create_state
   system_logs_category = None;
   system_logs_detail_seq = None;
   system_logs_detail_scroll = 0;
-  msg_input = Buffer.create 256;
+  msg_input = Masc_tui_message_input.create ();
   msg_command_menu = Masc_tui_command.Menu_idle;
   msg_recovered_paste_keepers = [];
   msg_attachments = [];
@@ -9356,7 +9355,7 @@ let composer_extra_rows (state : state) =
   let lines =
     Masc_tui_message_layout.composer_lines
       ~max_rows:Masc_tui_message_layout.composer_max_rows
-      (Buffer.contents state.msg_input)
+      (Masc_tui_message_input.contents state.msg_input)
   in
   max 0 (List.length lines - 1)
 
@@ -11967,7 +11966,7 @@ let keeper_observed_turn (state : state) keeper_name =
 ;;
 
 let keeper_message_draft_empty (state : state) =
-  Buffer.length state.msg_input = 0
+  Masc_tui_message_input.length state.msg_input = 0
   && state.msg_attachments = [] && state.msg_references = []
 
 let keeper_message_turn_active (state : state) =
@@ -12511,7 +12510,7 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
   | Keepers Keeper_message, Right_pane, None, None when state.msg_scroll = 0 ->
     let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
     (match Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
-        (Buffer.contents state.msg_input) with
+        (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
        let status_rows = keeper_message_status_rows state ~terminal_cols + 1 in

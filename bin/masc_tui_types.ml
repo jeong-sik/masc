@@ -428,20 +428,13 @@ let gate_mode_word = function
   | Masc.Keeper_gate_mode.Auto_judge -> "Auto Judge"
   | Masc.Keeper_gate_mode.Always_allow -> "allow-all"
 
-(* A stance as it arrives on the wire. A value this build does not know keeps
+(* A stance as the decoder read it. A value this build does not know keeps
    the server's own spelling rather than collapsing to one word: the reader is
    deciding on it, and "unknown" would hide which unknown it is. *)
-let gate_mode_word_of_wire raw =
-  match Masc.Keeper_gate_mode.of_string raw with
-  | Some mode -> gate_mode_word mode
-  | None -> raw
+let gate_mode_reading_word = function
+  | Masc.Tui_decode.Gate_mode mode -> gate_mode_word mode
+  | Masc.Tui_decode.Unrecognised_gate_mode raw -> raw
 
-(* The chat header shows the effective stances, including their defaults. A
-   blank label here is worse than repetition: this is the surface where the
-   operator decides whether to send work, and AUTO/YOLO plus the Gate mode
-   change what can happen after that send. A Keeper-level [workspace] value is
-   inheritance, so resolve it through the workspace observation rather than
-   printing a setting that is not itself a mode. *)
 (* The stance's one word, the wire's own: the chat header, the Keeper Info
    row, the footer's [g:auto] and the event line all name it, and they named it
    four ways -- AUTO, "asked", auto, "(auto)" -- so a reader had to know that
@@ -455,7 +448,14 @@ let tool_mode_effect = function
   | Masc.Keeper_tool_approval_mode.Auto -> "per Gate policy"
   | Masc.Keeper_tool_approval_mode.Yolo -> "unasked"
 
-let keeper_chat_mode_labels ~yolo ~keeper_gate_mode ~workspace_gate_mode =
+(* The chat header shows the effective stances, including their defaults. A
+   blank label here is worse than repetition: this is the surface where the
+   operator decides whether to send work, and AUTO/YOLO plus the Gate mode
+   change what can happen after that send. A Keeper with no override of its
+   own follows the workspace lane, so the header draws the workspace stance. *)
+let keeper_chat_mode_labels ~yolo
+    ~(keeper_gate_mode : Masc.Tui_decode.gate_mode option)
+    ~(workspace_gate_mode : Masc.Tui_decode.gate_mode option) =
   let chat_mode =
     String.uppercase_ascii
       (tool_mode_word
@@ -464,10 +464,10 @@ let keeper_chat_mode_labels ~yolo ~keeper_gate_mode ~workspace_gate_mode =
   in
   let gate_mode =
     match keeper_gate_mode with
-    | Some mode when not (String.equal mode "workspace") -> Some mode
-    | Some _ | None -> workspace_gate_mode
+    | Some _ as own -> own
+    | None -> workspace_gate_mode
   in
-  chat_mode, Option.map gate_mode_word_of_wire gate_mode
+  chat_mode, Option.map gate_mode_reading_word gate_mode
 ;;
 
 (* Usage coverage can be warming independently of the catalog. Missing time
@@ -5605,7 +5605,7 @@ type state = {
      somebody singled out are here, so absence means "follows the workspace"
      rather than "unknown". Distinct from [keeper_yolo_names], which is the
      in-memory stance a restart clears. *)
-  mutable keeper_gate_modes: (string * string) list;
+  mutable keeper_gate_modes: (string * Masc.Tui_decode.gate_mode) list;
   (* Runtime_params registry rows, as the surface reads them: key, current,
      default, and whether somebody moved it. Loaded like the other config
      views rather than kept live -- these change when an operator changes

@@ -72,6 +72,27 @@ describe('Keeper operation stream projection', () => {
     expect(entry?.delivery).toBe('streaming')
   })
 
+  it('preserves visible reply whitespace and SKILL-prefixed prose across deltas', () => {
+    assistantEntry()
+    const chunks = ['    ', '첫 줄', '\n', 'SKILL', '.md 설명', '\n\n\n', '끝  ', '\n\n']
+    for (const delta of chunks) {
+      expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TEXT_MESSAGE_CONTENT', delta,
+      })).toBeNull()
+    }
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe(chunks.join(''))
+    expect(entry?.rawText).toBe(chunks.join(''))
+    const reply = '    완료\nSKILL.md 설명\n\n\n끝  \n'
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply, turn_ref: 'turn-1', turn_outcome: 'visible_reply' },
+    })).toBeNull()
+    const completed = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(completed?.text).toBe(reply)
+    expect(completed?.rawText).toBe(reply)
+  })
+
   it.each([
     ['whole', ['  hello world\n\t다음 줄  ']],
     ['split', ['  ', 'hello', ' ', 'world', '\n', '\t', '다음', ' ', '줄', '  ']],

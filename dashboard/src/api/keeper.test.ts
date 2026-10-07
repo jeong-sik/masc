@@ -20,6 +20,7 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperChatOperation,
+  editQueuedKeeperChatOperation,
   fetchKeeperChatHistory,
   fetchKeeperCheckpoints,
   fetchKeeperRuntimeTrace,
@@ -586,6 +587,45 @@ describe('fetchKeeperChatOperation', () => {
       '/api/v1/keepers/sangsu/chat/operations/kmsg-restart-1',
       expect.any(Object),
     )
+  })
+})
+
+describe('editQueuedKeeperChatOperation', () => {
+  it('preserves authored message and text block bytes, and rejects blank edits', async () => {
+    const originalInput = {
+      schema: 'masc.keeper_chat_operation.input.v1',
+      message: 'before',
+      user_blocks: [{ type: 'text', text: 'before' }],
+      attachments: [],
+      turn_instructions: null,
+      surface_context: null,
+    }
+    const fetchMock = vi.fn().mockImplementation(async (_url, init) => {
+      const input = JSON.parse(init.body).input
+      return new Response(JSON.stringify({
+        schema: 'masc.keeper_chat_operation.v1',
+        operation_id: 'kmsg-edit-1',
+        sequence: '7',
+        created_at: 42,
+        input,
+        state: 'Queued',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const operation = {
+      operationId: 'kmsg-edit-1', sequence: '7', createdAt: 42,
+      input: { message: 'before', wire: originalInput },
+      state: { kind: 'queued' as const },
+    }
+    const message = '    첫 줄\n\nSKILL.md 설명  \n'
+    const result = await editQueuedKeeperChatOperation('echo', operation, message)
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body)
+    expect(body.input.message).toBe(message)
+    expect(body.input.user_blocks).toEqual([{ type: 'text', text: message }])
+    expect(result.input?.message).toBe(message)
+    await expect(editQueuedKeeperChatOperation('echo', operation, '  \n'))
+      .rejects.toThrow('must not be blank')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 

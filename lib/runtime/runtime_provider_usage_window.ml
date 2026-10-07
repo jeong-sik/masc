@@ -683,8 +683,15 @@ let decode_kimi_coding_usages json =
    next reset in UTC. A credit plan states included.balance_usd, allowance_usd
    and period instead, and its model calls go on against purchased credits
    once the allowance is spent, so no single window says when a call is
-   refused; that shape is refused by name. *)
-let ollama_balance_window ~path ~kind name fields =
+   refused; that shape is refused by name.
+
+   Both shapes state purchased.balance_usd, the unexpired purchased credits.
+   Ollama spends the included allowance first and then the purchased balance
+   (ollama.com/pricing, read 2026-10-07), and its 429 for a spent session
+   window says "add usage credits". So a spent session or weekly window
+   refuses model calls only while that balance is zero; above zero the calls
+   it would refuse are paid from the balance. *)
+let ollama_balance_window ~path ~kind ~role name fields =
   let* entry = optional_object ~path name fields in
   match entry with
   | None -> Ok None
@@ -703,17 +710,17 @@ let ollama_balance_window ~path ~kind name fields =
       (Some
          { limit_id = None
          ; kind
-         ; role = Gates_model_calls
+         ; role
          ; utilization = Fraction ((100.0 -. remaining) /. 100.0)
          ; resets_at
          })
 ;;
 
 let decode_ollama_balance json =
-  let path = "ollama-balance" in
-  let* fields = fields_at ~path json in
-  let* included = required ~path "included" fields in
-  let path = member_path path "included" in
+  let root = "ollama-balance" in
+  let* fields = fields_at ~path:root json in
+  let* included = required ~path:root "included" fields in
+  let path = member_path root "included" in
   let* included_fields = fields_at ~path included in
   match List.assoc_opt "balance_usd" included_fields with
   | Some _ ->
@@ -723,10 +730,32 @@ let decode_ollama_balance json =
          ; expected = "absent: only a legacy plan's session and weekly windows are read"
          })
   | None ->
-    let* session =
-      ollama_balance_window ~path ~kind:(Provider_label "session") "session" included_fields
+    let* purchased = required ~path:root "purchased" fields in
+    let purchased_path = member_path root "purchased" in
+    let* purchased_fields = fields_at ~path:purchased_path purchased in
+    let* purchased_balance =
+      required_as number_at ~path:purchased_path "balance_usd" purchased_fields
     in
-    let* weekly = ollama_balance_window ~path ~kind:Seven_day "weekly" included_fields in
+    let* purchased_balance =
+      within
+        ~path:(member_path purchased_path "balance_usd")
+        ~expected:"0 or more"
+        ~low:0.0
+        ~high:Float.infinity
+        purchased_balance
+    in
+    let role =
+      if Float.compare purchased_balance 0.0 > 0 then Counts_other_use else Gates_model_calls
+    in
+    let* session =
+      ollama_balance_window
+        ~path
+        ~kind:(Provider_label "session")
+        ~role
+        "session"
+        included_fields
+    in
+    let* weekly = ollama_balance_window ~path ~kind:Seven_day ~role "weekly" included_fields in
     distinct_windows
       ~path
       { source = Ollama_balance_read; windows = List.filter_map Fun.id [ session; weekly ] }

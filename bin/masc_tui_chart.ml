@@ -66,39 +66,6 @@ let sparkline ?min ?max values =
     Buffer.contents buf
 ;;
 
-let sparkline_colored ?min ?max ~style_of_level values =
-  match values with
-  | [] -> ""
-  | _ ->
-    let v_min =
-      match min with
-      | Some m -> m
-      | None -> List.fold_left Stdlib.min (List.hd values) values
-    in
-    let v_max =
-      match max with
-      | Some m -> m
-      | None -> List.fold_left Stdlib.max (List.hd values) values
-    in
-    let range = v_max - v_min in
-    let buf = Buffer.create (List.length values * 16) in
-    List.iter
-      (fun v ->
-        let level =
-          if range <= 0 then
-            if v_min <= 0 then 0 else 3
-          else
-            let clamped_v = Stdlib.max v_min (Stdlib.min v_max v) in
-            let raw = ((clamped_v - v_min) * 7) / range in
-            Stdlib.max 0 (Stdlib.min 7 raw)
-        in
-        Buffer.add_string buf (Masc_tui_theme.status (style_of_level level));
-        Buffer.add_string buf sparkline_glyphs.(level);
-        Buffer.add_string buf Masc_tui_theme.Sgr.reset)
-      values;
-    Buffer.contents buf
-;;
-
 let format_compact_num n =
   if n = min_int then "-4.6M"
   else

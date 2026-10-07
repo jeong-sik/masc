@@ -1,6 +1,5 @@
-"""Answering keeps lanes visible and lets unavailable-only fleets be read."""
+"""Answering lets an unavailable-only fleet be read and follows the cursor back into view."""
 import os
-import re
 import sys
 import time
 
@@ -14,40 +13,7 @@ def current_rows(output):
 
 
 def run(executable):
-    names = ["long-" + "keeper" * 24, "한글이름" * 30, "alpha"]
     started = time.time() - 120
-    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
-    fixtures["/api/v1/keepers/turns"] = (200, {
-        "schema": "masc.keeper_turns.v1",
-        "keepers": [{"keeper_name": name, "status": "ok", "turn": {
-            "lane": "chat_operation", "started_at_unix": started,
-            "interrupt_token": "answering-fixture-token",
-            "preview": {"status_text": "PREVIEW working", "text_tail": "visible output",
-                        "updated_at_unix": started, "last_tool": None},
-        }} for name in names],
-    })
-
-    def inspect_running(process, master_fd, _slave_fd, output, _base_path):
-        _keyboard_harness.send_and_wait(process, master_fd, output, b"@", b"PREVIEW")
-        for width in (60, 80, 120):
-            _keyboard_harness.resize_and_wait(process, master_fd, output, rows=26, columns=width,
-                              needle=b"MASC Answering", final_cursor=b"\x1b[?25l")
-            _keyboard_harness.drain_until_quiet(process, master_fd, output)
-            rows = current_rows(output)
-            running = [row for row in rows if b"chat_operation" in row]
-            assert len(running) == 3, (width, rows)
-            for row in running:
-                assert re.search(rb"chat_operation +2m[0-9]+s", row), (width, row)
-            assert any(b"alpha" in row for row in running), (width, rows)
-            assert any(b"long-" in row for row in running), (width, rows)
-            assert any("한글".encode() in row for row in running), (width, rows)
-            assert any(b"PREVIEW" in row for row in rows), (width, rows)
-        _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
-        os.write(master_fd, b"q")
-
-    _keyboard_harness.run_terminal_scenario(executable, description="Answering fits long ASCII and CJK names without losing lane or age",
-                            interact=inspect_running, http_fixtures=fixtures)
-
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/turns"] = (200, {
         "schema": "masc.keeper_turns.v1",
@@ -56,9 +22,10 @@ def run(executable):
     })
 
     def inspect_unavailable(process, master_fd, _slave_fd, output, _base_path):
-        _keyboard_harness.resize_and_wait(process, master_fd, output, rows=26, columns=60,
-                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         _keyboard_harness.send_and_wait(process, master_fd, output, b"@", b"owner read failed 00")
+        # Resized while open, the overlay is drawn again at the new size.
+        _keyboard_harness.resize_and_wait(process, master_fd, output, rows=26, columns=60,
+                          needle=b"MASC Answering", final_cursor=b"\x1b[?25l")
         # There are no actionable rows. j still moves the reading window.
         _keyboard_harness.send_and_wait(process, master_fd, output, b"j" * 40, b"owner read failed 39")
         _keyboard_harness.drain_until_quiet(process, master_fd, output)

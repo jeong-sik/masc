@@ -388,6 +388,80 @@ let test_deletion_inventory_waits_for_reconfirmed_workspace () =
     (state.keeper_deletions = Some (Ok refreshed));
   Alcotest.(check int) "selection follows its operation after reorder" 0 state.keeper_deletions_cursor
 
+let test_uncertain_identity_retires_reads_not_admitted_operations () =
+  let open Masc_tui_types in
+  let module Detail = Masc_tui_board_detail in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let post body : board_post =
+    { bp_id = "same-id"; bp_author = "author"; bp_title = "Thread";
+      bp_body = body; bp_votes = 0; bp_comment_count = 0;
+      bp_created_at = "2026-10-07"; bp_created_at_unix = None; bp_updated_at = None;
+      bp_hearth = None; bp_kind = None; bp_closed = None } in
+  let a = post "A's retained post" and b = post "B's delayed post" in
+  let begin_read () = match Detail.start state.board_detail ~post_id:a.bp_id with
+    | Detail.Started (next, request) -> state.board_detail <- next; request
+    | Detail.Already_loading -> Alcotest.fail "retired Board read still owns its slot" in
+  let initial = begin_read () in
+  state.board_detail <- Detail.complete state.board_detail initial (Ok (a, [], None));
+  let delayed = begin_read () in
+  let authority = state.workspace_authority in
+  let reading = Some state.workspace_read_authority in
+  let admitted kind = workspace_reply_admitted state ~authority ~reading ~kind in
+  let cancelled_write = ref false and cancelled_observation = ref false in
+  state.workspace_cancellations <- [ref (), (fun () -> cancelled_write := true)];
+  state.workspace_observation_cancellations <- [ref (), (fun () -> cancelled_observation := true)];
+  Masc_tui_message_input.insert state.msg_input "unsent draft";
+  state.keeper_yolo_names <- ["A-keeper"];
+  state.keeper_turns_inflight <- true;
+  let browser = Browser_lane_view.create () in
+  state.browser_lane <- Some {browser with load=Browser_lane_view.Loading (1, Read)};
+  state.keeper_queue_inflight <- ["reading"; "writing"];
+  state.keeper_queue_readings <- ["reading"];
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Error "health failed");
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "old Board/mode read is inadmissible during uncertainty" false
+    (admitted Workspace_observation);
+  Alcotest.(check bool) "admitted write and chat receipt keep their authority" true
+    (admitted Workspace_operation_outcome);
+  Alcotest.(check bool) "observation stream is cancelled" true !cancelled_observation;
+  Alcotest.(check bool) "admitted operation is not cancelled" false !cancelled_write;
+  Alcotest.(check bool) "read-only in-flight slot is released" false state.keeper_turns_inflight;
+  Alcotest.(check string) "draft is preserved" "unsent draft"
+    (Masc_tui_message_input.contents state.msg_input);
+  Alcotest.(check (list string)) "retained mode rows are preserved" ["A-keeper"] state.keeper_yolo_names;
+
+  Alcotest.(check (list string)) "queue observation releases only its own slot" ["writing"]
+    state.keeper_queue_inflight;
+  (match state.browser_lane with
+   | Some {load=Browser_lane_view.Idle; _} -> ()
+   | _ -> Alcotest.fail "browser read stayed pending");
+  state.browser_lane <- Some {browser with load=Browser_lane_view.Loading (2, Goto "https://example.test")};
+  suspend_workspace_readings state;
+  (match state.browser_lane with
+   | Some {load=Browser_lane_view.Loading (2, Goto _); _} -> ()
+   | _ -> Alcotest.fail "admitted browser navigation lost its receipt owner");
+  state.board_detail <- Detail.complete state.board_detail delayed (Ok (b, [], None));
+  (match Detail.view_for state.board_detail ~post_id:a.bp_id with
+   | Detail.Ready (shown, _, _) -> Alcotest.(check string) "A stays on screen" a.bp_body shown.bp_body
+   | Detail.Absent | Detail.Loading | Detail.Failed _ -> Alcotest.fail "retirement erased A's detail");
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Ok (identity "/workspace/a"));
+  Alcotest.(check bool) "reconfirming A cannot revive B's old read stamp" false
+    (admitted Workspace_observation);
+  Alcotest.(check bool) "a read dispatched during uncertainty cannot enter on reconfirmation" false
+    (workspace_reply_admitted state ~authority ~reading:None ~kind:Workspace_observation);
+  let refreshed = begin_read () in
+  Alcotest.(check bool) "reconfirmed reads get a fresh Board request" false
+    (Detail.same_request delayed refreshed);
+  Alcotest.(check bool) "new confirmed read is admitted" true
+    (workspace_reply_admitted state ~authority ~reading:(Some state.workspace_read_authority)
+      ~kind:Workspace_observation);
+  state.board_detail <- Detail.complete state.board_detail refreshed (Ok (a, [], None))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
@@ -419,5 +493,7 @@ let () =
             test_partial_identity_keeps_definite_mismatches
         ; Alcotest.test_case "deletion inventory waits for workspace reconfirmation" `Quick
             test_deletion_inventory_waits_for_reconfirmed_workspace
+        ; Alcotest.test_case "uncertainty retires reads while admitted operations survive" `Quick
+            test_uncertain_identity_retires_reads_not_admitted_operations
         ] )
     ]

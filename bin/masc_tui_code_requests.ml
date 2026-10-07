@@ -18,6 +18,7 @@ let code_scope_axes_of = function
 let code_scope_axes state = code_scope_axes_of state.code_scope
 
 let launch_entries_load state ~host ~deliver =
+  if server_authority_ready state then begin
   (* Read here, not inside the daemon. The daemon runs later, and the scope it
      read then was whichever one was current by then -- so a request made in
      one scope could be sent under another. *)
@@ -41,9 +42,12 @@ let launch_entries_load state ~host ~deliver =
       (fun () ->
          let keeper, repo = code_scope_axes_of scope in
          Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port ~path:dir ())
+  end
+
 ;;
 
 let launch_file_load state ~host ~deliver ~path =
+  if server_authority_ready state then begin
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -54,6 +58,8 @@ let launch_file_load state ~host ~deliver ~path =
       (fun () ->
          let keeper, repo = code_scope_axes state in
          Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ())
+  end
+
 ;;
 
 (* The 50-commit first page covers the pane; the route caps at 200 anyway. *)
@@ -78,6 +84,7 @@ let code_history_entry_at_ms = function
 ;;
 
 let launch_history_load state ~host ~deliver ~path =
+  if server_authority_ready state then begin
   let scope = state.code_scope in
   match
     Masc_tui_fetched.start
@@ -162,9 +169,12 @@ let launch_history_load state ~host ~deliver ~path =
                 @ List.map (fun change -> Hist_keeper_change change) changes)
            in
            Ok { chl_entries; chl_activity_note })
+  end
+
 ;;
 
 let launch_diff_load state ~host ~deliver ~base_ref ~path =
+  if server_authority_ready state then begin
   match Masc_tui_fetched.start ~equal:String.equal state.code_diff ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -175,6 +185,8 @@ let launch_diff_load state ~host ~deliver ~base_ref ~path =
       (fun () ->
          let keeper, repo = code_scope_axes state in
          Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path ~base_ref ())
+  end
+
 ;;
 
 (* Same fiber-and-mailbox shape as the notes read below. Scoped by the same
@@ -182,6 +194,7 @@ let launch_diff_load state ~host ~deliver ~base_ref ~path =
    describes the checkout on screen rather than whichever one the server
    would default to. *)
 let launch_blame_load state ~host ~deliver ~path =
+  if server_authority_ready state then begin
   match Masc_tui_fetched.start ~equal:String.equal state.code_blame ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -191,6 +204,8 @@ let launch_blame_load state ~host ~deliver ~path =
     Masc_tui_async_read.launch
       ~deliver:(fun result -> deliver (Code_blame_loaded (request, result)))
       (fun () -> Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ())
+  end
+
 ;;
 
 (* Ask the language server about [symbol] on the pane's cursor line. The
@@ -204,6 +219,7 @@ let start_lsp_question
       ~(question : string)
       ~(symbol : string)
   =
+  if server_authority_ready state then begin
   match Masc_tui_fetched.current_key state.code_file with
   | None -> report "error" "no file is open on the Code surface"
   | Some path ->
@@ -240,4 +256,6 @@ let start_lsp_question
             run ();
             `Stop_daemon)
         | None -> deliver (Code_lsp_answered (request, Error "Eio switch is unavailable"))))
+  end
+
 ;;

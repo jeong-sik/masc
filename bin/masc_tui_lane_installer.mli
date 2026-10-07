@@ -19,3 +19,6 @@ val receive_catalog : request_id:int -> directory:string option -> (Yojson.Safe.
 
 val begin_preview : request_id:int -> path:string -> t -> (t,string) result
 val receive_preview : request_id:int -> path:string -> (Yojson.Safe.t,string) result -> t -> (t * string option) option
+
+val suspend_read : t -> t
+(** Restore the editing or browsing state preceding a retired read. *)

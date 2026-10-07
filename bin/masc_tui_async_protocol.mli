@@ -112,7 +112,8 @@ type currency_authority_request = {
 }
 
 type async_msg =
-  | Workspace_scoped of workspace_authority * async_msg
+  | Workspace_scoped of workspace_authority * unit ref option * async_msg
+  | Workspace_operation of async_msg
   | Workspace_identity_unconfirmed of
       { detail : string
       ; latest : (Masc.Tui_decode.server_identity, string) result
@@ -585,3 +586,11 @@ type 'a mailed = {
   ready_at_ns : int64;
   message : 'a;
 }
+
+val workspace_message_is_read : async_msg -> bool
+val workspace_message_admitted :
+  state -> authority:workspace_authority -> reading:unit ref option -> async_msg -> bool
+(** A stale read never re-enters a reconfirmed workspace. Admitted operation
+    and chat receipts keep their original workspace authority. *)
+
+val account_login_action_is_read : Masc_tui_account_login.action -> bool

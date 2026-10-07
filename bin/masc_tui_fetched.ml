@@ -100,6 +100,15 @@ let start ~equal state ~key =
 
 let clear state = { state with status = Status_absent }
 
+let suspend state =
+  let status = match state.status with
+    | Status_loading _ -> Status_absent
+    | Status_refreshing (request, value, None) -> Status_ready (request, value)
+    | Status_refreshing (request, value, Some error) -> Status_stale (request, value, error)
+    | (Status_absent | Status_ready _ | Status_stale _ | Status_failed _) as status -> status
+  in
+  { state with status }
+
 let complete ~equal state request result =
   if not (is_current ~equal state request)
   then

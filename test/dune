@@ -3575,7 +3575,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries alcotest masc masc_tui_types masc_tui_keeper_control unix))
+ (libraries alcotest masc masc_tui_types masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input unix))
 
 (test
  (name test_tool_transport_prefix)

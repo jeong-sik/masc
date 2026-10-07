@@ -112,7 +112,8 @@ type currency_authority_request = {
 }
 
 type async_msg =
-  | Workspace_scoped of workspace_authority * async_msg
+  | Workspace_scoped of workspace_authority * unit ref option * async_msg
+  | Workspace_operation of async_msg
   | Workspace_identity_unconfirmed of
       { detail : string
       ; latest : (Masc.Tui_decode.server_identity, string) result
@@ -585,3 +586,198 @@ type 'a mailed = {
   ready_at_ns : int64;
   message : 'a;
 }
+
+(* Snapshot authority is withdrawn independently of admitted effects. Keep
+   this match exhaustive: a new reply must choose whether it is a replaceable
+   observation or the outcome of an operation already sent. *)
+let account_login_action_is_read = function
+  | Masc_tui_account_login.Inventory | Discover | Preview_removal _
+  | Refresh_removed _ | Refresh_list _ -> true
+  | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Input _
+  | Cancel | Recover | Prepare _ | Save _ | Close | Nothing | Remove _ -> false
+
+let rec workspace_message_is_read = function
+  | Workspace_scoped (_, _, message) -> workspace_message_is_read message
+  | Workspace_operation _ -> false
+  | Keeper_queue_loaded (_, _, action, _) ->
+    (match action with Masc_tui_queue_inspection.Inspect -> true
+     | Pause | Resume | Cancel _ | Move_to_end _ | Edit _
+     | Cancel_event _ | Prioritize_event _ -> false)
+  | Lane_declaration_loaded (_, request, _, _, _) ->
+    (match request with Masc_tui_lane_declaration.Read _ -> true | Save _ -> false)
+  | Account_login_json (_, _, action, _) -> account_login_action_is_read action
+  | Workspace_identity_unconfirmed _
+  | Lane_application_loaded _
+  | Lane_package_catalog_loaded _
+  | Lane_package_preview_loaded _
+  | Lane_addons_loaded _
+  | Lane_subscriptions_loaded _
+  | Keeper_deletions_loaded _
+  | Msx_activity_loaded _
+  | Msx_live_loaded _
+  | Dos_live_loaded _
+  | Voice_agent_voices_loaded _
+  | Voice_wizard_reread _
+  | Voice_config_loaded _
+  | Board_post_refresh_done _
+  | Keeper_chat_history_loaded _
+  | Keeper_chat_copy_loaded _
+  | Keeper_chat_journal_loaded _
+  | Context_inspector_loaded _
+  | Keeper_chat_older_loaded _
+  | Lanes_loaded _
+  | Lane_inventory_loaded _
+  | Clients_loaded _
+  | Lane_runs_loaded _
+  | Lane_run_detail_loaded _
+  | Measurement_artifact_loaded _
+  | Verification_loaded _
+  | Harness_loaded _
+  | Fusion_runs_loaded _
+  | Fusion_detail_loaded _
+  | Fusion_historical_detail_loaded _
+  | Fusion_launch_options_loaded _
+  | Repositories_loaded _
+  | Workspace_activity_loaded _
+  | Memory_loaded _
+  | Memory_input_loaded _
+  | Memory_facts_loaded _
+  | Repository_changes_loaded _
+  | Repository_changes_diff_loaded _
+  | File_changes_loaded _
+  | Keeper_chat_file_changes_loaded _
+  | Git_diff_loaded _
+  | Browser_history_list_loaded _
+  | Browser_history_page_loaded _
+  | Browser_lane_clients_loaded _
+  | Browser_lane_loaded _
+  | Browser_lane_scene_loaded _
+  | Browser_lane_screenshot_ready _
+  | Connectors_loaded _
+  | Runtime_surface_loaded _
+  | Tools_loaded _
+  | Skills_catalog_loaded _
+  | Tools_async_observation_loaded _
+  | Runtime_catalog_loaded _
+  | Keeper_tool_approvals_loaded _
+  | Sent_image_ready _
+  | Image_render_ready _
+  | Keeper_turns_loaded _
+  | Gate_snapshot_loaded _
+  | Keeper_gate_settings_loaded _
+  | Keeper_tool_modes_loaded _
+  | Goal_confirmation_loaded _
+  | Schedules_loaded _
+  | Schedule_wake_history_loaded _
+  | Keeper_schedules_loaded _
+  | System_logs_loaded _
+  | Keeper_calls_loaded _
+  | Goal_timeline_loaded _
+  | Task_history_loaded _
+  | Verification_evidence_loaded _
+  | Keeper_config_view_loaded _
+  | Keeper_items_loaded _
+  | Keeper_sandbox_view_loaded _
+  | Keeper_sandbox_logs_loaded _
+  | Exact_activity_read _
+  | Browser_activity_read _
+  | Machine_activity_read _
+  | Runtime_config_view_loaded _
+  | Runtime_params_loaded _
+  | Prompts_loaded _
+  | Keeper_board_quarantines_loaded _
+  | Presets_listed _
+  | Preset_detail_loaded _
+  | Preset_contents_shown _
+  | Play_invites_listed _
+  | Librarian_input_loaded _
+  | Resources_listed _
+  | Code_entries_loaded _
+  | Code_file_loaded _
+  | Code_history_loaded _
+  | Code_diff_loaded _
+  | Acting_pane_changes_loaded _
+  | Code_blame_loaded _
+  | Code_lsp_answered _
+  | Resource_read _
+  | Github_identity_view_loaded _
+  | Identity_providers_loaded _
+  | Observer_opened _
+  | Observer_received _
+  | Observer_closed _
+    -> true
+  | Voice_wizard_saved _
+  | Msx_frame_loaded _
+  | Voice_agent_voice_saved _
+  | Voice_wizard_probed _
+  | Voice_level _
+  | Voice_transcribed _
+  | Voice_silent _
+  | Voice_discarded _
+  | Voice_failed _
+  | Http_refresh_done _
+  | Http_refresh_failed _
+  | Surface_composer_released
+  | Http_scoped_refresh_done _
+  | Http_scoped_refresh_failed _
+  | Approval_decision_done _
+  | Ask_answer_done _
+  | Keeper_chat_dispatch_started _
+  | Keeper_chat_done _
+  | Keeper_chat_stream_deltas _
+  | Keeper_chat_stream_unavailable _
+  | Keeper_run_next_done _
+  | Keeper_observed_interrupt_done _
+  | Keeper_chat_interrupt_done _
+  | Fusion_launched _
+  | Browser_lane_action_done _
+  | Browser_lane_follow_loaded _
+  | Connector_unbind_all_done _
+  | Runtime_lane_slots_written _
+  | Runtime_assignment_set _
+  | Keeper_chat_approval_answered _
+  | Keeper_chat_control_received _
+  | Gate_approval_resolved _
+  | Gate_auto_judge_retried _
+  | Gate_mode_set _
+  | Surface_tool_approval_answered _
+  | Keeper_tool_mode_set _
+  | Keeper_chat_dispatch_blocked _
+  | Keeper_action_done _
+  | Board_new_post_done _
+  | Board_vote_done _
+  | Goal_transition_done _
+  | Goal_confirmation_submitted _
+  | Schedule_cancel_done _
+  | Verification_verdict_done _
+  | Harness_label_done _
+  | Task_cancel_done _
+  | Exact_activity_saved _
+  | Browser_activity_saved _
+  | Machine_activity_saved _
+  | Runtime_param_written _
+  | Board_quarantine_requeued _
+  | Board_quarantines_bulk_progress _
+  | Board_quarantines_bulk_requeued _
+  | Preset_saved _
+  | Preset_restored _
+  | Preset_deleted _
+  | Play_invite_issued _
+  | Play_invite_revoked _
+  | Identity_switch_set _
+  | Identity_login_started _
+  | Identity_refreshed _
+  | Identity_app_saved _
+  | Account_login_event _
+  | Account_login_removal _
+  | Github_login_lines _
+  | Github_login_finished _
+  | Github_token_saved _
+  | Task_dispatched _
+  | Task_dispatch_failed _
+    -> false
+
+let workspace_message_admitted state ~authority ~reading message =
+  workspace_reply_admitted state ~authority ~reading
+    ~kind:(if workspace_message_is_read message
+      then Workspace_observation else Workspace_operation_outcome)

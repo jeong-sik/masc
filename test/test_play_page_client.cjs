@@ -101,7 +101,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     fetch: async (url, init) => {
       const request = { url, authorization: init.headers.Authorization, method: init.method, body: init.body && JSON.parse(init.body) };
       requests.push(request);
-      if (url === '/api/v1/play/room') return roomReply(request);
+      if (url === '/api/v1/play/room') return roomReply(request, init.signal);
       if (url === '/api/v1/play/session') return sessionReply(request);
       return reply(request, init.signal);
     },
@@ -113,6 +113,13 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     // Existing cases assert game requests; room traffic has its own assertions.
     get requests() { return requests.filter(request => request.url !== '/api/v1/play/room'); },
     get roomRequests() { return requests.filter(request => request.url === '/api/v1/play/room'); },
+    async expireRoomRead() {
+      const timer = timers.find(timer => timer.delay === 5000);
+      assert.ok(timer, 'the in-flight read has a timeout');
+      timers.splice(timers.indexOf(timer), 1);
+      timer.callback();
+      await settle();
+    },
     async roomPoll() { vm.runInContext('refreshRoom();', context); await settle(); },
     get reloads() { return reloads; },
     get hash() { return location.hash; },
@@ -1059,7 +1066,8 @@ for (const [name, release] of [
     assert.ok(recovered.requests.every(request => request.authorization === 'Bearer fixture-token'));
     await recovered.get('leave').handlers.click();
     assert.equal(recovered.requests.some(request => request.method === 'POST'), name !== 'unknown');
-    assert.equal(storage.size, name === 'unknown' ? 3 : 0);
+    assert.deepEqual([...storage.keys()].sort(), name === 'unknown'
+      ? ['masc.play.document', 'masc.play.invite', 'masc.play.pending', 'masc.play.room.clients'] : []);
     if (name === 'unknown') {
       assert.match(recovered.get('status').textContent, /운영자에게 초대 회수/);
       assert.equal(recovered.padButton.disabled, true);
@@ -1635,7 +1643,7 @@ for (const [count, remaining] of [[1, '가x'], [3, 'x']]) {
 }
 
 
-for (const failingKey of ['masc.play.room.draft', 'masc.play.invite']) {
+for (const failingKey of ['masc.play.room.draft', 'masc.play.room.clients', 'masc.play.invite']) {
   test(`disconnect retains retryable authority when deleting ${failingKey} fails`, async () => {
     const storage = new Map();
     let connected = true;
@@ -1657,7 +1665,9 @@ for (const failingKey of ['masc.play.room.draft', 'masc.play.invite']) {
     assert.equal(storage.get('masc.play.invite'), 'fixture-token');
     const relevant = removed.filter(key => key !== 'masc.play.pending');
     assert.deepEqual(relevant, failingKey === 'masc.play.room.draft'
-      ? ['masc.play.room.draft'] : ['masc.play.room.draft', 'masc.play.invite']);
+      ? ['masc.play.room.draft'] : failingKey === 'masc.play.room.clients'
+        ? ['masc.play.room.draft', 'masc.play.room.clients']
+        : ['masc.play.room.draft', 'masc.play.room.clients', 'masc.play.invite']);
     assert.equal(storage.get('masc.play.room.draft'), failingKey === 'masc.play.room.draft' ? draft : undefined);
     assert.equal(page.get('chat-text').disabled, true);
     assert.equal(page.padButton.disabled, true);
@@ -1732,3 +1742,76 @@ for (const viewer of [undefined, '', 42]) {
     assert.match(page.get('room-status').textContent, /공용 대화를 읽지 못/);
   });
 }
+
+
+test('disconnect after ordinary reload leaves every client even without a pending message', async () => {
+  const storage = new Map();
+  const first = fixture(gameReply, { storage });
+  await first.settle();
+  assert.equal(storage.has('masc.play.room.draft'), false);
+  const second = fixture(gameReply, { storage, hash:'' });
+  await second.settle();
+  const third = fixture(gameReply, { storage, hash:'' });
+  await third.settle();
+  await third.get('leave').handlers.click();
+  assert.deepEqual(new Set(third.roomRequests.filter(r => r.body.action === 'leave').map(r => r.body.client_id)),
+    new Set([first, second, third].map(page => page.roomRequests[0].body.client_id)));
+  assert.equal(storage.size, 0);
+});
+
+for (const failingKey of ['masc.play.room.draft', 'masc.play.room.clients', 'masc.play.invite']) {
+  test(`rejected credentials close chat while ${failingKey} cleanup awaits retry`, async () => {
+    const storage = new Map();
+    let rejected = false;
+    const page = fixture(gameReply, { storage, roomReply: () => response(emptyRoom, rejected ? 401 : 200) });
+    await page.settle();
+    page.get('chat-text').value = 'retained';
+    page.get('chat-text').handlers.input();
+    storage.delete = key => { if (key === failingKey) throw new Error('cleanup refused'); return Map.prototype.delete.call(storage, key); };
+    rejected = true;
+    await page.roomPoll();
+    assert.equal(page.get('chat-text').disabled, true);
+    assert.equal(page.get('chat-send').disabled, true);
+    assert.equal(page.get('leave').disabled, false, 'local cleanup remains retryable');
+    const saved = storage.get('masc.play.room.draft');
+    const sent = page.roomRequests.length;
+    page.get('chat-text').value = 'must not persist';
+    page.get('chat-text').handlers.input();
+    page.get('chat-send').handlers.click();
+    await page.roomTick();
+    assert.equal(page.roomRequests.length, sent);
+    assert.equal(storage.get('masc.play.room.draft'), saved);
+    storage.delete = key => Map.prototype.delete.call(storage, key);
+    await page.get('leave').handlers.click();
+    assert.equal(storage.size, 0);
+    assert.equal(page.roomRequests.length, sent, 'cleanup uses no rejected bearer');
+  });
+}
+
+test('a timed-out room read releases a queued send and cannot overwrite its receipt', async () => {
+  let finishRead;
+  let signal;
+  let reads = 0;
+  const page = fixture(gameReply, { roomReply: ({ body }, abort) => {
+    if (body.action === 'read' && ++reads === 1) {
+      signal = abort;
+      return new Promise(resolve => { finishRead = () => resolve(response(emptyRoom)); });
+    }
+    return response({ ...emptyRoom, messages:[roomMessage(1, 'delivered', 'minsu')] });
+  } });
+  await page.settle();
+  page.get('chat-text').value = 'delivered';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  assert.equal(page.roomRequests.some(r => r.body.action === 'say'), false);
+  await page.expireRoomRead();
+  assert.equal(signal.aborted, true);
+  assert.equal(page.roomRequests.filter(r => r.body.action === 'say').length, 1);
+  assert.equal(page.get('chat-text').value, '');
+  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'delivered');
+  finishRead();
+  await page.settle();
+  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'delivered');
+  await page.roomTick();
+  assert.equal(reads, 2, 'periodic reads recover after the timeout');
+});

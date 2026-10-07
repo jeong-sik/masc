@@ -809,6 +809,7 @@ let checkpoint_json (st : machine) =
   let named = function None -> `Null | Some name -> `String name in
   `Assoc
     [ "version", `Int 1
+    ; "core_sha", `String Msx_core_identity.source_digest
     ; "machine", `String (Base64.encode_string (Msx.serialize st.m))
     ; "cartridge", named st.cart
     ; "disk", named st.disk
@@ -935,4 +936,84 @@ let change_disk ~path ~backup_path =
             Ok (observe next)))
       | _ -> Error (Invalid_request "load a disk game before changing disks"))
   with Sys_error message -> Error (Unreadable message)
+;;
+
+(* The digest ocaml-msx reports for the sources at OCAML_MSX_SHA in
+   scripts/opam-pin-external-deps.sh. Bump the two together: CI links the
+   pinned core, and test_msx_tools checks that the linked digest equals this
+   one, so a SHA bumped alone turns that test red with the new digest in its
+   message. Read the digest of a commit from its build:
+   _build/default/lib/identity/msx_core_identity.ml. *)
+let pinned_core_source_digest = "c4e0ede25fe25a717fc758569a5b2f0c"
+
+type core = {
+  source_digest : string;
+  pinned_source_digest : string;
+  matches_pin : bool;
+}
+[@@deriving yojson]
+
+let core =
+  { source_digest = Msx_core_identity.source_digest
+  ; pinned_source_digest = pinned_core_source_digest
+  ; matches_pin = String.equal Msx_core_identity.source_digest pinned_core_source_digest
+  }
+
+type checkpoint_info = {
+  version : int;
+  frame : int option;
+  saved_at_unix : float option;
+  core_sha : string option;
+  cartridge : string option;
+  disk : string option;
+  ledger_entries : int;
+}
+
+let checkpoint_info ~path =
+  (* Inspection stays available when execution is disabled, so this is the
+     one call in the lane without [require_activity]: it reads a file the
+     caller names and touches no machine state. *)
+  if not (Sys.file_exists path)
+  then Error (Invalid_request ("no MSX checkpoint at " ^ path))
+  else
+    let json =
+      try Ok (Yojson.Safe.from_string (read_file path)) with
+      | Sys_error message -> Error (Unreadable message)
+      | Yojson.Json_error message ->
+        Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
+    match json with
+    | Error e -> Error e
+    | Ok json -> (
+      (* Yojson.Safe.Util shadows [path] with its own JSON-pointer reader, so
+         the file name is captured before the [open]. *)
+      let file = path in
+      let open Yojson.Safe.Util in
+      try
+        let member_int name = try Some (member name json |> to_int) with Type_error _ -> None in
+        let member_string name =
+          match member name json with
+          | `String s -> Some s
+          | _ -> None in
+        let saved_at =
+          match Unix.stat file with
+          | exception _ -> None
+          | stats -> Some stats.st_mtime in
+        let ledger_entries =
+          match member "ledger" json with
+          | `List items -> List.length items
+          | _ -> 0 in
+        Ok
+          { version =
+              (match member_int "version" with Some v -> v | None -> 0)
+              (* The version a checkpoint without the field predates: v1 always
+                 wrote it. A missing envelope field is malformed, not ancient. *)
+          ; frame = member_int "frame"
+          ; saved_at_unix = saved_at
+          ; core_sha = member_string "core_sha"
+          ; cartridge = member_string "cartridge"
+          ; disk = member_string "disk"
+          ; ledger_entries
+          }
+      with Type_error (message, _) ->
+        Error (Invalid_request ("invalid MSX checkpoint: " ^ message)))
 ;;

@@ -57,6 +57,8 @@ let operation_of_misc : Tool_schemas_misc.misc_operation -> operation option = f
   | Tool_schemas_misc.Misc_msx_step_until_change
   | Tool_schemas_misc.Misc_msx_peek
   | Tool_schemas_misc.Misc_msx_ram_diff
+  | Tool_schemas_misc.Misc_msx_meta
+  | Tool_schemas_misc.Misc_msx_checkpoint_info
   | Tool_schemas_misc.Misc_portrait_read
   | Tool_schemas_misc.Misc_dos_load
   | Tool_schemas_misc.Misc_dos_eject

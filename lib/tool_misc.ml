@@ -272,6 +272,12 @@ let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args
            ~agent_name:ctx.agent_name args)
   | Some Tool_schemas_misc.Misc_msx_screen ->
       Some (Tool_misc_msx_lane.handle_screen ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_msx_meta ->
+      Some (Tool_misc_msx_lane.handle_meta ~tool_name:name ~start_time:start ())
+  | Some Tool_schemas_misc.Misc_msx_checkpoint_info ->
+      Some
+        (Tool_misc_msx_lane.handle_checkpoint_info ~tool_name:name ~start_time:start
+           ~base_path:ctx.config.base_path args)
   | Some Tool_schemas_misc.Misc_msx_press ->
       Some
         (Tool_misc_msx_lane.handle_press ~tool_name:name ~start_time:start
@@ -370,6 +376,11 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_msx_peek
   | Tool_schemas_misc.Misc_msx_ram_diff
   | Tool_schemas_misc.Misc_dos_peek ->
+    true
+  (* A core digest and a slot's metadata read constants and files; neither
+     touches the machine, the ledger or the activity gate. *)
+  | Tool_schemas_misc.Misc_msx_meta
+  | Tool_schemas_misc.Misc_msx_checkpoint_info ->
     true
   (* Loading, ejecting, pressing and stepping change the shared machine. *)
   | Tool_schemas_misc.Misc_msx_load

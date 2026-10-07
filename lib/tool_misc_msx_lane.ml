@@ -413,6 +413,52 @@ let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
     of_lane ~tool_name ~start_time ~extra:["slot", `String slot] result
 ;;
 
+(* masc_msx_meta — which core this server linked, as [Msx_lane.core] reports
+   it. Read-only: reads one module constant, moves nothing. *)
+let handle_meta ~tool_name ~start_time () =
+  Tool_result.make_ok ~tool_name ~start_time
+    ~data:(`Assoc [ "core", Msx_lane.core_to_yojson Msx_lane.core ])
+    ()
+;;
+
+(* masc_msx_checkpoint_info — what a saved slot holds, without restoring it.
+   A restore replaces the machine every watcher shows, so asking about a slot
+   must not be a restore in disguise. *)
+let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
+  match checkpoint_slot args with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok slot ->
+    let saves_dir = Filename.concat (msx_dir ~base_path) "saves" in
+    let path = Filename.concat saves_dir (slot ^ ".json") in
+    match Msx_lane.checkpoint_info ~path with
+    | Ok info ->
+      Tool_result.make_ok ~tool_name ~start_time
+        ~data:
+          (`Assoc
+            ([ ("slot", `String slot)
+             ; ("version", `Int info.version)
+             ; ("frame", match info.frame with Some f -> `Int f | None -> `Null)
+             ; ( "saved_at_unix"
+               , match info.saved_at_unix with Some t -> `Float t | None -> `Null )
+             ; ("core_sha", match info.core_sha with Some s -> `String s | None -> `Null)
+             ; ( "core_matches_current"
+               , `Bool
+                   (match info.core_sha with
+                    | Some sha -> String.equal sha Msx_lane.core.source_digest
+                    | None -> false) )
+             ; ( "cartridge"
+               , match info.cartridge with Some c -> `String c | None -> `Null )
+             ; ("disk", match info.disk with Some d -> `String d | None -> `Null)
+             ; ("ledger_entries", `Int info.ledger_entries)
+             ]))
+        ()
+    | Error ((Msx_lane.Invalid_request _ | Msx_lane.No_machine | Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved) as e) ->
+      reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+    | Error (Msx_lane.Unreadable _ as e) ->
+      refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
+        (Msx_lane.error_to_string e)
+;;
+
 let handle_change_disk ~tool_name ~start_time ~base_path args =
   let request = match args with
     | `Assoc ["disk", `String disk] when disk <> "" -> Ok disk

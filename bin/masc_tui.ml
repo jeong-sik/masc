@@ -2295,7 +2295,7 @@ let launch_voice_wizard_reread state ~mailbox ~request =
   | None ->
     enqueue_async mailbox
       (Voice_wizard_reread (request, Error "Eio switch is unavailable"))
-  end
+  end else suspend_voice_wizard_read state
 ;;
 
 (* The sentence the endpoints are asked to say. In Korean because that is what

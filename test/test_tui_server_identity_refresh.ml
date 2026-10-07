@@ -462,10 +462,42 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
       ~kind:Workspace_observation);
   state.board_detail <- Detail.complete state.board_detail refreshed (Ok (a, [], None))
 
+let test_unknown_voice_save_read_retirement () =
+  let open Masc_tui_types in
+  let module Wizard = Masc_tui_voice_wizard_session in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  let opened = Wizard.voice_wizard_open ~section:Voice_setup.Tts
+      ~provider:Voice_wizard.Elevenlabs ~revision:"before-save" in
+  let sending = Wizard.voice_wizard_sending opened ~request:7 in
+  state.voice_wizard <- Some sending;
+  suspend_workspace_readings state;
+  (match state.voice_wizard with
+   | Some {vws_save=Wizard.Save_sending 7; _} -> ()
+   | _ -> Alcotest.fail "admitted voice save lost its receipt owner");
+  let unanswered = match Wizard.voice_wizard_after_save sending ~request:7
+      (Wizard.Save_unanswered_reply "connection lost") with
+    | Some session -> session | None -> Alcotest.fail "save receipt lost" in
+  let check_retired () = match state.voice_wizard with
+    | Some {vws_save=Wizard.Save_needs_reopen _; vws_revision; vws_draft; _} ->
+        Alcotest.(check string) "original revision retained" "before-save" vws_revision;
+        Alcotest.(check bool) "voice draft retained" true (vws_draft = opened.vws_draft)
+    | _ -> Alcotest.fail "unanswered save still waits for a retired reread" in
+  state.voice_wizard <- Some unanswered;
+  suspend_workspace_readings state;
+  check_retired ();
+  (* The receipt can first arrive after retirement; refused read admission
+     must settle only its observation owner, leaving the save unknown. *)
+  state.voice_wizard <- Some unanswered;
+  suspend_voice_wizard_read state;
+  check_retired ()
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "detail focus waits for authoritative roster" `Quick
+      , [ Alcotest.test_case "unknown voice save read retirement" `Quick
+            test_unknown_voice_save_read_retirement
+        ; Alcotest.test_case "detail focus waits for authoritative roster" `Quick
             test_detail_focus_waits_for_authoritative_roster
         ; Alcotest.test_case "same base and different MASC root retain separate inputs" `Quick
             test_same_base_with_different_masc_root_cannot_restore_inputs

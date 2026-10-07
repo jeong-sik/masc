@@ -6445,6 +6445,16 @@ let suspend_keeper_deletions_read state =
   state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
   state.keeper_deletions_loading <- false
 
+let suspend_voice_wizard_read state =
+  let module Wizard = Masc_tui_voice_wizard_session in
+  state.voice_wizard <- Option.map (fun (session : Wizard.voice_wizard_session) ->
+    match session.vws_save with
+    | Wizard.Save_unanswered {request; _} ->
+        Option.value ~default:session (Wizard.voice_wizard_after_reread session ~request
+          (Error "workspace identity is unconfirmed; the save outcome is still unknown"))
+    | Save_not_sent | Save_sending _ | Save_probing _ | Save_settled
+    | Save_needs_reopen _ -> session) state.voice_wizard
+
 (* Observation receipts have a shorter lifetime than admitted operations.
    Retire their owners without cancelling a write or erasing its outcome,
    the rows already shown, navigation, or the operator's draft. *)
@@ -6457,6 +6467,7 @@ let suspend_workspace_readings state =
   state.detail_read_authority <- ref ();
   state.detail_reads <- [];
   suspend_keeper_deletions_read state;
+  suspend_voice_wizard_read state;
   state.keeper_queue_inflight <- List.filter
     (fun keeper -> not (List.mem keeper state.keeper_queue_readings)) state.keeper_queue_inflight;
   state.keeper_queue_readings <- [];

@@ -83,6 +83,10 @@ async function main() {
         json = { ok: true };
       } else if (url.pathname === '/api/v1/lane-addons/live') {
         frameReads += 1;
+        if (url.searchParams.get('source_kind') === 'msx_capture') return route.fulfill({ json: {
+          state:'changed', change_count:7, incarnation:'msx-fixture', activity:[],
+          screen:{ format:'rgb8', width:1, height:1, rgb_base64:'AP8A' }
+        } });
         const activity = [{ at: ejected ? 2 : 1, who: 'operator', action: ejected ? 'eject' : 'pass minsu' }];
         json = ejected ? { state: 'no_machine', activity }
           : url.searchParams.has('since')
@@ -107,7 +111,17 @@ async function main() {
     await page.locator('#chat-send').click();
     await page.waitForFunction(() => document.getElementById('chat-text').value === '');
     assert.equal(messages.length, 3);
+    const msxResponse = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === '/api/v1/lane-addons/live'
+        && url.searchParams.get('source_kind') === 'msx_capture';
+    });
     await page.locator('#machine-view').selectOption('msx');
+    assert.equal((await msxResponse).status(), 200);
+    await page.waitForFunction(() => [...document.getElementById('screen')
+      .getContext('2d').getImageData(0, 0, 1, 1).data].join(',') === '0,255,0,255');
+    assert.deepEqual(await pixel(), [0, 255, 0, 255]);
+    await page.screenshot({ path:resolve(output, 'play-msx-mobile.png'), fullPage:true });
     await page.waitForFunction(() => document.getElementById('turn').textContent.includes('MSX'));
     assert.equal(await page.locator('#game-controls').isVisible(), false);
     await page.locator('#chat-text').fill('MSX도 같은 방입니다.');
@@ -115,6 +129,9 @@ async function main() {
     await page.waitForFunction(() => document.getElementById('chat-text').value === '');
     assert.equal(messages.at(-1).machine, 'msx');
     await page.locator('#machine-view').selectOption('dos');
+    await page.waitForFunction(() => [...document.getElementById('screen')
+      .getContext('2d').getImageData(0, 0, 1, 1).data].join(',') === '255,0,0,255');
+    assert.deepEqual(await pixel(), [255, 0, 0, 255]);
     await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례'));
     await page.waitForFunction(() => document.getElementById('status').textContent === '');
     for (const width of [320, 390, 900, 1440]) {
@@ -189,7 +206,8 @@ async function main() {
       browser_version: browser.version(), seat_reads: seatReads, frame_reads: frameReads,
       checks: ['seat recovers without machine activity', 'failed frame is fetched again',
         'several Keepers share public conversation', 'guest sends public message',
-        'one viewport switches DOS and MSX without splitting conversation', 'room layout fits phone and desktop',
+        'one viewport switches DOS and MSX without splitting conversation',
+        'MSX live response renders green pixels before DOS red pixels return', 'room layout fits phone and desktop',
         'same-tab reload reconnects', 'pad click sends input', 'reopening focused selector discovers idle invite',
         'pass updates controller and disables input', 'eject clears pixels', 'disconnect removes tab credential',
         'atomic session departure precedes credential removal', 'departed same-link reopen explicitly reconnects',

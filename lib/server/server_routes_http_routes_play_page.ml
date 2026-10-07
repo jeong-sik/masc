@@ -261,9 +261,12 @@ let sending = Promise.resolve();
 let textSending = false;
 let viewMachine = 'dos';
 let viewRevision = 0;
+let frameTimer = null;
+let frameAbort = null;
 function roomId() { return operationId(); }
 // A new page gets a separate presence lease, including duplicated tabs.
 const roomClient = roomId();
+const roomClients = new Set([roomClient]);
 let roomSending = Promise.resolve();
 let roomBusy = false;
 let chatSending = false;
@@ -371,6 +374,7 @@ async function api(method, path, body, signal) {
   const response = await fetch(path, init);
   let json = null;
   try { json = await response.json(); } catch (_) { json = null; }
+  if (signal?.aborted) throw signal.reason;
   // Authentication/read failures do not settle an earlier admitted write.
   if (!unsettled && (response.status === 401 || response.status === 403)) end('초대가 끝났거나 회수됐어요. 운영자에게 새 링크를 받아 주세요.');
   return { status: response.status, json };
@@ -422,7 +426,10 @@ function restoreRoomDraft() {
     el('chat-text').value = saved.text;
     const p = saved.pending;
     if (p && typeof p.client_id === 'string' && typeof p.message_id === 'string'
-        && typeof p.text === 'string' && (p.machine === 'msx' || p.machine === 'dos')) pendingChat = p;
+        && typeof p.text === 'string' && (p.machine === 'msx' || p.machine === 'dos')) {
+      pendingChat = p;
+      roomClients.add(p.client_id);
+    }
   } catch (_) { /* A malformed saved draft is not a message to send. */ }
 }
 
@@ -491,6 +498,7 @@ function roomRequest(body) {
     // A send can wait behind a read while another document replaces this
     // tab's draft. Recheck its authority at the public write boundary.
     if (ended || disconnecting || departureConfirmed || !roomConnectionCurrent(body.action === 'say')) return null;
+    roomClients.add(body.client_id);
     const abort = new AbortController();
     roomAbort = abort;
     return api('POST', ROOM_PATH, body, abort.signal).finally(() => {
@@ -664,7 +672,7 @@ function renderPassTargets(participants) {
   if ([...select.options].some((o) => o.value === chosen)) select.value = chosen;
 }
 
-async function refreshSeat() {
+async function refreshSeat(signal) {
   // Only a successful read may acknowledge the activity that prompted it.
   // A failed read after sending a move must be retried by the poll as well.
   lastActivityKey = null;
@@ -673,15 +681,15 @@ async function refreshSeat() {
   nextSeatPollAt = performance.now() + SEAT_POLL_MS;
   let r;
   try {
-    r = await api('GET', SEAT_PATH);
+    r = await api('GET', SEAT_PATH, undefined, signal);
   } catch (_) {
-    if (ended || latestSeatRequest !== request) return null;
+    if (ended || signal?.aborted || latestSeatRequest !== request) return null;
     controllerError = '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.';
     renderTurn();
     setStatus('seat', controllerError);
     return null;
   }
-  if (ended || latestSeatRequest !== request) return null;
+  if (ended || signal?.aborted || latestSeatRequest !== request) return null;
   if (r.status !== 200 || !r.json || typeof r.json.machine !== 'boolean'
       || typeof r.json.connected !== 'boolean'
       || typeof r.json.name !== 'string'
@@ -750,12 +758,12 @@ function showPad(savesName, buttons) {
 // has none (404) -- and it settles on the saves name that answer carries.
 // Any other answer, or a read that throws, leaves it unsettled with the keys
 // row showing, and the next poll reads it again.
-async function syncPad() {
+async function syncPad(signal) {
   if (seatSavesName === padFor) return;
   if (seatSavesName === null) { showPad(null, []); return; }
   showPad(undefined, []);
-  const r = await api('GET', PAD_PATH);
-  if (ended) return;
+  const r = await api('GET', PAD_PATH, undefined, signal);
+  if (ended || signal?.aborted) return;
   const named = r.json !== null && typeof r.json.saves_name === 'string';
   if (r.status === 200 && named && Array.isArray(r.json.buttons)) showPad(r.json.saves_name, r.json.buttons);
   else if (r.status === 404 && named) showPad(r.json.saves_name, []);
@@ -827,22 +835,33 @@ function renderActivity(activity) {
 // One poll. Every way it can fail -- the network, the seat read, a frame
 // that will not decode -- is shown and the next poll is still scheduled, so
 // the page never freezes on an old frame without saying so.
-async function tick() {
+function restartFrames() {
+  if (frameAbort) frameAbort.abort();
+  if (frameTimer !== null) clearTimeout(frameTimer);
+  frameTimer = null;
+  const abort = new AbortController();
+  frameAbort = abort;
+  void tick(viewRevision, abort);
+}
+
+async function tick(revision, abort) {
   try {
-    await poll();
+    await poll(revision, abort.signal);
   } catch (_) {
-    setStatus('connection', '연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
+    if (!ended && !abort.signal.aborted && revision === viewRevision)
+      setStatus('connection', '연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
   } finally {
-    if (!ended) setTimeout(tick, POLL_MS);
+    if (!ended && !abort.signal.aborted && revision === viewRevision)
+      frameTimer = setTimeout(() => tick(revision, abort), POLL_MS);
   }
 }
 
-async function poll() {
-  if (ended) return;
-  const watched = viewMachine, revision = viewRevision;
+async function poll(revision, signal) {
+  if (ended || signal.aborted || revision !== viewRevision) return;
+  const watched = viewMachine;
   const query = since === null ? '' : '&since=' + since.count + '&incarnation=' + encodeURIComponent(since.incarnation);
-  const r = await api('GET', LIVE_PATH + watched + '_capture' + query);
-  if (ended || revision !== viewRevision) return;
+  const r = await api('GET', LIVE_PATH + watched + '_capture' + query, undefined, signal);
+  if (ended || signal.aborted || revision !== viewRevision) return;
   if (r.status !== 200 || !r.json) {
     setStatus('connection', '연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
   } else {
@@ -875,12 +894,13 @@ async function poll() {
     // Expiry and Keeper stops need not move the machine. An observer must
     // still discover that its holder departed, so a real move can recover it.
     if (watched === 'dos') {
-      const activityChanged = observedActivityKey !== null && key !== observedActivityKey;
+      const activityChanged = key !== observedActivityKey && (observedActivityKey !== null || key !== '');
       observedActivityKey = key;
       const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
       if ((activityChanged || (performance.now() >= nextSeatPollAt && (key !== lastActivityKey || waitingForController)))
-          && await refreshSeat()) lastActivityKey = key;
-      await syncPad();
+          && await refreshSeat(signal)) lastActivityKey = key;
+      if (signal.aborted || revision !== viewRevision) return;
+      await syncPad(signal);
     }
   }
 }
@@ -932,7 +952,8 @@ async function disconnect() {
     departureConfirmed = true;
     // Presence cleanup is best effort and cannot delay a confirmed departure.
     // api captures this bearer synchronously before local storage is removed.
-    void api('POST', ROOM_PATH, { action:'leave', client_id:roomClient, machine:viewMachine }).catch(() => {});
+    for (const client_id of roomClients)
+      void api('POST', ROOM_PATH, { action:'leave', client_id, machine:viewMachine }).catch(() => {});
     end('연결을 끊었어요. 다시 들어오려면 받은 초대 링크를 열어 주세요.');
   } catch (_) {
     if (!ended) setStatus('disconnect', '조종권 반납 결과를 확인하지 못했어요. 초대 연결을 유지했으니 다시 연결 끊기를 눌러 주세요.');
@@ -1023,10 +1044,12 @@ el('machine-view').addEventListener('change', () => {
   viewMachine = selected;
   viewRevision += 1;
   since = null;
+  observedActivityKey = null;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   setStatus('frame', '화면을 읽고 있어요.');
   refreshRoom();
   renderTurn();
+  restartFrames();
 });
 el('chat-send').addEventListener('click', sendChat);
 el('chat-text').addEventListener('input', () => { saveRoomDraft(); setRoomControls(); });
@@ -1053,7 +1076,9 @@ if (token === '') {
 } else {
   tickRoom();
   starting = refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.'));
-  starting.finally(tick);
+  // A selected machine begins observing immediately even if this initial
+  // seat never answers. Its eventual completion must not create a second loop.
+  starting.finally(() => { if (viewRevision === 0) restartFrames(); });
 }
 </script>
 </body>

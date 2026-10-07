@@ -92,13 +92,18 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     requestAnimationFrame() {},
     atob,
     performance: { now: () => now },
-    setTimeout: (callback, delay) => timers.push({ callback, delay }),
+    setTimeout: (callback, delay) => {
+      const timer = { callback, delay };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeout: timer => { const index = timers.indexOf(timer); if (index >= 0) timers.splice(index, 1); },
     fetch: async (url, init) => {
       const request = { url, authorization: init.headers.Authorization, method: init.method, body: init.body && JSON.parse(init.body) };
       requests.push(request);
       if (url === '/api/v1/play/room') return roomReply(request);
       if (url === '/api/v1/play/session') return sessionReply(request);
-      return reply(request);
+      return reply(request, init.signal);
     },
   });
   vm.runInContext(script, context);
@@ -184,6 +189,10 @@ test('an uncertain public message preserves its exact receipt and draft through 
   assert.deepEqual(sends[1], sends[0]);
   assert.equal(reloaded.get('chat-text').value, '');
   assert.notEqual(first.roomRequests[0].body.client_id, reloaded.roomRequests[0].body.client_id);
+  await reloaded.get('leave').handlers.click();
+  assert.deepEqual(new Set(reloaded.roomRequests.filter(request => request.body.action === 'leave')
+    .map(request => request.body.client_id)), new Set([sends[0].client_id, reloaded.roomRequests[0].body.client_id]),
+    'disconnect leaves both the fresh document and recovered send clients');
 });
 
 test('an edited next draft cannot replace the unconfirmed public message after reload', async () => {
@@ -281,6 +290,7 @@ test('MSX observation uses the same room and never takes the DOS controller', as
   await page.settle();
   page.get('machine-view').value = 'msx';
   page.get('machine-view').handlers.change();
+  await page.settle();
   await page.poll();
   assert.match(page.get('turn').textContent, /MSX/);
   assert.equal(page.get('game-controls').hidden, true);
@@ -293,17 +303,61 @@ test('MSX observation uses the same room and never takes the DOS controller', as
 });
 
 test('a late DOS frame cannot repaint the selected MSX view', async () => {
-  let finish;
-  const page = fixture(request => request.url.includes('dos_capture')
-    ? new Promise(resolve => { finish = () => resolve(response(frame)); }) : gameReply(request));
+  let finish, oldSignal;
+  const msx = { ...frame, screen:{ ...frame.screen, rgb_base64:'AP8A' } };
+  const page = fixture((request, signal) => {
+    if (request.url.includes('dos_capture')) {
+      oldSignal = signal;
+      return new Promise(resolve => { finish = () => resolve(response(frame)); });
+    }
+    return request.url.includes('msx_capture') ? response(msx) : gameReply(request);
+  });
   await page.settle();
   page.get('machine-view').value = 'msx';
   page.get('machine-view').handlers.change();
+  await page.settle();
+  assert.equal(oldSignal.aborted, true, 'switching cancels the previous frame request');
+  assert.deepEqual(page.rendered, [[0, 255, 0, 255]], 'the new machine renders without waiting for DOS');
   finish();
   await page.settle();
-  assert.deepEqual(page.rendered, []);
+  assert.deepEqual(page.rendered, [[0, 255, 0, 255]], 'the late aborted response does not repaint');
   await page.poll();
+  assert.equal(page.rendered.length, 2, 'only the replacement poll loop remains');
+});
+
+test('machine selection begins frames while the initial seat request is still pending', async () => {
+  let finishSeat;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? new Promise(resolve => { finishSeat = () => resolve(response(seat)); }) : gameReply(request));
+  await page.settle();
+  assert.equal(page.rendered.length, 0);
+  page.get('machine-view').value = 'msx';
+  page.get('machine-view').handlers.change();
+  await page.settle();
+  assert.ok(page.requests.some(request => request.url.includes('msx_capture')));
   assert.equal(page.rendered.length, 1);
+  finishSeat();
+  await page.settle();
+  assert.equal(page.rendered.length, 1, 'late initialization does not restart the selected view');
+  await page.poll();
+  assert.equal(page.rendered.length, 2);
+});
+
+test('the first observed handoff refreshes controller authority before the idle interval', async () => {
+  let finishFrame, seats = 0;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') return response(++seats === 1 ? seat : { ...seat, controller:'operator' });
+    if (request.url.includes('dos_capture')) return new Promise(resolve => { finishFrame = () => resolve(response(frame)); });
+    return gameReply(request);
+  });
+  await page.settle();
+  assert.equal(seats, 1);
+  assert.equal(page.padButton.disabled, false);
+  finishFrame();
+  await page.settle();
+  assert.equal(seats, 2, 'new observed authority is fetched without advancing the poll clock');
+  assert.equal(page.padButton.disabled, true);
+  assert.match(page.get('turn').textContent, /operator/);
 });
 
 test('public-room failure does not prevent controller release and disconnect', async () => {
@@ -562,8 +616,7 @@ test('a failed seat read retries without a new move and restores playable contro
   });
   await page.settle();
   assert.match(page.get('status').textContent, /자리/);
-  await page.poll();
-  assert.equal(seatReads, 2);
+  assert.equal(seatReads, 2, 'first activity immediately retries the initial failed read');
   assert.equal(page.padButton.disabled, true);
   await page.poll();
   assert.equal(seatReads, 3, 'retry the same activity after the seat recovers');
@@ -1503,8 +1556,7 @@ test('a reopened departed invitation reconnects after a transient initial seat f
     sessionReply: ({ body }) => { connected = body.connected; return response({ ok:true, connected }); }
   });
   await page.settle();
-  assert.equal(page.padButton.disabled, true);
-  await page.poll();
+  assert.ok(reads >= 2, 'first activity recovers the failed initial seat immediately');
   assert.equal(page.padButton.disabled, false);
   assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:true }]);
   await page.poll();

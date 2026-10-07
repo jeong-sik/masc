@@ -4994,6 +4994,19 @@ let test_expanded_chat_diagnostics_preserve_settled_identity () =
   check bool "merged settled block keeps superseded runtime diagnostics" true
     (Astring.String.is_infix ~affix:"first-runtime" screen);
   state.msg_settled_logs <- [];
+  state.keeper_turns <- [{Tui_decode.ktr_keeper_name="alpha"; ktr_chat_control_token=None;
+    ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
+      interrupt_token="preview-source"; turn_ref=None;
+      preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
+        ktp_text_tail=String.concat "\n" (List.init 100 (Printf.sprintf "preview-line-%03d"));
+        ktp_last_tool=None}}}];
+  let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+  let screen = String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+  check bool "long excerpt retains its observation label" true
+    (Astring.String.is_infix ~affix:"최근 출력 발췌" screen);
+  check bool "long excerpt retains latest speech" true
+    (Astring.String.is_infix ~affix:"preview-line-099" screen);
+  state.keeper_turns <- [];
   let pending, _ = preflight_input () in
   state.msg_inflight <- [pending];
   let width = Masc_tui_message_layout.chat_role_label_width ~pane_cells:80 in

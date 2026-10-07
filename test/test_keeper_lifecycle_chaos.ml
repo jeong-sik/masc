@@ -41,15 +41,13 @@ let get_phase name =
   | None -> Alcotest.fail ("keeper not found: " ^ name)
   | Some e -> e.phase
 
-let paired_lifecycle_origin (_ : KSM.event) = R.Generic_dispatch
-
 let dispatch name event =
-  match R.dispatch_event ~base_path:bp ~origin:(paired_lifecycle_origin event) name event with
+  match R.dispatch_event ~base_path:bp name event with
   | Ok tr -> tr
   | Error e -> Alcotest.fail (KSM.transition_error_to_string e)
 
 let dispatch_expect_rejected name event =
-  match R.dispatch_event ~base_path:bp ~origin:(paired_lifecycle_origin event) name event with
+  match R.dispatch_event ~base_path:bp name event with
   | Ok _ -> Alcotest.fail "expected rejected transition"
   (* R.dispatch_event returns a closed transition_error type.  Terminal
      keepers always yield Terminal_state (apply_event guards on

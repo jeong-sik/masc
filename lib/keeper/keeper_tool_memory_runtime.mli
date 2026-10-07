@@ -10,6 +10,9 @@ type memory_search_source =
   | Absorbed
       (** Facts a librarian pass merged into a newer claim (RFC-0456 §4.2),
           read from [<keeper>.memory-absorbed.jsonl]. *)
+  | Dropped
+      (** Historical originals and reasons from the removal journal.
+          These are not current claims or authority to restore them. *)
   | History
   | All
 
@@ -68,6 +71,13 @@ val keeper_memory_write_with_outcome
 (** Validate and atomically upsert an explicit fact in the Keeper's
     Memory OS snapshot. The write stays inside MASC and never enters the
     external-effect Gate or approval replay path. *)
+
+(** The answer of a [keeper_memory_write] receipt for the repeat guard: the
+    fields that say what the write did ([memory_id], [identity_disposition],
+    [outcome], the source of a source-bound write, the error of a refused one),
+    without the snapshot [revision] and [recorded_at] that change on every
+    write. [None] for output that is not a receipt object. *)
+val memory_write_answer_of_output : string -> Yojson.Safe.t option
 
 (** The two stores an explicit memory write reaches: the ordinary current
     Memory OS snapshot, or the source-bound store a [source_path] selects. *)

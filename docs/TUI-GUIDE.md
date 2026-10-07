@@ -336,12 +336,35 @@ roll-up of actual Skill invocation/delivery/action counts; and `all tools` is
 the registered catalog. Registration or availability does not prove actual
 use, and a missing retained receipt does not prove a Skill was never used.
 
-At 110 columns and wider, the keeper detail view keeps a roster pane on its
-left with the cursor marked; keys keep their detail meaning. Narrower
-terminals use the single-pane layout. `Ctrl-B` changes the roster preference
+The Keeper roster starts closed. At 110 columns and wider, `Ctrl-B` pins it
+beside the current surface with the cursor marked. Narrower terminals use
+the single-pane layout. `Ctrl-B` changes the roster preference
 only while the pane has room to show. Below 110 columns it reports the width
 requirement and leaves the preference unchanged, so resizing wider cannot
 reveal a hidden toggle that had no visible effect when it was pressed.
+
+From Dashboard (Overview), press `Left` to open the Keeper list. In chat,
+`Left` opens it only when the input is empty and its cursor is at the start.
+With text present, `Left`/`Right` move the editing cursor; typing, paste,
+Backspace and Ctrl-W edit at that cursor. Even at the start of a nonempty
+draft, `Left` stays in the input. Use `Ctrl-G` to switch Keepers with a draft.
+In the list, `Up`/`Down` (or `j`/`k`) select a Keeper; `Enter` opens its chat.
+`Right`, `Esc`, or `Tab` returns to the screen you were reading without sending
+a message or interrupting the Keeper. Chat drafts stay with their Keeper when
+you switch. `Left` also opens a list hidden with `Ctrl-B`, without changing
+that visibility preference. On a narrow terminal the list uses the whole body;
+on a wider terminal it sits to the left of Dashboard or the conversation.
+The list uses a quiet divider, a count (or visible range for a long list), and
+a highlighted cursor row. While selecting, the lower panel identifies the
+Keeper, its observed health and runtime; it labels the current conversation
+separately. Short viewports give those detail rows back to the list.
+
+The same list treatment is used beside Work, Tasks, Board, Approvals, Schedules,
+Task Review, Verdicts and Fusion details. Titles and counts sit apart, label
+columns stay aligned, and only the pane holding keyboard focus highlights the
+selected row. The focus band uses a quiet neutral tint with a known terminal
+palette and reverse video when colours or the palette are unavailable. The [layout language](design/tui/LAYOUT-LANGUAGE.md) records the
+shared direction and which custom surfaces still have separate renderers.
 
 ### The Activity pane
 
@@ -665,7 +688,8 @@ settings remain visible as warnings even when no restart is required.
 
 Standalone Lane model settings use the same form as Config → Models. In the
 Lane's `s` model-order editor, `Enter` or `d` opens the selected account/model's
-context, output and sampling fields. Runtime detail's `e` opens the same form.
+context, output and sampling fields. Runtime detail's `e` and the All runtimes
+roster's `e` open the same form.
 These entries reread the saved source and resolve the full runtime ID,
 including the account. Leaving the screen or pane cancels a pending settings
 entry; an older read cannot open a newer selection. Saving refreshes Runtime,
@@ -1129,23 +1153,34 @@ Config 탭의 `presets` 패널(`p` 로 순환)이 이 기능의 자리다. 목�
 저장 시각을 보여주고, 아래 상세에는 설명과 keeper 목록이, 그 아래에는 이번
 세션의 마지막 복원 보고서가 남는다. manifest 가 읽히지 않는 디렉터리는 `!` 줄로
 따로 보인다. 키는 `j`/`k` 선택, `n` 저장(이름을 입력하고 Enter, Esc 취소),
-`u` 두 번 되돌리기, `r` 새로고침이다. Config 에서 `s` 와 `t` 는 이미 Resources 와
-Tools 로 가는 키라 쓰지 않는다. 되돌리기는 세 표면을 덮어쓰므로 `u` 한 번은
-무장만 하고, 다른 키를 누르면 풀린다. 이름을 입력하는 동안에는 패널이 모든
-인쇄 가능 키를 가져가므로 이름에 `n` 이나 `u` 가 들어가도 키가 발화하지 않는다.
+`u` 두 번 되돌리기, `D` 두 번 삭제, `r` 새로고침이다. Config 에서 `s` 와 `t` 는 이미
+Resources 와 Tools 로 가는 키라 쓰지 않는다. 되돌리기와 삭제는 한 번 누르면 준비만
+하고, 같은 키를 한 번 더 눌러야 실행된다. 다른 키를 누르면 풀린다. `!` 줄의
+프리셋은 목록에서 고를 수 없으니 채팅의 `/preset delete <name>` 으로 지운다.
+이름이 프리셋 이름 규칙(`A-Z a-z 0-9 . _ -`)에 맞지 않는 디렉터리는 이 명령으로도
+지울 수 없다.
+이름을 입력하는 동안에는 패널이 모든 인쇄 가능 키를 가져가므로 이름에 `n`, `u`,
+`D` 가 들어가도 키가 발화하지 않는다.
 
 채팅 창에서도 같은 일을 할 수 있다. `/preset` lists the prompt presets the server holds under `.masc/presets`:
 one line per preset with its counts (prompt overrides, keepers with
 instructions, runtime assignments, exact-output lanes), its description, and
 when it was saved; a directory whose manifest does not read gets a `!` line.
 `/preset save <name> [description]` snapshots the live state under that name.
-`/preset restore <name>` saves the live state first (the report names that
-autosave), then applies the preset surface by surface and reports each one:
-prompt overrides take effect at once, keeper instructions at each keeper's
-next up, and runtime routing through a runtime.toml commit. Every skipped key
+`/preset restore <name>` saves the live state first as `_autosave`, replacing
+the one the previous restore left, then applies the preset surface by surface
+and reports each one: prompt overrides take effect at once, keeper
+instructions at each keeper's next up, and runtime routing through a
+runtime.toml commit. `/preset restore _autosave` undoes the latest restore's
+prompt overrides and runtime assignments; a keeper that had no instructions,
+or a lane that restore added, stays as it left them. Every skipped key
 is listed with its reason, and a restore that skipped anything or whose
-commit failed is shown as an error. The three answers land in the chat pane
-of the keeper selected when the command was typed.
+commit failed is shown as an error. `/preset delete <name>` removes that
+preset, including one listed with `!` because it does not load; typing the
+name is the confirmation. A directory whose name is not a valid preset name
+is refused.
+The answers land in the chat pane of the keeper selected when the command was
+typed.
 
 #### Context inspector
 
@@ -1983,9 +2018,18 @@ Models groups saved model bindings by account/provider and shows the API model,
 declared context, reasoning effort, temperature, and output cap. `e` opens the
 selected binding's settings; `c` copies it into an independently named variant
 on the same account; `o` opens its source section in `runtime.toml`. In the form,
-Tab or arrows select a field, Ctrl-U clears it, Enter advances and saves from
-the last field, and Esc cancels. Save failures preserve the draft and show the
-error. Add a saved copy to a Lane to use it.
+Tab or Up/Down select a field, Ctrl-U clears it, Enter advances and saves from
+the last field, and Esc cancels. On Context, Left/Right cycle through 272k,
+500k, 750k, 1M and custom input; returning to custom restores the typed value.
+Copy suggests a context-based name after choosing a preset, until the operator
+edits the name. These are requested limits; Runtime shows the effective context
+and any capability clamp. Add a saved copy to a Lane to use it.
+
+The source revision is kept with each model/account draft and checked before
+applying its fields and again when saving. If the source changed, close and
+reopen the form after reload. A missing or unreadable save reply is shown as an
+unknown outcome: the draft remains and Config, Runtime and Lanes are reloaded
+to inspect the result. No write is retried automatically.
 
 Context and output edits belong to the selected account/model binding.
 Reasoning effort and temperature belong to `[models.NAME]` and affect every

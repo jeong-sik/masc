@@ -58,24 +58,6 @@ let packed_decision_stage_label : packed_decision_stage -> string = function
   | Packed Decision_tool_policy_selected -> "Decision_tool_policy_selected"
 ;;
 
-module Decision_transition = struct
-  type ('from, 'to_) t =
-    | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
-    | Undecided_to_tool_policy_selected :
-        (decision_undecided, decision_tool_policy_selected) t
-    | Guard_ok_to_tool_policy_selected :
-        (decision_guard_ok, decision_tool_policy_selected) t
-    | Tool_policy_selected_to_guard_ok :
-        (decision_tool_policy_selected, decision_guard_ok) t
-
-  let to_tag : type a b. (a, b) t -> string = function
-    | Undecided_to_guard_ok -> "undecided->guard_ok"
-    | Undecided_to_tool_policy_selected -> "undecided->tool_policy_selected"
-    | Guard_ok_to_tool_policy_selected -> "guard_ok->tool_policy_selected"
-    | Tool_policy_selected_to_guard_ok -> "tool_policy_selected->guard_ok"
-  ;;
-end
-
 (* Living-matrix documentation of the decision-stage transition relation.
    Forbidden [<active>_to_undecided] pairs are unrepresentable through
    the [decision_stage_active] target type (PR #14887 made

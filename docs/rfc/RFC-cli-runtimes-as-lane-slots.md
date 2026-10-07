@@ -7,7 +7,7 @@ updated: 2026-09-27
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["claude-setting-sources-opt-in"]
+related: []
 ---
 
 # CLI runtimes as lane slots

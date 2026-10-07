@@ -195,52 +195,253 @@ let test_a_different_priority_run_limit_is_a_conflict () =
          ~haystack:message)
 ;;
 
-(* The read-only check reports what [with_admission] would refuse, and only
-   that: no admission yet, no declaration, or the same allowance is [None]. *)
-let test_admitted_allowance_change_reports_what_admission_would_refuse () =
+let publish_agreed labelled =
+  match Provider_admission.allowances_of_configs labelled with
+  | Ok allowances -> Provider_admission.publish allowances
+  | Error _ -> fail "the published configs should agree"
+;;
+
+(* Polls the identity's queue, bounded, until [count] requests wait on it. *)
+let await_queued ~clock ~config count =
+  let deadline = Eio.Time.now clock +. 10.0 in
+  let rec loop () =
+    match Provider_admission.snapshot_for ~config with
+    | Some snapshot when snapshot.queue_length >= count -> ()
+    | Some _ | None ->
+      if Eio.Time.now clock > deadline
+      then failf "%d requests never queued" count
+      else (
+        Eio.Time.sleep clock 0.001;
+        loop ())
+  in
+  loop ()
+;;
+
+let test_configs_on_one_account_that_disagree_are_named () =
+  let base_url = "http://disagreeing-allowances.test:1" in
+  let four = make_config ~base_url ~max_concurrent_requests:4 () in
+  let two = make_config ~base_url ~max_concurrent_requests:2 () in
+  let undeclared = make_config ~base_url () in
+  let other_account = make_config ~base_url ~api_key:"other-key" ~max_concurrent_requests:2 () in
+  (match
+     Provider_admission.allowances_of_configs
+       [ "a", four; "b", undeclared; "c", other_account; "d", four ]
+   with
+   | Ok _ -> ()
+   | Error _ -> fail "agreeing and undeclared configs should publish");
+  match Provider_admission.allowances_of_configs [ "a", four; "b", two; "c", other_account ] with
+  | Ok _ -> fail "two allowances on one account should be refused"
+  | Error [ disagreement ] ->
+    check
+      (list string)
+      "the disagreement names both configs"
+      [ "a"; "b" ]
+      (List.map fst disagreement.declarations)
+  | Error disagreements -> failf "expected one disagreement, got %d" (List.length disagreements)
+;;
+
+(* Once an allowance is published, a request built from an older config on
+   that account runs under the published allowance instead of raising. *)
+let test_a_published_allowance_governs_requests_from_older_configs () =
   Eio_main.run
   @@ fun _env ->
-  let base_url = "http://admitted-change.test:1" in
-  let admitted = make_config ~base_url ~max_concurrent_requests:2 () in
-  let with_run_limit =
-    make_config ~base_url ~max_concurrent_requests:2 ~admission_priority_run_limit:3 ()
+  let base_url = "http://published-allowance.test:1" in
+  let older = make_config ~base_url ~max_concurrent_requests:1 () in
+  let published =
+    make_config ~base_url ~max_concurrent_requests:3 ~admission_priority_run_limit:2 ()
   in
-  let more_permits = make_config ~base_url ~max_concurrent_requests:4 () in
-  let undeclared = make_config ~base_url () in
-  let other_account =
-    make_config ~base_url ~api_key:"other-key" ~max_concurrent_requests:4 ()
-  in
-  let change config = Provider_admission.admitted_allowance_change ~config in
-  check bool "nothing admitted yet" true (Option.is_none (change with_run_limit));
+  Provider_admission.with_admission ~config:older (fun () -> ());
+  publish_agreed [ "published", published ];
+  (match Provider_admission.snapshot_for ~config:published with
+   | Some snapshot -> check int "the scheduler takes the published permits" 3 snapshot.max_slots
+   | None -> fail "the account's scheduler should exist");
   check
-    bool
-    "asking installs nothing"
-    true
-    (Option.is_none (Provider_admission.snapshot_for ~config:with_run_limit));
-  Provider_admission.with_admission ~config:admitted (fun () -> ());
-  check bool "the same allowance is no change" true (Option.is_none (change admitted));
-  check bool "no declaration is no change" true (Option.is_none (change undeclared));
-  check bool "another account is no change" true (Option.is_none (change other_account));
-  List.iter
-    (fun (label, config, declared) ->
-       match change config with
-       | None -> failf "%s should be reported" label
-       | Some (conflict : Provider_admission_state.conflict) ->
-         check int (label ^ ": admitted permits") 2 conflict.authoritative.max;
-         check
-           (option int)
-           (label ^ ": admitted run limit")
-           None
-           conflict.authoritative.priority_run_limit;
-         check bool (label ^ ": declared allowance") true (conflict.declared = declared);
-         (match Provider_admission.with_admission ~config (fun () -> ()) with
-          | () -> failf "%s was admitted although it was reported" label
-          | exception Invalid_argument _ -> ()))
-    [ ( "a run limit"
-      , with_run_limit
-      , { Provider_admission_state.max = 2; priority_run_limit = Some 3 } )
-    ; "more permits", more_permits, { max = 4; priority_run_limit = None }
+    int
+    "an older config is admitted"
+    7
+    (Provider_admission.with_admission ~config:older (fun () -> 7))
+;;
+
+let test_raising_the_permits_admits_a_waiting_request_at_once () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let base_url = "http://raised-permits.test:1" in
+  let one = make_config ~base_url ~max_concurrent_requests:1 () in
+  let two = make_config ~base_url ~max_concurrent_requests:2 () in
+  publish_agreed [ "one", one ];
+  let release, resolve_release = Eio.Promise.create () in
+  let admitted, resolve_admitted = Eio.Promise.create () in
+  Eio.Fiber.all
+    [ (fun () ->
+        Provider_admission.with_admission ~config:one (fun () -> Eio.Promise.await release))
+    ; (fun () ->
+        Provider_admission.with_admission ~config:one (fun () ->
+          Eio.Promise.resolve resolve_admitted ()))
+    ; (fun () ->
+        await_queued ~clock ~config:one 1;
+        publish_agreed [ "two", two ];
+        (match
+           Eio.Time.with_timeout clock 5.0 (fun () -> Ok (Eio.Promise.await admitted))
+         with
+         | Ok () -> ()
+         | Error `Timeout -> fail "the raised permit count should admit the waiting request");
+        Eio.Promise.resolve resolve_release ())
     ]
+;;
+
+let test_lowering_the_permits_waits_for_holders_to_return () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let base_url = "http://lowered-permits.test:1" in
+  let two = make_config ~base_url ~max_concurrent_requests:2 () in
+  let one = make_config ~base_url ~max_concurrent_requests:1 () in
+  publish_agreed [ "two", two ];
+  let release_a, resolve_a = Eio.Promise.create () in
+  let release_b, resolve_b = Eio.Promise.create () in
+  let holding, resolve_holding = Eio.Promise.create () in
+  let held = Atomic.make 0 in
+  let waiter_ran = ref false in
+  let hold release () =
+    Provider_admission.with_admission ~config:two (fun () ->
+      if Atomic.fetch_and_add held 1 = 1 then Eio.Promise.resolve resolve_holding ();
+      Eio.Promise.await release)
+  in
+  Eio.Fiber.all
+    [ hold release_a
+    ; hold release_b
+    ; (fun () ->
+        Eio.Promise.await holding;
+        Provider_admission.with_admission ~config:two (fun () -> waiter_ran := true))
+    ; (fun () ->
+        await_queued ~clock ~config:two 1;
+        publish_agreed [ "one", one ];
+        Eio.Promise.resolve resolve_a ();
+        Eio.Time.sleep clock 0.05;
+        check bool "one holder still holds the only permit" false !waiter_ran;
+        Eio.Promise.resolve resolve_b ())
+    ];
+  check bool "the waiter ran once both holders returned" true !waiter_ran
+;;
+
+(* A request that meets a full endpoint reports its wait once, with the
+   config's identity and class; one granted at once reports nothing, and
+   nothing is reported once the observer is removed. *)
+let test_a_queued_request_reports_its_wait () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let base_url = "http://queued-wait.test:1" in
+  let config ?(admission_class = Admission_class.Standard) () =
+    { (make_config ~base_url ~max_concurrent_requests:1 ()) with
+      provider_id = Some "queued-wait-provider"
+    ; admission_class
+    }
+  in
+  let reports = ref [] in
+  let remove =
+    Provider_admission.install_wait_observer (fun (wait : Provider_admission.wait) ->
+      reports := wait :: !reports)
+  in
+  Fun.protect
+    ~finally:remove
+    (fun () ->
+       Provider_admission.with_admission ~config:(config ()) (fun () -> ());
+       check int "a permit granted at once reports nothing" 0 (List.length !reports);
+       let occupied, occupied_resolver = Eio.Promise.create () in
+       let release, release_resolver = Eio.Promise.create () in
+       Eio.Fiber.all
+         [ (fun () ->
+             Provider_admission.with_admission ~config:(config ()) (fun () ->
+               Eio.Promise.resolve occupied_resolver ();
+               Eio.Promise.await release))
+         ; (fun () ->
+             Eio.Promise.await occupied;
+             Provider_admission.with_admission
+               ~config:(config ~admission_class:Priority ())
+               (fun () -> ()))
+         ; (fun () ->
+             Eio.Promise.await occupied;
+             (match
+                Provider_admission.with_admission_until
+                  ~clock
+                  ~deadline_at:(Eio.Time.now clock +. 0.05)
+                  ~config:(config ())
+                  (fun () -> ())
+              with
+              | Ok () -> fail "the bounded wait should expire while the permit is held"
+              | Error `Permit_wait_expired -> ());
+             Eio.Promise.resolve release_resolver ())
+         ];
+       let summary (wait : Provider_admission.wait) =
+         ( Admission_class.to_string wait.admission_class
+         , (match wait.outcome with
+            | Wait_granted -> "granted"
+            | Wait_expired -> "expired")
+         , Option.is_some wait.waited_ms )
+       in
+       check
+         (list (triple string string bool))
+         "the expired standard wait, then the granted priority wait"
+         [ "standard", "expired", true; "priority", "granted", true ]
+         (List.rev_map summary !reports);
+       List.iter
+         (fun (wait : Provider_admission.wait) ->
+            check (option string) "provider id" (Some "queued-wait-provider") wait.provider_id;
+            check string "model" "admission-model" wait.model_id;
+            check string "kind" "openai_compat" wait.kind)
+         !reports;
+       remove ();
+       reports := [];
+       let occupied, occupied_resolver = Eio.Promise.create () in
+       let release, release_resolver = Eio.Promise.create () in
+       Eio.Fiber.both
+         (fun () ->
+            Provider_admission.with_admission ~config:(config ()) (fun () ->
+              Eio.Promise.resolve occupied_resolver ();
+              Eio.Promise.await release))
+         (fun () ->
+            Eio.Promise.await occupied;
+            Eio.Fiber.both
+              (fun () -> Provider_admission.with_admission ~config:(config ()) (fun () -> ()))
+              (fun () ->
+                 Eio.Time.sleep clock 0.02;
+                 Eio.Promise.resolve release_resolver ()));
+       check int "no observer, no report" 0 (List.length !reports))
+;;
+
+(* A remover clears only its own installation, so an older install's
+   remover cannot take away the observer installed after it. *)
+let test_a_stale_remover_keeps_the_later_observer () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let config =
+    make_config ~base_url:"http://stale-remover.test:1" ~max_concurrent_requests:1 ()
+  in
+  let first = ref 0
+  and second = ref 0 in
+  let remove_first = Provider_admission.install_wait_observer (fun _ -> incr first) in
+  let remove_second = Provider_admission.install_wait_observer (fun _ -> incr second) in
+  Fun.protect ~finally:remove_second (fun () ->
+    remove_first ();
+    let occupied, occupied_resolver = Eio.Promise.create () in
+    let release, release_resolver = Eio.Promise.create () in
+    Eio.Fiber.both
+      (fun () ->
+         Provider_admission.with_admission ~config (fun () ->
+           Eio.Promise.resolve occupied_resolver ();
+           Eio.Promise.await release))
+      (fun () ->
+         Eio.Promise.await occupied;
+         Eio.Fiber.both
+           (fun () -> Provider_admission.with_admission ~config (fun () -> ()))
+           (fun () ->
+              Eio.Time.sleep clock 0.02;
+              Eio.Promise.resolve release_resolver ())));
+  check int "the replaced observer saw nothing" 0 !first;
+  check int "the later observer saw the wait" 1 !second
 ;;
 
 let reject_dispatch_transport : Llm_transport.t =
@@ -817,9 +1018,29 @@ let () =
             `Quick
             test_a_different_priority_run_limit_is_a_conflict
         ; test_case
-            "admitted allowance change reports what admission would refuse"
+            "configs on one account that disagree are named"
             `Quick
-            test_admitted_allowance_change_reports_what_admission_would_refuse
+            test_configs_on_one_account_that_disagree_are_named
+        ; test_case
+            "a published allowance governs requests from older configs"
+            `Quick
+            test_a_published_allowance_governs_requests_from_older_configs
+        ; test_case
+            "raising the permits admits a waiting request at once"
+            `Quick
+            test_raising_the_permits_admits_a_waiting_request_at_once
+        ; test_case
+            "lowering the permits waits for holders to return"
+            `Quick
+            test_lowering_the_permits_waits_for_holders_to_return
+        ; test_case
+            "a queued request reports its wait"
+            `Quick
+            test_a_queued_request_reports_its_wait
+        ; test_case
+            "a stale remover keeps the later observer"
+            `Quick
+            test_a_stale_remover_keeps_the_later_observer
         ; test_case
             "zero declaration rejected before dispatch"
             `Quick

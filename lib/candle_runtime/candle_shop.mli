@@ -19,6 +19,10 @@ type catalog =
 (** The entries priced in force, plus the active season id, if any. One
     season prices the whole response: windows never overlap. *)
 
+val catalog_entry_to_yojson : catalog_entry -> Yojson.Safe.t
+(** One catalog row as the Keeper tool and the dashboard both send it:
+    [id], [slot], [price_status], and [price_milli] when priced. *)
+
 type receipt =
   { account : account
   ; item : Keeper_portrait_item.t

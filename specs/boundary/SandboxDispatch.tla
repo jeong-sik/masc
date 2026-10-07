@@ -82,8 +82,7 @@ SubmitExecute ==
 \* Clean dispatch: routing matches the profile contract.
 \*   Docker     => DockerReuse | DockerColdstart
 \*   Micro_vm   => DockerReuse | DockerColdstart
-\*                 (the guest is a backend the same way the container is;
-\*                 [Keeper_sandbox_runner.uses_backend] classifies both)
+\*                 (the guest is a backend the same way the container is)
 \*   Remote_ssh => Ssh
 \* No arm produces Host.
 \* DockerColdstart is the cold-path branch when no reusable container

@@ -15,6 +15,12 @@ def run_models(executable: str) -> None:
         f"[models.model{i:02d}]\ntemperature = 0.7\n"
         f"[ollama_cloud.model{i:02d}]\nmax-tokens = 16384"
         for i in range(12)
+    ) + (
+        # A binding table only counts once its provider is declared.
+        "\n[providers.ollama_cloud]\n"
+        'protocol = "openai-compatible-http"\n'
+        'kind = "openai_compat"\n'
+        'endpoint = "http://localhost:9000/v1"'
     )
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (
         200,

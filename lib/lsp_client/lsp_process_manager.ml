@@ -16,12 +16,10 @@ type lsp_process =
 
 type spawn_error =
   | Command_not_found of string
-  | Startup_timeout of string
   | Process_error of string
 
 let pp_spawn_error fmt = function
   | Command_not_found cmd -> Fmt.pf fmt "LSP server not found: %s" cmd
-  | Startup_timeout lang -> Fmt.pf fmt "LSP server startup timeout for %s" lang
   | Process_error msg -> Fmt.pf fmt "LSP process error: %s" msg
 ;;
 

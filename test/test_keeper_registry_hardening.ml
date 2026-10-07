@@ -418,7 +418,7 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
     Fun.protect
       ~finally:(fun () -> ignore (Reservation.release token : Reservation.release_outcome))
       (fun () ->
-         (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with
+         (match KR.wakeup_running_exact ~intent:KR.Attention_result captured with
           | KR.Exact_wake_lifecycle_reserved owner ->
             check string "reservation owner is reported"
               (Reservation.owner_id token)
@@ -444,7 +444,7 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
            | Error _ -> fail "lifecycle owner could not install replacement lane"
          in
          Atomic.set replacement.fiber_wakeup false;
-         (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with
+         (match KR.wakeup_running_exact ~intent:KR.Attention_result captured with
           | KR.Exact_wake_lifecycle_reserved _ -> ()
           | KR.Exact_wake_signaled
           | KR.Exact_wake_missing
@@ -457,7 +457,7 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
          replacement)
   in
   Atomic.set replacement.fiber_wakeup false;
-  (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with
+  (match KR.wakeup_running_exact ~intent:KR.Attention_result captured with
    | KR.Exact_wake_replaced -> ()
    | KR.Exact_wake_signaled
    | KR.Exact_wake_missing

@@ -20,19 +20,6 @@ let test_sparkline_levels () =
   check int "single element 1 character" 1 (Layout.display_width single)
 ;;
 
-let test_sparkline_colored () =
-  let values = [ 10; 50; 90 ] in
-  let colored =
-    Chart.sparkline_colored
-      ~style_of_level:(fun lvl ->
-        if lvl >= 6 then Chart.Status Masc_tui_theme.Bad
-        else if lvl >= 3 then Chart.Status Masc_tui_theme.Warn
-        else Chart.Status Masc_tui_theme.Ok)
-      values
-  in
-  check int "sparkline colored has 3 display cells" 3 (Layout.display_width colored)
-;;
-
 (* A gauge draws a proportion, not a verdict: no level colouring at any
    fill, so a task-completion gauge at 90% is not painted Bad (#33297). *)
 let test_gauge_carries_no_level_colour () =
@@ -124,7 +111,7 @@ let test_heatmap_24h_normalization () =
 
 let test_distribution_bars () =
   let items : Chart.bar_item list =
-    [ { name = "상수_speak"; count = 50; style = Some (Chart.Status Masc_tui_theme.Ok) }
+    [ { name = "상수_speak"; count = 50; style = Some Masc_tui_theme.Ok }
     ; { name = "run_command"; count = 25; style = None }
     ; { name = "replace_file"; count = 25; style = None }
     ]
@@ -163,7 +150,6 @@ let () =
     [ ( "sparklines"
       , [ Alcotest.test_case "empty" `Quick test_sparkline_empty
         ; Alcotest.test_case "levels" `Quick test_sparkline_levels
-        ; Alcotest.test_case "colored" `Quick test_sparkline_colored
         ] )
     ; ( "gauges"
       , [ Alcotest.test_case "no level colour" `Quick test_gauge_carries_no_level_colour

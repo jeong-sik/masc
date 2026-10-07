@@ -345,8 +345,6 @@ let set_started_at_for_test ~base_path name started_at =
 type wakeup_intent =
   | Reactive_signal
   | Scheduled_signal
-  | Goal_signal
-  | Supervisor_resume
   | Hitl_resolution
   | Broadcast_signal
   | Attention_result
@@ -356,8 +354,6 @@ type wakeup_intent =
 let wakeup_intent_to_wire = function
   | Reactive_signal -> "reactive_signal"
   | Scheduled_signal -> "scheduled_signal"
-  | Goal_signal -> "goal_signal"
-  | Supervisor_resume -> "supervisor_resume"
   | Hitl_resolution -> "hitl_resolution"
   | Broadcast_signal -> "broadcast_signal"
   | Attention_result -> "attention_result"
@@ -714,7 +710,6 @@ let rec dispatch_event_with_audit_internal
           ~base_path
           ?lifecycle_token
           ?expected_lane
-          ?(origin = Generic_dispatch)
           ?events_fired
           ?selected_event
           name
@@ -813,7 +808,6 @@ let rec dispatch_event_with_audit_internal
             ~base_path
             ?lifecycle_token
             ?expected_lane
-            ~origin
             ?events_fired
             ?selected_event
             name
@@ -1006,7 +1000,6 @@ let rec dispatch_event_with_audit_internal
             ~base_path
             ?lifecycle_token
             ?expected_lane
-            ~origin
             ?events_fired
             ?selected_event
             name
@@ -1045,7 +1038,6 @@ let rec dispatch_event_with_audit_internal
 
 let dispatch_event_with_audit
       ~base_path
-      ?(origin = Generic_dispatch)
       ?events_fired
       ?selected_event
       name
@@ -1053,47 +1045,35 @@ let dispatch_event_with_audit
   =
   dispatch_event_with_audit_internal
     ~base_path
-    ~origin
     ?events_fired
     ?selected_event
     name
     event
 ;;
 
-let dispatch_event_exact
-      (entry : registry_entry)
-      ?(origin = Generic_dispatch)
-      event
-  =
+let dispatch_event_exact (entry : registry_entry) event =
   dispatch_event_with_audit_internal
     ~base_path:entry.base_path
     ~expected_lane:(Keeper_lane.id entry.lane)
-    ~origin
     entry.name
     event
 ;;
 
-let dispatch_event_exact_for_lifecycle
-      token
-      (entry : registry_entry)
-      ?(origin = Generic_dispatch)
-      event
-  =
+let dispatch_event_exact_for_lifecycle token (entry : registry_entry) event =
   dispatch_event_with_audit_internal
     ~base_path:entry.base_path
     ~lifecycle_token:token
     ~expected_lane:(Keeper_lane.id entry.lane)
-    ~origin
     entry.name
     event
 ;;
 
-let dispatch_event ~base_path ?(origin = Generic_dispatch) name event =
-  dispatch_event_with_audit ~base_path ~origin name event
+let dispatch_event ~base_path name event =
+  dispatch_event_with_audit ~base_path name event
 ;;
 
-let dispatch_event_and_log ~base_path ?(origin = Generic_dispatch) name event =
-  match dispatch_event ~base_path ~origin name event with
+let dispatch_event_and_log ~base_path name event =
+  match dispatch_event ~base_path name event with
   | Ok tr -> Ok tr
   | Error e ->
     let reason_label =
@@ -1109,8 +1089,8 @@ let dispatch_event_and_log ~base_path ?(origin = Generic_dispatch) name event =
     Error e
 ;;
 
-let dispatch_event_unit ~base_path ?(origin = Generic_dispatch) name event =
-  match dispatch_event_and_log ~base_path ~origin name event with
+let dispatch_event_unit ~base_path name event =
+  match dispatch_event_and_log ~base_path name event with
   | Ok _ -> ()
   | Error e ->
     let error_str = Keeper_state_machine.transition_error_to_string e in

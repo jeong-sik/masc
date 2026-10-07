@@ -1,10 +1,6 @@
-(** Pulse — the beating heart of any Space.
+(** Pulse — a tick engine for background work that runs until it is shut down.
 
-    A Space is an abstracted environment where agents exist and act.
-    Keeper Autonomy (traces, no end) and TRPG (bounded, session ends) are both Spaces.
-    The only axis of variation is lifecycle: when does the heart stop?
-
-    The Pulse is a tick engine driven by two forces:
+    The Pulse is driven by two forces:
     - Rhythm: a timer that fires at adaptive intervals (the SA node)
     - Nudge: an external stimulus that demands an immediate beat (adrenaline)
 
@@ -39,12 +35,6 @@ type rhythm = {
   quiet   : int * int;    (** (start_hour, end_hour) in KST — stretch interval during these hours *)
 }
 
-(** Space lifecycle. The only difference between spaces. *)
-type lifecycle =
-  | Always_on             (** Never stops (Keeper Autonomy). Runs until explicit shutdown. *)
-  | Bounded of (beat -> bool)
-    (** Stops when predicate returns true (TRPG session end, time limit, etc.) *)
-
 (** Runtime statistics. *)
 type stats = {
   total_beats   : int;
@@ -71,17 +61,15 @@ type t
 
     @param clock Eio clock for sleeping and timestamps
     @param rhythm Adaptive rhythm configuration
-    @param lifecycle Always_on or Bounded
     @param consumers First-class consumer modules to notify on each beat *)
 val create :
   clock:_ Eio.Time.clock ->
   rhythm:rhythm ->
-  lifecycle:lifecycle ->
   consumers:(module Consumer) list ->
   t
 
-(** Start the pulse loop. Blocks the calling fiber until the lifecycle ends.
-    Call this inside [Eio.Switch.run] or [Eio.Fiber.fork].
+(** Start the pulse loop as a daemon fiber on [sw] and return. The loop
+    beats until [shutdown] is called or [sw] finishes.
 
     @param sw Eio switch for managing child fibers *)
 val run : sw:Eio.Switch.t -> t -> unit
@@ -94,8 +82,7 @@ val run : sw:Eio.Switch.t -> t -> unit
 val nudge : t -> reason:string -> unit
 
 (** Request a graceful shutdown. The current beat (if any) will complete,
-    then the loop exits. For [Bounded] spaces, this is also called
-    automatically when the predicate returns true. *)
+    then the loop exits. *)
 val shutdown : t -> unit
 
 (** Update the rhythm configuration. Takes effect on the next beat cycle.

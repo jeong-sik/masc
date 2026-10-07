@@ -15,19 +15,6 @@ let route path =
     | _ -> None
 ;;
 
-let catalog_entry_json (entry : Candle_shop.catalog_entry) =
-  let price =
-    match entry.price with
-    | Candle_config.Unpriced -> [ "price_status", `String "unpriced" ]
-    | Candle_config.Priced amount ->
-      [ "price_status", `String "priced"; "price_milli", `String (string_of_int amount) ]
-  in
-  `Assoc
-    ([ "id", `String (Item.id entry.item)
-     ; "slot", `String (Item.slot_id (Item.slot entry.item))
-     ] @ price)
-;;
-
 let ready_json ~keeper (view : Candle_status.view) =
   let catalog = List.map (fun item ->
     { Candle_shop.item; price=Candle_config.price_at view.policy ~at:view.at item }) Item.all in
@@ -42,7 +29,7 @@ let ready_json ~keeper (view : Candle_status.view) =
     ; "balance_milli", `String (string_of_int (Candle_balance.balance view.balance ~keeper))
     ; "owned_items", `List (List.map (fun item -> `String (Item.id item))
         (Candle_balance.owned view.balance ~keeper))
-    ; "catalog", `List (List.map catalog_entry_json catalog)
+    ; "catalog", `List (List.map Candle_shop.catalog_entry_to_yojson catalog)
     ; "season", season
     ]
 ;;

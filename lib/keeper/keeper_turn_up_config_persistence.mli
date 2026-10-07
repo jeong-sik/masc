@@ -25,7 +25,6 @@ type conflict =
   }
 
 type warning =
-  | Manifest_parent_sync_unconfirmed of string
   | Runtime_config_parent_sync_unconfirmed of string
   | Lock_release_unconfirmed of string
   | Runtime_config_lock_release_unconfirmed of string
@@ -67,7 +66,6 @@ type error =
 
 type 'a publication =
   | Commit of 'a
-  | Commit_with_warnings of 'a * warning list
   | Commit_then_publish of warning list * (unit -> 'a)
   | Rollback of 'a
 

@@ -13,6 +13,9 @@ type error =
   | Negative_purchase of string
   | Invalid_grant of { keeper : string; amount_milli : int }
   | Duplicate_grant of { keeper : string; reason : string }
+  | Invalid_gift of { from_keeper : string; to_keeper : string; amount_milli : int }
+  | Duplicate_gift of { from_keeper : string; to_keeper : string; reason : string }
+  | Unowned_gift of { keeper : string; item : Keeper_portrait_item.t }
   | Unowned_equipment of {keeper : string; item : Keeper_portrait_item.t}
   | Wrong_equipment_slot of Keeper_portrait_item.t
   | Already_owned of
@@ -76,10 +79,33 @@ val grant
 (** Credit an operator gift. A non-positive amount is [Invalid_grant]; a
     second gift to the same keeper under the same reason is
     [Duplicate_grant], so a retried grant run cannot pay twice. *)
+val gift
+  :  t
+  -> at:Candle_time.t
+  -> from_keeper:string
+  -> to_keeper:string
+  -> amount_milli:int
+  -> reason:string
+  -> (t, error) result
+(** Move money between keepers: a transfer, never issuance — supply is
+    untouched. A non-positive amount is [Invalid_gift]; a second gift
+    under the same (from, to, reason) triple is [Duplicate_gift], so a
+    retried gift run cannot pay twice; an unfunded giver is
+    [Insufficient_balance] and an overflowing receiver [Balance_overflow]. *)
+val gift_item
+  :  t
+  -> at:Candle_time.t
+  -> from_keeper:string
+  -> to_keeper:string
+  -> item:Keeper_portrait_item.t
+  -> (t, error) result
+(** Move item ownership between keepers. The giver must own the item
+    ([Unowned_gift]) and the receiver must not ([Already_owned]). A worn
+    item comes off the giver; anything else worn stays worn. *)
 
-(** Replay payments, purchases and grants in file order. A repeated purchase,
-    negative amount, overspend, duplicate payment, duplicate grant or
-    overflow rejects the whole fold. *)
+(** Replay payments, purchases, grants and gifts in file order. A repeated purchase,
+    negative amount, overspend, duplicate payment, duplicate grant, duplicate
+    gift, unowned gift or overflow rejects the whole fold. *)
 val of_events : at:Candle_time.t -> Candle_event.t list -> (t, error) result
 (** Observe wallets at [at] after replaying chronological monetary and policy
     facts. Current configuration never rewrites historical intervals or debits.

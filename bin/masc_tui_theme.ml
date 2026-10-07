@@ -381,6 +381,21 @@ let status_readable palette state =
 ;;
 
 let selection = Sgr.reverse
+
+let sidebar_selection palette =
+  if not colors_enabled then selection
+  else match palette with
+  | None -> selection
+  | Some palette ->
+    let foreground = Terminal_palette.foreground palette in
+    (* A small neutral step toward the foreground, instead of filling the
+       whole selected row with the terminal's bright text colour. *)
+    (match Option.bind (Color.recede_toward ~background:foreground
+       ~floor:status_contrast_floor ~max_ratio:0.18
+       (Terminal_palette.background palette)) Terminal_palette.best_color with
+     | None -> selection
+     | Some projected -> Sgr.default_fg ^ Sgr.background (Some projected))
+
 let border_focus = Sgr.bright_cyan
 
 module Syntax = struct

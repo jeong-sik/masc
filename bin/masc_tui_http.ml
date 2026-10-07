@@ -610,10 +610,9 @@ let http_delete ~(host : string) ~(port : int) ~(path : string) =
 let list_play_invites ~host ~port =
   get_json ~host ~port ~path:"/api/v1/play/invites"
 
-(* The play routes say why in [message]; the shared refusal reads only the
-   [error] code, which leaves the operator with "HTTP 409: not_ready". The
-   credential's own 401 and 403, and a body with no sentence in it, keep the
-   shared wording. *)
+(* The play routes add [missing] and [taken_by] to the refusal sentence; the
+   shared refusal shows only the sentence. The credential's own 401 and 403,
+   and a body with no sentence in it, keep the shared wording. *)
 let play_mutation_outcome = function
   | Ok (status_code, body) as answer when status_code >= 400 && status_code < 500 ->
     (match Masc.Tui_decode.play_invite_refusal ~status_code ~body with
@@ -1717,38 +1716,6 @@ let post_keeper_observed_turn_interrupt ~on_control_token ~host ~port ~keeper_na
     result
 ;;
 
-let fetch_keeper_chat_operation ~(host : string) ~(port : int)
-    (request : Masc_tui_keeper_chat_projection.request) :
-    ( Masc_tui_keeper_chat_projection.operation_reconciliation
-    , Masc_tui_keeper_chat_projection.error )
-    result =
-  let path =
-    Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
-      (percent_encode_path_segment request.keeper_name)
-      (percent_encode_path_segment request.request_id)
-  in
-  match http_get ~host ~port ~path with
-  | Error detail ->
-      Error (Masc_tui_keeper_chat_projection.Transport_error detail)
-  | Ok (status, response_body)
-    when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error
-        (Masc_tui_keeper_chat_projection.Http_error
-           { status; body = response_body })
-  | Ok (_, response_body) ->
-      (match Yojson.Safe.from_string response_body with
-       | json ->
-           Masc_tui_keeper_chat_projection.decode_operation_reconciliation
-             ~request json
-           |> Result.map_error (fun error ->
-                  Masc_tui_keeper_chat_projection.protocol_error error)
-       | exception Yojson.Json_error detail ->
-           Error
-             (Masc_tui_keeper_chat_projection.protocol_error
-                (Masc_tui_keeper_chat_projection.Malformed_event
-                   ("Keeper chat operation response is invalid JSON: "
-                  ^ detail))))
-
 (** Fetch the live keeper roster from [GET /api/v1/gate/keepers].
 
     The Keepers surface needs one fact the durable metadata on disk cannot
@@ -2294,7 +2261,7 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     stamps the author from the HTTP auth resolver, so the payload carries
     text only. The response is the tools envelope [{ok, message}]; interpreting
     it stays with the caller. *)
-let board_workspace_field (identity : Masc.Tui_decode.server_identity) =
+let expected_workspace_field (identity : Masc.Tui_decode.server_identity) =
   "expected_workspace", `Assoc
     [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
     ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
@@ -2308,7 +2275,7 @@ let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : 
   in
   let payload =
     `Assoc
-      ([ board_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
+      ([ expected_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
       @ hearth_field)
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
@@ -2328,12 +2295,13 @@ let post_goal_confirmation ~host ~port confirmation =
     local literal, so the TUI and the tool cannot disagree about what
     "drop" means. The server owns the phase rules; an invalid transition is
     its rejection to return, not the TUI's to pre-guess. *)
-let post_goal_transition ~(host : string) ~(port : int) ~(goal_id : string)
-    ~(action : Goal_phase.Public_action.t)
+let post_goal_transition ~expected_workspace ~(host : string) ~(port : int)
+    ~(goal_id : string) ~(action : Goal_phase.Public_action.t)
     ~(note : string option) : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
-      ([ ("goal_id", `String goal_id)
+      ([ expected_workspace_field expected_workspace
+       ; ("goal_id", `String goal_id)
        ; ("action", `String (Goal_phase.Public_action.to_string action))
        ]
       @
@@ -2350,7 +2318,7 @@ let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id
     ~(up : bool) : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
-      [ board_workspace_field expected_workspace
+      [ expected_workspace_field expected_workspace
       ; ("post_id", `String post_id)
       ; ("direction", `String (if up then "up" else "down"))
       ]
@@ -2363,7 +2331,7 @@ let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id
 let post_board_comment ~expected_workspace ~(host : string) ~(port : int) ~(post_id : string)
     ~(content : string) : (Yojson.Safe.t, string) result =
   let payload =
-    `Assoc [ board_workspace_field expected_workspace; ("post_id", `String post_id); ("content", `String content) ]
+    `Assoc [ expected_workspace_field expected_workspace; ("post_id", `String post_id); ("content", `String content) ]
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
     ~body:(Yojson.Safe.to_string payload)
@@ -2433,26 +2401,6 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
       ]
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
-    ~body:(Yojson.Safe.to_string payload)
-
-(** POST /api/v1/tools/masc_schedule_create. The payload is the tool's own
-    argument contract; the kind-specific timing fields arrive already
-    assembled by the caller (the form's typed spec builds them), and time
-    syntax, cron text, and timezone spellings stay the tool's to validate.
-    The server records the credential's actor as requester and scheduler. *)
-let post_schedule_create ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(message : string)
-    ~(timing_fields : (string * Yojson.Safe.t) list) :
-    (Yojson.Safe.t, string) result =
-  let payload =
-    `Assoc
-      ([ ("keeper_name", `String keeper_name)
-       ; ("message", `String message)
-       ; ("source", `String "operator_request")
-       ]
-      @ timing_fields)
-  in
-  post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_create"
     ~body:(Yojson.Safe.to_string payload)
 
 (** POST /api/v1/verification/verdict — the operator's verdict on a task
@@ -3227,6 +3175,12 @@ let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
     | Ok json -> Ok json
     | Error message -> Error (`Refused message))
 
+(** POST /api/v1/presets/delete — body {name}: the server removes that preset
+    directory, whether or not it loads. *)
+let post_preset_delete ~(host : string) ~(port : int) ~(name : string) : post_outcome =
+  post_json_outcome ~host ~port ~path:"/api/v1/presets/delete"
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("name", `String name) ]))
+
 (** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
 let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)
     ~(body_json : string) : (Yojson.Safe.t, string) result =
@@ -3402,7 +3356,7 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
     ([GET /api/v1/keepers/asks]).
 
     Open questions only. The rows carry choice ids next to labels and
-    {!submit_keeper_ask_answer} takes ids back, so nothing on this side ever
+    {!post_keeper_ask_answer} takes ids back, so nothing on this side ever
     matches a choice by its wording. *)
 let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
     (Masc.Tui_decode_asks.asks_snapshot, string) result =
@@ -3430,50 +3384,6 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode_asks.decode_asks_snapshot json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
-
-(** Answer one question of one ask ([POST /api/v1/keepers/ask-answer]).
-
-    A [409] is not a transport failure: another surface answered first. The
-    body carries what landed, and the caller surfaces that rather than
-    retrying — resubmitting would only lose again, and the operator needs to
-    see the decision that stands. *)
-let submit_keeper_ask_answer ~(host : string) ~(port : int) ~(keeper_name : string)
-    ~(ask_id : string) ~(question_id : string) ~(choice_ids : string list) :
-    (unit, string) result =
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("name", `String keeper_name);
-          ("ask_id", `String ask_id);
-          ( "answers",
-            `List
-              [
-                `Assoc
-                  [
-                    ("question_id", `String question_id);
-                    ( "response",
-                      `Assoc
-                        [
-                          ("kind", `String "chose");
-                          ( "choice_ids",
-                            `List (List.map (fun id -> `String id) choice_ids) );
-                        ] );
-                  ];
-              ] );
-        ])
-  in
-  match
-    http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/keepers/ask-answer" ~body
-  with
-  | Error detail -> Error detail
-  | Ok (status, response_body) when Masc.Tui_decode.is_success_http_status status ->
-      let (_ : string) = response_body in
-      Ok ()
-  | Ok (409, response_body) ->
-      Error (named_refusal "another surface answered first" ~status:409 ~body:response_body)
-  | Ok (status, response_body) ->
-      Error (named_refusal "answer" ~status ~body:response_body)
 
 (** Browser Lane shares the authenticated TUI transport. Reads are POST because
     selecting the Firefox tab belongs to the request body. *)

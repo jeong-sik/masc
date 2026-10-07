@@ -17,6 +17,34 @@ def screen(output):
     return _keyboard_harness.screen_text(raw[:end + len(_keyboard_harness.FRAME_END)]).decode("utf-8", errors="strict")
 
 
+def status_header_visible(columns, all_runtimes):
+    """Whether the ROUTE / PROBE header fits at this width.
+
+    Mirrors the product's width formula in bin/masc_tui_render.ml
+    runtime_table_cells (~line 9395): inner width is columns - 4
+    (masc_tui_frame.ml border 2 + padding 2) minus 2, cell_gap is 1
+    (masc_tui_table.ml), and lane/candidate/status widths come from
+    runtime_column_widths. The Runtime_lanes arm (#41143) reserves
+    lane+candidate first, so a narrow terminal folds the status column and keeps
+    the full status in detail; the Runtime_all arm reserves only the candidate
+    heading, so its status stays visible.
+    """
+    if columns >= 140:
+        lane, candidate, status = 18, 30, 22
+    elif columns >= 120:
+        lane, candidate, status = 14, 24, 22
+    else:
+        lane, candidate, status = 10, 20, 22
+    inner = max(1, (columns - 4) - 2)
+    if all_runtimes:
+        status_width = min(status, max(1, inner - len("RUNTIME") - 1))
+    else:
+        remaining = inner - lane - 2 * 1
+        candidate_floor = min(candidate, max(1, remaining - 1))
+        status_width = min(status, max(1, remaining - candidate_floor))
+    return status_width >= len("ROUTE / PROBE")
+
+
 def run(executable, no_color):
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     _, resolved = _keyboard_runtime.runtime_resolved_response()
@@ -50,12 +78,13 @@ def run(executable, no_color):
             for columns in (30, 40, 60, 80, 120):
                 resize_start = len(output)
                 _keyboard_harness.resize_and_wait(process, fd, output, rows=32, columns=columns,
-                                  needle=b"ROUTE / PROBE", controls=(_keyboard_harness.FULL_REDRAW,))
+                                  needle=b"MASC System / Runtime", controls=(_keyboard_harness.FULL_REDRAW,))
                 clear = output.rfind(_keyboard_harness.FULL_REDRAW, resize_start)
                 assert clear >= resize_start
                 _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END,
-                    start=_keyboard_harness.end_of_needle(output, b"ROUTE / PROBE", clear), timeout=3)
+                    start=_keyboard_harness.end_of_needle(output, b"MASC System / Runtime", clear), timeout=3)
                 visible = screen(output)
+                status_visible = status_header_visible(columns, all_runtimes)
                 if not all_runtimes:
                     default_block = visible.split("[runtime].default", 1)[1].split("ROUTE / PROBE", 1)[0]
                     route_block, marker, _ = default_block.partition("media_")
@@ -63,19 +92,29 @@ def run(executable, no_color):
                     readable = "".join(route_block.split())
                     assert LANE_ID in readable and RUNTIME_ID in readable, (columns, route_block)
                     assert "…" not in route_block, (columns, route_block)
-                suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
-                # The fixture has no account usage scope, so the folded row
-                # reports usage unknown; reachability remains in detail.
-                candidate_rows = [row for row in visible.splitlines()
-                                  if suffix in row and "usage unknown" in row]
-                assert len(candidate_rows) == 1, (columns, all_runtimes, visible)
-                cells = sum(0 if unicodedata.combining(char) else
-                            2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
-                            for char in candidate_rows[0])
-                assert cells <= columns, (columns, cells, candidate_rows)
-                assert "\\x1B" not in candidate_rows[0], candidate_rows
-                if columns in (30, 40):
-                    assert "…" in candidate_rows[0], candidate_rows
+                if status_visible:
+                    suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
+                    # The fixture has no account usage scope, so the folded row
+                    # reports usage unknown; reachability remains in detail.
+                    candidate_rows = [row for row in visible.splitlines()
+                                      if suffix in row and "usage unknown" in row]
+                    assert len(candidate_rows) == 1, (columns, all_runtimes, visible)
+                    cells = sum(0 if unicodedata.combining(char) else
+                                2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+                                for char in candidate_rows[0])
+                    assert cells <= columns, (columns, cells, candidate_rows)
+                    assert "\\x1B" not in candidate_rows[0], candidate_rows
+                    if columns in (30, 40):
+                        assert "…" in candidate_rows[0], candidate_rows
+                else:
+                    # #41143 folds the status column at this width: the lane and
+                    # candidate stay visible, and the full status is read in
+                    # detail below (asserted after the detail opens).
+                    lane_heading = "USED BY" if all_runtimes else "LANE"
+                    candidate_heading = "RUNTIME" if all_runtimes else "CANDIDATE"
+                    header = next(row for row in visible.splitlines()
+                                  if lane_heading in row and candidate_heading in row)
+                    assert "ROUTE / PROBE" not in header, (columns, header)
                 # The full identity is read through the same selected row.
                 _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Runtime ID:")
                 detail = screen(output)
@@ -91,7 +130,15 @@ def run(executable, no_color):
                         probe_detail = screen(output)
                 probe_field = probe_detail.split("Probe status:", 1)[1].split("Probe transport:", 1)[0]
                 assert "reachable" in "".join(probe_field.split()), (columns, probe_detail)
-                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"ROUTE / PROBE")
+                if not status_visible:
+                    # #41143 folds the table's status column at this width; the
+                    # same facts are read in the detail as Probe status and
+                    # Account usage (the table's "usage unknown" value is the
+                    # folded column, not a detail label).
+                    assert "Probe status:" in probe_detail, (columns, probe_detail)
+                    assert "Account usage:" in probe_detail, (columns, probe_detail)
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b",
+                    b"ROUTE / PROBE" if status_visible else b"MASC System / Runtime")
         os.write(fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(executable,

@@ -42,7 +42,7 @@ val path : Masc.Machine_lane.t -> since:mark option -> string
 
 type activity_entry = { at : float; who : string; action : string }
 (** One line of "what a Keeper did to this machine", the wire shape of
-    [Lane_activity.entry] read independently of it -- this module never links
+    [Machine_action_feed.entry] read independently of it -- this module never links
     the server's write-side library, only its own JSON contract. *)
 
 type activity =

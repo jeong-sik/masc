@@ -961,6 +961,14 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+(** A Gate stance as the server wrote it ({!Keeper_gate_mode}). Read once
+    here so every screen draws the same thing: [Unrecognised_gate_mode] keeps a
+    word this build does not know as the server wrote it, rather than failing
+    the reading that carries it (the Gate snapshot also carries the queue). *)
+type gate_mode =
+  | Gate_mode of Keeper_gate_mode.t
+  | Unrecognised_gate_mode of string
+
 (** The slot one Keeper reaches first in one exact-output lane. *)
 type keeper_exact_lane_first = {
   kel_keeper : string;
@@ -973,7 +981,7 @@ type keeper_exact_lane_first = {
 
 val decode_keeper_gate_settings :
   Yojson.Safe.t ->
-  ((string * string) list * keeper_exact_lane_first list, string) result
+  ((string * gate_mode) list * keeper_exact_lane_first list, string) result
 (** [(keeper, mode) list, exact-lane firsts] from
     [/api/v1/dashboard/gate/keeper-settings] ([modes] and [exact_lanes]). A
     list whose [*_state] says [unavailable] is an [Error], never an empty
@@ -1083,6 +1091,9 @@ type gate_pending = {
           changes what the command means. *)
   gp_waiting_s : float option;
   gp_phase : gate_pending_phase;
+  gp_judge_advice : Keeper_approval_queue_rules_types.hitl_context_summary option;
+      (** Auto Judge's rationale and questions for a [Gate_human_required] row.
+          Required there and [None] in every other phase. *)
   gp_auto_judge_detail : string option;
       (** Durable Auto Judge failure or handoff reason, when the server
           recorded one. *)
@@ -1092,8 +1103,8 @@ type gate_pending = {
 }
 
 type gate_lane_modes = {
-  glm_workspace : string;
-  glm_external : string;
+  glm_workspace : gate_mode;
+  glm_external : gate_mode;
       (** The external-services lane. A separate switch from the workspace
           lane: opening one does not open the other. *)
 }
@@ -1514,6 +1525,9 @@ val decode_preset_saved : Yojson.Safe.t -> (preset_manifest, string) result
 
 val decode_preset_restore : Yojson.Safe.t -> (preset_restore_report, string) result
 (** POST /api/v1/presets/restore — the per-surface report. *)
+
+val decode_preset_deleted : Yojson.Safe.t -> (string, string) result
+(** POST /api/v1/presets/delete — the name of the preset the server removed. *)
 
 val decode_latest_librarian_run_id : Yojson.Safe.t -> (string, string) result
 (** Read the first Librarian row from the newest-first exact-lane summary. The
@@ -2489,9 +2503,9 @@ val play_revoke_http_error : status_code:int -> body:string -> string
 (** Preserve the release failure detail from the revoke endpoint's 500 reply. *)
 
 val play_invite_refusal : status_code:int -> body:string -> string option
-(** The sentence for a client refusal the play routes answered with
-    [{error, message}]: ["HTTP 409: <message>"], then in parentheses what the
-    body says is missing and who holds the name. Every part is made
-    terminal-safe. [None] for a 401 or 403, which are about the credential the
-    client sent and are worded where that is known, for a status that is not a
-    4xx, and for a body with no [message] to read. *)
+(** The sentence for a client refusal the play routes answered through
+    [Server_refusal.json] ([{error: <sentence>, code}]): ["HTTP 409: <error>"],
+    then in parentheses what the body says is missing and who holds the name.
+    Every part is made terminal-safe. [None] for a 401 or 403, which are about
+    the credential the client sent and are worded where that is known, for a
+    status that is not a 4xx, and for a body with no [error] sentence. *)

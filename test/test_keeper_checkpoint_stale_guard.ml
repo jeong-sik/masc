@@ -1839,6 +1839,36 @@ let test_summary_answers_watermark_and_count_without_reading () =
   | Error e -> fail ("watermark read the unreadable file: " ^ e)
 ;;
 
+(* A save reaches the canonical through the session root's resolved path. A
+   reader handed the root's symlinked spelling finds the summary that save
+   published, without reading the file. *)
+let test_summary_found_through_a_symlinked_session_root () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let real_session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir real_session_dir) @@ fun () ->
+  let real_root = Filename.dirname real_session_dir in
+  let linked_root = real_root ^ "-link" in
+  Unix.symlink real_root linked_root;
+  Fun.protect ~finally:(fun () -> Unix.unlink linked_root) @@ fun () ->
+  let session_dir = Filename.concat linked_root (Filename.basename real_session_dir) in
+  let sid = "summary-through-link" in
+  save_ok
+    ~session_dir
+    (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"three")
+    "save turn 3";
+  let path =
+    Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid
+  in
+  Unix.chmod path 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
+  match Keeper_checkpoint_store.canonical_message_count ~session_dir ~session_id:sid with
+  | Ok (Some count) -> check int "message count from the summary" 2 count
+  | Ok None -> fail "summary reported no checkpoint"
+  | Error _ -> fail "message count read the unreadable file through the link"
+;;
+
 (* A canonical file replaced behind the store (another process, an operator)
    is a new inode, so the summary no longer matches and the next answer
    parses the file; a removed file answers as no checkpoint. *)
@@ -2237,6 +2267,8 @@ let () =
             test_unencodable_payload_is_recovered_at_the_sink;
           test_case "summary answers watermark and count without reading" `Quick
             test_summary_answers_watermark_and_count_without_reading;
+          test_case "summary found through a symlinked session root" `Quick
+            test_summary_found_through_a_symlinked_session_root;
           test_case "byte count comes from the summary without reading" `Quick
             test_byte_count_from_summary_without_reading;
           test_case "summary follows a checkpoint replaced behind it" `Quick

@@ -158,7 +158,7 @@ let decoder_of_shape : Runtime_schema.usage_read_shape -> _ = function
   | Openrouter_key -> Runtime_provider_usage_window.decode_openrouter_key
   | Zai_quota_limit -> Runtime_provider_usage_window.decode_zai_quota_limit
   | Kimi_coding_usages -> Runtime_provider_usage_window.decode_kimi_coding_usages
-  | Ollama_usage -> Runtime_provider_usage_window.decode_ollama_usage
+  | Ollama_balance -> Runtime_provider_usage_window.decode_ollama_balance
 ;;
 
 let is_success_status status = status >= 200 && status < 300

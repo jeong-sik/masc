@@ -1663,22 +1663,16 @@ let move_queued_priority_cohort_to_front store ~now ~operation_id ~predecessors 
 
 type semantic_error =
   | Semantic_store_error of error
-  | Unknown_execution of Keeper_execution_scope_id.t
   | Admission_conflict of Keeper_execution_scope_id.t
-  | Execution_changed of Semantic.t
   | Sources_owned of Keeper_execution_scope_id.t list
-  | Execution_slot_busy of Keeper_execution_scope_id.t
   | Invalid_execution of Semantic.error
 
 type semantic_admission = Semantic_created of Semantic.t | Semantic_existing of Semantic.t
 
 let semantic_error_to_string = function
   | Semantic_store_error error -> error_to_string error
-  | Unknown_execution id -> "unknown semantic execution: " ^ scope_key id
   | Admission_conflict id -> "semantic admission conflict: " ^ scope_key id
-  | Execution_changed current -> "semantic execution changed: " ^ scope_key current.id
   | Sources_owned ids -> "selected sources already belong to: " ^ String.concat ", " (List.map scope_key ids)
-  | Execution_slot_busy id -> "semantic execution slot is held by: " ^ scope_key id
   | Invalid_execution error -> Semantic.error_to_string error
 ;;
 let semantic_store_result result = Result.map_error (fun error -> Semantic_store_error error) result
@@ -1749,38 +1743,6 @@ let semantic_prepare store ~id ~input ~sources ~now =
         else
           let* () = insert_semantic store.db candidate |> semantic_store_result in
           Ok (Semantic_created candidate))
-;;
-let semantic_apply store ~expected ~now action =
-  with_semantic_transaction store (fun () ->
-    let* current = semantic_get_with_db store.db expected.Semantic.id |> semantic_store_result in
-    let* current = match current with None -> Error (Unknown_execution expected.id) | Some current -> Ok current in
-    let* expected_bytes = semantic_canonical expected |> semantic_store_result in
-    let* current_bytes = semantic_canonical current |> semantic_store_result in
-    if expected_bytes <> current_bytes then Error (Execution_changed current)
-    else
-      let* next = Semantic.apply ~now action current |> Result.map_error (fun error -> Invalid_execution error) in
-      let* () =
-        if next.current_sources = current.current_sources then Ok ()
-        else
-          let* outstanding = semantic_rows store.db ~active_only:true |> semantic_store_result in
-          let owners = List.filter (fun (execution : Semantic.t) ->
-            not (Keeper_execution_scope_id.equal execution.id current.id)
-            && List.exists (fun selected -> List.exists (same_source selected)
-                 (execution.sources @ execution.current_sources)) next.current_sources) outstanding in
-          if owners = [] then Ok ()
-          else Error (Sources_owned (List.map (fun (execution : Semantic.t) -> execution.id) owners)) in
-      let* () = match next.phase with
-        | Semantic.Running | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ ->
-            if semantic_is_running current.phase then Ok () else
-            let* outstanding = semantic_rows store.db ~active_only:true |> semantic_store_result in
-            (match List.find_opt (fun (execution : Semantic.t) -> semantic_is_running execution.phase) outstanding with
-             | Some running -> Error (Execution_slot_busy running.id)
-             | None -> Ok ())
-        | Semantic.Preparing | Semantic.Ready | Semantic.Suspended _ | Semantic.Recovering _ | Semantic.Settled _ -> Ok () in
-      let* () =
-        if next == current then Ok ()
-        else update_semantic store.db ~expected:current next |> semantic_store_result in
-      Ok next)
 ;;
 
 let direct_execution_with_db db (operation : Operation.t) =

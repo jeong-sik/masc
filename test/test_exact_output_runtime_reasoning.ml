@@ -288,19 +288,19 @@ let test_lane_thinking_the_slot_cannot_carry_is_refused () =
     failf "a different publication error: %s" (Registry.publication_error_to_string error)
   | Ok _ -> fail "a lane whose slot cannot turn thinking off was published"
 
-(* The shipped Board Attention lane's second slot, as config/runtime.toml
-   declares it: deepseek-v4-flash on ollama.com with thinking-control-format
-   "none" and thinking-support. That wire has no thinking control to turn
-   reasoning off, so a lane that asks it for thinking = false is refused where
-   the registry is published -- boot names the lane and the slot instead of
-   publishing a lane that the slot would silently ignore. *)
+(* A Board Attention slot on ollama.com (deepseek-v4-pro) whose runtime row
+   declares thinking-control-format "none" and thinking-support. That wire has
+   no thinking control to turn reasoning off, so a lane that asks it for
+   thinking = false is refused where the registry is published -- boot names
+   the lane and the slot instead of publishing a lane that the slot would
+   silently ignore. *)
 let shipped_second_slot_toml = {|[runtime]
-default = "ollama_cloud.deepseek-v4-flash"
+default = "ollama_cloud.deepseek-v4-pro"
 [runtime.exact_output_lanes.board_attention_exact]
-slots = ["ollama_cloud.deepseek-v4-flash"]
+slots = ["ollama_cloud.deepseek-v4-pro"]
 thinking = false
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["ollama_cloud.deepseek-v4-flash"]
+slots = ["ollama_cloud.deepseek-v4-pro"]
 [providers.ollama_cloud]
 protocol = "openai-compatible-http"
 endpoint = "https://ollama.com/v1"
@@ -309,16 +309,16 @@ exact-body-timeout-s = 1200.0
 [providers.ollama_cloud.credentials]
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
-[models.deepseek-v4-flash]
+[models.deepseek-v4-pro]
 reasoning-uncontrolled = true
-api-name = "deepseek-v4-flash"
+api-name = "deepseek-v4-pro"
 tools-support = true
 thinking-support = true
 streaming = true
-[models.deepseek-v4-flash.capabilities]
+[models.deepseek-v4-pro.capabilities]
 max-output-tokens = 384000
 thinking-control-format = "none"
-[ollama_cloud.deepseek-v4-flash]
+[ollama_cloud.deepseek-v4-pro]
 |}
 
 let test_shipped_board_second_slot_refuses_thinking_off () =

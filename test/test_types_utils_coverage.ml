@@ -365,13 +365,7 @@ let test_masc_error_to_string () =
     (String.length (Masc_domain.masc_error_to_string (Masc_domain.Agent (Masc_domain.Agent_error.NotFound "test"))) > 0);
   check bool "TaskAlreadyClaimed" true
     (String.length (Masc_domain.masc_error_to_string
-      (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id = "t1"; by = "agent" }))) > 0);
-  check bool "RateLimitExceeded" true
-    (String.length (Masc_domain.masc_error_to_string
-      (Masc_domain.RateLimitExceeded {
-        limit = 10; current = 15; wait_seconds = 30;
-        category = Masc_domain.BroadcastLimit
-      })) > 0)
+      (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id = "t1"; by = "agent" }))) > 0)
 
 (* ============================================================ *)
 (* Masc_domain.task Tests                                              *)

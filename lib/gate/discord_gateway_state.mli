@@ -85,7 +85,8 @@ type inbound_attachment =
 
 (* The readable body of a message: its text, plus one line per attachment.
    Discord sends [content] empty when a file is posted with no caption, so
-   the files are the whole message and dropping them drops it entirely. *)
+   the files are the whole message and dropping them drops it entirely.
+   Nonblank content is preserved verbatim before the file lines. *)
 val content_with_attachments :
   content:string -> attachments:inbound_attachment list -> string
 

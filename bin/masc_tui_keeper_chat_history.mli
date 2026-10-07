@@ -255,8 +255,10 @@ val page_of_json : Yojson.Safe.t -> (page, string) result
 
 (** The row's text with one line per file under it. A file posted with no
     caption arrives with empty text, and joining on it anyway puts a blank line
-    where a sentence would be (task-552). [format_bytes] is supplied by the
-    caller: this module sits below the one that renders sizes. *)
+    where a sentence would be (task-552). A nonblank caption is preserved
+    verbatim, including indentation and trailing paragraph breaks.
+    [format_bytes] is supplied by the caller: this module sits below the one
+    that renders sizes. *)
 val text_with_attachments :
   format_bytes:(int -> string) ->
   text:string ->

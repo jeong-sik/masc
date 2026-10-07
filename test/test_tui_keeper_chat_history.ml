@@ -2053,6 +2053,27 @@ let test_a_row_with_no_files_is_untouched () =
        ~notes:[])
 ;;
 
+let test_a_caption_keeps_its_whitespace () =
+  let note =
+    { History.att_name = "notes.txt"; att_mime = ""; att_bytes = 0
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
+  in
+  List.iter
+    (fun caption ->
+       Alcotest.(check string) "caption retained before attachment metadata"
+         (caption ^ "\n⎘ #1 notes.txt")
+         (History.text_with_attachments ~format_bytes:bytes_only ~text:caption
+            ~notes:[ note ]);
+       Alcotest.(check string) "same caption without attachments"
+         caption
+         (History.text_with_attachments ~format_bytes:bytes_only ~text:caption
+            ~notes:[]))
+    [ "    첫 줄의 코드\n    둘째 줄의 코드"
+    ; "첫 문단\n\n둘째 문단\n\n"
+    ; "  앞뒤 공백을 보존해 주세요.  "
+    ]
+;;
+
 (* An image that was measured reads as its pixels, in the order it arrived:
    the bytes answered "how big is the file" and the reader was asking "how
    big is it". A file that was not measured keeps the mime it always had,
@@ -2325,6 +2346,8 @@ let () =
             test_a_blank_caption_is_treated_as_none
         ; test_case "a caption stays above its files" `Quick
             test_a_caption_stays_above_its_files
+        ; test_case "a caption keeps indentation and paragraph breaks" `Quick
+            test_a_caption_keeps_its_whitespace
         ; test_case "a row with no files is untouched" `Quick
             test_a_row_with_no_files_is_untouched
         ; test_case "a measured image names its pixels and index" `Quick

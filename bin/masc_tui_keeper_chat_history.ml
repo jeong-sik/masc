@@ -522,11 +522,10 @@ let text_with_attachments ~format_bytes ~text ~notes =
          else "")
         dimensions
     in
-    let body = String.trim text in
     String.concat "\n"
-      (if body = ""
+      (if String.trim text = ""
        then List.mapi line notes
-       else body :: List.mapi line notes)
+       else text :: List.mapi line notes)
 
 let attachment_notes_of fields =
   match List.assoc_opt "attachments" fields with

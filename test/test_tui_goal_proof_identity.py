@@ -5,7 +5,6 @@ import base64
 import hashlib
 import json
 import os
-import re
 import sys
 import zlib
 from pathlib import Path
@@ -89,17 +88,23 @@ def run(executable: str, scenario: str) -> None:
         frame = bytes(output[start:end])
         screen = h.screen_text(frame)
         assert h.PLANNING_PATH in reads and detail_path in reads, reads
-        # The current criterion, not the historical one a stale proof names.
+        # The detail pane draws the criterion as its own fields ("Metric:" and
+        # "Target:"), not as the confirmation screen's single "metric = target"
+        # row, so the same fact is read from the fields the pane actually has.
         assert goal_id.encode() in screen, screen
         assert b"Metric: completed-runs" in screen and b"Target: 4" in screen, screen
         assert expected in screen, screen
+        # The proof state is the pane's headline, distinct from the Goal's
+        # current phase: a proven proof reads "proven", a refuted one "refused".
+        if scenario in ("proven", "refuted"):
+            headline = b"refused" if scenario == "refuted" else b"proven"
+            assert headline in screen, screen
         if scenario == "stale":
             assert notice in screen, screen
             # Historical proof is drawn with the existing Note (dim) tone,
-            # not the success colour of a current Proven verdict. The row's
-            # indent sits inside the dim span.
-            assert re.search(rb"\x1b\[2m *" + re.escape(notice), frame), frame
-            assert re.search(rb"\x1b\[2m *" + re.escape(evidence), frame), frame
+            # not the success colour of a current Proven verdict.
+            assert b"\x1b[2m  " + notice in frame, frame
+            assert b"\x1b[2m  " + evidence in frame, frame
         else:
             assert notice not in screen, screen
         if scenario == "unreadable":

@@ -9943,12 +9943,17 @@ let render_runtime (state : state) =
        List.iter
          (fun line -> c.push_styled ~style:(Theme.recede ()) ("  " ^ line))
          (Masc_tui_types.runtime_default_route_lines ~cols state);
-       c.push_styled ~style:(Theme.recede ())
-         (Printf.sprintf "  %s %s   %s"
-            (runtime_column runtime_lane_width "media_failover")
-            (runtime_column runtime_candidate_width media_text)
-            (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
-       c.push_divider ());
+       (* A short viewport folds the media_failover row and its divider away so
+          the table header and the selected row keep a place (#41143's rule for
+          the status column, applied to height). *)
+       if not (Masc_tui_types.runtime_media_row_folded ~rows ~cols state) then begin
+         c.push_styled ~style:(Theme.recede ())
+           (Printf.sprintf "  %s %s   %s"
+              (runtime_column runtime_lane_width "media_failover")
+              (runtime_column runtime_candidate_width media_text)
+              (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
+         c.push_divider ()
+       end);
   let table_cells = runtime_table_cells ~cols ~status_cells ~mode:state.runtime_mode in
   c.push_styled ~style:(Theme.recede ())
     ("  " ^ Masc_tui_table.header_row
@@ -12033,10 +12038,15 @@ let render_presets (state : state) =
     (fun index (manifest : Tui_decode.preset_manifest) ->
       if index >= first && index < first + preset_rows then begin
         incr drawn;
-        let armed =
-          state.preset_restore_armed = Some manifest.Tui_decode.pm_name
+        let name = manifest.Tui_decode.pm_name in
+        let mark =
+          match state.preset_armed with
+          | Some (Restore_armed armed) when String.equal armed name ->
+              Theme.warn () ^ "r" ^ Ansi.reset
+          | Some (Delete_armed armed) when String.equal armed name ->
+              Theme.bad () ^ "D" ^ Ansi.reset
+          | Some (Restore_armed _ | Delete_armed _) | None -> " "
         in
-        let mark = if armed then Theme.warn () ^ "r" ^ Ansi.reset else " " in
         let label =
           row_with_field ~cols ~lead:(" " ^ mark ^ " ")
             ~field:(Terminal_text.single_line (Masc_tui_preset_text.pane_row manifest))

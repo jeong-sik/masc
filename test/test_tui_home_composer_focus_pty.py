@@ -63,15 +63,22 @@ def mouse_home_retains_composer(executable):
         cards.assert_selected(output, destination)
         # Refresh must keep Home navigation focus. It must not become a
         # character appended to the saved draft or reopen the composer.
-        h.send_and_wait(process, fd, output, b"r", b"Enter:open")
+        # Nothing on the settled Home changes when r lands, so no new
+        # frame is owed: press, let the cadence settle, and read the
+        # surface state instead of waiting for a redraw.
+        os.write(fd, b"r")
+        h.drain_until_quiet(process, fd, output)
         h.drain_until_quiet(process, fd, output)
         cards.assert_selected(output, destination)
         assert draft not in h.screen_text(bytes(output))
         home.assert_no_decision_posts(requests)
 
         # This Enter opens the selected Home destination; it does not send
-        # the formerly focused composer's retained message.
-        h.send_and_wait(process, fd, output, b"\r", b"Esc:Dashboard")
+        # the formerly focused composer's retained message. Home resume
+        # opens the chat with return-to-Home (masc_tui.ml:23167-23169),
+        # so the chat breadcrumb is the proof it opened.
+        h.send_and_wait(process, fd, output, b"\r",
+                        b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         h.drain_until_quiet(process, fd, output)
         restored = h.screen_text(bytes(output))
         assert "Keepers ▸ beta ▸ chat".encode() in restored, restored
@@ -96,7 +103,7 @@ def mouse_home_retains_composer(executable):
     h.run_terminal_scenario(
         executable, description="Mouse Dashboard entry blurs and saves beta surface composer",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
-        prepare_workspace=prepare, terminal_cols=120,
+        prepare_workspace=prepare, terminal_cols=120, refresh=0.5,
     )
     home.assert_no_decision_posts([(path, body) for path, body in requests if path != CHAT_PATH])
     assert sum(path == CHAT_PATH for path, _body in requests) == 1, requests

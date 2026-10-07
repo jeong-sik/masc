@@ -406,17 +406,30 @@ let canonical_identity_opt path =
   | _ -> None
   | exception Unix.Unix_error _ -> None
 
+(* Summaries are keyed by the file's resolved path. A save reaches the
+   canonical through [canonical_session_location], which resolves a symlinked
+   session root, while a reader is handed the configured spelling of the same
+   file. A path that does not resolve has no key, so nothing is published for
+   it and a reader parses the file. *)
+let summary_key canonical_path =
+  match Unix.realpath canonical_path with
+  | resolved -> Some resolved
+  | exception Unix.Unix_error _ -> None
+
 (* [Some summary] only while the file at [canonical_path] is the one the
    summary was taken from. *)
 let cached_summary ~canonical_path =
   match canonical_identity_opt canonical_path with
   | None -> None
   | Some identity ->
-    Stdlib.Mutex.protect canonical_summaries_mutex (fun () ->
-      match Hashtbl.find_opt canonical_summaries canonical_path with
-      | Some summary when canonical_identity_equal summary.identity identity ->
-        Some summary
-      | Some _ | None -> None)
+    (match summary_key canonical_path with
+     | None -> None
+     | Some key ->
+       Stdlib.Mutex.protect canonical_summaries_mutex (fun () ->
+         match Hashtbl.find_opt canonical_summaries key with
+         | Some summary when canonical_identity_equal summary.identity identity ->
+           Some summary
+         | Some _ | None -> None))
 
 let summary_of_checkpoint ~identity (checkpoint : Agent_core.Checkpoint.t) =
   { identity
@@ -426,8 +439,11 @@ let summary_of_checkpoint ~identity (checkpoint : Agent_core.Checkpoint.t) =
   }
 
 let publish_summary ~canonical_path summary =
-  Stdlib.Mutex.protect canonical_summaries_mutex (fun () ->
-    Hashtbl.replace canonical_summaries canonical_path summary)
+  match summary_key canonical_path with
+  | None -> ()
+  | Some key ->
+    Stdlib.Mutex.protect canonical_summaries_mutex (fun () ->
+      Hashtbl.replace canonical_summaries key summary)
 
 (* After a parse: the summary describes the bytes parsed only if the file
    identity is the same before and after the read. Otherwise a rename landed

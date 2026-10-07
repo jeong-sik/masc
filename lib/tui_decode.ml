@@ -3722,12 +3722,6 @@ let decode_keeper_secret_projections json =
     items
   |> Result.map List.rev
 
-(* The counts are read with a default rather than required: the server adds
-   fields to this section over time, and a TUI that refuses the whole reading
-   because one counter is new would hide the fleet exactly when it changed.
-   The three that name the fleet's own verdict -- status, blocker, and whether
-   an operator has to act -- are required, because a reading without them says
-   nothing. *)
 let decode_keeper_tool_approval json =
   let* kta_keeper = required_string_field json "keeper" in
   let* kta_tool_call_id = required_string_field json "tool_call_id" in
@@ -5157,6 +5151,11 @@ let decode_preset_saved json =
   match member "preset" json with
   | `Null -> Error "the save answer carries no preset"
   | preset -> decode_preset_manifest preset
+;;
+
+let decode_preset_deleted json =
+  let* () = preset_ok json in
+  required_string_field json "deleted"
 ;;
 
 let decode_preset_part json key =

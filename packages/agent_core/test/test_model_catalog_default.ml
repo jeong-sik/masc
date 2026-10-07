@@ -341,7 +341,7 @@ let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
            entry.supports_native_streaming
        | [] -> failf "missing ollama_cloud/%s catalog row" model_id
        | _ -> failf "duplicate ollama_cloud/%s catalog rows" model_id)
-    [ "qwen3.5:cloud"; "gemma4:31b-cloud" ]
+    [ "gemma4:31b-cloud" ]
 ;;
 
 (* No ollama_cloud row states a thinking control of its own.

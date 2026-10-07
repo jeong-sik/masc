@@ -490,13 +490,11 @@ let surfaces =
       id = "keeper_world_observation";
       description =
         "What a keeper turn is told about the world — board posts, fleet \
-         messages, its own past tool calls, and the briefing's share of the \
-         request body";
+         messages, and its own past tool calls";
       param_keys = [
         "keeper.board.own_recent.max";
         "keeper.fleet.messages.max";
         "keeper.own_actions.turns.max";
-        "keeper.context.briefing.share_percent";
       ];
     };
     {

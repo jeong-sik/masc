@@ -1850,8 +1850,20 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
   | Error (`Unknown_outcome message) ->
     Error
       ("preset restore outcome unknown — the server may have finished it; \
-        check the preset list for a new autosave before retrying: " ^ message)
+        check when the preset list says _autosave was saved before retrying: " ^ message)
   | Ok json -> Tui_decode.decode_preset_restore json
+
+(** POST /api/v1/presets/delete — the name the server removed. An unanswered
+    request may still have removed it, so the operator is told to read the
+    list before trying again. *)
+let delete_preset ~(host : string) ~(port : int) ~(name : string) : (string, string) result =
+  match Masc_tui_http.post_preset_delete ~host ~port ~name with
+  | Post_answered json -> Tui_decode.decode_preset_deleted json
+  | Post_refused detail -> Error ("preset delete refused: " ^ detail)
+  | Post_unanswered detail ->
+    Error
+      ("preset delete unanswered — the preset may be gone; \
+        check the preset list before retrying: " ^ detail)
 
 (* The fleet reading answers what the keeper list cannot: a keeper that never
    started has no row, so the roster shows nine keepers whether the tenth is
@@ -1884,12 +1896,6 @@ let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
               Error (Masc_tui_keeper_control.Roster_malformed detail)
           | Ok (rows, errors, truncated, total, candle) ->
               Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
-
-(* Every line these views hand the renderer goes through the terminal
-   sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show
-   escaped, not a control to replay into the frame. *)
-let sanitize_view_lines lines =
-  List.map Masc.Tui_terminal_text.sanitize_terminal_text lines
 
 let load_keeper_config_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =

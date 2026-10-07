@@ -94,6 +94,10 @@ class ServedFixtures(dict):
         return (
             dict.__contains__(self, path)
             or dict.__contains__(self, path_only)
+            or (
+                path_only == "/api/v1/gate/keepers"
+                and dict.__contains__(self, "/api/v1/gate/keepers?detailed=true")
+            )
             or path in HARNESS_PATHS
             or path_only in HARNESS_PATH_PREFIXES
         )

@@ -128,7 +128,7 @@ let change_count () =
 
 let newest_activity () =
   match Dos_lane.recent_activity () with
-  | entry :: _ -> entry.Lane_activity.who, entry.Lane_activity.action
+  | entry :: _ -> entry.Machine_action_feed.who, entry.Machine_action_feed.action
   | [] -> fail "no activity"
 
 let starts_with ~prefix s = String.length s >= String.length prefix && String.sub s 0 (String.length prefix) = prefix
@@ -285,8 +285,8 @@ let test_expired_credential_releases_controller_on_next_move role () =
           check bool "the expired turn was released in the lane ledger" true
             (List.exists
                (fun entry ->
-                 String.equal entry.Lane_activity.who "minsu"
-                 && String.equal entry.Lane_activity.action "released (idle)")
+                 String.equal entry.Machine_action_feed.who "minsu"
+                 && String.equal entry.Machine_action_feed.action "released (idle)")
                (Dos_lane.recent_activity ())))))
 
 let () =

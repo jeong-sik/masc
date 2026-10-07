@@ -9380,7 +9380,7 @@ let restore_payload : Yojson.Safe.t =
     ; ( "report"
       , `Assoc
           [ ("restored", `String "morning")
-          ; ("autosave", `String "_autosave-20260903T103201Z")
+          ; ("autosave", `String "_autosave")
           ; ( "prompt_overrides"
             , `Assoc
                 [ ("effect", `String "immediate")
@@ -9413,7 +9413,7 @@ let test_decode_preset_restore_reads_each_surface () =
   match Tui_decode.decode_preset_restore restore_payload with
   | Error detail -> Alcotest.fail detail
   | Ok report ->
-    Alcotest.(check string) "autosave" "_autosave-20260903T103201Z" report.Tui_decode.prr_autosave;
+    Alcotest.(check string) "autosave" "_autosave" report.Tui_decode.prr_autosave;
     Alcotest.(check (list string)) "overrides applied" [ "keeper" ]
       report.Tui_decode.prr_prompt_overrides.Tui_decode.pp_applied;
     Alcotest.(check (list (pair string string))) "overrides skipped"
@@ -9459,6 +9459,18 @@ let test_decode_preset_refusal_is_the_servers_sentence () =
   match Tui_decode.decode_presets refused with
   | Error detail -> Alcotest.(check string) "list refusal" "invalid preset name: bad name" detail
   | Ok _ -> Alcotest.fail "a refused list decoded as a snapshot"
+
+let test_decode_preset_deleted_reads_the_removed_name () =
+  let deleted : Yojson.Safe.t = `Assoc [ ("ok", `Bool true); ("deleted", `String "_autosave") ] in
+  (match Tui_decode.decode_preset_deleted deleted with
+   | Ok name -> Alcotest.(check string) "the removed name" "_autosave" name
+   | Error detail -> Alcotest.fail detail);
+  let refused : Yojson.Safe.t =
+    `Assoc [ ("ok", `Bool false); ("error", `String "no preset named morning") ]
+  in
+  match Tui_decode.decode_preset_deleted refused with
+  | Error detail -> Alcotest.(check string) "the server's sentence" "no preset named morning" detail
+  | Ok _ -> Alcotest.fail "a refused delete decoded as a removed name"
 
 let test_decode_prompts_reads_the_live_shape () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -13265,6 +13277,8 @@ let () =
           test_decode_preset_restore_reads_each_surface
       ; Alcotest.test_case "a preset refusal decodes to the server's sentence" `Quick
           test_decode_preset_refusal_is_the_servers_sentence
+      ; Alcotest.test_case "decode_preset_deleted reads the removed name" `Quick
+          test_decode_preset_deleted_reads_the_removed_name
       ; Alcotest.test_case "a 200 carrying only an error is an error" `Quick
           test_a_two_hundred_carrying_only_an_error_is_an_error
       ; Alcotest.test_case "a JSON refusal shows its sentence, not the envelope" `Quick

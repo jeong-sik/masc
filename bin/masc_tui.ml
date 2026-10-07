@@ -6124,12 +6124,12 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
    call this; so does board compose when its handler declines the key, so
    "Tab falls through" stays true while composing. *)
 let cycle_surface state ~mailbox ~backwards =
-  let ring = Masc_tui_surface_navigation.visible_surface_ring state in
+  let ring = Masc_tui_types.surface_ring in
   let count = List.length ring in
   if count > 0 then begin
     let step = if backwards then count - 1 else 1 in
     let index =
-      (Masc_tui_surface_navigation.visible_surface_ring_index state state.view + step) mod count
+      (Masc_tui_surface_navigation.surface_ring_index state state.view + step) mod count
     in
     goto_surface state ~mailbox (fst (List.nth ring index))
   end
@@ -7731,12 +7731,6 @@ let drain_queued_message state ~base_path ~mailbox =
   if state.workspace_identity = Workspace_identity_match
      && Option.is_none state.keepers_error then next ()
 ;;
-
-(* The same words the log projection ends a turn with: one function, so a
-   turn read from the strict decode and one drawn from its log agree. *)
-let chat_status_text completed =
-  Keeper_chat_transcript.turn_status_text ~reply:completed.Keeper_chat.reply
-    ~turn_ref:completed.turn_ref completed.turn_outcome
 
 (* /task in the composer or the chat pane: create the task first, then hand
    the keeper the operator's words with the task id in front. Creation runs
@@ -9673,6 +9667,15 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
         ~wrap:(fun result -> Preset_restored (Preset_to_chat target, result))
+  | Masc_tui_command.Preset_delete_missing_name ->
+      notice ~kind:Notice_failure "/preset delete needs a name on the same line"
+  | Masc_tui_command.Preset_delete name ->
+      (* Typing the name is the confirmation, as for restore. The name need
+         not load: a preset listed with ! is deleted the same way. *)
+      Buffer.clear state.msg_input;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port -> Masc_tui_loader.delete_preset ~host ~port ~name)
+        ~wrap:(fun result -> Preset_deleted (Preset_to_chat target, result))
   | Masc_tui_command.Play_invalid reason ->
       notice ~kind:Notice_failure reason
   | Masc_tui_command.Play_invites ->
@@ -10491,7 +10494,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_health_cursor <- 0;
   state.memory_health_scroll <- 0;
   state.preset_save_draft <- None;
-  state.preset_restore_armed <- None;
+  state.preset_armed <- None;
   state.preset_report <- None;
   state.preset_busy <- false;
   Masc_tui_types.withdraw_fusion_workspace state;
@@ -10951,19 +10954,6 @@ let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mai
     drain_queued_message state ~base_path ~mailbox
   end
 
-let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox results =
-  if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
-  let was_unavailable =
-    state.workspace_identity <> Workspace_identity_match
-    || Option.is_some state.keepers_error
-  in
-  let previous_items = visible_item_revision state in
-  apply_http_scoped_surfaces state ~currency_authority results;
-  refresh_changed_keeper_items state ~mailbox
-    ~roster_refreshed:(Option.fold ~none:false ~some:Result.is_ok results.http_keeper_roster) previous_items;
-  resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
-  end
-
 let apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket err =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
     apply_server_identity_reading state (Error err);
@@ -11146,6 +11136,121 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
   end
 ;;
 
+let current_surface_needs state =
+  Masc_tui_types.surface_needs ~about_open:state.about_open
+    ~keeper_pane_drawn:
+      (not (Masc_tui_render.acting_pane_suppressed state))
+    state.view
+
+(* The reads a full refresh tick sends beside its surface bundle. They go out
+   while the bundle is still on the wire, so a bundle that moves the read
+   authority withdraws them; [resume_reads_after_authority_change] sends
+   them again from this same list. *)
+let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
+  (* The chat pane's history comes down its own generation-guarded path, not
+     in the surface bundle, so the tick asks for it here. Without this the
+     pane read once on open and a message that arrived after that waited for
+     the operator to leave and come back. *)
+  (if
+     needs.Masc_tui_types.needs_keeper_chat
+     (* Not while reading back: the reload replaces the transcript with the
+        newest window, which throws away every older page the operator
+        fetched and snaps the view to the bottom mid-read. The next tick
+        after scroll returns to 0 catches the pane up. *)
+     && state.msg_scroll = 0
+   then
+     match state.msg_target_keeper_name with
+     | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
+     | None -> ());
+  (* An operator who consented in a browser is standing in front of a tab
+     that does not know it happened: the callback lands on the server, not
+     here. So while a login this TUI started is still outstanding, the tick
+     asks again. It stops as soon as the answer says attached, so this is
+     not a poll that runs forever -- it runs exactly as long as somebody is
+     waiting for it. Same shape as the chat reload above, and for the same
+     reason: a pane that read once on open showed a fact that had since
+     changed. *)
+  (if
+     state.view = Keepers Keeper_detail
+     && state.detail_tab = Detail_identity
+   then
+     match selected_keeper state with
+     | Some keeper when identity_login_recovery_poll_ready state keeper.k_name ->
+         Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
+     | Some _ | None -> ());
+  (* The "answering now" badge rides every tick for the same reason as the
+     held approvals: it is drawn from every surface, and its whole point is
+     the operator who walked away from the chat pane. *)
+  launch_keeper_turns_load state ~mailbox;
+  (* The schedule list rides for the same reason, now that the agenda strip
+     names the next wake from every surface. Fetched only on the Schedules
+     surface it was empty everywhere else, and a strip that says nothing is
+     scheduled while thirteen wakes are queued is worse than no strip.
+
+     Measured on this workspace before it was added: 12.4 kB gzipped, 2.1 ms
+     to serve, against a two-second cadence. The projection sorts the active
+     rows ahead of the settled ones and cuts at twenty, so the earliest wake
+     is in the payload whether or not the tail is. *)
+  launch_schedules_load state ~mailbox
+;;
+
+(* The two tokens a read is admitted under. Applying a server identity
+   reading moves the workspace one when the workspace changes (the first
+   reading at boot is one) and cancels every read it admitted; it revokes
+   the detail one when the item authority changes, as when a booting server
+   becomes ready. *)
+type read_authority =
+  { read_workspace : Masc_tui_types.workspace_authority
+  ; read_detail : unit ref
+  }
+
+let read_authority state =
+  { read_workspace = state.workspace_authority; read_detail = state.detail_read_authority }
+
+(* A read sent under an authority that a refresh then withdrew never lands:
+   its completion carries the old authority and is dropped. A full or scoped
+   refresh ends here once it is applied, so each read the move withdrew is
+   sent again in one place instead of waiting a tick (2026-10-07: after boot
+   the Answering surface said "not loaded yet" and an open chat showed no
+   running turn until the next tick). It runs after the whole refresh
+   because the focused detail needs the roster that refresh brought. *)
+let resume_reads_after_authority_change state ~mailbox ~(before : read_authority) =
+  let moved =
+    before.read_workspace <> state.workspace_authority
+    || before.read_detail != state.detail_read_authority
+  in
+  (* The detail goes first: it restores the remembered Keeper focus and
+     marks its identity read pending, so the side reads below neither poll
+     the same login again nor ask about the Keeper the cursor fell on. *)
+  refresh_visible_detail_after_authority_recovery state ~mailbox
+    ~previous_authority:before.read_detail;
+  if moved && server_authority_ready state then begin
+    (* Under the same condition the tick sends them: a server that is not
+       booting, whether or not its workspace is this checkout's. *)
+    launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
+    (* Navigation can precede the first confirmed identity, and its Lane
+       read was cancelled with the old authority. The loader keeps its own
+       in-flight guard. *)
+    if state.workspace_identity = Workspace_identity_match && state.view = Lanes
+    then launch_lanes_load state ~mailbox
+  end
+;;
+
+let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox results =
+  if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
+  let was_unavailable =
+    state.workspace_identity <> Workspace_identity_match
+    || Option.is_some state.keepers_error
+  in
+  let previous_items = visible_item_revision state in
+  let authority = read_authority state in
+  apply_http_scoped_surfaces state ~currency_authority results;
+  refresh_changed_keeper_items state ~mailbox
+    ~roster_refreshed:(Option.fold ~none:false ~some:Result.is_ok results.http_keeper_roster) previous_items;
+  resume_reads_after_authority_change state ~mailbox ~before:authority;
+  resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
+  end
+
 (* Entering a Keeper detail tab, by [ / ] or by a press on its name in the
    title strip: one way in, so a press reads what the key reads. The scroll
    belonged to the tab being left. *)
@@ -11187,7 +11292,7 @@ let enter_config_pane state ~mailbox pane =
   | Config_presets ->
     state.presets_cursor <- 0;
     state.preset_save_draft <- None;
-    state.preset_restore_armed <- None;
+    state.preset_armed <- None;
     if state.presets_snapshot = None
     then launch_presets_load state ~mailbox
   | Config_params -> launch_runtime_params_load state ~mailbox
@@ -11546,44 +11651,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let needs =
       (* This newer bundle supersedes an inflight scoped read, so it must
          replace every dataset currently drawn rather than omit that read. *)
-      Masc_tui_types.surface_needs ~about_open:state.about_open
-        ~keeper_pane_drawn:
-          (not (Masc_tui_render.acting_pane_suppressed state))
-        state.view
+      current_surface_needs state
     in
-    (* The chat pane's history comes down its own generation-guarded path, not
-       in the surface bundle, so the tick asks for it here. Without this the
-       pane read once on open and a message that arrived after that waited for
-       the operator to leave and come back. *)
-    (if
-       (not was_booting)
-       && needs.Masc_tui_types.needs_keeper_chat
-       (* Not while reading back: the reload replaces the transcript with the
-          newest window, which throws away every older page the operator
-          fetched and snaps the view to the bottom mid-read. The next tick
-          after scroll returns to 0 catches the pane up. *)
-       && state.msg_scroll = 0
-     then
-       match state.msg_target_keeper_name with
-       | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
-       | None -> ());
-    (* An operator who consented in a browser is standing in front of a tab
-       that does not know it happened: the callback lands on the server, not
-       here. So while a login this TUI started is still outstanding, the tick
-       asks again. It stops as soon as the answer says attached, so this is
-       not a poll that runs forever -- it runs exactly as long as somebody is
-       waiting for it. Same shape as the chat reload above, and for the same
-       reason: a pane that read once on open showed a fact that had since
-       changed. *)
-    (if
-       (not was_booting)
-       && state.view = Keepers Keeper_detail
-       && state.detail_tab = Detail_identity
-     then
-       match selected_keeper state with
-       | Some keeper when identity_login_recovery_poll_ready state keeper.k_name ->
-           Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
-       | Some _ | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
        there would be worse than none. The payload is a handful of rows. The
@@ -11592,20 +11661,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        badge is how an operator finds out. The server caches the snapshot. *)
     (* Held approvals and Gate reads start after this refresh validates
        workspace identity in Http_refresh_done. *)
-    (* The "answering now" badge rides every tick for the same reason as the
-       approvals above: it is drawn from every surface, and its whole point
-       is the operator who walked away from the chat pane. *)
-    if not was_booting then launch_keeper_turns_load state ~mailbox;
-    (* The schedule list rides for the same reason, now that the agenda strip
-       names the next wake from every surface. Fetched only on the Schedules
-       surface it was empty everywhere else, and a strip that says nothing is
-       scheduled while thirteen wakes are queued is worse than no strip.
-
-       Measured on this workspace before it was added: 12.4 kB gzipped, 2.1 ms
-       to serve, against a two-second cadence. The projection sorts the active
-       rows ahead of the settled ones and cuts at twenty, so the earliest wake
-       is in the payload whether or not the tail is. *)
-    if not was_booting then launch_schedules_load state ~mailbox;
+    if not was_booting then launch_tick_side_reads state ~mailbox ~needs;
 
     let run_refresh () =
       try
@@ -13126,7 +13182,9 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Preset_restore _
        | Masc_tui_command.Preset_restore_missing_name
        | Masc_tui_command.Preset_show _
-       | Masc_tui_command.Preset_show_missing_name ->
+       | Masc_tui_command.Preset_show_missing_name
+       | Masc_tui_command.Preset_delete _
+       | Masc_tui_command.Preset_delete_missing_name ->
            set_msg_scroll state 0;
            if state.view <> Keepers Keeper_message then begin
              match state.msg_target_keeper_name with
@@ -13781,16 +13839,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         state.workspace_identity <> Workspace_identity_match
         || Option.is_some state.keepers_error
       in
-      let was_unconfirmed = state.workspace_identity <> Workspace_identity_match in
-      let previous_authority = state.detail_read_authority in
+      let authority = read_authority state in
       apply_http_surfaces state ~mailbox results;
-      (* Navigation can precede the first confirmed identity. Its cancelled
-         Lane read belongs to the old authority; start a fresh read now that
-         the visible surface can use this workspace. Steady refreshes do not
-         repeat it, and the loader retains its existing in-flight guard. *)
-      if was_unconfirmed && state.workspace_identity = Workspace_identity_match
-         && state.view = Lanes then launch_lanes_load state ~mailbox;
-      refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_authority;
+      resume_reads_after_authority_change state ~mailbox ~before:authority;
       resume_authorized_input_after_refresh state
         ~was_unavailable:dispatch_was_unavailable ~base_path ~mailbox;
       (* The local roster is trustworthy only after a workspace-matched read.
@@ -14468,7 +14519,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                |> Option.map (fun row -> row.Tui_decode.pm_name) in
            if not (Option.equal String.equal selected_name next_name) then begin
              state.config_scroll <- 0;
-             state.preset_restore_armed <- None
+             state.preset_armed <- None
            end;
            state.presets_snapshot <- Some snapshot;
            state.presets_error <- None;
@@ -14614,6 +14665,23 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Preset_to_pane, Error detail ->
            state.preset_busy <- false;
            report_action state "error" ("preset restore: " ^ detail))
+  | Preset_deleted (sink, result) ->
+      (* The list is read again after a failure too: a refusal says the
+         list was stale, and an unanswered delete may have landed. *)
+      (match sink, result with
+       | Preset_to_chat target, Ok name ->
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
+             ("deleted preset " ^ name)
+       | Preset_to_chat target, Error detail ->
+           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
+       | Preset_to_pane, Ok name ->
+           state.preset_busy <- false;
+           report_action state "system" (name ^ " 삭제");
+           launch_presets_load state ~mailbox
+       | Preset_to_pane, Error detail ->
+           state.preset_busy <- false;
+           report_action state "error" ("preset delete: " ^ detail);
+           launch_presets_load state ~mailbox)
   | Play_invites_listed (target, result) ->
       (match result with
        | Error detail ->
@@ -19958,6 +20026,11 @@ and is loaded on demand through keeper_skill.
         Masc_tui_keys.cancels_two_press
           ~input_seen:(Option.is_some input) ~key ~second_press
       in
+      (* A view change that no key caused, such as a dispatched task opening
+         its surface, leaves the presets pane without passing through the
+         Config arm below. A delete cannot be put back, so the first input
+         seen anywhere else ends the arm. *)
+      if state.view <> Config && Option.is_some input then state.preset_armed <- None;
       (match state.view with
        | Approvals ->
            if cancelled [ "y"; "Y"; "n"; "N" ] then
@@ -19997,9 +20070,15 @@ and is loaded on demand through keeper_skill.
            if cancelled [ "a"; "A" ] then
          state.verification_verdict_armed <- None
        | Config ->
-           (* A restore rewrites three surfaces; its arm must not outlive the
-              keypress that set it. *)
-           if cancelled [ "u"; "U" ] then state.preset_restore_armed <- None
+           (* A restore rewrites three surfaces and a delete removes a preset;
+              an arm must not outlive the keypress that set it, and only its
+              own key confirms it. *)
+           (match state.preset_armed with
+            | None -> ()
+            | Some (Restore_armed _) ->
+                if cancelled [ "u"; "U" ] then state.preset_armed <- None
+            | Some (Delete_armed _) ->
+                if cancelled [ "D" ] then state.preset_armed <- None)
        | Runtime ->
            if cancelled [ "D" ] then state.runtime_lane_remove_armed <- None
        | Overview | Acting | Metrics | Lanes | Clients | Harness | Memory | Fusion
@@ -23955,7 +24034,7 @@ and is loaded on demand through keeper_skill.
                 if state.preset_busy then
                   report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
                 else begin
-                  state.preset_restore_armed <- None;
+                  state.preset_armed <- None;
                   state.preset_save_draft <- Some ""
                 end
             | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
@@ -24357,9 +24436,9 @@ and is loaded on demand through keeper_skill.
                 list to page; Config's panes carry cursors of their own. *)
              | Overview | Acting | Config -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
-          refresh, so the pane takes u, twice, for the destructive restore.
-          Its save key is n, answered inside the [n] dispatch below, which
-          the surface list there requires. *)
+          refresh, so the pane takes u, twice, for the destructive restore,
+          and D, twice, for the delete. Its save key is n, answered inside
+          the [n] dispatch below, which the surface list there requires. *)
        | Some "u" | Some "U"
          when state.view = Config && state.config_pane = Config_presets ->
            (match selected_preset_for_state state with
@@ -24368,8 +24447,8 @@ and is loaded on demand through keeper_skill.
               let name = manifest.Tui_decode.pm_name in
               if state.preset_busy then
                 report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
-              else if state.preset_restore_armed = Some name then begin
-                state.preset_restore_armed <- None;
+              else if state.preset_armed = Some (Restore_armed name) then begin
+                state.preset_armed <- None;
                 state.preset_busy <- true;
                 report_action state "system" (name ^ " 복원 중 · 지금 상태는 먼저 저장됩니다");
                 launch_preset_call state ~mailbox:async_messages
@@ -24377,9 +24456,30 @@ and is loaded on demand through keeper_skill.
                   ~wrap:(fun result -> Preset_restored (Preset_to_pane, result))
               end
               else begin
-                state.preset_restore_armed <- Some name;
+                state.preset_armed <- Some (Restore_armed name);
                 report_action state "system"
                   (Printf.sprintf "u 를 한 번 더 누르면 %s 로 되돌립니다" name)
+              end)
+       | Some "D"
+         when state.view = Config && state.config_pane = Config_presets ->
+           (match selected_preset_for_state state with
+            | None -> report_action state "error" "지울 프리셋을 고르세요"
+            | Some manifest ->
+              let name = manifest.Tui_decode.pm_name in
+              if state.preset_busy then
+                report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+              else if state.preset_armed = Some (Delete_armed name) then begin
+                state.preset_armed <- None;
+                state.preset_busy <- true;
+                report_action state "system" (name ^ " 삭제 중");
+                launch_preset_call state ~mailbox:async_messages
+                  ~call:(fun ~host ~port -> Masc_tui_loader.delete_preset ~host ~port ~name)
+                  ~wrap:(fun result -> Preset_deleted (Preset_to_pane, result))
+              end
+              else begin
+                state.preset_armed <- Some (Delete_armed name);
+                report_action state "system"
+                  (Printf.sprintf "D 를 한 번 더 누르면 %s 를 지웁니다" name)
               end)
        | Some key when state.view = Planning
            && Option.is_some (goal_detail_on_screen state)
@@ -25009,7 +25109,7 @@ and is loaded on demand through keeper_skill.
                 if state.presets_cursor < count - 1 then begin
                   state.presets_cursor <- state.presets_cursor + 1;
                   state.config_scroll <- 0;
-                  state.preset_restore_armed <- None;
+                  state.preset_armed <- None;
                   ensure_preset_detail state ~mailbox:async_messages
                 end
             | Config when state.config_pane = Config_prompts ->
@@ -25381,7 +25481,7 @@ and is loaded on demand through keeper_skill.
                 if next <> state.presets_cursor then begin
                   state.presets_cursor <- next;
                   state.config_scroll <- 0;
-                  state.preset_restore_armed <- None;
+                  state.preset_armed <- None;
                   ensure_preset_detail state ~mailbox:async_messages
                 end
             | Config when state.config_pane = Config_prompts ->

@@ -846,6 +846,33 @@ let test_ollama_native_catalog_replay_overrides_win () =
     cases
 ;;
 
+(* The deployment shape: the ollama_cloud provider reached over its /v1 wire.
+   Each reasoning model ollama.com serves to keepers declares its replay
+   contract on its own catalog row, because the provider-scoped lookup matches
+   the id exactly and never borrows a sibling row's fields. *)
+let test_ollama_cloud_v1_reasoning_models_replay_within_the_user_turn () =
+  List.iter
+    (fun model_id ->
+       let config =
+         Provider_config.make
+           ~provider_id:"ollama_cloud"
+           ~kind:OpenAI_compat
+           ~model_id
+           ~base_url:"https://ollama.com/v1"
+           ~request_path:"/chat/completions"
+           ()
+       in
+       let actual = (Reasoning_dialect.for_provider_config config).replay_policy in
+       check_bool
+         (Printf.sprintf
+            "%s replays the latest user turn's tool-call reasoning (got %s)"
+            model_id
+            (Reasoning_replay_contract.show_replay_policy actual))
+         true
+         (actual = Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn))
+    [ "glm-5.3-flash"; "glm-5.3"; "deepseek-v4.1-flash" ]
+;;
+
 let test_openai_responses_replays_only_opaque_item () =
   let config =
     Provider_config.make
@@ -1333,6 +1360,10 @@ let () =
             "Ollama catalog replay override wins"
             `Quick
             test_ollama_native_catalog_replay_overrides_win
+        ; Alcotest.test_case
+            "ollama_cloud /v1 reasoning models replay within the user turn"
+            `Quick
+            test_ollama_cloud_v1_reasoning_models_replay_within_the_user_turn
         ; Alcotest.test_case
             "OpenAI Responses opaque boundary"
             `Quick

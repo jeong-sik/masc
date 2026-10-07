@@ -49,14 +49,19 @@ def run(executable: str) -> None:
         _keyboard_harness.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
         # New common-inventory keys may wrap above this entry; look at the
         # current sheet while scrolling instead of hardcoding a row offset.
+        # The sheet title is not redrawn on scroll, so each press waits for
+        # the frame, not for the title.
         for _ in range(24):
             _keyboard_harness.drain_until_quiet(process, fd, output)
-            sheet = screen_text(output)
-            if all(needle in sheet for needle in IN_THE_SHEET):
+            if all(needle in screen_text(output) for needle in IN_THE_SHEET):
                 break
-            _keyboard_harness.send_and_wait(process, fd, output, b"j", b"MASC Cheat Sheet")
+            start = len(output)
+            os.write(fd, b"j")
+            _keyboard_harness.wait_for_output(
+                process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
         else:
-            raise AssertionError(f"sheet omitted slot-editor guidance: {sheet!r}")
+            raise AssertionError(
+                f"sheet omitted slot-editor guidance: {screen_text(output)!r}")
         # Close the sheet before quitting: the two keys sent back to back
         # left the pane mid-transition and the exit snapshot never settled.
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Lanes")

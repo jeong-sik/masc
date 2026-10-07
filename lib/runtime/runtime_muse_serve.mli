@@ -177,6 +177,11 @@ type turn_result =
     (** Terminal aggregate, enriched with counted-once counts when the
         observed completions agree; otherwise the sum of this turn's unique
         completion events when the terminal omits usage. Never session totals. *)
+  ; last_call_usage : Runtime_muse_msp.token_usage option
+    (** The counts of this turn's newest model call ([session/tokenUsage]),
+        with its counted-once [prompt_tokens]: what that request carried.
+        [None] when the host reported no call, or when a view gap followed
+        the newest call it reported. *)
   ; tool_calls : int
   ; approvals_decided : int
   ; call_models : call_model list

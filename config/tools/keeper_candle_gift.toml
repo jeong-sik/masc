@@ -1,0 +1,29 @@
+name = "keeper_candle_gift"
+description = "Gift Candle or one owned portrait accessory to another Keeper. Give exactly one of amount_milli (with a reason naming the occasion) or item (an item id you own). Money moves, never mints; a gifted item you wear comes off. Your Keeper identity comes from this turn."
+additional_properties = false
+defer_loading = false
+
+[[params]]
+name = "to"
+type = "string"
+required = true
+description = "The receiving Keeper's name. Must differ from yours."
+
+[[params]]
+name = "amount_milli"
+type = "integer"
+required = false
+description = "Milli-Candle to send. Give this or item, never both. Must be positive."
+minimum = 1
+
+[[params]]
+name = "item"
+type = "string"
+required = false
+description = "A canonical item id you own, from keeper_candle_catalog. Give this or amount_milli, never both."
+
+[[params]]
+name = "reason"
+type = "string"
+required = false
+description = "What the money gift is for. Required with amount_milli; a second gift under the same reason to the same Keeper is refused."

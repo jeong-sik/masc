@@ -5497,6 +5497,9 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
+  (* Roster row to return to when the Keeper message view closes. Kept by name
+     so an empty roster read, which clamps [keeper_cursor], does not lose it. *)
+  mutable keeper_message_return: string option;
   (* The first Keepers list row on screen, as the last frame drew it
      ([Keeper_list_scroll]). A cursor move to a row already on screen leaves
      the window where it is. *)
@@ -8554,6 +8557,7 @@ let create_state
   opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
+  keeper_message_return = None;
   keeper_list_scroll = 0;
   runtime_pick_keeper = None;
   runtime_pick_list = Masc_tui_pick_list.closed;

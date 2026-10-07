@@ -163,6 +163,11 @@ type async_msg =
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
+  | Approvals_listing_superseded
+  | Approvals_summary_loaded of
+      Masc_tui_types.Snapshot_read.request
+      * Masc.Tui_decode.server_identity
+      * (approval_snapshot, string) result
   | Surface_composer_released
   | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of

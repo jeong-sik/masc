@@ -144,8 +144,23 @@ let test_espeak_is_asked_for_a_voice_and_a_file () =
   in
   Alcotest.(check (list string))
     "the argv that was run"
-    [ "espeak-ng"; "-v"; "en"; "-w"; "/tmp/out.wav"; "hello keeper" ]
+    [ "espeak-ng"; "-v"; "en"; "-w"; "/tmp/out.wav"; "--"; "hello keeper" ]
     argv
+
+(* The message is the last argv element and always follows "--", so a message
+   that starts with "-" cannot be read as an option. *)
+let test_an_espeak_message_starting_with_a_dash_stays_a_message () =
+  let message = "-w/tmp/elsewhere.wav" in
+  let argv =
+    argv_of
+      (Overlay.tts_command_for_endpoint
+         (endpoint ~kind:Voice_config.Espeak_ng "espeak-local")
+         ~voice:"en" ~message ~output_file:"/tmp/out.wav")
+  in
+  Alcotest.(check (list string))
+    "the message sits behind the end-of-options marker"
+    [ "--"; message ]
+    (List.filteri (fun i _ -> i >= List.length argv - 2) argv)
 
 (* A reader who never picked a voice has been listening to the default voice
    all along, and espeak-ng uses it when told nothing. *)
@@ -158,7 +173,7 @@ let test_no_espeak_voice_leaves_the_flag_off () =
   in
   Alcotest.(check (list string))
     "no -v at all"
-    [ "espeak-ng"; "-w"; "/tmp/out.wav"; "hello" ]
+    [ "espeak-ng"; "-w"; "/tmp/out.wav"; "--"; "hello" ]
     argv
 
 let test_whisper_is_asked_for_the_model_and_the_file () =
@@ -592,6 +607,8 @@ let () =
             test_espeak_is_asked_for_a_voice_and_a_file
         ; Alcotest.test_case "no espeak-ng voice leaves the flag off" `Quick
             test_no_espeak_voice_leaves_the_flag_off
+        ; Alcotest.test_case "an espeak-ng message starting with a dash stays a message"
+            `Quick test_an_espeak_message_starting_with_a_dash_stays_a_message
         ] )
     ; ( "transcribing"
       , [ Alcotest.test_case "whisper is asked for the model and the file" `Quick

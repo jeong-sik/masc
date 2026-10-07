@@ -167,6 +167,36 @@ let test_espeak_writes_audio_that_can_be_played () =
         Alcotest.(check bool) "and the file is where it was asked for" true
           (Sys.file_exists output_file))
 
+(* A message that looks like an option must be spoken, not obeyed. Without the
+   end-of-options marker espeak-ng reads "-w<path>" as a second -w and writes
+   the clip there; measured 2026-10-07, espeak-ng 1.52.0. The case asserts the
+   clip lands in the asked-for file and the path named inside the message is
+   never created. *)
+let test_an_espeak_message_that_looks_like_an_option_writes_nothing_else () =
+  let output_file = Filename.temp_file "masc_espeak_live_" ".wav" in
+  let decoy = Filename.temp_file "masc_espeak_decoy_" ".wav" in
+  Sys.remove decoy;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun file ->
+          try Sys.remove file with
+          | Sys_error _ -> ())
+        [ output_file; decoy ])
+    (fun () ->
+      match
+        Voice_bridge_transport.speak_via_command_to_file
+          espeak_endpoint
+          ~message:("-w" ^ decoy)
+          ~voice:"en"
+          ~output_file
+      with
+      | Error message -> Alcotest.fail message
+      | Ok file_size ->
+        Alcotest.(check bool) "the asked-for file holds the audio" true (file_size > 1024);
+        Alcotest.(check bool) "the path inside the message was not written" false
+          (Sys.file_exists decoy))
+
 (* The mirror of the say case above. Measured 2026-10-07 with espeak-ng
    1.52.0: an unknown voice exits 1 with "Error: The specified espeak-ng
    voice does not exist." and writes no file. Loud, where say is silent --
@@ -257,6 +287,8 @@ let () =
       then
         [ Alcotest.test_case "espeak-ng writes audio that can be played" `Quick
             test_espeak_writes_audio_that_can_be_played
+        ; Alcotest.test_case "an option-looking message writes nothing else" `Quick
+            test_an_espeak_message_that_looks_like_an_option_writes_nothing_else
         ; Alcotest.test_case "an unknown espeak-ng voice fails loudly" `Quick
             test_an_unknown_espeak_voice_fails_loudly
         ]

@@ -572,9 +572,11 @@ let tts_command_for_endpoint (endpoint : Voice_config.endpoint) ~voice ~message 
        the same one a reader who never picked one has been listening to. -w
        writes WAVE; measured 2026-10-07 with espeak-ng 1.52.0, the file came
        back as 16-bit mono 22050 Hz WAVE. The message rides argv, never a
-       shell. *)
+       shell, behind "--": without it a message that starts with "-w/path"
+       is read as a second -w and the clip lands in that path (measured
+       2026-10-07, espeak-ng 1.52.0, text on stdin). *)
     let voice_args = if String.trim voice = "" then [] else [ "-v"; String.trim voice ] in
-    Ok { argv = (command :: voice_args) @ [ "-w"; output_file; message ] }
+    Ok { argv = (command :: voice_args) @ [ "-w"; output_file; "--"; message ] }
 ;;
 
 (* The command that lists the voices installed on this machine.

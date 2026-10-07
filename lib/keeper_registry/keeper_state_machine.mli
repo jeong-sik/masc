@@ -116,11 +116,8 @@ val event_to_string : event -> string
       supervisor-owned work and are intentionally ignored by the registry. *)
 type entry_action =
   | Start_drain
-  | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of { event_name : string; detail : string }
   | Cleanup_and_unregister
-  | Trigger_immediate_cleanup
-  | Cancel_pending_agent_core
 
 (** Result of applying an event. *)
 type transition_result = {

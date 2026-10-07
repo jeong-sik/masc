@@ -5,7 +5,7 @@ message content).
 usage:
   python3 -I measure.py turns     <masc-dir> <YYYY-MM-DD>
   python3 -I measure.py restarts  <masc-dir> <YYYY-MM-DD>
-  python3 -I measure.py unfinished <masc-dir> <YYYY-MM-DD>
+  python3 -I measure.py unfinished <masc-dir> <YYYY-MM-DD> [<HH:MM>]
   python3 -I measure.py span      <masc-dir> <keeper> <YYYY-MM-DDTHH:MM> <YYYY-MM-DDTHH:MM>
   python3 -I measure.py writes    <trace.json> <start-atom> <end-atom>
   python3 -I measure.py carried   <masc-dir> <YYYY-MM-DD> <keeper> <HH:MM> <HH:MM>
@@ -128,16 +128,22 @@ def restarts(masc_dir, day):
     }, indent=1))
 
 
-def unfinished(masc_dir, day):
+def unfinished(masc_dir, day, until=None):
     """Atoms saved by turns that did not finish, from each keeper's
     turn-boundaries.jsonl. A finished turn's line states where it started;
-    when that start is past the furthest position the previous line stated
-    (its end, or its start when it has no atom position), the atoms between
-    were saved by turns that failed or were cancelled and picked up by the
-    turns after them. `from` and `until` are the two lines' times: the span
-    lay past the last completed boundary between them. Counts the lines
-    recorded on <day> (UTC)."""
+    when that start is past the end the previous line stated, the atoms
+    between were saved by turns that failed or were cancelled and picked up
+    by the turns after them. `from` and `until` are the two lines' times: the
+    span lay past the last completed boundary between them.
+
+    A previous line with no atom position (an official-client turn) states no
+    end. The atoms past its start may belong to that completed turn's own
+    Agent-Core candidate, whose end only a later line reveals, so such gaps are
+    counted apart as `after_official_client_line` and left out of `spans` and
+    `atoms`. Counts the lines recorded on <day> (UTC), up to <until> (HH:MM,
+    UTC) when given."""
     spans = []
+    after_official_client = []
     for path in sorted((pathlib.Path(masc_dir) / "keepers").glob("*/turn-boundaries.jsonl")):
         previous = None
         with open(path, errors="replace") as handle:
@@ -155,17 +161,21 @@ def unfinished(masc_dir, day):
                 turn = int(record["turn_ref"].rsplit("#", 1)[1])
                 stamp = datetime.datetime.fromtimestamp(record["recorded_at"], datetime.timezone.utc)
                 start_atom = start.get("start_atom") if isinstance(start, dict) else None
-                if previous and start_atom is not None and stamp.date().isoformat() == day:
+                in_window = stamp.date().isoformat() == day and (until is None or stamp.strftime("%H:%M") <= until)
+                if previous and start_atom is not None and in_window:
                     gap_atoms = start_atom - previous["end_atom"]
                     if gap_atoms > 0:
-                        spans.append({"keeper": path.parent.name, "atoms": gap_atoms,
-                                      "turns_without_line": turn - previous["turn"] - 1,
-                                      "from": previous["at"], "until": stamp.strftime("%m-%d %H:%M")})
-                # The furthest position this line witnesses: its end, or for a
-                # line with no atom position (an official client), its start.
+                        entry = {"keeper": path.parent.name, "atoms": gap_atoms,
+                                 "turns_without_line": turn - previous["turn"] - 1,
+                                 "from": previous["at"], "until": stamp.strftime("%m-%d %H:%M")}
+                        (after_official_client if previous["official_client"] else spans).append(entry)
+                # The line's end atom. A line with no atom position (an
+                # official client) states none; its start stands in as the
+                # lower bound and the next gap is classed apart.
                 end_atom = position.get("end_atom") if isinstance(position, dict) else None
                 witnessed = end_atom if end_atom is not None else start_atom
-                previous = ({"end_atom": witnessed, "turn": turn, "at": stamp.strftime("%m-%d %H:%M")}
+                previous = ({"end_atom": witnessed, "turn": turn, "at": stamp.strftime("%m-%d %H:%M"),
+                             "official_client": end_atom is None}
                             if witnessed is not None else None)
     spans.sort(key=lambda span: -span["atoms"])
     print(json.dumps({
@@ -173,14 +183,20 @@ def unfinished(masc_dir, day):
         "keepers": len({span["keeper"] for span in spans}),
         "atoms": sum(span["atoms"] for span in spans),
         "turns_without_line": sum(span["turns_without_line"] for span in spans),
+        "after_official_client_line": {"spans": len(after_official_client),
+                                       "atoms": sum(span["atoms"] for span in after_official_client)},
         "largest": spans[:10],
     }, indent=1))
 
 
 def span(masc_dir, keeper, start, end):
     """One keeper's model calls between two UTC instants, grouped by the
-    `total_turns` value each call logged, with the tools it called."""
+    `total_turns` value each call logged and the keeper's boot count since
+    the window opened (`<total_turns>#<boots>`), with the tools it called.
+    A boot that cuts a turn leaves `total_turns` unchanged, so the turns on
+    either side of it log the same number and only the boot line splits them."""
     turns_seen = collections.OrderedDict()
+    boots = 0
     tools = collections.Counter()
     day = datetime.date.fromisoformat(start[:10])
     while day.isoformat() <= end[:10]:
@@ -189,6 +205,11 @@ def span(masc_dir, keeper, start, end):
             if not (start <= stamp <= end):
                 continue
             message = row.get("message", "")
+            boot = KEEPER_BOOT.search(message)
+            if boot:
+                if boot.group(1) == keeper:
+                    boots += 1
+                continue
             if message.startswith(f"keeper:{keeper} tool_call tool="):
                 tools[message.split("tool=", 1)[1].split()[0]] += 1
                 continue
@@ -196,7 +217,7 @@ def span(masc_dir, keeper, start, end):
                 continue
             match = TURN_LINE.search(message)
             if match:
-                entry = turns_seen.setdefault(match.group(2), {"first": row["ts"][:19], "first_call_tokens": int(match.group(3)),
+                entry = turns_seen.setdefault(f"{match.group(2)}#{boots}", {"first": row["ts"][:19], "first_call_tokens": int(match.group(3)),
                                                                "calls": 0, "tokens": 0, "max_tokens": 0})
                 entry["last"] = row["ts"][:19]
                 entry["calls"] += 1
@@ -206,7 +227,7 @@ def span(masc_dir, keeper, start, end):
     print(json.dumps({"keeper": keeper, "from": start, "until": end,
                       "calls": sum(entry["calls"] for entry in turns_seen.values()),
                       "tokens": sum(entry["tokens"] for entry in turns_seen.values()),
-                      "by_total_turns": turns_seen, "tools": tools.most_common(8)}, indent=1))
+                      "by_total_turns_and_boot": turns_seen, "tools": tools.most_common(8)}, indent=1))
 
 
 def writes(trace_path, start, end):
@@ -339,7 +360,7 @@ def main(argv):
     elif command == "restarts":
         restarts(argv[2], argv[3])
     elif command == "unfinished":
-        unfinished(argv[2], argv[3])
+        unfinished(argv[2], argv[3], argv[4] if len(argv) > 4 else None)
     elif command == "span":
         span(argv[2], argv[3], argv[4], argv[5])
     elif command == "writes":

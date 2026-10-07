@@ -1,8 +1,12 @@
 {
- "spans": 105,
- "keepers": 23,
- "atoms": 6586,
- "turns_without_line": 283,
+ "spans": 88,
+ "keepers": 20,
+ "atoms": 5467,
+ "turns_without_line": 280,
+ "after_official_client_line": {
+  "spans": 17,
+  "atoms": 1119
+ },
  "largest": [
   {
    "keeper": "sangsu",
@@ -10,20 +14,6 @@
    "turns_without_line": 98,
    "from": "10-05 18:04",
    "until": "10-06 02:49"
-  },
-  {
-   "keeper": "jazz-developer",
-   "atoms": 503,
-   "turns_without_line": 0,
-   "from": "10-05 12:58",
-   "until": "10-06 00:18"
-  },
-  {
-   "keeper": "masc-pro-builder",
-   "atoms": 360,
-   "turns_without_line": 1,
-   "from": "10-05 20:45",
-   "until": "10-06 01:04"
   },
   {
    "keeper": "you-never-change",
@@ -61,18 +51,32 @@
    "until": "10-06 05:30"
   },
   {
-   "keeper": "tui-developer",
-   "atoms": 105,
-   "turns_without_line": 0,
-   "from": "10-06 07:47",
-   "until": "10-06 10:22"
-  },
-  {
    "keeper": "masc-pro-builder",
    "atoms": 93,
    "turns_without_line": 0,
    "from": "10-06 05:59",
    "until": "10-06 08:34"
+  },
+  {
+   "keeper": "wkbl-front",
+   "atoms": 89,
+   "turns_without_line": 0,
+   "from": "10-06 06:13",
+   "until": "10-06 08:32"
+  },
+  {
+   "keeper": "you-never-change",
+   "atoms": 89,
+   "turns_without_line": 79,
+   "from": "10-06 00:12",
+   "until": "10-06 05:21"
+  },
+  {
+   "keeper": "masc-pro-builder",
+   "atoms": 88,
+   "turns_without_line": 0,
+   "from": "10-06 08:34",
+   "until": "10-06 11:48"
   }
  ]
 }

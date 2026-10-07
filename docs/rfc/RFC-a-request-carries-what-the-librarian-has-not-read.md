@@ -43,7 +43,7 @@ related: ["keeper-context-window-in-tokens", "librarian-lifecycle", "0363", "046
 ### 2.1 이어받은 턴 (2026-10-06)
 
 - 끝나지 못한 턴이 저장한 atom 은, 다음에 끝까지 간 턴의 줄이 자기 시작 위치로 적을 때까지 마지막 완료 경계 뒤에 남는다. 그동안 그 뒤의 턴들이 그 atom 을 이어받아 싣는다.
-- 00:00~15:00Z 에 Keeper 23개에서 이런 구간이 105개, atom 6,586개였다(`unfinished.json`). 구간마다 앞 줄과 뒷줄 사이에는 그 atom 이 마지막 완료 경계 뒤에 있었다. 그동안의 요청이 실제로 그 atom 을 실었는지는 이 파일로 알 수 없다. 공식 씨앗이나 `Past_librarian_point` 에서 연 요청은 그 뒤에서 시작했을 수 있다.
+- 00:00~15:00Z 에 Keeper 20개에서 이런 구간이 88개, atom 5,467개였다(`unfinished.json`). 공식 클라이언트 턴 줄 바로 뒤의 틈 17개(atom 1,119개)는 그 턴 자신의 Agent Core 후보가 남긴 atom 일 수 있어 따로 세고 이 숫자에서 뺐다. 구간마다 앞 줄과 뒷줄 사이에는 그 atom 이 마지막 완료 경계 뒤에 있었다. 그동안의 요청이 실제로 그 atom 을 실었는지는 이 파일로 알 수 없다. 공식 씨앗이나 `Past_librarian_point` 에서 연 요청은 그 뒤에서 시작했을 수 있다.
 - 서버가 11번 기동했다. 기동 직후 각 Keeper 의 첫 Agent Core 요청 189건 가운데 143건이, 끝나지 못한 턴의 atom 을 실었다(`restarts.json`). 그 143건 가운데 32건은 범위가 완료 경계보다 앞에서 열렸다(polisher 12597 < 12606, masc-pro-builder 2856 < 2968). 그 요청들은 Librarian 이 아직 읽지 못한 끝난 턴도 실었다.
 - you-never-change 를 따라가면 이렇다.
   - 05:21 에 운영자 채팅 턴이 시작됐다.

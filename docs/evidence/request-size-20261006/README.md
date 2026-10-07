@@ -5,9 +5,9 @@ All numbers come from the live base path (`~/me/.masc`), read-only, with `measur
 
 | File | Command | What it shows |
 |---|---|---|
-| `unfinished.json` | `measure.py unfinished ~/me/.masc 2026-10-06` | Atoms saved by turns that did not finish, as the next finished turn's line states them |
+| `unfinished.json` | `measure.py unfinished ~/me/.masc 2026-10-06 15:00` | Atoms saved by turns that did not finish, as the next finished turn's line states them |
 | `restarts.json` | `measure.py restarts ~/me/.masc 2026-10-06` | The first Agent-Core request after each keeper boot, and how many atoms of unfinished turns it carried |
-| `sangsu-span.json` | `measure.py span ~/me/.masc sangsu 2026-10-05T18:00 2026-10-06T02:50` | One keeper's calls and tokens, grouped by the `total_turns` value each call logged |
+| `sangsu-span.json` | `measure.py span ~/me/.masc sangsu 2026-10-05T18:00 2026-10-06T02:50` | One keeper's calls and tokens, grouped by the `total_turns` value each call logged and the keeper's boot count (`<total_turns>#<boots>`), so the two turns around the 01:32 boot stay apart |
 | `sangsu-writes.json` | `measure.py writes <trace.json> 2077 3686` and `3686 4463` | What those calls were |
 | `sangsu-composition.json` | `turn_composition.py <trace.json> 2077 3686` | Byte composition of the first loop turn's atoms |
 | `turns.json` | `measure.py turns ~/me/.masc 2026-10-06` | Model calls per Keeper turn, split at keeper boots |
@@ -17,10 +17,16 @@ All numbers come from the live base path (`~/me/.masc`), read-only, with `measur
 | `muse-session.json` | `measure.py session <session.jsonl>` | One Muse host session resumed for 33 Keeper turns |
 | `muse-fresh.json` | `measure.py fresh <session.jsonl> 70000,100000,130000` | The same calls if each turn had started a fresh host session from a seed |
 
+## Reproducing
+
+- `turns`, `restarts`, `unfinished`, `span` and `carried` read `<masc-dir>/logs/system_log_<day>.jsonl` and `<masc-dir>/keepers/*/turn-boundaries.jsonl`. Those files stay on the machine that ran the server, and no copy is checked in. Someone who keeps them can rerun the commands in the table. `unfinished` takes an optional end time (`15:00`) because the day's log kept growing after these files were made.
+- `writes`, `turn_composition.py`, `session` and `fresh` read a keeper's checkpoint trace (`{"messages": [...]}`) and a Muse host session `.jsonl`. This repository does not carry either file, and this README does not name an immutable path for them: the trace file for a keeper is replaced when its checkpoint is purged. For these rows the checked-in `.json` outputs are the only form of the evidence. Nobody else can regenerate them.
+- `seed-by-path.txt` was copied by hand from two log lines of the same log file.
+
 ## What the numbers say
 
 1. **The turn after an unfinished turn picks up its atoms, verbatim, by design.** A turn writes its turn-boundary line only when it finishes. After a failure past a saved checkpoint stage the same run does not retry; the next keeper cycle does (`keeper_turn_driver.ml`, "retry deferred after typed AGENT_CORE checkpoint stage … the next keeper cycle remains eligible"). The completed boundary stays where the last finished turn left it, so the next turn's requests carry the unfinished turn's atoms with their tool results verbatim (#37602 keeps resumed work out of demotion; Librarian RFC §4.6 records why a turn's start is not a safe lower bound). The Librarian reads them once a later finished turn's line states where it started.
-   - 2026-10-06 (to 15:00Z): 105 such spans across 23 keepers, 6,586 atoms (`unfinished.json`). The server booted 11 times; 143 of the 189 first requests after a boot carried atoms of an unfinished turn (`restarts.json`).
+   - 2026-10-06 (to 15:00Z): 88 such spans across 20 keepers, 5,467 atoms (`unfinished.json`). 17 more gaps (1,119 atoms) follow an official-client turn's line, which states no end atom. Those atoms may belong to that finished turn's own Agent-Core candidate, so they are counted apart as `after_official_client_line` and left out of the 88 and 5,467. The server booted 11 times; 143 of the 189 first requests after a boot carried atoms of an unfinished turn (`restarts.json`).
    - you-never-change: an operator chat turn started at 05:21. Restarts at 06:46, 07:21, 07:52 and 08:58 each cancelled the running turn. A cancelled turn does not advance the turn number, so all five turns logged `total_turns=612`, and the four after the restarts used `turn_boundary=boundary:3887`. Their first requests carried 45, 89, 157 and 275 atoms (194 KB, 325 KB, 557 KB, 971 KB). The turn that started at 09:00 finished at 09:17. The next request used boundary 4210, and the five turns' 324 atoms (3887..4211) went out demoted in 570 KB (`carried-you-never-change.txt`).
 2. **One keeper spent 1.33 billion tokens in under nine hours, most of it a loop and its resumption.** sangsu, 2026-10-05 18:00 to 10-06 02:50 (`sangsu-span.json`, `sangsu-writes.json`):
    - 18:14 to 19:57: one turn, 1,608 calls, 637.7 M tokens, up to 686,047 per call. 1,579 of its tool calls were `keeper_memory_write` (494 inserted, 1,085 re-observed an existing fact). The Ollama session limit ended it with a 429.

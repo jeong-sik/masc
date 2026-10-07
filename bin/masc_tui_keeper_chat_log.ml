@@ -555,3 +555,17 @@ let read_whole_journal ~fetch ~since_seq =
   in
   page since_seq Journal.first_row []
 ;;
+
+let read_with_operation_state ~read_operation ~read_journal =
+  let operation = read_operation () in
+  let journal = read_journal () in
+  match operation with
+  | Ok (Some Keeper_chat_operation.Queued) ->
+      let refreshed = read_operation () in
+      (match refreshed with
+       | Ok (Some (Keeper_chat_operation.Running _ | Succeeded _ | Failed _ | Cancelled _)) ->
+           refreshed, read_journal ()
+       | Ok (Some Queued) | Ok None | Error _ -> refreshed, journal)
+  | Ok (Some (Running _ | Succeeded _ | Failed _ | Cancelled _)) | Ok None | Error _ ->
+      operation, journal
+;;

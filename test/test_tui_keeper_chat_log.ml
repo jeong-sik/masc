@@ -153,6 +153,29 @@ let page_json ?(schema = "masc.keeper_chat_events.v2") ?(next_since_offset = `In
     ; "next_since_offset", next_since_offset
     ]
 
+let test_operation_and_journal_read_order () =
+  let open Keeper_chat_operation in
+  List.iter (fun next ->
+    let calls = ref [] and states = ref [Queued; next] in
+    let read_operation () =
+      calls := !calls @ ["operation"];
+      match !states with
+      | value :: rest -> states := rest; Ok (Some value)
+      | [] -> fail "unexpected operation reread" in
+    let read_journal () = calls := !calls @ ["journal"]; Ok [] in
+    let observed, _ = Log.read_with_operation_state ~read_operation ~read_journal in
+    check bool "claim between reads is observed" true (observed = Ok (Some next));
+    check (list string) "journal follows the newest operation observation"
+      ["operation";"journal";"operation";"journal"] !calls)
+    [Running {started_at=2.}; Succeeded {completed_at=3.;outcome_ref="result"}];
+  let terminal = Failed {completed_at=3.;failure={kind=Interrupted_by_restart;
+    detail="server restarted";outcome_ref=None}} in
+  let observed, journal = Log.read_with_operation_state
+    ~read_operation:(fun () -> Ok (Some terminal))
+    ~read_journal:(fun () -> Error Log.Journal_pruned) in
+  check bool "journal absence cannot erase the exact failure" true
+    (observed = Ok (Some terminal) && journal = Error Log.Journal_pruned)
+
 let test_decode_exact_operation_state () =
   let body fields = `Assoc (["schema", `String "masc.keeper_chat_operation.v1";
     "operation_id", `String "exact"] @ fields) in
@@ -833,7 +856,8 @@ let () =
             test_a_blank_reason_is_not_a_reason
         ] )
     ; ( "v2 page"
-      , [ test_case "decode exact operation state" `Quick test_decode_exact_operation_state
+      , [ test_case "operation and journal observation order" `Quick test_operation_and_journal_read_order
+        ; test_case "decode exact operation state" `Quick test_decode_exact_operation_state
         ; test_case "decode events page" `Quick test_decode_events_page
         ; test_case "add_journaled holds undrawn positions" `Quick
             test_add_journaled_holds_undrawn_positions

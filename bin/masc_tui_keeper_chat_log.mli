@@ -191,3 +191,12 @@ val read_whole_journal :
     while both cursors advance past the ones asked from. The first error ends
     the read; a page that claims more without advancing is
     {!Events_undecodable}, naming the positions, never a shorter [Ok]. *)
+
+val read_with_operation_state :
+  read_operation:(unit -> (Keeper_chat_operation.state option, string) result) ->
+  read_journal:(unit -> (Masc.Keeper_chat_event_log.journaled_event list, events_error) result) ->
+  (Keeper_chat_operation.state option, string) result
+  * (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
+(** Read operation state before its journal. Recheck a queued observation after
+    reading the journal; if it has since started or ended, read the journal
+    after that newer state. A journal failure does not discard the state. *)

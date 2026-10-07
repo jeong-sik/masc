@@ -6313,7 +6313,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
        separate authority for whether that execution is still running. Read
        it first: terminal store settlement follows the final journal append,
        so the following journal read cannot cut off that terminal prefix. *)
-    let operation_state =
+    let read_operation () =
       match source with
       | Keeper_chat_log.Autonomous_turn _ -> Ok None
       | Keeper_chat_log.Operation operation_id ->
@@ -6330,7 +6330,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
            | Eio.Cancel.Cancelled _ as exn -> raise exn
            | exn -> Error (Printexc.to_string exn))
     in
-    let journal =
+    let read_journal () =
       try
         Keeper_chat_log.read_whole_journal ~since_seq
           ~fetch:(fun ~since_seq ~since_offset ->
@@ -6346,6 +6346,8 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
     in
+    let operation_state, journal = Keeper_chat_log.read_with_operation_state
+      ~read_operation ~read_journal in
     enqueue_async mailbox
       (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state })
   in
@@ -16290,6 +16292,26 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
                   [ (source, started_at, since_seq) ])
       in
+      let reconcile_operation log =
+        match operation_state with
+        | Ok observed ->
+            Keeper_chat_log.observe_operation_state log.tl_log observed;
+            Option.iter (Keeper_chat_transcript.reconcile_operation log.tl_transcript)
+              (Keeper_chat_log.operation_state log.tl_log)
+        | Error detail ->
+            Keeper_chat_log.observe_operation_state log.tl_log None;
+            add_event state "error"
+              (Printf.sprintf "operation for %s not loaded: %s"
+                 (Keeper_chat.compact_request_id journal_id)
+                 (Keeper_chat.terminal_safe_text detail))
+      in
+      (* The operation record remains authoritative when its journal cannot
+         be read. Settle the retained transcript before classifying the
+         independent journal failure below. *)
+      (match journal with
+       | Ok _ -> ()
+       | Error _ -> Option.iter reconcile_operation
+           (settled_log_for_request state ~keeper_name journal_id));
       (match journal with
       | Ok lines ->
           (* The lines join the session's record of the turn when it has one
@@ -16304,17 +16326,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                   ~started_at:(journal_log_started_at ~fallback:started_at lines)
           in
           let accepted = turn_log_add_journaled log lines in
-          (match operation_state with
-           | Ok observed ->
-               Keeper_chat_log.observe_operation_state log.tl_log observed;
-               Option.iter (Keeper_chat_transcript.reconcile_operation log.tl_transcript)
-                 (Keeper_chat_log.operation_state log.tl_log)
-           | Error detail ->
-               Keeper_chat_log.observe_operation_state log.tl_log None;
-               add_event state "error"
-                 (Printf.sprintf "operation for %s not loaded: %s"
-                    (Keeper_chat.compact_request_id journal_id)
-                    (Keeper_chat.terminal_safe_text detail)));
+          reconcile_operation log;
           (* An observer-followed turn has no pane-owned delta delivery.
              Refresh its durable results after the journal accepts them;
              replayed seqs and text-only reads do not request another load. *)

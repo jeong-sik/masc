@@ -2112,6 +2112,26 @@ let test_exact_operation_ending_keeps_unjournaled_rows () =
     ; Succeeded {completed_at=150.; outcome_ref="stored-result"} ]
 ;;
 
+let test_delivery_failure_keeps_complete_stream_authority () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- loaded_turn ~request_id:"delivered";
+  let log = settled_log ~request_id:"delivered"
+    [Live.Run_started; Live.Text "answered"; visible_reply "answered"; Live.Run_finished] in
+  state.msg_settled_logs <- [log];
+  let before = Tui_types.chat_rows_for state "alpha" in
+  let terminal = Keeper_chat_operation.Failed {completed_at=150.; failure={kind=Delivery_failed;
+    detail="delivery failed";outcome_ref=None}} in
+  Log.observe_operation_state log.tl_log (Some terminal);
+  Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+  check bool "delivery failure retains the stream's complete log" true
+    (Tui_types.turn_log_holds_the_turn log);
+  check (list string) "delivery failure does not reintroduce duplicate durable rows"
+    (List.map (fun (row : Tui_types.msg_entry) -> row.me_text) before)
+    (Tui_types.chat_rows_for state "alpha" |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
+;;
+
 (* Two turns settled in one session, one of them for another keeper: only
    alpha's held turn is suppressed from alpha's rows. *)
 let test_settled_logs_are_read_per_keeper () =
@@ -5048,6 +5068,8 @@ let () =
             test_an_unfinished_settled_log_suppresses_nothing
         ; test_case "exact operation ending retains unjournaled history rows" `Quick
             test_exact_operation_ending_keeps_unjournaled_rows
+        ; test_case "delivery failure preserves complete stream authority" `Quick
+            test_delivery_failure_keeps_complete_stream_authority
         ; test_case "settle_turn_log commits, holds and clears live" `Quick
             test_settle_turn_log_commits_holds_and_clears_live
         ; test_case "a turn the server ended without a closing event is closed" `Quick

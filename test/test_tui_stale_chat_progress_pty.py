@@ -33,6 +33,7 @@ def run(executable: str) -> None:
         journals[operation] = [{"v": 1, "seq": seq, "ts": at + seq, "event": event}
                                for seq, event in enumerate(events)]
     read_old_state = threading.Event()
+    current_state_reads = []
 
     def operation(path):
         identity = urllib.parse.unquote(urllib.parse.urlsplit(path).path.rsplit("/", 1)[-1])
@@ -42,7 +43,11 @@ def run(executable: str) -> None:
             result.update(state="Failed", completed_at=now - 104990,
                           failure_kind="Turn_cancelled", failure_detail=failure)
         elif identity == current:
-            result.update(state="Running", started_at=now - 5)
+            current_state_reads.append(identity)
+            if len(current_state_reads) == 1:
+                result.update(state="Queued")
+            else:
+                result.update(state="Running", started_at=now - 5)
         else:
             return 404, {"error": "unknown_operation"}
         return 200, result
@@ -77,6 +82,8 @@ def run(executable: str) -> None:
             if screen.count(text) != 1:
                 raise AssertionError(f"expected one retained {text!r}: {screen!r}")
         progress = [line for line in screen.splitlines() if b"IN PROGRESS" in line]
+        if len(current_state_reads) < 2:
+            raise AssertionError("the queued observation was not reconciled after the journal read")
         if len(progress) != 1 or b"CURRENT_RUNTIME" not in progress[0] or b"OLD_RUNTIME" in progress[0]:
             raise AssertionError(f"progress does not identify the current execution: {screen!r}")
         h.send_and_wait(process, fd, output, b"\x11", b"MASC Keepers")

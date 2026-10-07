@@ -2228,6 +2228,9 @@ let apply ~now t delta =
 (* The operation closes progress but does not fill gaps in its journal.
    Keep the same partial-log authority as a terminal subscription receipt. *)
 let reconcile_operation t (state : Keeper_chat_operation.state) =
+  let ending_source = match t.phase with
+    | Waiting | Working -> Ending_read_from_record
+    | Stream_ended | Stream_failed _ -> t.ending_source in
   match state with
   | Queued | Running _ -> ()
   | Failed { completed_at; failure } ->
@@ -2235,13 +2238,13 @@ let reconcile_operation t (state : Keeper_chat_operation.state) =
        | Stream_failed _ -> ()
        | Waiting | Working | Stream_ended ->
            apply ~now:completed_at t (Live.Run_failed { message = failure.detail });
-           t.ending_source <- Ending_read_from_record)
+           t.ending_source <- ending_source)
   | Cancelled { completed_at } ->
       (match t.phase with
        | Stream_failed _ -> ()
        | Waiting | Working | Stream_ended ->
            apply ~now:completed_at t (Live.Run_failed { message = "요청이 취소되었습니다" });
-           t.ending_source <- Ending_read_from_record)
+           t.ending_source <- ending_source)
   | Succeeded { completed_at; _ } ->
       (match t.phase with
        | Stream_ended | Stream_failed _ -> ()

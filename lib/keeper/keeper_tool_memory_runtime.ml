@@ -1062,9 +1062,9 @@ let keeper_context_status_json
     Config_dir_resolver.keepers_dir_for_base_path
       ~base_path:config.Workspace.base_path
   in
-  let memory_facts_total =
+  let memory_facts =
     match read_current_facts ~keepers_dir ~keeper_id:meta.name with
-    | Ok facts -> List.length facts
+    | Ok facts -> facts
     | Error error -> failwith (durable_search_error_detail error)
   in
   let source_memory_facts_total, source_memory_invalidations_total =
@@ -1105,7 +1105,9 @@ let keeper_context_status_json
          ]
          @ Keeper_sandbox.context_status_fields sandbox
          @ [ "sandbox_live", sandbox_live
-           ; "memory_facts_total", `Int memory_facts_total
+           ; "memory_facts_total", `Int (List.length memory_facts)
+           ; "memory_limits", Keeper_memory_limits.to_json
+               (Keeper_memory_limits.current memory_facts)
            ; "source_memory_facts_total", `Int source_memory_facts_total
            ; ( "source_memory_invalidations_total"
              , `Int source_memory_invalidations_total )

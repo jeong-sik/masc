@@ -338,6 +338,23 @@ module KeeperMemoryOs = struct
   let recall_env_key = "MASC_KEEPER_MEMORY_OS_RECALL"
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
   let facts_max_bytes_env_key = "MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES"
+  let category_cap_env_key = "MASC_KEEPER_MEMORY_CATEGORY_CAP"
+  let facts_per_category_cap_env_key = "MASC_KEEPER_MEMORY_FACTS_PER_CATEGORY_CAP"
+
+  let positive_count name ~default =
+    match Env_config_memory.env_opt name with
+    | None -> default
+    | Some raw ->
+      (match int_of_string_opt raw with
+       | Some value when value > 0 -> value
+       | Some _ | None ->
+         raise (Env_config_core.Config_error (name ^ " must be a positive integer")))
+  ;;
+
+  let category_cap () = positive_count category_cap_env_key ~default:30
+  let facts_per_category_cap () =
+    positive_count facts_per_category_cap_env_key ~default:30
+  ;;
 
   let facts_max_bytes () =
     match Env_config_memory.env_opt facts_max_bytes_env_key with

@@ -500,7 +500,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                      ~model_facing_name
                      ~seen
                      ~elapsed_s:(now () -. started)
-                     ~text:(Some turn.text)
+                     ~text:turn.text
                      ~dynamic_tool_calls:turn.dynamic_tool_calls)))))
 ;;
 

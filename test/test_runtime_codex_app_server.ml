@@ -178,7 +178,7 @@ let warm_fresh_executable path =
     wait ()
 ;;
 
-let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_pages = []) ?(model_pages_before_thread = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let fixture_script ?(capture_tool_results = false) ?(close_before_turn = false) ?(inject_items = false) ?(model_pages = []) ?(model_pages_before_thread = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?(line_delays = []) ?before_final_stdin_drain_s
     ?pipe_holder_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
@@ -267,7 +267,11 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_
            (fun seconds ->
               output_string output (Printf.sprintf "sleep %.3f\n" seconds))
            terminal_line_delay_s;
-       output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
+       output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n");
+       if capture_tool_results
+          && Yojson.Safe.Util.member "method" (Yojson.Safe.from_string line)
+             = `String "item/tool/call"
+       then capture_request ())
     remaining_lines;
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
@@ -279,10 +283,11 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_
   path
 ;;
 
-let with_fixture ?close_before_turn ?inject_items ?model_pages ?model_pages_before_thread ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let with_fixture ?capture_tool_results ?close_before_turn ?inject_items ?model_pages ?model_pages_before_thread ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?terminal_line_delay_start_index ?line_delays ?before_final_stdin_drain_s ?pipe_holder_s lines f =
   let path =
     fixture_script
+      ?capture_tool_results
       ?close_before_turn
       ?inject_items
       ?model_pages
@@ -631,7 +636,7 @@ let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false)
             check bool "terminal carries scheduling disposition" true
               (result.scheduling_handoff = expected_handoff);
             check int "concurrent tool frames survive steer response" 2 !calls;
-            check string "natural terminal survives handoff" "MASC_SUBSCRIPTION_OK" result.text);
+            check (option string) "natural terminal survives handoff" (Some "MASC_SUBSCRIPTION_OK") result.text);
       let rows = In_channel.with_open_bin capture_path In_channel.input_lines
         |> List.map Yojson.Safe.from_string in
       let open Yojson.Safe.Util in
@@ -1021,7 +1026,7 @@ let test_history_is_injected_before_turn () =
        in
        match run_fixture ~history path with
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-       | Ok result -> check string "text" "MASC_SUBSCRIPTION_OK" result.text)
+       | Ok result -> check (option string) "text" (Some "MASC_SUBSCRIPTION_OK") result.text)
 ;;
 
 (* The image has to land in the turn/start input list as an inline data URL --
@@ -1109,7 +1114,7 @@ let test_chatgpt_subscription_turn () =
       match run_fixture path with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok result ->
-        check string "text" "MASC_SUBSCRIPTION_OK" result.text;
+        check (option string) "text" (Some "MASC_SUBSCRIPTION_OK") result.text;
         check string "thread" "thread-1" result.thread_id;
         check string "turn" "turn-1" result.turn_id;
         check string "model" "gpt-fixture" result.model;
@@ -1181,7 +1186,7 @@ let test_token_usage_of_this_turn_reaches_the_result () =
          | None -> fail "the turn's request frame was not kept as its count");
         check (option int) "the frame's model window" (Some 272000)
           result.model_context_window;
-        check string "text still lands" "MASC_SUBSCRIPTION_OK" result.text)
+        check (option string) "text still lands" (Some "MASC_SUBSCRIPTION_OK") result.text)
 ;;
 
 let test_token_usage_of_another_turn_is_not_ours () =
@@ -1983,7 +1988,7 @@ let test_supported_account_modes () =
         | Ok turn ->
           check string "authentication" expected
             (Runtime_codex_app_server.authentication_to_string turn.subscription);
-          check string "actual turn completed" "MASC_SUBSCRIPTION_OK" turn.text))
+          check (option string) "actual turn completed" (Some "MASC_SUBSCRIPTION_OK") turn.text))
     [ `Assoc [ "type", `String "apiKey" ], true, "api_key"
     ; `Null, false, "provider_managed"
     ; `Assoc [ "type", `String "amazonBedrock" ], true, "amazon_bedrock" ]
@@ -2478,7 +2483,7 @@ let test_retry_notifications_are_observational () =
     (fun path ->
        match run_fixture path with
        | Ok turn ->
-         check string "completed after retries" "MASC_SUBSCRIPTION_OK" turn.text
+         check (option string) "completed after retries" (Some "MASC_SUBSCRIPTION_OK") turn.text
        | Error error -> fail (Runtime_codex_app_server.error_to_string error));
   let terminal =
     {|{"method":"error","params":{"willRetry":false,"error":{"message":"provider gave up"}}}|}
@@ -2510,7 +2515,7 @@ let test_progress_resets_stream_idle_timeout () =
     (fun path ->
        match run_fixture ~timeout_s:0.75 path with
        | Ok turn ->
-         check string "progressing turn completes" "MASC_SUBSCRIPTION_OK" turn.text
+         check (option string) "progressing turn completes" (Some "MASC_SUBSCRIPTION_OK") turn.text
        | Error error -> fail (Runtime_codex_app_server.error_to_string error))
 ;;
 
@@ -2613,7 +2618,7 @@ let test_command_item_outlasting_the_idle_window_completes () =
            path
        with
        | Ok turn ->
-         check string "turn completes after the silent command" "MASC_SUBSCRIPTION_OK" turn.text
+         check (option string) "turn completes after the silent command" (Some "MASC_SUBSCRIPTION_OK") turn.text
        | Error error -> fail (Runtime_codex_app_server.error_to_string error))
 ;;
 
@@ -2632,7 +2637,7 @@ let test_mcp_item_outlasting_the_idle_window_completes () =
        with
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok turn ->
-         check string "turn completes after the silent MCP call" "MASC_SUBSCRIPTION_OK" turn.text;
+         check (option string) "turn completes after the silent MCP call" (Some "MASC_SUBSCRIPTION_OK") turn.text;
          let open Runtime_codex_app_server in
          (match List.rev !stream_events with
           | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
@@ -2667,7 +2672,7 @@ let test_sleep_item_outlasting_the_idle_window_completes () =
        with
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok turn ->
-         check string "turn completes after the sleep" "MASC_SUBSCRIPTION_OK" turn.text;
+         check (option string) "turn completes after the sleep" (Some "MASC_SUBSCRIPTION_OK") turn.text;
          let open Runtime_codex_app_server in
          (match List.rev !stream_events with
           | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
@@ -2720,7 +2725,7 @@ let test_two_open_items_keep_the_window_off_until_both_complete () =
            path
        with
        | Ok turn ->
-         check string "turn completes after the second item" "MASC_SUBSCRIPTION_OK" turn.text
+         check (option string) "turn completes after the second item" (Some "MASC_SUBSCRIPTION_OK") turn.text
        | Error error -> fail (Runtime_codex_app_server.error_to_string error))
 ;;
 
@@ -2873,7 +2878,7 @@ let test_no_deadline_starts_after_turn_acceptance () =
            ~no_turn_deadline:true
            path
        with
-       | Ok turn -> check string "unbounded result" "MASC_SUBSCRIPTION_OK" turn.text
+       | Ok turn -> check (option string) "unbounded result" (Some "MASC_SUBSCRIPTION_OK") turn.text
        | Error error -> fail (Runtime_codex_app_server.error_to_string error))
 ;;
 
@@ -2946,7 +2951,7 @@ let test_no_deadline_begins_after_turn_dispatch () =
              ~images:[])
        in
        match outcome with
-       | Ok turn -> check string "turn completes" "MASC_SUBSCRIPTION_OK" turn.text
+       | Ok turn -> check (option string) "turn completes" (Some "MASC_SUBSCRIPTION_OK") turn.text
        | Error error -> fail (Runtime_codex_app_server.error_to_string error))
 ;;
 
@@ -3100,7 +3105,7 @@ let test_nonterminal_notifications_do_not_preempt_completion () =
   with_fixture lines (fun path ->
     match run_fixture path with
     | Ok turn ->
-      check string "completed after progress" "MASC_SUBSCRIPTION_OK" turn.text
+      check (option string) "completed after progress" (Some "MASC_SUBSCRIPTION_OK") turn.text
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
     )
 ;;
@@ -3131,7 +3136,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
        match run_fixture ~on_stream_event path with
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok turn ->
-         check string "turn completes" "MASC_SUBSCRIPTION_OK" turn.text;
+         check (option string) "turn completes" (Some "MASC_SUBSCRIPTION_OK") turn.text;
          (match !reports with
           | [ { Runtime_provider_usage_window.source = Codex_account_rate_limits_updated
               ; windows =
@@ -3161,7 +3166,7 @@ let test_item_output_deltas_are_typed_and_unbounded () =
     (fun path ->
       match run_fixture path with
       | Ok result ->
-        check string "terminal text" "MASC_SUBSCRIPTION_OK" result.text
+        check (option string) "terminal text" (Some "MASC_SUBSCRIPTION_OK") result.text
       | Error error -> fail (Runtime_codex_app_server.error_to_string error));
   let wrong_identity =
     {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-other","turnId":"turn-1","itemId":"command-1","delta":"chunk"}}|}
@@ -3205,7 +3210,7 @@ let test_empty_output_delta_does_not_end_the_turn () =
         ]
         (fun path ->
           match run_fixture path with
-          | Ok result -> check string label "MASC_SUBSCRIPTION_OK" result.text
+          | Ok result -> check (option string) label (Some "MASC_SUBSCRIPTION_OK") result.text
           | Error error -> fail (Runtime_codex_app_server.error_to_string error)))
     [ "empty delta", {|""|}
     ; "whitespace delta", {|"   "|}
@@ -3228,7 +3233,7 @@ let test_empty_output_delta_does_not_end_the_turn () =
         ]
         (fun path ->
           match run_fixture path with
-          | Ok result -> check string label "MASC_SUBSCRIPTION_OK" result.text
+          | Ok result -> check (option string) label (Some "MASC_SUBSCRIPTION_OK") result.text
           | Error error -> fail (Runtime_codex_app_server.error_to_string error)))
     [ ( "empty itemId"
       , {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"","delta":"chunk"}}|}
@@ -3534,7 +3539,7 @@ let check_declared_provider_environment ~relative =
           close_out output; Unix.chmod wrapper 0o700;
           match run_fixture wrapper with
           | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-          | Ok turn -> check string "turn completed" "MASC_SUBSCRIPTION_OK" turn.text));
+          | Ok turn -> check (option string) "turn completed" (Some "MASC_SUBSCRIPTION_OK") turn.text));
     let output = open_out config_path in
     output_string output "[model_providers.fixture]\nenv_key = 42\n"; close_out output;
     match run_fixture "/not/spawned/invalid-provider-config" with
@@ -5025,7 +5030,7 @@ let test_blank_completion_closes_identity_across_four_messages () =
                   |> String.concat "" in
                 check string "blank completion cannot poison or repeat the next messages"
                   (blank ^ "BCD") text;
-                check string "last named message remains the final answer" "D" result.text))
+                check (option string) "last named message remains the final answer" (Some "D") result.text))
           [None; Some "n+1"])
         [None; Some "n"])
       [None; Some "n"])
@@ -6186,6 +6191,14 @@ let test_production_keeper_quiet_final_contract () =
     {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","id":"message-1","text":"","phase":"final_answer"}],"status":"completed"}}}|} in
   let missing_terminal =
     {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|} in
+  let tool_request name arguments =
+    Yojson.Safe.to_string (`Assoc
+      ["id", `String "quiet-tool"; "method", `String "item/tool/call";
+       "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+         "callId", `String "quiet-call"; "tool", `String name; "arguments", arguments]]) in
+  let failed_read = tool_request "keeper_artifact_read"
+    (`Assoc ["sha256", `String (String.make 64 '0')]) in
+  let successful_read = tool_request "keeper_context_status" (`Assoc []) in
   let observation = { Keeper_world_observation.pending_messages = []; pending_board_events = [];
             idle_seconds = 0; active_goals = Ok []; unclaimed_task_count = 0;
             claimable_tasks = []; held_task_skills = []; failed_task_count = 0;
@@ -6195,17 +6208,32 @@ let test_production_keeper_quiet_final_contract () =
             connected_surfaces = []; connected_surface_failures = [];
             own_recent_board_posts = []; fleet_messages = []; own_recent_actions = Ok [] } in
   let wake = Keeper_input_speaker.Host_prompt (Autonomous_wake {answered_asks=[]}) in
-  List.iter (fun (label, turn_kind, input_speaker, tail, expected_quiet) ->
+  List.iter (fun (label, turn_kind, input_speaker, tail, expected_tool, expected_quiet) ->
     let base_path = temp_workspace "masc-codex-quiet-" in
+    let capture_path = Filename.concat base_path "quiet-protocol.jsonl" in
+    let dynamic_context_for_tools = Some (fun tools ->
+      Option.iter (fun (name, _) ->
+        check bool "fixture ordinary tool is actually offered" true
+          (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) tools)) expected_tool;
+      "") in
     Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
-      with_fixture ([init_result; account_chatgpt; thread_result; turn_result] @ tail)
+      with_fixture ~capture_tool_results:true ~capture_path
+        ([init_result; account_chatgpt; thread_result; turn_result] @ tail)
         (fun cli_path ->
           let result = run_production_keeper_turn_with_input
             ~turn_kind ~input_speaker ~world_observation:(Some observation)
-            ~write_cost_ledger:false ~after_turn:ignore ~dynamic_context_for_tools:None
+            ~write_cost_ledger:false ~after_turn:ignore ~dynamic_context_for_tools
             ~http_requests:None ~base_path ~trace_id:("quiet-" ^ label)
             ~user_message:"Continue any available work; finish quietly if nothing changed."
             ~cli_path ~model:"gpt-fixture" ~turn_instructions:None in
+          Option.iter (fun (_, success) ->
+            let rows = In_channel.with_open_bin capture_path In_channel.input_lines
+              |> List.map Yojson.Safe.from_string in
+            let open Yojson.Safe.Util in
+            match List.find_opt (fun row -> member "id" row = `String "quiet-tool") rows with
+            | None -> fail "fixture never received the ordinary tool result"
+            | Some row -> check bool "ordinary tool outcome crossed the protocol boundary" success
+                (row |> member "result" |> member "success" |> to_bool)) expected_tool;
           match expected_quiet, result with
           | true, Ok result ->
             check string label "" result.response_text;
@@ -6214,13 +6242,21 @@ let test_production_keeper_quiet_final_contract () =
           | false, Error _ -> ()
           | true, Error error -> failf "%s: %s" label (Agent_core.Error.to_string error)
           | false, Ok _ -> failf "%s silently lost an expected reply" label)))
-    [ "streamed", Turn_record.Autonomous, wake, [blank_item; missing_terminal], true
-    ; "terminal", Turn_record.Autonomous, wake, [blank_terminal], true
-    ; "missing", Turn_record.Autonomous, wake, [missing_terminal], false
-    ; "direct", Turn_record.Direct, Keeper_input_speaker.Person Owner, [blank_terminal], false
+    [ "streamed", Turn_record.Autonomous, wake, [blank_item; missing_terminal], None, true
+    ; "terminal", Turn_record.Autonomous, wake, [blank_terminal], None, true
+    ; "missing", Turn_record.Autonomous, wake, [missing_terminal], None, false
+    ; "direct", Turn_record.Direct, Keeper_input_speaker.Person Owner, [blank_terminal], None, false
     ; "answered", Turn_record.Autonomous,
         Keeper_input_speaker.Host_prompt (Autonomous_wake {answered_asks=[Owner]}),
-        [blank_terminal], false
+        [blank_terminal], None, false
+    ; "failed-tool-missing", Turn_record.Autonomous, wake,
+        [failed_read; missing_terminal], Some ("keeper_artifact_read", false), false
+    ; "successful-tool-missing", Turn_record.Autonomous, wake,
+        [successful_read; missing_terminal], Some ("keeper_context_status", true), true
+    ; "failed-tool-explicit", Turn_record.Autonomous, wake,
+        [failed_read; blank_terminal], Some ("keeper_artifact_read", false), true
+    ; "direct-failed-tool-explicit", Turn_record.Direct, Keeper_input_speaker.Person Owner,
+        [failed_read; blank_terminal], Some ("keeper_artifact_read", false), false
     ]
 ;;
 
@@ -7074,7 +7110,7 @@ let test_live_chatgpt_subscription () =
     match result with
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
     | Ok result ->
-      check string "live response" "MASC_SUBSCRIPTION_OK" result.text;
+      check (option string) "live response" (Some "MASC_SUBSCRIPTION_OK") result.text;
       check bool "subscription plan is present" true
         (match result.subscription with Runtime_codex_app_server.Chatgpt { plan_type; _ } -> String.trim plan_type <> "" | _ -> false)
 ;;
@@ -7120,7 +7156,7 @@ let test_live_dynamic_tool_subscription () =
     | Ok result ->
       check int "live dynamic tool calls" 1 !tool_calls;
       check int "live measured tool calls" 1 result.dynamic_tool_calls;
-      check string "live tool response" "MASC_TOOL_OK" result.text
+      check (option string) "live tool response" (Some "MASC_TOOL_OK") result.text
 ;;
 
 (* This experiment reports provider usage, not an assumed cache benefit.
@@ -7150,7 +7186,7 @@ let test_live_developer_context_comparison () =
               ~prompt:"Return the current marker." ~images:[] with
           | Error error -> fail (Runtime_codex_app_server.error_to_string error)
           | Ok result ->
-              check string "latest developer fact survives resume" marker (String.trim result.text);
+              check (option string) "latest developer fact survives resume" (Some marker) (Option.map String.trim result.text);
               (match !observed_model with
                | None -> observed_model := Some result.model
                | Some model -> check string "same model across comparison" model result.model);
@@ -7205,7 +7241,7 @@ let test_live_history_injection_subscription () =
     in
     match result with
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-    | Ok result -> check string "live history response" "MASC_HISTORY_OK" result.text
+    | Ok result -> check (option string) "live history response" (Some "MASC_HISTORY_OK") result.text
 ;;
 
 let test_live_keeper_chatgpt_subscription () =

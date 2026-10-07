@@ -857,7 +857,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
              ~prompt
              ~images:[]
          with
-         | Ok result -> Ok { model = result.model; text = result.text }
+         | Ok result ->
+           (match result.text with
+            | Some text -> Ok { model = result.model; text }
+            | None -> Error Empty_response)
          | Error (Runtime_codex_app_server.Subscription_required _ as error) ->
            Error
              (Unavailable

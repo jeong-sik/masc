@@ -167,7 +167,7 @@ type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
-  ; text : string
+  ; text : string option
   ; dynamic_tool_calls : int
   ; scheduling_handoff : handoff_state
   ; subscription : subscription
@@ -1261,8 +1261,8 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
           | None, None, None, None -> None
         in
         (match text with
-         | Some text -> Ok text
-         | None when tool_calls_observed -> Ok ""
+         | Some text -> Ok (Some text)
+         | None when tool_calls_observed -> Ok None
          | None -> protocol_error stage "completed turn has no assistant message")
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
@@ -2185,7 +2185,8 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
       ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8; current_item=None}
       ~on_stream_event)
   in
-  emit_stream_event on_stream_event (Turn_finished { text });
+  emit_stream_event on_stream_event
+    (Turn_finished { text = Option.value text ~default:"" });
   Ok
     { thread_id
     ; turn_id

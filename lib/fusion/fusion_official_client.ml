@@ -429,7 +429,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        ~mgr ~clock ~cwd config ~prompt ~images:(List.map (fun (image : image_input) ->
            ({ media_type = image.media_type; base64_data = image.base64_data }
             : Runtime_codex_app_server.image_input)) images) with
-     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = (match result.usage with
+     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = Option.value result.text ~default:""; model = result.model; usage = (match result.usage with
          | Some Runtime_codex_app_server.Thread_count_replaced -> !observed_usage
          | usage -> optional_usage codex_usage usage) }
      | Error error -> codex_failed error)

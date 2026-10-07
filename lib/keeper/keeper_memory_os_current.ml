@@ -1770,7 +1770,11 @@ let append_removal_journal_and_clear_receipt
 
 let journal_contains_entry ~keepers_dir ~keeper_id expected =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+  (* Only receipt reconciliation calls this, after proving the exact committed
+     snapshot. A process interrupted during its append may leave a partial
+     final row: recover that tail before deciding whether to append the
+     preserved removal. General archive reads never perform this repair. *)
+  match Fs_compat.recover_private_jsonl_durable_locked_result path with
   | Ok snapshot ->
     let content = snapshot.Fs_compat.bytes in
     let rec scan line_number = function

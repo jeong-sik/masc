@@ -589,7 +589,17 @@ let test_batch_retraction_is_exact_atomic_and_cas_guarded () =
     (List.length (read_journal_lines ~keepers_dir))
 ;;
 
-let test_batch_retraction_recovers_exact_reason_evidence () =
+let write_torn_journal_tail path ~prefix =
+  let bytes = prefix ^ "{\"outcome\":\"committed\",\"revision\":" in
+  Fs_compat.save_file path bytes;
+  (match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+   | Error (Fs_compat.Incomplete_transaction_tail _) -> ()
+   | Error _ | Ok _ -> fail "fixture must expose an incomplete append tail");
+  check string "general journal read leaves the torn tail unchanged" bytes
+    (Fs_compat.load_file path)
+;;
+
+let check_batch_retraction_recovers_exact_reason_evidence ~torn_tail () =
   with_temp_keepers @@ fun keepers_dir ->
   let target = fact ~claim:"reason must survive interrupted finalize" () in
   let seeded = replace ~keepers_dir ~facts:[ target ] () |> require_ok in
@@ -601,6 +611,7 @@ let test_batch_retraction_recovers_exact_reason_evidence () =
   let journal_path =
     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
   in
+  let seed_journal = Fs_compat.load_file journal_path in
   Fs_compat.invalidate_cached_writer journal_path;
   Sys.remove journal_path;
   Unix.mkdir journal_path 0o700;
@@ -653,27 +664,49 @@ let test_batch_retraction_recovers_exact_reason_evidence () =
   check (list string) "target is absent from committed snapshot" []
     (fact_ids committed.facts);
   Unix.rmdir journal_path;
+  if torn_tail then write_torn_journal_tail journal_path ~prefix:seed_journal;
   (match request () with
    | Error (Current.Retract_batch_snapshot_conflict _) -> ()
    | Error _ | Ok _ -> fail "restart reconciliation did not precede stale CAS");
   check bool "reconciled plan receipt is cleared" false
     (Sys.file_exists receipt_path);
   let journal = read_journal_lines ~keepers_dir in
-  check int "exact reason entry is appended once" 1 (List.length journal);
-  let recovered = List.hd journal in
+  check int "complete history survives recovery" (if torn_tail then 2 else 1)
+    (List.length journal);
+  let removals = List.filter
+      (fun line -> to_int (member "revision" line) = committed.revision) journal in
+  check int "exact reason entry is appended once" 1 (List.length removals);
+  let recovered = List.hd removals in
   check string "recovered journal entry retains plan identity" plan_id
     (recovered |> member "source" |> member "trace_id" |> to_string);
   check string "recovered journal entry retains exact reason" reason
     (recovered |> member "dropped" |> to_list |> List.hd
      |> member "reason" |> to_string);
+  (match Current.read_dropped ~keepers_dir ~keeper_id:"keeper"
+      ~current_facts:committed.facts |> require_ok with
+   | [ archived ] ->
+     check bool "batch recovery keeps the complete original" true
+       (archived.original = target);
+     check (option string) "batch recovery keeps the exact reason" (Some reason)
+       archived.removal.drop_reason
+   | _ -> fail "batch recovery did not restore the historical original");
   (match request () with
    | Error (Current.Retract_batch_snapshot_conflict _) -> ()
    | Error _ | Ok _ -> fail "second stale retry did not remain a conflict");
-  check int "repeated retry does not duplicate recovered evidence" 1
+  check int "repeated retry does not duplicate recovered evidence"
+    (List.length journal)
     (List.length (read_journal_lines ~keepers_dir))
 ;;
 
-let test_ordinary_removals_preserve_archive_until_journal_recovery () =
+let test_batch_retraction_recovers_exact_reason_evidence () =
+  check_batch_retraction_recovers_exact_reason_evidence ~torn_tail:false ()
+;;
+
+let test_batch_retraction_recovers_torn_journal_tail () =
+  check_batch_retraction_recovers_exact_reason_evidence ~torn_tail:true ()
+;;
+
+let check_ordinary_removals_preserve_archive_until_journal_recovery ~torn_tail () =
   let successor = fact ~claim:"replacement rule" () in
   let producers =
     [ ( "librarian"
@@ -707,6 +740,7 @@ let test_ordinary_removals_preserve_archive_until_journal_recovery () =
     let journal_path =
       Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
     in
+    let seed_journal = Fs_compat.load_file journal_path in
     Fs_compat.invalidate_cached_writer journal_path;
     Sys.remove journal_path;
     Unix.mkdir journal_path 0o700;
@@ -740,12 +774,16 @@ let test_ordinary_removals_preserve_archive_until_journal_recovery () =
     (* Missing journal after restart must not be reported as an empty archive.
        Reading is observational: it leaves preparation for a writer to settle. *)
     Unix.rmdir journal_path;
+    if torn_tail then write_torn_journal_tail journal_path ~prefix:seed_journal;
+    let journal_before_read = Fs_compat.load_file_opt journal_path in
     (match Current.read_dropped ~keepers_dir ~keeper_id:"keeper"
         ~current_facts:(read ()).facts with
      | Error _ -> ()
      | Ok _ -> fail "pending archive was reported complete");
     check string "archive read leaves the receipt untouched" receipt_bytes
       (Fs_compat.load_file receipt_path);
+    check (option string) "archive read leaves journal recovery to the writer"
+      journal_before_read (Fs_compat.load_file_opt journal_path);
     let next = next_write () |> require_upsert_ok in
     check int "recovery precedes the next update" 3 next.revision;
     check bool "successful finalization clears preparation" false
@@ -764,6 +802,14 @@ let test_ordinary_removals_preserve_archive_until_journal_recovery () =
       |> List.filter (fun line -> to_int (member "revision" line) = 2) in
     check int "restart finalizes the removal once" 1 (List.length recovered))
     producers
+;;
+
+let test_ordinary_removals_preserve_archive_until_journal_recovery () =
+  check_ordinary_removals_preserve_archive_until_journal_recovery ~torn_tail:false ()
+;;
+
+let test_ordinary_removals_recover_torn_journal_tail () =
+  check_ordinary_removals_preserve_archive_until_journal_recovery ~torn_tail:true ()
 ;;
 
 let test_removal_receipt_write_failure_preserves_current_fact () =
@@ -3003,9 +3049,17 @@ let () =
             `Quick
             test_batch_retraction_recovers_exact_reason_evidence
         ; test_case
+            "batch retraction recovers torn journal tail"
+            `Quick
+            test_batch_retraction_recovers_torn_journal_tail
+        ; test_case
             "ordinary removals preserve archive until journal recovery"
             `Quick
             test_ordinary_removals_preserve_archive_until_journal_recovery
+        ; test_case
+            "ordinary removals recover torn journal tail"
+            `Quick
+            test_ordinary_removals_recover_torn_journal_tail
         ; test_case
             "receipt write failure preserves current fact"
             `Quick

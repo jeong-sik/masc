@@ -1197,13 +1197,15 @@ val read_private_jsonl_durable_locked_result :
   after:Private_jsonl_cursor.t option ->
   (private_jsonl_snapshot, private_jsonl_transaction_error) result
 
-(** Process-start recovery read of a private JSONL store under its stable
-    sibling lock. Behaves like {!read_private_jsonl_durable_locked_result} with
-    [after = None], except that a torn tail (an incomplete final row left by a
+(** Process-start or prepared-transaction recovery read of a private JSONL store
+    under its stable sibling lock. Behaves like
+    {!read_private_jsonl_durable_locked_result} with [after = None], except that
+    a torn tail (an incomplete final row left by a
     mid-append crash) is truncated to the last complete row and fsynced while
     the lock is held, after which reading resumes with the truncated cursor.
-    Every other failure propagates unchanged. Only process-start recovery may
-    use this entry point; general reads keep hard-failing on
+    Every other failure propagates unchanged. Only process-start recovery or a
+    serialized writer recovering a prepared transaction whose committed state
+    it has verified may use this entry point; general reads keep hard-failing on
     [Incomplete_transaction_tail]. *)
 val recover_private_jsonl_durable_locked_result :
   string ->

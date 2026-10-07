@@ -3061,9 +3061,10 @@ let private_jsonl_last_complete_row_length bytes =
   | None -> 0
 ;;
 
-(* Process-start recovery entry point: a torn tail left by a mid-append crash
-   is truncated to the last complete row under the stable lock, then reading
-   resumes. General reads keep hard-failing on [Incomplete_transaction_tail];
+(* Process-start or verified prepared-transaction recovery: a torn tail left
+   by a mid-append crash is truncated to the last complete row under the stable
+   lock, then reading resumes. General reads keep hard-failing on
+   [Incomplete_transaction_tail];
    only recovery callers may opt into truncation. *)
 let recover_private_jsonl_durable_locked_with_io ~io path =
   let success snapshot = Snapshot_succeeded snapshot in

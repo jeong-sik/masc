@@ -138,6 +138,9 @@ type skill_activity = private
           every decoded activation and every live call carries one. *)
   ; skill_tool_use_id : string option
   ; turn_ref : string option
+      (** The activation's exact turn, or the Reply_details receipt for the
+          stream segment that made this call. Absent until that receipt
+          arrives; a later continuation never supplies it. *)
   ; content_revision : string option
   ; runtime_id : string option
   ; state : skill_state
@@ -341,10 +344,10 @@ val note_skill_activity : t -> skill_activity -> unit
 (** Folds in the exact delivery record of one skill read -- the states the
     wire has no event for ([Skill_served_only], [Skill_delivered],
     [Skill_used]), the calls the read led to, and the proof ids -- keyed by
-    its [skill_tool_use_id]. A record in a state the stream speaks for
+    [(turn_ref, skill_tool_use_id)]. A record in a state the stream speaks for
     itself (calling, pending, failed) or an evidence gap changes nothing,
-    and neither does one without a tool-use id. A second record for the
-    same id replaces the first. {!drawn} lays the record over the skill item
+    and neither does one without that complete identity. A second record for the
+    same identity replaces the first. {!drawn} lays the record over the skill item
     derived from the same call, and draws it on its own when the trail never
     saw that call. *)
 

@@ -7444,11 +7444,17 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
         (fun (row : msg_entry) ->
           if String.equal row.me_request_id request_id then
             List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
-              let observed = Option.exists (fun id ->
-                List.exists (fun (call : Masc_tui_keeper_chat_transcript.tool_activity) ->
-                  call.call_id = Some id
-                  && Option.is_some (Masc_tui_keeper_chat_transcript.skill_activity_of_tool call))
-                  (Masc_tui_keeper_chat_transcript.tool_calls turn_log.tl_transcript)) skill.skill_tool_use_id in
+              let observed =
+                Option.is_some skill.turn_ref && Option.is_some skill.skill_tool_use_id
+                && List.exists (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+                  match item.drawn with
+                  | Drawn_skill skills -> List.exists
+                      (fun (shown : Masc_tui_keeper_chat_transcript.skill_activity) ->
+                        shown.turn_ref = skill.turn_ref
+                        && shown.skill_tool_use_id = skill.skill_tool_use_id) skills
+                  | Drawn_tools _ | Drawn_thinking _ | Drawn_text _ | Drawn_reply _
+                  | Drawn_status _ | Drawn_error _ -> false)
+                    (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
               if turn_log_holds_the_turn turn_log || observed then
                 Masc_tui_keeper_chat_transcript.note_skill_activity turn_log.tl_transcript skill)
               row.me_skill_block)

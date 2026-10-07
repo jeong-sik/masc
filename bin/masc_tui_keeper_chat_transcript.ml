@@ -219,6 +219,7 @@ type t =
   ; mutable reversed_trail : trail_node list
   ; mutable next_tool_local_id : int
   ; mutable segment : int
+  ; mutable segment_turn_refs : (int * string) list
   ; mutable phase : phase
   ; mutable ended_at : float option
         (* [Some] the instant the run said it was over -- finished or failed.
@@ -296,9 +297,9 @@ type t =
            moment when it covered a span, and a turn that ran twenty minutes
            sits under rows typed during it carrying an opening clock (the
            2026-09-10 msx-retro-mania misread). *)
-  ; mutable noted_skills : (string * skill_activity) list
+  ; mutable noted_skills : ((string * string) * skill_activity) list
         (* The exact delivery records [note_skill_activity] took, keyed by
-           the read call's tool-use id, in the order they were first noted.
+           the read call's (turn_ref, tool-use id), in first-noted order.
            Not a trail node: the stream has no event for a delivery, so
            [drawn] lays these over the skill items the trail derived from
            the same calls, and draws the ones whose call the trail never saw
@@ -321,6 +322,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; reversed_trail = []
   ; next_tool_local_id = 0
   ; segment = 0
+  ; segment_turn_refs = []
   ; phase = Waiting
   ; ended_at = None
   ; interrupt = Not_requested
@@ -1406,6 +1408,8 @@ let project_trail t ~thinking ~text ~tools ~skills ~superseded =
               split acc ((at, activity) :: generic) [] rest
           | Some skill ->
               let acc = flush_generic acc generic in
+              let skill = { skill with turn_ref =
+                Option.map safe_line (nonblank (List.assoc_opt segment t.segment_turn_refs)) } in
               split acc [] ((at, skill) :: skills) rest)
     in
     group |> List.rev |> List.map (fun (call : live_tool_call) -> call.started_at, activity_of_live_call t call) |> split acc [] []
@@ -2213,6 +2217,8 @@ let apply_delta ~now t (delta : Live.delta) =
          t.ended_at <- Some now;
          settle t ~now)
   | Live.Reply_details { reply; turn_outcome; turn_ref } ->
+      t.segment_turn_refs <-
+        (t.segment, turn_ref) :: List.remove_assoc t.segment t.segment_turn_refs;
       t.reply <-
         Some { reply_text = reply; reply_at = now; reply_outcome = turn_outcome; reply_turn_ref = turn_ref };
       (match turn_outcome with
@@ -2331,31 +2337,36 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
    can never reach are taken; calling, pending and failed are the stream's
    own words, and the two evidence gaps name no read. The record is kept
    whole, not merged field by field, so the row a held turn draws for the
-   read says what the loaded row said about it. Keyed by the read call's
-   tool-use id, the one identity the wire and the ledger share; a record
-   without one has nothing to stand over. A later record for the same id
+   read says what the loaded row said about it. Keyed by the exact turn and
+   tool-use id: a continuation may reuse a provider id in a different turn.
+   An incomplete identity has nothing to stand over. A later record for the same key
    replaces the earlier one, as a later page replaces the loaded row. *)
+let skill_identity (skill : skill_activity) =
+  match skill.turn_ref, skill.skill_tool_use_id with
+  | Some turn_ref, Some use_id -> Some (turn_ref, use_id)
+  | (None, _) | (_, None) -> None
+
 let note_skill_activity t (evidence : skill_activity) =
   match evidence.state with
   | Skill_calling | Skill_served_pending | Skill_failed | Skill_evidence_missing
   | Skill_evidence_unavailable ->
       ()
   | Skill_served_only | Skill_delivered | Skill_used -> (
-      match evidence.skill_tool_use_id with
+      match skill_identity evidence with
       | None -> ()
-      | Some use_id ->
+      | Some key ->
           let known =
-            List.exists (fun (noted_id, _) -> String.equal noted_id use_id)
+            List.exists (fun (noted_key, _) -> noted_key = key)
               t.noted_skills
           in
           t.noted_skills <-
             (if known then
                List.map
-                 (fun (noted_id, noted) ->
-                   if String.equal noted_id use_id then (noted_id, evidence)
-                   else (noted_id, noted))
+                 (fun (noted_key, noted) ->
+                   if noted_key = key then (noted_key, evidence)
+                   else (noted_key, noted))
                  t.noted_skills
-             else t.noted_skills @ [ (use_id, evidence) ]);
+             else t.noted_skills @ [ (key, evidence) ]);
           bump t)
 
 let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
@@ -2398,7 +2409,7 @@ type drawn_item =
    cut stream, a gap in the journal -- while the loaded row that carried the
    record is one a held log leaves out of the timeline.
 
-   Only the id pairs the two. The stream's tool start always names its call
+   Only the exact turn and id pair the two. The stream's tool start names its call
    (the agent-core stream bridge reports a start without a tool id as a
    protocol error instead), so a skill item without an id is not expected.
    One that came anyway would stay as the stream drew it, and the record
@@ -2423,13 +2434,13 @@ let with_noted_skills noted items =
         | Skill_calling | Skill_served_pending | Skill_served_only
         | Skill_delivered | Skill_used | Skill_evidence_missing
         | Skill_evidence_unavailable -> (
-            match skill.skill_tool_use_id with
+            match skill_identity skill with
             | None -> skill
-            | Some use_id -> (
+            | Some key -> (
                 match
                   List.find_map
-                    (fun (noted_id, note) ->
-                      if String.equal noted_id use_id then Some note else None)
+                    (fun (noted_key, note) ->
+                      if noted_key = key then Some note else None)
                     noted
                 with
                 | Some note -> note
@@ -2453,18 +2464,16 @@ let with_noted_skills noted items =
                 item)
           items
       in
-      let drawn_use_ids =
+      let drawn_identities =
         List.concat_map
           (fun item ->
-            List.filter_map
-              (fun (skill : skill_activity) -> skill.skill_tool_use_id)
-              (skills_of item))
+            List.filter_map skill_identity (skills_of item))
           items
       in
       let unseen =
         List.filter_map
-          (fun (noted_id, note) ->
-            if List.exists (String.equal noted_id) drawn_use_ids then None
+          (fun (noted_key, note) ->
+            if List.mem noted_key drawn_identities then None
             else Some note)
           noted
       in

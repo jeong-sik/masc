@@ -3472,6 +3472,90 @@ let test_checkpoint_activities_have_exact_row_authority () =
     (List.exists (fun (row : Tui_types.msg_entry) -> row.me_text = "FINAL") rows)
 ;;
 
+let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> () in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (100, 160);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_loaded_keeper <- Some "alpha";
+    state.msg_tool_visibility <- Tui_types.Tools_full;
+    let request_id = "checkpoint-skills" in
+    let segment ~progress turn_ref execution_id =
+      let occurrence : Live.tool_occurrence =
+        {stream_scope=0; block_index=0; provider_message_id=None; tool_call_id=Some "reused-id"} in
+      [Live.Run_started]
+      @ (if progress then [Live.Text "EARLIER_PROGRESS"] else [])
+      @ [Live.Tool_started {occurrence; tool_name="keeper_skill"}
+      ; Live.Tool_args {occurrence; fragment=Live.Args_snapshot
+          {|{"identity":{"name":"checkpoint-skill"}}|}}
+      ; Live.Tool_ended {occurrence}; Live.Tool_result {occurrence; execution_id}
+      ; Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref}
+      ; Live.Run_finished] in
+    let log = settled_log ~request_id
+        (segment ~progress:true "trace-first#1" "skill-exec-first"
+        @ segment ~progress:false "trace-second#1" "skill-exec-second") in
+    let terminal = Keeper_chat_operation.Succeeded {completed_at=150.; outcome_ref="final"} in
+    Log.observe_operation_state log.tl_log (Some terminal);
+    Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+    Tui_types.hold_settled_log state log;
+    let receipt seq turn_ref runtime_id action =
+      { (chat_entry ~request_id ~operation_seq:seq ~at:(120. +. float_of_int seq)
+          ~role:(Tui_types.Message_skill Keeper_chat_transcript.Skill_used)
+          ~text:"Skill receipt" ()) with me_skill_block=
+        [Keeper_chat_transcript.make_skill_activity ~invocation:Instruction_read
+          ~skill_tool_use_id:"reused-id" ~turn_ref ~runtime_id
+          ~content_revision:"sha256:exact" ~skill_name:"checkpoint-skill"
+          ~state:Skill_used ~actions:[action] ()] } in
+    let first = receipt 1 "trace-first#1" "runtime-first" "FIRST_ACTION" in
+    let second = receipt 2 "trace-second#1" "runtime-second" "SECOND_ACTION" in
+    let absent = receipt 3 "trace-unseen#1" "runtime-unseen" "UNSEEN_ACTION" in
+    let final = chat_entry ~request_id ~operation_seq:4 ~role:Tui_types.Message_keeper
+        ~text:"FINAL_HISTORY_REPLY" ~at:150. () in
+    let install rows =
+      state.msg_loaded <- rows;
+      Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" rows in
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+    let count needle text = List.length (Astring.String.cuts ~sep:needle text) - 1 in
+    let verify marker_count markers =
+      let rendered = screen () in
+      check int "one Skill per observed or unmatched durable invocation" marker_count
+        (count "checkpoint-skill" rendered);
+      List.iter (fun marker -> check int (marker ^ " appears once") 1 (count marker rendered))
+        ("EARLIER_PROGRESS" :: "FINAL_HISTORY_REPLY" :: markers) in
+    install [first; final];
+    verify 2 ["FIRST_ACTION"];
+    (* The first receipt cannot mark the other segment delivered. *)
+    (match drawn_skills_of log with
+     | [first; second] ->
+         check bool "first segment received its exact receipt" true
+           (first.state = Keeper_chat_transcript.Skill_used);
+         check bool "other segment still awaits its own evidence" true
+           (second.state = Keeper_chat_transcript.Skill_served_pending)
+     | skills -> failf "expected two segment skills, got %d" (List.length skills));
+    install [first; second; absent; final];
+    verify 3 ["FIRST_ACTION"; "SECOND_ACTION"; "UNSEEN_ACTION"];
+    let rows = Tui_types.chat_rows_for state "alpha" in
+    check (list (option string)) "only unmatched Skill receipt stays in history"
+      [Some "trace-unseen#1"]
+      (List.concat_map (fun (row : Tui_types.msg_entry) ->
+        List.map (fun (skill : Keeper_chat_transcript.skill_activity) -> skill.turn_ref) row.me_skill_block) rows);
+    (* A reopened journal rebuilds both segment identities from real receipts. *)
+    let replay = {log with tl_transcript=Keeper_chat_transcript.of_log ~now:200. log.tl_log} in
+    state.msg_settled_logs <- [replay];
+    install [first; second; absent; final];
+    verify 3 ["FIRST_ACTION"; "SECOND_ACTION"; "UNSEEN_ACTION"])
+;;
+
 let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -5179,6 +5263,8 @@ let () =
             test_observed_history_handoff_keeps_progress_and_one_final_reply
         ; test_case "checkpoint activity rows retain exact source authority" `Quick
             test_checkpoint_activities_have_exact_row_authority
+        ; test_case "checkpoint Skill receipts retain exact turn scope when ids repeat" `Quick
+            test_checkpoint_skill_receipts_stay_in_their_exact_turn
         ; test_case "succeeded operation with checkpoint-only journal keeps final history" `Quick
             test_succeeded_operation_with_checkpoint_only_keeps_final_history
         ; test_case "a journal log of the live execution is not observed" `Quick

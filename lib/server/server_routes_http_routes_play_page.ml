@@ -213,7 +213,6 @@ let controllerRecoverable = false;
 let controllerError = null;
 let machine = false;
 let since = null;
-let lastActivityKey = null;
 let observedActivityKey = '';
 let nextReconnectAt = 0;
 let latestSeatRequest = null;
@@ -412,9 +411,6 @@ function renderPassTargets(participants) {
 
 async function refreshSeat() {
   if (ended || disconnecting) return null;
-  // Only a successful read may acknowledge the activity that prompted it.
-  // A failed read after sending a move must be retried by the poll as well.
-  lastActivityKey = null;
   const request = {};
   latestSeatRequest = request;
   nextSeatPollAt = performance.now() + SEAT_POLL_MS;
@@ -617,17 +613,15 @@ async function poll() {
     }
     const activity = live.activity || [];
     renderActivity(activity);
-    // Machine activity prompts a seat read; failed reads remain pending.
+    // Machine activity prompts an immediate seat read.
     // Opening the handoff selector refreshes participants independently.
     const key = activity.length === 0 ? '' : JSON.stringify(activity[0]) + '#' + activity.length;
-    // Expiry and Keeper stops need not move the machine. An observer must
-    // still discover that its holder departed, so a real move can recover it.
-    const waitingForController = controller !== null && controller !== me && !controllerRecoverable;
+    // Participation changes in another tab need not move the machine or
+    // leave a holder. Keep reading authority even while control is free.
     const activityChanged = key !== observedActivityKey;
     observedActivityKey = key;
-    const recoveryDue = performance.now() >= nextSeatPollAt
-      && (key !== lastActivityKey || waitingForController || initialConnectIntent);
-    if ((activityChanged || recoveryDue) && await refreshSeat()) lastActivityKey = key;
+    const recoveryDue = performance.now() >= nextSeatPollAt;
+    if (activityChanged || recoveryDue) await refreshSeat();
     await syncPad();
   }
 }

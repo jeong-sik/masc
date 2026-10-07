@@ -22,7 +22,8 @@
     It draws [GET /api/v1/lane-addons/live?source_kind=dos_capture],
     sends keys, text and hand-offs to [POST /api/v1/dos/*], and reads the seat
     again immediately whenever the live activity feed moves. Unchanged-activity
-    recovery and refused reconnect retries retain a separate five-second cadence.
+    participation reads continue every five seconds even with a free controller;
+    refused reconnect retries retain their own five-second cadence.
     Disconnect drains admitted writes, without waiting for their projection reads.
     When the loaded program has
     a masc pad layout ([GET /api/v1/play/pad]) it draws that pad in place of

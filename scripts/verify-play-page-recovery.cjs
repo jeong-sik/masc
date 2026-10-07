@@ -202,6 +202,20 @@ async function main() {
     await page.waitForFunction(() => document.getElementById('turn').textContent.includes('내 차례'));
     assert.equal(await page.locator('#send-text').isDisabled(), false);
     await page.evaluate(() => { Object.defineProperty(performance, 'now', { configurable:true, value:window.fixtureClock }); });
+    // Another tab may change participation while control stays free and
+    // the machine activity feed never changes. These are observations only.
+    released = true;
+    await page.locator('#pass-to').focus();
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('조종권이 비어'));
+    const writesBeforeParticipation = requests.filter(request => request.method === 'POST').length;
+    connected = false;
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('조종 연결을 끊었어요'));
+    assert.equal(await page.locator('#send-text').isDisabled(), true);
+    connected = true;
+    await page.waitForFunction(() => document.getElementById('turn').textContent.includes('조종권이 비어'));
+    assert.equal(await page.locator('#send-text').isDisabled(), false);
+    assert.equal(requests.filter(request => request.method === 'POST').length, writesBeforeParticipation,
+      'external participation changes require no local mutation');
     // The write has its receipt but its follow-up authority projection never
     // answers until after departure. Disconnect must only drain actual writes.
     const projectionRequested = new Promise(resolve => { projectionStarted = resolve; });
@@ -231,7 +245,9 @@ async function main() {
         'explicit invitation retries two transient reconnect refusals',
         'plain-text 413 and rate-limit 429 settle without losing the draft',
         'activity changes update ownership before the recovery deadline',
-        'terminal write receipt and disconnect do not wait for a stalled seat projection'],
+        'terminal write receipt and disconnect do not wait for a stalled seat projection',
+        'idle free controller observes external departure without activity',
+        'idle free controller observes external reconnect without input'],
       requests, errors };
     await writeFile(resolve(output, 'play-browser.json'), JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify({ result: 'PASS', output, checks: receipt.checks }));

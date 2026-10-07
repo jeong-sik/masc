@@ -210,7 +210,12 @@ val update_post :
   unit ->
   (Board.post, Board.board_error) Result.t
 
+val read_post : post_id:string -> (Board.post, Board.board_read_error) Result.t
+(** The post with [post_id], from the in-memory store. A read answers no I/O
+    failure; see {!Board.board_read_error}. *)
+
 val get_post : post_id:string -> (Board.post, Board.board_error) Result.t
+(** {!read_post} as a [board_error] result, for callers that also write. *)
 
 val list_posts_by_run_origin : unit -> Board.post list
 (** Exact run-origin index snapshot, newest publication first. *)
@@ -297,9 +302,15 @@ val add_comment :
   unit ->
   (Board.comment, Board.board_error) Result.t
 
+val read_comments :
+  post_id:string ->
+  (Board.comment list, Board.board_read_error) Result.t
+(** The comments on [post_id], oldest first, from the in-memory store. *)
+
 val get_comments :
   post_id:string ->
   (Board.comment list, Board.board_error) Result.t
+(** {!read_comments} as a [board_error] result. *)
 
 val require_persisted_sources_readable : unit -> (unit, Board.board_error) result
 (** Evidence requires complete post/comment source loads. Ordinary Board reads

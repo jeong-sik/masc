@@ -12,15 +12,19 @@ include Board_core_persist
 let ( let* ) = Result.bind
 
 
-let get_post store ~post_id : (post, board_error) Result.t =
+let read_post store ~post_id : (post, board_read_error) Result.t =
   maybe_sweep store;
-  match Post_id.of_string post_id with
+  match Post_id.of_string_for_read post_id with
   | Error e -> Error e
   | Ok pid ->
     with_lock store (fun () ->
       match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
       | Some post -> Ok post
-      | None -> Error (Post_not_found post_id))
+      | None -> Error (Read_post_not_found post_id))
+;;
+
+let get_post store ~post_id : (post, board_error) Result.t =
+  read_post store ~post_id |> Result.map_error board_error_of_read_error
 ;;
 
 (* RFC-0233 §7 guard #2: exact O(1) index lookups, mirroring [get_post] by
@@ -76,15 +80,16 @@ let compare_comments_oldest_first (a : comment) (b : comment) =
    repeated agent board-read traffic. Coalescing
    keeps the read atomic, removes one [maybe_sweep] dispatch, and
    eliminates the inter-call lock churn. *)
-let get_post_and_comments store ~post_id : (post * comment list, board_error) Result.t =
+let read_post_and_comments store ~post_id
+  : (post * comment list, board_read_error) Result.t =
   maybe_sweep store;
-  match Post_id.of_string post_id with
+  match Post_id.of_string_for_read post_id with
   | Error e -> Error e
   | Ok pid ->
     with_lock store (fun () ->
       let post_key = Post_id.to_string pid in
       match Hashtbl.find_opt store.posts post_key with
-      | None -> Error (Post_not_found post_id)
+      | None -> Error (Read_post_not_found post_id)
       | Some post ->
         let comment_ids =
           Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[]
@@ -93,6 +98,10 @@ let get_post_and_comments store ~post_id : (post * comment list, board_error) Re
           List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
         in
         Ok (post, List.sort compare_comments_oldest_first comments))
+;;
+
+let get_post_and_comments store ~post_id : (post * comment list, board_error) Result.t =
+  read_post_and_comments store ~post_id |> Result.map_error board_error_of_read_error
 ;;
 
 let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post list =
@@ -392,9 +401,9 @@ let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () =
   |> Result.map (fun creation -> creation.comment)
 ;;
 
-let get_comments store ~post_id : (comment list, board_error) Result.t =
+let read_comments store ~post_id : (comment list, board_read_error) Result.t =
   maybe_sweep store;
-  match Post_id.of_string post_id with
+  match Post_id.of_string_for_read post_id with
   | Error e -> Error e
   | Ok pid ->
     with_lock store (fun () ->
@@ -406,6 +415,10 @@ let get_comments store ~post_id : (comment list, board_error) Result.t =
         List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
       in
       Ok (List.sort compare_comments_oldest_first comments))
+;;
+
+let get_comments store ~post_id : (comment list, board_error) Result.t =
+  read_comments store ~post_id |> Result.map_error board_error_of_read_error
 ;;
 
 let get_comment store ~comment_id : (comment, board_error) Result.t =

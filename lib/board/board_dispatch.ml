@@ -442,6 +442,10 @@ let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
             };
           Ok post
 
+let read_post ~post_id =
+  match backend () with
+  | Jsonl store -> Board.read_post store ~post_id
+
 let get_post ~post_id =
   match backend () with
   | Jsonl store -> Board.get_post store ~post_id
@@ -548,6 +552,10 @@ let list_recent_posts_matching_author ~author_matches ~limit () =
 let current_post_cursor () =
   match backend () with
   | Jsonl store -> Board.current_post_cursor store
+
+let read_comments ~post_id =
+  match backend () with
+  | Jsonl store -> Board.read_comments store ~post_id
 
 let get_comments ~post_id =
   match backend () with

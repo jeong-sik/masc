@@ -1910,6 +1910,9 @@
   ; test_compression decodes its own gzip output with the library's reader
   decompress.de
   decompress.gz
+  ; test_goal_store and test_goal_tools freeze the creation clock
+  ptime
+  eio.mock
   masc.tool_metrics_store)
  (deps ../bin/main_eio.exe))
 

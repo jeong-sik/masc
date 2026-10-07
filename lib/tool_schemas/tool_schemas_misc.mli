@@ -132,6 +132,7 @@ type misc_operation =
   | Misc_dos_click
   | Misc_dos_type
   | Misc_dos_peek
+  | Misc_play_room
   | Misc_dos_pass
   | Misc_dos_save
   | Misc_dos_restore

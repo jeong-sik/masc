@@ -262,6 +262,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_dos_peek", read_state_tool);
     ("masc_dos_load", mutating_tool);
     ("masc_dos_pass", play_machine_tool);
+    ("masc_play_room", play_machine_tool);
     ("masc_dos_save", mutating_tool);
     ("masc_dos_restore", mutating_tool);
     ("masc_dos_eject", mutating_tool);

@@ -871,6 +871,12 @@ let run_turn
   let native_binding, native_resume = match native_continuation with
     | None -> None, None
     | Some { binding; resumed } -> Some binding, resumed in
+  (* Restore the whole native context before prompt/tool setup closes over
+     it. The same object must reach Core so new load receipts, repetition
+     observations and injector updates are persisted together. *)
+  let shared_context = match native_resume with
+    | Some resumed -> Some (Keeper_direct_native_continuation.restored_context resumed)
+    | None -> shared_context in
   let preview = Some (Keeper_turn_preview.reset ~keeper_name:meta.name
       ~now:(Time_compat.now ())
       ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path

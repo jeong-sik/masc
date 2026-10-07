@@ -144,7 +144,8 @@ let run_restart () =
     | Ok locator -> locator | Error detail -> Alcotest.fail detail in
   let checkpoint = match read (Filename.concat root "checkpoint.json") |> Yojson.Safe.from_string
       |> Agent_core.Checkpoint.of_json with
-    | Ok checkpoint -> checkpoint | Error detail -> Alcotest.fail detail in
+    | Ok checkpoint -> checkpoint
+    | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail) in
   let terminal = ref None in
   let resume config input =
     let execution_store = Agent_core.Agent.execution_store ~runtime ~dir ~resume:locator
@@ -165,8 +166,13 @@ let run_restart () =
     "effect receipt preserved" (Agent_core.Types.text_of_content result.response.content);
   assert_counts root ~providers:2;
   (match !terminal with
-   | Some {Agent_core.Agent.outcome=Terminal_succeeded; recovery=Retire} -> ()
-   | _ -> Alcotest.fail "resumed call did not preserve its terminal disposition");
+   | None -> Alcotest.fail "resumed call has no terminal disposition"
+   | Some disposition ->
+     (match disposition.Agent_core.Agent.outcome, disposition.recovery with
+      | Terminal_succeeded, Retire -> ()
+      | (Terminal_succeeded | Terminal_failed | Terminal_cancelled),
+        (Retire | Operator_repair_required Effect_outcome_unknown) ->
+        Alcotest.fail "resumed call did not preserve its terminal disposition"));
   (match resume config goal with
    | Error _ -> () | Ok _ -> Alcotest.fail "terminal scope executed again");
   assert_counts root ~providers:2

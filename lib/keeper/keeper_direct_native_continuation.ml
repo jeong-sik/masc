@@ -53,6 +53,8 @@ let state binding =
 let runtime_id resumed = resumed.call.runtime_id
 let system_prompt (resumed : resumed) = resumed.system_prompt
 let checkpoint (resumed : resumed) = resumed.checkpoint
+let restored_context (resumed : resumed) =
+  Agent_core.Context.copy ~eio:true resumed.checkpoint.context
 let initial_messages (resumed : resumed) = resumed.initial_messages
 let input (resumed : resumed) = resumed.input
 let config (prepared : prepared) = prepared.config
@@ -66,7 +68,7 @@ let rec is_prefix prefix messages =
   | _ :: _, [] -> false
 
 let validate_scope binding (checkpoint : Agent_core.Checkpoint.t) =
-  let* frame = Keeper_repetition_scope.load checkpoint.context
+  let* frame = Keeper_repetition_context.load checkpoint.context
     |> Result.map_error Keeper_repetition_snapshot.error_to_string in
   match Keeper_repetition_snapshot.active frame with
   | Some scope when Keeper_execution_scope_id.equal scope
@@ -103,7 +105,8 @@ let restore binding (call : Native.t) =
          when List.length seed.messages = seed_message_count + 1 ->
          Ok (List.take seed_message_count seed.messages,
              New_input {blocks=content; metadata})
-       | Some _ | None -> Error "native seed does not contain its exact original input") in
+       | Some {Agent_core.Types.role = (User | Assistant | System | Tool); _}
+       | None -> Error "native seed does not contain its exact original input") in
   Ok {call; checkpoint; initial_messages; system_prompt; input}
 
 let execution_dir binding call_id =
@@ -142,11 +145,10 @@ let retired_evidence binding call disposition =
   | Some _ -> Error "native terminal receipt disagrees with its canonical journal"
   | None -> Error "native terminal receipt has no matching terminal journal"
 
-let retains_settled_results messages results =
-  let blocks = List.concat_map
-    (fun (message : Agent_core.Types.message) -> message.content) messages in
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    List.for_all (fun result -> List.mem result blocks) results)
+let retains_settled_results binding (call : Native.t) messages results =
+  let* seed = load_checkpoint binding call.seed_checkpoint in
+  Ok (Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Keeper_native_result_retention.retains ~seed:seed.messages ~messages ~results))
 
 let load ~binding =
   let* observed = state binding in
@@ -168,7 +170,7 @@ let contains_tool_result (message : Agent_core.Types.message) =
     | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
     | ToolUse _ | Image _ | Document _ | Audio _ -> false) message.content
 
-let authorize_incomplete_response_cut ~binding ~checkpoint:cut () =
+let authorize_incomplete_response_cut ~binding ~checkpoint:(cut : Agent_core.Checkpoint.t) () =
   let* observed = state binding in
   let* source = match observed with
     | Native.Terminal_unacknowledged (call, {Agent.recovery=Retire; _}) ->
@@ -182,7 +184,8 @@ let authorize_incomplete_response_cut ~binding ~checkpoint:cut () =
   let* messages = match List.rev source.messages with
     | ({Agent_core.Types.role=Assistant; _} as last) :: earlier
       when not (contains_tool_result last) -> Ok (List.rev earlier)
-    | _ -> Error "response cut would remove more than an incomplete Assistant message" in
+    | {Agent_core.Types.role=(Assistant | User | System | Tool); _} :: _
+    | [] -> Error "response cut would remove more than an incomplete Assistant message" in
   let* () = Domain_pool_ref.submit_cpu_or_inline (fun () ->
     let expected = {source with Agent_core.Checkpoint.messages} in
     let candidate = {cut with Agent_core.Checkpoint.created_at=source.created_at} in
@@ -203,7 +206,7 @@ let binding_effect_observation ~binding =
     | Terminal_pending (call, ({Agent.recovery=Retire; _} as disposition)) ->
       let* terminal = retired_evidence binding call disposition in
       let* checkpoint = load_checkpoint binding call.checkpoint in
-      Ok (retains_settled_results checkpoint.messages terminal.settled_tool_results)
+      retains_settled_results binding call checkpoint.messages terminal.settled_tool_results
     | Terminal_pending
         (_, {Agent.recovery=Operator_repair_required Effect_outcome_unknown; _}) -> Ok false in
   match settled with
@@ -259,9 +262,15 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
           && config.model_id = resumed.checkpoint.model
           && config.provider_cfg.model_id = resumed.checkpoint.model then Ok ()
         else Error "saved native runtime or model identity changed" in
+      (* Keeper restored this context before building tools and hooks. They
+         close over that object, so replacing it here would lose their new
+         receipts and repetition observations from Core's checkpoints. *)
+      let context = match config.context with
+        | Some context -> context
+        | None -> restored_context resumed in
       Ok ({config with system_prompt=resumed.system_prompt;
                        initial_messages=resumed.initial_messages;
-                       context=Some (Agent_core.Context.copy ~eio:true resumed.checkpoint.context);
+                       context=Some context;
                        checkpoint_sidecar=resumed.checkpoint.working_context},
           Some resumed.checkpoint, resumed.input) in
   let call_id, api, resume, initial_call = match resumed with
@@ -304,8 +313,9 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
           | Native.Terminal_unacknowledged (previous, ({Agent.recovery=Retire; _} as disposition)) ->
             let* settled = load_checkpoint binding previous.checkpoint in
             let* terminal = retired_evidence binding previous disposition in
-            let* () = if retains_settled_results seed.messages
-                terminal.settled_tool_results then Ok ()
+            let* retained = retains_settled_results binding previous seed.messages
+                terminal.settled_tool_results in
+            let* () = if retained then Ok ()
               else Error "next native call is missing a canonically settled ToolResult" in
             let expected = match retired_history_cut with
               | None -> settled.messages

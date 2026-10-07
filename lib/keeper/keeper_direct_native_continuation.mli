@@ -36,6 +36,11 @@ val load : binding:binding -> (admission, string) result
 val runtime_id : resumed -> string
 val system_prompt : resumed -> string
 val checkpoint : resumed -> Agent_core.Checkpoint.t
+val restored_context : resumed -> Agent_core.Context.t
+(** A fresh Eio context containing the exact retained checkpoint entries.
+    Restore once before constructing tools, hooks or context injectors, then
+    pass this same object in [Runtime_agent.config.context]. [prepare]
+    preserves an explicitly supplied context, including setup mutations. *)
 val initial_messages : resumed -> Agent_core.Types.message list
 val input : resumed -> input
 

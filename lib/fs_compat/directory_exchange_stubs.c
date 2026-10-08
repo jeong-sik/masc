@@ -93,6 +93,10 @@ CAMLprim value caml_masc_readdir_nofollow(value v_path, value v_device, value v_
   result = Val_emptylist;
   errno = 0;
   while ((entry = readdir(directory)) != NULL) {
+    /* Preserve the inventory's existing contract: dot entries and hidden
+     * names are not mountable program or asset names. */
+    if (entry->d_name[0] == '.')
+      continue;
     name = caml_copy_string(entry->d_name);
     cell = caml_alloc(2, 0);
     Store_field(cell, 0, name);

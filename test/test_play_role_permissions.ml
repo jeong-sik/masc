@@ -1,6 +1,6 @@
 (* RFC play-link-for-the-shared-machine stage 1 (§2.2, §2.3, §5): the
    [Player] role an invite carries holds [CanPlayMachine] and nothing else,
-   the five seat tools require exactly that permission, and [Worker] /
+   the seat tools require exactly that permission, and [Worker] /
    [Admin] keep every right they had and gain the seat. *)
 
 open Alcotest
@@ -24,7 +24,7 @@ let all_permissions =
    change the game itself; peek reads what the screen hides; click is not
    needed for keyboard games. *)
 let seat_tools =
-  [ "masc_dos_screen"; "masc_dos_press"; "masc_dos_type"; "masc_dos_step"; "masc_dos_pass" ]
+  [ "masc_dos_screen"; "masc_dos_press"; "masc_dos_type"; "masc_dos_step"; "masc_dos_pass"; "masc_play_room" ]
 
 let test_player_holds_only_the_seat () =
   List.iter
@@ -93,7 +93,7 @@ let authorized role tool_name =
   | Ok () -> true
   | Error _ -> false
 
-(* Every tool the catalog knows: a Player passes the five seat tools and is
+(* Every tool the catalog knows: a Player passes the seat tools and is
    refused the rest, so no other tool can carry CanPlayMachine by accident. *)
 let test_player_passes_only_the_seat_tools () =
   let known = Tool_catalog.known_names () in
@@ -125,7 +125,7 @@ let () =
         ; test_case "role strings round-trip" `Quick test_role_strings_round_trip
         ] )
     ; ( "tools"
-      , [ test_case "the five seat tools require CanPlayMachine" `Quick
+      , [ test_case "the seat tools require CanPlayMachine" `Quick
             test_seat_tools_require_the_seat
         ; test_case "a player passes the seat tools and nothing else" `Quick
             test_player_passes_only_the_seat_tools

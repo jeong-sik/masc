@@ -27,7 +27,8 @@ let member name = function
   | _ -> None
 
 let seat_tools =
-  [ "masc_dos_pass"; "masc_dos_press"; "masc_dos_screen"; "masc_dos_step"; "masc_dos_type" ]
+  [ "masc_dos_pass"; "masc_dos_press"; "masc_dos_screen"; "masc_dos_step"; "masc_dos_type"
+  ; "masc_play_room" ]
 
 let request ?(params = `Assoc []) ?(notification = false) method_ =
   Yojson.Safe.to_string
@@ -231,6 +232,50 @@ let test_an_invite_plays_through_the_seat_with_auth_on () =
     check (option string) "masc_dos_screen ran as the invitee" (Some "pi") (meta_string "agent_id");
     check (option string) "the lane refused it, not the permission check"
       (Some "workflow_rejection") (meta_string "failure_class"))
+
+let test_an_invite_chats_through_the_seat_with_auth_on () =
+  with_state ~auth:true (fun ~base_path handle ->
+    let fields =
+      [ "action", `String "say"; "client_id", `String "seat-client"
+      ; "machine", `String "dos"; "message_id", `String "first"
+      ; "text", `String "같이 봅니다" ] in
+    let arguments = `Assoc fields in
+    let call ?auth_token arguments =
+      handle ?auth_token
+        (request ~params:(`Assoc
+          [ "name", `String "masc_play_room"; "arguments", arguments ]) "tools/call") in
+    check (option int) "a fabricated bearer cannot send to the room" (Some auth_error)
+      (error_code (call ~auth_token:"not-an-invite" arguments));
+    let response = call arguments in
+    check (option int) "the room call reaches dispatch" None (error_code response);
+    let result = match member "result" response with
+      | Some result -> result
+      | None -> fail "room call produced no result" in
+    check bool "authenticated room call succeeds" false
+      (member "isError" result = Some (`Bool true));
+    check bool "viewer metadata uses the authenticated Player" true
+      (Option.bind (member "structuredContent" result) (member "viewer") = Some (`String "pi"));
+    (match Option.bind (member "structuredContent" result) (member "messages") with
+     | Some (`List [_]) -> ()
+     | _ -> fail "the authenticated MCP response must include the room message");
+    let snapshot () = match Masc.Play_room.read ~base_path ~now:(Unix.gettimeofday ()) ~before:None with
+      | Ok snapshot -> snapshot
+      | Error error -> fail (Masc.Play_room.error_message error) in
+    let first = snapshot () in
+    (match first.messages with
+     | [message] ->
+         check string "speaker comes from authenticated Player" "pi" message.who;
+         check string "public message is durable" "같이 봅니다" message.text;
+         check bool "Player cannot claim Keeper attribution" true
+           (message.speaker = Masc.Play_room.Participant)
+     | _ -> fail "expected exactly one authenticated public message");
+    ignore (call arguments : Yojson.Safe.t);
+    check int "retry through MCP does not duplicate" 1 (List.length (snapshot ()).messages);
+    let forged = `Assoc (("who", `String "someone-else") :: fields) in
+    let refusal = call forged in
+    check bool "a body cannot replace the authenticated speaker" true
+      (Option.bind (member "result" refusal) (member "isError") = Some (`Bool true));
+    check int "forged request does not write" 1 (List.length (snapshot ()).messages))
 
 let test_an_invite_recovers_only_a_stopped_keepers_controller () =
   let module Lane = Dos_lane in
@@ -451,6 +496,8 @@ let () =
             test_the_seat_refuses_a_tool_it_does_not_list
         ; test_case "an invite plays through the seat with auth on" `Quick
             test_an_invite_plays_through_the_seat_with_auth_on
+        ; test_case "an invite chats through the seat with auth on" `Quick
+            test_an_invite_chats_through_the_seat_with_auth_on
         ; test_case "an invite passes only to someone at the machine" `Quick
             test_an_invite_passes_only_to_someone_at_the_machine
         ; test_case "an invite recovers only a stopped Keeper controller" `Quick

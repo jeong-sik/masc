@@ -1453,9 +1453,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
         ?on_memory_capacity_refusal
         ~on_memory_retry:(fun () ->
           resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
-        (* Every turn starts unbounded: the provider's typed overflow is what
-           narrows it. The shrink below cuts only the conversation window;
-           the pinned briefing is sent whole. *)
+        (* The provider's typed overflow narrows the initially unbounded turn. *)
         ~starting_capacity:unbounded_model_input_capacity_bytes
         ~same_run_retry_authorized:(fun () ->
           !context_overflow_retry_safe)

@@ -7,9 +7,10 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Semantic review remains pending
-for 70 production candidates. Five production files received bounded changes;
-their other responsibilities have not been declared audited or complete.
+is not a defect verdict or a new build gate. Six production candidates received
+bounded changes; their other responsibilities remain pending. The other 69
+production candidates still require semantic review. All 171 candidates remain
+in the campaign until their responsibilities and necessary repairs are assessed.
 
 | PR | Concrete boundary or defect | Changed production file |
 | --- | --- | --- |
@@ -19,6 +20,7 @@ their other responsibilities have not been declared audited or complete.
 | [#41872](https://github.com/jeong-sik/masc/pull/41872) | Pure calendar, segment grammar and ordering separated from storage effects | `dated_jsonl.ml` |
 | [#41879](https://github.com/jeong-sik/masc/pull/41879) | Pure line-window projection after backend acquisition | `keeper_tool_filesystem_runtime.ml` |
 | [#41890](https://github.com/jeong-sik/masc/pull/41890) | Failure card extracted; completed media retained on history reload; diagnostics remain separate from speech | `dashboard/src/components/chat/primitives.ts` |
+| [#41899](https://github.com/jeong-sik/masc/pull/41899) | One closed row classification; server failure producer; shared terminal authority and all consumers updated | `keeper_chat_store.ml`, `server_routes_http_keeper_stream.ml`, chat primitives |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather

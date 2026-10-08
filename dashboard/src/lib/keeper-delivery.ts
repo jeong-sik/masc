@@ -21,7 +21,7 @@ export const IN_FLIGHT_DELIVERY = [
 /** Deliveries representing a failed terminal outcome. */
 export const FAILED_DELIVERY = [
   'error',
-  'transport_failure',
+  'request_failure',
   'timeout',
   'interrupted',
 ] as const satisfies ReadonlyArray<KeeperConversationDelivery>

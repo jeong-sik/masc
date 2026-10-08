@@ -12,14 +12,9 @@ function renderStructuredFailureText(text: string): Array<string | VNode> {
   })
 }
 
-/** Typed failure card for kind=transport_failure rows.
- *
- * The discriminator is the writer-declared row kind (normalized to the closed
- * delivery='transport_failure' variant), never a string match on the content.
- * The raw error text is diagnostic payload, shown collapsed. The reassurance line states
- * what the backend guarantees: a Transport_failure row is watermark-neutral
- * (keeper_chat_store), so the user message it failed to answer stays pending
- * for the keeper's next turn. */
+/** Server-owned request failure with retained output. Diagnostic details
+ * stay collapsed; the failed input remains pending until real Keeper speech.
+ * Clipboard effects belong to the caller. */
 export function ChatFailureCard({ diagnostic, children, onCopy }: {
   diagnostic: string
   children?: ComponentChildren
@@ -73,4 +68,3 @@ export function ChatFailureCard({ diagnostic, children, onCopy }: {
     </div>
   `
 }
-

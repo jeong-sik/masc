@@ -70,11 +70,20 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     ])
   })
 
-  it('accepts unknown role strings (open enum for backend-ahead deploys)', () => {
+  it('rejects an unknown transcript row classification', () => {
     const out = safeParseKeeperChatHistoryMessage(
       validMessage({ role: 'tool-result-v2' }),
     )
-    expect(out?.role).toBe('tool-result-v2')
+    expect(out).toBeNull()
+  })
+
+  it('accepts server-owned failures without an assistant marker', () => {
+    const out = safeParseKeeperChatHistoryMessage(validMessage({
+      role: 'request_failure', content: 'provider disconnected after output',
+      blocks: [{ t: 'image', src: '/api/v1/media/completed', cap: 'completed' }],
+    }))
+    expect(out?.role).toBe('request_failure')
+    expect(out?.blocks).toEqual([{ t: 'image', src: '/api/v1/media/completed', cap: 'completed' }])
   })
 
   it('returns null when a required field is missing', () => {

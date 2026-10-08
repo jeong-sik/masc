@@ -9,7 +9,7 @@
 
     An array of rows, each with [role] ("user" / "assistant" / "tool"),
     [content], and [ts]. An assistant row carrying
-    [kind: "transport_failure"] is a delivery that failed rather than
+    [role: "request_failure"] is a delivery that failed rather than
     something the keeper said. An assistant row the server marks
     [autonomous_turn] also carries [blocks], among them a [t: "trace"] block
     whose [trace] steps are [think] / [reason] / [tool]; those become a
@@ -99,7 +99,7 @@ type kind =
                 evidence only: it does not claim the failed operation itself
                 was replayed. *)
       }
-      (** An assistant row the server marked [transport_failure]: the reply
+      (** A server-owned [request_failure] row: the reply
           did not reach its destination. Not keeper speech.
 
           [origin_request_id] is the operation the server persisted this row

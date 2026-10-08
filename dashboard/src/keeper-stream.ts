@@ -533,7 +533,7 @@ export function applyKeeperOperationTurnEvent(
       && isOperationDeliveryProvenance(
         entry.deliveryProvenance,
         operationId,
-        'terminal_assistant',
+        'terminal_result',
       ),
   )
   if (
@@ -556,7 +556,7 @@ export function applyKeeperOperationTurnEvent(
       text: '',
       rawText: null,
       timestamp: null,
-      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_assistant'),
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'),
       delivery: 'sending',
       streamState: 'opening',
       streamContract: keeperStreamContract(
@@ -945,7 +945,7 @@ export function applyKeeperStreamEvent(
           ...entry,
           deliveryProvenance: operationDeliveryProvenance(
             operationId,
-            'terminal_assistant',
+            'terminal_result',
           ),
           text: queued ? 'Queued' : entry.text,
           rawText: queued ? 'Queued' : entry.rawText,
@@ -1264,7 +1264,7 @@ export function applyKeeperStreamEvent(
         if (!isOperationDeliveryProvenance(
           entry.deliveryProvenance,
           source.operationId,
-          'terminal_assistant',
+          'terminal_result',
         )) {
           return entry
         }

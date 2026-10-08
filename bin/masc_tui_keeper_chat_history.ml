@@ -1338,144 +1338,142 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                 ; attachments = attachment_notes_of fields
                 }
             ]
+      | Some "request_failure" ->
+          (* The server already sends the append-once identity it stored
+             the row under. Only an operation key names a turn this client
+             dispatched; the other producers get [None] rather than a
+             borrowed id. *)
+          let origin_request_id =
+            match List.assoc_opt "delivery_key" fields with
+            | Some (`Assoc key_fields) -> (
+                match string_field key_fields "kind" with
+                | Some "operation" -> string_field key_fields "operation_id"
+                | Some _ | None -> None)
+            | Some _ | None -> None
+          in
+          Some
+            [ Utterance
+              { at
+              ; structural_id = structural_id_of_fields fields "failure"
+              ; turn_sequence
+              ; turn_id =
+                  (match turn_id with
+                   | Some _ -> turn_id
+                   | None -> origin_request_id)
+              ; (* The failure is the operation's: the key it was stored
+                   under names it even when the row carries no transcript
+                   slot for the provenance reader. *)
+                operation_id =
+                  (match operation_id with
+                   | Some _ -> operation_id
+                   | None -> origin_request_id)
+              ; execution_source =
+                  (match execution_source with
+                   | Some _ -> execution_source
+                   | None -> Option.map (fun id -> Masc_tui_keeper_chat_log.Operation id) origin_request_id)
+              ; kind = Delivery_failed { origin_request_id; recovered_at = None }
+              ; text = content
+              ; attachments = attachment_notes_of fields
+              }
+          ]
       | Some "assistant" -> (
-          match string_field fields "kind" with
-          | Some "transport_failure" ->
-              (* The server already sends the append-once identity it stored
-                 the row under. Only an operation key names a turn this client
-                 dispatched; the other producers get [None] rather than a
-                 borrowed id. *)
-              let origin_request_id =
-                match List.assoc_opt "delivery_key" fields with
-                | Some (`Assoc key_fields) -> (
-                    match string_field key_fields "kind" with
-                    | Some "operation" -> string_field key_fields "operation_id"
-                    | Some _ | None -> None)
-                | Some _ | None -> None
+          (* An autonomous turn persists what it did as a trace block and
+             often says nothing in [content]: on one live keeper 32 of
+             183 assistant rows were blank that way, and each drew as a
+             timestamp over an empty line. Exact Skill evidence leads the
+             turn as its own card; reasoning and ordinary calls follow as
+             the trace carried them, then the text, when there is any, is
+             what the turn said afterwards. A row with neither keeps its
+             empty line -- that is what the server holds for it.
+
+             Only a row the server marks [autonomous_turn] is read this
+             way. A direct-conversation turn can carry a trace block too
+             -- the server joins the raw trace onto rows with a turn ref
+             -- but its calls are already in the transcript as
+             [role: "tool"] rows, and reading both drew every call twice. *)
+          let autonomous =
+            match List.assoc_opt "autonomous_turn" fields with
+            | Some (`Assoc _) -> true
+            | Some _ | None -> false
+          in
+          let skill_projection = skill_projection_of_fields fields in
+          let fusion_rows =
+            List.map
+              (fun fusion ->
+                 Utterance
+                   { at
+                   ; structural_id =
+                       Option.map (fun id -> id ^ ":fusion") source_id
+                   ; turn_sequence
+                   ; turn_id
+                   ; operation_id
+                   ; execution_source
+                   ; kind = Fusion_conclusion fusion
+                   ; text = ""
+                   ; attachments = []
+                   })
+              (fusion_conclusions_of fields)
+          in
+          let skill_rows, trace_rows =
+            if autonomous then
+              let summary = trace_summary_of fields in
+              let skill_projection =
+                reconcile_skill_projection_with_trace summary skill_projection
               in
-              Some
-                [ Utterance
+              let summary =
+                if skill_projection.replaces_raw_skill_tools then
+                  without_raw_skill_tools summary
+                else summary
+              in
+              ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
+                  ~operation_id ~execution_source at skill_projection
+              , rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at
+                  summary )
+            else
+              ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
+                  ~operation_id ~execution_source at skill_projection
+              , [] )
+          in
+          let said =
+            (* An autonomous turn that wrote nothing has nothing to say.
+               With a trace the calls are the turn; without one the wake
+               produced neither, and as a row it was a speaker label over
+               an empty line -- which a later change filled with a middle
+               dot so the line would not look broken. Eleven of the
+               fourteen Keeper rows on one live screen were that dot.
+
+               A direct turn keeps its blank row: someone asked, and an
+               empty answer is part of that exchange. Nobody asked for an
+               autonomous one.
+
+               Trimmed rather than compared against "": a reply of a
+               single newline is as blank as no reply, and an exact
+               comparison let it through to be drawn as the dot.
+
+               Skill rows count as the turn's visible content too: when
+               the projection replaces the raw skill tool, trace_rows is
+               empty and an older guard let an empty utterance row through
+               under the Skill row. *)
+            if
+              String.trim content = ""
+              && (autonomous || skill_rows <> [] || trace_rows <> [])
+            then []
+            else
+              [ Utterance
                   { at
-                  ; structural_id = structural_id_of_fields fields "failure"
+                  ; structural_id =
+                      structural_id_of_fields fields "utterance"
                   ; turn_sequence
-                  ; turn_id =
-                      (match turn_id with
-                       | Some _ -> turn_id
-                       | None -> origin_request_id)
-                  ; (* The failure is the operation's: the key it was stored
-                       under names it even when the row carries no transcript
-                       slot for the provenance reader. *)
-                    operation_id =
-                      (match operation_id with
-                       | Some _ -> operation_id
-                       | None -> origin_request_id)
-                  ; execution_source =
-                      (match execution_source with
-                       | Some _ -> execution_source
-                       | None -> Option.map (fun id -> Masc_tui_keeper_chat_log.Operation id) origin_request_id)
-                  ; kind = Delivery_failed { origin_request_id; recovered_at = None }
+                  ; turn_id
+                  ; operation_id
+                  ; execution_source
+                  ; kind = if autonomous then Autonomous_reply else Said_by_keeper
                   ; text = content
                   ; attachments = []
                   }
               ]
-          | Some _ | None ->
-              (* An autonomous turn persists what it did as a trace block and
-                 often says nothing in [content]: on one live keeper 32 of
-                 183 assistant rows were blank that way, and each drew as a
-                 timestamp over an empty line. Exact Skill evidence leads the
-                 turn as its own card; reasoning and ordinary calls follow as
-                 the trace carried them, then the text, when there is any, is
-                 what the turn said afterwards. A row with neither keeps its
-                 empty line -- that is what the server holds for it.
-
-                 Only a row the server marks [autonomous_turn] is read this
-                 way. A direct-conversation turn can carry a trace block too
-                 -- the server joins the raw trace onto rows with a turn ref
-                 -- but its calls are already in the transcript as
-                 [role: "tool"] rows, and reading both drew every call twice. *)
-              let autonomous =
-                match List.assoc_opt "autonomous_turn" fields with
-                | Some (`Assoc _) -> true
-                | Some _ | None -> false
-              in
-              let skill_projection = skill_projection_of_fields fields in
-              let fusion_rows =
-                List.map
-                  (fun fusion ->
-                     Utterance
-                       { at
-                       ; structural_id =
-                           Option.map (fun id -> id ^ ":fusion") source_id
-                       ; turn_sequence
-                       ; turn_id
-                       ; operation_id
-                       ; execution_source
-                       ; kind = Fusion_conclusion fusion
-                       ; text = ""
-                       ; attachments = []
-                       })
-                  (fusion_conclusions_of fields)
-              in
-              let skill_rows, trace_rows =
-                if autonomous then
-                  let summary = trace_summary_of fields in
-                  let skill_projection =
-                    reconcile_skill_projection_with_trace summary skill_projection
-                  in
-                  let summary =
-                    if skill_projection.replaces_raw_skill_tools then
-                      without_raw_skill_tools summary
-                    else summary
-                  in
-                  ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
-                      ~operation_id ~execution_source at skill_projection
-                  , rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at
-                      summary )
-                else
-                  ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
-                      ~operation_id ~execution_source at skill_projection
-                  , [] )
-              in
-              let said =
-                (* An autonomous turn that wrote nothing has nothing to say.
-                   With a trace the calls are the turn; without one the wake
-                   produced neither, and as a row it was a speaker label over
-                   an empty line -- which a later change filled with a middle
-                   dot so the line would not look broken. Eleven of the
-                   fourteen Keeper rows on one live screen were that dot.
-
-                   A direct turn keeps its blank row: someone asked, and an
-                   empty answer is part of that exchange. Nobody asked for an
-                   autonomous one.
-
-                   Trimmed rather than compared against "": a reply of a
-                   single newline is as blank as no reply, and an exact
-                   comparison let it through to be drawn as the dot.
-
-                   Skill rows count as the turn's visible content too: when
-                   the projection replaces the raw skill tool, trace_rows is
-                   empty and an older guard let an empty utterance row through
-                   under the Skill row. *)
-                if
-                  String.trim content = ""
-                  && (autonomous || skill_rows <> [] || trace_rows <> [])
-                then []
-                else
-                  [ Utterance
-                      { at
-                      ; structural_id =
-                          structural_id_of_fields fields "utterance"
-                      ; turn_sequence
-                      ; turn_id
-                      ; operation_id
-                      ; execution_source
-                      ; kind = if autonomous then Autonomous_reply else Said_by_keeper
-                      ; text = content
-                      ; attachments = []
-                      }
-                  ]
-              in
-              Some (fusion_rows @ skill_rows @ trace_rows @ said))
+          in
+          Some (fusion_rows @ skill_rows @ trace_rows @ said))
       | Some "system" ->
           (* Durable approval lifecycle rows are server-owned status, never
              Keeper speech. A row that carries the typed lifecycle is read as

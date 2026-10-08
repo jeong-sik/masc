@@ -26,7 +26,7 @@ let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface
    normally see. [owner] is the operator's own, which is what these cases are
    about; the one row that lacks it falls to unresolved, which is the case
    below. *)
-let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?execution_id ?tool_call_name
+let row ?(ts = 1.0) ~role ?tool_call_id ?execution_id ?tool_call_name
     ?delivery_key ?transcript_slot ?turn_ref ?(speaker_authority = "owner")
     content =
   `Assoc
@@ -37,7 +37,6 @@ let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?execution_id ?tool_call_name
      ]
      @ (if role = "user" then [ "speaker_authority", `String speaker_authority ]
         else [])
-     @ (match kind with None -> [] | Some k -> [ "kind", `String k ])
      @ (match delivery_key with None -> [] | Some json -> [ "delivery_key", json ])
      @ (match transcript_slot with
         | None -> []
@@ -298,7 +297,7 @@ let test_roles_map_to_what_the_pane_draws () =
       (`List
          [ row ~ts:1.0 ~role:"user" "고쳐줘"
          ; row ~ts:2.0 ~role:"assistant" "고쳤어요"
-         ; row ~ts:3.0 ~role:"assistant" ~kind:"transport_failure" "slack 5xx"
+         ; row ~ts:3.0 ~role:"request_failure" "slack 5xx"
          ; row ~ts:4.0 ~role:"system"
              ~delivery_key:
                (`Assoc
@@ -343,14 +342,14 @@ let test_a_failed_turn_names_the_request_it_came_from () =
   let decoded =
     decode
       (`List
-         [ row ~ts:1.0 ~role:"assistant" ~kind:"transport_failure"
+         [ row ~ts:1.0 ~role:"request_failure"
              ~delivery_key:(operation_key "tui-28e58beb") "provider closed the connection"
-         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure"
+         ; row ~ts:2.0 ~role:"request_failure"
              ~delivery_key:
                (`Assoc
                   [ "kind", `String "fusion_run"; "request_id", `String "fusion-1" ])
              "provider closed the connection"
-         ; row ~ts:3.0 ~role:"assistant" ~kind:"transport_failure"
+         ; row ~ts:3.0 ~role:"request_failure"
              "provider closed the connection"
          ])
   in
@@ -420,7 +419,7 @@ let test_runtime_interruption_becomes_a_recovered_lifecycle () =
     decode
       (`List
          [ row ~ts:1.0 ~role:"user" "brief me"
-         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure" failure
+         ; row ~ts:2.0 ~role:"request_failure" failure
          ; autonomous_turn ~ts:3.0 ~content:(`String "briefing complete") []
          ])
   in
@@ -442,7 +441,7 @@ let test_runtime_interruption_becomes_a_recovered_lifecycle () =
 let test_stdout_close_stays_pending_without_a_later_reply () =
   let failure = fenced_masc_failure connection_closed in
   let decoded =
-    decode (`List [ row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure" failure ])
+    decode (`List [ row ~ts:2.0 ~role:"request_failure" failure ])
   in
   match decoded.History.rows with
   | [ { History.kind = History.Delivery_failed { recovered_at; _ }; text; _ } ] ->
@@ -491,7 +490,7 @@ let test_an_unfenced_stop_is_marked_recovered_by_a_later_reply () =
     decode
       (`List
          [ row ~ts:1.0 ~role:"user" "brief me"
-         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure"
+         ; row ~ts:2.0 ~role:"request_failure"
              (persisted_failure_row connection_closed)
          ; autonomous_turn ~ts:3.0 ~content:(`String "briefing complete") []
          ])
@@ -527,7 +526,7 @@ let test_unrelated_failure_is_not_marked_recovered () =
   let decoded =
     decode
       (`List
-         [ row ~ts:1.0 ~role:"assistant" ~kind:"transport_failure"
+         [ row ~ts:1.0 ~role:"request_failure"
              "Keeper request failed: auth denied"
          ; row ~ts:2.0 ~role:"assistant" "a later reply"
          ])
@@ -552,7 +551,7 @@ let test_rows_retain_the_exact_turn_identity () =
              ~transcript_slot:(tool_transcript_slot "exec-1" 0)
              ~tool_call_name:"Read" "{}"
          ; row ~role:"assistant" ~delivery_key:key
-             ~transcript_slot:(transcript_slot "terminal_assistant") "done"
+             ~transcript_slot:(transcript_slot "terminal_result") "done"
          ])
   in
   check (list (option string)) "every row keeps the producer's operation id"
@@ -574,10 +573,10 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
              ~transcript_slot:(tool_transcript_slot "exec-1" 0)
              ~tool_call_name:"Read" "{}"
          ; row ~role:"assistant" ~delivery_key:key
-             ~transcript_slot:(transcript_slot "terminal_assistant") "done"
+             ~transcript_slot:(transcript_slot "terminal_result") "done"
            (* A failure row carries no transcript slot. Its operation key
               still owns both journal lookup and conversation grouping. *)
-         ; row ~role:"assistant" ~kind:"transport_failure" ~delivery_key:key
+         ; row ~role:"request_failure" ~delivery_key:key
              "the wire dropped"
          ; autonomous_turn ~turn_ref:"trace-1#54" [ reason "look"; tool "Read" ]
          ; row ~role:"user"

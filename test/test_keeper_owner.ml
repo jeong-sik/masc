@@ -3323,8 +3323,7 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
        let failure_rows =
          List.filter
            (fun (row : Keeper_chat_store.chat_message) ->
-              Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Assistant
-              && Keeper_chat_store.Row_kind.equal row.kind Keeper_chat_store.Row_kind.Transport_failure)
+              Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Request_failure)
            rows
        in
        check int "each batch member has a failure row" 2 (List.length failure_rows);
@@ -4665,10 +4664,11 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
            ~keeper_name:meta.name ~delivery_key ~turn_ref ~content:full_reply
            ~blocks:[Keeper_chat_blocks.Image {src="https://example.invalid/delegated.png";cap=None}] ()
          |> Result.get_ok |> ignore;
-         Keeper_chat_store.append_assistant_message_result ~base_dir:base_path
+         Keeper_chat_store.append_request_failure_once ~base_dir:base_path
            ~keeper_name:meta.name ~turn_ref
-           ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
-           ~content:"TRANSPORT-FAILURE-MUST-NOT-BECOME-REPLY" () |> Result.get_ok;
+           ~delivery_key:(Keeper_chat_delivery_identity.Operation
+             (Keeper_chat_delivery_identity.Request_id.of_string "separate-failed-operation" |> Result.get_ok))
+           ~content:"TRANSPORT-FAILURE-MUST-NOT-BECOME-REPLY" () |> Result.get_ok |> ignore;
          Keeper_chat_store.append_assistant_message_result ~base_dir:base_path
            ~keeper_name:meta.name
            ~turn_ref:(Ids.Turn_ref.make ~trace_id:"owned-delegate" ~absolute_turn:8)

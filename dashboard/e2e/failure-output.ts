@@ -42,22 +42,31 @@ import '../src/styles/keeper-v2/tempered.css'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { ChatTranscript } from '../src/components/chat/primitives'
-import { chatHistoryEntriesFromRest } from '../src/keeper-state'
+import { chatHistoryEntriesFromRest, isDefaultVisibleConversationEntry, appendThreadEntry, mergeServerHistoryEntries, keeperThreads } from '../src/keeper-state'
 
 const image = new URL('./failure-output.svg', import.meta.url).href
 const audio = new URL('./failure-output.wav', import.meta.url).href
 const entries = chatHistoryEntriesFromRest('sangsu', [{
-  id: 'failure-output-fixture', role: 'assistant', ts: 1780000001,
+  id: 'failure-output-fixture', role: 'request_failure', ts: 1780000001,
   content: 'Keeper request failed: provider disconnected after media',
-  kind: 'transport_failure', turn_ref: 'fixture-trace#1',
+  turn_ref: 'fixture-trace#1',
   delivery_provenance_status: 'valid',
   delivery_provenance: {
     delivery_key: { kind: 'operation', operation_id: 'fixture-operation' },
-    transcript_slot: { kind: 'terminal_assistant' },
+    transcript_slot: { kind: 'terminal_result' },
   },
   blocks: [
     { t: 'image', src: image, cap: '실패 전에 생성된 이미지' },
     { t: 'voice', src: audio, transcript: '실패 전에 생성된 음성', secs: 1 },
   ],
 }])
-render(html`<${ChatTranscript} entries=${entries} variant="messenger" emptyText="empty" />`, document.getElementById('fixture')!)
+const live = chatHistoryEntriesFromRest('sangsu', [{
+  id: 'fixture-live-work', role: 'assistant', content: 'live placeholder', ts: 1780000000,
+  delivery_provenance_status: 'valid', delivery_provenance: entries[0]!.deliveryProvenance,
+}])[0]!
+appendThreadEntry('sangsu', {
+  ...live, text: '', rawText: '', delivery: 'streaming',
+  traceSteps: [{ kind: 'think', text: 'Completed work trace retained after failure' }],
+})
+mergeServerHistoryEntries('sangsu', entries)
+render(html`<${ChatTranscript} entries=${keeperThreads.value.sangsu!.filter(isDefaultVisibleConversationEntry)} groupToolCalls=${true} variant="messenger" emptyText="empty" />`, document.getElementById('fixture')!)

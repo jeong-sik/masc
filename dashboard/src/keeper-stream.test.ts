@@ -44,7 +44,7 @@ function assistantEntry(operationId?: string): void {
     delivery: 'sending',
     streamState: 'opening',
     ...(operationId
-      ? { deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_assistant') }
+      ? { deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result') }
       : {}),
     details: null,
   })
@@ -342,7 +342,7 @@ describe('Keeper operation stream projection', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('queued')
     expect(entry?.deliveryProvenance).toEqual(
-      operationDeliveryProvenance('kmsg-operation-1', 'terminal_assistant'),
+      operationDeliveryProvenance('kmsg-operation-1', 'terminal_result'),
     )
   })
 
@@ -394,7 +394,7 @@ describe('Keeper operation stream projection', () => {
         timestamp: null,
         deliveryProvenance: operationDeliveryProvenance(
           operationId,
-          'terminal_assistant',
+          'terminal_result',
         ),
         delivery: 'queued',
         streamState: null,
@@ -411,12 +411,12 @@ describe('Keeper operation stream projection', () => {
     expect(entries.find(entry => isOperationDeliveryProvenance(
       entry.deliveryProvenance,
       'kmsg-operation-1',
-      'terminal_assistant',
+      'terminal_result',
     ))?.text).toBe('')
     expect(entries.find(entry => isOperationDeliveryProvenance(
       entry.deliveryProvenance,
       'kmsg-operation-2',
-      'terminal_assistant',
+      'terminal_result',
     ))?.text).toBe('second')
   })
 
@@ -438,7 +438,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-operation-1',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'streaming',
       streamState: 'streaming',
@@ -478,7 +478,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-opening',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'sending',
       streamState: 'opening',
@@ -511,7 +511,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-interrupted',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'interrupted',
       streamState: null,
@@ -612,7 +612,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-operation-1',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'streaming',
       streamState: 'streaming',
@@ -679,7 +679,7 @@ describe('Keeper operation stream projection', () => {
         timestamp: null,
         deliveryProvenance: operationDeliveryProvenance(
           operationId,
-          'terminal_assistant',
+          'terminal_result',
         ),
         delivery: 'streaming',
         streamState: 'thinking',

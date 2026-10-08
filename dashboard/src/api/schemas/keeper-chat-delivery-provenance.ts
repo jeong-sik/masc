@@ -78,7 +78,7 @@ export const KeeperChatDeliveryKeySchema = Schema.Union(
 
 export const KeeperChatTranscriptSlotSchema = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('accepted_user') }),
-  Schema.Struct({ kind: Schema.Literal('terminal_assistant') }),
+  Schema.Struct({ kind: Schema.Literal('terminal_result') }),
   Schema.Struct({ kind: Schema.Literal('approval_request') }),
   Schema.Struct({ kind: Schema.Literal('approval_resolution') }),
   Schema.Struct({ kind: Schema.Literal('approval_replay') }),

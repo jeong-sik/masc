@@ -98,6 +98,16 @@ same 1,200-frame probe produced rendered output for L'Empereur, Europa Sensen,
 Genghis Khan, Rune Master and Super Daisenryaku. These are media-load and
 rendering checks; they do not promote those games to campaign-complete.
 
+The same day, the MASC tool path was exercised from a copied operator
+checkpoint at the Sangokushi II player-count prompt. `masc_msx_restore` restored
+frame 3,925, `masc_msx_press` selected zero human players, and 3,000 subsequent
+space presses (300 frames per call) reached frame 904,045 and a rendered
+`204年 4月` AI-turn/event screen. This proves a long-running observer session
+through the Lane and Tool boundary, including input-ledger growth and bitmap
+screen publication. It is still not an observed termination screen or a human
+unification victory; the copied checkpoint and temporary base path were kept
+outside the operator's live `.masc` tree.
+
 Campaign acceptance still requires readable interactive menus, starting a
 scenario, taking turns, completing a battle, saving progress, restarting and
 restoring that progress, and an observed ending. Record source/binary identity,

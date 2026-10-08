@@ -52,8 +52,8 @@ let test_stdio_controller () =
     Eio_main.run (fun env ->
       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
         Eio.Switch.run (fun sw ->
-          let request_source, request_sink = Eio_unix.pipe ~sw () in
-          let response_source, response_sink = Eio_unix.pipe ~sw () in
+          let request_source, request_sink = Eio_unix.pipe sw in
+          let response_source, response_sink = Eio_unix.pipe sw in
           Eio.Fiber.first
             (fun () -> Mcp_protocol_eio.Server.run (Dos_addon_worker.create ~base_path ())
               ~stdin:request_source ~stdout:response_sink ~clock:(Eio.Stdenv.clock env) ())

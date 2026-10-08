@@ -9870,3 +9870,8 @@
  (libraries alcotest astring yojson masc masc.masc_types masc.agent_core masc.runtime masc.server masc.ag_ui
   native_tool_outcome_fixture masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_runtime_native_tasks)
+ (modules test_runtime_native_tasks)
+ (libraries alcotest yojson masc.runtime))

@@ -256,20 +256,20 @@ type content_block =
 
 type content_channel = Text_content | Thinking_content
 
-type native_task_status =
+type native_task_status = Runtime_native_tasks.status =
   | Task_pending | Task_running | Task_completed | Task_failed | Task_killed | Task_paused
 
-type native_task_terminal = Task_completed_notice | Task_failed_notice | Task_stopped_notice
-type native_task_reason = Worker_restart
-type native_task_boundary = Task_terminal_unobserved | Task_terminal_observed
+type native_task_terminal = Runtime_native_tasks.terminal = Task_completed_notice | Task_failed_notice | Task_stopped_notice
+type native_task_reason = Runtime_native_tasks.reason = Worker_restart
+type native_task_boundary = Runtime_native_tasks.boundary = Task_terminal_unobserved | Task_terminal_observed
 
-type native_task_usage =
+type native_task_usage = Runtime_native_tasks.usage =
   { total_tokens : int; tool_uses : int; duration_ms : int }
 (** Provider task observations, never the root model's usage. [duration_ms]
     preserves the signed safe integer reported by the provider's wall-clock
     subtraction; a negative value neither fails nor terminates the task. *)
 
-type native_task_event =
+type native_task_event = Runtime_native_tasks.event =
   | Task_registered of
       { subagent_type : string option; is_backgrounded : bool option
       ; skip_transcript : bool option; ambient : bool option }

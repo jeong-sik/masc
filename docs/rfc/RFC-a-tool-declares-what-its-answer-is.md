@@ -127,4 +127,4 @@ Keeper 의 반복 감지는 입력과 출력이 모두 같은 호출이 턴 안�
 설계와 다른 점은 둘이다.
 
 - `keeper_memory_write` 의 답은 `ok`, `error_kind`, `effect_disposition`, `detail`, `outcome`, `store`, `memory_id`, `identity_disposition`, `basis`, `supersedes` 계열, `source_path`, `source_sha256`, `missing_premise_ids`, `removed_memory_ids`, `support_invalidations` 이다. 실패 응답도 `ok` 가 있으면 같은 필터를 탄다. §4.3 은 대표 필드만 적었다.
-- 목록에 없는 새 필드는 답에서 빠진다. 그 필드가 정말 변경을 나르면 반복 감지가 한 번 늦게 멈추는 비용을 받아들였다(`keeper_tool_memory_runtime.ml` 주석).
+- 목록에 없는 새 필드는 답에서 빠진다. 그 필드가 실제 변경을 담으면 서로 다른 결과가 같은 답으로 판정되어 반복 감지가 작업을 일찍 멈출 수 있다. 구현 주석은 이를 재개 비용으로 설명한다(`keeper_tool_memory_runtime.ml`).

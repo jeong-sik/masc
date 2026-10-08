@@ -2,4 +2,4 @@
 (library
  (name msx_machine_tools)
  (public_name masc.msx_tools)
- (libraries masc.machine_configuration masc.msx_lane masc.masc_core masc.config masc.tool_types yojson))
+ (libraries masc.machine_configuration masc.msx_lane masc.masc_core masc.config masc.tool_types unix yojson))

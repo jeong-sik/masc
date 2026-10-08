@@ -17,11 +17,6 @@ exception Test_isolation_breach of string
 (** Set global Eio filesystem. Call at server startup. *)
 val set_fs : Eio.Fs.dir_ty Eio.Path.t -> unit
 
-(** Enumerate one opened directory without following a final symlink. The
-    returned names are read from that directory descriptor, so pathname
-    replacement after open cannot redirect the enumeration. *)
-val read_directory_nofollow : string -> int -> int -> string list
-
 (** Clear global fs (testing/shutdown). *)
 val clear_fs : unit -> unit
 
@@ -221,11 +216,31 @@ val load_owned_regular_file_range
     snapshot validated across that exact read. Negative bounds return a typed
     read error; an offset at or beyond EOF returns empty [content]. *)
 
+(** A request-held root descriptor. Canonicalization is performed once and
+    checked against the identity observed before it. The callback result is
+    refused if the original root spelling or canonical directory changed.
+    The callback and entry reads are blocking; run this entire scope on a
+    system thread in Eio contexts. The handle is valid only in the callback. *)
+type owned_inventory_root
+val with_owned_inventory_root
+  : string
+  -> (owned_inventory_root -> ('a, owned_regular_file_read_error) result)
+  -> ('a, owned_regular_file_read_error) result
+val owned_inventory_root_path : owned_inventory_root -> string
+val owned_inventory_entry_kind
+  : owned_inventory_root -> string
+  -> (Unix.file_kind, owned_regular_file_read_error) result
+
 type owned_regular_file_range_digest =
   { content : string
   ; sha256 : string
   ; snapshot : owned_regular_file_snapshot
   }
+
+(** Hash a regular file opened relative to the held root descriptor. *)
+val owned_inventory_entry_digest
+  : owned_inventory_root -> string
+  -> (owned_regular_file_range_digest, owned_regular_file_read_error) result
 
 val load_owned_regular_file_range_with_sha256
   :  ownership_root:string
@@ -257,7 +272,8 @@ val owned_regular_file_read_error_to_string
     Errors contain no file contents; callers must redact host paths at public
     boundaries. Blocking operations use a system thread in Eio contexts. *)
 val read_owned_directory
-  : ?before_read:(string -> unit)
+  : ?inventory_root:owned_inventory_root
+  -> ?before_read:(string -> unit)
   -> ?after_read:(string -> unit)
   -> ownership_root:string
   -> string

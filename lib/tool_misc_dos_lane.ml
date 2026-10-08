@@ -232,9 +232,11 @@ let canonical_root path =
 (* Names come from the opened owned directory, so a temporary pathname swap
    cannot leak another directory's entries even when it is restored before
    the final validation. *)
-let entries_of_stable ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~ownership_root dir =
-  let ownership_root = canonical_root ownership_root in
-  match Fs_compat.read_owned_directory ~before_read ~after_read ~ownership_root dir with
+let entries_of_stable ?inventory_root ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~ownership_root dir =
+  let ownership_root = match inventory_root with
+    | None -> canonical_root ownership_root
+    | Some root -> Fs_compat.owned_inventory_root_path root in
+  match Fs_compat.read_owned_directory ?inventory_root ~before_read ~after_read ~ownership_root dir with
   | Error _ -> Error ()
   | Ok names ->
     Ok (List.filter (fun name -> not (String.starts_with ~prefix:"." name)) names)
@@ -635,10 +637,9 @@ let handle_meta ~tool_name ~start_time =
 
 (* [masc_dos_inventory] inspects only the operator-owned program inventory.
    It deliberately does not parse a game's executable or name any title: the
-   DOS Lane mounts the direct files beside whichever executable the caller
-   selects, and this read-only view makes that generic boundary visible before
-   a load. Names and byte lengths are enough to catch an incomplete asset
-   directory without exposing file contents or requiring a machine. *)
+   response labels these bytes as base assets. DOS load applies persisted
+   saves afterward, which can replace base contents or add mounted files.
+   This read-only view does not claim to describe that effective mount set. *)
 let unavailable_json name reason =
   `Assoc
     [ ("name", `String name)
@@ -647,48 +648,67 @@ let unavailable_json name reason =
     ]
 ;;
 
-let inventory_digest_json ~programs_root ~shown_name real =
-  match Fs_compat.load_owned_regular_file_range_with_sha256
-          ~ownership_root:programs_root ~offset:0 ~max_bytes:0 real with
-  | Ok (Some inspected) ->
+let within_inventory_root ~root path =
+  match Unix.realpath path with
+  | real when String.equal real root
+      || String.starts_with ~prefix:(root ^ Filename.dir_sep) real -> Some real
+  | _ -> None
+  | exception Unix.Unix_error _ -> None
+;;
+
+let inventory_entry_kind inventory_root path =
+  let root = Fs_compat.owned_inventory_root_path inventory_root in
+  match within_inventory_root ~root path with
+  | None -> Unavailable
+  | Some real ->
+    (match Fs_compat.owned_inventory_entry_kind inventory_root real with
+     | Ok Unix.S_DIR -> Directory
+     | Ok Unix.S_REG -> Regular
+     | Ok _ -> Other
+     | Error _ -> Unavailable)
+;;
+
+let inventory_digest_json ~inventory_root ~shown_name real =
+  match Fs_compat.owned_inventory_entry_digest inventory_root real with
+  | Ok inspected ->
     `Assoc
       [ ("name", `String shown_name)
       ; ("kind", `String "file")
       ; ("bytes", `Int inspected.snapshot.file_size)
       ; ("sha256", `String inspected.sha256)
       ]
-  | Ok None | Error _ -> unavailable_json shown_name "entry is unavailable"
+  | Error _ -> unavailable_json shown_name "entry is unavailable"
 ;;
 
-let inventory_file_json ~programs_root ~parent path name =
+let inventory_file_json ~inventory_root ~programs_root ~parent path name =
   let shown_name = if parent = "" then name else parent ^ "/" ^ name in
-  match within ~root:programs_root path with
+  match within_inventory_root ~root:programs_root path with
   | None -> unavailable_json shown_name "entry leaves the DOS inventory"
   | Some real ->
-    (match entry_kind real with
+    (match inventory_entry_kind inventory_root real with
      | Directory -> unavailable_json shown_name "entry is not a mounted file"
      | Other -> unavailable_json shown_name "entry is not a regular file"
      | Unavailable -> unavailable_json shown_name "entry is unavailable"
-     | Regular -> inventory_digest_json ~programs_root ~shown_name real)
+     | Regular -> inventory_digest_json ~inventory_root ~shown_name real)
 ;;
 
-let inventory_program_json ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~programs_root name =
+let inventory_program_json ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~inventory_root ~programs_root name =
   let path = Filename.concat programs_root name in
-  match within ~root:programs_root path with
+  match within_inventory_root ~root:programs_root path with
   | None -> unavailable_json name "entry leaves the DOS inventory"
   | Some real ->
-    (match entry_kind real with
+    (match inventory_entry_kind inventory_root real with
      | Unavailable -> unavailable_json name "entry is unavailable"
      | Other -> unavailable_json name "entry is not a regular file or directory"
-     | Regular -> inventory_digest_json ~programs_root ~shown_name:name real
+     | Regular -> inventory_digest_json ~inventory_root ~shown_name:name real
      | Directory ->
-       (match entries_of_stable ~before_read ~after_read ~ownership_root:programs_root real with
+       (match entries_of_stable ~inventory_root ~before_read ~after_read ~ownership_root:programs_root real with
         | Error () -> unavailable_json name "directory changed during inventory"
         | Ok names ->
           let executables =
             List.filter
               (fun file ->
-                entry_kind (Filename.concat real file) = Regular && is_program_name file)
+                inventory_entry_kind inventory_root (Filename.concat real file) = Regular && is_program_name file)
               names
           in
           let default_boot =
@@ -698,14 +718,16 @@ let inventory_program_json ?(before_read = fun _ -> ()) ?(after_read = fun _ -> 
           in
           let files =
             names
-            |> List.filter (fun child -> entry_kind (Filename.concat real child) <> Directory)
+            |> List.filter (fun child -> inventory_entry_kind inventory_root (Filename.concat real child) <> Directory)
             |> List.map (fun child ->
-                 inventory_file_json ~programs_root ~parent:name (Filename.concat real child)
+                 inventory_file_json ~inventory_root ~programs_root ~parent:name (Filename.concat real child)
                    child)
           in
           `Assoc
             [ ("name", `String name)
             ; ("kind", `String "directory")
+            ; ("asset_scope", `String "base_inventory")
+            ; ("saved_overlay", `String "applied_on_load")
             ; ( "executable_candidates"
               , `List (List.map (fun file -> `String file) executables) )
             ; ( "default_boot"
@@ -714,23 +736,36 @@ let inventory_program_json ?(before_read = fun _ -> ()) ?(after_read = fun _ -> 
             ]))
 ;;
 
-let handle_inventory_with_read_hooks ~before_read ~after_read ~tool_name ~start_time ~base_path =
+let handle_inventory_with_read_hooks ~before_program ~before_read ~after_read ~tool_name ~start_time ~base_path =
   let root = programs_dir ~base_path in
   try
     let result =
       off_domain (fun () ->
         if not (Sys.file_exists root) then Ok []
         else
-          let canonical = canonical_root root in
-          match entries_of_stable ~before_read ~after_read ~ownership_root:root canonical with
-          | Error () -> Error ()
-          | Ok names ->
-            Ok (List.map (inventory_program_json ~before_read ~after_read ~programs_root:canonical) names))
+          match Fs_compat.with_owned_inventory_root root (fun inventory_root ->
+            let canonical = Fs_compat.owned_inventory_root_path inventory_root in
+            match entries_of_stable ~inventory_root ~before_read ~after_read
+                    ~ownership_root:canonical canonical with
+            | Error () -> Error
+                { Fs_compat.failure = Fs_compat.Filesystem_identity_changed {path=root};
+                  close_failure = None }
+            | Ok names ->
+              before_program canonical;
+              Ok (List.map
+                (inventory_program_json ~before_read ~after_read ~inventory_root
+                  ~programs_root:canonical) names)) with
+          | Ok programs -> Ok programs
+          | Error _ -> Error ())
     in
     (match result with
      | Ok programs ->
        Tool_result.make_ok ~tool_name ~start_time
-         ~data:(`Assoc [ ("programs", `List programs) ])
+         ~data:(`Assoc
+           [ ("programs", `List programs)
+           ; ("asset_scope", `String "base_inventory")
+           ; ("saved_overlay", `String "applied_on_load")
+           ])
          ()
      | Error () ->
        Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
@@ -742,7 +777,7 @@ let handle_inventory_with_read_hooks ~before_read ~after_read ~tool_name ~start_
 ;;
 
 let handle_inventory ~tool_name ~start_time ~base_path =
-  handle_inventory_with_read_hooks ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ())
+  handle_inventory_with_read_hooks ~before_program:(fun _ -> ()) ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ())
     ~tool_name ~start_time ~base_path
 ;;
 

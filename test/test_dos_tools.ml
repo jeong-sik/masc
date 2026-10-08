@@ -381,6 +381,7 @@ let test_inventory_directory_replacement_hides_child_names () =
         let replaced = ref false in
         let result =
           Tool_misc_dos_lane.handle_inventory_with_read_hooks
+            ~before_program:(fun _ -> ())
             ~after_read:(fun _ -> ())
             ~before_read:(fun real ->
               Unix.rename real moved;
@@ -397,8 +398,8 @@ let test_inventory_directory_replacement_hides_child_names () =
           (contains "outside-private-name.dat" response)))
 ;;
 
-(* A directory with an executable suffix is not mounted or booted. The
-   inventory's advertised files must agree with the actual loaded machine. *)
+(* Inventory describes base assets. Without a saved overlay, loading mounts
+   these direct files; subdirectories never become mounted files. *)
 let test_inventory_skips_subdirectories_like_load () =
   with_workspace (fun base_path ->
     install_program_file ~base_path "game" "game.com" hello_com;
@@ -410,6 +411,10 @@ let test_inventory_skips_subdirectories_like_load () =
       | Some (`List values) -> values | _ -> fail "no inventory" in
     let game = List.find (fun value ->
       member "name" value = Some (`String "game")) programs in
+    check bool "inventory explicitly describes base assets" true
+      (member "asset_scope" (Tool_result.data result) = Some (`String "base_inventory"));
+    check bool "saved files are explicitly deferred to load" true
+      (member "saved_overlay" (Tool_result.data result) = Some (`String "applied_on_load"));
     check bool "only the mounted executable is a candidate" true
       (member "executable_candidates" game = Some (`List [`String "game.com"]));
     let files = match member "files" game with
@@ -438,6 +443,7 @@ let test_inventory_temporary_swap_cannot_publish_foreign_names () =
         write_file (Filename.concat outside "private-outside.exe") "private";
         let swapped = ref false in
         let result = Tool_misc_dos_lane.handle_inventory_with_read_hooks
+            ~before_program:(fun _ -> ())
           ~before_read:(fun directory ->
             if String.equal directory target then begin
               Unix.rename target moved;
@@ -458,6 +464,35 @@ let test_inventory_temporary_swap_cannot_publish_foreign_names () =
         check bool "host root is never serialized" false (contains base_path response);
         check bool "original executable is still advertised" true (contains "game.com" response))))
     [false; true]
+;;
+
+(* The root identity remains owned after enumeration. A replacement between
+   that read and per-program inspection cannot become a new authority merely
+   because it contains a matching game name. *)
+let test_inventory_root_replacement_between_reads_is_refused () =
+  with_workspace (fun base_path ->
+    install_program_file ~base_path "game" "game.com" hello_com;
+    let root = programs_dir ~base_path in
+    let moved = root ^ ".moved" in
+    let outside = Filename.temp_dir "masc-dos-outside-authority-" "" in
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree outside) (fun () ->
+      mkdir_p (Filename.concat outside "game");
+      write_file (Filename.concat outside "game/private-outside.com") "foreign";
+      let replaced = ref false in
+      let result = Tool_misc_dos_lane.handle_inventory_with_read_hooks
+        ~before_program:(fun canonical ->
+          Unix.rename canonical moved;
+          Unix.symlink outside canonical;
+          replaced := true)
+        ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ())
+        ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path in
+      check bool "replacement happened between inventory reads" true !replaced;
+      check bool "request refuses replacement authority" false (is_completed result);
+      let response = Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result) in
+      check bool "foreign filename is never published" false (contains "private-outside.com" response);
+      check bool "foreign digest is never published" false
+        (contains Digestif.SHA256.(to_hex (digest_string "foreign")) response);
+      check bool "host path is never published" false (contains outside response)))
 ;;
 
 let test_load_runs_to_the_first_key_request () =
@@ -1801,6 +1836,8 @@ let () =
         ; test_case "inventory mount parity" `Quick test_inventory_skips_subdirectories_like_load
         ; test_case "inventory temporary directory swap" `Quick
             test_inventory_temporary_swap_cannot_publish_foreign_names
+        ; test_case "inventory root authority across reads" `Quick
+            test_inventory_root_replacement_between_reads_is_refused
         ; test_case "inventory special files" `Quick
             test_inventory_rejects_special_files_without_host_paths
         ; test_case "inventory alias selection" `Quick

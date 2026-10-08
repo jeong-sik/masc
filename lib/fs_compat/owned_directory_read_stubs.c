@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <caml/alloc.h>
 #include <caml/memory.h>
 #include <caml/mlvalues.h>
@@ -38,6 +39,26 @@ CAMLprim value caml_masc_owned_directory_root(value v_path)
   CAMLreturn(caml_masc_owned_directory_open(Val_int(AT_FDCWD), v_path));
 }
 
+CAMLprim value caml_masc_owned_entry_open(value v_parent, value v_name)
+{
+  CAMLparam2(v_parent, v_name);
+  char *name = caml_stat_strdup(String_val(v_name));
+  int parent = Int_val(v_parent), result, saved_errno;
+  caml_enter_blocking_section();
+  struct stat observed;
+  result = fstatat(parent, name, &observed, AT_SYMLINK_NOFOLLOW);
+  if (result == 0 && !S_ISREG(observed.st_mode) && !S_ISDIR(observed.st_mode)) {
+    errno = EINVAL; result = -1;
+  }
+  if (result == 0)
+    result = openat(parent, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+  saved_errno = errno;
+  caml_leave_blocking_section();
+  caml_stat_free(name);
+  if (result == -1) { errno = saved_errno; uerror("openat", v_name); }
+  CAMLreturn(Val_int(result));
+}
+
 struct inventory_name { char *name; struct inventory_name *next; };
 
 /* A duplicated descriptor owns the DIR stream, so closedir cannot close the
@@ -55,6 +76,9 @@ CAMLprim value caml_masc_owned_directory_names(value v_fd)
     saved_errno = errno;
     if (duplicate != -1) close(duplicate);
   } else {
+    /* dup shares the directory offset. Each inventory read starts at the
+       beginning, including aliases that enumerate the held root again. */
+    rewinddir(directory);
     for (;;) {
       errno = 0;
       struct dirent *entry = readdir(directory);

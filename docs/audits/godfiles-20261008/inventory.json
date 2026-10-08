@@ -433,7 +433,9 @@
       "path": "lib/process/process_eio.ml",
       "baseline_lines": 2032,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: ignored fallback cwd repaired through foreground directory acquisition; typed backend cwd refusal and direct owner call; remaining process/capture/pipeline responsibilities pending semantic review",
+      "current_lines": 2054,
+      "validation_artifact": "process-fallback-cwd/README.md"
     },
     {
       "path": "lib/runtime/runtime.ml",

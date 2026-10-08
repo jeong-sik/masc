@@ -116,7 +116,12 @@ static value spawn_process(value v_executable, value v_argv, value v_env,
   char *executable = caml_stat_strdup(String_val(v_executable));
   char **argv = strings_of_array(v_argv);
   char **env = strings_of_array(v_env);
-  char *cwd = Is_some(v_cwd) ? caml_stat_strdup(String_val(Some_val(v_cwd))) : NULL;
+  /* Native Eio spawning supplies a path; synchronous PATH spawning supplies
+     an already-open directory. Opening separately keeps cwd failures distinct
+     from exec failures and fixes the directory identity before child setup. */
+  char *cwd = !search_path && Is_some(v_cwd)
+    ? caml_stat_strdup(String_val(Some_val(v_cwd))) : NULL;
+  int cwd_fd = search_path && Is_some(v_cwd) ? Int_val(Some_val(v_cwd)) : -1;
 
   int fd_count = 0;
   for (value l = v_fds; l != Val_emptylist; l = Field(l, 1)) fd_count++;
@@ -148,6 +153,7 @@ static value spawn_process(value v_executable, value v_argv, value v_env,
     if (rc == 0) rc = posix_spawnattr_setflags(&attr, flags);
   }
   if (rc == 0 && cwd != NULL) rc = posix_spawn_file_actions_addchdir_np(&actions, cwd);
+  if (rc == 0 && cwd_fd >= 0) rc = posix_spawn_file_actions_addfchdir_np(&actions, cwd_fd);
   for (int j = 0; rc == 0 && j < fd_count; j++) {
     if (child_fds[j] == STDIN_FILENO && isatty(parent_fds[j])) {
       /* No child of this stub reads a terminal it is handed as stdin: it
@@ -241,12 +247,37 @@ CAMLprim value masc_posix_spawn(value executable, value argv, value env,
   return spawn_process(executable, argv, env, cwd, fds, 0);
 }
 
-/* Unix fallback retains libc's PATH lookup semantics without duplicating
-   descriptor setup or group creation. */
+/* Unix fallback retains libc's PATH lookup semantics and supplies cwd as a
+   directory descriptor, without duplicating setup or process-group creation. */
 CAMLprim value masc_posix_spawnp(value executable, value argv, value env,
                                  value cwd, value fds)
 {
   return spawn_process(executable, argv, env, cwd, fds, 1);
+}
+
+CAMLprim value masc_open_process_directory(value v_path)
+{
+  CAMLparam1(v_path);
+  char *path = caml_stat_strdup(String_val(v_path));
+  /* Directory traversal needs search permission, not read/list permission. */
+#if defined(O_PATH)
+  int flags = O_PATH | O_DIRECTORY | O_CLOEXEC;
+#elif defined(O_SEARCH)
+  int flags = O_SEARCH | O_DIRECTORY | O_CLOEXEC;
+#else
+#error "process cwd acquisition requires O_PATH or O_SEARCH"
+#endif
+  caml_enter_blocking_section();
+  int fd;
+  do { fd = open(path, flags); } while (fd < 0 && errno == EINTR);
+  int error = errno;
+  caml_leave_blocking_section();
+  caml_stat_free(path);
+  if (fd < 0) {
+    errno = error;
+    uerror("open process cwd", v_path);
+  }
+  CAMLreturn(Val_int(fd));
 }
 
 #if defined(__clang__)

@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Sixteen production candidates received
-bounded changes; their other responsibilities remain pending. The other 59
+is not a defect verdict or a new build gate. Seventeen production candidates received
+bounded changes; their other responsibilities remain pending. The other 58
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -98,6 +98,9 @@ The Core check requires an approved leader-selected candidate under the current
 execution protocol; no selection receipt or approval is fabricated here.
 
 ## Next work
+
+The reproduced ignored-cwd fallback defect and directory-acquisition/refusal
+repair are recorded in [process-fallback-cwd/README.md](process-fallback-cwd/README.md).
 
 HITL judgment context acquisition, pure request projection and domain decoding
 are recorded in [hitl-request-context/README.md](hitl-request-context/README.md).

@@ -108,17 +108,16 @@ BiDi 연결의 `hover_at` 과 `drag` 는 실제 Firefox 157.0.1 에서 확인했
   확장 host 는 이때 끝나고, 확장이 5초 뒤 새 host 를 띄워 새 ID 로 붙는다 (`background.js`).
   BiDi host 는 다시 띄워 주는 것이 없다.
 - BiDi 세션은 소켓보다 오래 남는다. Firefox 157.0.1 을 임시 프로필로 띄워 쟀다(2026-10-08, headless).
-  - host 를 멈춘 뒤(SIGTERM, SIGKILL 둘 다) 같은 Firefox 에 host 를 다시 띄우면 붙지 못한다.
-    `session.new` 가 `session not created`("Maximum number of active sessions")로 거절된다.
+  - 세션을 끝내지 않고 소켓만 닫으면 같은 Firefox 에 다시 붙지 못한다. 프로세스를 죽여서 닫힌 경우도 같다.
+    다음 `session.new` 가 `session not created`("Maximum number of active sessions")로 거절된다.
     Firefox 는 세션을 하나만 받는다
     ([MDN](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/session/new), 2026-10-08 확인).
   - 남은 세션에 다시 들어가는 길도 없다. `ws://127.0.0.1:PORT/session/<세션 ID>` 는 404 다.
   - 세션을 만든 소켓에서 `session.end` 를 보내면 세션이 끝난다. Firefox 는 계속 떠 있고 탭도 그대로다.
     바로 다음 `session.new` 가 된다. 세 번 되풀이해 같았다.
-  - host 는 지금 `session.end` 를 보내지 않는다 (`browser_host.ml` 의 `run_bidi` 주석이 그렇게 정해 두었다).
-    그래서 host 가 한 번 끝나면 Firefox 를 다시 띄워야 다시 붙는다.
-    #41853 이 이것을 바꿨다. host 가 끝날 때 `session.end` 를 보낸다.
+  - host 는 끝날 때 `session.end` 를 보낸다(#41853, `browser_host.ml` 의 `run_bidi`).
     SIGTERM 으로 멈춘 host 뒤에 두 번째 host 가 같은 Firefox 에 붙는 것을 실제 Firefox 157.0.1 로 확인했다.
+    SIGKILL 로 죽인 host 뒤에는 붙지 못했다.
 - TUI 는 연결마다 `WebExtension`/`BiDi` 와 못 하는 일을 보여 준다. 붙어 있는 BiDi 연결은 브라우저 고르기 목록에 보인다.
   붙은 BiDi 연결이 없다는 말과 붙이는 문서 경로는 못 하는 동작을 시도한 뒤에야 나온다.
 
@@ -232,6 +231,8 @@ WebExtension 은 지금처럼 "설치만 하면 읽는" 연결로 둔다.
      서버가 다시 물어도 같은 답일 거절을 했을 때.
    - host 는 끝날 때 자기가 만든 BiDi 세션을 끝낸다(`session.end`). Ctrl-C, SIGTERM, 터미널이 닫힐 때(SIGHUP)도 그렇다. #41853 에서 했다.
      Ctrl-C 를 한 번 더 누르면 기다리지 않고 바로 끝난다. 그때는 세션이 남는다.
+     `nohup` 처럼 신호를 무시하도록 띄운 host 는 그 신호를 계속 무시한다.
+     WebSocket 이 붙기 전에 멈추면 시도만 그만둔다. 세션 요청을 이미 보냈으면 답을 기다렸다가 그 세션을 끝낸다.
      세션을 요청만 하고 답을 못 받았을 때도 끝내기를 보낸다. Firefox 가 요청을 거절했으면 끝낼 세션이 없다.
      멈춰 달라는 요청으로 끝났는데 세션을 못 끝냈으면 exit 1 이다. exit 0 은 같은 Firefox 에 바로 다시 붙일 수 있다는 뜻이다.
      안 끝내면 Firefox 를 다시 띄워야 다시 붙는다(§2.4).

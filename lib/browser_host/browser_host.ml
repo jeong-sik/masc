@@ -588,14 +588,10 @@ let run_bidi env config url ~stop =
   Eio.Fiber.fork_daemon ~sw:stop_sw (fun () ->
     Eio.Promise.resolve set_stopping (stop ());
     `Stop_daemon);
-  let stopped_unattached asked =
-    Log.Transport.info "browser-host: stopped by %s before it was attached" asked;
-    Ok ()
-  in
   (* Set once the BiDi connection is up and nobody had asked to stop. Until
-     then a stop abandons the attempt to connect: no session was asked for.
-     From then on the serving fiber sees the stop itself and leaves in
-     order. *)
+     then a stop abandons the attempt: no session was asked for. From then on
+     the serving fiber sees the stop itself and leaves in order, which
+     includes waiting for the answer to a session request already written. *)
   let attached = ref false in
   let serve_link ~ended peer link =
     Eio.Switch.run (fun sw ->
@@ -696,7 +692,7 @@ let run_bidi env config url ~stop =
   let serving () =
     Masc.Browser_bidi_peer.with_connection ~env ~timeout:extension_timeout_sec ~url (fun ~ended peer ->
       match Eio.Promise.peek stopping with
-      | Some asked -> stopped_unattached asked
+      | Some _ -> Ok ()
       | None ->
           attached := true;
           let session_left = ref false in
@@ -731,9 +727,17 @@ let run_bidi env config url ~stop =
            | Ok (), true -> Error "stopped with its BiDi session left in Firefox"
            | Ok (), false | Error _, (true | false) -> served))
   in
-  Eio.Fiber.first serving (fun () ->
-    let asked = Eio.Promise.await stopping in
-    if !attached then Eio.Fiber.await_cancel () else stopped_unattached asked)
+  let outcome =
+    Eio.Fiber.first serving (fun () ->
+      ignore (Eio.Promise.await stopping : string);
+      if !attached then Eio.Fiber.await_cancel () else Ok ())
+  in
+  (* Either fiber can be the one that saw the stop first; it is said once. *)
+  (match outcome, Eio.Promise.peek stopping, !attached with
+   | Ok (), Some asked, false ->
+       Log.Transport.info "browser-host: stopped by %s before it was attached" asked
+   | Ok (), Some _, true | Ok (), None, (true | false) | Error _, (Some _ | None), (true | false) -> ());
+  outcome
 
 module For_testing = struct
   let within = within

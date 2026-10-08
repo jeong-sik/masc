@@ -76,7 +76,12 @@ The host runs in the foreground until it is stopped with Ctrl-C or SIGTERM,
 or its terminal is closed (SIGHUP). It then finishes and answers a command in
 flight, tells the server, ends the BiDi session it asked for, and exits 0. A
 second Ctrl-C ends it at once and leaves the session in Firefox. A stop that
-comes while it is still connecting abandons the attempt.
+comes before the WebSocket is up abandons the attempt. One that comes while
+the session request is unanswered waits for that answer, up to twenty
+seconds, and then ends the session.
+
+A host started ignoring one of these signals keeps ignoring it. Under
+`nohup` it therefore outlives its terminal, and is stopped with SIGTERM.
 
 Exit status 0 says the host stopped as asked and the same Firefox takes the
 next one. A host that was stopped and could not end its session exits 1, as

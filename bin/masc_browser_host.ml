@@ -20,10 +20,13 @@ let signal_name = function
    server to tell. So a standard error that was that terminal goes to
    /dev/null; one redirected to a file keeps receiving the log. *)
 let leave_terminal () =
+  (* Called from a signal handler, which must not raise; and nothing is left
+     to report a failure to. *)
   match Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 with
-  | null -> Unix.dup2 null Unix.stderr; Unix.close null
-  (* Nothing is left to report this to. *)
   | exception Unix.Unix_error _ -> ()
+  | null ->
+    (try Unix.dup2 null Unix.stderr with Unix.Unix_error _ -> ());
+    (try Unix.close null with Unix.Unix_error _ -> ())
 
 let () =
   Log.init_from_env ();
@@ -69,7 +72,8 @@ let () =
              the waiting fiber, which Eio allows from a signal handler. *)
           let asked = Atomic.make None and wake = Eio.Condition.create () in
           List.iter (fun signal ->
-            Sys.set_signal (signal_number signal) (Sys.Signal_handle (fun number ->
+            let number = signal_number signal in
+            match Sys.signal number (Sys.Signal_handle (fun number ->
               (match signal with
                (* A second Ctrl-C is not asked to wait. *)
                | Interrupt -> Sys.set_signal number Sys.Signal_default
@@ -81,7 +85,12 @@ let () =
                (* Whoever sends SIGTERM again is not at a keyboard. *)
                | Terminate -> ());
               ignore (Atomic.compare_and_set asked None (Some signal) : bool);
-              Eio.Condition.broadcast wake)))
+              Eio.Condition.broadcast wake)) with
+            (* Whoever started the host ignoring a signal decided that: nohup
+               for a hangup, a shell without job control for the interrupt of
+               a job it put in the background. *)
+            | Sys.Signal_ignore -> Sys.set_signal number Sys.Signal_ignore
+            | Sys.Signal_default | Sys.Signal_handle _ -> ())
             [ Interrupt; Terminate; Hangup ];
           Browser_host.run_bidi env config url
             ~stop:(fun () ->

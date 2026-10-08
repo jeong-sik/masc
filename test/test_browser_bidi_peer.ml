@@ -303,8 +303,10 @@ let test_a_session_that_cannot_be_ended_is_an_error () =
       send_server_message flow (session_created (read_client_message flow)))
     (fun ~ended peer ->
       (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
-      (* The script returned after its one answer, which closed the socket. *)
-      Error (Eio.Promise.await ended ^ " / " ^ (match Peer.end_session peer with
+      (* The script returned after its one answer, which closed the socket.
+         The session is ended only once this side has seen that. *)
+      let closed=Eio.Promise.await ended in
+      Error (closed ^ " / " ^ (match Peer.end_session peer with
         | Ok () -> "ended" | Error detail -> detail))) in
   check (result unit string) "a closed socket" (Error "BiDi EOF / BiDi EOF") closed_under_it;
   let unanswered=with_scripted_firefox (fun flow ->
@@ -369,8 +371,25 @@ let test_a_refused_session_leaves_none_to_end () =
       Peer.end_session peer) in
   check (result unit string) "nothing to end" (Ok ()) refused;
   check (list string) "Firefox was sent nothing after its refusal" ["session.new"] (List.rev !seen)
-(* The two ways a session request ends without an answer that no socket
-   scripts: the caller gave up on it, and a browser that is not Firefox. *)
+(* An error answer without its code is not a refusal this side can read, so
+   the session is still ended. *)
+let test_an_unreadable_refusal_leaves_a_session_to_end () =
+  let seen=ref [] in
+  let outcome=with_scripted_firefox (fun flow ->
+      let asked=read_client_message flow in
+      seen:=method_of asked :: !seen;
+      send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" asked]);
+      let ending=read_client_message flow in
+      seen:=method_of ending :: !seen;
+      send_server_message flow (reply_to ending (obj [])))
+    (fun ~ended:_ peer ->
+      check (result string string) "the answer has no code" (Error "BiDi missing error") (Peer.metadata peer);
+      Peer.end_session peer) in
+  check (result unit string) "the session is ended" (Ok ()) outcome;
+  check (list string) "what Firefox was sent, in order" ["session.new";"session.end"] (List.rev !seen)
+(* The ways a session request ends without an answer that no socket scripts:
+   the caller gave up on it, a browser that is not Firefox, and a request the
+   connection never carried. *)
 let test_a_session_is_there_to_end_once_asked_for () =
   Eio_main.run (fun _ ->
     let ended=ref 0 in
@@ -389,7 +408,12 @@ let test_a_session_is_there_to_end_once_asked_for () =
     check (result string string) "a browser that is not Firefox is turned down"
       (Error "BiDi peer must be Firefox") (Peer.metadata other_browser);
     check (result unit string) "with the session it created" (Ok ()) (Peer.end_session other_browser);
-    check int "ended" 2 !ended)
+    check int "ended" 2 !ended;
+    let never_written=asking (fun () -> Error (Peer.Unsent "BiDi EOF")) in
+    check (result string string) "a request the connection never carried"
+      (Error "BiDi EOF") (Peer.metadata never_written);
+    check (result unit string) "asked Firefox for nothing" (Ok ()) (Peer.end_session never_written);
+    check int "so nothing is ended" 2 !ended)
 (* A peer that refuses the WebSocket upgrade. ws-direct raises [Failure] for
    the refused handshake; the connection returns it as its error rather than
    letting it out of [with_connection], where the native host would end on an
@@ -528,6 +552,8 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
       test_a_socket_closing_under_session_end_is_told_at_once;
     test_case "a session nobody confirmed is ended" `Quick test_a_session_nobody_confirmed_is_ended;
     test_case "a refused session leaves none to end" `Quick test_a_refused_session_leaves_none_to_end;
+    test_case "an unreadable refusal leaves a session to end" `Quick
+      test_an_unreadable_refusal_leaves_a_session_to_end;
     test_case "a session is there to end once asked for" `Quick test_a_session_is_there_to_end_once_asked_for];
   "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "document source is the shared document helper" `Quick test_document_source;

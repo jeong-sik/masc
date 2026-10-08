@@ -6,7 +6,6 @@ The CI-built host runs against a local HTTP lane and a scripted BiDi endpoint;
 no browser. test_browser_bidi_host.py is the one that drives a real Firefox.
 """
 import base64
-import fcntl
 import hashlib
 import http.server
 import json
@@ -20,7 +19,6 @@ import struct
 import subprocess
 import sys
 import tempfile
-import termios
 import threading
 import time
 import unittest
@@ -54,6 +52,19 @@ STAYS_ALIVE_SEC = 2
 SLOW_ANSWER_SEC = 1
 PAGE = {"url": "https://example.test/", "title": "Fixture", "text": "fixture text",
         "active": True, "scrollX": 0, "scrollY": 0}
+# The host starts through this, so each case states the signals the host
+# begins ignoring and the terminal it holds, whatever the suite inherited.
+# argv: the ignored signal names, "controlling" or "none", then the host's own.
+LAUNCHER = """
+import fcntl, os, signal, sys, termios
+ignored = sys.argv[1].split(",")
+for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+    signal.signal(getattr(signal, name), signal.SIG_IGN if name in ignored else signal.SIG_DFL)
+if sys.argv[2] == "controlling":
+    os.setsid()
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+os.execv(sys.argv[3], sys.argv[3:])
+"""
 
 
 class LaneState:
@@ -358,11 +369,12 @@ class BidiHostLink(unittest.TestCase):
         self.lanes.remove(entry)
         stop_lane(*entry)
 
-    def start(self, fixed, terminal=None):
+    def start(self, fixed, terminal=None, ignoring=()):
         """Start the host. [fixed] pins it to the lane with --server; without
         it the workspace connection file names the port. [terminal] is a pty
         slave the host takes as its controlling terminal and writes its log
-        to; without one the log goes to a file."""
+        to; without one the log goes to a file. [ignoring] names the signals
+        it is started ignoring, as nohup does for SIGHUP."""
         argv = [str(HOST), "--base-path", str(self.base),
                 "--bidi-url", f"ws://127.0.0.1:{self.firefox.server_address[1]}/session"]
         if fixed:
@@ -371,19 +383,19 @@ class BidiHostLink(unittest.TestCase):
             self.connection.write_text(f"[server]\nhttp_port = {self.lane.server_port}\n")
         # An exported MASC_HTTP_BASE_URL or MASC_HTTP_PORT outranks the file.
         env = {key: value for key, value in os.environ.items() if not key.startswith("MASC_")}
+        launch = [sys.executable, "-c", LAUNCHER, ",".join(ignoring)]
         if terminal is None:
-            self.process = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL,
+            self.process = subprocess.Popen(launch + ["none"] + argv, env=env, stdin=subprocess.DEVNULL,
                                             stdout=self.log, stderr=self.log)
         else:
             # A session of its own whose controlling terminal is the pty, as
             # for a host started from a terminal window.
-            self.process = subprocess.Popen(
-                argv, env=env, stdin=terminal, stdout=terminal, stderr=terminal, start_new_session=True,
-                preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0))
+            self.process = subprocess.Popen(launch + ["controlling"] + argv, env=env,
+                                            stdin=terminal, stdout=terminal, stderr=terminal)
         self.processes.append(self.process)
 
-    def attach(self, fixed, terminal=None):
-        self.start(fixed, terminal)
+    def attach(self, fixed, terminal=None, ignoring=()):
+        self.start(fixed, terminal, ignoring)
         self.assertTrue(self.lane.state.polled.wait(ATTACH_WAIT_SEC), self.host_log())
 
     def firefox_leaves(self):
@@ -414,9 +426,9 @@ class BidiHostLink(unittest.TestCase):
         time.sleep(STAYS_ALIVE_SEC)
         self.assertIsNone(self.process.poll(), self.host_log())
 
-    def assert_ends(self, reason, code=1):
+    def assert_ends(self, reason, code=1, within=EXIT_WAIT_SEC):
         try:
-            exited = self.process.wait(timeout=EXIT_WAIT_SEC)
+            exited = self.process.wait(timeout=within)
         except subprocess.TimeoutExpired:
             self.fail("the host is still running\n" + self.host_log())
         self.assertEqual(exited, code, self.host_log())
@@ -583,7 +595,7 @@ class BidiHostLink(unittest.TestCase):
         # What a second host meets while another holds the one session.
         self.firefox.state.refuses_the_session = True
         self.start(fixed=True)
-        self.assert_ends("BiDi command rejected: session not created")
+        self.assert_ends("BiDi command rejected: session not created", within=ATTACH_WAIT_SEC)
         self.assertEqual(self.firefox.state.methods, ["session.new"])
         self.assertNotIn("was not ended", self.host_log())
         self.assertEqual(self.lane.state.polls, [])
@@ -592,7 +604,7 @@ class BidiHostLink(unittest.TestCase):
         # The session exists by the time the host learns what answered.
         self.firefox.state.browser_name = "chromium"
         self.start(fixed=True)
-        self.assert_ends("BiDi peer must be Firefox")
+        self.assert_ends("BiDi peer must be Firefox", within=ATTACH_WAIT_SEC)
         self.assertEqual(self.firefox.state.methods, ["session.new", "session.end"])
         self.assertEqual(self.lane.state.polls, [])
 
@@ -615,6 +627,18 @@ class BidiHostLink(unittest.TestCase):
 
     def test_a_hangup_stops_the_host_and_ends_its_session(self):
         self.stopped_by(signal.SIGHUP)
+
+    def test_a_host_started_ignoring_the_hangup_stays_through_it(self):
+        # nohup starts the host with SIGHUP ignored so that it outlives its
+        # terminal. The host does not take that back.
+        self.attach(fixed=True, ignoring=("SIGHUP",))
+        self.process.send_signal(signal.SIGHUP)
+        self.assert_stays()
+        self.assertTrue(self.call(self.lane)["ok"])
+        self.assertNotIn("session.end", self.firefox.state.methods)
+        self.process.send_signal(signal.SIGTERM)
+        self.assert_ends("stopped by SIGTERM", code=0)
+        self.assert_session_ended_last()
 
     def test_a_closed_terminal_stops_the_host_and_ends_its_session(self):
         # The host runs in a terminal and the window is closed. Its log went
@@ -670,6 +694,7 @@ class BidiHostLink(unittest.TestCase):
         self.assertTrue(answer["ok"], answer)
         self.assert_ends("stopped by SIGTERM", code=0)
         # Answered once, the server told after that, and the session ended.
+        self.assertTrue(self.lane.state.disconnected.wait(EXIT_WAIT_SEC))
         self.assertEqual(self.lane.state.arrivals, [("result", ident), ("disconnect", None)])
         self.assert_session_ended_last()
 
@@ -691,8 +716,10 @@ class BidiHostLink(unittest.TestCase):
         self.firefox.state.answers_session_end = False
         self.attach(fixed=True)
         self.process.send_signal(signal.SIGTERM)
-        # Exit 0 would say the same Firefox takes the next host.
-        self.assert_ends("the BiDi session was not ended (no answer to session.end in time)", code=1)
+        # Exit 0 would say the same Firefox takes the next host. The host
+        # waits two seconds for the answer before it gives up.
+        self.assert_ends("the BiDi session was not ended (no answer to session.end in time)", code=1,
+                         within=2 * EXIT_WAIT_SEC)
         self.assertIn("restart it before attaching again", self.host_log())
         self.assertIn("stopped with its BiDi session left in Firefox", self.host_log())
         self.assertTrue(self.lane.state.disconnected.wait(EXIT_WAIT_SEC))
@@ -700,11 +727,26 @@ class BidiHostLink(unittest.TestCase):
     def test_a_stop_before_the_host_is_attached_abandons_the_attempt(self):
         self.firefox.state.answers_the_upgrade = False
         self.start(fixed=True)
-        self.assertTrue(self.firefox.state.connected.wait(EXIT_WAIT_SEC), self.host_log())
+        self.assertTrue(self.firefox.state.connected.wait(ATTACH_WAIT_SEC), self.host_log())
         self.process.send_signal(signal.SIGTERM)
         self.assert_ends("stopped by SIGTERM before it was attached", code=0)
+        self.assertEqual(self.host_log().count("before it was attached"), 1, self.host_log())
         self.assertEqual(self.lane.state.polls, [])
         self.assertEqual(self.firefox.state.methods, [])
+
+    def test_a_stop_while_the_session_is_being_asked_for_ends_that_session(self):
+        # The WebSocket is up and session.new is written: Firefox may hold
+        # the session whatever happens next, so the host waits for the answer
+        # and ends it. It never registers with the server.
+        self.firefox.state.slow_on = "session.new"
+        self.start(fixed=True)
+        self.wait_until(lambda: "session.new" in self.firefox.state.methods,
+                        "the host did not ask for a session", within=ATTACH_WAIT_SEC)
+        self.process.send_signal(signal.SIGTERM)
+        self.assert_ends("stopped by SIGTERM", code=0)
+        self.assertNotIn("before it was attached", self.host_log())
+        self.assertEqual(self.firefox.state.methods, ["session.new", "session.end"])
+        self.assertEqual(self.lane.state.polls, [])
 
 
 if __name__ == "__main__":

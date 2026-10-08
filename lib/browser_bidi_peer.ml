@@ -6,10 +6,10 @@ let obj xs = `Assoc xs
 let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
 type failure = Before_effect of string | Outcome_unknown of string
-type refusal = Rejected of string | Unanswered of string
+type refusal = Rejected of string | Unanswered of string | Unsent of string
 let refusal_message = function
   | Rejected code -> "BiDi command rejected: " ^ code
-  | Unanswered why -> why
+  | Unanswered why | Unsent why -> why
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
 type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   session_end : unit -> (unit,string) result; mutable session_may_exist : bool;
@@ -25,10 +25,11 @@ let end_session t =
   else let* () = t.session_end () in t.session_may_exist <- false; Ok ()
 let metadata t =
   (* Firefox may hold a session from the moment it is asked for one, whether
-     or not its answer arrives. Only its own refusal says there is none. *)
+     or not its answer arrives. There is none when it refused, and none when
+     the request was never written. *)
   t.session_may_exist <- true;
   match t.ask "session.new" (obj ["capabilities",obj []]) with
-  | Error (Rejected _ as refused) -> t.session_may_exist <- false; Error (refusal_message refused)
+  | Error (Rejected _ | Unsent _ as refused) -> t.session_may_exist <- false; Error (refusal_message refused)
   | Error (Unanswered _ as unanswered) -> Error (refusal_message unanswered)
   | Ok result ->
     let* caps = required "capabilities" result in
@@ -273,7 +274,7 @@ let with_connection ~env ~timeout ~url use =
           ~watcher:(fun ()->Eio.Time.sleep clock window; Error `Deadline_exceeded)
           (fun ()->Ok (Eio.Promise.await reply)) in
       let command method_ params =
-        match !broken with Some e->Error (Unanswered e)|None->
+        match !broken with Some e->Error (Unsent e)|None->
           (* The connection is ended only for a command that got no reply. *)
           (match exchange ~window:timeout method_ params with
            | Ok reply->reply

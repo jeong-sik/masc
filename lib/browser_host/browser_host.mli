@@ -99,7 +99,8 @@ val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
     asked. From then on the host takes no further command: one in flight is
     finished and its answer offered once, the server is told, and the host
     returns [Ok ()]. Asked before the BiDi connection is up, it abandons the
-    attempt and returns [Ok ()].
+    attempt and returns [Ok ()]; asked while its session request is
+    unanswered, it waits for that answer first.
 
     On each of these ways out, and when an exception raised while it serves
     leaves it, the host first ends the BiDi session it asked for, so the same

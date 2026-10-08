@@ -2746,7 +2746,7 @@ let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
   (* The two lists are written by hand: a constructor added later compiles
      (the label functions are exhaustive) but would be missing from the
      rollup and the legend, so their lengths are held here. *)
-  check int "six outcomes" 6 (List.length Transcript.all_outcomes);
+  check int "eight outcomes" 8 (List.length Transcript.all_outcomes);
   check int "eight skill states" 8 (List.length Transcript.all_skill_states);
   List.iter
     (fun outcome ->
@@ -2815,7 +2815,8 @@ let test_event_times_survive_log_replay_and_continuation () =
 
 let test_native_tools_are_observations_without_execution_receipts () =
   let t = fresh () in
-  let occurrence = occurrence ~block_index:7 "native-7" in
+  let make_occurrence = occurrence in
+  let occurrence = make_occurrence ~block_index:7 "native-7" in
   feed t [Live.Run_started; Live.Native_tool_started {occurrence;tool_name=Some "Read"}];
   let call () = match Transcript.tool_calls t with
     | [call] -> call | calls -> failf "expected one native step, got %d" (List.length calls) in
@@ -2827,6 +2828,11 @@ let test_native_tools_are_observations_without_execution_receipts () =
   feed t [Live.Tool_result {occurrence; execution_id="wrong-authority"}];
   check (option string) "MASC receipt cannot attach to native observation" None (call ()).execution_id;
   check bool "mixed-authority event is reported" true (Option.is_some (Transcript.unreadable t));
+  (* A block of one call is not folded and carries no summary outcome, so a
+     second native step makes the block collapse. *)
+  let second = make_occurrence ~block_index:8 "native-8" in
+  feed t [Live.Native_tool_started {occurrence=second;tool_name=Some "Read"};
+          Live.Native_tool_ended {occurrence=second}];
   let rows = Transcript.project_tool_block Transcript.Compact
       (Transcript.tool_block (Transcript.tool_calls t)) in
   check tool_outcome "collapsed tools retain native outcome" Transcript.Native_ended

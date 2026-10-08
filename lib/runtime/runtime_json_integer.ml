@@ -8,7 +8,7 @@ let in_range value =
   value >= min_safe_integer && value <= max_safe_integer
   && value >= Int64.of_int min_int && value <= Int64.of_int max_int
 
-let of_json json =
+let of_json (json : Yojson.Safe.t) =
   let error () = Error "expected a JSON integer in the ECMAScript safe-integer and OCaml int range" in
   match json with
   | `Int value when in_range (Int64.of_int value) -> Ok value
@@ -17,5 +17,4 @@ let of_json json =
       && value <= Int64.to_float max_safe_integer ->
       let integer = Int64.of_float value in
       if in_range integer then Ok (Int64.to_int integer) else error ()
-  | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _ | `String _ | `Bool _ | `Null
-  | `Tuple _ | `Variant _ -> error ()
+  | `Int _ | `Float _ | `Intlit _ | `Assoc _ | `List _ | `String _ | `Bool _ | `Null -> error ()

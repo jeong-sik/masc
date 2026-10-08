@@ -97,7 +97,7 @@ let test_worker_capture () =
               let before,frame = match Msx_lane.capture () with
                 | Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
               let result = screen () in
-              let png result = match List.find_map (function
+              let png (result : S.tool_result) = match List.find_map (function
                 | S.ImageContent {mime_type="image/png";data;_} -> Some (Base64.decode_exn data)
                 | _ -> None) result.S.content with
                 | Some png -> png | None -> fail "worker screen omitted its PNG" in

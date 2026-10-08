@@ -7,5 +7,12 @@ type t
 val create : command:(string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result) -> t
 val metadata : t -> (string, string) result
 val dispatch : t -> verb:verb -> Yojson.Safe.t -> (Yojson.Safe.t, failure) result
+(** One socket message carries at most this many bytes; a larger one ends the
+    connection. *)
+val reply_limit_bytes : int
+(** A page script's answer longer than this many UTF-16 units is refused in
+    the page, as [Before_effect] for a read, instead of being sent: at three
+    bytes a unit it could pass {!reply_limit_bytes}. *)
+val script_answer_limit_units : int
 val with_connection : env:Eio_unix.Stdenv.base -> timeout:float -> url:string ->
   (t -> (unit, string) result) -> (unit, string) result

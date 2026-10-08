@@ -45,9 +45,18 @@ activate_tab on a BiDi connection before it queues a command, by the same
 table. page.elements runs the automation lane's element script in the
 requested tab, so its selectors are the ones the DOM interactions take. A
 page.read with includeHtml runs the automation lane's document helper, which
-leaves the HTML out and says why when the result passes 1 MiB. A document the
-parser has not finished is refused before effect rather than returned as
-complete. A successful
+leaves the HTML out and says why when the result passes 1 MiB. Both reads
+answer for the whole document, so a document the parser has not finished is
+refused before effect rather than answered with the part that exists.
+
+One socket message carries at most 8 MiB, and a larger one ends the
+connection. A page script therefore measures its own answer: one longer than
+2,097,152 UTF-16 units is not sent, and the command is refused as
+`page_answer_exceeds_bidi_reply_limit` with the size. That is a quarter of
+the limit, because a unit takes at most three bytes on the wire and the
+envelope needs room. The connection stays up for the next command. The element
+script does not bound a control's value or a select's options, so a page can
+produce such an inventory. A successful
 follow receipt does not guarantee application content is ready; existing guarded
 read recovery remains necessary. A BiDi session enables browser-wide automation
 and must not be exposed beyond loopback.

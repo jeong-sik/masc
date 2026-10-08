@@ -314,13 +314,27 @@ let test_boot_recovers_a_paused_owner () =
          (Control.recovers_from_conflict action))
     [ Control.Pause; Control.Resume; Control.Shutdown; Control.Wakeup ]
 
+let directive_workspace : Decode.server_identity = {
+  sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None;
+  sid_base_path = "/workspace"; sid_masc_root = "/workspace/.masc/clusters/operator";
+  sid_executable_in_worktree = None; sid_state_ready = Some true;
+  sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None;
+}
+
+let check_directive_workspace fields =
+  Alcotest.(check bool) "directive binds both workspace paths" true
+    (List.assoc_opt "expected_workspace" fields = Some (`Assoc
+      [ "base_path", `String directive_workspace.sid_base_path
+      ; "masc_root", `String directive_workspace.sid_masc_root ]))
+
 let test_resume_body_carries_the_operation_id () =
   let body =
-    Control.directive_body ~operator_operation_id:"masc-tui-resume-analyst-3"
+    Control.directive_body ~expected_workspace:directive_workspace ~operator_operation_id:"masc-tui-resume-analyst-3"
       "resume"
   in
   match Yojson.Safe.from_string body with
   | `Assoc fields ->
+      check_directive_workspace fields;
       Alcotest.(check (option string))
         "action" (Some "resume")
         (match List.assoc_opt "action" fields with
@@ -334,9 +348,10 @@ let test_resume_body_carries_the_operation_id () =
   | _ -> Alcotest.fail "resume body must be a JSON object"
 
 let test_non_resume_directive_omits_the_operation_id () =
-  let body = Control.directive_body ~operator_operation_id:"ignored" "pause" in
+  let body = Control.directive_body ~expected_workspace:directive_workspace ~operator_operation_id:"ignored" "pause" in
   match Yojson.Safe.from_string body with
   | `Assoc fields ->
+      check_directive_workspace fields;
       Alcotest.(check bool)
         "no operation id" false
         (List.mem_assoc "operator_operation_id" fields)

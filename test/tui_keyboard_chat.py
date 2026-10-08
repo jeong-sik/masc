@@ -1149,6 +1149,9 @@ class AtomicChatFixture:
         request = json.loads(body)
         if request.get("action") != "resume":
             raise AssertionError(f"retained input expected explicit resume: {request!r}")
+        expected = self.submitted[0]["expected_workspace"]
+        if set(expected) != {"base_path", "masc_root"} or request.get("expected_workspace") != expected:
+            raise AssertionError(f"resume changed the retained input workspace: {request!r}")
         self.paused = False
         self.resume_confirmed = True
         return 200, {"ok": True}
@@ -1848,26 +1851,36 @@ def chat_visibility_modes_interaction(
             )
         if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
             raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
-        # The skill row leads with its mark, lane label and the
-        # skill's name, with the badge padding and SGR runs between -- the
-        # same token-split shape the tool-lane needles above take, because
-        # a literal "◆ ci-red-attribution" never exists as contiguous
-        # bytes. The rail is a token of its own, the way " · " is above: a
-        # needle anchored on the gutter mark crosses into the body, and
-        # Skill rows are Shade_quoted, so the renderer draws "│" (>= 0x80,
-        # outside the gap class) between badge padding and body.
-        # Body-anchored needles (✗, 씀, proof) never cross it and keep the
-        # plain gap.
-        if re.search(
-            "◆".encode()
-            + rb"[\x1b\x20-\x7e]*?"
-            + "│".encode()
-            + rb"[\x1b\x20-\x7e]*?"
-            + rb"ci-red-attribution",
-            initial,
-        ) is None:
+        # The skill header and its bold name must belong to one TURN on
+        # the completed screen, not separate turns or historical frames.
+        styled_rows = screen_rows(completed, preserve_styles=True)
+        turn_rows = sorted(
+            row for row, text in observed_rows.items()
+            if title_row < row < composer_row
+            and re.search(rb"TURN #\d+", text)
+        )
+        skill_in_turn = False
+        for index, row in enumerate(turn_rows):
+            if re.search(
+                "◆\\s+SKILL\\s+│\\s+TURN #\\d+".encode(),
+                observed_rows[row],
+            ) is None:
+                continue
+            end_row = (
+                turn_rows[index + 1]
+                if index + 1 < len(turn_rows) else composer_row
+            )
+            if any(
+                b"\x1b[1mci-red-attribution" in text
+                for body_row, text in styled_rows.items()
+                if row < body_row < end_row
+            ):
+                skill_in_turn = True
+                break
+        if not skill_in_turn:
             raise AssertionError(
-                f"the exact Skill evidence did not start its turn: {initial!r}"
+                "the completed Skill TURN did not contain its bold skill name: "
+                f"{styled_rows!r}"
             )
         # How far one invocation got is not on the resting row any more:
         # the row stands for every trigger of that skill.
@@ -1875,8 +1888,6 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"the compact skill row still spells a lifecycle: {initial!r}"
             )
-        if b"\x1b[1mci-red-attribution" not in initial:
-            raise AssertionError(f"the Skill name was not bold: {initial!r}")
         # The rest of the skill row rides the tool toggle now: the action
         # rows and the proof line exist only behind Ctrl-D, so the compact
         # frame must not carry them. Their presence is waited for below,

@@ -999,11 +999,23 @@ let checkpoint_info ~path =
   then Error (Invalid_request ("no MSX checkpoint at " ^ path))
   else
     let contents =
-      try Ok (read_file path) with
-      | Sys_error message -> Error (Unreadable message) in
+      try
+        Ok
+          (In_channel.with_open_bin path (fun ic ->
+             let contents = In_channel.input_all ic in
+             (* Saves replace this path atomically; stat the opened inode so its
+                mtime cannot come from a different checkpoint than [contents]. *)
+             let stats = Unix.fstat (Unix.descr_of_in_channel ic) in
+             contents, stats.Unix.st_mtime))
+      with
+      | Sys_error message -> Error (Unreadable message)
+      | Unix.Unix_error (error, fn, arg) ->
+        Error
+          (Unreadable
+             (Printf.sprintf "%s: %s (%s)" fn (Unix.error_message error) arg)) in
     match contents with
     | Error e -> Error e
-    | Ok contents ->
+    | Ok (contents, mtime_unix) ->
       let byte_length = String.length contents in
       let sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
       let json =
@@ -1082,12 +1094,6 @@ let checkpoint_info ~path =
         let* core_sha = optional_string "core_sha" in
         let* cartridge = optional_string "cartridge" in
         let* disk = optional_string "disk" in
-        let* mtime_unix =
-          match Unix.stat path with
-          | stats -> Ok stats.st_mtime
-          | exception Unix.Unix_error (error, fn, arg) ->
-            Error (Unreadable (Printf.sprintf "%s: %s (%s)" fn
-                                 (Unix.error_message error) arg)) in
         let saved_at_unix = Some mtime_unix in
         Ok
           { exists = true

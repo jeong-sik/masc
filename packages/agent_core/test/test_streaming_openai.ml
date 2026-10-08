@@ -158,8 +158,8 @@ let test_parse_usage () =
   | S.Openai_chunk chunk ->
     (match chunk.chunk_usage with
      | Some u ->
-       Alcotest.(check int) "input" 10 u.input_tokens;
-       Alcotest.(check int) "output" 5 u.output_tokens
+       Alcotest.(check (option int)) "input" (Some 10) u.input_tokens;
+       Alcotest.(check (option int)) "output" (Some 5) u.output_tokens
      | None -> Alcotest.fail "expected usage")
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
   | S.Openai_undeclared_reasoning_member _

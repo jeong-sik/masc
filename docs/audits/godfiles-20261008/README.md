@@ -32,6 +32,7 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41987](https://github.com/jeong-sik/masc/pull/41987) | Pure turn completion policy and response normalization; ignored history argument and testing forwarders removed; Muse fixture preparation repaired | `keeper_agent_run.ml/.mli`, direct adapter and policy tests |
 | [#41992](https://github.com/jeong-sik/masc/pull/41992) | HITL request/domain owner with explicit host/config acquisition before pure projection; shared HTTP/CLI captured bundle and direct test consumers | `hitl_summary_worker.ml/.mli`, HITL fixture |
 | [#42003](https://github.com/jeong-sik/masc/pull/42003) | Ignored fallback cwd repaired through owned directory FD; native/Eio refusal authority, shared path rule and redundant spawn forwarder removal | `process_eio.ml/.mli`, foreground owner and shared spawn C |
+| [#42013](https://github.com/jeong-sik/masc/pull/42013) | Eio foreground capture/cleanup effect owner; duplicate two-stream and pipeline drains removed; callback dispatch simplified and grace docs corrected | `process_eio.ml/.mli`, Eio capture owner, direct consumers |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -99,6 +100,9 @@ The Core check requires an approved leader-selected candidate under the current
 execution protocol; no selection receipt or approval is fabricated here.
 
 ## Next work
+
+Eio foreground capture/cleanup ownership, shared drains and direct child-output
+checks are recorded in [eio-capture-owner/README.md](eio-capture-owner/README.md).
 
 The reproduced ignored-cwd fallback defect and directory-acquisition/refusal
 repair are recorded in [process-fallback-cwd/README.md](process-fallback-cwd/README.md).

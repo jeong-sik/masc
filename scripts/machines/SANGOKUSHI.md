@@ -173,7 +173,7 @@ Keep the ending assets with the game, including `END.EXE`, `ENDSTIL.DAT`,
 `KOEI.DAT` and `FMDRV.COM`. A separate probe on the newer native DOS worker
 used ordinary DOS `EXEC` calls to load the sound driver and unchanged ending
 executable. It displayed the character scenes, Korean narrative and copyright
-screen, then exited with code 0 after the observed final key prompt. This tests
+screen, then exited with code 0 after Space on that observed screen. This tests
 the renderer and assets; it does not demonstrate a victorious campaign or the
 normal `MAIN.EXE` transition into the ending. Boot normal play with `KOEI.COM`:
 directly loading `END.EXE` is not equivalent to the game's parent/driver setup.

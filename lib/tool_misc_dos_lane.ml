@@ -254,6 +254,23 @@ let read_regular_file ~ownership_root path =
   | Ok None | Error _ -> Error "entry is unavailable"
 ;;
 
+(* Spelling the name safely is not the whole boundary. Sys.file_exists and
+   open both follow symbolic links, so an entry linked at a file outside
+   programs/ would be read into guest memory and handed back out 256 bytes at
+   a time by masc_dos_peek. The check is therefore on the resolved path, not
+   on the spelling: everything this lane opens has to really live under
+   programs/. A link inside the inventory still works; one that leaves it is
+   refused. *)
+let within ~root path =
+  match (Unix.realpath root, Unix.realpath path) with
+  | exception Unix.Unix_error _ -> None
+  | root_real, real ->
+    if String.equal real root_real
+       || String.starts_with ~prefix:(root_real ^ Filename.dir_sep) real
+    then Some real
+    else None
+;;
+
 type entry_kind = Directory | Regular | Other | Unavailable
 
 let entry_kind path =
@@ -264,6 +281,12 @@ let entry_kind path =
     | _ -> Other
   with
   | Unix.Unix_error _ | Sys_error _ -> Unavailable
+;;
+
+let owned_entry_kind ~ownership_root path =
+  match within ~root:ownership_root path with
+  | Some real -> entry_kind real
+  | None -> Unavailable
 ;;
 
 let is_program_name name =
@@ -309,7 +332,7 @@ let executable_in ?boot ~identity_name ~ownership_root dir =
     let rec validate = function
       | [] -> Ok ()
       | f :: rest ->
-        (match entry_kind (Filename.concat dir f) with
+        (match owned_entry_kind ~ownership_root (Filename.concat dir f) with
          | Directory | Regular -> validate rest
          | Other ->
            Error
@@ -317,7 +340,11 @@ let executable_in ?boot ~identity_name ~ownership_root dir =
                 "%s is unavailable: inventory entries must be regular files or directories" f)
          | Unavailable -> Error (Printf.sprintf "%s is unavailable" f))
     in
-    let files () = List.filter (fun f -> entry_kind (Filename.concat dir f) = Regular) names in
+    let files () =
+      List.filter
+        (fun f -> owned_entry_kind ~ownership_root (Filename.concat dir f) = Regular)
+        names
+    in
     let* () = validate names in
     let files = files () in
     select_executable ?boot ~identity_name ~dir_name:(Filename.basename identity_name) files
@@ -332,23 +359,6 @@ let executable_in ?boot ~identity_name ~ownership_root dir =
    files mounted). It cannot climb out: a separator or a dot segment is
    refused before it reaches the filesystem. *)
 let escapes = Dos_lane.escapes
-
-(* Spelling the name safely is not the whole boundary. Sys.file_exists and
-   open both follow symbolic links, so an entry linked at a file outside
-   programs/ would be read into guest memory and handed back out 256 bytes at
-   a time by masc_dos_peek. The check is therefore on the resolved path, not
-   on the spelling: everything this lane opens has to really live under
-   programs/. A link inside the inventory still works; one that leaves it is
-   refused. *)
-let within ~root path =
-  match (Unix.realpath root, Unix.realpath path) with
-  | exception Unix.Unix_error _ -> None
-  | root_real, real ->
-    if String.equal real root_real
-       || String.starts_with ~prefix:(root_real ^ Filename.dir_sep) real
-    then Some real
-    else None
-;;
 
 let left_inventory ~root shown =
   let _ = root in

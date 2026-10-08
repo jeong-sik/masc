@@ -61,12 +61,18 @@ let progress_of_json = function
       else (match List.assoc_opt "kind" fields with
         | Some (`String "output_observed") when sorted = ["byte_count"; "kind"] ->
             (match List.assoc_opt "byte_count" fields with
-             | Some (`Int byte_count) when byte_count > 0 -> Ok (Output_observed {byte_count})
-             | _ -> Error "native output byte_count must be a positive integer")
+             | Some json ->
+                 (match Runtime_json_integer.of_json json with
+                  | Ok byte_count when byte_count > 0 -> Ok (Output_observed {byte_count})
+                  | Ok _ | Error _ -> Error "native output byte_count must be a positive safe integer")
+             | None -> Error "native output byte_count must be a positive safe integer")
         | Some (`String "heartbeat_reported") when sorted = ["elapsed_seconds"; "kind"] ->
             (match List.assoc_opt "elapsed_seconds" fields with
-             | Some (`Int elapsed_seconds) when elapsed_seconds >= 0 -> Ok (Heartbeat_reported {elapsed_seconds})
-             | _ -> Error "native heartbeat elapsed_seconds must be a nonnegative integer")
+             | Some json ->
+                 (match Runtime_json_integer.of_json json with
+                  | Ok elapsed_seconds when elapsed_seconds >= 0 -> Ok (Heartbeat_reported {elapsed_seconds})
+                  | Ok _ | Error _ -> Error "native heartbeat elapsed_seconds must be a nonnegative safe integer")
+             | None -> Error "native heartbeat elapsed_seconds must be a nonnegative safe integer")
         | Some (`String "message_reported") when sorted = ["kind"; "message"] ->
             (match List.assoc_opt "message" fields with
              | Some (`String message) -> Ok (Message_reported {message})
@@ -129,8 +135,11 @@ let completion_of_json = function
       in
       (match List.assoc_opt "exit_code" fields with
        | Some `Null -> Ok {outcome; exit_code=None}
-       | Some (`Int value) -> Ok {outcome; exit_code=Some value}
-       | Some _ | None -> Error "native exit_code must be an integer or null")
+       | Some json ->
+           (match Runtime_json_integer.of_json json with
+            | Ok value -> Ok {outcome; exit_code=Some value}
+            | Error _ -> Error "native exit_code must be a safe integer or null")
+       | None -> Error "native exit_code must be a safe integer or null")
   | _ -> Error "native completion must be an object"
 
 let redact_completion redact completion =

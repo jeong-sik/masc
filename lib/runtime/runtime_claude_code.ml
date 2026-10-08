@@ -1179,8 +1179,8 @@ let parse_native_heartbeat ~expected_session_id fields =
     let* parent_id = string "parent_tool_use_id" in
     let* tool_name = string "tool_name" in
     let* elapsed = unique "elapsed_time_seconds" in
-    let* elapsed_seconds = match elapsed with
-      | `Int seconds when seconds >= 0 -> Ok seconds | _ -> malformed in
+    let* elapsed_seconds = match Runtime_json_integer.of_json elapsed with
+      | Ok seconds when seconds >= 0 -> Ok seconds | Ok _ | Error _ -> malformed in
     Ok {uuid; progress_id; parent_id; tool_name; elapsed_seconds}
 ;;
 

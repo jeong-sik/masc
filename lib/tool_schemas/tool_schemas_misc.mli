@@ -113,6 +113,8 @@ type misc_operation =
   | Misc_msx_restore
   | Misc_msx_change_disk
   | Misc_msx_screen
+  | Misc_msx_meta
+  | Misc_msx_checkpoint_info
   | Misc_msx_press
   | Misc_msx_step
   | Misc_msx_step_until_change
@@ -125,6 +127,8 @@ type misc_operation =
   | Misc_candle_equip
   | Misc_candle_gift
   | Misc_dos_load
+  | Misc_dos_meta
+  | Misc_dos_inventory
   | Misc_dos_eject
   | Misc_dos_screen
   | Misc_dos_step

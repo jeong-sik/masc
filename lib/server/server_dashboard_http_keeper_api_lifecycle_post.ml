@@ -388,7 +388,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               doing so during an active turn creates duplicate fibers and
               contradictory stopped/executing surfaces. Wake an already
               running fiber without changing its pause disposition. *)
-           Keeper_keepalive.process_directive
+           Keeper_keepalive.process_directive ~base_path:config.base_path
              ~agent_name:entry.name
              Keeper_directive.Wakeup;
            (* See #37175: only the lifecycle listener acts on a partial refresh. *)

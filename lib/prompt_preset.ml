@@ -39,6 +39,7 @@ type snapshot =
   ; instructions : (string * string) list
   ; assignments : (string * string) list
   ; lanes : lane list
+  ; default_revisions : (string * string) list option
   }
 
 type manifest =
@@ -67,12 +68,18 @@ type runtime_result =
   | Runtime_committed
   | Runtime_failed of string
 
+type default_comparison =
+  | Defaults_unknown
+  | Defaults_match
+  | Defaults_differ of (string * string option * string option) list
+
 type restore_report =
   { restored : string
   ; autosave : string
   ; prompt_overrides_result : part_result
   ; instructions_result : part_result
   ; runtime_result : runtime_result
+  ; default_comparison : default_comparison
   }
 
 let schema_version = 1
@@ -170,6 +177,36 @@ let manifest_of_snapshot (s : snapshot) =
   }
 ;;
 
+let compare_defaults (s : snapshot) =
+  match s.default_revisions with
+  | None -> Defaults_unknown
+  | Some saved ->
+      let current = Prompt_registry.default_revisions () in
+      let keys = List.sort_uniq String.compare (List.map fst saved @ List.map fst current) in
+      let changes = List.filter_map (fun key ->
+        let before = List.assoc_opt key saved in
+        let after = List.assoc_opt key current in
+        if before = after then None else Some (key, before, after)) keys in
+      match changes with [] -> Defaults_match | _ -> Defaults_differ changes
+;;
+
+let default_comparison_to_json comparison : Yojson.Safe.t =
+  let status, changes = match comparison with
+    | Defaults_unknown -> "unknown", []
+    | Defaults_match -> "matches", []
+    | Defaults_differ changes -> "differs", changes in
+  let revision = function None -> `Null | Some value -> `String value in
+  `Assoc ["status", `String status;
+    "changes", `List (List.map (fun (key, saved, current) ->
+      `Assoc ["key", `String key; "saved_sha256", revision saved;
+              "current_sha256", revision current]) changes)]
+;;
+
+let default_revisions_json = function
+  | None -> `Null
+  | Some rows -> `Assoc (List.map (fun (key, hash) -> key, `String hash) rows)
+;;
+
 let manifest_to_json (m : manifest) : Yojson.Safe.t =
   `Assoc
     [ "schema_version", `Int schema_version
@@ -194,6 +231,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ; "name", `String s.name
     ; "description", `String s.description
     ; "created_at", `String s.created_at
+    ; "default_revisions", default_revisions_json s.default_revisions
     ; ( "prompt_overrides"
       , `List
           (List.map
@@ -246,7 +284,24 @@ type stored_manifest =
   ; stored_description : string
   ; stored_created_at : string
   ; stored_keepers : string list
+  ; stored_default_revisions : (string * string) list option
   }
+
+let read_default_revisions fields =
+  match List.assoc_opt "default_revisions" fields with
+  | None | Some `Null -> Ok None
+  | Some (`Assoc rows) ->
+      let* reversed = List.fold_left (fun acc (key, value) ->
+        let* acc = acc in
+        match value with
+        | `String hash when String.length hash = 64
+            && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) hash ->
+            if List.mem_assoc key acc then Error ("duplicate default prompt key: " ^ key)
+            else Ok ((key, hash) :: acc)
+        | _ -> Error ("invalid default prompt SHA-256: " ^ key)) (Ok []) rows in
+      Ok (Some (List.rev reversed))
+  | Some _ -> Error "default_revisions must be an object or null"
+;;
 
 let stored_manifest_of_json (json : Yojson.Safe.t) =
   match json with
@@ -264,6 +319,7 @@ let stored_manifest_of_json (json : Yojson.Safe.t) =
       let* stored_description = string_field fields "description" in
       let* stored_created_at = string_field fields "created_at" in
       let* stored_keepers = string_list_field fields "keepers" in
+      let* stored_default_revisions = read_default_revisions fields in
       let* () =
         match
           List.find_opt (fun keeper -> not (is_valid_name keeper)) stored_keepers
@@ -271,7 +327,7 @@ let stored_manifest_of_json (json : Yojson.Safe.t) =
         | Some keeper -> Error ("manifest keeper name is not a file name: " ^ keeper)
         | None -> Ok ()
       in
-      Ok { stored_name; stored_description; stored_created_at; stored_keepers }
+      Ok { stored_name; stored_description; stored_created_at; stored_keepers; stored_default_revisions }
   | _ -> Error "manifest must be an object"
 ;;
 
@@ -371,6 +427,7 @@ let report_to_json (r : restore_report) : Yojson.Safe.t =
     ; "prompt_overrides", part_to_json ~timing:"immediate" r.prompt_overrides_result
     ; "instructions", part_to_json ~timing:"keeper_restart" r.instructions_result
     ; "runtime", runtime
+    ; "default_prompts", default_comparison_to_json r.default_comparison
     ]
 ;;
 
@@ -437,6 +494,7 @@ let capture ~base_path ~name ~description =
         { name
         ; description
         ; created_at = now_iso ()
+        ; default_revisions = Some (Prompt_registry.default_revisions ())
           (* Everything the operator saved, not only what is in force. A
              snapshot taken while an override is refused has to carry it, or
              the autosave a restore takes for safety is empty in exactly the
@@ -498,7 +556,10 @@ let write_preset_files dir (s : snapshot) =
   in
   Fs_compat.save_file_atomic
     (Filename.concat dir manifest_file)
-    (Yojson.Safe.pretty_to_string (manifest_to_json (manifest_of_snapshot s)) ^ "\n")
+    (let json = match manifest_to_json (manifest_of_snapshot s) with
+       | `Assoc fields -> `Assoc (("default_revisions", default_revisions_json s.default_revisions) :: fields)
+       | json -> json in
+     Yojson.Safe.pretty_to_string json ^ "\n")
 ;;
 
 (* The preset is written whole into a fresh holder, then put in place in one
@@ -597,6 +658,7 @@ let load ~base_path name =
         { name = m.stored_name
         ; description = m.stored_description
         ; created_at = m.stored_created_at
+        ; default_revisions = m.stored_default_revisions
         ; prompt_overrides
         ; instructions
         ; assignments
@@ -801,6 +863,7 @@ let restore ~base_path name =
   (* The target is read before the autosave is written, so restoring the
      autosave itself applies what it held, not the state just captured. *)
   let* target = load ~base_path name in
+  let default_comparison = compare_defaults target in
   let autosave = autosave_name in
   let* current =
     capture ~base_path ~name:autosave ~description:("state before restoring " ^ name)
@@ -811,7 +874,7 @@ let restore ~base_path name =
   let runtime_result =
     restore_runtime ~base_path ~assignments:target.assignments ~lanes:target.lanes
   in
-  Ok { restored = name; autosave; prompt_overrides_result; instructions_result; runtime_result }
+  Ok { restored = name; autosave; prompt_overrides_result; instructions_result; runtime_result; default_comparison }
 ;;
 
 (* ── Delete ────────────────────────────────────────────────────────── *)

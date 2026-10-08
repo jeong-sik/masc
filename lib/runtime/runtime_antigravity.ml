@@ -487,6 +487,24 @@ let effort_to_string = function
   | High -> "high"
 ;;
 
+(* Under [--json-schema] agy takes the answer as the arguments of a tool it
+   calls [finish]. A value the model writes as text is not an answer to it:
+   the CLI replies "You did not call any tools. ... If you have completed your
+   task call the finish tool." and the model answers again with the whole
+   prompt re-sent. Measured 2026-10-08 on agy 1.3.1, gemini-3.8-flash-low: of
+   499 Librarian passes told to "return exactly one JSON value", 308 wrote
+   text first and all 308 took a second model call. *)
+let structured_output_tool = "finish"
+
+let structured_output_instruction ~schema =
+  Printf.sprintf
+    "Deliver exactly one JSON value matching this JSON Schema by calling the `%s` tool \
+     in your first response, with the value's members as the tool's arguments. Do not \
+     write the value as text and do not call any other tool. JSON Schema: %s"
+    structured_output_tool
+    (Yojson.Safe.to_string schema)
+;;
+
 let execution_mode_to_string = function
   | Plan -> "plan"
   | Accept_edits -> "accept-edits"

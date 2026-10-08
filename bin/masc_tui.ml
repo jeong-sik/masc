@@ -5340,6 +5340,7 @@ let launch_keeper_lanes_load state ~mailbox =
   if state.keeper_lanes_inflight then ()
   else begin
     state.keeper_lanes_inflight <- true;
+    state.keeper_lanes_resume <- false;
     let host = server_peer_host in
     let port = state.port in
     Masc_tui_async_read.launch
@@ -10888,6 +10889,7 @@ let revoke_detail_readings state =
   state.keeper_sandbox_logs <- None;
   state.keeper_sandbox_logs_error <- None;
   state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_resume <- false;
   state.lanes <- None;
   state.keeper_secrets <- [];
   state.lanes_error <- None;
@@ -11106,6 +11108,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_turns_observed_at <- None;
   state.keeper_observed_interrupts <- [];
   state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_resume <- false;
   state.lanes <- None;
   state.lanes_error <- None;
   state.keeper_secrets <- [];
@@ -11692,10 +11695,10 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       launch_keeper_config_view state ~mailbox keeper.k_name
   | Detail_secrets ->
       (* The projection arrives with the composite body the Keeper lanes read
-         carries. Ask for it when none has answered: the roster opens with
-         that read, but a read that failed leaves nothing behind, and the tab
-         drew that as "no projection reported". *)
-      if Option.is_none state.lanes then launch_keeper_lanes_load state ~mailbox
+         carries. Ask when no snapshot has answered, or an interrupted read
+         still needs replacement after workspace reconfirmation. *)
+      if Option.is_none state.lanes || state.keeper_lanes_resume then
+        launch_keeper_lanes_load state ~mailbox
   | Detail_github ->
       state.github_identity_view <- None;
       state.github_identity_view_error <- None;

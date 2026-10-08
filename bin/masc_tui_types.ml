@@ -6063,6 +6063,7 @@ type state = {
   mutable schedule_form_refusal: schedule_form_refusal option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
+  mutable keeper_lanes_resume: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
@@ -6831,6 +6832,7 @@ let suspend_workspace_readings state =
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
   state.keeper_sandbox_logs_inflight <- None;
+  state.keeper_lanes_resume <- state.keeper_lanes_resume || state.keeper_lanes_inflight;
   state.keeper_lanes_inflight <- false;
   state.connectors_inflight <- false;
   state.connectors_reload_after_inflight <- false;
@@ -9315,6 +9317,7 @@ let create_state
   schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
+  keeper_lanes_resume = false;
   lane_inventory = None;
   standalone_lanes = None;
   standalone_lanes_error = None;

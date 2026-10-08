@@ -47,7 +47,10 @@ let launch_entries_load state ~host ~deliver =
 ;;
 
 let launch_file_load ?(intent = Open_code_file) state ~host ~deliver ~path =
-  if server_authority_ready state then begin
+  if not (server_authority_ready state) then
+    Masc_tui_loader.report_action state "error"
+      "Cannot open Code file while workspace identity is unconfirmed; retry after reconnecting"
+  else begin
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->

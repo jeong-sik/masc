@@ -169,11 +169,11 @@ let current_facts ~keepers_dir ~keeper_id =
   | Error detail -> Alcotest.fail detail
 ;;
 
-let replace_current_facts ~keepers_dir ~keeper_id facts =
+let replace_current_facts ?expected_revision ~keepers_dir ~keeper_id facts =
   Current.replace
     ~keepers_dir
     ~keeper_id
-    ~expected_revision:None
+    ~expected_revision
     ~now:(Time_compat.now ())
     ~source:{ Current.kind = Current.Librarian; trace_id = "seed" }
     ~facts
@@ -3296,8 +3296,10 @@ let test_current_search_pages_all_matching_memory () =
     if json_field "truncated" response = `Bool true then
       matches @ pages (search ~cursor:(json_field "next_cursor" response) ())
     else (
+      (* The last page leaves the field out; [json_field] fails on a missing
+         one, so read it as optional. *)
       Alcotest.(check bool) "last page has no next cursor" true
-        (json_field "next_cursor" response = `Null);
+        (Yojson.Safe.Util.member "next_cursor" response = `Null);
       matches) in
   let all = pages first in
   let source_snapshot = match Masc.Keeper_memory_source_current.read_for_keepers_dir
@@ -3321,7 +3323,8 @@ let test_current_search_pages_all_matching_memory () =
   rejected "unsupported_memory_search_cursor_scope" (search ~cursor ~source:"all" ());
   rejected "invalid_memory_search_cursor" (search ~cursor:(`String "malformed") ());
   rejected "invalid_memory_search_cursor" (search ~cursor:(`Int 10) ());
-  replace_current_facts ~keepers_dir ~keeper_id:meta.name
+  (* The snapshot seeded above is revision 1; replacing it names that one. *)
+  replace_current_facts ~expected_revision:1 ~keepers_dir ~keeper_id:meta.name
     (ordinary @ [fact "unrelated new fact changes the corpus"]);
   rejected "stale_memory_search_cursor" (search ~cursor ());
   let restart = search () in

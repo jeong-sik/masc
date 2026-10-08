@@ -485,6 +485,14 @@ let announcement_ready () =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | _ -> None
 
+let in_eio_fiber_context () =
+  try
+    ignore (Eio.Fiber.get announcement_ready_key);
+    true
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> false
+
 let enqueue ~ready ~author content () =
   Mutex.protect announcements_lock (fun () -> Queue.push {author;content;ready} announcements)
 ;;
@@ -500,7 +508,11 @@ let announce ~author content =
 let with_deferred_announcements f =
   let ready = Atomic.make false in
   Fun.protect ~finally:(fun () -> Atomic.set ready true)
-    (fun () -> Eio.Fiber.with_binding announcement_ready_key ready (fun () -> f (enqueue ~ready)))
+    (fun () ->
+      let run () = f (enqueue ~ready) in
+      if in_eio_fiber_context ()
+      then Eio.Fiber.with_binding announcement_ready_key ready run
+      else run ())
 ;;
 
 let flush_announcements () =

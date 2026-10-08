@@ -571,15 +571,15 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
     (match resolve_program ?boot ~base_path name with
      | Error message -> reject ~tool_name ~start_time message
      | Ok (program_name, program_bytes, files) ->
+       let announce_load =
+         announce ~author:agent_name
+           (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name) in
        let loaded =
          off_domain (fun () ->
            Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
              ~saves_dir:(saves_dir ~base_path (String.trim name))
              ~checkpoint_dir:(checkpoints_dir ~base_path) ~program_name ~program_bytes
-             ~files
-             ~announce:
-               (announce ~author:agent_name
-                  (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)))
+             ~files ~announce:announce_load)
        in
        after_announcing
          (of_lane_run ~base_path ~extra:[ core_field ] ~tool_name ~start_time loaded))
@@ -829,14 +829,14 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
          ()
      | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e))
   | Ok (Some slot) ->
+    let announce_restore =
+      announce ~author:agent_name
+        (Printf.sprintf "%s 님이 DOS 기계를 %s 체크포인트로 되돌렸습니다" agent_name
+           (Machine_checkpoint.slot_to_string slot)) in
     let restored =
       off_domain (fun () ->
         Dos_lane.restore ~who:agent_name ~dir ~slot ~ledger_dir:(dos_dir ~base_path)
-          ~saves_dir_of:(saves_dir ~base_path)
-          ~announce:
-            (announce ~author:agent_name
-               (Printf.sprintf "%s 님이 DOS 기계를 %s 체크포인트로 되돌렸습니다" agent_name
-                  (Machine_checkpoint.slot_to_string slot))))
+          ~saves_dir_of:(saves_dir ~base_path) ~announce:announce_restore)
     in
     after_announcing
       (of_lane ~base_path ~extra:[ slot_field slot; core_field ] ~tool_name ~start_time restored)

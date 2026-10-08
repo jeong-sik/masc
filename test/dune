@@ -3408,6 +3408,7 @@
  (modules test_tui_keeper_chat_transcript)
  (libraries
   alcotest
+  agent_core
   fmt
   masc
   masc.string_util
@@ -3444,6 +3445,7 @@
   masc_tui_credential
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
+  masc_tui_keeper_chat_transcript
   yojson))
 
 (test
@@ -3497,7 +3499,7 @@
 (test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
- (libraries alcotest fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
+ (libraries alcotest agent_core fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
 
 (test
  (name test_tui_measurement)

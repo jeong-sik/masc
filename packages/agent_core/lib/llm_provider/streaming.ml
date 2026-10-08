@@ -889,6 +889,11 @@ type tool_block_identity =
 
 type inline_channel = Inline_text | Inline_thinking
 
+type openai_prelude =
+  | Awaiting_reported_metadata
+  | Reported_prelude_published
+  | Output_without_prelude
+
 type openai_stream_state =
   { mutable thinking_block_started : bool
   ; mutable thinking_block_index : int
@@ -911,6 +916,7 @@ type openai_stream_state =
   ; mutable next_block_index : int
   ; mutable thinking_state : thinking_state
   ; mutable gemini_message_model : Model_id.t option
+  ; mutable openai_prelude : openai_prelude
   ; inline_reasoning : Inline_reasoning_split.state option
     (** Present only for a model whose content channel can also carry
         reasoning wrapped in tags (template-parser dialect or declared
@@ -939,6 +945,7 @@ let create_openai_stream_state
   ; next_block_index = 0
   ; thinking_state = Not_thinking
   ; gemini_message_model = None
+  ; openai_prelude = Awaiting_reported_metadata
   ; inline_reasoning =
       (if inline_reasoning then Some (Inline_reasoning_split.create ()) else None)
   ; provider
@@ -955,6 +962,7 @@ type openai_projection_scalar_snapshot =
   ; snapshot_text_block_index : int
   ; snapshot_next_block_index : int
   ; snapshot_thinking_state : thinking_state
+  ; snapshot_openai_prelude : openai_prelude
   }
 
 type openai_projection_undo =
@@ -980,6 +988,7 @@ let begin_openai_projection state =
       ; snapshot_text_block_index = state.text_block_index
       ; snapshot_next_block_index = state.next_block_index
       ; snapshot_thinking_state = state.thinking_state
+      ; snapshot_openai_prelude = state.openai_prelude
       }
   ; inline_snapshot = Option.map (fun split -> split, Inline_reasoning_split.snapshot split) state.inline_reasoning
   ; undo = []
@@ -1002,6 +1011,7 @@ let rollback_openai_projection tx =
   state.text_block_index <- snapshot.snapshot_text_block_index;
   state.next_block_index <- snapshot.snapshot_next_block_index;
   state.thinking_state <- snapshot.snapshot_thinking_state;
+  state.openai_prelude <- snapshot.snapshot_openai_prelude;
   Option.iter (fun (split, captured) -> Inline_reasoning_split.restore split captured) tx.inline_snapshot;
   List.iter
     (function
@@ -1453,7 +1463,27 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
                ; usage = Some (Types.delta_usage_of_api_usage usage)
                })
         | None -> ()));
-    Ok (List.rev !events, !telemetry_event)
+    let events = List.rev !events in
+    let events =
+      match state.openai_prelude with
+      | Reported_prelude_published | Output_without_prelude -> events
+      | Awaiting_reported_metadata ->
+        if not (Api_common.string_is_blank chunk.chunk_id)
+           && not (Api_common.string_is_blank chunk.chunk_model)
+        then (
+          state.openai_prelude <- Reported_prelude_published;
+          (* The pair belongs to this wire chunk. Never assemble it from
+             separate partial headers or substitute the requested model.
+             Usage remains on its existing MessageDelta, exactly once. *)
+          MessageStart {id=chunk.chunk_id; model=chunk.chunk_model; usage=None} :: events)
+        else (
+          (* A late prelude is not a metadata update: accumulators and chat
+             consumers treat it as a response boundary. Preserve the existing
+             metadata-poor output rather than reopening it later. *)
+          if events <> [] then state.openai_prelude <- Output_without_prelude;
+          events)
+    in
+    Ok (events, !telemetry_event)
 ;;
 
 (** Convert a parsed {!openai_chunk} into {!sse_event} list.
@@ -1486,7 +1516,13 @@ let openai_chunk_to_events (state : openai_stream_state) (chunk : openai_chunk)
 
 let openai_sse_parse_result_to_events state = function
   | Openai_chunk chunk -> openai_chunk_to_events state chunk
-  | Openai_done -> [ MessageStop ], None
+  | Openai_done ->
+    (* The terminal sentinel is observable even without a preceding chunk.
+       It closes the prelude window; later data must not invent a new start. *)
+    (match state.openai_prelude with
+     | Awaiting_reported_metadata -> state.openai_prelude <- Output_without_prelude
+     | Reported_prelude_published | Output_without_prelude -> ());
+    [ MessageStop ], None
   | Openai_empty -> [], None
   | Openai_provider_error { message; error_type; provider_status; report; raw } ->
     [ SSEError { message; error_type; provider_status; report; raw } ], None

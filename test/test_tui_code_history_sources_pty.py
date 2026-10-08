@@ -48,7 +48,8 @@ def run(executable, columns):
         h.send_and_wait(process, fd, output, b"\r", b"local lock = 1")
         h.resize_and_wait(process, fd, output, rows=30, columns=columns,
             needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"H", b"Keeper: keeper-")
+        # The source label and long Keeper name wrap separately at 60 columns.
+        h.send_and_wait(process, fd, output, b"H", b"Keeper:")
         document = read_document(process, fd, output)
         assert "Githistoryunavailable" in document, document
         assert "TASKTAIL" in document and "EXECTAIL" in document, document

@@ -1417,11 +1417,16 @@ let run_best_effort
                   capture, and a running Keeper usually carries an execution
                   basis too; neither reaches the prompt without a source, yet
                   comparing the record with [empty] refused every live pass. *)
-               let eligible = match pass with
-                 | Memory_pass None ->
+               (* Maintenance is already a request to review excess memory.
+                  A no-change shortcut must not stand in for that review:
+                  cleanup remembers a committed input as reviewed. *)
+               let eligible = match write_scope, pass with
+                 | Context_and_memory, Memory_pass None ->
                    Keeper_librarian_context.shows_no_working_context
                      prompt_input.working_context
-                 | Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _ -> false in
+                 | (Memory_maintenance | Context_only), _
+                 | Context_and_memory,
+                   (Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _) -> false in
                let observation = Typesafeai_librarian_preflight.assess
                  ~observe:(fun observation -> observed_preflight := Some observation)
                  ~clock ~keeper_id ~eligible ~prompt () in

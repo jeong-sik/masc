@@ -35,7 +35,7 @@ let assess ?(observe = fun _ -> ()) ~clock ~keeper_id ~eligible ~prompt () =
   match Typesafeai_config.librarian_preflight_destinations ~keeper_id with
   | Error reason -> { outcome = Skipped reason; elapsed_s = None }
   | Ok _ when not eligible ->
-    { outcome = Ineligible "this pass must generate continuity or working context"; elapsed_s = None }
+    { outcome = Ineligible "this pass requires a full Librarian review"; elapsed_s = None }
   | Ok destinations ->
     (match choices with
      | Error reason -> { outcome = Question_unavailable reason; elapsed_s = None }

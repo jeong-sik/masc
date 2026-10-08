@@ -880,12 +880,12 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
   let module T = Masc_tui_keeper_chat_transcript in
   let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
   let module Accum = Masc.Keeper_stream_tool_accum in
-  List.iter (fun provider_id ->
+  List.iter (fun (provider_id, next_model) ->
     let initial = {Agent_core.Types.zero_api_usage with input_tokens=500;
       cache_read_input_tokens=100} in
     let next_initial = {Agent_core.Types.zero_api_usage with input_tokens=200} in
-    let start usage = Agent_core.Types.MessageStart
-        {id=provider_id;model="observed";usage=Some usage} in
+    let start model usage = Agent_core.Types.MessageStart
+        {id=provider_id;model;usage=Some usage} in
     let sparse output = Agent_core.Types.MessageDelta
         {stop_reason=None;usage=Some {input_tokens=None;output_tokens=Some output;
           cache_read_input_tokens=None;cache_creation_input_tokens=None}} in
@@ -911,9 +911,9 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       (Some (T.of_log ~now:2000. log)) in
     publish (E.Run_started {run_id="run";thread_id="keeper:keeper.one"});
     publish (E.Text_message_start {message_id="outer";role=E.Assistant});
-    List.iter send Agent_core.Types.[start initial;
+    List.iter send Agent_core.Types.[start "observed" initial;
       ContentBlockDelta {index=0;delta=TextDelta "EARLIER_RESPONSE"};
-      sparse 7;start initial];
+      sparse 7;start "observed" initial];
     let wire,replay,_ = snapshots () in
     List.iter (fun log ->
       check (option string) "exact open-scope replay cannot erase delta usage"
@@ -923,10 +923,20 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       MessageDelta {stop_reason=Some StopToolUse;usage=None};MessageStop];
     (match Accum.close_turn_without_sources accum ~turn:0 with
      | Ok () -> () | Error detail -> fail detail);
-    List.iter send Agent_core.Types.[start next_initial;
+    send (start next_model next_initial);
+    let wire,replay,_ = snapshots () in
+    List.iter (fun log ->
+      check (option string) "new response initial counters arrive before any delta"
+        (Some "tokens: in 200 · out 0 · cache read 0 · cache write 0") (tokens log);
+      if next_model = "" then
+        check string "only the absent model label is unavailable"
+          "configured: configured-model"
+          (T.runtime_identity_text ~keeper_name:"keeper.one"
+             ~configured_runtime:"configured-model" (Some (T.of_log ~now:2000. log)))) [wire;replay];
+    List.iter send Agent_core.Types.[
       ContentBlockDelta {index=0;delta=TextDelta "PREFIX"};
       ContentBlockDelta {index=1;delta=ThinkingDelta "REASONING"};
-      sparse 9;start next_initial;
+      sparse 9;start next_model next_initial;
       ContentBlockDelta {index=2;delta=TextDelta "SUFFIX"};MessageStop];
     let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1 in
     publish (E.Reply_details {reply="SUFFIX";turn_outcome=Outcome.Visible_reply;turn_ref});
@@ -951,7 +961,9 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       (wire_items = replay_items);
     ignore (Log.add_journaled replay journal);
     check bool "overlapping replay leaves origins and content unchanged" true
-      (replay_items = projected replay)) ["reused-provider-id"; ""]
+      (replay_items = projected replay))
+    ["reused-provider-id", "observed"; "", "observed";
+     "reused-provider-id", ""; "", ""]
 ;;
 
 let test_conflicting_provider_start_cannot_open_a_response () =

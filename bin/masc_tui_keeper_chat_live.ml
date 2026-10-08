@@ -252,7 +252,9 @@ let custom_deltas_unvalidated fields =
     (match object_field fields "value" with
      | Some value ->
        (match string_field value "model" with
-        | Some model when String.trim model <> "" ->
+        | Some model ->
+          (* A start establishes response and usage even when the provider
+             has no model label. Presentation handles that absent label. *)
           [ Stream_model_started
               { message_id = Option.bind (string_field value "provider_message_id")
                   (fun id -> if String.trim id = "" then None else Some id)

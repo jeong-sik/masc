@@ -16,9 +16,11 @@ def run(executable):
     fixture = chat.AtomicChatFixture(first_working=True)
     # Token reports draw beside the runtime roster row. Supply that actual
     # read contract before using observed token counters as ordered witnesses.
+    # Short opaque fixture IDs keep the whole token clause visible at120cols,
+    # including both observed and configured runtime identities.
     runtime_path = "/api/v1/gate/keepers?detailed=true"
     fixture.fixtures[runtime_path] = h.keeper_runtime_http_fixtures(
-        alpha_runtime_id="fixture-runtime")[runtime_path]
+        alpha_runtime_id="cfg")[runtime_path]
     stop_answer = threading.Event()
     resume_reasoning = threading.Event()
     stop_reasoning = threading.Event()
@@ -60,11 +62,11 @@ def run(executable):
                        + activity(0, 0, "text", "observed"))
                 content_gate("late-runtime-name")
                 yield event("KEEPER_RUNTIME_ATTEMPT_STARTED", {
-                    "runtime_id": "observed-runtime", "attempt_index": 0})
+                    "runtime_id": "run", "attempt_index": 0})
                 yield event("KEEPER_STREAM_MESSAGE_DELTA", {"usage": {"output_tokens": 1}})
                 content_gate("repeated-runtime-name")
                 yield event("KEEPER_RUNTIME_ATTEMPT_STARTED", {
-                    "runtime_id": "observed-runtime", "attempt_index": 0})
+                    "runtime_id": "run", "attempt_index": 0})
                 yield event("KEEPER_STREAM_MESSAGE_DELTA", {"usage": {"output_tokens": 2}})
                 content_gate("overlap")
                 yield (event("KEEPER_THINKING_DELTA", {"index": 1, "delta": "checking alongside the answer"})
@@ -156,7 +158,7 @@ def run(executable):
         try:
             chat.open_atomic_chat(process, fd, output)
             assert h.wait_for_fixture_state(process, fd, output,
-                lambda: b"configured: fixture-runtime" in h.screen_text(bytes(output)), timeout=5), "runtime roster row did not arrive"
+                lambda: b"configured: cfg" in h.screen_text(bytes(output)), timeout=5), "runtime roster row did not arrive"
             h.send_and_wait(process, fd, output, b"phase-check", h.composer_showing(b"phase-check"))
             os.write(fd, b"\r")
             observe("answering", b"STREAMING")

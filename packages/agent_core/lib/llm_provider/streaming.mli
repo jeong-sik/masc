@@ -81,7 +81,7 @@ type openai_chunk =
   ; delta_reasoning_details : openai_reasoning_details_delta option
   ; delta_tool_calls : openai_tool_call_delta list
   ; finish_reason : string option
-  ; chunk_usage : api_usage option
+  ; chunk_usage : delta_usage option
   ; chunk_timings : inference_timings option
     (** Top-level [timings] object llama-server attaches to the final SSE
         chunk (the one carrying [finish_reason]) without opt-in. Includes

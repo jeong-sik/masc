@@ -230,7 +230,17 @@ def unavailable_journal_operation_recovers(executable: str) -> None:
     assert not [path for path, _ in posts if path != "/mcp"], posts
 
 
-def journal_mailbox_recovers_terminal_tail(executable: str, state_kind: str) -> None:
+# The server appends a turn's last journal lines and sends their frames before
+# it makes the operation record terminal: the turn's journal publisher has
+# ended, and Keeper_owner.on_execution_settled has run, before the durable
+# settle is applied. The read a frame starts therefore finds the whole
+# journal, and its first operation read lands on either side of that settle.
+SETTLED_BEFORE_READ = 'settled before the read'
+SETTLED_DURING_READ = 'settled during the read'
+
+
+def journal_mailbox_recovers_terminal_tail(
+        executable: str, state_kind: str, settles: str = SETTLED_BEFORE_READ) -> None:
     """A partial mailbox result releases its read even after record-only closure."""
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures.update(observer.observer_http_fixtures())
@@ -258,6 +268,10 @@ def journal_mailbox_recovers_terminal_tail(executable: str, state_kind: str) -> 
                 else {'type': 'run_finished', 'run_id': operation_id})
     events = first + last
     last_seq = len(events) - 1
+    # A record that settles between the TUI's two operation reads makes it
+    # read the journal once more (Keeper_chat_log.read_with_operation_state).
+    rereads = state_kind != 'Running' and settles == SETTLED_DURING_READ
+    notified_reads = [2, 2] if rereads else [2]
 
     def history():
         return 200, [{'id': operation_id, 'role': 'user',
@@ -266,9 +280,11 @@ def journal_mailbox_recovers_terminal_tail(executable: str, state_kind: str) -> 
             'delivery_key': {'kind': 'operation', 'operation_id': operation_id}}]
 
     def operation():
+        settled = announce if settles == SETTLED_BEFORE_READ else requested_tail
+        state = state_kind if settled.is_set() else 'Running'
         result = {'schema': 'masc.keeper_chat_operation.v1', 'operation_id': operation_id,
-                  'state': state_kind}
-        if state_kind == 'Running':
+                  'state': state}
+        if state == 'Running':
             result['started_at'] = now
         else:
             result['completed_at'] = now + 3
@@ -317,19 +333,26 @@ def journal_mailbox_recovers_terminal_tail(executable: str, state_kind: str) -> 
             h.palette_go(process, fd, output, b'keeper alpha', ('QUESTION_' + state_kind).encode())
             h.wait_for_output(process, fd, output, partial.encode(), start=0, timeout=8)
             assert h.wait_for_fixture_event(process, fd, output, connected, timeout=8)
-            assert calls == [-1], calls
+            # Entering chat sometimes loads the history twice (#42012); the
+            # second load reads the journal again from the seq the pane holds.
+            # Let those loads finish before the tail is armed, so the only
+            # read that can fetch it is the one the notification starts.
+            h.drain_until_quiet(process, fd, output, quiet=1.0)
+            opened = list(calls)
+            assert opened in ([-1], [-1, 2]), calls
             announce.set()
             assert h.wait_for_fixture_event(process, fd, output, requested_tail, timeout=8), calls
             h.wait_for_output(process, fd, output, tail.encode(), start=0, timeout=8)
             h.drain_until_quiet(process, fd, output)
             screen = h.screen_text(bytes(output))
             assert screen.count(partial.encode()) == 1 and screen.count(tail.encode()) == 1, screen
-            assert calls == [-1, 2], calls
+            assert calls == opened + notified_reads, calls
             verified['value'] = True
             h.send_and_wait(process, fd, output, b'\x11', b'MASC Keepers')
             h.palette_go(process, fd, output, b'keeper alpha', ('HISTORY_AFTER_TERMINAL_' + state_kind).encode())
             h.drain_until_quiet(process, fd, output)
-            assert calls == [-1, 2], calls  # Heard terminal, including no-reply cancellation, retires replay.
+            # Heard terminal, including no-reply cancellation, retires replay.
+            assert calls == opened + notified_reads, calls
             assert not [path for path, _ in posts if path != '/mcp'], posts
             h.send_and_wait(process, fd, output, b'\x11', b'MASC Keepers')
             os.write(fd, b'q')
@@ -338,7 +361,7 @@ def journal_mailbox_recovers_terminal_tail(executable: str, state_kind: str) -> 
             done.set()
 
     h.run_terminal_scenario(executable,
-        description='Actual journal mailbox recovers a tail after ' + state_kind + ' operation record',
+        description=f'Actual journal mailbox recovers a tail, {state_kind} operation record {settles}',
         interact=interact, http_fixtures=fixtures, http_requests=posts,
         refresh=3600.0, terminal_rows=42, terminal_cols=140)
 
@@ -348,6 +371,12 @@ if __name__ == "__main__":
     run(executable)
     run(executable, refresh_fails=True)
     unavailable_journal_operation_recovers(executable)
-    for state_kind in ('Running', 'Succeeded', 'Failed', 'Cancelled'):
-        journal_mailbox_recovers_terminal_tail(executable, state_kind)
-    print("tui stale chat progress: PASS (7 scenarios)")
+    journal_mailbox_recovers_terminal_tail(executable, 'Running')
+    # Cancelled is reached from Running through a continuation: the segment
+    # ends on Run_finished, Requeue_continuation makes the record Queued and
+    # Cancel_queued makes it Cancelled (Keeper_chat_operation_reducer), all
+    # possibly between the TUI's two operation reads.
+    for state_kind in ('Succeeded', 'Failed', 'Cancelled'):
+        for settles in (SETTLED_BEFORE_READ, SETTLED_DURING_READ):
+            journal_mailbox_recovers_terminal_tail(executable, state_kind, settles)
+    print("tui stale chat progress: PASS (10 scenarios)")

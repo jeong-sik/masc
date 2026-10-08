@@ -1943,29 +1943,34 @@ def chat_visibility_modes_interaction(
             )
         if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
             raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
-        # The skill header and its bold name must belong to one TURN on
-        # the completed screen, not separate turns or historical frames.
+        # The skill row and its bold name must belong to one turn on the
+        # completed screen, not separate turns or historical frames. The
+        # conversation draws no TURN heading; a turn is one rail block that
+        # opens on ╭ and closes on ╰, and a one-row turn stands alone on ╶.
         styled_rows = screen_rows(completed, preserve_styles=True)
-        turn_rows = sorted(
-            row for row, text in observed_rows.items()
-            if title_row < row < composer_row
-            and re.search(rb"TURN #\d+", text)
-        )
+        turn_blocks: list[list[int]] = []
+        open_block: list[int] = []
+        for row in sorted(
+            row for row in observed_rows if title_row < row < composer_row
+        ):
+            text = observed_rows[row]
+            if "╭".encode() in text or "╶".encode() in text:
+                open_block = [row]
+            elif open_block:
+                open_block.append(row)
+            if open_block and ("╰".encode() in text or "╶".encode() in text):
+                turn_blocks.append(open_block)
+                open_block = []
         skill_in_turn = False
-        for index, row in enumerate(turn_rows):
-            if re.search(
-                "◆\\s+SKILL\\s+│\\s+TURN #\\d+".encode(),
-                observed_rows[row],
-            ) is None:
-                continue
-            end_row = (
-                turn_rows[index + 1]
-                if index + 1 < len(turn_rows) else composer_row
-            )
-            if any(
-                b"\x1b[1mci-red-attribution" in text
-                for body_row, text in styled_rows.items()
-                if row < body_row < end_row
+        for block in turn_blocks:
+            skill_rows = [
+                row for row in block
+                if re.search("◆\\s+SKILL".encode(), observed_rows[row])
+            ]
+            if skill_rows and any(
+                b"\x1b[1mci-red-attribution" in styled_rows.get(row, b"")
+                for row in block
+                if row >= skill_rows[0]
             ):
                 skill_in_turn = True
                 break

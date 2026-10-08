@@ -24925,7 +24925,18 @@ and is loaded on demand through keeper_skill.
              refresh_repository_changes state ~mailbox:async_messages
            else
            (match state.view with
-            | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+            | Code ->
+                if state.code_history_open then
+                  (match Masc_tui_fetched.current_key state.code_file with
+                   | None -> ()
+                   | Some path ->
+                       Masc_tui_code_requests.launch_history_load state
+                         ~host:server_peer_host
+                         ~deliver:(workspace_enqueue state async_messages) ~path)
+                else
+                  Masc_tui_code_requests.launch_entries_load state
+                    ~host:server_peer_host
+                    ~deliver:(workspace_enqueue state async_messages)
             | Keepers Keeper_list ->
                 launch_keeper_lanes_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->

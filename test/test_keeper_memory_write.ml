@@ -996,6 +996,90 @@ let test_recall_artifacts_follow_history_retention () =
     ["A later decision changes the complete snapshot."] (match_texts search)
 ;;
 
+let test_superseded_recall_pin_releases_only_after_history_retention () =
+  List.iter (fun demand -> with_temp_dir @@ fun base_path ->
+    let config = Masc.Workspace.default_config base_path in
+    let meta = make_meta "pin-retirement" in
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let store = Tool_blob_store.create ~base_path in
+    let execution = Runtime.keeper_memory_write_with_outcome ~config ~meta
+        ~args:(make_args ~title:"" ~content:"Memory later becomes historical.") in
+    let response = Yojson.Safe.from_string execution.Masc.Keeper_tool_execution.raw_output in
+    Alcotest.(check bool) "fact persisted" true (json_field "ok" response = `Bool true);
+    let render search = Masc.Keeper_memory_os_recall.render_if_enabled
+        ~memory_search_available:search ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:1. ()
+        |> Option.get in
+    let prompt = render false in
+    let reference = List.hd (List.rev (String.split_on_char '\n' prompt)) |> Yojson.Safe.from_string in
+    let reference = match Tool_output.normalized_artifact_ref_of_json reference with
+      | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+      | _ -> Alcotest.fail "expected artifact before retirement" in
+    let keeper_dir = Filename.concat (Masc.Workspace.keepers_runtime_dir config) meta.name in
+    let pin = Filename.concat keeper_dir "memory-recall-current.json" in
+    let prior_pin = Fs_compat.load_file pin in
+    if not demand then begin
+      let retracted = Runtime.keeper_memory_retract_with_outcome ~config ~meta
+          ~args:(make_retract_args ~memory_id:(string_field "memory_id" response)
+            ~reason:"The last current fact was retracted.") in
+      Alcotest.(check bool) "last fact retracts" true
+        (json_field "ok" (Yojson.Safe.from_string retracted.Masc.Keeper_tool_execution.raw_output) = `Bool true)
+    end;
+    (* Neither a failed demand read nor a failed artifact revalidation is an
+       empty authority. They leave the last complete pin intact. *)
+    let source_path = Masc.Keeper_memory_source_current.path_for_keepers_dir
+        ~keepers_dir ~keeper_id:meta.name in
+    Fs_compat.save_file source_path "not a source snapshot";
+    ignore (render demand);
+    Alcotest.(check string) "unavailable source preserves current pin" prior_pin (Fs_compat.load_file pin);
+    Sys.remove source_path;
+    let ordinary_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
+    let ordinary = Fs_compat.load_file ordinary_path in
+    Fs_compat.save_file ordinary_path "not an ordinary snapshot";
+    ignore (render demand);
+    Alcotest.(check string) "unavailable ordinary source preserves current pin" prior_pin (Fs_compat.load_file pin);
+    Fs_compat.save_file ordinary_path ordinary;
+    ignore (render demand);
+    Alcotest.(check bool) "superseded current root is empty" true
+      (Yojson.Safe.from_string (Fs_compat.load_file pin) = `Null);
+    let sweep () = List.iter (fun mode -> match Tool_blob_maintenance.run ~base_path
+          ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+      | Ok _ -> () | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error))
+        [Tool_blob_maintenance.Observe_only; Delete_previous_candidates] in
+    let present () = match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+      | Ok value -> Option.is_some value
+      | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error) in
+    sweep ();
+    Alcotest.(check bool) "retirement preserves dated historical artifact" true (present ());
+    let history_dir = Filename.concat keeper_dir
+        (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
+    ignore (Dated_jsonl.prune (Dated_jsonl.create ~base_dir:history_dir ()) ~days:1);
+    sweep ();
+    Alcotest.(check bool) "normal history retention makes retired artifact collectable" false (present ()))
+    [true; false]
+;;
+
+let test_late_pin_retirement_preserves_new_same_artifact_publication () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let module Pin = Masc.Keeper_recall_artifact in
+  let ok = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let artifact = Tool_blob_store.put_durable_reuse (Tool_blob_store.create ~base_path)
+      ~bytes:"same memory snapshot" ~mime:"text/plain" in
+  let retain () = ok (Pin.retain ~config ~keeper_id:"keeper" ~kind:Memory_os ~now:1. artifact) in
+  retain ();
+  let observed = ok (Pin.observe_current ~config ~keeper_id:"keeper" ~kind:Memory_os) in
+  retain ();
+  let pin = Filename.concat (Filename.concat (Masc.Workspace.keepers_runtime_dir config) "keeper")
+      "memory-recall-current.json" in
+  let newer = Fs_compat.load_file pin in
+  ok (Pin.retire_current ~config ~keeper_id:"keeper" ~kind:Memory_os observed);
+  Alcotest.(check string) "late retirement cannot release newer same-hash publication" newer (Fs_compat.load_file pin);
+  let current = ok (Pin.observe_current ~config ~keeper_id:"keeper" ~kind:Memory_os) in
+  ok (Pin.retire_current ~config ~keeper_id:"keeper" ~kind:Memory_os current);
+  Alcotest.(check bool) "current owner can retire its exact pin" true
+    (Yojson.Safe.from_string (Fs_compat.load_file pin) = `Null)
+;;
+
 let test_source_bound_write_discards_stale_claim_and_recreates () =
   with_temp_dir
   @@ fun base_path ->
@@ -3746,6 +3830,10 @@ let () =
             "recall snapshots survive GC until history retention releases them"
             `Quick
             test_recall_artifacts_follow_history_retention
+        ; Alcotest.test_case "superseded recall pins keep history then permit collection" `Quick
+            test_superseded_recall_pin_releases_only_after_history_retention
+        ; Alcotest.test_case "late recall retirement preserves same-hash publication" `Quick
+            test_late_pin_retirement_preserves_new_same_artifact_publication
         ; Alcotest.test_case "demand recall avoids bulk artifact and source work" `Quick
             test_demand_recall_does_not_materialize_or_verify_all_memory
         ; Alcotest.test_case "source search validates query candidates only" `Quick

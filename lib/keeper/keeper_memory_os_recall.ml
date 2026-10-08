@@ -100,14 +100,30 @@ let read_source ~keepers_dir ~keeper_id =
     Unavailable
 ;;
 
-let render_demand_notice ~memory_search_available ~keepers_dir ~keeper_id =
-  let ordinary = match read_ordinary ~keepers_dir ~keeper_id with
+let retire_pin ~config ~keeper_id observed =
+  let retirement = try Result.bind observed (fun observed ->
+      Keeper_recall_artifact.retire_current ~config ~keeper_id ~kind:Memory_os observed)
+    with
+    | Eio.Cancel.Cancelled _ as error -> raise error
+    | exn -> Error (Printexc.to_string exn) in
+  match retirement with
+  | Ok () -> ()
+  | Error detail -> Log.Keeper.warn "memory recall pin retirement failed keeper=%s: %s" keeper_id detail
+
+let authoritative = function Absent | Available _ -> true | Unavailable -> false
+
+let render_demand_notice ~memory_search_available ~config ~keepers_dir ~keeper_id ~observed =
+  let ordinary_state = read_ordinary ~keepers_dir ~keeper_id in
+  let source_state = read_source ~keepers_dir ~keeper_id in
+  if authoritative ordinary_state && authoritative source_state then
+    retire_pin ~config ~keeper_id observed;
+  let ordinary = match ordinary_state with
     | Absent -> ordinary_text Absent
     | Unavailable -> ordinary_text Unavailable
     | Available snapshot ->
       Printf.sprintf "Current ordinary memory: %d stored facts; bodies omitted."
         (List.length snapshot.Keeper_memory_os_current.facts) in
-  let source = match read_source ~keepers_dir ~keeper_id with
+  let source = match source_state with
     | Absent -> "Source-bound memory snapshot is absent. No source-bound facts are current."
     | Unavailable -> "Source-bound memory is unavailable. Prior claims are unverified, not deleted."
     | Available snapshot ->
@@ -122,7 +138,7 @@ let render_demand_notice ~memory_search_available ~keepers_dir ~keeper_id =
   block [ordinary; source; retrieval; current_lookup_scope]
 ;;
 
-let render_with_source_revalidation ~memory_search_available ~artifact_reader_available ~config ~meta ~keepers_dir ~keeper_id ~now =
+let render_with_source_revalidation ~memory_search_available ~artifact_reader_available ~config ~meta ~keepers_dir ~keeper_id ~now ~observed =
   let source_state =
     match Keeper_memory_source_current.revalidate ~config ~meta ~keepers_dir ~now () with
     | Error message ->
@@ -166,8 +182,11 @@ let render_with_source_revalidation ~memory_search_available ~artifact_reader_av
   let fallback reason =
     block ([ordinary_notice; source_notice; reason; search_notice;
       current_lookup_scope] @ source_withdrawals) in
-  if not has_knowledge then
+  if not has_knowledge then begin
+    if authoritative ordinary_state && authoritative source_state then
+      retire_pin ~config ~keeper_id observed;
     block [ordinary_text ordinary_state; source_text source_state]
+  end
   else if not artifact_reader_available then
     fallback "Current memory artifact retrieval is unavailable on this tool surface."
   else
@@ -202,11 +221,12 @@ let render_if_enabled ?(artifact_reader_available = true) ?(memory_search_availa
   else
     Some
       (try
+         let observed = Keeper_recall_artifact.observe_current ~config ~keeper_id ~kind:Memory_os in
          if memory_search_available || not artifact_reader_available then
-           render_demand_notice ~memory_search_available ~keepers_dir ~keeper_id
+           render_demand_notice ~memory_search_available ~config ~keepers_dir ~keeper_id ~observed
          else
            render_with_source_revalidation ~memory_search_available ~artifact_reader_available
-             ~config ~meta ~keepers_dir ~keeper_id ~now
+             ~config ~meta ~keepers_dir ~keeper_id ~now ~observed
        with
        | Eio.Cancel.Cancelled _ as error -> raise error
        | exn ->

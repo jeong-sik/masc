@@ -2,7 +2,10 @@
 
     Search-capable surfaces receive only store availability and counts plus a
     current-lookup requirement: no claim bodies, source-file revalidation,
-    artifact rendering, blob writes or retention writes. The Keeper selects
+    artifact rendering, blob writes or dated retention writes. Authoritative
+    demand recall retires the superseded current artifact pin, preserving
+    dated history. Empty authoritative artifact recall does the same; failed
+    ordinary/source reads preserve the current pin. The Keeper selects
     relevant facts through [keeper_memory_search], whose read boundary
     revalidates source claims before returning them.
 

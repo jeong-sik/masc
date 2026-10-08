@@ -8956,30 +8956,17 @@ let browser_lane_source_hint view =
        | (Located _ | Invalid _) as source ->
            Some (Masc.Browser_source_context.label source))
 
-let browser_lane_unserved_gesture_rows (view : Browser_lane_view.t) =
-  match view.unserved_gesture with
-  | None -> []
-  | Some unserved -> Browser_lane_view.unserved_gesture_rows unserved
-
 let browser_lane_fixed_rows view =
   (* Status, selection, tab, URL, divider and text position are always drawn.
      A source hint contributes a row only when the selected node has one, and
      a refused gesture its rows until the next input. *)
   6 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
-  + List.length (browser_lane_unserved_gesture_rows view)
+  + List.length (Browser_lane_view.unserved_rows view)
 
-(* The picker's rows besides its choices: the status row, the heading and the
-   divider above them, the detail row for the highlighted choice below them,
-   and the row an empty connection list explains itself on. *)
-let browser_picker_frame_rows = 5
-
-(* What the picker keeps for the BiDi host when it has rows for it: its first
-   row, and the row that says how many more the screen could not hold. *)
-let browser_host_reserved_rows = 2
-
-(* Choosing is what the picker is for. On a terminal that would be left with
-   fewer choices than this beside the host's rows, the choices keep the room. *)
-let browser_picker_least_choices = 3
+(* The picker's rows besides its choices and what an empty connection list
+   says: the status row, the heading and the divider above the choices, and
+   the detail row for the highlighted choice below them. *)
+let browser_picker_frame_rows = 4
 
 (* The cells a BiDi host row has behind the surface's two-cell indent. *)
 let browser_host_row_cells ~cols = max 1 (framed_inner_width cols - 2)
@@ -9100,20 +9087,20 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";
           c.push_divider ();
-          (* The BiDi host's rows come last and cannot be scrolled to. Their
-             first row, which says whether a host runs, keeps a place however
-             many choices there are, with the row that says more is hidden,
+          (* The BiDi host's rows cannot be scrolled to. Their first rows,
+             which say where a host stands, keep a place however many
+             choices there are, with the row that says more is hidden,
              unless that would leave too few choices to choose from. *)
           let host_rows =
             Browser_lane_view.bidi_host_rows ~width:(browser_host_row_cells ~cols) view in
-          let room = max 1 (budget - browser_picker_frame_rows) in
+          let empty_line = browser_lane_picker_empty_line view in
+          let choices = browser_choices view in
           let room =
-            match host_rows with
-            | _ :: _ when room - browser_host_reserved_rows >= browser_picker_least_choices ->
-                room - browser_host_reserved_rows
-            | [] | _ :: _ -> room in
+            Browser_lane_view.picker_choice_rows
+              ~rows:(budget - browser_picker_frame_rows - List.length (Option.to_list empty_line))
+              ~choices:(List.length choices) ~host_rows:(List.length host_rows) in
           let start = max 0 (cursor - room + 1) in
-          browser_choices view |> List.iteri (fun index choice ->
+          choices |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
               let line = "  " ^ Terminal_text.single_line (browser_choice_label choice)
                 ^ (if browser_choice_selected view choice then " (current)" else "") in
@@ -9123,24 +9110,22 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              the cursor. *)
           c.push_styled ~style:(Theme.recede ())
             ("  " ^ Option.value ~default:""
-               (Option.bind (List.nth_opt (browser_choices view) cursor) browser_choice_detail));
-          (match browser_lane_picker_empty_line view with
-           | None -> ()
-           | Some line ->
-            c.push_styled ~style:(Theme.recede ()) line;
-            if awaiting_browser view then (
-              c.push_styled ~style:(Theme.info ()) "  Live requires the MASC extension and its registered native host.";
-              c.push_styled ~style:(Theme.recede ())
-                ("  " ^ transport_setup_row [Browser_lane.Web_extension]);
-              c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh."));
-          (* Last, so a terminal too short for everything loses these from
-             the end: how to start a host goes first, whether one runs last. *)
-          List.iter (fun row ->
-              c.push_styled ~style:(Theme.recede ()) ("  " ^ Terminal_text.single_line row))
-            host_rows
+               (Option.bind (List.nth_opt choices cursor) browser_choice_detail));
+          Option.iter (c.push_styled ~style:(Theme.recede ())) empty_line;
+          (* A terminal too short for everything loses rows from the end.
+             Where the host stands comes before how one is started, and both
+             before the rows on the extension, which say the same on every
+             screen. *)
+          List.iter (fun row -> c.push_styled ~style:(Theme.recede ()) ("  " ^ row)) host_rows;
+          if Option.is_some empty_line && awaiting_browser view then (
+            c.push_styled ~style:(Theme.info ())
+              "  The MASC extension and its registered native host connect a live browser.";
+            c.push_styled ~style:(Theme.recede ())
+              ("  " ^ transport_setup_row [Browser_lane.Web_extension]);
+            c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh.")
       | None ->
-      List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ Terminal_text.single_line row))
-        (browser_lane_unserved_gesture_rows view);
+      List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ row))
+        (Browser_lane_view.unserved_rows view);
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft

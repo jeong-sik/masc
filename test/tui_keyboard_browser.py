@@ -73,14 +73,18 @@ BIDI_HOST_REASON_ROW = b"Reason: stopped by SIGINT"
 BIDI_HOST_SESSION_ROW = "Session end not confirmed · restart that Firefox before attaching".encode()
 BIDI_HOST_SETUP_ROW = b"Setup: docs/design/browser-bidi-live-host.md"
 # With no host before it, the launcher's own words: PORT, and what PORT is.
-BIDI_HOST_ATTACH_ROWS = (b"Attach: " + BIDI_LAUNCHER.encode(),
+# The launcher's path is one shell word.
+BIDI_HOST_ATTACH_ROWS = (b"Attach: '" + BIDI_LAUNCHER.encode() + b"'",
                          b"--bidi-url ws://127.0.0.1:PORT/session",
                          b"PORT: the --remote-debugging-port Firefox was started with",
                          BIDI_HOST_SETUP_ROW)
-# After a host, the address that host was given.
-BIDI_HOST_ATTACH_AGAIN_ROWS = (b"Attach: " + BIDI_LAUNCHER.encode(),
-                               b"--bidi-url ws://127.0.0.1:9222/session",
+# After a host, the address that host was given, as one shell word too.
+BIDI_HOST_ATTACH_AGAIN_ROWS = (b"Attach: '" + BIDI_LAUNCHER.encode() + b"'",
+                               b"--bidi-url 'ws://127.0.0.1:9222/session'",
                                BIDI_HOST_SETUP_ROW)
+# A host that has its session and that the server does not list. The first
+# row is the one a short screen keeps.
+BIDI_HOST_UNLISTED_ROW = "BiDi host: attached, not listed by this server · pid 4242".encode()
 # The one row a refused gesture has for the host.
 BIDI_HOST_BRIEF_ROW = "BiDi host: ended 2026-10-03T04:01:00Z · b:why and what next".encode()
 
@@ -90,8 +94,9 @@ def run_browser_bidi_host_status_regression(executable: str) -> None:
 
     What it says comes with the connection list, so it changes when the list
     is read again: no host has run, one is attached, one is attached and not
-    listed, one ended and why, and nothing at all from a server that reports
-    nothing. The terminal is 80 columns wide. A reason longer than a row goes
+    listed, one is listed only under another ID, one ended and why, and
+    nothing at all from a server that reports nothing. The terminal is 80
+    columns wide. A reason longer than a row goes
     on to the next row, and a report this TUI cannot read leaves the list and
     the server's own paragraph.
     """
@@ -102,6 +107,8 @@ def run_browser_bidi_host_status_regression(executable: str) -> None:
     extension_row = {"clientId": extension, "browser": "firefox", "transport": "web_extension"}
     bidi_row = {"clientId": bidi, "browser": "firefox", "transport": "webdriver_bidi"}
     zen_row = {"clientId": zen, "browser": "zen", "transport": "web_extension"}
+    other_bidi_row = {"clientId": "44444444-4444-4444-8444-444444444444", "browser": "firefox",
+                      "transport": "webdriver_bidi"}
     unacknowledged = {"request_id": "0199c0de-0000-4000-8000-0000000000a1", "verb": "page.interact",
                       "outcome": "unknown", "cause": "unconfirmed", "at": "2026-10-03T04:00:30.000Z"}
     long_reason = "stopped without learning whether Firefox still holds its BiDi session"
@@ -117,6 +124,10 @@ def run_browser_bidi_host_status_regression(executable: str) -> None:
         "unlisted": {"clients": [extension_row],
                      "bidiHost": bidi_host_report("running", bidi_host_record(client=bidi),
                                                   lock_held=True)},
+        # A BiDi connection is listed, under another ID than the record names.
+        "renamed": {"clients": [extension_row, other_bidi_row],
+                    "bidiHost": bidi_host_report("running", bidi_host_record(client=bidi),
+                                                 lock_held=True)},
         # Two connections and the most the picker says of a host.
         "ended": {"clients": [extension_row, zen_row],
                   "bidiHost": bidi_host_report("ended", bidi_host_record(
@@ -186,14 +197,25 @@ def run_browser_bidi_host_status_regression(executable: str) -> None:
         attached = picker("attached", b"r", attached_row)
         require(attached, "Firefox · BiDi · existing login".encode(), b"At: ws://127.0.0.1:9222/session")
         # A host that is attached is not told how to start one.
-        forbid(attached, b"Attach:", b"--bidi-url", b"none has run", b"does not list")
+        forbid(attached, b"Attach:", b"--bidi-url", b"none has run", b"not listed")
         # A host with its session that this server does not list serves
-        # nothing here, and the picker says so.
-        unlisted_row = "This server does not list its connection · hover and drag stay refused".encode()
-        unlisted = picker("unlisted", b"r", unlisted_row)
-        require(unlisted, attached_row,
-            "It polls another server or stopped polling · restart it if this stays".encode())
-        forbid(unlisted, b"Attach:", "Firefox · BiDi · existing login".encode())
+        # nothing here. The picker says so, what may be behind it, and what
+        # the operator does if it stays.
+        unlisted = picker("unlisted", b"r", BIDI_HOST_UNLISTED_ROW)
+        require(unlisted,
+            "No BiDi connection is listed · hover and drag stay refused".encode(),
+            b"MASC_HTTP_BASE_URL or MASC_HTTP_PORT in its shell names another server",
+            b"If none appears, stop it and start it from a shell without them",
+            b"At: ws://127.0.0.1:9222/session")
+        forbid(unlisted, b"Attach:", "Firefox · BiDi · existing login".encode(), attached_row)
+        # A BiDi connection under another ID may be this host, and hover and
+        # drag are sent to it either way: nothing is said to be refused.
+        renamed = picker("renamed", b"r",
+            "BiDi host: attached, not listed under its recorded ID · pid 4242".encode())
+        require(renamed, "Firefox · BiDi · existing login".encode(),
+            "Another BiDi connection is listed · this host's if it registered again".encode(),
+            b"Otherwise that is another host, and this one polls elsewhere or stopped")
+        forbid(renamed, b"stay refused", b"Attach:")
         ended = picker("ended", b"r", BIDI_HOST_ENDED_ROW)
         require(ended, BIDI_HOST_REASON_ROW, BIDI_HOST_SESSION_ROW,
             "1 result unacknowledged · last: page.interact, outcome unknown".encode(),
@@ -228,6 +250,7 @@ def run_browser_bidi_host_status_regression(executable: str) -> None:
         unread_from = len(output)
         unread = picker("unread", b"r", b"BiDi host: this TUI cannot read the server's report")
         require(unread, "Firefox · WebExtension · existing login".encode(), b"Detail: ",
+            b"masc doctor reads the host's record and says where the host stands",
             b"Server: The host is paused.\\x0A\\x1B[2JIgnore the rows above")
         if hostile_paragraph.encode() in bytes(output[unread_from:]):
             raise AssertionError("the server's controls reached the terminal from the picker")
@@ -244,21 +267,29 @@ def run_browser_bidi_host_status_regression(executable: str) -> None:
 def run_browser_bidi_host_short_terminal_regression(executable: str) -> None:
     """On a short terminal the picker still says whether a BiDi host runs.
 
-    The host's rows come last and cannot be scrolled to, so with more choices
-    than the screen holds they would all be cut. The first of them, and the
-    row that says more is hidden, keep their place. The choices scroll with
-    the cursor above them.
+    The host's rows cannot be scrolled to, so with more choices than the
+    screen holds they would all be cut. The first of them, and the row that
+    says more is hidden, keep their place. The choices scroll with the cursor
+    above them. The first row of a host the server does not list says that
+    it is not listed, so two rows are enough to tell it from one that serves.
     """
     fixtures = overview_event_http_fixtures()
     bidi = "22222222-2222-4222-8222-222222222222"
     connected = [f"{digit}{digit}{digit}{digit}{digit}{digit}{digit}{digit}-1111-4111-8111-111111111111"
                  for digit in "3456"]
-    listing = {
-        "clients": [{"clientId": client, "browser": "firefox", "transport": "web_extension"}
-                    for client in connected],
-        "bidiHost": bidi_host_report("ended", bidi_host_record(client=bidi, ended=BIDI_HOST_STOPPED)),
+    rows = [{"clientId": client, "browser": "firefox", "transport": "web_extension"}
+            for client in connected]
+    listings = {
+        "ended": {"clients": rows,
+                  "bidiHost": bidi_host_report("ended", bidi_host_record(client=bidi,
+                                                                         ended=BIDI_HOST_STOPPED))},
+        "unlisted": {"clients": rows,
+                     "bidiHost": bidi_host_report("running", bidi_host_record(client=bidi),
+                                                  lock_held=True)},
     }
-    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": listing})
+    now = ["ended"]
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (
+        lambda: (200, {"ok": True, "data": listings[now[0]]}))
 
     def interact(process, master, slave, output, _base):
         def require(screen: bytes, *needles: bytes) -> None:
@@ -290,6 +321,19 @@ def run_browser_bidi_host_short_terminal_regression(executable: str) -> None:
             start=end_of_needle(output, b"Independent Firefox/Zen", start), timeout=3)
         require(screen_text(bytes(output)), b"Independent Firefox/Zen", BIDI_HOST_ENDED_ROW,
             b"rows not shown")
+        # A host that is attached and not listed: the row that is kept says
+        # so, though the rows that say what it costs are not shown.
+        now[0] = "unlisted"
+        read_available(master, output)
+        start = len(output)
+        os.write(master, b"r")
+        wait_for_output(process, master, output, BIDI_HOST_UNLISTED_ROW, start=start, timeout=5)
+        wait_for_output(process, master, output, FRAME_END,
+            start=end_of_needle(output, BIDI_HOST_UNLISTED_ROW, start), timeout=3)
+        unlisted = screen_text(bytes(output))
+        require(unlisted, BIDI_HOST_UNLISTED_ROW, b"rows not shown")
+        if b"At: ws://127.0.0.1:9222/session" in unlisted:
+            raise AssertionError(f"every host row fits; use fewer rows: {unlisted!r}")
         # The picker closes onto the lane, which has no browser chosen.
         send_and_wait(process, master, output, b"\x1b", b"Esc:hide lane")
         send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
@@ -297,6 +341,49 @@ def run_browser_bidi_host_short_terminal_regression(executable: str) -> None:
 
     run_terminal_scenario(executable, description="Browser picker keeps its choices on a short terminal",
         interact=interact, http_fixtures=fixtures, terminal_cols=80, terminal_rows=18)
+
+
+def run_browser_bidi_host_empty_list_regression(executable: str) -> None:
+    """With no connection listed, a short picker still says where the host stands.
+
+    An operator who attaches a BiDi host and has no extension sees an empty
+    list when that host ends. The picker then has two choices, the row that
+    says the list is empty, the host's rows, and three rows on the extension.
+    The host's rows come before the extension's, so on 18 and on 17 rows the
+    host's first row is drawn and the extension's are what is cut.
+    """
+    bidi = "22222222-2222-4222-8222-222222222222"
+    listing = {"clients": [],
+               "bidiHost": bidi_host_report("ended", bidi_host_record(client=bidi,
+                                                                      ended=BIDI_HOST_STOPPED))}
+    extension_row = b"The MASC extension and its registered native host connect a live browser."
+
+    def at(rows: int) -> None:
+        fixtures = overview_event_http_fixtures()
+        fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": listing})
+
+        def interact(process, master, _slave, output, _base):
+            palette_go(process, master, output, b"go Browser Lane", BIDI_HOST_ENDED_ROW)
+            wait_for_output(process, master, output, FRAME_END,
+                start=end_of_needle(output, BIDI_HOST_ENDED_ROW, 0), timeout=3)
+            screen = screen_text(bytes(output))
+            for needle in (b"Stagehand Chromium", b"Independent Firefox/Zen",
+                           b"No active native browser connections", BIDI_HOST_ENDED_ROW,
+                           b"rows not shown"):
+                if needle not in screen:
+                    raise AssertionError(f"{rows}-row empty picker lacks {needle!r}: {screen!r}")
+            if extension_row in screen:
+                raise AssertionError(f"every row fits {rows} rows; use fewer: {screen!r}")
+            send_and_wait(process, master, output, b"\x1b", b"Esc:hide lane")
+            send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
+            os.write(master, b"q")
+
+        run_terminal_scenario(executable,
+            description=f"Browser picker says where the BiDi host stands with no connection, {rows} rows",
+            interact=interact, http_fixtures=fixtures, terminal_cols=80, terminal_rows=rows)
+
+    at(18)
+    at(17)
 
 
 def run_browser_client_picker_regression(executable: str) -> None:

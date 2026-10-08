@@ -14,7 +14,7 @@ let pinned () = choose_client firefox { (create ()) with clients = Some [firefox
 let found listed = { listed; bidi_host = Host_not_reported }
 
 module Record = Masc.Browser_bidi_host_record
-module Launcher = Masc.Browser_lane_launcher
+module Status = Masc.Browser_bidi_host_status
 
 (* The BiDi connection of the host the record below names. *)
 let bidi = { firefox with client_id = "33333333-3333-4333-8333-333333333333";
@@ -23,11 +23,11 @@ let host_entry : Record.entry =
   { pid = 4242; started_at = 1_791_000_000.; bidi_url = "ws://127.0.0.1:9222/session"
   ; client_id = success (Browser_lane.client_id_of_string bidi.client_id)
   ; attached_at = Some 1_791_000_002.; unacknowledged = []; ended = None }
-let host_attach : Launcher.bidi_attach =
+let host_attach : Status.attach =
   { launcher = "/workspace/.masc/browser-lane/host/launch"
   ; arguments = "--bidi-url ws://127.0.0.1:PORT/session"
-  ; standing = Launcher.Launcher_installed }
-let host_report state : Launcher.bidi_host_report =
+  ; standing = Status.Launcher_installed }
+let host_report state : Status.report =
   { state; attach = host_attach; message = "the server's own sentence" }
 let host state = Host_reported (host_report state)
 let host_ending ?(reason = "stopped by SIGINT") session : Record.ending =
@@ -195,10 +195,7 @@ let test_screenshot_drag_hint () =
 (* What an 80-column terminal leaves a Browser Lane row inside the surface
    frame. The rows below are written to fit it. *)
 let row_cells = Masc_tui_frame.inner_width ~cols:80
-let cells text =
-  let count = ref 0 in
-  String.iter (fun byte -> if Char.code byte land 0xC0 <> 0x80 then incr count) text;
-  !count
+let cells = Masc_tui_message_layout.display_width
 let prefix_through needle text =
   let limit = String.length text - String.length needle in
   let rec find index =
@@ -380,7 +377,9 @@ let test_unserved_gesture () =
      learned of the host afterwards does not rewrite them. *)
   let later = { refreshed with bidi_host = host (Record.Running host_entry) } in
   expect "a later word of the host leaves the refusal as it was said"
-    (later.unserved_gesture = Some unserved);
+    (unserved_rows later
+     = [not_listed; "BiDi host: ended 2026-10-03T04:01:00Z · b:why and what next"]);
+  expect "a view with nothing refused draws no such rows" (unserved_rows ready = []);
   expect "the next input withdraws it"
     ((withdraw_unserved_gesture refreshed).unserved_gesture = None);
   expect "choosing a connection or finishing an action leaves no refusal about the old one"
@@ -620,14 +619,16 @@ let test_bidi_host_rows () =
   let setup = "Setup: docs/design/browser-bidi-live-host.md" in
   (* Where no host has left an address, the launcher's own words stand. *)
   let attach =
-    ["Attach: /workspace/.masc/browser-lane/host/launch";
+    ["Attach: '/workspace/.masc/browser-lane/host/launch'";
      "        --bidi-url ws://127.0.0.1:PORT/session";
      "        PORT: the --remote-debugging-port Firefox was started with"; setup] in
-  (* After a host, the address it was given is the one to give again. *)
+  (* After a host, the address it was given is the one to give again. The
+     path and the address are one shell word each. *)
   let attach_again =
-    ["Attach: /workspace/.masc/browser-lane/host/launch";
-     "        --bidi-url ws://127.0.0.1:9222/session"; setup] in
-  let running state = [Printf.sprintf "BiDi host: %s · pid 4242" state; "At: ws://127.0.0.1:9222/session"] in
+    ["Attach: '/workspace/.masc/browser-lane/host/launch'";
+     "        --bidi-url 'ws://127.0.0.1:9222/session'"; setup] in
+  let at = "At: ws://127.0.0.1:9222/session" in
+  let running state = [Printf.sprintf "BiDi host: %s · pid 4242" state; at] in
   let ended = ["BiDi host: ended 2026-10-03T04:01:00Z · pid 4242"] in
   says "nothing reported draws nothing" Host_not_reported [];
   says "a host that never ran says so and how one is started" (host Record.Never_started)
@@ -637,14 +638,28 @@ let test_bidi_host_rows () =
   (* A host serves on the server that lists it. *)
   says ~clients:[firefox; bidi] "a host this server lists is not told how to start one"
     (host (Record.Running host_entry)) (running "attached");
+  (* The first row is the one a short screen keeps, so it is the one that
+     tells this host from one that serves. *)
   let unlisted =
-    running "attached"
-    @ ["This server does not list its connection · hover and drag stay refused";
-       "It polls another server or stopped polling · restart it if this stays"] in
+    ["BiDi host: attached, not listed by this server · pid 4242";
+     "No BiDi connection is listed · hover and drag stay refused";
+     "MASC_HTTP_BASE_URL or MASC_HTTP_PORT in its shell names another server";
+     "If none appears, stop it and start it from a shell without them"; at] in
   says "an attached host this server does not list says what that costs"
     (host (Record.Running host_entry)) unlisted;
   says ~clients:[{ bidi with transport = Browser_lane.Web_extension }]
     "the same ID over the extension is not that host" (host (Record.Running host_entry)) unlisted;
+  (* A BiDi connection under another ID may be this host, and hover and drag
+     are sent to it either way: nothing is said to be refused. *)
+  says ~clients:[firefox; { bidi with client_id = "44444444-4444-4444-8444-444444444444" }]
+    "another BiDi connection beside the host is not a refusal"
+    (host (Record.Running host_entry))
+    ["BiDi host: attached, not listed under its recorded ID · pid 4242";
+     "Another BiDi connection is listed · this host's if it registered again";
+     "Otherwise that is another host, and this one polls elsewhere or stopped"; at];
+  says ~clients:[firefox; { bidi with client_id = "44444444-4444-4444-8444-444444444444" }]
+    "a host still connecting beside another BiDi connection is connecting"
+    (host (Record.Running { host_entry with attached_at = None })) (running "connecting");
   says ~clients:[firefox; bidi] "a listed host whose record is behind is attached"
     (host (Record.Running { host_entry with attached_at = None })) (running "attached");
   says "a host that ended in order says when, why, and that Firefox takes the next"
@@ -658,11 +673,20 @@ let test_bidi_host_rows () =
     (host_ended ~reason:"BiDi connection ended: BiDi EOF" Record.Session_unknown)
     (ended @ ["Could not ask Firefox to end the session · restart it if it still runs";
               "Reason: BiDi connection ended: BiDi EOF"] @ attach_again);
-  says "a host Firefox refused a session says what holds it"
+  (* Firefox held a session when the host asked. Whether it still does is
+     not in the record, so the next host is tried before a restart. *)
+  says "a host Firefox refused a session says what held it"
     (host_ended ~reason:"BiDi command rejected: session not created" Record.Session_refused)
-    (ended @ ["Firefox holds another session and refused this host one";
-              "Stop the other host, or restart that Firefox if none is attached";
+    (ended @ ["Firefox refused this host a session · it held one then";
+              "Stop a host still attached there · restart that Firefox if refused again";
               "Reason: BiDi command rejected: session not created"] @ attach_again);
+  (* A host that never reached Firefox left no session there, and what kept
+     it from one is still there for the next. *)
+  (let ending = host_ending ~reason:"BiDi connection failed: Connection refused" Record.No_session_left in
+   says "a host that never got a session is not told that Firefox takes the next"
+     (host (Record.Ended ({ host_entry with attached_at = None; ended = Some ending }, ending)))
+     (ended @ ["It got no session · check that Firefox answers at that address first";
+               "Reason: BiDi connection failed: Connection refused"] @ attach_again));
   says "a host that left no reason is not said to have crashed" (host (Record.Died host_entry))
     (["BiDi host: pid 4242 is gone · no reason recorded";
       "Its session may be left in Firefox · restart Firefox if a host is refused"] @ attach_again);
@@ -682,20 +706,24 @@ let test_bidi_host_rows () =
     ["BiDi host: could not check whether one runs"; "Detail: Too many open files"];
   says "a report this TUI cannot read says so"
     (Host_report_unreadable { detail = "no state"; message = None })
-    ["BiDi host: this TUI cannot read the server's report"; "Detail: no state"];
+    ["BiDi host: this TUI cannot read the server's report";
+     "masc doctor reads the host's record and says where the host stands"; "Detail: no state"];
+  (* The paragraph is longer than most screens have rows for. Where the
+     state is said in full comes before it. *)
   says "and keeps the paragraph the server wrote for the operator"
     (Host_report_unreadable { detail = "no state"; message = Some "No BiDi browser host is running." })
-    ["BiDi host: this TUI cannot read the server's report"; "Detail: no state";
+    ["BiDi host: this TUI cannot read the server's report";
+     "masc doctor reads the host's record and says where the host stands"; "Detail: no state";
      "Server: No BiDi browser host is running."];
   (* A launcher that is not there, or not as installed, is not one to run. *)
   let with_launcher standing state =
     Host_reported { (host_report state) with attach = { host_attach with standing } } in
   says "no lane installed: install it first"
-    (with_launcher Launcher.Launcher_not_installed Record.Never_started)
+    (with_launcher Status.Launcher_not_installed Record.Never_started)
     ["BiDi host: none has run for this workspace";
      "Attach: install the browser lane in this workspace first"; setup];
   says "a launcher that is not as installed: install again first"
-    (with_launcher Launcher.Launcher_needs_reinstall (Record.Died host_entry))
+    (with_launcher Status.Launcher_needs_reinstall (Record.Died host_entry))
     ["BiDi host: pid 4242 is gone · no reason recorded";
      "Its session may be left in Firefox · restart Firefox if a host is refused";
      "Attach: install the browser lane again first (launcher not as installed)"; setup];
@@ -732,17 +760,32 @@ let test_bidi_host_rows () =
   says "a launcher path longer than the row breaks before a slash, with every name whole"
     (launched_from long_launcher)
     ["BiDi host: none has run for this workspace";
-     "Attach: /Users/someone/me/workspace/yousleepwhen/masc/.masc/browser-lane";
-     "        /host/launch";
+     "Attach: '/Users/someone/me/workspace/yousleepwhen/masc/.masc/browser-lane";
+     "        /host/launch'";
      "        --bidi-url ws://127.0.0.1:PORT/session";
      "        PORT: the --remote-debugging-port Firefox was started with"; setup];
   (* A single name longer than the row has nowhere better to break. It is
      still all there. *)
   let one_long_name = "/work/" ^ String.make 90 'n' ^ "/host/launch" in
-  let unwrapped rows = String.concat "" (List.map String.trim rows) in
-  let at_long_name = drawn (launched_from one_long_name) in
-  expect ("a name longer than the row is not cut:\n" ^ String.concat "\n" at_long_name)
-    (String_util.contains_substring (unwrapped at_long_name) one_long_name);
+  (* The launcher as its rows say it: each row without the cells its lead,
+     or the blank under the lead, takes. *)
+  let launcher_said rows =
+    let lead = String.length "Attach: " in
+    let rec launcher = function
+      | [] -> []
+      | row :: _ when String_util.contains_substring row "--bidi-url" -> []
+      | row :: rest -> String.sub row lead (String.length row - lead) :: launcher rest in
+    String.concat "" (launcher (List.tl rows)) in
+  List.iter (fun (name, path) ->
+      let rows = drawn (launched_from path) in
+      expect (name ^ ":\n" ^ String.concat "\n" rows)
+        (String.equal (launcher_said rows) (Filename.quote path)))
+    [ "a name longer than the row is not cut", one_long_name
+    (* A space in a name is part of the path, wherever the row ends. *)
+    ; "a long name with a space keeps the space",
+      "/work/" ^ String.make 60 'y' ^ " " ^ String.make 60 'z' ^ "/host/launch"
+    ; "a space where a row would end is kept", "/work/" ^ String.make 59 'y' ^ " z/host/launch"
+    ; "a path with spaces all through", "/my work/a b/c  d/host/launch" ];
   (* Every row fits the width it was asked for, at 80 columns and narrower,
      whatever the record holds. *)
   let widest = unacknowledged ~cause:Record.Not_sent ~outcome:Record.Unknown
@@ -763,8 +806,36 @@ let test_bidi_host_rows () =
          host (Record.Unreadable { detail = String.make 200 'd'; held = Some true });
          host (Record.Unreadable { detail = String.make 200 'd'; held = Some false });
          Host_report_unreadable { detail = String.make 200 'd'; message = Some (String.make 900 'm') };
+         host_ended Record.Session_refused;
          launched_from long_launcher; launched_from one_long_name])
-    [width; 56; 36]
+    [width; 56; 36; 14; 9];
+  (* On a screen narrower than a lead leaves room beside it, the lead has a
+     row of its own and what it opens is read on the rows under it. *)
+  expect "a narrow screen still says what a lead opens"
+    (drawn ~width:12 (host (Record.Unreadable { detail = "torn in two"; held = None }))
+     = ["BiDi host:"; "could not"; "check"; "whether one"; "runs"; "Detail:"; "torn in two"]);
+  (* How many rows the picker gives its choices: the host's first row and
+     the row that counts the rest keep a place while the choices keep
+     theirs. *)
+  let choice_rows = picker_choice_rows in
+  expect "with nothing to say of a host the choices have every row"
+    (choice_rows ~rows:5 ~choices:6 ~host_rows:0 = 5);
+  expect "the host keeps two rows and the count beside three choices"
+    (choice_rows ~rows:6 ~choices:6 ~host_rows:8 = 3);
+  expect "a host with two rows to say keeps those two"
+    (choice_rows ~rows:5 ~choices:6 ~host_rows:2 = 3);
+  expect "one row shorter, it keeps its first row and the count"
+    (choice_rows ~rows:5 ~choices:6 ~host_rows:8 = 3);
+  expect "beside fewer than three of many choices, the choices keep the room"
+    (choice_rows ~rows:4 ~choices:6 ~host_rows:8 = 4);
+  (* With no connection listed there are two choices, and both fit. *)
+  expect "two choices are all there are, so the host keeps its rows beside them"
+    (choice_rows ~rows:5 ~choices:2 ~host_rows:8 = 2
+     && choice_rows ~rows:4 ~choices:2 ~host_rows:8 = 2);
+  expect "but not beside one of two"
+    (choice_rows ~rows:3 ~choices:2 ~host_rows:8 = 3);
+  expect "a screen with no row for a choice still draws one"
+    (choice_rows ~rows:0 ~choices:2 ~host_rows:8 = 1)
 
 (* The report rides the connection list: it is read from the same answer,
    kept with the list, and dropped with it. *)
@@ -776,7 +847,7 @@ let test_bidi_host_discovery () =
   let ended = host_report (let ending = host_ending Record.Session_left in
                            Record.Ended ({ host_entry with ended = Some ending }, ending)) in
   expect "the server's report is read with the list"
-    (decode_discovery (answer ["bidiHost", Launcher.bidi_host_report_to_json ended])
+    (decode_discovery (answer ["bidiHost", Status.report_to_json ended])
      = Ok { listed = [firefox]; bidi_host = Host_reported ended });
   expect "a server that says nothing of the host still lists its connections"
     (decode_discovery (answer []) = Ok (found [firefox])

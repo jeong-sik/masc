@@ -66,7 +66,9 @@ val resolve_config
 
 (** The native-messaging host: polls the server, forwards commands to the
     extension over stdout, reads replies from stdin. Returns when stdin
-    reaches EOF or the poll loop stops; the string is why.
+    reaches EOF or the poll loop stops; the string is why. Every refused
+    registration stops it: the extension starts the next host, which has a
+    new client ID.
 
     When a poll or result request to the server fails and the origin came
     from the workspace connection file, the host reads that file again. The
@@ -93,7 +95,17 @@ val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
     - the BiDi connection ended, also while the host waits for work. A
       command it ended under is answered first, once;
     - a command's outcome is unknown. That answer too is offered once;
-    - the server refuses the client's registration.
+    - the server refuses the client's registration for a reason that asking
+      again would not change.
+
+    A server that ended this connection is not such a reason. It does so
+    after two minutes without a poll, as after the machine slept, and serves
+    that client ID no more. Nothing starts another BiDi host, so this one
+    registers again under a new client ID and keeps its BiDi session. The
+    server registers an ID when its poll arrives, so this holds for any ID
+    that had sent a poll before, answered or not. It ends only when the
+    server calls an ID ended on the first poll that ID ever sent: such an ID
+    did not fall silent, and a further new one would be told the same.
 
     [stop] blocks until the operator asked the host to stop and answers what
     asked. From then on the host takes no further command: one in flight is

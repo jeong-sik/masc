@@ -2932,7 +2932,6 @@
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_muse_serve.inc)
-(include stanzas/test_runtime_client_prompt_ceiling.inc)
 (include stanzas/test_runtime_muse_serve_config.inc)
 (include stanzas/test_runtime_muse_home.inc)
 (include stanzas/test_runtime_muse_model_discovery.inc)
@@ -9780,6 +9779,22 @@
  (name runtest)
  (deps (alias runtest-test_tui_chat_progress_clock_pty)))
 
+; H2 crash-resume harness: scenario subcommands need orchestrated env
+; (H2_ROOT, H2_ASYNC_*), so it is an executable, not a (test) — a (test)
+; stanza would run it with no args under the default runtest alias and exit 2.
+; Run: ./test_h2_composition_resume.exe <scenario> with H2_ROOT set.
+(executable
+ (name test_h2_composition_resume)
+ (modules test_h2_composition_resume)
+ (libraries masc_test_deps))
+
+; H2 execution journal harness: no-args runs all scenarios (deterministic,
+; temp dirs only), so it is safe under the default runtest alias.
+(test
+ (name test_h2_journal)
+ (modules test_h2_journal)
+ (libraries masc_test_deps))
+
 (test
  (name test_h5_media_failover_continuity)
  (modules test_h5_media_failover_continuity)
@@ -9807,3 +9822,5 @@
  (libraries masc.tool_types masc.lane_addon_tool_result masc.lane_addon_call_context masc.machine_controller_contract
   masc.dos_worker masc.dos_lane masc.machine_pad_layout masc.masc_core masc.machine_configuration
   mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64 digestif unix))
+
+(include stanzas/test_tui_code_history_sources_pty.inc)

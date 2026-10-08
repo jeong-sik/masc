@@ -1378,7 +1378,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
-             let* args = validate_board_workspace state args in
+             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
              let voter = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "voter" voter args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment_vote" args in

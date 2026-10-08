@@ -620,9 +620,10 @@ let rec workspace_message_is_read = function
     (match action with Masc_tui_queue_inspection.Inspect -> true
      | Pause | Resume | Cancel _ | Move_to_end _ | Edit _
      | Cancel_event _ | Prioritize_event _ -> false)
-  (* The owner's answer to a resume already sent. It releases the retained
-     input, which the Resume reply above did before it was split out. *)
-  | Keeper_queue_resume_confirmed _ -> false
+  (* A roster observation cannot release retained input after its read epoch
+     retires. A completed resume POST still owns its mutation receipt. *)
+  | Keeper_queue_resume_confirmed (_, _, Owner_already_active) -> true
+  | Keeper_queue_resume_confirmed (_, _, Owner_resumed) -> false
   | Lane_declaration_loaded (_, request, _, _, _) ->
     (match request with Masc_tui_lane_declaration.Read _ -> true | Save _ -> false)
   | Account_login_json (_, _, action, _) -> account_login_action_is_read action

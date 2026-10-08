@@ -82,6 +82,13 @@ let login_started (state : state) request ~report ~notice result =
         ; ils_label = label
         ; ils_url = url
         };
+      (* The POST was admitted by this origin, even if its receipt arrives
+         during a temporary health outage. Polling itself still waits for
+         confirmed identity and checks that origin before requesting. *)
+      Option.iter (fun origin ->
+        remember_identity_login_expectation state
+          { ile_origin = origin; ile_keeper = keeper_name; ile_provider = provider_id })
+        request.ilr_origin;
       if keeper_detail_target_matches state keeper_name
       then state.identity_attempt_error <- None;
       report "system" (Printf.sprintf "%s: %s login started" keeper_name provider_id)

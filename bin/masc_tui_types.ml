@@ -2624,6 +2624,7 @@ type identity_login_request = {
   ilr_keeper: string;
   ilr_provider: string;
   ilr_generation: int;
+  ilr_origin: Tui_decode.server_identity option;
 }
 
 (* Login-completion expectation, held across a transient authority loss.
@@ -7034,7 +7035,8 @@ let start_identity_login_request (state : state) ~keeper_name ~provider_id =
   let request =
     { ilr_keeper = keeper_name;
       ilr_provider = provider_id;
-      ilr_generation = state.identity_login_generation }
+      ilr_generation = state.identity_login_generation;
+      ilr_origin = state.server_identity }
   in
   state.identity_login_requests <-
     request :: List.filter

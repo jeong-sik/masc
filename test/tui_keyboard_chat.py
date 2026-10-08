@@ -1848,35 +1848,36 @@ def chat_visibility_modes_interaction(
             )
         if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
             raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
-        # #41661 moved the turn title onto the block header row: the mark,
-        # the lane label, the quoted rail and the TURN heading draw on one
-        # row, and the skill's bold name follows on the row under it. The
-        # name row's own body keeps the name off the header row, so the
-        # association the old single-row regex pinned is now two facts:
-        # the badge row carries mark + SKILL + rail + TURN heading, and
-        # the bold name follows that heading in the accumulated screen.
-        if re.search(
-            "◆".encode()
-            + rb"[\x1b\x20-\x7e]*?"
-            + rb"SKILL"
-            + rb"[\x1b\x20-\x7e]*?"
-            + "│".encode()
-            + rb"[\x1b\x20-\x7e]*?"
-            + rb"TURN #\d+",
-            initial,
-        ) is None:
-            raise AssertionError(
-                f"the exact Skill evidence did not start its turn: {initial!r}"
+        # The skill header and its bold name must belong to one TURN on
+        # the completed screen, not separate turns or historical frames.
+        styled_rows = screen_rows(completed, preserve_styles=True)
+        turn_rows = sorted(
+            row for row, text in observed_rows.items()
+            if title_row < row < composer_row
+            and re.search(rb"TURN #\d+", text)
+        )
+        skill_in_turn = False
+        for index, row in enumerate(turn_rows):
+            if re.search(
+                "◆\\s+SKILL\\s+│\\s+TURN #\\d+".encode(),
+                observed_rows[row],
+            ) is None:
+                continue
+            end_row = (
+                turn_rows[index + 1]
+                if index + 1 < len(turn_rows) else composer_row
             )
-        turn_heading = re.search(rb"TURN #\d+", initial)
-        skill_name = initial.find(b"\x1b[1mci-red-attribution")
-        if (
-            turn_heading is None
-            or skill_name < 0
-            or not (turn_heading.start() < skill_name)
-        ):
+            if any(
+                b"\x1b[1mci-red-attribution" in text
+                for body_row, text in styled_rows.items()
+                if row < body_row < end_row
+            ):
+                skill_in_turn = True
+                break
+        if not skill_in_turn:
             raise AssertionError(
-                f"the skill name did not follow its turn heading: {initial!r}"
+                "the completed Skill TURN did not contain its bold skill name: "
+                f"{styled_rows!r}"
             )
         # How far one invocation got is not on the resting row any more:
         # the row stands for every trigger of that skill.
@@ -1884,8 +1885,6 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"the compact skill row still spells a lifecycle: {initial!r}"
             )
-        if b"\x1b[1mci-red-attribution" not in initial:
-            raise AssertionError(f"the Skill name was not bold: {initial!r}")
         # The rest of the skill row rides the tool toggle now: the action
         # rows and the proof line exist only behind Ctrl-D, so the compact
         # frame must not carry them. Their presence is waited for below,

@@ -147,8 +147,8 @@ def failed_source_keeps_known_cards(executable):
     fixtures = fixtures_with_held([held("call-known", "known-held-card")])
     fixtures[OPERATOR_PATH] = (503, {"error": "confirm source offline"})
     gate = copy.deepcopy(_keyboard_approvals.blocked_gate_detail_http_fixtures()[GATE_PATH])
-    gate[1]["approval_queue"][0].update(id="gate-known", phase="human_required",
-                                        tool_name="known-gate-card")
+    gate[1]["approval_queue"][0] = home.human_required_row(
+        gate[1]["approval_queue"][0], id="gate-known", tool_name="known-gate-card")
     fixtures[GATE_PATH] = gate
     requests = []
 
@@ -222,8 +222,9 @@ def each_failed_source_keeps_other_cards(executable):
     for failed_path, failed_label in cases:
         fixtures = fixtures_with_held([held("call-partial", "retained-held-card")])
         gate = copy.deepcopy(_keyboard_approvals.blocked_gate_detail_http_fixtures()[GATE_PATH])
-        gate[1]["approval_queue"][0].update(id="gate-partial", phase="human_required",
-                                            tool_name="retained-gate-card")
+        gate[1]["approval_queue"][0] = home.human_required_row(
+            gate[1]["approval_queue"][0], id="gate-partial",
+            tool_name="retained-gate-card")
         fixtures[GATE_PATH] = gate
         fixtures[_keyboard_harness.KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
         fixtures[failed_path] = (503, {"error": "isolated source failure"})

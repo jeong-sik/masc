@@ -738,6 +738,29 @@ let pending_board_event_of_composition_completion
     | Keeper_event_queue.Composition_failed detail -> "failed", detail
     | Keeper_event_queue.Composition_cancelled reason -> "cancelled", reason
   in
+  (* Same silent-cut gap as the delegate reply above: a failed or cancelled
+     composition's detail exists nowhere else, so a cut here is never silent
+     either -- the row appends the request id the title already carries. *)
+  let preview =
+    (* [short_preview] measures after [String.trim], so the cut test must
+       measure the same trimmed bytes: a space-padded short answer must not
+       read as cut. Trim once here and share it with the preview. *)
+    let message = String.trim message in
+    let cut = short_preview ~max_len:delegate_reply_preview_max_len message in
+    if String.length message > delegate_reply_preview_max_len then
+      let note =
+        event_row_text
+          Prompt_names.keeper_world_event_rows_composition_detail_lookup
+          [ "request_id", cc.cc_request_id ]
+          ~fallback:(Yojson.Safe.to_string
+            (`Assoc
+               [ "tool", `String "keeper_composition_status"
+               ; "arguments", `Assoc [ "request_id", `String cc.cc_request_id ]
+               ]))
+      in
+      if String.equal note "" then cut else cut ^ "\n" ^ note
+    else cut
+  in
   { event_kind = Composition_completed
   ; post_id = Keeper_event_queue.composition_completion_post_id cc
   ; author = keeper_name
@@ -745,7 +768,7 @@ let pending_board_event_of_composition_completion
        model-facing prose slot, and the three fields already say everything
        the row states. *)
   ; title = String.concat " " [ cc.cc_tool; outcome; cc.cc_request_id ]
-  ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
+  ; preview
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -779,11 +802,46 @@ let pending_board_event_of_delegate_completion
     | Keeper_event_queue.Delegate_no_reply -> "no_reply", ""
     | Keeper_event_queue.Delegate_failed detail -> "failed", detail
   in
+  (* [short_preview] truncates at [delegate_reply_preview_max_len] bytes and
+     ends with "..." exactly when it cut. A cut reply keeps only its head in
+     the row: the tail is where exact export objects and code fences live --
+     an artifact marker past the cut vanished from a delivered answer while
+     the row said nothing, so the reader had no way to know the text it held
+     was partial. The row itself is a pure projection and cannot fetch
+     anything back. So a cut is never silent: the row appends the read path,
+     [masc_keeper_delegate_status] with the operation id the row already
+     carries as its post id, which returns the original full reply for that
+     exact outcome. Raising the ceiling would only hide the same cut again at
+     a different size; the wording lives in config/prompts like every event
+     row, and a render failure still states the cut and the id as bare data. *)
+  let preview =
+    (* [short_preview] measures after [String.trim], so the cut test must
+       measure the same trimmed bytes: a space-padded short reply must not
+       read as cut. Trim once here and share it with the preview. *)
+    let message = String.trim message in
+    let cut = short_preview ~max_len:delegate_reply_preview_max_len message in
+    if String.length message > delegate_reply_preview_max_len then
+      let note =
+        event_row_text
+          Prompt_names.keeper_world_event_rows_delegate_reply_lookup
+          [ "operation_id", dc.dc_operation_id; "keeper", dc.dc_keeper ]
+          ~fallback:(Yojson.Safe.to_string
+            (`Assoc
+               [ "tool", `String "masc_keeper_delegate_status"
+               ; "arguments", `Assoc
+                   [ "target", `Assoc
+                       [ "kind", `String "keeper"; "name", `String dc.dc_keeper ]
+                   ; "operation_id", `String dc.dc_operation_id
+                   ] ]))
+      in
+      if String.equal note "" then cut else cut ^ "\n" ^ note
+    else cut
+  in
   { event_kind = Delegate_completed
   ; post_id = Keeper_event_queue.delegate_completion_post_id dc
   ; author = dc.dc_keeper
   ; title = Printf.sprintf "%s %s" dc.dc_keeper outcome
-  ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
+  ; preview
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at

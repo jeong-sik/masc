@@ -833,7 +833,9 @@ type terminal_error_receipt =
   | Recorded_terminal_error of { seq : int; ts : float }
   | Existing_terminal_error of { seq : int; ts : float; message : string }
 
-let record_terminal_error journal ~ts ~message =
+type terminal_error_segment = Existing_segment | Newly_settled_segment
+
+let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
   let ( let* ) = Result.bind in
   let read_error = function
     | Journal_missing -> "operation journal disappeared during settlement"
@@ -845,10 +847,10 @@ let record_terminal_error journal ~ts ~message =
     | Ok entries -> Ok entries
     | Error Journal_missing -> Ok []
     | Error error -> Error (read_error error) in
-  match List.rev entries with
-  | { event = Keeper_chat_events.Event_error { message }; seq; ts } :: _ ->
+  match segment, List.rev entries with
+  | Existing_segment, { event = Keeper_chat_events.Event_error { message }; seq; ts } :: _ ->
     Ok (Existing_terminal_error { seq; ts; message })
-  | _ ->
+  | Newly_settled_segment, _ | Existing_segment, _ ->
     let* () = append_result journal ~seq ~ts (Keeper_chat_events.Event_error { message }) in
     Ok (Recorded_terminal_error { seq; ts })
 ;;

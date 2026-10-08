@@ -317,6 +317,12 @@ Answer to your question ({{ask_id}}, from {{surface}})
 ### world.event_rows.ask_skipped
 (skipped)
 
+### world.event_rows.delegate_reply_lookup (vars: operation_id, keeper)
+This is a truncated preview of a completed delegation answer; the exact tail of the original reply is cut off. Read the original full reply with masc_keeper_delegate_status({"target":{"kind":"keeper","name":"{{keeper}}"},"operation_id":"{{operation_id}}"}) before acting on it; do not delegate again or relay the request through Board to recover the text.
+
+### world.event_rows.composition_detail_lookup (vars: request_id)
+The detail above is a truncated preview of a failed or cancelled async composition request. Read the full request record with keeper_composition_status("{{request_id}}") to recover the complete detail before acting.
+
 ### world.event_rows.completion_authority_title (vars: task_id)
 Completion evidence rejected for task {{task_id}}
 

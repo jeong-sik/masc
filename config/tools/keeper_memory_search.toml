@@ -21,7 +21,8 @@ source='absorbed' finds facts merged into a newer claim: into is the claim \
 now holding it; into_current=false if not current. source='dropped' retrieves \
 historical removed claims with reasons from the journal; these are not current \
 facts. Check the reason and original evidence before using or writing a new \
-current claim. Search never restores memory. The removal journal may be incomplete."""
+current claim. Search never restores memory. Pending removal finalization is \
+reported as a read failure until a writer recovers it; older journal gaps may remain."""
 additional_properties = false
 
 [[params]]

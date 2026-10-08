@@ -265,10 +265,9 @@ cache_read_multiplier = 0.1
 # caller-set sampling parameters and a tool turn replaying a signed thinking
 # block all came back.
 # Thinking is adaptive and `disabled` is accepted at high effort or below, so
-# the control is adaptive_default: a request that turns thinking off sends
-# `disabled`. The backend refuses that request when it also names an effort, so
-# the one that goes out runs at the model's medium default and stays inside the
-# accepted range.
+# the control is adaptive_disabled_through_high: disabling thinking sends
+# `disabled` with omitted effort or explicit low/medium/high. xhigh and max
+# require adaptive thinking and are refused locally when thinking is disabled.
 # Forced tool_choice is accepted, so the tool-choice flags keep the base values.
 # The API rejects any top_k, and any temperature or top_p other than its
 # default, so none of the three is sent and top_k is not offered.
@@ -282,7 +281,7 @@ id_prefix = "claude-haiku-5-5"
 base = "anthropic"
 # Even thinking=disabled rejects a final assistant continuation (migration guide).
 supports_assistant_prefill = false
-anthropic_thinking_control = "adaptive_default"
+anthropic_thinking_control = "adaptive_disabled_through_high"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
 max_output_tokens = 128000

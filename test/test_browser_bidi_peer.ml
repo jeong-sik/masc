@@ -417,6 +417,25 @@ let test_a_refused_session_leaves_none_to_end () =
       ended_session peer) in
   check (result unit string) "nothing to end" (Ok ()) refused;
   check (list string) "Firefox was sent nothing after its refusal" ["session.new"] (List.rev !seen)
+(* "session not created" is the one refusal that says Firefox holds a
+   session. Any other is a session it did not start, with nothing said of
+   one that is there. *)
+let test_a_session_refused_for_another_reason_is_a_failed_one () =
+  let refused=with_scripted_firefox (fun flow ->
+      let asked=read_client_message flow in
+      send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" asked;
+        "error",`String "unknown error";"message",`String "the profile is locked"]);
+      match read_client_message flow with
+      | (_ : Yojson.Safe.t) -> ()
+      | exception End_of_file -> ())
+    (fun ~ended:_ peer ->
+      (match Peer.metadata peer with
+       | Error (Peer.Session_failed said) ->
+         check string "Firefox's own error is the reason" "BiDi command rejected: unknown error" said
+       | Error (Peer.Session_refused said) -> failf "another error was read as a session Firefox holds: %s" said
+       | Ok version -> failf "a refused session answered a version: %s" version);
+      ended_session peer) in
+  check (result unit string) "nothing to end" (Ok ()) refused
 (* An error answer without its code is not a refusal this side can read, so
    the session is still ended. *)
 let test_an_unreadable_refusal_leaves_a_session_to_end () =
@@ -600,6 +619,8 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
       test_why_a_session_was_not_ended_says_whether_firefox_could_be_asked;
     test_case "a session nobody confirmed is ended" `Quick test_a_session_nobody_confirmed_is_ended;
     test_case "a refused session leaves none to end" `Quick test_a_refused_session_leaves_none_to_end;
+    test_case "a session refused for another reason is a failed one" `Quick
+      test_a_session_refused_for_another_reason_is_a_failed_one;
     test_case "an unreadable refusal leaves a session to end" `Quick
       test_an_unreadable_refusal_leaves_a_session_to_end;
     test_case "a session is there to end once asked for" `Quick test_a_session_is_there_to_end_once_asked_for];

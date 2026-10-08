@@ -54,6 +54,7 @@ let directory base_path =
   List.fold_left Filename.concat base_path [ Common.masc_dirname; "browser-lane" ]
 
 let path base_path name = Filename.concat (directory base_path) name
+let record_path ~base_path = path base_path record_name
 
 (* The codec cuts a time to the millisecond below it, and a time read back
    from its text sits a hair under that millisecond as often as not. Half a
@@ -107,8 +108,8 @@ let cause_of_wire = function
 (* The address as a reader may be shown it. [Browser_bidi_downloads.endpoint]
    has refused userinfo and a fragment; the query goes here. *)
 let recorded_address bidi_url =
-  let* (_ : string * int * string) = Browser_bidi_downloads.endpoint bidi_url in
-  Ok (Uri.to_string (Uri.with_query (Uri.of_string bidi_url) []))
+  let* uri, (_ : string * int * string) = Browser_bidi_downloads.endpoint_uri bidi_url in
+  Ok (Uri.to_string (Uri.with_query uri []))
 
 let ending_to_json { at; reason; session } =
   `Assoc
@@ -173,11 +174,13 @@ let reason_limit_bytes = 512
 let cut_mark = "..."
 let printable_byte byte = byte >= ' ' && byte <= '~'
 
-(* A reason as the writer leaves it: printable ASCII, no longer than a cut
-   one. The reader takes no other, because what it reads is said on to an
-   operator and to a model. *)
+(* A reason in the bytes and at the length the writer leaves one: printable
+   ASCII, within the limit, or cut there and marked. The reader takes no
+   other, so that what it passes on to a screen is one bounded line. *)
 let written_reason raw =
-  if String.length raw <= reason_limit_bytes + String.length cut_mark && String.for_all printable_byte raw
+  let length = String.length raw in
+  let cut = length <= reason_limit_bytes + String.length cut_mark && String.ends_with ~suffix:cut_mark raw in
+  if (length <= reason_limit_bytes || cut) && String.for_all printable_byte raw
   then Ok raw
   else Error "ended.reason is not what a host writes"
 
@@ -331,10 +334,14 @@ let lock_held base_path =
          held))
 
 let observe ~base_path =
-  let entry = read_entry base_path in
-  match lock_held base_path with
-  | Ok lock_held -> state_of ~lock_held entry
-  | Error detail -> Unreadable { detail; held = None }
+  match read_entry base_path with
+  (* No record, and a record with its ending, say the same whatever the lock
+     says, so a lock that cannot be asked takes nothing from them. *)
+  | (Ok None | Ok (Some { ended = Some _; _ })) as entry -> state_of ~lock_held:false entry
+  | (Ok (Some { ended = None; _ }) | Error _) as entry ->
+    (match lock_held base_path with
+     | Ok lock_held -> state_of ~lock_held entry
+     | Error detail -> Unreadable { detail; held = None })
 
 type held =
   { base_path : string

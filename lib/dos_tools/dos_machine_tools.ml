@@ -165,7 +165,9 @@ let no_machine ~base_path ~tool_name ~start_time =
       Printf.sprintf "%s (an autosave file is there but this server cannot read it: %s)" refusal
         reason
   in
-  reject ~tool_name ~start_time ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
+  Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
+    ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
 ;;
 
 (* [png] adds the frame for a model that reads images: the observation's text,

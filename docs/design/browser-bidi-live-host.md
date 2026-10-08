@@ -153,7 +153,10 @@ server:
     oldest leave. What a reader loses with the older ones is only that a
     counted total may be smaller than the number of timed-out commands the
     host met; the list's order and the shape of the kept entries stand.
-    Every addition writes the record again.
+    Every addition writes the record again. A count at 64 in a status
+    sentence is the record's limit, not the host's whole history: the
+    sentence then says the record keeps the newest 64 and that what left
+    before them is not in the record.
   - A host that leaves in order adds `ended`: when, why, and
     `session_in_firefox`. A host that could not attach leaves its reason the
     same way.

@@ -240,6 +240,10 @@ let host_entry : Record.entry =
   { pid = 4242; started_at = 1_791_000_000.; bidi_url = bidi_address; client_id = host_client
   ; attached_at = Some 1_791_000_002.; unacknowledged = []; ended = None }
 
+(* Notes [n] more results than the record keeps, so a test can land exactly on
+   the record's limit and then step one past it. *)
+let repeat_note held n = for _ = 1 to n do written (Record.note_unacknowledged held unacknowledged) done
+
 (* An observation as a caller holds it, for what no workspace on disk and no
    server in this process can be made to say. *)
 let observation ?(base_path = "/workspace") ?(launcher = Launcher.Follows_workspace)
@@ -391,6 +395,28 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   List.iter
     (fun observed -> lacks (bidi_message observed) [ "did not acknowledge"; "The server acknowledged" ])
     [ one; two ];
+  (* Once the count reaches the record's limit, the sentence says the record
+     keeps only the newest ones: an operator reading "64 results" must not
+     take it for the whole history, and the record itself does not say how
+     many older ones already left. *)
+  lacks (bidi_message one)
+    [ "The record keeps the newest 64"; "any result older than those has already left it" ];
+  lacks (bidi_message two) [ "The record keeps the newest 64" ];
+  released held
+
+(* A count that has reached the record's limit is not the host's whole
+   history: the sentence then says the record keeps only the newest ones and
+   that which and how many already left is not in the record. *)
+let a_record_at_the_limit_says_the_newest_are_kept () =
+  browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  let held = take_record base in
+  written (Record.attached held ~now:1_791_000_002.);
+  repeat_note held 65;
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  says observed
+    [ "lists 64 results the host holds no acknowledgement for"
+    ; "The record keeps the newest 64 of them; any result older than those has already left it, \
+       and which and how many left is not in the record." ];
   released held
 
 (* A host that never reached Firefox left no session there, and what kept it
@@ -813,6 +839,8 @@ let () = run "Onboarding observations"
                    a_launcher_that_cannot_be_run_as_it_is_is_installed_first;
                  test_case "a BiDi host that ended says why and what comes first" `Quick
                    a_bidi_host_that_ended_says_why_and_what_comes_first;
+                 test_case "a record at the limit says the newest are kept" `Quick
+                   a_record_at_the_limit_says_the_newest_are_kept;
                  test_case "a BiDi host that never got a session says what the next one needs" `Quick
                    a_bidi_host_that_never_got_a_session_says_what_the_next_one_needs;
                  test_case "a BiDi host that died says the session may be left" `Quick

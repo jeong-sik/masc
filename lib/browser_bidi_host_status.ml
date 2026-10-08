@@ -159,20 +159,32 @@ let listed_beside (t : Launcher.t) =
              Browser_lane.lane_connected_window_sec)
 
 (* The results are in the record; the sentence says how many, where, and
-   that the record tells them apart. No acknowledgement reaching the host is
-   not the server refusing one. *)
+   that the record tells them apart. A count that has reached the record's
+   limit says so too: the record keeps only the newest of them, anything
+   older has already left it, and which and how many left is not in the
+   record. No acknowledgement reaching the host is not the server refusing
+   one. *)
 let unacknowledged (t : Launcher.t) (entry : Record.entry) =
-  let listed what each =
+  let listed what each trim =
     Printf.sprintf
       " Its record, %s, lists %s the host holds no acknowledgement for, and %swhether the server \
-       refused it, the host could not send it, or no acknowledgement came."
+       refused it, the host could not send it, or no acknowledgement came.%s"
       (Record.record_path ~base_path:t.base_path)
-      what each
+      what each trim
   in
   match List.length entry.unacknowledged with
   | 0 -> ""
-  | 1 -> listed "one result" ""
-  | count -> listed (Printf.sprintf "%d results" count) "for each "
+  | 1 -> listed "one result" "" ""
+  | count ->
+      let trim =
+        if count < Record.unacknowledged_limit then ""
+        else
+          Printf.sprintf
+            " The record keeps the newest %d of them; any result older than those has already \
+             left it, and which and how many left is not in the record."
+            Record.unacknowledged_limit
+      in
+      listed (Printf.sprintf "%d results" count) "for each " trim
 
 (* What became of the last host's session decides what the operator does
    before the next one. A Firefox that holds a session refuses every host

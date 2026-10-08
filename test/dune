@@ -3594,7 +3594,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries alcotest masc masc_tui_types masc_tui_fetched masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input masc_tui_voice_wizard_session masc_tui_account_login masc.voice_setup masc.voice_wizard unix))
+ (libraries alcotest masc masc_tui_types masc_tui_fetched masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc.voice_setup masc.voice_wizard unix))
 
 (test
  (name test_tool_transport_prefix)

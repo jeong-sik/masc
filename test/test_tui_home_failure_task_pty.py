@@ -307,10 +307,12 @@ class RefreshCompletionGate:
     opens a settle interval; the receipt window opens from the end of a
     settle generation that survived a client-freeze contrast: with the
     TUI stopped for longer than the span, any late receive/apply that
-    the window would have swallowed lands after the resume and resets
-    the gate clock, and the settle test is repeated against the re-read
-    clock ([last_event_time]) instead of being memoized from a stale
-    one. The receipt window then measures the receipt alone.
+    the window would have swallowed is held while stopped. The settle
+    then closes on a client-observed boundary, not the passive
+    predicate: after the resume drains what was in flight, a fresh
+    refresh press is delivered, and the exchange it fires can only
+    register after the client read the key and sent -- completing into
+    a whole span of silence is the boundary the receipt window keys on.
     """
 
     def __init__(self, span=0.5):
@@ -488,36 +490,64 @@ def task_cancel_previous_workspace_receipt(executable):
                     # first clean span: the TUI is stopped for longer than
                     # the span -- freezing any late receive/apply/follow-up
                     # exactly where the window would have swallowed it --
-                    # and only after the resume is the settle test
-                    # recomputed. Requests already on the wire are served
-                    # while the client is frozen (the fixture lives in the
-                    # test process), which is the swallow itself: the old
-                    # passive settle would have opened the window over a
-                    # client that had not even resumed. Here the window
-                    # decision happens at a time a whole span after the
-                    # client was last known busy, and a tail that was
-                    # merely slow lands after the resume as a new
-                    # registration, re-arming the settle; only a client
-                    # that stayed alive and wire-silent across the imposed
-                    # delay opens the receipt window. The freeze is not
-                    # proof of absence -- the client could in principle be
-                    # late beyond it -- but with the recomputed check and
-                    # the receipt window's own pair assertions it turns
-                    # "quiet right now" into "quiet across an imposed
-                    # client-side delay", which is the contrast the old
-                    # pass lacked.
+                    # and the boundary out of the settle segment is a
+                    # client-side state, not elapsed time. Requests
+                    # already on the wire are served while the client is
+                    # frozen (the fixture lives in the test process), and
+                    # the fixture thread registers bytes the client wrote
+                    # before the stop, so the baseline is taken only after
+                    # the resume has drained those in-flight registers --
+                    # a pre-resume snapshot would mistake them for
+                    # post-resume speech. Elapsed quiet then proves
+                    # nothing by itself: with nothing left to send the
+                    # client is legitimately silent forever, and re-reading
+                    # the passive predicate would pass it without the
+                    # client ever having run past the resume. So the test
+                    # forces the boundary: a fresh refresh press is
+                    # delivered to the resumed client, and the exchange it
+                    # fires can only register after the client has read
+                    # the key, processed it, and sent -- the settle closes
+                    # on that client-observed exchange completing into a
+                    # whole span of silence. Keying the loop on [pressed_at]
+                    # -- not on the post-drain baseline -- also absorbs a
+                    # straggler that registers between the drain and the
+                    # press: it is client speech, but not the boundary, and
+                    # the loop keeps waiting for an exchange the client
+                    # produced after the press. The receipt window is then
+                    # keyed on a client event that postdates the imposed
+                    # delay, and its pair assertions measure the receipt
+                    # in isolation.
                     os.kill(process.pid, signal.SIGSTOP)
                     time.sleep(gate.span + 0.25)
                     os.kill(process.pid, signal.SIGCONT)
+                    h.drain_until_quiet(process, fd, output)
+                    base_exchanges = gate.snapshot()[1]
+                    os.write(fd, b"r")
+                    pressed_at = time.monotonic()
                     deadline = time.monotonic() + 15
-                    while not gate.quiesced():
+                    # The boundary is "an exchange the client produced
+                    # after the press has completed", not "any exchange
+                    # arrived": a straggler that registers between the
+                    # drain and the press satisfies the raw arrival parts
+                    # of this predicate, but its completion predates
+                    # [pressed_at], so the pressed_at part keeps the loop
+                    # waiting for a genuinely post-resume exchange.
+                    while not (gate.snapshot()[1] > base_exchanges
+                               and gate.quiesced()
+                               and gate.last_event_time() >= pressed_at):
                         if time.monotonic() > deadline:
                             raise AssertionError(
-                                "refresh tail did not settle after the client-freeze contrast: "
+                                "refresh tail did not settle past a client-observed "
+                                "post-resume exchange: "
                                 + repr(gate.snapshot())
                                 + " reads=" + repr((state["health_reads"], state["history_reads"])))
                         gate.changed.clear()
                         h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
+                    assert gate.last_event_time() >= pressed_at, (
+                        "the boundary exchange predates the press: "
+                        + repr({"last_event": gate.last_event_time(),
+                                "pressed_at": pressed_at,
+                                "snapshot": gate.snapshot()}))
                     assert any(length >= 0.5 for length in gate.durations), (
                         "the completion gate never held the drill's slow exchange: "
                         + repr(gate.durations))
@@ -538,12 +568,15 @@ def task_cancel_previous_workspace_receipt(executable):
                     "the receipt window opened while an exchange was still running: "
                     + repr(before_gate))
                 # Settle segment and receipt segment are separate: the
-                # settle loop above refused to close until the gate clock
-                # had passed [resumed_at] and then a whole span in silence,
-                # so a window that would have opened before the refresh
-                # tail's late receive/apply landed cannot be reused here --
-                # this window is keyed on the settled clock, not on an
-                # older quiet streak.
+                # settle loop above refused to close until the resumed
+                # client had demonstrably spoken -- a fresh refresh press
+                # delivered after the resume, registered only once the
+                # client read the key and fired it, then completed into a
+                # whole span of silence -- so a window that would have
+                # opened before the refresh tail's late receive/apply
+                # landed cannot be reused here. This window is keyed on a
+                # client event that postdates the imposed delay, not on
+                # quiet streaks that predate it.
                 window_start = time.monotonic()
                 assert window_start - window_opened_at >= gate.span, (
                     "the receipt window did not open after a settled span: "

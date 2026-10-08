@@ -25,6 +25,15 @@ val masc_dirname : string
     rather than inlining the literal — see #9571. The
     [test_masc_dirname_ssot] enforcement test flags regressions. *)
 
+val browser_lane_dirname : string
+(** The browser lane's directory under the MASC directory: its token, the
+    BiDi host's record and lock, the launcher, the automation drivers'
+    records and profiles. Value is ["browser-lane"]. *)
+
+val browser_lane_token_name : string
+(** The lane token's file name in {!browser_lane_dirname}. Value is
+    ["token"]. *)
+
 val masc_dir_from_base_path : base_path:string -> string
 (** [masc_dir_from_base_path ~base_path] is
     [Filename.concat base_path masc_dirname]. Canonical way to spell

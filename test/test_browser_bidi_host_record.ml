@@ -261,6 +261,11 @@ let said = Fmt.to_to_string (pp state)
 let test_what_a_record_and_its_lock_say () =
   let ended = { entry with ended = Some ending } in
   check state "no record" Record.Never_started (Record.state_of ~lock_held:false (Ok None));
+  (* A host that has taken the lock and not yet written its first record,
+     or one whose record was deleted under it: the record is the word, and
+     a second host is refused by the lock. *)
+  check state "no record, and a host holds the lock" Record.Never_started
+    (Record.state_of ~lock_held:true (Ok None));
   check state "a record and its lock" (Record.Running entry) (Record.state_of ~lock_held:true (Ok (Some entry)));
   check state "a record nobody holds" (Record.Died entry) (Record.state_of ~lock_held:false (Ok (Some entry)));
   check state "an ending" (Record.Ended (ended, ending)) (Record.state_of ~lock_held:false (Ok (Some ended)));

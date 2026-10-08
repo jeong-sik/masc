@@ -24,7 +24,7 @@ type t =
 type verdict = Absent | Connected | Aligned | Unverified | Misconfigured
 
 let host_directory base_path =
-  List.fold_left Filename.concat base_path [ Common.masc_dirname; "browser-lane"; "host" ]
+  List.fold_left Filename.concat base_path [ Common.masc_dirname; Common.browser_lane_dirname; "host" ]
 
 (* install-host.sh writes both files in one installation; the names and the
    declaration's fields are the contract between that script and this reader. *)

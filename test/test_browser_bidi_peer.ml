@@ -16,7 +16,7 @@ let test_context_identity () =
   let command method_ _ = match method_ with
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List (List.map (fun c->obj ["context",`String c;"url",`String "https://same.example/"]) !contexts)])
     | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://same.example/";"title",`String "same";"active",`Bool true]))
-    | _ -> Error (Peer.Rejected "unexpected test command") in
+    | _ -> Error (Peer.Rejected (Peer.Other_error "unexpected test command")) in
   let peer=peer_of command in
   let ids () = match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
     | Ok (`List rows) -> List.map (fun row->Yojson.Safe.Util.(row |> member "id" |> to_int)) rows
@@ -145,7 +145,7 @@ let test_pointer_validation () =
     calls:=method_::!calls;
     match method_ with
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
-    | _ -> Error (Peer.Rejected "unexpected effect dispatch") in
+    | _ -> Error (Peer.Rejected (Peer.Other_error "unexpected effect dispatch")) in
   let peer=peer_of command in
   let viewport=obj ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
     "scrollX",`Int 0;"scrollY",`Int 0] in
@@ -605,7 +605,20 @@ let test_peer_serves_what_the_lane_table_says () =
       | Error (Peer.Before_effect detail), true | Error (Peer.Outcome_unknown detail), _ ->
         failf "the peer did not serve %s (%s), which the lane table says BiDi does" name detail)
       Lane.all_of_live_capability)
-let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity];
+(* Firefox's error codes are read once where the answer arrives. The two
+   this host acts on are their own cases; any other is kept as Firefox wrote
+   it, and every code is written back as it was read. *)
+let test_an_error_code_is_read_once_and_written_back () =
+  check bool "session not created" true (Peer.error_code_of_wire "session not created" = Peer.Session_not_created);
+  check bool "invalid session id" true (Peer.error_code_of_wire "invalid session id" = Peer.Invalid_session_id);
+  List.iter (fun code ->
+      check bool ("another code is kept: " ^ code) true (Peer.error_code_of_wire code = Peer.Other_error code))
+    [ "no such frame"; "unknown command"; "Session not created"; "session not created " ];
+  List.iter (fun code ->
+      check string ("written back: " ^ code) code (Peer.error_code_to_wire (Peer.error_code_of_wire code)))
+    [ "session not created"; "invalid session id"; "no such frame"; "" ]
+let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity;
+    test_case "an error code is read once and written back" `Quick test_an_error_code_is_read_once_and_written_back];
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
     test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error;

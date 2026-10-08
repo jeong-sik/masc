@@ -81,13 +81,25 @@ val issue_snapshot : base_path:string -> keeper_name:string -> (issue_snapshot,e
     receiver means publication preparation failed before a valid binding. *)
 type discovery_entry = { receiver : receiver; state : (validation, error) result }
 val discover : base_path:string -> keeper_name:string -> discovery_entry list outcome
-(** Read-only enumeration of canonical managed v2 files. Unknown filenames are
-    ignored, never deleted. Includes receiver identities from known process
+(** Read-only descriptor-owned enumeration of canonical managed v2 directories.
+    Every bound workspace root/ancestor, including empty Keeper/generation
+    directories, must have the effective UID and lack group/other write
+    permission; final descriptor/path validation repeats those checks.
+    Cold absence is allowed only by an initial child open below a freshly
+    validated bound workspace root. Root failures and failures after binding
+    remain errors; an already enumerated generation disappearing is an error.
+    Unknown filenames are ignored, never deleted. Includes receiver identities from known process
     issues even when a failed first append left no file. Outer errors mean
     enumeration failed; entry errors mean that receiver could not be validated.
-    Neither an empty result nor a valid file proves historical completeness. *)
+    Neither an empty result nor a valid file proves historical completeness.
+    Directory enumeration and later SQLite pathname opens are independent;
+    this API does not establish owned leaf-open continuity or fix leaf TOCTOU. *)
 
 module For_testing : sig
+  val discover : before_read:(string -> unit) -> after_read:(string -> unit) ->
+    base_path:string -> keeper_name:string -> discovery_entry list outcome
+  (** Fault callbacks after actual directory binding and after enumeration.
+      Uses the production descriptor-owned discovery path. *)
   val append_with_io : commit:(Sqlite3.db -> Sqlite3.Rc.t) ->
     close:(Sqlite3.db -> bool) -> publication -> commit outcome
   (** The actual append transaction with injected COMMIT/close operations.

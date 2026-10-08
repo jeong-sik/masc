@@ -83,6 +83,34 @@ health and reporting without holding the autonomous root-stream mutex. Other
 observations retain the original stream locking and closed guards. Task
 persistence never mutates the root accumulator or publishes root lifecycle.
 
+## Descriptor-owned directory discovery
+
+Writer reader construction and receiver discovery use one Keeper directory
+function for the existing v2 storage layout. Discovery enumerates through
+`Fs_compat.read_owned_directory_if_present` using the actual effective UID.
+The captured workspace root and every bound ancestor/directory must have that
+UID and lack group/other write permission, even when the Keeper or generation
+has no files. Checks cover both actual descriptors and corresponding paths;
+final validation uses fresh stats. Existing required-directory callers opt into
+these checks via `owner_uid`; omitted `owner_uid` preserves prior behavior.
+
+A cold subtree is absent only when an initial descriptor-relative child open
+returns ENOENT and the already bound root/ancestors pass fresh validation.
+The captured root must exist and be bound. Missing root authority, failures
+after binding/enumeration, changed identity or final permission drift are typed
+errors. An already enumerated generation disappearing is an outer discovery
+failure, so a partial inventory cannot become empty successful discovery.
+No pathname preflight or callback flag is promoted into authoritative absence.
+The existing unknown-filename skip policy and process-only issue join remain.
+
+Directory enumeration and the later SQLite pathname open are separate operations.
+This repair strengthens directory discovery only: it does not bind SQLite's
+leaf open to a prior directory descriptor, validate its ownership by this new
+helper, or resolve leaf replacement/symlink TOCTOU. Database/cursor/audit/COMMIT /
+cleanup semantics are unchanged. Discovery is not an atomic multi-file snapshot,
+receiver liveness, historical completeness or a provider lifetime guarantee.
+There is no new durable inventory, ordering selector, retry or retention policy.
+
 ## Authenticated consumer and exact validation scope
 
 Production GET routes discover receivers and read records for the authenticated
@@ -135,3 +163,13 @@ execution result for this replacement. Upstream optional `awaited` repair
 be7cc1110a6361a355e62b0301d6a253ad1bd52f and parent fixture repair
 b5c8aa1a81ecaaaec020f49c9a3d9c8aed7d392c still require owner integration.
 No provider lifetime, UI, deployed behavior or full-stack test PASS is claimed.
+
+This discovery hardening adds two registered real-callback store cases: empty
+Keeper/generation permissions, a cold missing subtree beneath an unsafe ancestor,
+valid empty inventories, an ENOENT after actual binding and an already enumerated
+generation removed through the actual after-read hook. Two Fs cases cover owned
+cold absence versus an unbound missing root, UID mismatch, preserved non-opt-in
+behavior, empty permissions, final directory/root permission drift, bound ENOENT,
+post-enumeration directory deletion and captured-root rename. The cases are
+authored, **not executed**. Local parse and fragment checks are source checks;
+no runtime, HTTP, screen, installation or full-stack success is inferred.

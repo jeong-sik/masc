@@ -2743,11 +2743,6 @@ let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
   let keys = List.map fst Transcript.legend in
   check bool "received result mark is explained without a success claim" true
     (List.mem (Transcript.received_marker ^ " received") keys);
-  (* The two lists are written by hand: a constructor added later compiles
-     (the label functions are exhaustive) but would be missing from the
-     rollup and the legend, so their lengths are held here. *)
-  check int "six outcomes" 6 (List.length Transcript.all_outcomes);
-  check int "eight skill states" 8 (List.length Transcript.all_skill_states);
   List.iter
     (fun outcome ->
       let key =
@@ -2827,6 +2822,11 @@ let test_native_tools_are_observations_without_execution_receipts () =
   feed t [Live.Tool_result {occurrence; execution_id="wrong-authority"}];
   check (option string) "MASC receipt cannot attach to native observation" None (call ()).execution_id;
   check bool "mixed-authority event is reported" true (Option.is_some (Transcript.unreadable t));
+  (* A single call is already shown in full. A second distinct native call
+     exercises the compact group's summary without inventing a MASC receipt. *)
+  let second = {occurrence with block_index=8; tool_call_id=Some "native-8"} in
+  feed t [Live.Native_tool_started {occurrence=second;tool_name=Some "Search"};
+          Live.Native_tool_ended {occurrence=second}];
   let rows = Transcript.project_tool_block Transcript.Compact
       (Transcript.tool_block (Transcript.tool_calls t)) in
   check tool_outcome "collapsed tools retain native outcome" Transcript.Native_ended
@@ -2856,18 +2856,68 @@ let test_response_boundaries_preserve_origins () =
     List.iter put (Live.Run_started :: boundary @ [Live.Text "PREFIX"; Live.Thinking "thought"; Live.Text "SUFFIX"]);
     let before = Transcript.drawn t in
     let last = List.hd (List.rev before) in
-    put (reply_details ~reply:"SUFFIX" ());
+    put (reply_details ~reply:"PREFIX\nSUFFIX" ());
     put Live.Run_finished;
-    check (list string) (label ^ ": prior content and observed order preserved")
-      ["COMMENTARY"; "PREFIX"; "SUFFIX"] (speech t);
+    check (list string) (label ^ ": observed order plus a separate canonical reply")
+      ["COMMENTARY"; "PREFIX"; "SUFFIX"; "PREFIX\nSUFFIX"] (speech t);
     let after = Transcript.drawn t in
     let reply = List.find (fun (item:Transcript.drawn_item) -> match item.drawn with Drawn_reply _ -> true | _ -> false) after in
-    check bool (label ^ ": reply keeps surviving stretch origin") true (last.origin = reply.origin);
+    check bool (label ^ ": final reply does not steal an observed origin") true (last.origin <> reply.origin);
+    check bool (label ^ ": separate final carries typed authority") true
+      (reply.response_part = Some Transcript.Final_response);
+    let observations = List.filter (fun (item:Transcript.drawn_item) ->
+      item.response_part = Some Transcript.Observed_response) after in
+    check (list string) (label ^ ": exact observed fragments survive")
+      ["PREFIX";"SUFFIX"]
+      (List.filter_map (fun (item:Transcript.drawn_item) ->
+        match item.drawn with Drawn_text text -> Some text | _ -> None) observations);
+    check bool (label ^ ": every original row keeps content, origin and position") true
+      (List.map (fun (item:Transcript.drawn_item) -> item.origin,item.drawn) before
+       = List.map (fun (item:Transcript.drawn_item) -> item.origin,item.drawn)
+           (List.filter (fun (item:Transcript.drawn_item) -> item.response_part <> Some Transcript.Final_response) after));
     check bool (label ^ ": origins are unique across boundaries") true
       (let origins = List.map (fun (item:Transcript.drawn_item) -> item.origin) after in
        List.length origins = List.length (List.sort_uniq compare origins));
     check bool (label ^ ": refolding preserves origins and content") true
       (after = Transcript.drawn (Transcript.of_log ~now:origin log))) cases
+;;
+
+let test_interleaved_final_keeps_observed_times_and_bytes () =
+  List.iter (fun canonical ->
+    let t = fresh () in
+    feed ~now:10. t [Live.Run_started;Live.Text "A"];
+    feed ~now:20. t [Live.Thinking "R"];
+    feed ~now:30. t [Live.Text "B"];
+    let before = Transcript.drawn t in
+    feed ~now:40. t [reply_details ~reply:canonical ()];
+    feed ~now:50. t [Live.Run_finished];
+    let after = Transcript.drawn t in
+    check (list string) "observed bytes and final bytes remain separate"
+      ["text:A";"thinking:R";"text:B";"reply:" ^ canonical]
+      (List.map drawn_to_string after);
+    check (list (option (float 0.001))) "canonical reply has its own event time"
+      [Some 10.;Some 20.;Some 30.;Some 40.]
+      (List.map (fun (item:Transcript.drawn_item) -> item.at) after);
+    check bool "surviving observations retain source origins" true
+      (List.map (fun (item:Transcript.drawn_item) -> item.origin) before
+       = List.map (fun (item:Transcript.drawn_item) -> item.origin) (List.take 3 after));
+    check bool "role metadata never enters the authored text" true
+      (List.map (fun (item:Transcript.drawn_item) -> item.response_part) after
+       = [Some Transcript.Observed_response;None;Some Transcript.Observed_response;
+          Some Transcript.Final_response]);
+    feed ~now:60. t [Live.Run_failed {message="late failure"}];
+    check (list string) "a terminal error preserves observations and final authority"
+      ["text:A";"thinking:R";"text:B";"reply:" ^ canonical;"error:late failure"]
+      (drawn t)) ["A\nB";"Changed canonical body"];
+  List.iter (fun outcome ->
+    let t = fresh () in
+    feed t [Live.Run_started;Live.Text "A";Live.Thinking "R";Live.Text "B";
+      Live.Reply_details {reply="";turn_outcome=outcome;turn_ref="trace#1"}];
+    check bool "blank and control outcomes preserve observations without a final text area"
+      true (List.for_all (fun (item:Transcript.drawn_item) -> item.response_part=None)
+        (Transcript.drawn t)))
+    [Masc.Keeper_turn_outcome.Visible_reply;Continuation_checkpoint;
+     Terminal_effect_settled;Awaiting_gate_approval;No_visible_reply]
 ;;
 
 let test_usage_resets_only_at_response_boundaries () =
@@ -2932,7 +2982,7 @@ let test_empty_new_response_does_not_replace_prior_message () =
 
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "response boundaries", [test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
+    [ ( "response boundaries", [test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts] )

@@ -294,6 +294,13 @@ GitHub CLI identity observation. On the GitHub tab, `L` starts the gh
 device-flow login and streams its (redacted) output into the pane; when
 the stream ends the pane re-reads the identity observation.
 
+A browser consent started on the Identity tab keeps checking its Keeper even
+on another surface. The consent URL and background wait end together when
+the provider attaches, leaves the inventory, the Keeper disappears from a
+successfully read roster, or the server's `expires_at` deadline passes.
+A failed roster read or unreadable provider declaration does not imply deletion.
+Workspace recovery preserves only unexpired waits; start a new login after expiry.
+
 Reading a board post on a wide terminal keeps the post list beside it.
 `Ctrl-W` toggles focus; `h` selects the list and `l` selects the post. `j`/`k`
 then move the focused pane, while `PgUp`/`PgDn` move it by a page. The open post
@@ -1046,6 +1053,11 @@ this guarantee.
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did. Reasoning starts folded with a `THINKING`
 label; tool calls start as a compact activity row labelled `TOOLS`.
+Folded reasoning summarizes a thought only when the summary uses fewer displayed
+rows than its source Markdown at the available message-body width, with the same
+trailing-blank trimming used by the transcript. Short notes stay visible, and
+link-preview cards do not make a fitting thought fold.
+Resizing or changing the origin display recalculates that fold.
 `Ctrl-R` cycles reasoning through folded, full, and hidden; `Ctrl-D` cycles
 tool details through compact, results, and full, so
 full arguments and unfolded Gate history are two presses from compact. Results

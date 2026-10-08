@@ -30,6 +30,16 @@ module Streaming = struct
   }
 end
 
+type row_extent = { count : int; nonblank_end : int }
+
+type 'identity measured = {
+  measure_key : 'identity Streaming.key;
+  measure_text : string;
+  measure_stable_source_len : int;
+  measure_stable_rows : row_extent;
+  measure_height : int;
+}
+
 (* One store per kind, each keyed by the identity that owns the result, so a
    lookup is a hash rather than a walk of everything retained. The pane looks
    one of these up for every message it walks, and a scrolled transcript walks
@@ -39,12 +49,14 @@ end
 type 'identity t = {
   completed : ('identity, 'identity Completed.rendered) Masc_tui_lru.t;
   growing : ('identity, 'identity Streaming.growing) Masc_tui_lru.t;
+  measured : ('identity, 'identity measured) Masc_tui_lru.t;
 }
 
 let create ~capacity =
   if capacity <= 0 then invalid_arg "Markdown render cache capacity must be positive";
   { completed = Masc_tui_lru.create ~capacity;
     growing = Masc_tui_lru.create ~capacity;
+    measured = Masc_tui_lru.create ~capacity;
   }
 
 (* The identity finds the entry; the rest of the key says whether what was
@@ -161,6 +173,45 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
       remember_growing cache updated;
       rows
   | Some _ | None -> reset_growing cache ~key ~text ~renderer
+
+let row_extent rows =
+  List.fold_left (fun extent row ->
+    let count = extent.count + 1 in
+    { count;
+      nonblank_end = if String.trim row = "" then extent.nonblank_end else count })
+    { count = 0; nonblank_end = 0 } rows
+
+let append_extent left right =
+  { count = left.count + right.count;
+    nonblank_end = if right.nonblank_end = 0 then left.nonblank_end
+      else left.count + right.nonblank_end }
+
+let measure_growing cache ~theme_revision ~palette_generation ~width ~renderer
+    ~identity ~text =
+  let key : _ Streaming.key =
+    { identity; width; theme_revision; palette_generation } in
+  let previous = match Masc_tui_lru.find cache.measured identity with
+    | Some measured when same_visual_rest key measured.measure_key -> Some measured
+    | Some _ | None -> None in
+  match previous with
+  | Some measured when String.equal measured.measure_text text -> measured.measure_height
+  | Some _ | None ->
+    let source_start, stable = match previous with
+      | Some measured when String.starts_with ~prefix:measured.measure_text text ->
+        measured.measure_stable_source_len, measured.measure_stable_rows
+      | Some _ | None -> 0, { count = 0; nonblank_end = 0 } in
+    let pending = String.sub text source_start (String.length text - source_start) in
+    let rendered = renderer ~width pending in
+    validate_streaming_render ~source_length:(String.length pending) rendered;
+    let extent = append_extent stable (row_extent rendered.rows) in
+    let measure_height = Int.max 1 extent.nonblank_end in
+    let newly_stable = row_extent (take rendered.mutable_row_start rendered.rows) in
+    Masc_tui_lru.set cache.measured identity
+      { measure_key = key; measure_text = text;
+        measure_stable_source_len = source_start + rendered.mutable_source_start;
+        measure_stable_rows = append_extent stable newly_stable;
+        measure_height };
+    measure_height
 
 module For_testing = struct
   let retained_entries cache = Masc_tui_lru.size cache.completed

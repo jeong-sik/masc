@@ -2639,6 +2639,7 @@ type identity_login_expectation = {
   ile_origin: Tui_decode.server_identity;
   ile_keeper: string;
   ile_provider: string;
+  ile_expires_at: float;
 }
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the legal
@@ -6725,10 +6726,11 @@ let identity_logins_for_keeper (state : state) keeper_name =
 
 (* A recovered provider read may still be pending browser consent. Continue
    the existing cadence without resurrecting the withdrawn consent URL. *)
-let identity_login_pending_for_keeper (state : state) keeper_name =
+let identity_login_pending_for_keeper (state : state) ~now keeper_name =
   server_authority_ready state
   && List.exists (fun expectation ->
        String.equal expectation.ile_keeper keeper_name
+       && expectation.ile_expires_at > now
        && identity_expectation_workspace_matches ~origin:expectation.ile_origin state)
        state.identity_login_expectations
 
@@ -6736,10 +6738,10 @@ let identity_login_pending_for_keeper (state : state) keeper_name =
    after each one from any surface: an operator who consented in a browser
    and then left the Identity tab, or opened another Keeper, still sees the
    login land. *)
-let identity_login_pending_keepers (state : state) =
+let identity_login_pending_keepers (state : state) ~now =
   state.identity_login_expectations
   |> List.filter_map (fun expectation ->
-       if identity_login_pending_for_keeper state expectation.ile_keeper
+       if identity_login_pending_for_keeper state ~now expectation.ile_keeper
        then Some expectation.ile_keeper
        else None)
   |> List.sort_uniq String.compare
@@ -6799,27 +6801,59 @@ let remember_identity_login (state : state) login =
   (match state.server_identity with
    | Some origin when server_authority_ready state ->
        remember_identity_login_expectation state
-         { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider }
+         { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider;
+           ile_expires_at=login.ils_expires_at }
    | _ -> ())
 
-let retire_identity_logins (state : state) ~keeper_name ~providers =
-  (* The wait ends when consent lands (attached) or when it never can (the
-     provider is no longer declared). A provider removed mid-consent left
-     its wait polling for the life of the process before the inventory's
-     absence counted as an answer. *)
+(* A terminal observation retires both the browser URL and its background
+   wait. Only disappearance invalidates an in-flight replacement request:
+   expiry of the previous consent does not expire the replacement. *)
+type identity_login_retirement =
+  | Login_provider_inventory of string * identity_provider list
+  | Login_keeper_inventory of string list
+  | Login_deadline of float
+
+let retire_identity_login_state (state : state) retirement =
+  let disappeared ~keeper ~provider =
+    match retirement with
+    | Login_provider_inventory (name, providers) ->
+        String.equal keeper name
+        && not (identity_provider_declared ~providers ~provider_id:provider)
+    | Login_keeper_inventory names -> not (List.mem keeper names)
+    | Login_deadline _ -> false
+  in
+  let keep ~keeper ~provider ~expires_at =
+    not (disappeared ~keeper ~provider)
+    && (match retirement with
+       | Login_provider_inventory (name, providers) ->
+           not (String.equal keeper name
+                && identity_provider_attached ~providers ~provider_id:provider)
+       | Login_keeper_inventory _ -> true
+       | Login_deadline now -> expires_at > now)
+  in
   state.identity_login_expectations <- List.filter
-    (fun expectation ->
-      let provider_id = expectation.ile_provider in
-      not (String.equal expectation.ile_keeper keeper_name
-           && (identity_provider_attached ~providers ~provider_id
-               || not (identity_provider_declared ~providers ~provider_id))))
-    state.identity_login_expectations;
-  state.identity_logins <-
-    List.filter
-      (fun login ->
-        not (String.equal login.ils_keeper keeper_name
-             && identity_login_landed ~providers ~login))
-      state.identity_logins
+    (fun held -> keep ~keeper:held.ile_keeper ~provider:held.ile_provider
+       ~expires_at:held.ile_expires_at) state.identity_login_expectations;
+  state.identity_logins <- List.filter
+    (fun login -> keep ~keeper:login.ils_keeper ~provider:login.ils_provider
+       ~expires_at:login.ils_expires_at) state.identity_logins;
+  state.identity_login_requests <- List.filter
+    (fun request -> not (disappeared ~keeper:request.ilr_keeper
+       ~provider:request.ilr_provider)) state.identity_login_requests
+
+let retire_identity_logins state ~keeper_name ~providers =
+  retire_identity_login_state state (Login_provider_inventory (keeper_name, providers))
+
+let reconcile_identity_login_keepers state ~keeper_names ~error =
+  (* A partial/error roster is not evidence that a Keeper was deleted. *)
+  match error with
+  | Some _ -> ()
+  | None -> retire_identity_login_state state (Login_keeper_inventory keeper_names)
+
+let expire_identity_logins state ~now =
+  let displayed = List.length state.identity_logins in
+  retire_identity_login_state state (Login_deadline now);
+  List.length state.identity_logins <> displayed
 
 (* A workspace rework rerun keeps the workspace but ends every login it had
    admitted, so every expectation retires with it. Nothing here runs for a
@@ -8172,8 +8206,8 @@ let pending_detail_read (state : state) ~tab ~keeper =
 (* The tick may reopen a provider read only after the old response settles and
    the same workspace confirms the waiting Keeper's login. The expectation
    carries no consent URL or authorization; it only keeps the read alive. *)
-let identity_login_recovery_poll_ready (state : state) keeper_name =
-  identity_login_pending_for_keeper state keeper_name
+let identity_login_recovery_poll_ready (state : state) ~now keeper_name =
+  identity_login_pending_for_keeper state ~now keeper_name
   && Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
 
 let detail_read_started state ~tab ~keeper =

@@ -168,8 +168,15 @@ type memory_pass =
           read, a neutral system row sharing the Memory lane, and every row
           outside it. *)
 
+type heading_boundary = Inherit_heading | Start_heading
+(** [Inherit_heading] keeps ordinary per-turn heading grouping. [Start_heading]
+    explicitly opens an origin heading for this entry, even inside the same
+    request and with the same speaker label. This is presentation metadata,
+    not a new turn or a change to the authored body. *)
+
 type entry = {
   style : style;
+  heading_boundary : heading_boundary;
   timestamp : string;
   timeline_bucket : timeline_bucket option;
       (** The civil-hour rail this entry belongs under. [None] is reserved for
@@ -577,6 +584,10 @@ val chat_title_row :
   inner_cells:int -> title:string -> mode_suffix:string -> string
 (** Fit a chat navigation title while reserving the complete projection-mode
     suffix first. The opaque title yields width before semantic display state. *)
+
+val entry_body_cells : origin:origin_display -> inner_width:int -> entry -> int
+(** Available body cells after the entry's rail, origin and indentation. A
+    continued origin occupies the same padded width as its opening origin. *)
 
 val chat_role_label_width : pane_cells:int -> int
 (** The badge budget for a pane this wide. It does not read the labels: body

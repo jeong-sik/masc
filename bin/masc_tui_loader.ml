@@ -402,6 +402,8 @@ let replace_keeper_rows ~preserve_on_error (state : state)
   let next_keeper_ids =
     List.map (fun keeper -> keeper.k_name) state.keepers
   in
+  reconcile_identity_login_keepers state ~keeper_names:next_keeper_ids
+    ~error:keepers_error;
   (* A roster change no longer dismisses an action notice: the notice answers
      the operator's last action, and a refresh tick would otherwise wipe it
      before it is read. User actions still clear it. *)

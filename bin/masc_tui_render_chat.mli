@@ -103,3 +103,21 @@ val cached_chat_markdown :
 val keeper_message_clock : float -> string
 (** The wall-clock stamp the live heading prints, so a test can locate the
     stamp between bodies without reading it back off a rendered frame. *)
+
+(** Regression access to fold measurement and its production cache owner. *)
+module For_testing : sig
+  type chat_markdown_identity =
+  { cmi_style : Message_layout.style;
+    cmi_keeper_name : string;
+    cmi_request_id : string;
+    cmi_observed_at : float option;
+    cmi_entry_index : int;
+  }
+  val chat_markdown : context:Masc_tui_ansi.Chat_theme.body_context ->
+    width:int -> string -> string list
+  val fold_thinking_entry : Masc_tui_types.state -> chat_cols:int ->
+    Message_layout.entry -> Message_layout.entry
+  val thinking_height_cache : chat_markdown_identity Masc_tui_markdown_render_cache.t
+  val chat_markdown_cache : chat_markdown_identity Masc_tui_markdown_render_cache.t
+  val chat_markdown_theme_revision : int
+end

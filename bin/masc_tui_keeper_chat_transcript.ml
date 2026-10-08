@@ -2440,8 +2440,11 @@ type drawn_origin =
   | Reply_of_segment of int
   | Error_of_segment of int
 
+type response_part = Observed_response | Final_response
+
 type drawn_item =
   { origin : drawn_origin
+  ; response_part : response_part option
   ; at : float option
   ; segment : int
   ; superseded : int option
@@ -2530,7 +2533,7 @@ let with_noted_skills noted items =
    [trail_item]), so one level of flattening is the whole of it. *)
 let drawn t =
   let item ~segment ~origin ~at drawn =
-    [{ origin; at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }] in
+    [{ origin; response_part = None; at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }] in
   let items, unseen =
     project_trail t
       ~thinking:(fun ~segment ~origin ~at lines -> item ~segment ~origin:(Thinking_stretch origin) ~at (Drawn_thinking lines))
@@ -2548,15 +2551,14 @@ let drawn t =
     | Text_stretch id, None, Drawn_text _ -> id >= t.response_first_stretch
     | _ -> false
   in
-  (* The flat canonical reply can stand for the last text stretch only. A
-     provider message start or tool round ends the preceding response even
-     when no later text arrives. Earlier observed stretches keep their places;
-     resolving a multi-block final reply requires content provenance that the
-     current flat reply event does not carry. *)
-  let last_text =
+  (* A provider message start or tool round ends the preceding response even
+     when no later text arrives. Count the terminal response's observed text
+     stretches before any visibility filtering: hidden reasoning cannot make
+     a multi-stretch response safe to replace in place. *)
+  let text_count, last_text =
     List.mapi (fun index item -> index, item) items
-    |> List.fold_left (fun last (index, item) ->
-         if current_text item then Some index else last) None
+    |> List.fold_left (fun (count, last) (index, item) ->
+         if current_text item then count + 1, Some index else count, last) (0, None)
   in
   (* A read the trail never saw has no place of its own in it. Every read
      comes before the turn's terminal message, so it goes ahead of the
@@ -2567,9 +2569,10 @@ let drawn t =
     | [] -> items, last_text
     | skills -> (
         let unseen_item =
-          { origin = Unstreamed_skills; at = None; segment = t.segment; superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
+          { origin = Unstreamed_skills; response_part = None; at = None; segment = t.segment; superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
         in
         match last_text with
+        | _ when text_count > 1 -> items @ [ unseen_item ], last_text
         | None -> items @ [ unseen_item ], None
         | Some last ->
             ( List.concat
@@ -2581,7 +2584,7 @@ let drawn t =
   in
   let items = match t.reply with
   | None -> items
-  | Some { reply_text; reply_outcome = Masc.Keeper_turn_outcome.Visible_reply; _ }
+  | Some { reply_text; reply_at; reply_outcome = Masc.Keeper_turn_outcome.Visible_reply; _ }
     when String.trim reply_text <> "" -> (
       (* Which turn this reply belongs to was decided before it got here, by
          the log this transcript projects: a log is one operation's
@@ -2590,32 +2593,43 @@ let drawn t =
          request's identity, not its words), and a journal is read per
          operation into the log created with that id. So a reply on this
          transcript is this operation's, and the operation records one reply:
-         the terminal response. The
-         record is the store's text for it and stands where its last stretch
-         was, typed as the record -- whatever the stream's copy read. *)
+         the terminal response. One observed text stretch can retain the
+         established in-place presentation. Multiple stretches carry no
+         canonical block mapping, so the final record follows separately. *)
       let reply_item =
         { origin = Reply_of_segment t.segment
-        ; at = t.settled_at
+        ; response_part = None
+        ; at = Some reply_at
         ; segment = t.segment
         ; superseded = None
         ; superseded_runtime_id = None
         ; drawn = Drawn_reply (safe_block reply_text)
         }
       in
-      match last_text with
-      | None ->
-          (* Nothing streamed for the reply: the record is all there is. *)
-          items @ [ reply_item ]
-      | Some last ->
-          List.mapi (fun index item ->
-            if index = last then { reply_item with origin = item.origin; at = item.at }
-            else item) items)
+      if text_count > 1 then
+        (* A flat recorded reply cannot identify which canonical bytes belong
+           at each observed position. Keep the evidence in its original
+           order, and present final authority separately. In particular,
+           A/thinking/B must not become thinking/AB or A/thinking/AB. *)
+        List.map (fun item ->
+          if current_text item then { item with response_part = Some Observed_response }
+          else item) items
+        @ [ { reply_item with response_part = Some Final_response } ]
+      else match last_text with
+        | None ->
+            (* Nothing streamed for the reply: the record is all there is. *)
+            items @ [ reply_item ]
+        | Some last ->
+            List.mapi (fun index item ->
+              if index = last then { reply_item with origin = item.origin; at = item.at }
+              else item) items)
   | Some { reply_text; reply_at; reply_outcome; reply_turn_ref } ->
       (* Nothing is chunked for a control outcome, and a visible reply with
          no text has nothing to chunk: the one row that says how the turn
          ended comes from the recorded reply. *)
       items
       @ [ { origin = Reply_of_segment t.segment
+          ; response_part = None
           ; at = Some reply_at
           ; segment = t.segment
           ; superseded = None
@@ -2632,6 +2646,7 @@ let drawn t =
   | Stream_failed message ->
       items
       @ [ { origin = Error_of_segment t.segment
+          ; response_part = None
           ; at = t.ended_at
           ; segment = t.segment
           ; superseded = None

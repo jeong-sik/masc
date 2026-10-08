@@ -492,9 +492,9 @@ type drawn =
   | Drawn_tools of tool_block
   | Drawn_text of string  (** A reply stretch as it streamed. *)
   | Drawn_reply of string
-      (** The recorded visible reply, standing where the current attempt's
-          last streamed stretch was: the record is the store's text for the
-          turn's terminal message, so it is the text drawn there. *)
+      (** The recorded visible reply. It replaces the response's one observed
+          text stretch, or has a separate final row when multiple stretches
+          cannot be mapped back from the canonical flat body. *)
   | Drawn_status of string
       (** How a turn without visible reply text ended, from the recorded
           reply through {!turn_status_text}. *)
@@ -514,8 +514,17 @@ type drawn_origin =
     events produces the same ids. A recorded reply replacing streamed text
     retains the surviving text stretch's origin. *)
 
+type response_part = Observed_response | Final_response
+(** A split presentation when a flat final reply has no mapping back to the
+    response's multiple observed text stretches. Observed text retains its
+    original place and bytes; the recorded final reply has its own row. *)
+
 type drawn_item =
   { origin : drawn_origin
+  ; response_part : response_part option
+        (** [Some] distinguishes observed and final text only when they must
+            be displayed separately. [None] keeps the ordinary presentation;
+            it does not change the authority represented by [drawn]. *)
   ; at : float option
         (** First observed event time for this stretch; [None] for delivery
             records whose stream event was unavailable. Journal replay keeps
@@ -535,13 +544,16 @@ val drawn : t -> drawn_item list
     failure appends one [Drawn_error], preserving any prior reply or checkpoint.
     Without a reply, the trail stays as it is.
     The recorded reply is the terminal message's text, not
-    the whole turn's, so with a [Visible_reply] it stands for the text
-    last stretch in the final response window. Provider message starts, tool
+    the whole turn's, so a [Visible_reply] belongs to the final response
+    window. Provider message starts, tool
     rounds, retries and continuations open a new window. The last text stretch
-    becomes one [Drawn_reply] at its existing position and origin. If no text
-    streamed in that window, the reply is appended. Earlier observed stretches
-    keep their text and position. The flat reply does not identify original
-    content blocks, so multi-block final reconciliation remains unresolved. The reply is this turn's because the log this transcript
+    becomes one [Drawn_reply] at its existing position and origin when it is
+    the response window's only text stretch. If multiple stretches were
+    observed, their text, order and origins remain unchanged, marked
+    [Observed_response], and the recorded reply is appended at its own event
+    time with [Final_response]. No string matching or splitting infers a
+    mapping absent from the flat canonical reply. If no text streamed in that
+    window, the reply is appended with the ordinary presentation. The reply is this turn's because the log this transcript
     projects is one operation's and both the stream and the journal reach it
     by that id; the two texts are not compared. With a blank [Visible_reply]
     or any control outcome, one [Drawn_status] is appended and the streamed

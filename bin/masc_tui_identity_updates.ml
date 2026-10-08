@@ -65,19 +65,24 @@ let providers_loaded (state : state) request result =
     | Error detail -> state.identity_view_error <- Some detail)
 ;;
 
-let login_started (state : state) request ~report ~notice result =
+let login_started (state : state) request ~now ~report ~notice result =
+  ignore (expire_identity_logins state ~now);
   let keeper_name = request.ilr_keeper in
   let current = finish_identity_login_request state request in
   if current
   then (
     match result with
-    | Masc_tui_identity_model.Login_started { provider_id; label; url } ->
+    | Masc_tui_identity_model.Login_started { expires_at; _ } when expires_at <= now ->
+      notice ~keeper_name:(Some keeper_name)
+        (Masc_tui_identity_model.Notice_bad, "login expired; start a new login")
+    | Masc_tui_identity_model.Login_started { provider_id; label; url; expires_at } ->
       remember_identity_login
         state
         { ils_keeper = keeper_name
         ; ils_provider = provider_id
         ; ils_label = label
         ; ils_url = url
+        ; ils_expires_at = expires_at
         };
       if keeper_detail_target_matches state keeper_name
       then state.identity_attempt_error <- None;

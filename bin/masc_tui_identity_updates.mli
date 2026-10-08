@@ -34,6 +34,7 @@ val providers_loaded
 val login_started
   :  Masc_tui_types.state
   -> Masc_tui_types.identity_login_request
+  -> now:float
   -> report:(string -> string -> unit)
   -> notice:
        (keeper_name:string option

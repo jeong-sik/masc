@@ -21,9 +21,11 @@ let carries_cut_mark text = holds text "\xe2\x80\xa6"
 (* No [timeline_bucket] unless a test passes one: an entry without a
    trustworthy time. Tests about the heading's clock pass [twelve_o_clock]. *)
 let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
+    ?(heading_boundary = Layout.Inherit_heading)
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
   { style
+  ; heading_boundary
   ; timestamp
   ; timeline_bucket
   ; diagnostics = []
@@ -908,6 +910,7 @@ let test_a_row_carrying_an_escape_wraps_by_its_real_width () =
 let transcript count =
   List.init count (fun index ->
       { Layout.style = Layout.Keeper;
+        heading_boundary = Layout.Inherit_heading;
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
         timeline_bucket = None;
         diagnostics = [];
@@ -1356,6 +1359,41 @@ let test_a_turn_keeps_one_heading_across_its_blocks () =
           [ entry ~timeline_bucket:twelve_o_clock Layout.Tool "" "tui-..dddddddd" "first"
           ; entry ~timeline_bucket:twelve_o_clock Layout.Tool "" "tui-..eeeeeeee" "second"
           ]))
+;;
+
+let test_explicit_heading_boundary_preserves_ordinary_turn_grouping () =
+  let at ?(heading_boundary=Layout.Inherit_heading) ~speaker style role body =
+    entry ~timeline_bucket:twelve_o_clock ~speaker ~heading_boundary
+      style role "same-request" body in
+  let first = at ~speaker:"THINKING ↺1" Layout.Thinking "THINKING ↺1" "old thought" in
+  let speech = at ~speaker:" ↺1" Layout.Keeper "alpha ↺1" "old speech" in
+  let tool = at ~speaker:"TOOLS ↺1" Layout.Tool "TOOLS ↺1" "tool evidence" in
+  let next = at ~speaker:"different label" Layout.Keeper "alpha ↺1" "more speech" in
+  let origins entries =
+    Layout.visible_rows ~origin:Layout.Origin_row ~inner_width:80 ~height:40 entries
+    |> List.filter_map (fun (row:Layout.row) -> match row.kind with
+      | Layout.Metadata (Layout.Origin {speaker;_}) -> Some speaker
+      | Layout.Metadata (Layout.Diagnostic | Layout.Continued_at _ | Layout.Timeline_break _)
+      | Layout.Body | Layout.Viewport_gap _ -> None) in
+  check (list string) "ordinary tool and retry labels do not mint extra headings"
+    ["THINKING ↺1"] (origins [first;speech;tool;next]);
+  let section = {next with heading_boundary=Layout.Start_heading} in
+  check (list string) "the typed boundary opens a section inside an existing turn"
+    ["THINKING ↺1";"different label"] (origins [first;speech;tool;section]);
+  check (list string) "a boundary also overrides same-speaker continuation grouping"
+    ["different label";"different label"] (origins [next;section]);
+  let body_rows entries =
+    Layout.visible_rows ~origin:Layout.Origin_row ~inner_width:80 ~height:40 entries
+    |> List.filter_map (fun (row:Layout.row) -> match row.kind with
+      | Layout.Body -> Some row.text
+      | Layout.Metadata _ | Layout.Viewport_gap _ -> None) in
+  check (list string) "headings do not alter message bodies"
+    (body_rows [first;speech;tool;next]) (body_rows [first;speech;tool;section]);
+  List.iter (fun origin ->
+    check int "explicit row headings leave compact origin-mode row counts unchanged"
+      (Layout.total_rows ~origin ~inner_width:80 [next;next])
+      (Layout.total_rows ~origin ~inner_width:80 [next;section]))
+    [Layout.Origin_inline;Layout.Origin_bare]
 ;;
 
 let test_metadata_keeps_a_typed_origin () =
@@ -3158,6 +3196,8 @@ let () =
             test_one_speaker_keeps_one_heading
         ; test_case "a turn keeps one heading across its blocks" `Quick
             test_a_turn_keeps_one_heading_across_its_blocks
+        ; test_case "explicit heading boundary preserves ordinary turn grouping" `Quick
+            test_explicit_heading_boundary_preserves_ordinary_turn_grouping
         ; test_case "metadata keeps a typed origin" `Quick
             test_metadata_keeps_a_typed_origin
         ; test_case "the origin carries the speaker whole" `Quick

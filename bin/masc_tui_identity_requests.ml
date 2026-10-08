@@ -114,6 +114,10 @@ let launch_app_save
 let launch_login state ~host ~deliver ~fork ~keeper_name ~provider_id ~label =
   let authority = state.workspace_authority in
   let request = start_identity_login_request state ~keeper_name ~provider_id in
+  let request_current () =
+    authority = state.workspace_authority
+    && List.exists (( = ) request) state.identity_login_requests
+  in
   let port = state.port in
   let run () =
     let result =
@@ -121,42 +125,24 @@ let launch_login state ~host ~deliver ~fork ~keeper_name ~provider_id ~label =
         match
           if authority <> state.workspace_authority
           then Error "Workspace authority withdrawn"
+          else if not (request_current ()) then Error "login request retired"
           else Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name ~provider_id
         with
         | Error err -> Login_failed err
         | Ok json ->
-          (match json with
-           | `Assoc fields ->
-             (match List.assoc_opt "attached" fields with
-              | Some (`Bool true) ->
-                let msg =
-                  match List.assoc_opt "message" fields with
-                  | Some (`String m) -> m
-                  | _ -> label ^ ": credentials attached."
-                in
-                deliver (Identity_refreshed (keeper_name, Ok ()));
-                Login_attached msg
-              | _ ->
-                (match List.assoc_opt "authorize_url" fields with
-                 | Some (`String url) ->
-                   let provider_id =
-                     match List.assoc_opt "provider" fields with
-                     | Some (`String id) -> id
-                     | Some _ | None -> provider_id
-                   in
-                   (* Opened here, on this fiber, because the URL is about
-                           nine hundred characters and a pane truncates it -- an
-                           operator cannot select what is not on screen. It is
-                           still printed below, wrapped, for the machine that has
-                           no opener. *)
-                   if authority = state.workspace_authority
-                   then (
-                     match Masc_tui_browser.open_url url with
-                     | Ok _ | Error _ -> ());
-                   Login_started { provider_id; label; url }
-                 | Some _ | None ->
-                   Login_failed "the server answered without an authorize_url"))
-           | _ -> Login_failed "the server answered with something this cannot read")
+          let result = decode_identity_login ~provider_id ~label
+            ~now:(Unix.gettimeofday ()) json in
+          (match result with
+           | Login_attached _ ->
+               if request_current () then deliver (Identity_refreshed (keeper_name, Ok ()))
+           | Login_started { url; expires_at; _ } ->
+               (* Keep the wrapped URL on screen as well: a machine may not
+                  have a browser opener. Retired requests cannot open it. *)
+               if request_current () && expires_at > Unix.gettimeofday ()
+               then (match Masc_tui_browser.open_url url with
+                     | Ok _ | Error _ -> ())
+           | Login_failed _ -> ());
+          result
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Login_failed (Printexc.to_string exn)

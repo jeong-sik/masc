@@ -304,6 +304,7 @@ type identity_login_started =
           declaration is free to change. *)
   ; ils_label : string
   ; ils_url : string
+  ; ils_expires_at : float
   }
 
 (** Whether the login [login] started has landed: the service it was for now
@@ -344,6 +345,41 @@ type identity_login_result =
       { provider_id : string
       ; label : string
       ; url : string
+      ; expires_at : float
       }
   | Login_attached of string
   | Login_failed of string
+
+(* The OAuth route's absolute deadline is also the pending-state store's
+   deadline. Missing or malformed values must not create an unbounded wait;
+   CLI-token attachment is already complete and carries no consent deadline. *)
+let decode_identity_login ~provider_id ~label ~now (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "attached" fields with
+       | Some (`Bool true) ->
+           let message = match List.assoc_opt "message" fields with
+             | Some (`String message) -> message
+             | _ -> label ^ ": credentials attached."
+           in
+           Login_attached message
+       | _ ->
+           let deadline = match List.assoc_opt "expires_at" fields with
+             | Some (`Float value) when Float.is_finite value -> Some value
+             | Some (`Int value) -> Some (float_of_int value)
+             | _ -> None
+           in
+           (match List.assoc_opt "authorize_url" fields, deadline with
+            | Some (`String _), None ->
+                Login_failed "the server answered without a valid expires_at"
+            | Some (`String _), Some expires_at when expires_at <= now ->
+                Login_failed "login expired; start a new login"
+            | Some (`String url), Some expires_at ->
+                let provider_id = match List.assoc_opt "provider" fields with
+                  | Some (`String id) -> id
+                  | _ -> provider_id
+                in
+                Login_started { provider_id; label; url; expires_at }
+            | _ -> Login_failed "the server answered without an authorize_url"))
+  | _ -> Login_failed "the server answered with something this cannot read"
+;;

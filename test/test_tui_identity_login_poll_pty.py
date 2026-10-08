@@ -12,6 +12,7 @@ import stat
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import tui_keyboard_harness as h
@@ -50,7 +51,8 @@ def run(executable):
         return 200, {"providers": [row]}
 
     def login(_body):
-        return 200, {"authorize_url": "https://consent.invalid/slack", "provider": "slack"}
+        return 200, {"authorize_url": "https://consent.invalid/slack", "provider": "slack",
+                     "expires_at": time.time() + 600.0}
 
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[ATTACHED_TOOLS_PATH] = h.PathHttpResponse(inventory)

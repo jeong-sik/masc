@@ -281,16 +281,21 @@ def task_cancel_editor_replacement(executable):
         )
 
 
-class ReadCompletionGate:
+class RefreshCompletionGate:
     """Admission set over the refresh tail's /health exchanges.
 
     While armed, every exchange registers when its handler enters and
-    completes only after its response has been written, so [quiesced] --
-    nothing held and nothing registered for [span] seconds -- is a
+    completes when the fixture dispatcher has written its response to the
+    socket (the response's [on_sent] callback) -- or when that write is
+    lost to a dropped peer, which also ends the exchange. [quiesced] --
+    nothing held and nothing registered for [span] seconds -- is then a
     completion boundary: the refresh chain's last identity exchange has
-    finished. Read counters cannot prove this; a quiet span over them is
-    how the original race passed its settle loop with a response still
-    outstanding.
+    been answered on the wire and none is still running. Keying the
+    boundary on the fixture callable's own exit would leave a gap: the
+    response bytes, the client receive, and the applied bundle that fires
+    the next request all happen after that return. Read counters cannot
+    prove completion at all; a quiet span over them is how the original
+    race passed its settle loop with a response still outstanding.
     """
 
     def __init__(self, span=0.5):
@@ -319,6 +324,10 @@ class ReadCompletionGate:
     def quiesced(self):
         with self._lock:
             return self.held == 0 and time.monotonic() - self.last_event >= self.span
+
+    def snapshot(self):
+        with self._lock:
+            return (self.held, self.exchanges)
 
 
 def task_cancel_previous_workspace_receipt(executable):
@@ -356,8 +365,9 @@ def task_cancel_previous_workspace_receipt(executable):
                             # trusted, and the window must still wait for
                             # this completion.
                             time.sleep(drill)
-                    finally:
+                    except BaseException:
                         gate.complete(time.monotonic() - entered)
+                        raise
                 root = foreign if state["foreign"] else local
                 return h.RawHttpResponse(200, json.dumps({
                     "status": "ok", "paths": {
@@ -365,7 +375,9 @@ def task_cancel_previous_workspace_receipt(executable):
                         "effective_masc_root": str(root / ".masc"),
                         "effective_has_masc_dir": True,
                     },
-                }).encode(), content_type="application/json")
+                }).encode(), content_type="application/json",
+                    on_sent=(lambda: gate.complete(time.monotonic() - entered))
+                    if gate is not None else None)
 
             def rpc(body):
                 request = json.loads(body)
@@ -425,16 +437,21 @@ def task_cancel_previous_workspace_receipt(executable):
                 # completion -- the original race. Gate the window on
                 # completions instead: arm before the press, and every
                 # /health exchange of the refresh chain registers an
-                # admission at handler entry and completes it only after its
-                # response is written. The window opens when nothing is held
-                # and no exchange has registered for 0.5s -- the chain's last
-                # identity exchange has then completed, and a tail released
-                # later than any quiet span is still held here. The drill
+                # admission at handler entry and completes when its
+                # response has been written to the socket -- the [on_sent]
+                # callback the fixture dispatcher fires, not the fixture
+                # callable's own return, which happens before the bytes
+                # are sent and before the client can apply the bundle that
+                # fires the next request. The window opens when nothing is
+                # held and no exchange has registered for 0.5s -- the
+                # chain's last identity exchange has then been answered on
+                # the wire, and a tail released later than any quiet span
+                # is still held here. The drill
                 # holds the first exchange's response for 0.75s -- longer
                 # than the quiet span the old loop trusted -- to show the
                 # window opens on that completion, and still measures only
                 # the receipt afterwards.
-                gate = ReadCompletionGate()
+                gate = RefreshCompletionGate()
                 state["health_gate"] = gate
                 state["drill_delay"] = 0.75
                 try:
@@ -443,8 +460,8 @@ def task_cancel_previous_workspace_receipt(executable):
                     while not gate.quiesced():
                         if time.monotonic() > deadline:
                             raise AssertionError(
-                                "refresh tail did not reach its completion boundary: held="
-                                + str(gate.held) + " exchanges=" + str(gate.exchanges)
+                                "refresh tail did not reach its completion boundary: "
+                                + repr(gate.snapshot())
                                 + " reads=" + repr((state["health_reads"], state["history_reads"])))
                         gate.changed.clear()
                         h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
@@ -452,17 +469,26 @@ def task_cancel_previous_workspace_receipt(executable):
                         "the completion gate never held the drill's slow exchange: "
                         + repr(gate.durations))
                 finally:
-                    state["health_gate"] = None
                     state["drill_delay"] = 0.0
+                # The gate stays armed through the receipt window: any
+                # exchange that arrives or completes there still registers
+                # and completes on the wire, so the assertions below see it.
                 h.drain_until_quiet(process, fd, output)
                 before = (state["health_reads"], state["history_reads"])
+                before_gate = gate.snapshot()
                 start = len(output)
                 release.set()
                 h.wait_for_output(process, fd, output,
                                   ("task " + TASK_A + " cancelled in the previous workspace").encode(),
                                   start=start, timeout=10)
                 h.drain_until_quiet(process, fd, output)
-                assert (state["health_reads"], state["history_reads"]) == before, state
+                after = (state["health_reads"], state["history_reads"])
+                assert after == before, {"before": before, "after": after}
+                after_gate = gate.snapshot()
+                assert after_gate == before_gate, (
+                    "an exchange ran during the receipt window: "
+                    + repr({"before": before_gate, "after": after_gate,
+                            "reads": {"before": before, "after": after}}))
                 assert len(transitions) == 1, transitions
                 os.write(fd, b"q")
             finally:

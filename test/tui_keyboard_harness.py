@@ -53,11 +53,18 @@ class RawHttpResponse:
         *,
         content_type: str,
         headers: tuple[tuple[str, str], ...] = (),
+        on_sent: Callable[[], None] | None = None,
     ) -> None:
         self.status = status
         self.body = body
         self.content_type = content_type
         self.headers = headers
+        # Invoked by the dispatcher after the response bytes have been
+        # handed to the socket -- or after the write failed, since a
+        # dropped reply still ends the exchange. A completion boundary
+        # keyed on the fixture callable's exit would fire before any of
+        # that, which is exactly the gap a response gate must not have.
+        self.on_sent = on_sent
 
 
 class StreamingHttpResponse:
@@ -354,6 +361,7 @@ def test_http_endpoint(
                 body = resolved.body
                 content_type = resolved.content_type
                 extra_headers = resolved.headers
+                sent = resolved.on_sent
             else:
                 status, payload = resolved
                 if (
@@ -390,6 +398,13 @@ def test_http_endpoint(
                 self.wfile.write(body)
             except (BrokenPipeError, ConnectionResetError):
                 pass
+            finally:
+                # The exchange ends here, not when the fixture callable
+                # returned: bytes are on (or lost to) the socket, the
+                # client can receive them, and nothing is buffered in the
+                # fixture. Callers gate completion boundaries on this.
+                if sent is not None:
+                    sent()
 
         def do_GET(self) -> None:
             self.respond()

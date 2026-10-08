@@ -7,10 +7,13 @@ type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture 
 val verb_to_wire : verb -> string
 val verb_of_wire : string -> verb option
 (** The browser's error codes this host acts on, and any other one as the
-    browser wrote it. *)
-type error_code =
+    browser wrote it. A code is made only by {!error_code_of_wire}, so the
+    two this host acts on are never carried as [Other_error]. *)
+type error_code = private
   | Session_not_created
-      (** Firefox will not serve a [session.new]: it holds a session already. *)
+      (** Firefox will not serve a [session.new]. BiDi answers this for any
+          reason a session cannot start; Firefox 157.0.1 was seen to answer
+          it while it held a session for another connection. *)
   | Invalid_session_id  (** A session command on a connection that has no session. *)
   | Other_error of string
 

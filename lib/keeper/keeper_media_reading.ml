@@ -113,19 +113,31 @@ let rec mkdir_p dir =
     try Sys.mkdir dir 0o755 with Sys_error _ when Sys.file_exists dir -> ())
 ;;
 
-let record_path ~base_path ~keeper_name ~kind ~sha =
+(* The media type is part of the key: the same bytes read as another type are
+   another attachment, with their own reading or their own failure. *)
+let media_type_segment media_type =
+  String.map
+    (fun c ->
+      match c with
+      | 'a' .. 'z' | '0' .. '9' | '.' | '+' | '-' -> c
+      | 'A' .. 'Z' -> Char.lowercase_ascii c
+      | _ -> '_')
+    media_type
+;;
+
+let record_path ~base_path ~keeper_name ~kind ~media_type ~sha =
   Filename.concat
     (Filename.concat
        (Filename.concat base_path "media-readings")
        (safe_segment keeper_name))
-    (Printf.sprintf "%s-%s.json" (kind_to_string kind) sha)
+    (Printf.sprintf "%s-%s-%s.json" (kind_to_string kind) sha (media_type_segment media_type))
 ;;
 
 let load_reading ~base_path ~keeper_name ~kind ~media_type ~sha =
   match base_path with
   | None -> None
   | Some base_path ->
-    let path = record_path ~base_path ~keeper_name ~kind ~sha in
+    let path = record_path ~base_path ~keeper_name ~kind ~media_type ~sha in
     (match In_channel.with_open_bin path In_channel.input_all with
      | exception Sys_error _ -> None
      | content ->
@@ -148,7 +160,7 @@ let store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~text =
   match base_path with
   | None -> ()
   | Some base_path ->
-    let path = record_path ~base_path ~keeper_name ~kind ~sha in
+    let path = record_path ~base_path ~keeper_name ~kind ~media_type ~sha in
     let json =
       `Assoc
         [ "schema_version", `Int 1
@@ -207,7 +219,7 @@ let reference_text ~kind ~media_type ~source =
 ;;
 
 let project_blocks ?base_path ~keeper_name ~needs_projection ~deadline ~read blocks =
-  let memo : (kind * string, string) Hashtbl.t = Hashtbl.create 4 in
+  let memo : (kind * string * string, string) Hashtbl.t = Hashtbl.create 4 in
   let replaced : (string * int) list ref = ref [] in
   let project_one ~kind ~media_type ~data ~source_type block =
     if not (needs_projection kind)
@@ -229,7 +241,7 @@ let project_blocks ?base_path ~keeper_name ~needs_projection ~deadline ~read blo
          | Ok bytes ->
            let sha = source_sha256 bytes in
            let text =
-             match Hashtbl.find_opt memo (kind, sha) with
+             match Hashtbl.find_opt memo (kind, media_type, String.lowercase_ascii sha) with
              | Some text -> text
              | None ->
                let text =
@@ -247,7 +259,7 @@ let project_blocks ?base_path ~keeper_name ~needs_projection ~deadline ~read blo
                     | Ok _ -> unavailable_text ~kind ~media_type ~sha ~reason:"empty_reading"
                     | Error reason -> unavailable_text ~kind ~media_type ~sha ~reason)
                in
-               Hashtbl.replace memo (kind, sha) text;
+               Hashtbl.replace memo (kind, media_type, String.lowercase_ascii sha) text;
                text
            in
            Agent_core.Types.text_block text))

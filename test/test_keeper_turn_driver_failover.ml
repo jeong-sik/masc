@@ -1275,6 +1275,66 @@ let test_h5_attachments_share_one_deadline () =
     (contains ~needle:"budget_spent" (List.nth texts 1));
   Alcotest.(check int) "the reader ran once" 1 !calls
 
+(* Review finding (context-reviewer, #41983 75feda36): reuse is keyed by the
+   media type as well, in memory and on disk. The same bytes presented as
+   another type are another attachment. *)
+let h5_doc_block ~media_type =
+  Agent_core.Types.document_block
+    ~media_type
+    ~data:(Base64.encode_string h5_fact_document)
+    ~source_type:Agent_core.Types.Base64
+    ()
+
+let h5_reader_only_pdf calls ~deadline:_ ~kind:_ ~media_type ~bytes:_ =
+  incr calls;
+  if media_type = "application/pdf" then Ok ("pdf-reading: " ^ h5_fact_document)
+  else Error "no_document_reader"
+
+let h5_same_bytes_two_types ?base_path ~first ~second () =
+  let calls = ref 0 in
+  let blocks, _ =
+    h5_project_direct ?base_path
+      ~deadline:(Monotonic_deadline.after ~seconds:30.)
+      ~read:(h5_reader_only_pdf calls)
+      [ h5_doc_block ~media_type:first; h5_doc_block ~media_type:second ]
+  in
+  h5_texts blocks, !calls
+
+let test_h5_same_bytes_other_type_is_not_a_memo_hit () =
+  let texts, calls = h5_same_bytes_two_types ~first:"application/pdf" ~second:"text/plain" () in
+  Alcotest.(check int) "the reader ran for each type" 2 calls;
+  Alcotest.(check bool) "the pdf was read" true
+    (contains ~needle:"status=read" (List.nth texts 0));
+  Alcotest.(check bool) "the other type is unavailable, not a copy of the pdf reading" true
+    (contains ~needle:"status=unavailable" (List.nth texts 1)
+     && not (contains ~needle:"pdf-reading" (List.nth texts 1))
+     && not (contains ~needle:"application/pdf" (List.nth texts 1)))
+
+let test_h5_same_bytes_other_type_reverse_order () =
+  let texts, calls = h5_same_bytes_two_types ~first:"text/plain" ~second:"application/pdf" () in
+  Alcotest.(check int) "the reader ran for each type" 2 calls;
+  Alcotest.(check bool) "the first stays unavailable" true
+    (contains ~needle:"status=unavailable" (List.nth texts 0));
+  Alcotest.(check bool) "the pdf is still read, not a copy of the failure" true
+    (contains ~needle:"pdf-reading" (List.nth texts 1))
+
+let test_h5_durable_reading_is_keyed_by_media_type () =
+  let dir = h5_fresh_dir () in
+  ignore (h5_same_bytes_two_types ~base_path:dir ~first:"application/pdf" ~second:"text/plain" ());
+  let calls = ref 0 in
+  let blocks, _ =
+    h5_project_direct ~base_path:dir
+      ~deadline:(Monotonic_deadline.after ~seconds:30.)
+      ~read:(h5_reader_only_pdf calls)
+      [ h5_doc_block ~media_type:"text/plain"; h5_doc_block ~media_type:"application/pdf" ]
+  in
+  let texts = h5_texts blocks in
+  Alcotest.(check int) "only the type with no stored reading is read again" 1 !calls;
+  Alcotest.(check bool) "the stored pdf reading is reused after a restart" true
+    (contains ~needle:"pdf-reading" (List.nth texts 1));
+  Alcotest.(check bool) "the other type was not served the pdf reading" false
+    (contains ~needle:"pdf-reading" (List.nth texts 0))
+
 let synthetic_image () =
   Agent_core.Types.image_block
     ~media_type:"image/png"
@@ -6551,6 +6611,18 @@ let () =
             "H5 attachments share one deadline"
             `Quick
             test_h5_attachments_share_one_deadline;
+          Alcotest.test_case
+            "H5 same bytes under another media type is not a memo hit"
+            `Quick
+            test_h5_same_bytes_other_type_is_not_a_memo_hit;
+          Alcotest.test_case
+            "H5 same bytes under another media type, reverse order"
+            `Quick
+            test_h5_same_bytes_other_type_reverse_order;
+          Alcotest.test_case
+            "H5 durable reading is keyed by media type"
+            `Quick
+            test_h5_durable_reading_is_keyed_by_media_type;
           Alcotest.test_case
             "media rows keep their fields in the public view"
             `Quick

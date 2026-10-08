@@ -3291,7 +3291,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc.runtime masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries masc.runtime masc.server masc.ag_ui masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model

@@ -15400,19 +15400,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            List.iter (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with
              | Keeper_chat_live.Accepted {interactive=None;_} ->
                launch_keeper_turns_load state ~mailbox
-             | Keeper_chat_live.Accepted {interactive=Some receipt;_} ->
-               let notice = match receipt.outcome with
-                 | Keeper_chat.Applied ->
-                   (match receipt.interrupt_error with
-                    | Some detail -> Some ("Message accepted; interruption unavailable: " ^ detail)
-                    | None when receipt.signalled -> Some "Update accepted; stopping the observed turn before continuing"
-                    | None when receipt.resumed -> Some "Update accepted; chat interruption pause released"
-                    | None -> None)
-                 | Keeper_chat.Stale_control ->
-                   Some "Message queued: chat controls changed after this input; the newer stop or resume remains in effect"
-                 | Keeper_chat.Paused -> Some "Message queued: Keeper remains paused; inspect with /queue"
-                 | Keeper_chat.Replayed -> None in
-               Option.iter (append_chat_history state request Message_status) notice
+             | Keeper_chat_live.Accepted {interactive=Some _;_} -> ()
              | _ -> ()) deltas;
            if List.exists (Keeper_chat.same_request_identity request)
                 state.keeper_run_next_pending then begin
@@ -15462,7 +15450,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                      not (String.equal name request.keeper_name
                           && String.equal id request.request_id))
                    state.keeper_auto_priority_pending;
-                 append_chat_history state request Message_status "Submitted message already started or settled; no other turn was interrupted"
+                 turn_log_note_priority_unavailable entry.log
                | None -> ())
            end;
            if List.exists (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with

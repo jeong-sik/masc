@@ -109,8 +109,8 @@ let test_seq_dedup_and_none_never_dedupes () =
   check bool "same seq is a duplicate" false (Log.add t ~seq:(Some 0) (Live.Text "again"));
   let revision = Log.revision t in
   check bool "duplicate leaves the revision alone" true (Log.revision t = revision);
-  check bool "an id-less delta is added" true (Log.add t ~seq:None (Live.Accepted { admission = Live.Running; queue_length = 1; interactive = None }));
-  check bool "and again: None never dedupes" true (Log.add t ~seq:None (Live.Accepted { admission = Live.Running; queue_length = 1; interactive = None }));
+  check bool "an id-less delta is added" true (Log.add t ~seq:None (Live.Text "!"));
+  check bool "and again: None never dedupes" true (Log.add t ~seq:None (Live.Text "!"));
   check int "three entries" 3 (List.length (Log.entries t));
   check position "resume position" (Journal.After_seq 0) (Log.resume_position t)
 

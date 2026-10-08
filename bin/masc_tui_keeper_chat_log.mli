@@ -10,8 +10,9 @@
 type entry =
   { seq : int option
         (** Journal position of the frame that carried the delta. [None] for
-            frames that never went through the bus (the acceptance event, the
-            settle-time run_error); such entries are never deduplicated. *)
+            frames that never went through the bus (the settle-time
+            run_error); such entries are never deduplicated. Acceptance is
+            retained separately as request metadata. *)
   ; at : float option (** Observed event time; journal reads preserve [ts]. *)
   ; attempt : int  (** 0-based runtime attempt this entry belongs to. *)
   ; delta : Masc_tui_keeper_chat_live.delta
@@ -31,7 +32,9 @@ val request_id : t -> string
 val started_at : t -> float
 
 val add : ?at:float -> t -> seq:int option -> Masc_tui_keeper_chat_live.delta -> bool
-(** Appends unless [seq] is [Some n] and an entry with seq [n] is already
+(** Acceptance updates the first/latest request receipt without appending a
+    journal entry or advancing its cursor. Other deltas append unless [seq]
+    is [Some n] and an entry with seq [n] is already
     held; returns whether it was added. A [Runtime_attempt_started] delta
     advances the attempt before it is stored, so it is the first entry of the
     new attempt. *)
@@ -62,6 +65,18 @@ val delta_of_journaled :
     page and the wire decode to the same deltas. *)
 
 val entries : t -> entry list  (** Insertion order. *)
+
+val first_acceptance : t -> entry option
+val latest_acceptance : t -> entry option
+(** Request receipts are scalar observations, separate from journal entries
+    and their cursor. The first receipt retains admission provenance; the
+    latest receipt updates the queue snapshot after a reconnect. [None]
+    means this client has observed no acceptance. *)
+
+val note_priority_unavailable : t -> unit
+val priority_unavailable : t -> bool
+(** Local priority intent met a Running/Settled admission, so no run-next
+    control was sent. Kept with receipt metadata, outside journal entries. *)
 
 val resume_position : t -> Masc.Keeper_chat_event_log.replay_position
 (** Where a resume of this turn starts: after the highest seq held, or the

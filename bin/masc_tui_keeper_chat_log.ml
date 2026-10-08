@@ -21,6 +21,9 @@ type t =
   ; source : journal_source
   ; started_at : float
   ; mutable reversed_entries : entry list
+  ; mutable first_acceptance : entry option
+  ; mutable latest_acceptance : entry option
+  ; mutable priority_unavailable : bool
   ; held_seqs : (int, unit) Hashtbl.t
   ; mutable resume_position : Journal.replay_position
         (* After the highest seq held; the whole turn while none is. *)
@@ -35,6 +38,9 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; source
   ; started_at
   ; reversed_entries = []
+  ; first_acceptance = None
+  ; latest_acceptance = None
+  ; priority_unavailable = false
   ; held_seqs = Hashtbl.create 64
   ; resume_position = Journal.Whole_turn
   ; attempt = 0
@@ -50,6 +56,9 @@ let keeper_name t = t.keeper_name
 let request_id t = t.request_id
 let started_at t = t.started_at
 let entries t = List.rev t.reversed_entries
+let first_acceptance t = t.first_acceptance
+let latest_acceptance t = t.latest_acceptance
+let priority_unavailable t = t.priority_unavailable
 let resume_position t = t.resume_position
 let attempt t = t.attempt
 let committed t = t.committed
@@ -57,7 +66,21 @@ let revision t = t.revision
 
 let bump t = t.revision <- t.revision + 1
 
+let note_priority_unavailable t =
+  if not t.priority_unavailable then begin
+    t.priority_unavailable <- true;
+    bump t
+  end
+
 let add ?at t ~seq (delta : Live.delta) =
+  match delta with
+  | Live.Accepted _ ->
+      let entry = { seq = None; at; attempt = 0; delta } in
+      if t.first_acceptance = None then t.first_acceptance <- Some entry;
+      t.latest_acceptance <- Some entry;
+      bump t;
+      true
+  | _ ->
   let duplicate =
     match seq with
     | Some seq -> Hashtbl.mem t.held_seqs seq

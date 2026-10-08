@@ -1,0 +1,2 @@
+### Fixed
+- Keep request admission and priority feedback ahead of the owned reply, even when buffered execution has an earlier timestamp. Preserve notices through reconnects and batch/journal source selection without adding metadata to authored messages or treating queued input as consumed.

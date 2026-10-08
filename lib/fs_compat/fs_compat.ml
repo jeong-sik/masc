@@ -2512,6 +2512,8 @@ type private_jsonl_transaction_operation =
   | Remove_rewrite_stage
   | Truncate_transaction_data
   | Sync_transaction_data
+  | Remove_transaction_data
+  | Sync_removal_parent
 
 type private_jsonl_operation_failure =
   { operation : private_jsonl_transaction_operation
@@ -2655,6 +2657,8 @@ let private_jsonl_operation_to_string = function
   | Remove_rewrite_stage -> "remove rewrite stage"
   | Truncate_transaction_data -> "truncate transaction data"
   | Sync_transaction_data -> "sync transaction data"
+  | Remove_transaction_data -> "remove transaction data"
+  | Sync_removal_parent -> "sync removal parent"
 ;;
 
 let private_jsonl_operation_failure_to_string failure =
@@ -3125,6 +3129,43 @@ let private_jsonl_open_existing ~close_fd path flags =
     Error
       (Private_jsonl_operation_failed
          (private_jsonl_failure Open_transaction_data exception_))
+;;
+
+let purge_private_jsonl_durable_locked_with_io ~io path =
+  let success cursor = Cursor_succeeded cursor in
+  with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir ~path ->
+  let ( let* ) = Result.bind in
+  let sync_removed () =
+    let* () =
+      private_jsonl_capture Sync_removal_parent (fun () ->
+        io.before_sync_parent dir;
+        fsync_parent_directory dir)
+      |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+    in
+    Ok Private_jsonl_cursor.Missing
+  in
+  let* opened =
+    private_jsonl_open_existing ~close_fd:io.close_fd path
+      [ Unix.O_RDONLY; Unix.O_NONBLOCK ]
+  in
+  match opened with
+  | None -> sync_removed ()
+  | Some fd ->
+    private_jsonl_with_fd ~close_operation:Close_transaction_data
+      ~close_fd:io.close_fd ~success fd (fun () ->
+        let* () =
+          private_jsonl_capture Remove_transaction_data (fun () -> Unix.unlink path)
+          |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+        in
+        sync_removed ())
+;;
+
+let purge_private_jsonl_durable_locked_result path =
+  purge_private_jsonl_durable_locked_with_io ~io:private_jsonl_transaction_unix_io path
+;;
+
+let purge_private_jsonl_durable_locked_with_io_for_testing =
+  purge_private_jsonl_durable_locked_with_io
 ;;
 
 let rec private_jsonl_read_byte fd byte offset =

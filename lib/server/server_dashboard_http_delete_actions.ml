@@ -561,6 +561,16 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
          with
          | Error _ as error -> error
          | Ok () -> remove rest)
+      | Keeper_board_attention_candidates_artifact :: rest ->
+        (match Keeper_board_attention_candidate.purge
+           ~base_path:config.Workspace.base_path ~keeper_name with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
+      | Keeper_board_attention_partitions_artifact :: rest ->
+        (match Keeper_board_attention_partition.purge
+           ~base_path:config.Workspace.base_path ~keeper_name with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
       | artifact :: rest ->
         (match keeper_artifact_path config keeper_name artifact with
          | None ->

@@ -891,6 +891,9 @@ let test_missing_start_text_scope_survives_journal_and_wire () =
          E.Agent_core_stream_message_delta {stream_scope=stopped_scope;
            stop_reason=Some Agent_core.Types.EndTurn; usage=None};
          E.Reply_details {reply="Done"; turn_outcome=Outcome.Visible_reply;
+           (* Exercise recovery from observed text/stop scopes without a
+              separate terminal identity on the durable reply. *)
+           terminal_stream_scope=None;
            turn_ref=Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:3}]
       |> List.mapi (fun seq event ->
         let wire = Journal.keeper_chat_event_to_json event

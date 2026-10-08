@@ -1056,7 +1056,7 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
   let on_stream_event = function
     | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Conversation_compacted
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Conversation_compacted
     | Usage_reported _ | Turn_finished _ -> ()
   in
   with_fixture
@@ -1130,7 +1130,7 @@ let test_quota_refusal_still_reports_the_turns_spend () =
         (turn_id, model, usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens)
         :: !reported
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Usage_windows_reported _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture
@@ -1159,7 +1159,7 @@ let test_quota_refusal_before_any_response_reports_no_spend () =
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Usage_windows_reported _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture [ Emit rate_limit_rejected; Emit quota_result_with_usage ] (fun path ->
@@ -1177,7 +1177,7 @@ let test_result_of_another_session_reports_no_spend () =
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Usage_windows_reported _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture
@@ -1327,7 +1327,7 @@ let test_api_diagnostic_preserves_native_effects () =
                   | Runtime_claude_code.Native_tool_started _ | Native_tool_finished _ ->
                     true
                   | Turn_started _ | Usage_windows_reported _ | Conversation_compacted
-                  | Native_tool_progress _ | Usage_reported _ -> false
+                  | Native_tool_progress _ | Native_task_observed _ | Usage_reported _ -> false
                   | Text_delta _ | Thinking_delta _ | Content_block_stopped _
                   | Dynamic_tool_started _
                   | Dynamic_tool_finished _
@@ -2447,11 +2447,16 @@ let test_duplicate_keys_fail_closed () =
   let duplicate =
     {|{"type":"assistant","parent_tool_use_id":null,"type":"result","session_id":"__SESSION__","uuid":"duplicate-1"}|}
   in
-  with_fixture [ Emit duplicate ] (fun path ->
-    match run_fixture path with
-    | Error (Runtime_claude_code.Protocol_error _) -> ()
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-    | Ok _ -> fail "duplicate stream JSON key was admitted")
+  List.iter (fun frame ->
+    with_fixture [ Emit frame ] (fun path ->
+      match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "duplicate stream JSON key was admitted"))
+    [ duplicate
+    ; {|{"type":"system","subtype":"task_started","subtype":"init","session_id":"__SESSION__","uuid":"mixed-root"}|}
+    ; {|{"type":"system","type":"result","subtype":"task_started","session_id":"__SESSION__","uuid":"mixed-type"}|}
+    ]
 ;;
 
 let test_unsupported_control_request_fails_closed () =
@@ -2665,6 +2670,299 @@ let test_child_heartbeat_and_unknown_result_scope_are_unowned () =
      [Emit native_tool_assistant;
       Emit (match Yojson.Safe.from_string native_tool_result with `Assoc fields -> Yojson.Safe.to_string (`Assoc (List.remove_assoc "parent_tool_use_id" fields)) | _ -> fail "object expected");
       Emit (heartbeat_frame ())]]
+;;
+
+let task_wire ?(task_id="task-one") ?(run_id=Some "alpha")
+    ?(call_id=Some "parent-agent") ?(session="__SESSION__") ~uuid subtype payload =
+  Yojson.Safe.to_string (`Assoc (["type",`String "system";"subtype",`String subtype;
+    "session_id",`String session;"uuid",`String uuid;"task_id",`String task_id]
+    @ Option.to_list (Option.map (fun id -> "run_id",`String id) run_id)
+    @ (if subtype="task_updated" then [] else
+        Option.to_list (Option.map (fun id -> "tool_use_id",`String id) call_id))
+    @ payload))
+;;
+
+let task_start_payload = ["description",`String "not root speech";
+  "task_type",`String "local_agent";"spawn_depth",`Int 1;
+  "subagent_type",`String "Explore";"is_backgrounded",`Bool true;
+  "prompt",`String "private child prompt"]
+;;
+
+let task_progress_payload count = ["description",`String "child activity";
+  "usage",`Assoc ["total_tokens",count;"tool_uses",`Float 2.;"duration_ms",`Int 17];
+  "last_tool_name",`String "Read";"summary",`String "not root Thinking"]
+;;
+
+let task_terminal_payload status = ["status",`String status;
+  "summary",`String "not root answer";"output_file",`String "/private/child-output"]
+;;
+
+let replace_wire_field key value frame = match Yojson.Safe.from_string frame with
+  | `Assoc fields -> Yojson.Safe.to_string (`Assoc ((key,value)::List.remove_assoc key fields))
+  | _ -> fail "object fixture expected"
+;;
+
+let agent_launch_result call_id = replace_wire_field "message"
+  (`Assoc ["role",`String "user";"content",`List [`Assoc ["type",`String "tool_result";
+    "tool_use_id",`String call_id;"content",`String "background launch";"is_error",`Bool false]]])
+  native_tool_result
+;;
+
+let task_observations events = List.filter_map (function
+  | Runtime_claude_code.Native_task_observed observation -> Some observation | _ -> None) events
+;;
+
+let test_tasks_survive_native_return_without_changing_root_response () =
+  let second_call = `Assoc ["type",`String "tool_use";"id",`String "second-agent";
+    "name",`String "Agent";"input",`Assoc []] in
+  let starts = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields ->
+        let message = match List.assoc "message" fields with `Assoc fields -> fields | _ -> fail "message" in
+        let content = match List.assoc "content" message with `List blocks -> blocks | _ -> fail "content" in
+        replace_wire_field "message" (`Assoc (("content",`List (content @ [second_call]))::
+          List.remove_assoc "content" message)) parent_tool_assistant
+    | _ -> fail "assistant" in
+  let events = ref [] in
+  with_fixture [Emit starts; Emit (agent_launch_result "parent-agent");
+    Emit {|{"type":"system","subtype":"background_tasks_changed","uuid":"level-before","session_id":"__SESSION__","tasks":[{"task_id":"task-one","run_id":"alpha","task_type":"local_agent","description":"level membership only"}]}|};
+    (* A legal first registration can arrive after the native return. *)
+    Emit (task_wire ~uuid:"start-one" "task_started" task_start_payload);
+    Emit (task_wire ~task_id:"task-two" ~call_id:(Some "second-agent") ~uuid:"start-two"
+      "task_started" (("is_backgrounded",`Bool false)::List.remove_assoc "is_backgrounded" task_start_payload));
+    Emit {|{"type":"system","subtype":"background_tasks_changed","uuid":"empty-level","session_id":"__SESSION__","tasks":[]}|};
+    Emit (task_wire ~uuid:"progress-one" "task_progress" (task_progress_payload (`Int 30)));
+    Emit (task_wire ~task_id:"task-two" ~uuid:"background-two" "task_updated"
+      ["patch",`Assoc ["is_backgrounded",`Bool true]]);
+    Emit (agent_launch_result "second-agent");
+    Emit (task_wire ~uuid:"progress-decrease" "task_progress" (task_progress_payload (`Float 3.)));
+    Emit (task_wire ~uuid:"state-one" "task_updated" ["patch",`Assoc
+      ["status",`String "completed";"end_time",`Float 2000.;"total_paused_ms",`Int 9]]);
+    Emit (task_wire ~uuid:"terminal-one" "task_notification" (task_terminal_payload "completed"));
+    Emit (task_wire ~uuid:"terminal-metadata" "task_updated"
+      ["patch",`Assoc ["end_time",`Int 2001;"is_backgrounded",`Bool true]]);
+    Emit (task_wire ~task_id:"task-two" ~call_id:(Some "second-agent") ~uuid:"terminal-two"
+      "task_notification" (task_terminal_payload "stopped" @ ["reason",`String "worker_restart"]));
+    Emit assistant;Emit result_with_usage]
+    (fun path -> match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "task metadata cannot replace root body" "MASC_CLAUDE_OK" turn.text;
+          check string "task counters cannot change measured root model" "claude-fixture" turn.model;
+          check (option int) "task usage never replaces root result usage" (Some 123456)
+            (Option.map (fun (u:Runtime_claude_code.turn_usage) -> u.input_tokens) turn.usage.turn_total);
+          let observations = task_observations (List.rev !events) in
+          check (list bool) "terminal boundary belongs to each task, not its parent call"
+            [false;false;false;false;false;true;true;true;true]
+            (List.map (fun (o:Runtime_claude_code.native_task_observation) ->
+              o.boundary=Task_terminal_observed) observations);
+          check (list string) "exact edge order despite native return and task interleaving"
+            ["start-one";"start-two";"progress-one";"background-two";"progress-decrease";
+             "state-one";"terminal-one";"terminal-metadata";"terminal-two"]
+            (List.map (fun (o:Runtime_claude_code.native_task_observation) -> o.uuid) observations);
+          List.iter (fun (o:Runtime_claude_code.native_task_observation) ->
+            check string "owner is original root envelope" "parent-assistant" o.owner.call_envelope_uuid;
+            check int "parallel Agent calls retain their own ordinal"
+              (if o.owner.call_id="parent-agent" then 0 else 1) o.owner.call_ordinal;
+            check string "observed session is actual runtime session" turn.session_id o.owner.session_id) observations;
+          let counts = List.filter_map (fun (o:Runtime_claude_code.native_task_observation) ->
+            match o.event with Task_progress_reported {usage;_} -> Some usage.total_tokens | _ -> None) observations in
+          check (list int) "safe numeric floats and decreasing task counts remain observations" [30;3] counts;
+          check int "only the two native results finish native calls" 2
+            (List.length (List.filter (function Runtime_claude_code.Native_tool_finished _ -> true | _ -> false) !events));
+          check int "only the root result ends the turn" 1
+            (List.length (List.filter (function Runtime_claude_code.Turn_finished _ -> true | _ -> false) !events)))
+;;
+
+let test_task_run_order_replays_and_cross_kind_uuid () =
+  let start uuid run = task_wire ~uuid ~run_id:run "task_started" task_start_payload in
+  let progress uuid run = task_wire ~uuid ~run_id:run "task_progress" (task_progress_payload (`Int 1)) in
+  let events = ref [] in
+  with_fixture (List.map (fun x -> Emit x)
+    [parent_tool_assistant;agent_retry_frame ~uuid:"retry-owned" ();
+     heartbeat_frame ~uuid:"heartbeat-owned" ~parent:"parent-agent" ~tool_name:"Agent" ();
+     start "heartbeat-owned" (Some "alpha");
+     start "retry-owned" (Some "alpha");start "start" (Some "alpha");start "start" (Some "alpha");
+     start "duplicate-start-new-uuid" (Some "alpha");
+     agent_retry_frame ~uuid:"start" ();heartbeat_frame ~uuid:"start" ~parent:"parent-agent" ~tool_name:"Agent" ();
+     task_wire ~uuid:"terminal-alpha" "task_notification" (task_terminal_payload "completed");
+     task_wire ~uuid:"cannot-reopen" "task_updated" ["patch",`Assoc ["status",`String "running"]];
+     progress "closed-alpha" (Some "alpha");start "runless" None;start "runless" (Some "omega");
+     start "new-run" (Some "omega");start "late-start" (Some "beta");
+     progress "late-progress" (Some "alpha");progress "live-progress" (Some "omega");
+     task_wire ~uuid:"wrong-call" ~run_id:(Some "omega") ~call_id:(Some "unrelated")
+       "task_notification" (task_terminal_payload "failed");
+     task_wire ~uuid:"terminal-omega" ~run_id:(Some "omega") "task_notification" (task_terminal_payload "failed");
+     task_wire ~uuid:"terminal-again" ~run_id:(Some "omega") "task_notification" (task_terminal_payload "failed");
+     assistant;result]) (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+          check (list (pair string string)) "only registered exact runs and fresh cross-kind UUIDs publish"
+            ["start","alpha";"terminal-alpha","alpha";"new-run","omega";
+             "live-progress","omega";"terminal-omega","omega";"terminal-again","omega"]
+            (task_observations (List.rev !events) |> List.map (fun (o:Runtime_claude_code.native_task_observation) -> o.uuid,o.owner.run_id));
+          check int "task UUID cannot be reused as retry or heartbeat" 2
+            (List.length (List.filter (function Runtime_claude_code.Native_tool_progress _ -> true | _ -> false) !events)))
+;;
+
+let test_task_registration_rejects_unowned_and_malformed_frames () =
+  let start = task_wire ~uuid:"valid" "task_started" task_start_payload in
+  let child = replace_wire_field "parent_tool_use_id" (`String "outer") parent_tool_assistant in
+  let reused = replace_wire_field "uuid" (`String "another-root-occurrence") parent_tool_assistant in
+  let bad_depth = replace_wire_field "spawn_depth" (`Int 2) start in
+  List.iter (fun (native,frames) ->
+    let seen = ref [] in
+    with_fixture (List.map (fun x -> Emit x) (frames @ [assistant;result])) (fun path ->
+      match run_fixture ~native ~on_stream_event:(fun event -> seen := event :: !seen) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> check int "unowned task never acquires a later root call" 0
+          (List.length (task_observations !seen))))
+    [Runtime_native_tools.Native_read,[parent_tool_assistant;start];
+     Native_none,[parent_tool_assistant;start];Native_full,[child;start];
+     Native_full,[parent_tool_assistant;reused;start];
+     Native_full,[parent_tool_assistant;bad_depth];
+     Native_full,[native_tool_assistant;task_wire ~call_id:(Some "native-call-1")
+       ~uuid:"read-is-not-agent" "task_started" task_start_payload];
+     Native_full,[parent_tool_assistant;replace_wire_field "parent_task_id" (`String "child-parent") start];
+     Native_full,[start;parent_tool_assistant;replace_wire_field "uuid" (`String "fresh-unowned-replay") start];
+     Native_full,[task_wire ~uuid:"progress-before-owner" "task_progress" (task_progress_payload (`Int 1));
+       parent_tool_assistant;start]];
+  let malformed = match Yojson.Safe.from_string start with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("task_id",`String "collision")::fields))
+    | _ -> fail "object" in
+  let bad_usage = task_wire ~uuid:"bad-number" "task_progress" (task_progress_payload (`Intlit "9007199254740992")) in
+  let bad_patch = task_wire ~uuid:"bad-patch" "task_updated" ["patch",`Assoc
+    ["status",`String "running";"status",`String "completed"]] in
+  let events = ref [] in
+  with_fixture (List.map (fun x -> Emit x)
+    [parent_tool_assistant;malformed;replace_wire_field "session_id" (`String "foreign") start;start;
+     bad_usage;bad_patch;task_wire ~uuid:"good-number" "task_progress" (task_progress_payload (`Float 1.));
+     assistant;result]) (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "malformed task telemetry cannot terminate a healthy turn" "MASC_CLAUDE_OK" turn.text;
+          check (list string) "malformed/foreign UUIDs do not poison the corrected task"
+            ["valid";"good-number"] (task_observations (List.rev !events)
+              |> List.map (fun (o:Runtime_claude_code.native_task_observation) -> o.uuid)))
+;;
+
+let test_task_telemetry_identity_and_counter_validation () =
+  let start = task_wire ~uuid:"valid-start" "task_started" task_start_payload in
+  let progress = task_wire ~uuid:"valid-progress" "task_progress" (task_progress_payload (`Int 0)) in
+  let duplicate_subtype subtype = match Yojson.Safe.from_string start with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("subtype",`String subtype)::fields))
+    | _ -> fail "object fixture expected" in
+  let blank_identities = List.concat_map (fun key ->
+    List.map (fun blank -> replace_wire_field key (`String blank) start) ["";" \t\n"])
+    ["task_id";"run_id";"uuid";"tool_use_id";"parent_task_id";"session_id"] in
+  let check_frames frames expected =
+    let events = ref [] in
+    with_fixture (List.map (fun frame -> Emit frame) (frames @ [assistant;result])) (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "malformed task does not fail root turn" "MASC_CLAUDE_OK" turn.text;
+          check (list string) "only corrected telemetry publishes" expected
+            (task_observations (List.rev !events) |> List.map
+              (fun (o:Runtime_claude_code.native_task_observation) -> o.uuid))) in
+  List.iter (fun malformed ->
+    check_frames [parent_tool_assistant;malformed] [];
+    check_frames [parent_tool_assistant;malformed;start] ["valid-start"])
+    (duplicate_subtype "task_started" :: duplicate_subtype "task_progress" :: blank_identities);
+  let ended timestamp = task_wire ~uuid:"valid-end" "task_updated"
+    ["patch", `Assoc ["end_time", `Int timestamp]] in
+  check_frames [parent_tool_assistant;start;ended (-1)] ["valid-start"];
+  check_frames [parent_tool_assistant;start;ended (-1);ended 0]
+    ["valid-start";"valid-end"];
+  List.iter (fun key ->
+    let counts = ["total_tokens",`Int 0;"tool_uses",`Int 0;"duration_ms",`Int 0] in
+    let usage = `Assoc ((key,`Int (-1))::List.remove_assoc key counts) in
+    let malformed_progress = replace_wire_field "usage" usage progress in
+    let terminal = task_wire ~uuid:"valid-terminal" "task_notification"
+      (("usage",`Assoc counts)::task_terminal_payload "completed") in
+    let malformed_terminal = replace_wire_field "usage" usage terminal in
+    check_frames [parent_tool_assistant;start;malformed_progress;malformed_terminal]
+      ["valid-start"];
+    check_frames [parent_tool_assistant;start;malformed_progress;progress;
+      malformed_terminal;terminal] ["valid-start";"valid-progress";"valid-terminal"])
+    ["total_tokens";"tool_uses"]
+;;
+
+let test_task_clock_values_and_replay () =
+  let progress task_id uuid value = task_wire ~task_id ~uuid "task_progress"
+    ["description",`String "clock observation";"usage",`Assoc
+      ["total_tokens",`Int 3;"tool_uses",`Int 2;"duration_ms",value]] in
+  let pause task_id uuid value = task_wire ~task_id ~uuid "task_updated"
+    ["patch",`Assoc ["total_paused_ms",value]] in
+  let terminal task_id uuid value = task_wire ~task_id ~uuid "task_notification"
+    (("usage",`Assoc ["total_tokens",`Int 3;"tool_uses",`Int 2;"duration_ms",value])
+      :: task_terminal_payload "completed") in
+  let check_frames frames expected =
+    let events = ref [] in
+    with_fixture (List.map (fun frame -> Emit frame)
+      (parent_tool_assistant :: agent_launch_result "parent-agent" :: frames
+       @ [assistant;result_with_usage])) (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "task clocks preserve root body" "MASC_CLAUDE_OK" turn.text;
+          check string "task clocks preserve root model" "claude-fixture" turn.model;
+          check (option int) "task clocks preserve root usage" (Some 123456)
+            (Option.map (fun (u:Runtime_claude_code.turn_usage) -> u.input_tokens) turn.usage.turn_total);
+          let actual = task_observations (List.rev !events) |> List.map
+            (fun (o:Runtime_claude_code.native_task_observation) ->
+              check string "clock keeps original native owner" "parent-agent" o.owner.call_id;
+              check string "clock keeps original envelope" "parent-assistant" o.owner.call_envelope_uuid;
+              let value = match o.event with
+                | Task_registered _ -> None
+                | Task_patched {total_paused_ms;_} -> total_paused_ms
+                | Task_progress_reported {usage;_}
+                | Task_terminal_reported {usage=Some usage;_} ->
+                    check int "clock does not replace token count" 3 usage.total_tokens;
+                    check int "clock does not replace tool count" 2 usage.tool_uses;
+                    Some usage.duration_ms
+                | Task_terminal_reported {usage=None;_} -> fail "clock usage missing" in
+              o.uuid,(value,o.boundary=Task_terminal_observed)) in
+          check (list (pair string (pair (option int) bool)))
+            "exact signed clock facts, replay and task boundary" expected actual;
+          check int "tasks do not reopen or finish the native call" 1
+            (List.length (List.filter (function Runtime_claude_code.Native_tool_finished _ -> true | _ -> false) !events));
+          check int "only root result finishes the turn" 1
+            (List.length (List.filter (function Runtime_claude_code.Turn_finished _ -> true | _ -> false) !events))) in
+  let cases = [`Int (-1),-1;`Float (-1.),-1;`Int 0,0;`Int 17,17;
+    `Int (-9_007_199_254_740_991),-9_007_199_254_740_991;
+    `Float (-9_007_199_254_740_991.),-9_007_199_254_740_991;
+    `Int 9_007_199_254_740_991,9_007_199_254_740_991] in
+  let frames, expected = List.mapi (fun index (value,clock) ->
+    let task = Printf.sprintf "signed-clock-%d" index in
+    let start = task^"-start" and p = task^"-progress" and u = task^"-pause"
+        and stop = task^"-terminal" in
+    [task_wire ~task_id:task ~uuid:start "task_started" task_start_payload;
+     progress task p value;progress task p value;progress task p (`Int 9);
+     pause task u value;pause task u value;pause task u (`Int 9);
+     terminal task stop value;terminal task stop value;terminal task stop (`Int 9);
+     progress task (task^"-after-terminal") (`Int (-1))],
+    [start,(None,false);p,(Some clock,false);u,(Some clock,false);stop,(Some clock,true)]) cases
+    |> List.split in
+  check_frames (List.concat frames) (List.concat expected);
+  let malformed = [`Int (-9_007_199_254_740_992);`Int 9_007_199_254_740_992;
+    `Float (-0.5);`Float 0.5;`String "-1";`Null] in
+  let frames, expected = List.mapi (fun index invalid ->
+    let task = Printf.sprintf "malformed-clock-%d" index in
+    let start = task^"-start" and p = task^"-progress" and u = task^"-pause"
+        and stop = task^"-terminal" in
+    [task_wire ~task_id:task ~uuid:start "task_started" task_start_payload;
+     progress task p invalid;pause task u invalid;terminal task stop invalid;
+     progress task p (`Int (-1));pause task u (`Int (-1));terminal task stop (`Int (-1))],
+    [start,(None,false);p,(Some (-1),false);u,(Some (-1),false);stop,(Some (-1),true)]) malformed
+    |> List.split in
+  check_frames (List.concat frames) (List.concat expected)
 ;;
 
 let test_tool_progress_keeps_stream_open () =
@@ -3037,6 +3335,10 @@ let () =
             test_rejected_rate_limit_overrides_success_flag
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case "duplicate keys fail closed" `Quick test_duplicate_keys_fail_closed
+        ; test_case "task identities and counters reject malformed telemetry" `Quick
+            test_task_telemetry_identity_and_counter_validation
+        ; test_case "task signed clocks preserve values and UUID replay" `Quick
+            test_task_clock_values_and_replay
         ; test_case "result usage is carried" `Quick test_result_usage_is_carried
         ; test_case "latest request input and result total both travel" `Quick
             test_latest_request_input_and_result_total_both_travel
@@ -3188,6 +3490,9 @@ let () =
         ; test_case "Agent retry clear and cross-kind UUID ownership" `Quick test_agent_retry_identity_clear_and_uuid_interleaving
         ; test_case "Agent retry exception stays producer scoped" `Quick test_agent_retry_observation_exception_is_narrow
         ; test_case "Agent retry requires root native_full" `Quick test_agent_retry_requires_root_native_full
+        ; test_case "tasks survive native return with exact root ownership" `Quick test_tasks_survive_native_return_without_changing_root_response
+        ; test_case "task run ordering and cross-kind UUID replay" `Quick test_task_run_order_replays_and_cross_kind_uuid
+        ; test_case "unowned and malformed tasks preserve the healthy turn" `Quick test_task_registration_rejects_unowned_and_malformed_frames
         ; test_case "child and missing result scope heartbeat ignored" `Quick test_child_heartbeat_and_unknown_result_scope_are_unowned
         ; test_case
             "unknown stream type fails closed"

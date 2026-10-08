@@ -109,6 +109,10 @@ val run :
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.progress -> unit) ->
   ?on_native_tool_completion:
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.completion -> unit) ->
+  ?on_native_task_observation:(Runtime_claude_code.native_task_observation -> unit) ->
+  (* Task metadata keeps its registered native occurrence after the spawning
+      call closes. It emits no model content, native completion or receipt.
+      Journal/UI transport is a separate consumer of this callback. *)
   ?on_native_action:(official_turn:int ->
     identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
   ?on_usage_report:(Keeper_client_usage_report.t -> unit) ->

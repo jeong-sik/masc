@@ -2920,6 +2920,7 @@ let test_spawn_failure_fences_claim () =
 ;;
 
 let run_direct_attempt
+      ?required_native_posture ?on_native_task_observation ?on_event
       ?hooks
       ?(system_prompt = "pre-dispatch fixture system prompt")
       ~base_path
@@ -2957,6 +2958,7 @@ let run_direct_attempt
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
                   in
                   Keeper_claude_code_runtime.run
+                    ?required_native_posture ?on_native_task_observation
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
@@ -2989,9 +2991,95 @@ let run_direct_attempt
                     ~context:(Some (Agent_core.Context.create ()))
                     ~event_bus:None
                     ~raw_trace:None
-                    ~on_event:None
+                    ~on_event
                     ~config
                     ())))))
+;;
+
+let test_task_callback_keeps_closed_native_owner_and_model_content () =
+  let module F = Native_tool_outcome_fixture in
+  List.iter (fun thinking ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let keeper_name = "claude-pre-dispatch" in
+      let secret = "task-private-cobalt-forest-value" in
+      let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+      Fs_compat.mkdir_p (Filename.dirname token_file);
+      Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+      let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let projection = F.create ~redaction () in
+      let events = ref [] and snapshots = ref [] in
+      let on_event event = events := event :: !events; F.on_event projection event in
+      let on_native_task_observation observation =
+        snapshots := (observation, List.rev !events, F.events projection) :: !snapshots in
+      let frame event = Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+        "session_id",`String "__SESSION__";"parent_tool_use_id",`Null;"event",event]) in
+      let kind = if thinking then "thinking" else "text" in
+      let piece value = frame (`Assoc ["type",`String "content_block_delta";"index",`Int 0;
+        "delta",`Assoc ["type",`String (kind ^ "_delta");kind,`String value]]) in
+      let task uuid subtype fields = Yojson.Safe.to_string (`Assoc
+        (["type",`String "system";"subtype",`String subtype;"session_id",`String "__SESSION__";
+          "uuid",`String uuid;"task_id",`String "child-task";"run_id",`String "run-alpha";
+          "tool_use_id",`String "parent-agent"] @ fields)) in
+      with_fixture [
+        Emit (response_native_tool ~turn_id:"parent" ~message_id:"parent" ~call_id:"parent-agent" ~tool_name:"Agent");
+        Emit (native_tool_result ~call_id:"parent-agent" ~content:"background launch");
+        Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc ["id",`String "body";"model",`String "claude-fixture"]]));
+        Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;"content_block",`Assoc ["type",`String kind;kind,`String ""]]));
+        Emit (piece "task-private-");
+        Emit (task "task-register" "task_started" ["task_type",`String "local_agent";
+          "spawn_depth",`Int 1;"description",`String "not root speech";"is_backgrounded",`Bool true]);
+        Emit (task "task-progress" "task_progress" ["description",`String "not root thinking";
+          "usage",`Assoc ["total_tokens",`Int 9;"tool_uses",`Int 1;"duration_ms",`Int 30]]);
+        Emit (task "task-completed" "task_notification" ["status",`String "completed";
+          "summary",`String "not root answer";"output_file",`String "/private/child-output"]);
+        Emit (piece "cobalt-forest-value\n");
+        Emit (frame (`Assoc ["type",`String "content_block_stop";"index",`Int 0]));
+        Emit (response_frame ~uuid:"body-complete" ~message_id:"body" (`Assoc ["type",`String kind;kind,`String (secret ^ "\n")]));
+        Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+        Emit (result_text ~turn_id:"final" "Answer")]
+        (fun cli_path ->
+          let modes = Keeper_tool_approval_mode.shared () in
+          let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
+          let attempt = Fun.protect
+            ~finally:(fun () -> Keeper_tool_approval_mode.set modes ~keeper_name previous)
+            (fun () ->
+              Keeper_tool_approval_mode.set modes ~keeper_name Keeper_tool_approval_mode.Yolo;
+              run_direct_attempt ~base_path ~cli_path ~goal:"TASK_METADATA" ~tools:[]
+                ~required_native_posture:Runtime_native_tools.Native_full
+                ~on_event ~on_native_task_observation ()) in
+          (match attempt.result with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok _ -> ());
+          let observations = List.rev !snapshots in
+          check (list string) "typed task callback survives removal of native content index"
+            ["task-register";"task-progress";"task-completed"]
+            (List.map (fun ((o:Runtime_claude_code.native_task_observation),_,_) -> o.uuid) observations);
+          check (list bool) "only the actual task terminal seals its observation boundary"
+            [false;false;true] (List.map (fun ((o:Runtime_claude_code.native_task_observation),_,_) ->
+              o.boundary=Task_terminal_observed) observations);
+          List.iter (fun ((o:Runtime_claude_code.native_task_observation),sse,chat) ->
+            check string "task owns the exact original native call" "parent-agent" o.owner.call_id;
+            check int "root occurrence ordinal stays available" 0 o.owner.call_ordinal;
+            check int "one native block is already closed" 1
+              (List.length (List.filter (function Agent_core.Types.ContentBlockStop _ -> true | _ -> false) sse));
+            check bool "task completion cannot stop the model response" false
+              (List.exists (function Agent_core.Types.MessageStop -> true | _ -> false) sse);
+            check (list string) "task metadata never flushes the held secret prefix" []
+              (List.filter_map (function Keeper_chat_events.Text_delta text
+                | Agent_core_thinking_delta {delta=text;_} -> Some text | _ -> None) chat)) observations;
+          (match observations with
+           | [(_,first,_);(_,second,_);(_,third,_)] ->
+               check bool "no task edge emits an Agent Core content/lifecycle event" true
+                 (first=second && second=third)
+           | _ -> fail "three actual task edges required");
+          let body = F.events projection |> List.filter_map (function Keeper_chat_events.Text_delta text
+            | Agent_core_thinking_delta {delta=text;_} -> Some text | _ -> None) |> String.concat "" in
+          check bool "task observations never publish the configured secret" false
+            (Astring.String.is_infix ~affix:secret body);
+          check bool "safe authored content survives the task interleave" true
+            (Astring.String.is_infix ~affix:(Keeper_secret_redaction.redact_text redaction (secret ^ "\n")) body))))
+    [false;true]
 ;;
 
 let check_pre_dispatch_attempt label attempt =
@@ -4199,6 +4287,8 @@ let () =
             "every posture names the schema lookup"
             `Quick
             test_every_posture_names_the_schema_lookup
+        ; test_case "task metadata retains closed native owner without flushing model content" `Quick
+            test_task_callback_keeps_closed_native_owner_and_model_content
         ; test_case
             "a closed client connection is typed"
             `Quick

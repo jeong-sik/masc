@@ -256,6 +256,55 @@ type content_block =
 
 type content_channel = Text_content | Thinking_content
 
+type native_task_status =
+  | Task_pending | Task_running | Task_completed | Task_failed | Task_killed | Task_paused
+
+type native_task_terminal = Task_completed_notice | Task_failed_notice | Task_stopped_notice
+type native_task_reason = Worker_restart
+type native_task_boundary = Task_terminal_unobserved | Task_terminal_observed
+
+type native_task_usage =
+  { total_tokens : int; tool_uses : int; duration_ms : int }
+(** Provider task observations, never the root model's usage. [duration_ms]
+    preserves the signed safe integer reported by the provider's wall-clock
+    subtraction; a negative value neither fails nor terminates the task. *)
+
+type native_task_event =
+  | Task_registered of
+      { subagent_type : string option; is_backgrounded : bool option
+      ; skip_transcript : bool option; ambient : bool option }
+      (** Registration declares no task status. [None] means not reported. *)
+  | Task_patched of
+      { status : native_task_status option; is_backgrounded : bool option
+      ; end_time : int option; total_paused_ms : int option }
+      (** [total_paused_ms] retains signed safe integers; absence is
+          unreported, not zero. [end_time] admission retains the separate
+          nonnegative timestamp check. *)
+  | Task_progress_reported of
+      { usage : native_task_usage; last_tool_name : string option }
+  | Task_terminal_reported of
+      { outcome : native_task_terminal; reason : native_task_reason option
+      ; usage : native_task_usage option; skip_transcript : bool option
+      ; ambient : bool option }
+
+type native_task_owner =
+  { session_id : string; task_id : string; run_id : string; call_id : string
+  ; call_envelope_uuid : string; call_ordinal : int }
+(** Exact root Agent occurrence that registered this task run. The call may
+    already have returned an async launch result. [run_id] is opaque except
+    for the provider-declared lexical ordering of runs of the same task. *)
+
+type native_task_observation =
+  { owner : native_task_owner; uuid : string; event : native_task_event
+  ; boundary : native_task_boundary }
+(** Invocation-local observations: explicit session/run identity, Native_full,
+    unambiguous Root_response/Built_in Agent and provider root spawn depth.
+    No ownership is inferred for run-less, unknown or child task frames.
+    Raw prompt, summary, description, error and output-file bodies are excluded.
+    Task termination does not terminate the native call, model response or turn.
+    This client still returns on the first root result; post-result receiving
+    requires a separate process/session lifetime implementation. *)
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -284,6 +333,7 @@ type stream_event =
       { identity : Runtime_native_tools.action_identity
       ; progress : Runtime_native_tools.progress
       }
+  | Native_task_observed of native_task_observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
   | Conversation_compacted
   | Usage_reported of
@@ -862,6 +912,39 @@ let agent_retry_fields =
   ]
 ;;
 
+type task_frame_kind = Task_start | Task_update | Task_progress | Task_notification
+
+let task_kind = function
+  | "task_started" -> Some Task_start | "task_updated" -> Some Task_update
+  | "task_progress" -> Some Task_progress | "task_notification" -> Some Task_notification
+  | _ -> None
+;;
+
+let task_fields kind =
+  ["type"; "subtype"; "task_id"; "run_id"; "uuid"; "session_id"]
+  @ match kind with
+    | Task_start -> ["tool_use_id"; "description"; "subagent_type"; "is_backgrounded";
+        "spawn_depth"; "parent_task_id"; "task_type"; "workflow_name"; "prompt";
+        "skip_transcript"; "ambient"; "owned_by_subagent"]
+    | Task_update -> ["patch"]
+    | Task_progress -> ["tool_use_id"; "description"; "subagent_type"; "usage";
+        "last_tool_name"; "summary"; "workflow_progress"]
+    | Task_notification -> ["tool_use_id"; "status"; "reason"; "output_file"; "summary";
+        "usage"; "resource_links"; "handback"; "handback_report"; "skip_transcript"; "ambient"]
+;;
+
+let task_observation_candidate fields =
+  let subtypes = List.filter_map
+    (fun (key,value) -> if key="subtype" then Some value else None) fields in
+  (* Duplicate task discriminators are malformed telemetry too. Every value
+     must identify task telemetry; mixed root/system frames still fail closed. *)
+  let kinds = List.filter_map (function
+    | `String subtype -> task_kind subtype | _ -> None) subtypes in
+  kinds <> [] && List.length kinds = List.length subtypes
+  && List.for_all (fun (key,_) ->
+    List.exists (fun kind -> List.mem key (task_fields kind)) kinds) fields
+;;
+
 let parse_wire_line line =
   let stage = "stream-json message" in
   let* json = parse_json_value ~stage line in
@@ -888,6 +971,7 @@ let parse_wire_line line =
              && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
              && List.mem_assoc "subagent_type" fields
              && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
+       | [ `String "system" ] -> task_observation_candidate fields
        | _ -> false)
     | _ -> false
   in
@@ -1111,9 +1195,23 @@ type agent_retry_frame =
   ; note : Runtime_native_tools.retry_note option
   }
 
+type task_frame =
+  { task_uuid : string; task_id : string; run_id : string option
+  ; tool_use_id : string option; root_registration : bool
+  ; task_event : native_task_event }
+
 type observed_progress =
   | Heartbeat_frame of heartbeat
   | Agent_retry_frame of agent_retry_frame
+  | Task_frame of task_frame
+
+type task_binding =
+  | Task_unowned
+  | Task_owned of
+      { owner : native_task_owner; registration : native_task_event
+      ; mutable boundary : native_task_boundary }
+
+type task_run = { run_id : string; mutable binding : task_binding }
 
 type retry_binding =
   { progress_id : string; agent : Runtime_native_tools.retry_agent; mutable pending : bool }
@@ -1122,6 +1220,7 @@ type native_call_registry =
   { calls : (string, native_call_state) Hashtbl.t
   ; progress_uuids : (string, observed_progress) Hashtbl.t
   ; retry_bindings : (string, retry_binding) Hashtbl.t
+  ; task_runs : (string, task_run) Hashtbl.t
   ; native_posture : Runtime_native_tools.posture
   }
 
@@ -1289,6 +1388,182 @@ let project_agent_retry registry ~expected_session_id fields =
              | Some _, Some _ | None, (Some _ | None) -> Retry_ignored)
         | (Native_full | Native_read | Native_none), _ -> Retry_ignored
       end
+;;
+
+let parse_task_frame ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  (* The narrowly admitted observation still receives the shared recursive
+     duplicate-key check. Malformed telemetry is dropped, not a turn error. *)
+  let* () = Result.to_option (validate_unique_object_keys
+      ~stage:"task observation" ~path:"$" (`Assoc fields)) in
+  let string = function `String value -> Some value | _ -> None in
+  let identity = function
+    | `String value when String.trim value <> "" -> Some value
+    | _ -> None in
+  let bool = function `Bool value -> Some value | _ -> None in
+  let int value = Result.to_option (Runtime_json_integer.of_json value) in
+  let nonnegative_int value =
+    Option.bind (int value) (fun value -> if value >= 0 then Some value else None) in
+  let required parse key fields = Option.bind (List.assoc_opt key fields) parse in
+  let optional parse key fields = match List.assoc_opt key fields with
+    | None -> Some None | Some value -> Option.map Option.some (parse value) in
+  let string_field key = required string key fields in
+  let* subtype = string_field "subtype" in
+  let* kind = task_kind subtype in
+  let* () = if List.for_all (fun (key,_) -> List.mem key (task_fields kind)) fields
+    then Some () else None in
+  let* session_id = required identity "session_id" fields in
+  let* () = if session_id=expected_session_id then Some () else None in
+  let* task_uuid = required identity "uuid" fields in
+  let* task_id = required identity "task_id" fields in
+  let* run_id = optional identity "run_id" fields in
+  let* tool_use_id = optional identity "tool_use_id" fields in
+  let usage = function
+    | `Assoc counts when List.for_all (fun (key,_) ->
+        List.mem key ["total_tokens";"tool_uses";"duration_ms"]) counts ->
+        let* total_tokens = required nonnegative_int "total_tokens" counts in
+        let* tool_uses = required nonnegative_int "tool_uses" counts in
+        let* duration_ms = required int "duration_ms" counts in
+        Some {total_tokens;tool_uses;duration_ms}
+    | _ -> None in
+  let status = function
+    | `String "pending" -> Some Task_pending | `String "running" -> Some Task_running
+    | `String "completed" -> Some Task_completed | `String "failed" -> Some Task_failed
+    | `String "killed" -> Some Task_killed | `String "paused" -> Some Task_paused
+    | _ -> None in
+  let* task_event, root_registration = match kind with
+    | Task_start ->
+        let* _description = string_field "description" in
+        let* _prompt = optional string "prompt" fields in
+        let* _workflow = optional string "workflow_name" fields in
+        let* subagent_type = optional string "subagent_type" fields in
+        let* is_backgrounded = optional bool "is_backgrounded" fields in
+        let* skip_transcript = optional bool "skip_transcript" fields in
+        let* ambient = optional bool "ambient" fields in
+        let* task_type = optional string "task_type" fields in
+        let* spawn_depth = optional int "spawn_depth" fields in
+        let* parent_task_id = optional identity "parent_task_id" fields in
+        let* owned_by_subagent = optional bool "owned_by_subagent" fields in
+        (* SDK 2.1.292 defines depth 1 as top-level. An absent parent alone
+           cannot prove root origin: untracked/workflow launchers lack it too. *)
+        let root = task_type=Some "local_agent" && spawn_depth=Some 1
+          && parent_task_id=None && owned_by_subagent<>Some true in
+        Some (Task_registered {subagent_type;is_backgrounded;skip_transcript;ambient}, root)
+    | Task_update ->
+        let* patch = match List.assoc_opt "patch" fields with
+          | Some (`Assoc patch) when List.for_all (fun (key,_) -> List.mem key
+              ["status";"description";"end_time";"total_paused_ms";"error";"is_backgrounded"]) patch -> Some patch
+          | _ -> None in
+        let* _description = optional string "description" patch in
+        let* _error = optional string "error" patch in
+        let* status = optional status "status" patch in
+        let* is_backgrounded = optional bool "is_backgrounded" patch in
+        let* end_time = optional nonnegative_int "end_time" patch in
+        let* total_paused_ms = optional int "total_paused_ms" patch in
+        Some (Task_patched {status;is_backgrounded;end_time;total_paused_ms}, false)
+    | Task_progress ->
+        let* _description = string_field "description" in
+        let* _summary = optional string "summary" fields in
+        let* _subagent_type = optional string "subagent_type" fields in
+        let* usage = required usage "usage" fields in
+        let* last_tool_name = optional string "last_tool_name" fields in
+        Some (Task_progress_reported {usage;last_tool_name}, false)
+    | Task_notification ->
+        let* _summary = string_field "summary" in
+        let* _output_file = string_field "output_file" in
+        let* outcome = match List.assoc_opt "status" fields with
+          | Some (`String "completed") -> Some Task_completed_notice
+          | Some (`String "failed") -> Some Task_failed_notice
+          | Some (`String "stopped") -> Some Task_stopped_notice
+          | _ -> None in
+        let* reason = optional (function `String "worker_restart" -> Some Worker_restart
+          | _ -> None) "reason" fields in
+        let* () = match reason,outcome with
+          | Some Worker_restart,(Task_completed_notice|Task_failed_notice) -> None
+          | None,_ | Some Worker_restart,Task_stopped_notice -> Some () in
+        let* usage = optional usage "usage" fields in
+        let* skip_transcript = optional bool "skip_transcript" fields in
+        let* ambient = optional bool "ambient" fields in
+        Some (Task_terminal_reported {outcome;reason;usage;skip_transcript;ambient}, false) in
+  Some {task_uuid;task_id;run_id;tool_use_id;root_registration;task_event}
+;;
+
+let project_native_task registry ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  let* frame = parse_task_frame ~expected_session_id fields in
+  if Hashtbl.mem registry.progress_uuids frame.task_uuid then None else begin
+    (* Valid unowned identities stay seen across all metadata kinds. A replay
+       cannot acquire a native owner that happened to appear later. *)
+    Hashtbl.add registry.progress_uuids frame.task_uuid (Task_frame frame);
+    let* run_id = frame.run_id in
+    let emit owner boundary = Some {owner;uuid=frame.task_uuid;event=frame.task_event;boundary} in
+    let register () =
+      let binding =
+        match registry.native_posture, frame.root_registration, frame.tool_use_id with
+        | Runtime_native_tools.Native_full, true, Some call_id ->
+            (match Hashtbl.find_opt registry.calls call_id with
+             | Some (Native_open {scope=Root_response;envelope_uuid;ordinal;
+                   observation={origin=Built_in;tool_name=Some "Agent";_}}
+                 | Native_closed {scope=Root_response;envelope_uuid;ordinal;
+                   observation={origin=Built_in;tool_name=Some "Agent";_}}) ->
+                 Task_owned {owner={session_id=expected_session_id;task_id=frame.task_id;
+                     run_id;call_id;call_envelope_uuid=envelope_uuid;call_ordinal=ordinal};
+                   registration=frame.task_event;boundary=Task_terminal_unobserved}
+             | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None -> Task_unowned)
+        | (Native_full | Native_read | Native_none), _, _ -> Task_unowned in
+      Hashtbl.replace registry.task_runs frame.task_id {run_id;binding};
+      match binding with Task_owned {owner;boundary;_} -> emit owner boundary | Task_unowned -> None in
+    match frame.task_event, Hashtbl.find_opt registry.task_runs frame.task_id with
+    | Task_registered _, None -> register ()
+    | Task_registered _, Some previous when String.compare run_id previous.run_id > 0 ->
+        (* This ordering is the provider's declared per-task run contract.
+           The opaque run string is never parsed as a timestamp or prefix. *)
+        register ()
+    | Task_registered _, Some previous when run_id=previous.run_id ->
+        (match previous.binding with
+         | Task_owned held when frame.root_registration
+             && frame.tool_use_id=Some held.owner.call_id
+             && frame.task_event=held.registration -> ()
+         | Task_owned _ -> previous.binding <- Task_unowned
+         | Task_unowned -> ());
+        None
+    | Task_registered _, Some _ -> None
+    | (Task_patched _ | Task_progress_reported _ | Task_terminal_reported _), Some current
+        when run_id=current.run_id ->
+        (match current.binding with
+         | Task_unowned -> None
+         | Task_owned held ->
+             if Option.exists (fun call_id -> call_id<>held.owner.call_id) frame.tool_use_id
+             then None else
+             match frame.task_event, held.boundary with
+             | Task_patched {status;_}, Task_terminal_unobserved ->
+                 (match status with
+                  | Some (Task_completed | Task_failed | Task_killed) -> held.boundary <- Task_terminal_observed
+                  | Some (Task_pending | Task_running | Task_paused) | None -> ());
+                 emit held.owner held.boundary
+             | Task_patched {status=(None | Some (Task_completed | Task_failed | Task_killed));_},
+                 Task_terminal_observed ->
+                 (* End-time/background metadata can change after a terminal
+                    observation. Retain the patch without reopening the run. *)
+                 emit held.owner held.boundary
+             | Task_progress_reported _, Task_terminal_unobserved -> emit held.owner held.boundary
+             | Task_terminal_reported _, (Task_terminal_unobserved | Task_terminal_observed) ->
+                 (* The SDK allows a later notification to replace the task's
+                    report. Its fresh UUID is another observation, not a reopen. *)
+                 held.boundary <- Task_terminal_observed; emit held.owner held.boundary
+             | (Task_patched {status=Some (Task_pending | Task_running | Task_paused);_}
+                 | Task_progress_reported _), Task_terminal_observed
+             | Task_registered _, (Task_terminal_unobserved | Task_terminal_observed) -> None)
+    | (Task_patched _ | Task_progress_reported _ | Task_terminal_reported _), previous ->
+        (* Losing a registration cannot make a later call with the same ID
+           own the preceding task edge. Retain its exact run as unowned. *)
+        (match previous with
+         | None -> Hashtbl.add registry.task_runs frame.task_id {run_id;binding=Task_unowned}
+         | Some old when String.compare run_id old.run_id > 0 ->
+             Hashtbl.replace registry.task_runs frame.task_id {run_id;binding=Task_unowned}
+         | Some _ -> ());
+        None
+  end
 ;;
 
 let allowed_tool_name (tool : dynamic_tool) =
@@ -2011,10 +2286,15 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
   | "system" ->
     (* [compact_boundary] is the client's own record that it summarised the
        conversation: what the session held as sent before it is now a
-       summary. Other system frames are informational. *)
+       summary. Exact task edge kinds have their own observation registry;
+       other system frames remain informational. *)
     let* subtype = optional_string "system message" "subtype" fields in
     (match subtype with
      | Some "compact_boundary" -> emit_stream_event on_stream_event Conversation_compacted
+     | Some value when Option.is_some (task_kind value) ->
+         Option.iter (fun observation ->
+           emit_stream_event on_stream_event (Native_task_observed observation))
+           (project_native_task native_tool_calls ~expected_session_id fields)
      | Some _ | None -> ());
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
@@ -2274,7 +2554,7 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
     ~assistant_model:None
     ~assistant_texts:[]
     ~native_tool_calls:{calls=Hashtbl.create 8;progress_uuids=Hashtbl.create 8;
-      retry_bindings=Hashtbl.create 8;native_posture}
+      retry_bindings=Hashtbl.create 8;task_runs=Hashtbl.create 8;native_posture}
     ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event

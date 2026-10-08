@@ -2108,6 +2108,14 @@ let test_exact_operation_ending_keeps_unjournaled_rows () =
          | Stream_ended | Stream_failed _ -> true | Waiting | Working -> false);
       check bool "missing journal entries are not claimed complete" false
         (Tui_types.turn_log_holds_the_turn log);
+      check bool "record closure keeps journal replay open" false (Tui_types.turn_log_has_ended log);
+      let source = Log.source log.tl_log in
+      let key = "alpha", source in
+      check bool "history can still select record-closed source" false
+        (List.mem key (Tui_types.journal_held_keys state "alpha"));
+      (match Tui_types.journal_follow_for_source state ~keeper_name:"alpha" ~source ~seq:None ~at:151. with
+       | Tui_types.Follow_read _ -> ()
+       | Follow_nothing | Follow_read_after_inflight -> fail "record-only closure retired missing tail");
       check (list string) "durable keeper, tool and skill rows stay visible" expected
         (Tui_types.chat_rows_for state "alpha" |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
     in
@@ -3995,6 +4003,15 @@ let test_journal_tracking_keeps_keeper_and_source_identity () =
       ~seq:(Some 1) ~at:4. with Follow_read _ -> () | _ -> fail "alpha's POST excluded beta's journal");
   check bool "alpha's own stream does not exclude beta from history fetches" false
     (List.mem ("beta", beta_source) (Tui_types.journal_held_keys state "beta"));
+  Tui_types.remember_journal_unavailable state ("beta", beta_source);
+  Tui_types.journal_read_started state ("alpha", beta_source);
+  check (list string) "alpha ownership and read cannot block beta operation recovery"
+    [own.sent_request.request_id] (Tui_types.unavailable_journal_operation_targets state "beta");
+  Tui_types.journal_read_started state ("beta", beta_source);
+  check (list string) "beta's exact read suppresses duplicate operation recovery" []
+    (Tui_types.unavailable_journal_operation_targets state "beta");
+  Tui_types.journal_read_finished state ("alpha", beta_source);
+  Tui_types.journal_read_finished state ("beta", beta_source);
   let turn = Ids.Turn_ref.make ~trace_id:"same-key" ~absolute_turn:7 in
   let autonomous = Log.Autonomous_turn turn in
   let operation = Log.Operation (Log.source_key autonomous) in

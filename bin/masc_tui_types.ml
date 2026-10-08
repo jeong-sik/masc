@@ -3077,12 +3077,15 @@ let turn_log_holds_the_turn turn_log =
       false
 ;;
 
-(* History may land before the journal's terminal event. Only the event fold
-   closes observation; a checkpoint's Run_finished leaves the fold Waiting. *)
+(* History or operation records may close progress before the journal tail.
+   Only a heard terminal event retires replay, including no-reply cancellation;
+   a checkpoint's Run_finished leaves the fold Waiting. *)
 let turn_log_has_ended turn_log =
-  match Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
-  | Stream_ended | Stream_failed _ -> true
-  | Waiting | Working -> false
+  match Masc_tui_keeper_chat_transcript.ending_source turn_log.tl_transcript,
+        Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
+  | Ending_heard_in_stream, (Stream_ended | Stream_failed _) -> true
+  | Ending_heard_in_stream, (Waiting | Working)
+  | Ending_read_from_record, (Waiting | Working | Stream_ended | Stream_failed _) -> false
 ;;
 
 type inflight_phase =
@@ -7096,12 +7099,12 @@ let journal_held_keys state keeper_name =
 let unavailable_journal_operation_targets state keeper_name =
   state.msg_settled_logs
   |> List.filter_map (fun log ->
-      let request_id = turn_log_request_id log in
+      let key = turn_log_journal_key log in
       let journal_unavailable = state.msg_journal_reads_refused
-        || List.mem request_id state.msg_journal_unavailable in
-      let read_inflight = List.mem request_id state.msg_journal_inflight in
+        || List.mem key state.msg_journal_unavailable in
+      let read_inflight = List.mem key state.msg_journal_inflight in
       let owned = List.exists (fun (entry : inflight) ->
-        String.equal entry.sent_request.request_id request_id) state.msg_inflight in
+        turn_log_journal_key entry.log = key) state.msg_inflight in
       let terminal = Option.exists Keeper_chat_operation.is_terminal
         (Masc_tui_keeper_chat_log.operation_state log.tl_log) in
       match Masc_tui_keeper_chat_log.source log.tl_log with
@@ -12551,7 +12554,7 @@ let keeper_message_activity_rows (state : state) =
           | Turn_preflight _ | Turn_streaming -> false) own then
         attention "메시지 전달 재확인 중";
       if any_phase Masc_tui_keeper_chat_transcript.awaiting_continuation then
-        add "이어서 처리하기를 기다리는 중"
+        add "이어서 처리하기를 기다리는 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
       if has_working then add "기존 작업 처리 중";

@@ -6328,7 +6328,8 @@ let launch_unavailable_journal_operations state ~mailbox ~keeper_name =
   | _ :: _, Some sw ->
       let enqueue_async = workspace_enqueue state in
       let authority = state.workspace_authority and identity = state.server_identity in
-      List.iter (journal_read_started state) targets;
+      List.iter (fun operation_id ->
+        journal_read_started state (keeper_name, Keeper_chat_log.Operation operation_id)) targets;
       fork_workspace_job state ~sw (fun () ->
         List.iter (fun operation_id ->
           let operation_state = read_keeper_chat_operation state ~mailbox ~authority ~identity
@@ -16326,7 +16327,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         launch_current_autonomous_journals state ~mailbox ~keeper_name;
         launch_unavailable_journal_operations state ~mailbox ~keeper_name
   | Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state} ->
-      journal_read_finished state operation_id;
+      journal_read_finished state (keeper_name, Keeper_chat_log.Operation operation_id);
       Option.iter (fun log ->
         apply_keeper_chat_operation_state state ~journal_id:operation_id log
           (Result.map Option.some operation_state))
@@ -16364,21 +16365,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match journal with
        | Ok _ -> ()
        | Error _ -> Option.iter reconcile_operation
-           (settled_log_for_request state ~keeper_name journal_id));
-      (match journal with
-      | Ok lines ->
-          (* The lines join the session's record of the turn when it has one
-             -- a cut live stream's partial log, an earlier read of a turn
-             then still running -- else a fresh log. The same fold, the same
-             seq dedup. *)
-          let log =
-            match settled_log_for_request state ~keeper_name journal_id with
-            | Some held when not (turn_log_holds_the_turn held) -> held
-            | Some _ | None ->
-                turn_log_create_for_source ~keeper_name ~source
-                  ~started_at:(journal_log_started_at ~fallback:started_at lines)
-          in
-          let accepted = turn_log_add_journaled log lines in
+           (settled_log_for_source state ~keeper_name source));
+      (match receive_journal_result state ~keeper_name ~source ~started_at journal with
+      | Ok (log, accepted) ->
           reconcile_operation log;
           (* An observer-followed turn has no pane-owned delta delivery.
              Refresh its durable results after the journal accepts them;
@@ -16392,29 +16381,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                     | _ -> false)
                   accepted
           then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
-          Keeper_chat_log.commit log.tl_log;
-          if Keeper_chat_log.entries log.tl_log <> [] then hold_settled_log state log;
           (match state.msg_loaded_keeper with
             | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
                 enrich_held_logs_from_rows state ~keeper_name state.msg_loaded
-            | Some _ | None -> ());
-          if not (turn_log_holds_the_turn log) &&
-            (* A journal read whole that still cannot stand for the turn has
-               nothing more to say when the loaded transcript says the turn is
-               over: a cancelled turn (finished without a recorded reply), or
-               a failure the server never journaled (#33108). A turn still
-               running is asked again on the next load, from where this read
-               stopped. *)
-            ((match Keeper_chat_transcript.phase log.tl_transcript with
-             | Keeper_chat_transcript.Stream_ended
-             | Keeper_chat_transcript.Stream_failed _ ->
-                 true
-             | Keeper_chat_transcript.Waiting | Keeper_chat_transcript.Working ->
-                 false)
-            || (match source with
-                | Keeper_chat_log.Operation _ -> loaded_turn_has_ended state ~keeper_name journal_id
-                | Keeper_chat_log.Autonomous_turn _ -> false))
-          then remember_journal_unavailable state journal_id
+            | Some _ | None -> ())
       | Error (Keeper_chat_log.Unknown_operation | Keeper_chat_log.Journal_pruned | Keeper_chat_log.Journal_missing) ->
           (* Nothing to reload, now or later this session: the v1 rows are
              the turn. *)

@@ -28,7 +28,11 @@ import tui_keyboard_harness as _keyboard_harness
 
 COLUMNS = 150  # Roster fits; the separate Activity pane does not open.
 TALL_ROWS = 30
-SHORT_ROWS = 15
+# The fixture's three unavailable-status rows leave fewer than the required
+# three history rows at 15. Eighteen fits chat but not portrait and roster.
+COMPACT_ROWS = 15
+SHORT_ROWS = 18
+COMPACT_NOTICE = b"Keeper chat needs a larger terminal"
 ROSTER_COLUMNS = 34
 CAPTION = "대화 · ".encode()
 IMAGE_ID = b"42"
@@ -220,6 +224,8 @@ def open_chat(process, fd, output) -> None:
     _keyboard_harness.send_and_wait(process, fd, output, b"c", chat_title(b"alpha"))
     _keyboard_harness.drain_until_quiet(process, fd, output)
     _keyboard_harness.send_and_wait(process, fd, output, b"\x02", b"KEEPERS")
+    # The roster heading arrives before the rest of its frame, portrait included.
+    _keyboard_harness.drain_until_quiet(process, fd, output)
     assert any(b"KEEPERS" in row for row in screen(output).values()), "Ctrl-B pins the portrait roster"
 
 
@@ -263,6 +269,13 @@ def mosaic_resizes(binary: str) -> None:
             assert_chat_intact(rows, b"alpha")
 
         visible()
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=COMPACT_ROWS, columns=COLUMNS,
+                                          needle=COMPACT_NOTICE, controls=(_keyboard_harness.FULL_REDRAW,),
+                                          final_cursor=b"\x1b[?25l")
+        compact = screen(output)
+        assert COMPACT_NOTICE in b"\n".join(compact.values()), "tiny viewport lost its explicit refusal"
+        assert_hidden(compact)
+        assert not any(b"  > " in row for row in compact.values()), "unreadable viewport kept a composer"
         _keyboard_harness.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=chat_title(b"alpha"))
         _keyboard_harness.drain_until_quiet(process, fd, output)
         assert_hidden(screen(output))
@@ -467,6 +480,7 @@ def hidden_roster_releases_focus(binary: str, *, resize: bool) -> None:
         if resize:
             _keyboard_harness.resize_and_wait(process, fd, output, rows=TALL_ROWS, columns=109,
                               needle=b"KEEPERS")
+            _keyboard_harness.drain_until_quiet(process, fd, output)
             # The narrow navigator owns the body until explicitly dismissed.
             assert chat_title(b"alpha") not in b"\n".join(screen(output).values())
             _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", chat_title(b"alpha"))

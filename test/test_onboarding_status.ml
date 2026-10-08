@@ -67,7 +67,7 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
     (Sys.file_exists (Filename.concat root "keepers"));
   let invalid_configs = [
     String.concat "\n" (List.filter (fun line -> not (String.starts_with ~prefix:"default = " line)) (String.split_on_char '\n' runtime_before))
-      ^ "\n[runtime.assignments]\nimp = \"ollama_cloud.deepseek-v4-flash\"\n";
+      ^ "\n[runtime.assignments]\nimp = \"ollama_cloud.deepseek-v4.1-flash\"\n";
     runtime_before ^ "\n[runtime.lanes.broken]\ncandidates = [\"not.configured\"]\n";
     (* An assignment naming neither a declared lane nor a runtime is rejected
        at load, whatever the admission domain. *)
@@ -83,7 +83,7 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
      lane's entry candidate, so a lane-bound imp reads as declared but
      unverified, not as a load failure. *)
   write runtime_path
-    (runtime_before ^ "\n[runtime.lanes.only_lane]\ncandidates = [\"ollama_cloud.deepseek-v4-flash\"]\n[runtime.assignments]\nimp = \"only_lane\"\n");
+    (runtime_before ^ "\n[runtime.lanes.only_lane]\ncandidates = [\"ollama_cloud.deepseek-v4.1-flash\"]\n[runtime.assignments]\nimp = \"only_lane\"\n");
   let lane_named = Onboarding_status.inspect ~base_path:(Some base) in
   check bool "an assignment naming a declared lane is not a load failure" true
     (condition Onboarding_status.Model_connection lane_named = Onboarding_status.Needs_verification);
@@ -129,14 +129,14 @@ let a_load_failure_says_what_failed () = with_workspace @@ fun base ->
        (message Onboarding_status.Runtime_configuration assignment)
        "[runtime.assignments]");
 
-  write runtime_path (without_table "[models.deepseek-v4-flash]" fixture);
+  write runtime_path (without_table "[models.\"deepseek-v4.1-flash\"]" fixture);
   let dangling = Onboarding_status.inspect ~base_path:(Some base) in
   check bool "a binding without its declaration needs the file edited" true
     (condition Onboarding_status.Runtime_configuration dangling = Onboarding_status.Invalid);
   check bool "the message names the binding that cannot resolve" true
     (String_util.contains_substring
        (message Onboarding_status.Runtime_configuration dangling)
-       "ollama_cloud.deepseek-v4-flash")
+       "ollama_cloud.deepseek-v4.1-flash")
 
 (* The launcher and, when [declared], the launch.json install-host.sh writes
    beside it. *)

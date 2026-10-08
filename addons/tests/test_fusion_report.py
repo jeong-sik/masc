@@ -29,7 +29,13 @@ def retain_fixture_receipt(refs, terminal):
     if terminal is not None:
         terminal.pop("error", None)
     if terminal is not None and isinstance(terminal.get("response"), dict):
-        terminal["response"].pop("_meta", None)
+        response = terminal.pop("response")
+        response.pop("_meta", None)
+        for key in ("text", "data"):
+            if isinstance(response.get("content", {}).get(key), str):
+                value = response["content"].pop(key)
+                response["content"][key + "_sha256"] = hashlib.sha256(value.encode("utf-8")).hexdigest()
+        terminal["response_attestation"] = response
     SAMPLING_RECEIPTS[refs["request"]["sha256"]] = copy.deepcopy({
         "request": refs["request"], "outcome": refs.get("outcome"), "terminal": terminal})
 
@@ -128,6 +134,7 @@ def computation_output(status="answered", *, role="panel", outcome=True, text="F
     retain_fixture_receipt(refs, terminal)
     template = project(detail())
     item = copy.deepcopy(template["rows"][0])
+    fields["input_evidence"] = copy.deepcopy(item["evidence"])
     item.update(id="computed-model-output", lane_id="fusion/computation", subject_id="analysis-request",
                 title="Panel analysis", fields=fields, evidence=list(refs.values()), related_ids=[])
     return {"rows": [item], "coverage": fields["input_coverage"]}
@@ -305,7 +312,7 @@ class FusionReport(unittest.TestCase):
         self.assertEqual(context["fields"]["raw_computed_rows"], [original])
         self.assertEqual(fields["computation"], {key: value for key, value in original["fields"]["computation"].items() if key != "text"})
         self.assertEqual(fields["model_evidence"], original["fields"]["model_evidence"])
-        for key in ("computation", "model_evidence", "sampling_response", "sampling_error", "input_coverage"):
+        for key in ("computation", "model_evidence", "sampling_response", "sampling_error", "input_coverage", "input_evidence"):
             self.assertEqual(context["fields"]["raw_computed_rows"][0]["fields"][key], original["fields"][key])
         for ref in fields["model_evidence"].values():
             self.assertIn(ref, item["evidence"])

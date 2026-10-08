@@ -307,6 +307,7 @@ val run_named :
   ?enable_thinking:bool ->
   ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
   ?agent_core_checkpoint:Agent_core.Checkpoint.t ->
+  ?native_binding:Keeper_direct_native_continuation.binding ->
   ?continue_from_checkpoint:bool ->
   ?trace_link:string * string ->
   ?event_bus:Agent_core.Event_bus.t ->

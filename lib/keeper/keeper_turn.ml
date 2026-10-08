@@ -511,7 +511,30 @@ let run_keeper_invocation_turn_admitted_inner
             in
       let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let session_dir = Filename.concat base_dir session_id in
-      (match (match Keeper_direct_gate_continuation.load
+      let native_admission =
+        let ( let* ) = Result.bind in
+        let* operation = Keeper_owner_registry.exact_operation
+            ~base_path:ctx.config.base_path ~keeper_name:meta.name operation_id
+          |> Result.map_error Keeper_owner_registry.command_error_to_string in
+        let* operation = match operation with
+          | Some operation -> Ok operation
+          | None -> Error "direct native admission has no owning operation" in
+        let binding : Keeper_direct_native_continuation.binding =
+          { base_path = ctx.config.base_path
+          ; keeper_name = meta.name
+          ; operation_id
+          ; execution_digest = operation.execution_digest
+          ; session_dir
+          ; session_id
+          } in
+        let* admission = Keeper_direct_native_continuation.load ~binding in
+        match admission with
+        | Keeper_direct_native_continuation.Resume resumed ->
+          Ok (binding, Some resumed, None)
+        | Keeper_direct_native_continuation.Terminal_pending _ ->
+          Error "native execution is terminal and awaiting Owner acknowledgement; it cannot be dispatched again"
+        | Keeper_direct_native_continuation.No_pending ->
+          let* direct_resume = (match Keeper_direct_gate_continuation.load
           ~config:ctx.config ~meta ~operation_id ~session_dir with
         | Error _ as error -> error
         | Ok (Some admission) -> Ok (Some (Keeper_agent_run.Gate_continuation admission))
@@ -523,13 +546,16 @@ let run_keeper_invocation_turn_admitted_inner
            | Ok None -> Keeper_direct_runtime_continuation.load
                ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
                ~session_dir ~session_id
-               |> Result.map (Option.map (fun admission -> Keeper_agent_run.Runtime_continuation admission)))) with
+               |> Result.map (Option.map (fun admission -> Keeper_agent_run.Runtime_continuation admission)))) in
+          Ok (binding, None, direct_resume)
+      in
+      (match native_admission with
        | Error detail ->
          dispatch_failed
            ~class_:Tool_result.Runtime_failure
            (Keeper_request_failure.Turn_continuation_unpersisted
               { stage = Keeper_request_failure.Continuation_load; detail })
-       | Ok direct_resume ->
+       | Ok (native_binding, native_resume, direct_resume) ->
       let deferred_lane = ref None in
       let produced_checkpoint = ref None in
       let gate_ids = ref [] in
@@ -567,7 +593,7 @@ let run_keeper_invocation_turn_admitted_inner
         | Keeper_agent_run.Runtime_continuation _ -> None) in
       let user_blocks =
         if Option.is_some official_checkpoint_resume then None
-        else if Option.is_some direct_resume then user_blocks else
+        else if Option.is_some native_resume || Option.is_some direct_resume then user_blocks else
         Option.map
           (Keeper_vision_ingest.evict_blocks
              ~base_path:ctx.config.base_path
@@ -595,9 +621,11 @@ let run_keeper_invocation_turn_admitted_inner
       in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
-      let selected_runtime = match official_checkpoint_resume with
+      let selected_runtime = match native_resume with
+        | Some resumed -> Ok (Keeper_direct_native_continuation.runtime_id resumed)
+        | None -> (match official_checkpoint_resume with
         | Some checkpoint -> Ok checkpoint.Keeper_semantic_execution.runtime_id
-        | None -> resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume in
+        | None -> resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume) in
       match selected_runtime with
       | Error detail ->
         Progress.stop_tracking turn_task_id;
@@ -787,6 +815,7 @@ let run_keeper_invocation_turn_admitted_inner
                       Keeper_agent_run.run_turn
                                       ~observation_token
                                       ?direct_resume
+                                      ~native_continuation:{ binding = native_binding; resumed = native_resume }
                                       ?official_task_reference
                                       ?hitl_resolution:(Option.map Keeper_direct_gate_continuation.resolution gate_resume)
                                       ~on_gate_deferred:(fun approval_id -> gate_ids := approval_id :: !gate_ids)

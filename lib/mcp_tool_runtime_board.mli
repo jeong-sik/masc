@@ -69,6 +69,10 @@ module For_testing : sig
     operation:string ->
     (unit -> (unit, string) result) ->
     Tool_result.result
+
+  val created_post_id : Tool_result.result -> string option
+  (** The id of the post a successful [masc_board_post] result carries in
+      its typed data; [None] when the data is not a post. *)
 end
 
 (** {1 MCP runtime fallback} *)

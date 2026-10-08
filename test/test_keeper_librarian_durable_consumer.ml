@@ -3325,7 +3325,7 @@ let test_memory_count_cleanup_without_history () =
     commit [] in
   let run execute = Cleanup.For_testing.run_with ~execute ~base_path:config.base_path ~keeper_name in
   check bool "overflow reviewed without a finished turn" true
-    (run execute = Cleanup.Reviewed {remaining_excess=true});
+    (run execute = Cleanup.Reviewed Cleanup.Excess_retained);
   check bool "safe no-change choice is not immediately repeated" true
     (run execute = Cleanup.Already_reviewed);
   check int "one model decision" 1 !calls;
@@ -3340,9 +3340,151 @@ let test_memory_count_cleanup_without_history () =
       [ {Memory.absorbed=Memory.memory_id first;into=Memory.memory_id merged}
       ; {Memory.absorbed=Memory.memory_id second;into=Memory.memory_id merged} ] [merged] in
   check bool "next wake can consolidate with lineage" true
-    (run merge = Cleanup.Reviewed {remaining_excess=false});
+    (run merge = Cleanup.Reviewed Cleanup.Limits_reached);
   check bool "within limit requires no model" true (run execute = Cleanup.Within_limits);
   check int "no additional no-change model calls" 1 !calls
+;;
+
+(* Use the production cleanup and queue signal on the real serialized lane.
+   Only the model boundary is replaced: each answer commits through Current,
+   and no external event arrives after the initial submission. *)
+let check_memory_cleanup_wakes ~category_cap ~item_cap ~initial ~decisions
+    ~expected_wakes ~expected_facts ~expected_results =
+  let module Cleanup = Masc.Keeper_memory_cleanup in
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let module Lane = Masc.Keeper_memory_lane in
+  let module Signal = Masc.Keeper_librarian_queue_signal in
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.librarian_env_key
+    (Some "true") @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.category_cap_env_key
+    (Some (string_of_int category_cap)) @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.facts_per_category_cap_env_key
+    (Some (string_of_int item_cap)) @@ fun () ->
+  with_workspace @@ fun config ->
+  write_meta config "cleanup-continuation";
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  let commit ~before after =
+    let after_ids = List.map Memory.memory_id after in
+    let dropped_statements = List.filter_map (fun fact ->
+      let memory_id = Memory.memory_id fact in
+      if List.mem memory_id after_ids then None
+      else Some {Memory.memory_id; reason="The fixture model chose to retire this memory."}) before in
+    match Current.apply_disposition ~revisions:[] ~absorbed:[] ~dropped_statements
+      ~keepers_dir ~keeper_id:keeper_name ~now:2.
+      ~source:{kind=Current.Librarian;trace_id="cleanup-continuation"}
+      ~new_claims:after () with
+    | Ok _ -> true
+    | Error detail -> fail detail in
+  ignore (commit ~before:[] initial);
+  let decisions_left = ref decisions in
+  let calls = ref 0 in
+  let execute ~keepers_dir:_ ~keeper_name:_ ~expected_revision:_ (input : Masc.Keeper_librarian.input) =
+    incr calls;
+    check int "sleeping Keeper has no new conversation" 0 (List.length input.messages);
+    match !decisions_left with
+    | [] -> fail "cleanup called the model without count progress"
+    | decision :: rest ->
+      decisions_left := rest;
+      (match decision with
+       | None -> false
+       | Some after ->
+         let before = match input.current with Some current -> current.facts | None -> [] in
+         commit ~before after) in
+  let wakes = ref 0 in
+  let results = ref [] in
+  let run () =
+    let result = Cleanup.For_testing.run_with ~execute ~base_path:config.base_path ~keeper_name in
+    results := result :: !results in
+  Lane.For_testing.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      Signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
+      Cleanup.forget ~base_path:config.base_path ~keeper_name;
+      Lane.For_testing.reset ())
+    (fun () -> Eio.Switch.run @@ fun sw ->
+      Lane.init ~sw;
+      Signal.install (fun ~base_path ~keeper_name:signaled_name ->
+        check string "continuation keeps the runtime" config.base_path base_path;
+        check string "continuation keeps the Keeper" keeper_name signaled_name;
+        incr wakes;
+        ignore (Lane.submit ~base_path ~keeper_name:signaled_name run);
+        check bool "continuation waits on the current lane" true
+          (Lane.has_waiting ~base_path ~keeper_name:signaled_name));
+      ignore (Lane.submit ~base_path:config.base_path ~keeper_name run);
+      Lane.For_testing.await_idle ~base_path:config.base_path ~keeper_name;
+      check int "only measured progress emits a wake" expected_wakes !wakes;
+      check int "every planned model decision ran" (List.length decisions) !calls;
+      check bool "saved decisions determine the continuation" true
+        (expected_results (List.rev !results));
+      let snapshot = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name with
+        | Ok (Some snapshot) -> snapshot
+        | Ok None -> fail "cleanup lost current memory"
+        | Error detail -> fail detail in
+      let identities_and_categories facts =
+        List.map (fun (fact : Memory.fact) ->
+          Memory.memory_id fact, Memory.category_to_string fact.category) facts
+        |> List.sort Stdlib.compare in
+      check (list (pair string string)) "the model-selected memory and categories are persisted"
+        (identities_and_categories expected_facts)
+        (identities_and_categories snapshot.facts))
+;;
+
+let cleanup_fixture_fact category claim =
+  Masc.Keeper_memory_os_types.observed ~category ~claim ~now:1.
+    ~origin:{kind=Masc.Keeper_memory_os_types.Injected;trace_id="cleanup-continuation"}
+;;
+
+let test_memory_count_cleanup_continues_without_external_wake () =
+  let module Cleanup = Masc.Keeper_memory_cleanup in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let first = cleanup_fixture_fact Memory.Constraint "Production requires approval." in
+  let second = cleanup_fixture_fact Memory.Constraint "Rollback assets are ready." in
+  let third = cleanup_fixture_fact Memory.Constraint "Record the deployment outcome." in
+  let run initial =
+    check_memory_cleanup_wakes ~category_cap:1 ~item_cap:1 ~initial
+      ~decisions:[Some (List.tl initial); Some [third]]
+      ~expected_wakes:1 ~expected_facts:[third]
+      ~expected_results:((=)
+        [Cleanup.Reviewed Cleanup.Progress_with_excess; Cleanup.Reviewed Cleanup.Limits_reached]) in
+  run [first; second; third];
+  let custom name = match Memory.category_of_string name with
+    | Some category -> category | None -> fail "custom category fixture" in
+  (* Every category is below its item cap. Category excess alone must wake. *)
+  run [{first with category=custom "deployment_rules"};
+       {second with category=custom "rollback_rules"}; third]
+;;
+
+let test_memory_count_cleanup_does_not_spin () =
+  let module Cleanup = Masc.Keeper_memory_cleanup in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let first = cleanup_fixture_fact Memory.Constraint "Production requires approval." in
+  let second = cleanup_fixture_fact Memory.Constraint "Rollback assets are ready." in
+  let third = cleanup_fixture_fact Memory.Constraint "Record the deployment outcome." in
+  let rewritten = cleanup_fixture_fact Memory.Constraint "Approval is required for production." in
+  let preference = cleanup_fixture_fact Memory.Preference "Prefer rollback drills on staging." in
+  let lesson = cleanup_fixture_fact Memory.Lesson "A deployment log exposed the failed step." in
+  let initial = [first; second; third] in
+  let check_retained ~initial after =
+    check_memory_cleanup_wakes ~category_cap:1 ~item_cap:1 ~initial
+      ~decisions:[Some after] ~expected_wakes:0 ~expected_facts:after
+      ~expected_results:((=) [Cleanup.Reviewed Cleanup.Excess_retained]) in
+  check_retained ~initial initial;
+  check_retained ~initial [rewritten; second; third];
+  (* Fewer excess items cannot hide a newly overflowing category count. *)
+  check_retained ~initial [first; preference];
+  (* Fewer excess categories cannot hide a newly overflowing item count. *)
+  check_retained
+    ~initial:[first; preference; lesson]
+    [first; second; preference];
+  check_memory_cleanup_wakes ~category_cap:1 ~item_cap:1 ~initial
+    ~decisions:[Some [second;third]; Some [second;third]]
+    ~expected_wakes:1 ~expected_facts:[second;third]
+    ~expected_results:((=)
+      [Cleanup.Reviewed Cleanup.Progress_with_excess; Cleanup.Reviewed Cleanup.Excess_retained]);
+  check_memory_cleanup_wakes ~category_cap:1 ~item_cap:1 ~initial
+    ~decisions:[None] ~expected_wakes:0 ~expected_facts:initial
+    ~expected_results:(function [Cleanup.Unavailable _] -> true | _ -> false)
 ;;
 
 let () =
@@ -3485,6 +3627,10 @@ let () =
     ; ( "production wake"
       , [ test_case "count overflow is reviewed without unread history" `Quick
             test_memory_count_cleanup_without_history
+        ; test_case "saved count progress continues without an external wake" `Quick
+            test_memory_count_cleanup_continues_without_external_wake
+        ; test_case "retained and worsening count excess does not spin" `Quick
+            test_memory_count_cleanup_does_not_spin
         ; test_case "failure stops and a later wake drains successful cuts" `Quick
             test_one_wake_stops_on_failure_then_drains_successful_cuts
         ; test_case "growing source allows following phases" `Quick

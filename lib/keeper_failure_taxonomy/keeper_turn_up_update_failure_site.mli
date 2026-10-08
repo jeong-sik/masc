@@ -1,11 +1,8 @@
-(** Keeper_turn_up_update_failure_site — closed sum for [site] label on
-    [metric_keeper_turn_up_update_failures] (4 sites in
-    keeper_turn_up_update.ml). *)
+(** Keeper_turn_up_update_failure_site — closed sum for the [site] label on
+    [metric_keeper_turn_up_update_failures]. *)
 
 type t =
-  | Prompt_cap
-  | Sandbox_validation
-  | Runtime_assignment
   | Config_persistence
+      (** Persisting the updated Keeper config failed (keeper_turn_up_update.ml). *)
 
 val to_label : t -> string

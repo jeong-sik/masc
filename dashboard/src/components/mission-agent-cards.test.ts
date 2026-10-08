@@ -103,7 +103,6 @@ describe('mission keeper runtime helpers', () => {
     expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
     expect(keeperRuntimeBlockerLabel('fiber_unresolved')).toBe('Fiber 미해결')
     expect(keeperRuntimeBlockerLabel('fiber_unresolved')).toBe('Fiber 미해결')
-    expect(keeperRuntimeBlockerLabel('stale_termination_storm')).toBe('Stale 종료 폭주')
     expect(keeperRuntimeBlockerLabel('heartbeat_failures')).toBe('하트비트 실패')
     expect(keeperRuntimeBlockerLabel('turn_failures')).toBe('턴 실패 반복')
     expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe('런타임 호출 오류')
@@ -125,15 +124,15 @@ describe('mission keeper runtime helpers', () => {
 
   it('turns registry failure blocker codes into operator-readable hints', () => {
     const keeper = {
-      name: 'stormed',
+      name: 'heartbeat-lost',
       status: 'idle',
-      runtime_blocker_class: 'stale_termination_storm',
+      runtime_blocker_class: 'heartbeat_failures',
       runtime_blocker_summary:
-        'Stale watchdog terminated 8 keeper cycle(s) in the storm window; operator investigation is required before restart.',
+        'Heartbeat failed 8 times in a row; operator investigation is required before restart.',
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      'Stale watchdog terminated 8 keeper cycle(s) in the storm window; operator investigation is required before restart.',
+      'Heartbeat failed 8 times in a row; operator investigation is required before restart.',
     )
   })
 

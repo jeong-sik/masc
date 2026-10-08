@@ -15,6 +15,7 @@ type navigation =
   | Message_keeper of {
       keeper_name : string;
       cursor : int;
+      return_keeper : string option;
     }
 
 type message_switch =
@@ -69,10 +70,21 @@ let reconcile ~current_ids ~next_ids ~current =
       (match find_index keeper_name next_ids with
        | Some next_cursor -> Calls_keeper { keeper_name; cursor = next_cursor }
        | None -> List_cursor (fallback_cursor ~cursor next_ids))
-  | Message_keeper { keeper_name; cursor } ->
+  | Message_keeper { keeper_name; cursor; return_keeper } ->
+      let selected_id =
+        if cursor < 0 then None else List.nth_opt current_ids cursor
+      in
+      (* The row to return to is remembered by name. A failed read empties the
+         roster and clamps the cursor to zero, so the cursor alone cannot name
+         it after the roster refills. *)
+      let return_keeper =
+        match selected_id with
+        | Some _ -> selected_id
+        | None -> return_keeper
+      in
       let cursor =
-        match find_index keeper_name next_ids with
+        match Option.bind return_keeper (fun id -> find_index id next_ids) with
         | Some next_cursor -> next_cursor
         | None -> fallback_cursor ~cursor next_ids
       in
-      Message_keeper { keeper_name; cursor }
+      Message_keeper { keeper_name; cursor; return_keeper }

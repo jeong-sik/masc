@@ -61,7 +61,6 @@ let contextualize_message ~channel ~channel_user_id ~channel_user_name
   let safe_user_id = normalized_or_unknown channel_user_id in
   let safe_user_name = normalized_or_unknown channel_user_name in
   let safe_workspace_id = normalized_or_unknown channel_workspace_id in
-  let safe_content = String.trim content in
   let metadata_lines =
     metadata
     |> List.filter_map (fun (key, value) ->
@@ -87,7 +86,7 @@ let contextualize_message ~channel ~channel_user_id ~channel_user_name
   String.concat "\n"
     (context_lines
      @ metadata_block
-     @ [ ""; "[User message]"; safe_content ])
+     @ [ ""; "[User message]"; content ])
 
 let metadata_value key metadata =
   match List.assoc_opt key metadata with
@@ -285,7 +284,7 @@ let accept_connector ~delivery ~clock:_ ~config ~channel ~channel_user_id
         | Ok source ->
           let input =
             Keeper_chat_operation_payload.input_to_json
-              ~message:(String.trim content)
+              ~message:content
               ~user_blocks:[]
               ~turn_instructions:None
               ~surface_context:None

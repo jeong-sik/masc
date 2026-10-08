@@ -146,6 +146,7 @@ let running ~started_at_unix =
     { lane = Reading.Turn_lane_autonomous
     ; started_at_unix
     ; interrupt_token = "7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d"
+    ; turn_ref = None
     ; preview = None
     }
 

@@ -119,6 +119,10 @@ type async_msg =
       ; latest : (Masc.Tui_decode.server_identity, string) result
         (* The identity the refusing probe read; it may name a workspace. *)
       }
+  | Schedule_form_authority_refused of
+      { action : string; detail : string; workspace : workspace_input_identity option }
+      (** A schedule create/modify form refused by the workspace guard: the
+          guard's withdrawal, then the refusal kept on the Schedules surface. *)
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (string list, string) result, string) result
@@ -198,7 +202,7 @@ type async_msg =
       * (Masc_tui_keeper_chat_projection.response, Masc_tui_keeper_chat_projection.error) result
       * unit Eio.Promise.u
   | Keeper_chat_stream_deltas of
-      Masc_tui_keeper_chat_projection.request * (int option * Masc_tui_keeper_chat_live.delta) list
+      Masc_tui_keeper_chat_projection.request * Masc_tui_keeper_chat_live.observed_delta list
   | Keeper_chat_stream_unavailable of Masc_tui_keeper_chat_projection.request * string
   | Keeper_run_next_done of Masc_tui_keeper_chat_projection.request * (string, string) result
   | Keeper_observed_interrupt_done of
@@ -212,10 +216,16 @@ type async_msg =
       * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_copy_loaded of
       int * string * (Masc_tui_keeper_chat_history.decoded, string) result
-  | Keeper_chat_journal_loaded of
+  | Keeper_chat_operation_loaded of
       { keeper_name : string
       ; operation_id : string
+      ; operation_state : (Keeper_chat_operation.state, string) result
+      }
+  | Keeper_chat_journal_loaded of
+      { keeper_name : string
+      ; source : Masc_tui_keeper_chat_log.journal_source
       ; started_at : float
+      ; operation_state : (Keeper_chat_operation.state option, string) result
       ; journal :
           ( Masc.Keeper_chat_event_log.journaled_event list
           , Masc_tui_keeper_chat_log.events_error )

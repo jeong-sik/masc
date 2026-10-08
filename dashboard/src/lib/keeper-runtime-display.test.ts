@@ -251,10 +251,6 @@ describe('keeperRuntimeBlockerHint', () => {
 
   const registryBlockerHintCases: Array<[KeeperRuntimeBlockerClass, string]> = [
     [
-      'stale_termination_storm',
-      'Stale watchdog 종료가 반복되어 restart 전에 원인 확인이 필요합니다.',
-    ],
-    [
       'heartbeat_failures',
       '하트비트 실패가 누적되어 keeper 생존 상태 확인이 필요합니다.',
     ],

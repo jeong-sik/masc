@@ -14,19 +14,23 @@ val request : base_path:string -> refresh
 
 val output_schema : Yojson.Safe.t
 
+type execution_failure =
+  | Input_too_large of string
+  | Output_too_large of string
+  | Execution_failed of string
+
 module For_testing : sig
-  (** The production configuration predicate, with only provider execution
-      and its input bound replaced by the fixture. *)
+  (** The production configuration predicate, with provider execution and
+      typed refusal evidence supplied by the fixture. *)
   val start_configured
     : sw:Eio.Switch.t
     -> base_path:string
-    -> max_input_bytes:int
     -> execute:(rendered_prompt:string -> selected:Workspace_memory_ledger.pending_fact list
-       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string, string) result)
+       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string, execution_failure) result)
+    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string, execution_failure) result)
     -> unit
 
-  (** The lane run itself: measured HTTP slots as one exact-output flow.
-      Runtime preparation rejects CLI slots until they expose a context window. *)
+  (** The lane run itself: HTTP slots as one exact-output flow. *)
   val execute
     : resolved:Runtime_exact_output_registry.resolved_lane
     -> rendered_prompt:string
@@ -37,9 +41,9 @@ module For_testing : sig
   val start
     : sw:Eio.Switch.t
     -> base_path:string
-    -> max_input_bytes:int
     -> execute:(rendered_prompt:string -> selected:Workspace_memory_ledger.pending_fact list
-       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string, string) result)
+       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string, execution_failure) result)
+    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string, execution_failure) result)
     -> unit
   val is_idle : base_path:string -> bool
   val stop : base_path:string -> unit

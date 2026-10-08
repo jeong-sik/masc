@@ -1908,8 +1908,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
      budget like any other word: no row exceeds [body_width], and the block
      keeps the same wrap width as the rows it sits among. *)
   let body_chunks =
-    match entry.span_clock, entry.turn_rail with
-    | Some span, Rail_opens -> wrap_words ~max_cells:body_width span @ body_chunks
+    match origin, entry.span_clock, entry.turn_rail with
+    | (Origin_inline | Origin_row), Some span, Rail_opens ->
+        wrap_words ~max_cells:body_width span @ body_chunks
     | _ -> body_chunks
   in
   let body_rows =
@@ -1978,9 +1979,12 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
         | None -> body_rows
         | Some metadata -> metadata :: body_rows)
   in
-  match timeline_break_row ~previous ~inner_width:pane_width entry with
-  | None -> message_rows
-  | Some timeline_break -> timeline_break :: message_rows
+  match origin with
+  | Origin_bare -> message_rows
+  | Origin_inline | Origin_row ->
+      match timeline_break_row ~previous ~inner_width:pane_width entry with
+      | None -> message_rows
+      | Some timeline_break -> timeline_break :: message_rows
 
 let viewport_gap_text ~inner_width hidden_rows =
   let candidates =

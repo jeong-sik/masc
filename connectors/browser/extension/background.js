@@ -990,6 +990,7 @@ async function pageInteract(args, deadlineMs, signal) {
   // A later executeScript rejection can lose a result after a page effect.
   try {
     if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
+    if (args.action === 'hover_at') throw new Error("trusted_hover_requires_live_bidi_connection");
     if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
     const tab = await browser.tabs.get(args.tabId);
     signal?.throwIfAborted();

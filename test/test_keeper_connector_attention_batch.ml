@@ -90,7 +90,6 @@ let transient_retry_route =
 let deterministic_route ~detail =
   Keeper_runtime_failure_route.Exhausted_visible_alive
     { terminal = Keeper_runtime_failure_route.Deterministic_request
-    ; provenance = Keeper_runtime_failure_route.Agent_core_api_error
     ; detail
     }
 ;;
@@ -364,40 +363,6 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
        |> Result.value ~default:(-1)))
 ;;
 
-let test_transient_board_prefix_keeps_connector_content_within_admission_limit () =
-  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
-  @@ fun () ->
-  with_ctx "connector-after-transient" (fun ~base_path ~keeper_name ~meta ~ctx ->
-    let board = board_attention_stimulus ~label:"unavailable-head" ~arrived_at:1.0 in
-    let messages = List.init 3 (fun index ->
-      connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"C-bounded"
-        ~message_id:(string_of_int index) ~arrived_at:(Float.of_int (index + 2))
-        ~content:(Printf.sprintf "connector content %d" index))
-    in
-    List.iter (enqueue_exn ~base_path keeper_name) (board :: messages);
-    Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
-    let intake =
-      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
-        ~ctx ~meta_after_triage:meta ~pending_board_events:[]
-    in
-    let expected = List.take 2 messages |> List.map (fun (source : Q.stimulus) -> source.post_id) in
-    check (list string) "readable connector members fill the limit after the failed Board row"
-      expected
-      (Keeper_heartbeat_source_batch.stimuli intake.source_batch
-       |> List.map (fun (source : Q.stimulus) -> source.post_id));
-    check (list string) "every admitted member retains its recorded content"
-      (List.map (fun id -> "connector-attention:" ^ id) expected)
-      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.post_id)
-         intake.pending_board_events);
-    check (list string) "recorded message bodies reach the turn in order"
-      [ "connector content 0"; "connector content 1" ]
-      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
-         intake.pending_board_events);
-    check int "unadmitted and admitted sources remain pending before ACK" 4
-      (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
-       |> Result.map Q.length |> Result.value ~default:(-1)))
-;;
-
 let test_unread_connector_sources_survive_other_completed_work ~failure () =
   List.iter (fun count ->
     with_ctx (Printf.sprintf "connector-unread-%d" count)
@@ -435,11 +400,11 @@ let test_unread_connector_sources_survive_other_completed_work ~failure () =
           (first.event_queue_triggers = []);
         check bool "independently scheduled work survives unread connector content" true
           (Keeper_heartbeat_loop.should_run_turn_after_event_intake
-             ~scheduled:true ~consumed_stimulus_count:0
+             ~scheduled:true
              ~event_queue_intake_error:first.event_queue_intake_error);
         check bool "unread content does not create an unscheduled turn" false
           (Keeper_heartbeat_loop.should_run_turn_after_event_intake
-             ~scheduled:false ~consumed_stimulus_count:0
+             ~scheduled:false
              ~event_queue_intake_error:first.event_queue_intake_error);
         let bootstrap : Q.stimulus =
           { post_id = "readable-other-work"; urgency = Q.Low; arrived_at = 10.; payload = Q.Bootstrap } in
@@ -452,7 +417,7 @@ let test_unread_connector_sources_survive_other_completed_work ~failure () =
            |> List.map (fun (source : Q.stimulus) -> source.post_id));
         check bool "unrelated admitted work can still run" true
           (Keeper_heartbeat_loop.should_run_turn_after_event_intake
-             ~scheduled:true ~consumed_stimulus_count:1
+             ~scheduled:true
              ~event_queue_intake_error:mixed.event_queue_intake_error);
         let complete batch =
           match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
@@ -1345,11 +1310,11 @@ let test_batch_with_a_channel_less_member_routes_nowhere () =
   | Some _ -> fail "a channel-less member must take the route from the batch"
 ;;
 
-(* RFC-0373 admits an autonomous turn after chat-lane deferrals. Official
-   clients own their resume history, so a settled host tool result alone does
-   not permit terminating that provider turn. The waiting chat claims after
-   the admitted turn completes. *)
-let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
+(* A chat may arrive after an autonomous official-client turn starts.
+   Official clients own their resume history, so a settled host tool result
+   alone does not permit terminating that provider turn. The waiting chat
+   claims after the admitted turn completes. *)
+let test_official_turn_keeps_tool_result_until_completion () =
   Eio_main.run
   @@ fun env ->
   Masc_test_deps.ensure_rng_initialized ();
@@ -1359,69 +1324,38 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
   @@ fun sw ->
   let base_path = Masc_test_deps.setup_test_workspace () in
   Unix.putenv "MASC_BASE_PATH" base_path;
-  let keeper_name = "debt-advisory" in
+  let keeper_name = "official-chat-handoff" in
   let meta = test_meta keeper_name in
   Keeper_registry.For_testing.clear ();
   Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.clear ()) @@ fun () ->
   ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
-  (* Cross-domain counters: the chat child runs on another eio domain, so a
-     plain ref's write may never become visible to this domain's spin. *)
+  (* The chat child runs on another Eio domain. *)
   let chat_turns = Atomic.make 0 in
-  let fed = Atomic.make 0 in
-  let watch_after_turn = Atomic.make false in
   let post_turn_chat, mark_post_turn_chat = Eio.Promise.create () in
-  let holder = ref None in
-  (* Deterministic handshake: the runner resolves [held] once its claim
-     succeeded, and parks on [release_gate] until the test opens it --
-     the way a real chat turn keeps the slot for its duration. *)
-  let held, hold = Eio.Promise.create () in
-  let release_gate, release = Eio.Promise.create () in
+  let operation_id =
+    match
+      Owner.Chat_operation.Operation_id.of_string "kmsg-official-chat-handoff"
+    with
+    | Ok operation_id -> operation_id
+    | Error detail -> fail detail
+  in
   let submit owner =
-    let serial = Atomic.fetch_and_add fed 1 + 1 in
-    let operation_id =
-      match
-        Owner.Chat_operation.Operation_id.of_string
-          ("kmsg-debt-advisory-" ^ string_of_int serial)
-      with
-      | Ok operation_id -> operation_id
-      | Error detail -> fail detail
-    in
-    (match
-       Owner.submit_operation owner ~operation_id
-         ~source:(`Assoc [ "kind", `String "dashboard" ])
-         ~input:(`Assoc [ "message", `String "fed chat turn" ])
-     with
-     | Ok _ -> ()
-     | Error error -> fail (Owner.error_to_string error))
+    match
+      Owner.submit_operation owner ~operation_id
+        ~source:(`Assoc [ "kind", `String "dashboard" ])
+        ~input:(`Assoc [ "message", `String "answer after this tool" ])
+    with
+    | Ok _ -> ()
+    | Error error -> fail (Owner.error_to_string error)
   in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     match claim () with
     | Ok (Some (operation : Owner.Chat_operation.t)) ->
-      let claimed = Atomic.fetch_and_add chat_turns 1 + 1 in
-      if Atomic.get watch_after_turn
-      then
-        ignore
-          (Eio.Promise.try_resolve mark_post_turn_chat operation.operation_id);
-      (* Only the first claim releases the debt-cap poller. A second resolve
-         would fail the follower after signalling that it had merely started. *)
-      if claimed = 1 then Eio.Promise.resolve hold ();
-      let owner =
-        match !holder with
-        | Some owner -> owner
-        | None -> fail "the test did not publish the owner for the feeder"
-      in
-      (* Refill before the first turn settles, so the admitted autonomous
-         turn still finds a claimable chat. Later claims drain this finite
-         fixture rather than continually creating new work. *)
-      if claimed = 1 then submit owner;
-      Eio.Promise.await release_gate;
-      Owner.Operation_succeeded
-        { outcome_ref = "turn:debt-advisory-" ^ string_of_int claimed }
+      ignore (Atomic.fetch_and_add chat_turns 1);
+      Eio.Promise.resolve mark_post_turn_chat operation.operation_id;
+      Owner.Operation_succeeded { outcome_ref = "turn:official-chat-handoff" }
     | Ok None -> fail "the chat runner found an empty queue"
     | Error Owner.Owner_closed ->
-      (* A queued chat whose slot only opens at teardown: the owner is
-         gone, and the row is settled as cancelled rather than raising
-         through the test's switch. *)
       Owner.Operation_failed
         { kind = Owner.Chat_operation.Turn_cancelled
         ; detail = "keeper owner closed before the queued chat claimed"
@@ -1455,122 +1389,82 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
     | Ok owner -> owner
     | Error error -> fail (Owner_registry.lookup_error_to_string error)
   in
-  holder := Some owner;
-  submit owner;
-  (* The first chat child claims and parks in the gate; [held] resolving
-     is the deterministic signal that the slot is occupied. *)
-  Eio.Promise.await held;
-  Fun.protect
-    ~finally:(fun () -> ignore (Eio.Promise.try_resolve release ()))
-    @@ fun () ->
-  let cap = Owner.autonomous_deferral_debt_cap in
-  let refusals = ref 0 in
-  let bound = cap + 6 in
-  let rec poll () =
-    match
-      Owner_registry.run_autonomous_if_idle ~base_path ~keeper_name (fun () ->
-        (* The cap admitted this autonomous turn while a chat waits. Its
-           official-client result has no proven durable resume boundary. *)
-        let projection =
-          match Owner_registry.operation_projection ~base_path ~keeper_name with
-          | Ok projection -> projection
-          | Error error -> fail (Owner_registry.lookup_error_to_string error)
-        in
-        check bool "a claimable chat waits during the bought turn" true
-          projection.has_claimable_queued;
-        let owner =
-          match !holder with
-          | Some owner -> owner
-          | None -> fail "the test did not publish the owner for the feeder"
-        in
-        let handed_off = ref false in
-        let terminal_error = ref None in
-        let tool =
-          Agent_core.Tool.create ~name:"debt-cap-probe" ~description:"settle work"
-            ~parameters:[] (fun _ ->
-              submit owner;
-              Ok { Agent_core.Types.content = "settled result"
-                 ; content_blocks = None; _meta = None })
-        in
-        let projected =
-          Keeper_official_client_host.dynamic_tools
-            ~content_transport:Runtime_official_client_tool.Codex
-            ~accepts_image_input:true ~tool_approval:None
-            ~runtime_label:"debt-cap-fixture" ~keeper_name ~turn_count:1
-            ~tools:[tool] ~loading_plan:Keeper_official_client_host.All_on_demand
-            ~hooks:Agent_core.Hooks.empty ~event_bus:None
-            ~context_injector:None
-            ~context:(Some (Agent_core.Context.create_sync ()))
-            ~terminal_effect_state:(fun () ->
-              Keeper_tools_agent_core.Terminal_effect_open)
-            ~terminal_error ~pre_tool_rejects:(ref [])
-            ~on_result_handoff:(fun ~invocation:_ ~content:_ -> handed_off := true)
-            ~on_tool_boundary:(fun () ->
-              check bool "tool result handed off before boundary advice" true
-                !handed_off;
-              Keeper_agent_run.For_testing.official_client_tool_boundary
-                ~repetition_execution:None
-                ~tool_calls:[] ())
-            ~raw_trace_run:None ()
-        in
-        let tool =
-          match projected with
-          | Ok [tool] -> tool
-          | Ok _ -> fail "expected one official-client tool"
-          | Error error -> fail (Agent_core.Error.to_string error)
-        in
-        let result = tool.call ~call_id:"debt-cap-settled-tool" (`Assoc []) in
-        check bool "autonomous tool completed" true result.success;
-        check string "settled tool result preserved" "settled result" result.content;
-        check (option string) "boundary was not a tool error" None !terminal_error;
-        check int "queued chat did not claim during the official turn" 1
-          (Atomic.get chat_turns);
-        (* This direct probe establishes the AGENT_CORE advisory decision
-           after debt-cap admission. It does not run Agent_core.Agent.Advanced
-           and therefore does not prove that a checkpoint was persisted. *)
-        (match
-           Keeper_agent_run.For_testing.native_tool_boundary
-             ~keeper_name ~repetition_execution:None
-             ~terminal_effect_state:Keeper_tools_agent_core.Terminal_effect_open
-             ~tool_calls:[] ~assistant_turn_texts:[]
-             ~yield_requested:(Some (fun () ->
-               Keeper_unified_turn.autonomous_yield_request
-                 ~base_path ~keeper_name))
-         with
-         | Ok (Runtime_agent.Yield Runtime_agent.Operation_queued) -> ()
-         | Ok (Runtime_agent.Yield _ | Runtime_agent.Continue) | Error _ ->
-           fail "the AGENT_CORE advisory ignored the queued chat after debt-cap admission");
-        match result.abort_turn with
-        | None ->
-          Atomic.set watch_after_turn true;
-          true
-        | Some (Keeper_official_client_host.Repeated_tool_call _
-                | Keeper_official_client_host.Terminal_tool_boundary _) ->
-          fail "the official client stopped before its turn completed")
-    with
-    | Ok (`Ran answer) -> answer
-    | Ok (`Busy _) ->
-      incr refusals;
-      (* The cap-th refusal is the debt that buys the slot. From then on
-         the holding chat may finish: the cap suppression keeps the next
-         queued chat out and the slot reaches this poller. *)
-      if !refusals = cap then Eio.Promise.resolve release ();
-      if !refusals >= bound
-      then
-        fail
-          (Printf.sprintf
-             "the autonomous lane never received the debt-cap slot (%d refusals)"
-             !refusals);
-      poll ()
-    | Ok `Interrupted -> fail "nothing interrupted the autonomous lane"
-    | Error error -> fail (Owner_registry.command_error_to_string error)
-  in
-  check bool "the chat lane held the slot before the cap"
-    (Atomic.get chat_turns > 0)
-    true;
-  check bool "debt-cap turn retained its official tool result" true (poll ());
+  (match
+     Owner_registry.run_autonomous_if_idle ~base_path ~keeper_name (fun () ->
+       let handed_off = ref false in
+       let terminal_error = ref None in
+       let tool =
+         Agent_core.Tool.create ~name:"official-chat-probe" ~description:"settle work"
+           ~parameters:[] (fun _ ->
+             submit owner;
+             Ok { Agent_core.Types.content = "settled result"
+                ; content_blocks = None; _meta = None })
+       in
+       let projected =
+         Keeper_official_client_host.dynamic_tools
+           ~content_transport:Runtime_official_client_tool.Codex
+           ~accepts_image_input:true ~tool_approval:None
+           ~runtime_label:"official-chat-fixture" ~keeper_name ~turn_count:1
+           ~tools:[tool] ~loading_plan:Keeper_official_client_host.All_on_demand
+           ~hooks:Agent_core.Hooks.empty ~event_bus:None
+           ~context_injector:None
+           ~context:(Some (Agent_core.Context.create_sync ()))
+           ~terminal_effect_state:(fun () ->
+             Keeper_tools_agent_core.Terminal_effect_open)
+           ~terminal_error ~pre_tool_rejects:(ref [])
+           ~on_result_handoff:(fun ~invocation:_ ~content:_ -> handed_off := true)
+           ~on_tool_boundary:(fun () ->
+             check bool "tool result handed off before boundary advice" true
+               !handed_off;
+             Keeper_agent_run.For_testing.official_client_tool_boundary
+               ~repetition_execution:None
+               ~tool_calls:[] ())
+           ~raw_trace_run:None ()
+       in
+       let tool =
+         match projected with
+         | Ok [tool] -> tool
+         | Ok _ -> fail "expected one official-client tool"
+         | Error error -> fail (Agent_core.Error.to_string error)
+       in
+       let result = tool.call ~call_id:"official-chat-settled-tool" (`Assoc []) in
+       check bool "autonomous tool completed" true result.success;
+       check string "settled tool result preserved" "settled result" result.content;
+       check (option string) "boundary was not a tool error" None !terminal_error;
+       check bool "the tool queued a claimable chat" true
+         (Owner.operation_projection owner).has_claimable_queued;
+       check int "queued chat did not claim during the official turn" 0
+         (Atomic.get chat_turns);
+       (* This direct probe establishes the AGENT_CORE advisory decision
+          when a chat arrives during an autonomous turn. It does not run
+          Agent_core.Agent.Advanced and therefore does not prove that a
+          checkpoint was persisted. *)
+       (match
+          Keeper_agent_run.For_testing.native_tool_boundary
+            ~keeper_name ~repetition_execution:None
+            ~terminal_effect_state:Keeper_tools_agent_core.Terminal_effect_open
+            ~tool_calls:[] ~assistant_turn_texts:[]
+            ~yield_requested:(Some (fun () ->
+              Keeper_unified_turn.autonomous_yield_request
+                ~base_path ~keeper_name))
+        with
+        | Ok (Runtime_agent.Yield Runtime_agent.Operation_queued) -> ()
+        | Ok (Runtime_agent.Yield _ | Runtime_agent.Continue) | Error _ ->
+          fail "the AGENT_CORE advisory ignored the newly queued chat");
+       match result.abort_turn with
+       | None -> ()
+       | Some (Keeper_official_client_host.Repeated_tool_call _
+               | Keeper_official_client_host.Terminal_tool_boundary _) ->
+         fail "the official client stopped before its turn completed")
+   with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy _) -> fail "the empty owner did not admit the autonomous turn"
+   | Ok `Interrupted -> fail "nothing interrupted the autonomous lane"
+   | Error error -> fail (Owner_registry.command_error_to_string error));
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 3.0 (fun () ->
-    let operation_id = Eio.Promise.await post_turn_chat in
+    let claimed_operation_id = Eio.Promise.await post_turn_chat in
+    check bool "the waiting message claimed after the official turn" true
+      (Owner.Chat_operation.Operation_id.equal operation_id claimed_operation_id);
     let rec await_settlement () =
       match Owner.exact_operation owner operation_id with
       | Error error -> fail (Owner.error_to_string error)
@@ -1579,7 +1473,7 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
         (match operation.state with
          | Owner.Chat_operation.Succeeded { outcome_ref; _ } ->
            check string "the follower completed after the official turn"
-             "turn:debt-advisory-2" outcome_ref
+             "turn:official-chat-handoff" outcome_ref
          | Owner.Chat_operation.Queued | Owner.Chat_operation.Running _ ->
            Eio.Fiber.yield ();
            await_settlement ()
@@ -1607,10 +1501,6 @@ let () =
             "admits only one exact HITL resolution per turn"
             `Quick
             test_one_intake_admits_only_one_hitl_resolution
-        ; test_case
-            "transient Board prefix preserves bounded connector content"
-            `Quick
-            test_transient_board_prefix_keeps_connector_content_within_admission_limit
         ; test_case "missing connector file survives other completion and restoration" `Quick
             (test_unread_connector_sources_survive_other_completed_work ~failure:`Missing_file)
         ; test_case "missing connector rows survive other completion and restoration" `Quick
@@ -1643,9 +1533,9 @@ let () =
             `Quick
             test_batch_completion_acks_every_member
         ; test_case
-            "the debt-cap official turn keeps a settled tool until completion"
+            "an official turn keeps a settled tool until completion with chat queued"
             `Quick
-            test_debt_cap_official_turn_keeps_tool_result_until_completion
+            test_official_turn_keeps_tool_result_until_completion
         ] )
     ; ( "batch_disposition_of_cycle_outcome (P1-2)"
       , [ test_case

@@ -2,14 +2,22 @@
     Run on the existing per-Keeper Librarian lane at boot, post-turn or intake
     wake, including when there is no unread conversation. *)
 
+type review_result =
+  | Limits_reached
+  | Progress_with_excess
+  | Excess_retained
+
 type outcome =
   | Disabled
   | Within_limits
   | Already_reviewed
-  | Reviewed of { remaining_excess : bool }
+  | Reviewed of review_result
   | Unavailable of string
 
 val run : base_path:string -> keeper_name:string -> outcome
+(** A committed decision that reduces category or item excess without worsening
+    the other emits the existing Librarian queue signal when excess remains.
+    A refusal, unchanged count or rewrite does not schedule another pass. *)
 
 val forget : base_path:string -> keeper_name:string -> unit
 (** Forget a purged Keeper's observation. *)

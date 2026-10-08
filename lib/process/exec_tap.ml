@@ -16,10 +16,6 @@ type call_kind =
   | Process_eio_run_argv_with_stdin
   | Process_eio_run_argv_with_stdin_and_status
   | Process_eio_run_argv_with_status
-  | Unix_create_process
-  | Unix_create_process_env
-  | Unix_open_process_args_in
-  | Unix_open_process_args_full
 
 let kind_to_string = function
   | Process_eio_run_argv -> "Process_eio.run_argv"
@@ -27,10 +23,6 @@ let kind_to_string = function
   | Process_eio_run_argv_with_stdin_and_status ->
       "Process_eio.run_argv_with_stdin_and_status"
   | Process_eio_run_argv_with_status -> "Process_eio.run_argv_with_status"
-  | Unix_create_process -> "Unix.create_process"
-  | Unix_create_process_env -> "Unix.create_process_env"
-  | Unix_open_process_args_in -> "Unix.open_process_args_in"
-  | Unix_open_process_args_full -> "Unix.open_process_args_full"
 
 type mode =
   | Off

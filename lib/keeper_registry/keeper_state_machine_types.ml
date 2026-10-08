@@ -112,18 +112,13 @@ let event_to_string = function
 
 (* ── Entry Actions ─────────────────────────────────────── *)
 
-(** Runtime contract mirrors [.mli]:
-    - [Publish_lifecycle] is executed by the registry as an observability
-      side effect.
-    - The remaining variants describe runtime-owned work and remain
-      explicit phase-entry intent until that integration is unified. *)
+(** Runtime contract mirrors [.mli]: the registry executes
+    [Publish_lifecycle] as an observability side effect. *)
 type entry_action =
-  | Start_drain
   | Publish_lifecycle of
       { event_name : string
       ; detail : string
       }
-  | Cleanup_and_unregister
 
 (* ── Transition Types ──────────────────────────────────── *)
 

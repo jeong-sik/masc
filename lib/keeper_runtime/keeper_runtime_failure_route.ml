@@ -49,19 +49,6 @@ type terminal_class =
   | Tool_correction_lost of fence_disposition
   | Internal_opaque
 
-type failure_provenance =
-  | Agent_core_api_error
-  | Agent_core_provider_error
-  | Agent_core_agent_error
-  | Agent_core_mcp_error
-  | Agent_core_config_error
-  | Agent_core_serialization_error
-  | Agent_core_io_error
-  | Agent_core_orchestration_error
-  | Agent_core_internal_error
-  | Masc_internal_error
-  | Completion_contract
-
 type error_boundary =
   | Masc_execution
   | Agent_core_execution
@@ -74,7 +61,6 @@ type route =
   | Rotate_now of { rotate : rotate_class }
   | Exhausted_visible_alive of
       { terminal : terminal_class
-      ; provenance : failure_provenance
       ; detail : string
       }
 
@@ -103,12 +89,11 @@ let rotate rotate_class = Rotate_now { rotate = rotate_class }
 let failure_detail err =
   Keeper_internal_error.cap_blocker_detail (Agent_core.Error.to_string err)
 
-let exhaust ~err ~provenance terminal_class =
-  Exhausted_visible_alive
-    { terminal = terminal_class; provenance; detail = failure_detail err }
+let exhaust ~err terminal_class =
+  Exhausted_visible_alive { terminal = terminal_class; detail = failure_detail err }
 
 let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_error) =
-  let exhaust_failure = exhaust ~err ~provenance:Masc_internal_error in
+  let exhaust_failure = exhaust ~err in
   match internal with
   | Keeper_internal_error.Resumable_cli_session _ -> rotate Resumable_cli_session
   | Keeper_internal_error.Runtime_exhausted { reason; _ } ->
@@ -281,7 +266,7 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
     observe Network_transient
 
 let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
-  let exhaust_failure = exhaust ~err ~provenance:Agent_core_provider_error in
+  let exhaust_failure = exhaust ~err in
   match p with
   | Llm_provider.Error.RateLimit { retry_after; _ } -> observe_retry ?retry_after Rate_limited
   | Llm_provider.Error.HardQuota { retry_after; _ } -> observe_retry ?retry_after Hard_quota
@@ -355,33 +340,19 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.ProviderTerminal _ ->
     exhaust_failure Provider_integration
 
-let provenance_for_boundary boundary agent_core_provenance =
-  match boundary with
-  | Agent_core_execution -> agent_core_provenance
-  | Masc_execution -> Masc_internal_error
-;;
-
-let route_of_error_family ~boundary (err : Agent_core.Error.t) : route =
-  let exhaust_failure provenance terminal =
-    exhaust ~err ~provenance:(provenance_for_boundary boundary provenance) terminal
-  in
+let route_of_error_family (err : Agent_core.Error.t) : route =
+  let exhaust_failure = exhaust ~err in
   match err with
   | Agent_core.Error.Api api -> route_of_api_error api
   | Agent_core.Error.Provider p -> route_of_provider_error ~err p
-  | Agent_core.Error.Mcp _ ->
-    exhaust_failure Agent_core_mcp_error Protocol_error
-  | Agent_core.Error.Config _ ->
-    exhaust_failure Agent_core_config_error Config_mismatch
-  | Agent_core.Error.Agent _ ->
-    exhaust_failure Agent_core_agent_error Internal_opaque
-  | Agent_core.Error.Serialization _ ->
-    exhaust_failure Agent_core_serialization_error Internal_opaque
-  | Agent_core.Error.Io _ ->
-    exhaust_failure Agent_core_io_error Internal_opaque
-  | Agent_core.Error.Orchestration _ ->
-    exhaust_failure Agent_core_orchestration_error Internal_opaque
+  | Agent_core.Error.Mcp _ -> exhaust_failure Protocol_error
+  | Agent_core.Error.Config _ -> exhaust_failure Config_mismatch
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
-    exhaust_failure Agent_core_internal_error Internal_opaque
+    exhaust_failure Internal_opaque
 ;;
 
 let route_of_error ~boundary (err : Agent_core.Error.t) : route =
@@ -398,8 +369,8 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
   | Some internal ->
     (match boundary with
      | Masc_execution -> route_of_masc_internal ~err internal
-     | Agent_core_execution -> route_of_error_family ~boundary err)
-  | None -> route_of_error_family ~boundary err
+     | Agent_core_execution -> route_of_error_family err)
+  | None -> route_of_error_family err
 
 (* A provider's retry hint that names a wait: present, finite, above zero. *)
 let usable_retry_after = function
@@ -577,7 +548,7 @@ let response_observed = function
        (* the model answered and kept repeating one unit; the client ended
           the stream, so the input was seen. *)
        true)
-  | Exhausted_visible_alive { terminal; provenance = _; detail = _ } ->
+  | Exhausted_visible_alive { terminal; detail = _ } ->
     (match terminal with
      | Deterministic_request
      (* invalid request or input capacity: refused before any generation. *)
@@ -705,7 +676,7 @@ let route_resumes_on_same_path = function
           the provider's wire or its own non-transient answer: the same path
           answers the same way after any wait. *)
        false)
-  | Exhausted_visible_alive { terminal; provenance = _; detail = _ } ->
+  | Exhausted_visible_alive { terminal; detail = _ } ->
     (match terminal with
      | Deterministic_request
      | Session_claim_refused

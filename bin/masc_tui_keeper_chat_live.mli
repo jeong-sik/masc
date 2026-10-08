@@ -84,6 +84,8 @@ type delta =
           producer suppresses exact replays within one open stream scope;
           every published start opens a new response even when a later scope
           reuses [message_id]. The id is optional correlation data. *)
+  | Stream_model_stopped
+      (** The provider response ended; the Keeper turn may still be running. *)
   | Stream_details of
       { usage : stream_usage option
       ; stop_reason : string option

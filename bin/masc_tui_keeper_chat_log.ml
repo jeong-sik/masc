@@ -142,7 +142,7 @@ let add ?at t ~seq (delta : Live.delta) =
     (match delta with
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
      | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
-     | Live.Stream_details _
+     | Live.Stream_details _ | Live.Stream_model_stopped
      | Live.Native_tool_started _ | Live.Native_tool_ended _
      | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
@@ -234,7 +234,7 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
     if usage = None && stop_reason = None
     then None
     else Some (Live.Stream_details { usage; stop_reason })
-  | E.Agent_core_stream_message_stop
+  | E.Agent_core_stream_message_stop -> Some Live.Stream_model_stopped
   | E.Agent_core_stream_ping
   | E.Agent_core_content_block_start _
   | E.Agent_core_content_block_stop _ -> None

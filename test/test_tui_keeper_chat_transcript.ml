@@ -1458,6 +1458,60 @@ let test_the_row_names_the_model_phase_between_tool_calls () =
     (contains ~needle:"runtime candidate: waiting on [gpt-4o] (attempt 2), nothing back for 10s \xc2\xb7 1 tool"
        (progress_text ~now:(origin +. 60.) t))
 
+let test_response_stop_preserves_pending_work () =
+  List.iter (fun content ->
+    let t = fresh () in
+    feed t [Live.Run_started; Live.Stream_model_started
+      {message_id=Some "response";model="observed";usage=None}; content];
+    let before = Transcript.drawn t in
+    let active = progress_text t in
+    let decoder = Live.create () in
+    let receive json =
+      Live.feed decoder ("data: " ^ json ^ "\n\n")
+      |> List.iter (fun (observed : Live.observed_delta) ->
+          Transcript.apply ~now:origin t observed.delta) in
+    List.iter (fun json ->
+      receive json;
+      check phase "malformed provider stop leaves Keeper running" Transcript.Working
+        (Transcript.phase t);
+      check string "malformed provider stop preserves current model activity" active
+        (progress_text t);
+      check bool "malformed provider stop is reported" true
+        (Option.is_some (Transcript.unreadable t)))
+      [{|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP"}|};
+       {|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP","value":{}}|}];
+    receive {|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP","value":null}|};
+    check bool "a subsequent valid wire stop ends only model activity" true
+      (contains ~needle:"model response ended" (progress_text t));
+    feed t [Live.Stream_model_stopped; Live.Stream_model_stopped; Live.Text ""; Live.Thinking ""];
+    check phase "provider stop leaves Keeper running" Transcript.Working (Transcript.phase t);
+    check bool "response stop and empty chunks leave the transcript body unchanged" true
+      (before = Transcript.drawn t);
+    let stopped = progress_text t in
+    check bool "the ended response is visible" true (contains ~needle:"model response ended" stopped);
+    check bool "empty chunks do not invent resumed output" false
+      (contains ~needle:"STREAMING" stopped || contains ~needle:"THINKING" stopped);
+    feed t [tool_started "pending" "Execute"; tool_ended "pending"];
+    let pending = Transcript.tool_calls t in
+    feed t [Live.Stream_model_stopped];
+    check bool "response stop preserves existing pending execution" true
+      (pending = Transcript.tool_calls t);
+    check bool "pending execution stays pending after provider stop" true
+      (contains ~needle:"awaiting results: Execute" (progress_text t));
+    feed t [tool_result "pending" "executed"; Live.Stream_model_started
+      {message_id=Some "response";model="observed";usage=None}; Live.Thinking "next"];
+    check bool "a later response can resume reasoning with a reused id" true
+      (contains ~needle:"THINKING" (progress_text t));
+    feed t [Live.Stream_model_stopped; Live.Runtime_attempt_started
+      {runtime_id=Some "retry";attempt_index=Some 1}];
+    check bool "retry clears the prior response's end" false
+      (contains ~needle:"model response ended" (progress_text t));
+    feed t [Live.Run_finished; Live.Stream_model_stopped];
+    check phase "a late response stop cannot reopen a completed turn" Transcript.Stream_ended
+      (Transcript.phase t))
+    [Live.Text "answer"; Live.Thinking "reason"]
+;;
+
 let test_runtime_identity_separates_configured_and_observed () =
   let identity ?(keeper_name = "keeper.one") transcript =
     Transcript.runtime_identity_text ~keeper_name
@@ -3034,7 +3088,7 @@ let test_empty_new_response_does_not_replace_prior_message () =
 
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "response boundaries", [test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
+    [ ( "response boundaries", [test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "response end retains turn and tool lifecycle" `Quick test_response_stop_preserves_pending_work; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;

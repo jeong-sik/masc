@@ -9789,6 +9789,11 @@
  (modules test_h2_composition_resume)
  (libraries masc_test_deps))
 
+(test
+ (name test_h5_media_failover_continuity)
+ (modules test_h5_media_failover_continuity)
+ (libraries masc_test_deps))
+
 (executable
  (name test_h3_working_state_meaning)
  (modules test_h3_working_state_meaning)

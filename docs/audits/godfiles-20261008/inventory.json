@@ -677,11 +677,13 @@
       "path": "test/test_keeper_chat_store.ml",
       "baseline_lines": 3733,
       "kind": "test",
-      "status": "invalid-kind acknowledgement scenario added; not executed",
+      "status": "invalid-kind acknowledgement scenario executed in row_kind group (3 tests passed); other groups and full semantic review remain pending",
       "prs": [
         41871
       ],
-      "current_lines": 3754
+      "current_lines": 3754,
+      "validation_source_head": "4a08c8a2bee6862297cae4a2cc3db00d231b854b",
+      "validation_artifact": "local-validation.md"
     },
     {
       "path": "test/test_keeper_checkpoint_stale_guard.ml",

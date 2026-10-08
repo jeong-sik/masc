@@ -27,7 +27,11 @@ val press_response :
     [activity_unobserved]), so a client reads one protocol on both routes.
     An accepted press wakes the [config] workspace's Lane instances bound to the
     machine once, with [Machine_changed Msx]; a refused one wakes nothing. The wake is
-    cancellation-protected, so the call must run in an Eio fiber. *)
+    cancellation-protected, so the call must run in an Eio fiber.
+
+    Every MSX change route (press, load, save, restore, disk) accepts an
+    optional [expected_workspace] object naming the workspace the terminal
+    read. A different workspace is a [`Conflict] and nothing is applied. *)
 
 val carts_json : base_path:string -> Yojson.Safe.t
 (** The load menu's inventory: [{carts:[names], loaded, cartridge}], the file
@@ -39,7 +43,7 @@ val load_result_json : ok:bool -> message:string -> Yojson.Safe.t
 
 val load_response :
   config:Workspace.config -> agent_name:string -> body:string ->
-  [ `OK | `Bad_request ] * Yojson.Safe.t
+  [ `OK | `Bad_request | `Conflict ] * Yojson.Safe.t
 (** An accepted load wakes the workspace's machine watchers after the machine
     changes and before the optional Board announcement. A refusal wakes none.
     The wake is cancellation-protected, so the call must run in an Eio fiber. *)
@@ -58,7 +62,16 @@ val tick_response :
     Stepping and atomic frame/ledger capture run once on the shared executor pool;
     an unavailable pool refuses the tick without running it inline.
     Activity refusal is HTTP 409 with [ok=false] and a closed [code] of
-    [activity_disabled] or [activity_unobserved], before execution starts. *)
+    [activity_disabled] or [activity_unobserved], before execution starts.
+    The body is not bound to a workspace; see [tick_response_bound]. *)
+
+val tick_response_bound :
+  config:Workspace.config -> body:string ->
+  [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
+(** [tick_response] for the route, which knows its workspace. An optional
+    [expected_workspace] object naming a different workspace is a [`Conflict]
+    without [code], and a malformed one a [`Bad_request]; nothing is stepped
+    in either case. The field is removed before the strict tick decoder. *)
 
 val activity_json : unit -> Yojson.Safe.t
 (** Read the published MSX activity only. No machine is started or advanced.
@@ -71,4 +84,4 @@ val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
     machine once, with [Machine_changed Msx]; a save or a refusal wakes nothing. *)
 val checkpoint_response :
   config:Workspace.config -> restore:bool -> body:string ->
-  [ `OK | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
+  [ `OK | `Bad_request | `Conflict | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t

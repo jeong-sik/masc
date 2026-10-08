@@ -385,6 +385,151 @@ let test_press_rejects_wrong_types () =
       ])
 ;;
 
+(* A change names the workspace the terminal read. Another workspace on the
+   same port is refused with 409 before any effect, a malformed precondition is
+   a 400, and the matching one is accepted and stripped before the strict
+   per-route decoders. *)
+let test_changes_are_bound_to_the_expected_workspace () =
+  with_tick_machine (fun () ->
+    Eio_main.run @@ fun _env ->
+    let base_path = Filename.temp_dir "msx-bound-route-" "" in
+    let config = Masc.Workspace.default_config base_path in
+    let masc_root = Masc.Workspace.masc_root_dir config in
+    (try Unix.mkdir masc_root 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    let expected ~base ~root =
+      Printf.sprintf {|"expected_workspace":{"base_path":%S,"masc_root":%S}|} base root
+    in
+    let here = expected ~base:(Unix.realpath base_path) ~root:(Unix.realpath masc_root) in
+    let elsewhere =
+      let other = Filename.temp_dir "msx-other-workspace-" "" in
+      expected ~base:(Unix.realpath other) ~root:(Unix.realpath other)
+    in
+    let relative = expected ~base:"relative/path" ~root:"relative/root" in
+    let before = current_frame_number () in
+    (* The routes answer with different status sets, so each is reduced to the
+       two refusal statuses this test distinguishes before it is compared. *)
+    let refusal = function
+      | `Conflict -> `Conflict
+      | `Bad_request -> `Bad_request
+      | `OK | `Internal_server_error | `Service_unavailable -> `Other
+    in
+    let check_refused label status_expected (status, response) =
+      check bool (label ^ ": status") true (refusal status = status_expected);
+      check
+        (option bool)
+        (label ^ ": ok is false")
+        (Some false)
+        (match member "ok" response with Some (`Bool b) -> Some b | _ -> None)
+    in
+    List.iter
+      (fun (label, precondition, status_expected) ->
+        check_refused
+          ("press " ^ label)
+          status_expected
+          (Route.press_response ~config ~who:"unit-presser"
+             ~body:(Printf.sprintf {|{%s,"keys":["space"]}|} precondition));
+        check_refused
+          ("load " ^ label)
+          status_expected
+          (Route.load_response ~config ~agent_name:"unit-presser"
+             ~body:(Printf.sprintf {|{%s,"cart":"game.rom"}|} precondition));
+        check_refused
+          ("save " ^ label)
+          status_expected
+          (Route.checkpoint_response ~config ~restore:false
+             ~body:(Printf.sprintf {|{%s,"slot":"quick"}|} precondition));
+        check_refused
+          ("restore " ^ label)
+          status_expected
+          (Route.checkpoint_response ~config ~restore:true
+             ~body:(Printf.sprintf {|{%s,"slot":"quick"}|} precondition)))
+      [ "another workspace", elsewhere, `Conflict
+      ; "a relative precondition", relative, `Bad_request
+      ];
+    check int "a refused change presses nothing" before (current_frame_number ());
+    check bool "a refused change reaches no ledger" true (ledger_whos () = []);
+    let status, _ =
+      Route.press_response ~config ~who:"unit-presser"
+        ~body:(Printf.sprintf {|{%s,"keys":["space"]}|} here)
+    in
+    check bool "the matching workspace is accepted" true (status = `OK);
+    check bool "the accepted press advanced the machine" true (current_frame_number () > before))
+;;
+
+(* The picture read after a change names the workspace it read. A server swapped
+   onto the same port answers 409 instead of serving its picture. *)
+let test_live_read_is_bound_to_the_expected_workspace () =
+  let base_path = Filename.temp_dir "msx-live-bound-" "" in
+  let config = Masc.Workspace.default_config base_path in
+  let masc_root = Masc.Workspace.masc_root_dir config in
+  (try Unix.mkdir masc_root 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let other = Filename.temp_dir "msx-live-other-" "" in
+  let precondition = Server_routes_http_routes_lane_addons.live_workspace_precondition ~config in
+  let fields = [ "source_kind", "msx_capture"; "since", "3" ] in
+  let here =
+    [ "expected_base_path", Unix.realpath base_path
+    ; "expected_masc_root", Unix.realpath masc_root ] in
+  let status = function
+    | Ok _ -> `Served
+    | Error (`Conflict, _) -> `Conflict
+    | Error (`Bad_request, _) -> `Bad_request
+  in
+  check bool "no precondition leaves the query alone" true (precondition fields = Ok fields);
+  check bool "this workspace is served with the fields removed" true
+    (precondition (here @ fields) = Ok fields);
+  check bool "another workspace is a conflict" true
+    (status (precondition ([ "expected_base_path", Unix.realpath other
+                           ; "expected_masc_root", Unix.realpath other ] @ fields))
+     = `Conflict);
+  check bool "one field alone is a bad request" true
+    (status (precondition (("expected_base_path", Unix.realpath base_path) :: fields))
+     = `Bad_request);
+  check bool "a relative path is a bad request" true
+    (status (precondition ([ "expected_base_path", "relative"; "expected_masc_root", "relative" ] @ fields))
+     = `Bad_request)
+;;
+
+(* A tick names the workspace the terminal confirmed. Another workspace on the
+   same port is refused with 409 and no code before the machine steps, a
+   malformed precondition is a 400, and the matching one reaches the tick
+   worker with the field removed before the strict tick decoder. *)
+let test_tick_is_bound_to_the_expected_workspace () =
+  with_tick_machine (fun () ->
+    Eio_main.run @@ fun _env ->
+    let base_path = Filename.temp_dir "msx-tick-bound-" "" in
+    let config = Masc.Workspace.default_config base_path in
+    let masc_root = Masc.Workspace.masc_root_dir config in
+    (try Unix.mkdir masc_root 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    let expected ~base ~root =
+      Printf.sprintf {|"expected_workspace":{"base_path":%S,"masc_root":%S}|} base root
+    in
+    let here = expected ~base:(Unix.realpath base_path) ~root:(Unix.realpath masc_root) in
+    let other = Filename.temp_dir "msx-tick-other-" "" in
+    let elsewhere = expected ~base:(Unix.realpath other) ~root:(Unix.realpath other) in
+    let relative = expected ~base:"relative/path" ~root:"relative/root" in
+    let before = current_frame_number () in
+    let tick precondition =
+      Route.tick_response_bound ~config
+        ~body:(Printf.sprintf {|{%s,"frames":3}|} precondition)
+    in
+    let status_of precondition = fst (tick precondition) in
+    check bool "another workspace is a conflict" true (status_of elsewhere = `Conflict);
+    check
+      (option string)
+      "the conflict carries no activity code"
+      None
+      (match member "code" (snd (tick elsewhere)) with Some (`String c) -> Some c | _ -> None);
+    check bool "a relative precondition is a bad request" true (status_of relative = `Bad_request);
+    check int "a refused tick steps nothing" before (current_frame_number ());
+    (* This test has no executor pool, so an admitted tick ends at the worker
+       refusal. Reaching it proves the binding and the strict decoder both
+       accepted the body; the stepping itself is covered by the tick suite. *)
+    check bool "the matching workspace passes the binding and the decoder" true
+      (match status_of here with
+       | `Conflict | `Bad_request -> false
+       | `OK | `Service_unavailable | `Internal_server_error -> true))
+;;
+
 let test_press_defaults_and_identity () =
   with_tick_machine (fun () ->
     Eio_main.run @@ fun _env ->
@@ -902,6 +1047,18 @@ let () =
             "a field of the wrong type is a 400 naming the field"
             `Quick
             test_press_rejects_wrong_types
+        ; test_case
+            "changes are refused unless they name this workspace"
+            `Quick
+            test_changes_are_bound_to_the_expected_workspace
+        ; test_case
+            "the picture read after a change is refused for another workspace"
+            `Quick
+            test_live_read_is_bound_to_the_expected_workspace
+        ; test_case
+            "a tick is refused unless it names this workspace"
+            `Quick
+            test_tick_is_bound_to_the_expected_workspace
         ; test_case
             "absent fields default and the who is the caller's"
             `Quick

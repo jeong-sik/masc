@@ -547,11 +547,22 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
 
    The same decode validates the spectator's activity feed: a malformed
    feed is a failed read, not a successful empty activity list. *)
-let fetch_machine_live ~(host : string) ~(port : int)
+let fetch_machine_live ?expected_workspace ~(host : string) ~(port : int)
     (source : Masc.Machine_lane.t) ~(since : Masc_tui_machine_live.mark option) :
     (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result =
+  (* With [expected_workspace] the server answers 409 unless it is that
+     workspace, so a read after a change cannot return another server's picture. *)
+  let bound_path =
+    let path = Masc_tui_machine_live.path source ~since in
+    match expected_workspace with
+    | None -> path
+    | Some (expected : Masc.Tui_decode.server_identity) ->
+        let canonical value = Uri.pct_encode ~component:`Query_value (Masc_tui_types.canonical_path value) in
+        Printf.sprintf "%s&expected_base_path=%s&expected_masc_root=%s" path
+          (canonical expected.sid_base_path) (canonical expected.sid_masc_root)
+  in
   let result =
-    match http_get ~host ~port ~path:(Masc_tui_machine_live.path source ~since) with
+    match http_get ~host ~port ~path:bound_path with
     | Error _ as error -> error
     | Ok (status_code, body) ->
         Eio_guard.run_in_systhread ~label:"tui-machine-live-decode" (fun () ->
@@ -684,14 +695,24 @@ let post_setup_json ~host ~port ~path ~body =
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
+(* A change from the terminal names the workspace it read; the server refuses
+   it when it has been swapped onto the same port since. The field is required
+   so a new MSX change cannot be sent unbound. *)
+let msx_body ~(expected_workspace : Masc.Tui_decode.server_identity) fields =
+  Yojson.Safe.to_string
+    (`Assoc
+       (("expected_workspace", `Assoc
+           [ ("base_path", `String (Masc_tui_types.canonical_path expected_workspace.sid_base_path))
+           ; ("masc_root", `String (Masc_tui_types.canonical_path expected_workspace.sid_masc_root)) ])
+        :: fields))
+
 (* Press one or more keys on the shared MSX machine (RFC-0439 §3.3). Returns
    the new frame number on success, or an error string; the caller re-fetches
    the frame to see the result. Auth rides [post_json]'s operator bearer. *)
-let post_msx_press ~(host : string) ~(port : int) ~(keys : string list) :
+let post_msx_press ~expected_workspace ~(host : string) ~(port : int) ~(keys : string list) :
     (int, string) result =
   let body =
-    Yojson.Safe.to_string
-      (`Assoc [ ("keys", `List (List.map (fun k -> `String k) keys)) ])
+    msx_body ~expected_workspace [ ("keys", `List (List.map (fun k -> `String k) keys)) ]
   in
   match post_json ~host ~port ~path:msx_press_path ~body with
   | Error e -> Error e
@@ -719,9 +740,9 @@ let fetch_msx_carts ~(host : string) ~(port : int) : string list =
    §3.7). The server runs the same loader masc_msx_load does; on success the
    caller re-fetches the frame to start spectating. Auth rides [post_json]'s
    operator bearer, like a press. *)
-let post_msx_load ~(host : string) ~(port : int) ~(cart : string) :
+let post_msx_load ~expected_workspace ~(host : string) ~(port : int) ~(cart : string) :
     (unit, string) result =
-  let body = Yojson.Safe.to_string (`Assoc [ ("cart", `String cart) ]) in
+  let body = msx_body ~expected_workspace [ ("cart", `String cart) ] in
   match post_json ~host ~port ~path:msx_load_path ~body with
   | Error e -> Error e
   | Ok json -> (
@@ -732,8 +753,8 @@ let post_msx_load ~(host : string) ~(port : int) ~(cart : string) :
       match member "message" json with `String m -> Error m | _ -> Error "load refused"))
 ;;
 
-let post_msx_change_disk ~host ~port ~disk =
-  let body = Yojson.Safe.to_string (`Assoc ["disk", `String disk]) in
+let post_msx_change_disk ~expected_workspace ~host ~port ~disk =
+  let body = msx_body ~expected_workspace ["disk", `String disk] in
   match post_json ~host ~port ~path:"/api/v1/msx/disk" ~body with
   | Error e -> Error e
   | Ok json ->
@@ -744,9 +765,9 @@ let post_msx_change_disk ~host ~port ~disk =
       | `String message -> Error message | _ -> Error "disk change refused")
 ;;
 
-let post_msx_checkpoint ~host ~port ~restore ~slot =
+let post_msx_checkpoint ~expected_workspace ~host ~port ~restore ~slot =
   let path = if restore then "/api/v1/msx/restore" else "/api/v1/msx/save" in
-  let body = Yojson.Safe.to_string (`Assoc ["slot", `String slot]) in
+  let body = msx_body ~expected_workspace ["slot", `String slot] in
   match post_json ~host ~port ~path ~body with
   | Error e -> Error e
   | Ok json ->
@@ -768,9 +789,16 @@ let post_msx_checkpoint ~host ~port ~restore ~slot =
    Only validated pixels are retained; every tick supplies fresh metadata. *)
 let msx_tick_cache = Masc_tui_msx_tick.create ()
 
-let tick_msx ~(host : string) ~(port : int) :
+let tick_msx ~(expected_workspace : Masc.Tui_decode.server_identity)
+    ~(host : string) ~(port : int) :
     (Masc_tui_msx_tick.response, string) result =
   let headers = auth_headers () in
+  (* The tick names the workspace the terminal confirmed, so a server swapped
+     onto the same port after the check refuses it before stepping. *)
+  let body_fields =
+    [ ("expected_workspace", `Assoc
+         [ ("base_path", `String (Masc_tui_types.canonical_path expected_workspace.sid_base_path))
+         ; ("masc_root", `String (Masc_tui_types.canonical_path expected_workspace.sid_masc_root)) ]) ] in
   let request ~body =
     match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers
         ~host ~port ~path:msx_tick_path ~body with
@@ -780,7 +808,7 @@ let tick_msx ~(host : string) ~(port : int) :
         Result.map (fun json -> status_code,json)
           (decode_json ~allow_empty:false ~status_code:(if status_code=409 then 200 else status_code) ~body)
   in
-  Masc_tui_msx_tick.fetch msx_tick_cache ~host ~port ~headers ~request
+  Masc_tui_msx_tick.fetch ~body_fields msx_tick_cache ~host ~port ~headers ~request
 ;;
 
 let fetch_msx_activity ~host ~port =

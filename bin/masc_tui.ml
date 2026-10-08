@@ -15230,7 +15230,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                       (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
           in
           state.runtime_config_view <- Some
-             { rcv_path = path; rcv_source_text = reading.source_text; rcv_rows = rows; rcv_metadata = metadata };
+             { rcv_path = path; rcv_source_text = reading.source_text; rcv_rows = rows; rcv_metadata = metadata;
+               rcv_account_emails = reading.account_emails };
           state.runtime_config_view_error <- None;
           (* Parsed here, with the lex, so the pane and the scroll bound read
              one list. Parsing per frame would put the count a frame behind

@@ -5163,3 +5163,15 @@ let models_account_reading ~provider = function
           [Printf.sprintf "Account emails: %d rows this build cannot read" unreadable_rows]
         else [] in
       email, notes
+
+(* Read from the same published source observation as Models rows. Usage's
+   loaded-runtime observation is deliberately not an input to this join. *)
+let models_source_account_reading ~provider reading =
+  let emails = match reading with
+    | None -> Account_emails_unread
+    | Some reading ->
+      match reading.rcv_account_emails with
+      | Ok (emails, unreadable_rows) -> Account_emails_read { emails; unreadable_rows }
+      | Error detail -> Account_emails_failed detail
+  in
+  models_account_reading ~provider emails

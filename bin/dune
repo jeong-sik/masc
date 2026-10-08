@@ -1593,7 +1593,7 @@
  (name masc_tui_runtime_config_view)
  (wrapped false)
  (modules masc_tui_runtime_config_view)
- (libraries masc_tui_message_layout yojson))
+ (libraries masc_tui_message_layout masc_tui_account_login yojson))
 
 (library
  (name masc_tui_runtime_account_form)

@@ -24,7 +24,8 @@ type metadata = {
   preempted_keys : string list;
 }
 type reading = { path : string; source_text : string; metadata : metadata;
-  account_groups : (string list list, string) result }
+  account_groups : (string list list, string) result;
+  account_emails : ((string * string) list * int, string) result }
 type tone = Neutral | Good | Warning | Bad
 
 val decode : Yojson.Safe.t -> (reading, string) result

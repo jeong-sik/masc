@@ -75,8 +75,22 @@ let test_account_groups () =
     [`Null; `List [group ["a"]; group ["a"]]; `List [group []]; `List [group [""]]];
   expect "absent evidence is not an empty successful read"
     (Result.is_error (success (decode (fixture ()))).account_groups)
+let test_source_account_emails () =
+  let email = `Assoc ["integration_id", `String "codex_a";
+    "state", `String "read"; "email", `String "source-b@example.org"] in
+  let read rows = fixture () |> replace "account_emails" rows |> decode |> success in
+  expect "email belongs to the source response"
+    ((read (`List [email])).account_emails = Ok (["codex_a", "source-b@example.org"], 0));
+  expect "missing email evidence stays failed"
+    (Result.is_error (success (decode (fixture ()))).account_emails);
+  List.iter (fun rows -> expect "unavailable email evidence stays failed"
+    (Result.is_error (read rows).account_emails)) [`Null; `String "bad"];
+  expect "malformed rows preserve partial evidence"
+    ((read (`List [email; `Null])).account_emails = Ok (["codex_a", "source-b@example.org"], 1))
+
 let () = List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-  ["server-owned account group evidence", test_account_groups;
+  ["source-owned account email evidence", test_source_account_emails;
+   "server-owned account group evidence", test_account_groups;
    "atomic GET source and metadata", test_atomic_read;
    "pending and preempted settings", test_pending_and_preempted;
    "invalid source remains readable", test_invalid_source_is_readable;

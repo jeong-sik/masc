@@ -12338,7 +12338,7 @@ let config_path_note (state : state) =
 let config_models_drawn_rows (state : state) =
   List.map
     (fun (row : Masc_tui_model_runtime_table.row) ->
-      match fst (models_account_reading ~provider:row.provider state.overview_account_emails) with
+      match fst (models_source_account_reading ~provider:row.provider state.runtime_config_view) with
       | Some email ->
           { row with
             account_label =
@@ -12354,7 +12354,7 @@ let config_models_drawn_rows (state : state) =
    complete roster is counted: a partial one would read as fewer Keepers. *)
 let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row) =
   let account_email, account_notes =
-    models_account_reading ~provider:row.provider state.overview_account_emails in
+    models_source_account_reading ~provider:row.provider state.runtime_config_view in
   let keepers =
     match state.keeper_roster with
     | Masc_tui_keeper_control.Roster_complete rows ->

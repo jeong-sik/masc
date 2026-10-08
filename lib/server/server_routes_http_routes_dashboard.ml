@@ -425,6 +425,14 @@ let runtime_config_raw_json
       ()
   =
   let validation, keeper_settings, overlay = keeper_setting_payload source_text in
+  (* Models identifies the accounts in this exact source observation, which
+     may differ from the providers currently loaded by the runtime. *)
+  let account_groups, account_emails =
+    match Runtime_toml.parse_string source_text with
+    | Ok config -> Runtime_wizard_inventory.account_groups_json config,
+        Runtime_account_email.inventory_json config
+    | Error _ -> `Null, `Null
+  in
   `Assoc
     ([ ("ok", `Bool true)
     ; ( "source_revision"
@@ -432,9 +440,8 @@ let runtime_config_raw_json
     ; ("path", `String path)
     ; ("file_name", `String Config_dir_resolver.runtime_toml_filename)
     ; ("source_text", `String source_text)
-    ; ("account_groups", match Runtime_toml.parse_string source_text with
-        | Ok config -> Runtime_wizard_inventory.account_groups_json config
-        | Error _ -> `Null)
+    ; ("account_groups", account_groups)
+    ; ("account_emails", account_emails)
     ; ( "application"
       , runtime_config_application_json
           ?skill_application

@@ -22,7 +22,8 @@ type metadata = {
   preempted_keys : string list;
 }
 type reading = { path : string; source_text : string; metadata : metadata;
-  account_groups : (string list list, string) result }
+  account_groups : (string list list, string) result;
+  account_emails : ((string * string) list * int, string) result }
 type tone = Neutral | Good | Warning | Bad
 
 let ( let* ) = Result.bind
@@ -127,7 +128,11 @@ let decode json =
       then Error "invalid or duplicate account group membership"
       else Ok groups
   in
-  Ok { path; source_text; account_groups; metadata = {
+  let account_emails =
+    let* rows = field "account_emails" json in
+    Masc_tui_account_login.emails_of_document (`Assoc ["account_emails", rows])
+  in
+  Ok { path; source_text; account_groups; account_emails; metadata = {
     source_revision; validation; routing; routing_requires_restart; keeper; keeper_requires_restart;
     configured_count; pending_keys; applied_keys; preempted_keys;
   } }

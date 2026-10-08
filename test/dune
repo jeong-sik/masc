@@ -9788,6 +9788,13 @@
  (modules test_h2_composition_resume)
  (libraries masc_test_deps))
 
+; H2 execution journal harness: no-args runs all scenarios (deterministic,
+; temp dirs only), so it is safe under the default runtest alias.
+(test
+ (name test_h2_journal)
+ (modules test_h2_journal)
+ (libraries masc_test_deps))
+
 (test
  (name test_h5_media_failover_continuity)
  (modules test_h5_media_failover_continuity)

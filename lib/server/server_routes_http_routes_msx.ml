@@ -364,10 +364,25 @@ let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
                 "frames_ago", `Int (frame.number - last)])
           (recent_players_of ~now:frame.number entries))] @ pixel_fields)
 
-let tick_response ~body =
+(* With [config] the body may name the workspace the terminal read, and a
+   different one is a 409 before the tick decoder or the machine runs. The
+   field is removed before the strict tick decoder sees the body. *)
+let admit_tick_workspace ~config body =
+  match config with
+  | None -> Ok body
+  | Some config ->
+    (match Yojson.Safe.from_string body with
+     | exception Yojson.Json_error _ -> Ok body
+     | json ->
+       Result.map Yojson.Safe.to_string (admit_expected_workspace ~config json))
+
+let tick_response_in (config : Workspace.config option) body =
   let error status message =
     status, `Assoc [ "ok", `Bool false; "message", `String message ]
   in
+  match admit_tick_workspace ~config body with
+  | Error (status, message) -> error status message
+  | Ok body ->
   match decode_tick body with
   | Error detail -> error `Bad_request detail
   | Ok (frames, pixel_response) ->
@@ -396,14 +411,19 @@ let tick_response ~body =
       error `Internal_server_error "MSX tick failed; read the current frame before retrying"
 ;;
 
+let tick_response ~body = tick_response_in None body
+
+let tick_response_bound ~config ~body = tick_response_in (Some config) body
+
+
 (* The realtime driver (RFC-0439 §3.2, poll-cadence tick). The spectating TUI
    posts this a few times a second to advance the shared machine, so a game
    flows even when no keeper is pressing a key. Body: {frames:N}, clamped to
    1..max_frames_per_call; the answer is the advanced frame, so one call both
    steps and reads. A write, gated like press. *)
-let handle_tick request reqd =
+let handle_tick ~config request reqd =
   Http.Request.read_body_async reqd (fun body ->
-      let status, json = tick_response ~body in
+      let status, json = tick_response_bound ~config ~body in
       Http.Response.json_value_on_cpu ~status ~request
         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
 ;;
@@ -529,6 +549,7 @@ let add_routes router =
          request reqd)
   |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_step"
-         (fun _state _req reqd -> handle_tick request reqd)
+         (fun state _req reqd ->
+           handle_tick ~config:(Mcp_server.workspace_config state) request reqd)
          request reqd)
 ;;

@@ -334,7 +334,7 @@ def run_machine_pre_refresh_swap(executable, operation):
             # the withdrawn view or restore its control grant.
             release_tick.set()
             key(b':go Collab\r', '› guest'.encode())
-            assert 'Controlling' not in h.screen_text(bytes(output))
+            assert b'Controlling' not in h.screen_text(bytes(output))
             key(b'\x1b', b'MASC Dashboard')
             os.write(master, b'q')
         finally:

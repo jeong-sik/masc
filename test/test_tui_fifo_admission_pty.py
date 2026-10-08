@@ -70,28 +70,22 @@ def recalled_admission(executable: str, release_mode: str) -> None:
             if not any(original.encode() in row and "전송 대기".encode() in row
                        for row in rows.values()):
                 raise AssertionError("recalled input left the local queue on acceptance")
-            # Ctrl-T is read-only and does not replace the recalled editor
-            # with a /queue command. Its applied server snapshot is a second
-            # client round trip after the acceptance, without a guessed sleep.
-            _keyboard_harness.read_available(master_fd, output)
-            queue_start = len(output)
-            local_frame = _keyboard_harness.send_and_wait(
-                process, master_fd, output, b"\x14", b"Local unsent messages: 1"
+            # Accepted is applied before its frame and synchronous queue
+            # dispatch decision. Inspect a fresh redraw of that local state;
+            # Ctrl-T is globally owned by the mouse toggle, and typing /queue
+            # would replace the recalled edit whose ownership we are testing.
+            drawn = _keyboard_harness.resize_and_wait(
+                process, master_fd, output, rows=40, columns=121,
+                needle=edited.encode(),
+                controls=(_keyboard_harness.FULL_REDRAW,),
+                final_cursor=b"\x1b[?25h",
             )
-            if b"Reading server queue" not in _keyboard_harness.screen_text(
-                _keyboard_harness.frame_containing(local_frame, b"Local unsent messages: 1")
-            ):
-                raise AssertionError("local queue count was not from this inspection")
-            _keyboard_harness.wait_for_output(
-                process, master_fd, output, b"Queue snapshot", start=queue_start, timeout=5
-            )
-            snapshot_end = _keyboard_harness.end_of_needle(output, b"Queue snapshot", queue_start)
-            _keyboard_harness.wait_for_output(
-                process, master_fd, output, _keyboard_harness.FRAME_END,
-                start=snapshot_end, timeout=5,
-            )
-            if edited.encode() not in _keyboard_harness.screen_text(bytes(output)):
-                raise AssertionError("read-only inspection lost the recalled editor")
+            rows = _keyboard_harness.screen_rows(drawn)
+            if not any(original.encode() in row and "전송 대기".encode() in row
+                       for row in rows.values()):
+                raise AssertionError("fresh frame lost the recalled local queue item")
+            if edited.encode() not in _keyboard_harness.screen_text(drawn):
+                raise AssertionError("fresh frame lost the recalled editor")
             with fixture.lock:
                 received = [item["message"] for item in fixture.received]
             if received != ["first"]:

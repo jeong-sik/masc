@@ -1452,10 +1452,11 @@ status: reference
   연산자가 직접 배치한다. 읽기 전용 도구 `masc_dos_inventory`를 통해 머신을 기동하거나 조종권
   (`Controller`)을 획득하지 않고도 무부작용으로 기본 자산을 조회할 수 있다.
   - **기본 자산 범위 (Base Inventory Scope)**: 최상위의 단독 일반 파일(Regular)과 프로그램 디렉터리를
-    열거하며, 각각의 이름·바이트 크기·SHA-256 다이제스트를 노출한다(최상위 일반 파일은 확장자 필터링
-    없이 직렬화). 디렉터리의 경우 직속 하위 파일들의 목록을 함께 담는다. 이 정보는 기본 배치 자산
-    (`asset_scope: "base_inventory"`)만을 나타내며, `masc_dos_load` 시점에 합성되는 영속 저장본
-    (`saved_overlay: "applied_on_load"`)이나 런타임에 게임이 생성한 파일은 포함하지 않는다.
+    열거한다. 일반 파일은 이름·바이트 크기·SHA-256 다이제스트를 노출하며(확장자 필터링 없이 직렬화),
+    디렉터리는 이름과 직속 하위 파일 목록(`files`)을 담는다(디렉터리 자체에는 바이트 크기·해시를 두지
+    않음). 이 정보는 기본 배치 자산(`asset_scope: "base_inventory"`)만을 나타내며, `masc_dos_load`
+    시점에 합성되는 영속 저장본(`saved_overlay: "applied_on_load"`)이나 런타임에 게임이 생성한 파일은
+    포함하지 않는다.
   - **호스트 경로 은닉 (Host Path Redaction)**: 작업공간 외부의 호스트 파일시스템 경로는 도구 출력과
     오류 메시지 전반에서 엄격히 마스킹되며, 인벤토리 경계(`programs/`) 기준의 상대 이름만 노출된다.
   - **소유 루트 권한 결속 및 실패 표면 분리 (Owned Inventory Root & Failure Separation)**: 인벤토리

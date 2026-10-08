@@ -643,7 +643,7 @@ let test_bidi_host_rows () =
   let unlisted =
     ["BiDi host: attached, not listed by this server · pid 4242";
      "No BiDi connection is listed · hover and drag stay refused";
-     "MASC_HTTP_BASE_URL or MASC_HTTP_PORT in its shell names another server";
+     "With MASC_HTTP_BASE_URL or MASC_HTTP_PORT set, it polls another server";
      "If none appears, stop it and start it from a shell without them"; at] in
   says "an attached host this server does not list says what that costs"
     (host (Record.Running host_entry)) unlisted;
@@ -695,8 +695,8 @@ let test_bidi_host_rows () =
   says "a running host whose record cannot be read is stopped first"
     (host (Record.Unreadable { detail = "written as layout 2; this reader knows 1"; held = Some true }))
     ["BiDi host: one runs, and its record cannot be read";
-     "Detail: written as layout 2; this reader knows 1";
-     "Stop that host before starting another · it refuses a second one"];
+     "Stop that host before starting another · it refuses a second one";
+     "Detail: written as layout 2; this reader knows 1"];
   says "an unreadable record with no host behind it is replaced by the next host"
     (host (Record.Unreadable { detail = "bidi-host.json is not JSON"; held = Some false }))
     (["BiDi host: none runs, and the last record cannot be read";
@@ -784,7 +784,9 @@ let test_bidi_host_rows () =
     (* A space in a name is part of the path, wherever the row ends. *)
     ; "a long name with a space keeps the space",
       "/work/" ^ String.make 60 'y' ^ " " ^ String.make 60 'z' ^ "/host/launch"
-    ; "a space where a row would end is kept", "/work/" ^ String.make 59 'y' ^ " z/host/launch"
+    (* The name is two cells longer than the 66 a row has beside the lead,
+       and the space is the first of the two. *)
+    ; "a space where a row would end is kept", "/work/" ^ String.make 65 'y' ^ " z/host/launch"
     ; "a path with spaces all through", "/my work/a b/c  d/host/launch" ];
   (* Every row fits the width it was asked for, at 80 columns and narrower,
      whatever the record holds. *)
@@ -818,24 +820,35 @@ let test_bidi_host_rows () =
      the row that counts the rest keep a place while the choices keep
      theirs. *)
   let choice_rows = picker_choice_rows in
-  expect "with nothing to say of a host the choices have every row"
-    (choice_rows ~rows:5 ~choices:6 ~host_rows:0 = 5);
-  expect "the host keeps two rows and the count beside three choices"
-    (choice_rows ~rows:6 ~choices:6 ~host_rows:8 = 3);
-  expect "a host with two rows to say keeps those two"
-    (choice_rows ~rows:5 ~choices:6 ~host_rows:2 = 3);
-  expect "one row shorter, it keeps its first row and the count"
-    (choice_rows ~rows:5 ~choices:6 ~host_rows:8 = 3);
+  expect "with nothing under the choices they have every row"
+    (choice_rows ~rows:5 ~choices:6 ~below:0 = 5);
+  expect "the first two rows below and the count keep a place beside three choices"
+    (choice_rows ~rows:6 ~choices:6 ~below:8 = 3);
+  expect "two rows below with nothing after them need no count"
+    (choice_rows ~rows:5 ~choices:6 ~below:2 = 3);
+  expect "one row shorter, the first row below and the count keep theirs"
+    (choice_rows ~rows:5 ~choices:6 ~below:8 = 3);
   expect "beside fewer than three of many choices, the choices keep the room"
-    (choice_rows ~rows:4 ~choices:6 ~host_rows:8 = 4);
+    (choice_rows ~rows:4 ~choices:6 ~below:8 = 4);
   (* With no connection listed there are two choices, and both fit. *)
-  expect "two choices are all there are, so the host keeps its rows beside them"
-    (choice_rows ~rows:5 ~choices:2 ~host_rows:8 = 2
-     && choice_rows ~rows:4 ~choices:2 ~host_rows:8 = 2);
+  expect "two choices are all there are, so the rows below keep theirs beside them"
+    (choice_rows ~rows:5 ~choices:2 ~below:8 = 2
+     && choice_rows ~rows:4 ~choices:2 ~below:8 = 2);
   expect "but not beside one of two"
-    (choice_rows ~rows:3 ~choices:2 ~host_rows:8 = 3);
+    (choice_rows ~rows:3 ~choices:2 ~below:8 = 3);
   expect "a screen with no row for a choice still draws one"
-    (choice_rows ~rows:0 ~choices:2 ~host_rows:8 = 1)
+    (choice_rows ~rows:0 ~choices:2 ~below:8 = 1);
+  (* Rows that report a host come before the rows on the extension. Rows
+     that only say how one is started come after them. *)
+  let reports host = host_rows_report_a_host (viewing host) in
+  expect "nothing reported and no host yet are how-to, not a report"
+    (not (reports Host_not_reported) && not (reports (host Record.Never_started)));
+  List.iter (fun (name, host) -> expect (name ^ " is a report of a host") (reports host))
+    [ "a running host", host (Record.Running host_entry)
+    ; "a host that ended", host_ended Record.No_session_left
+    ; "a host that died", host (Record.Died host_entry)
+    ; "a record that cannot be read", host (Record.Unreadable { detail = "torn"; held = None })
+    ; "a report that cannot be read", Host_report_unreadable { detail = "no state"; message = None } ]
 
 (* The report rides the connection list: it is read from the same answer,
    kept with the list, and dropped with it. *)

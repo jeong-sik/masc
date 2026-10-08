@@ -3991,7 +3991,7 @@ module Browser_lane_view = struct
                   state "attached, not listed by this server"
                   :: List.map host_line
                        ["No BiDi connection is listed · hover and drag stay refused";
-                        "MASC_HTTP_BASE_URL or MASC_HTTP_PORT in its shell names another server";
+                        "With MASC_HTTP_BASE_URL or MASC_HTTP_PORT set, it polls another server";
                         "If none appears, stop it and start it from a shell without them"]
                   @ [at]
               | Host_beside_another_bidi ->
@@ -4017,9 +4017,10 @@ module Browser_lane_view = struct
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Unreadable { detail; held = Some true } ->
+             (* What to do comes before why, as for a host that ended. *)
              [host_line "BiDi host: one runs, and its record cannot be read";
-              host_said "Detail: " detail;
-              host_line "Stop that host before starting another · it refuses a second one"]
+              host_line "Stop that host before starting another · it refuses a second one";
+              host_said "Detail: " detail]
          | Unreadable { detail; held = Some false } ->
              [host_line "BiDi host: none runs, and the last record cannot be read";
               host_said "Detail: " detail]
@@ -4127,29 +4128,39 @@ module Browser_lane_view = struct
   let unserved_rows t = match t.unserved_gesture with
     | None -> []
     | Some unserved -> unserved_gesture_rows unserved
-  (* What the picker keeps for the BiDi host when it has rows for it: its
-     first two rows, where the host stands and what that asks of the
-     operator, and the row that says how many more the screen could not
-     hold. *)
-  let picker_host_rows_wanted = 3
+  (* Whether the BiDi host's rows report a host: one that runs or ran, or
+     a record or report that cannot be read. With no host yet they only say
+     how one is started. *)
+  let host_rows_report_a_host t = match t.bidi_host with
+    | Host_not_reported -> false
+    | Host_report_unreadable _ -> true
+    | Host_reported report ->
+        (match report.state with
+         | Never_started -> false
+         | Running _ | Ended _ | Died _ | Unreadable _ -> true)
+  (* What the picker keeps for the rows under its choices, which the cursor
+     cannot reach, when there are more of them than this: the first two, and
+     the row that says how many more the screen could not hold. *)
+  let picker_rows_below_wanted = 3
   (* What it keeps when the screen has no room for those beside the choices:
      the first row and the row that counts the rest. *)
-  let picker_host_rows_least = 2
+  let picker_rows_below_least = 2
   (* Choosing is what the picker is for. On a terminal that would be left
-     with fewer choices than this beside the host's rows, or fewer than
-     there are when there are fewer than this, the choices keep the room. *)
+     with fewer choices than this beside the rows below, or fewer than there
+     are when there are fewer than this, the choices keep the room. *)
   let picker_least_choices = 3
   (* How many of [rows] the picker gives its choices. [rows] is what the
-     screen has for the choices and all that is drawn after them. *)
-  let picker_choice_rows ~rows ~choices ~host_rows =
+     screen has for the choices and all that is drawn after them, and
+     [below] how many rows that is. *)
+  let picker_choice_rows ~rows ~choices ~below =
     let rows = Int.max 1 rows in
     let least = Int.min picker_least_choices choices in
-    let for_host kept = Int.min host_rows kept in
+    let kept_below kept = Int.min below kept in
     match
-      List.find_opt (fun kept -> rows - for_host kept >= least)
-        [picker_host_rows_wanted; picker_host_rows_least]
+      List.find_opt (fun kept -> rows - kept_below kept >= least)
+        [picker_rows_below_wanted; picker_rows_below_least]
     with
-    | Some kept -> rows - for_host kept
+    | Some kept -> rows - kept_below kept
     | None -> rows
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]

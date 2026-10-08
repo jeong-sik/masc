@@ -62,8 +62,7 @@ TUI reads that table in four places:
   serves, it says where the BiDi host stood and points at the picker, for
   example `BiDi host: ended 2026-10-03T04:01:00Z · b:why and what next`. From
   a server that does not report the host it names where attaching a BiDi host
-  is written (`Setup: docs/design/browser-bidi-live-host.md`). For work the
-  extension serves, it names where the extension's setup is written. The
+  is written (`Setup: docs/design/browser-bidi-live-host.md`). The
   read badge does not change, because nothing was requested. The rows stay
   through the lane's own refreshes and go with the next key or click. What
   they say of the host is what the connection list said when it was last
@@ -97,8 +96,10 @@ The rows under it:
 - A running host: `At:` and the address it was given.
   - Attached, with no BiDi connection listed: hover and drag stay refused on
     this server. Two rows say what may be behind it and what to do:
-    `MASC_HTTP_BASE_URL or MASC_HTTP_PORT in its shell names another server`,
+    `With MASC_HTTP_BASE_URL or MASC_HTTP_PORT set, it polls another server`,
     then `If none appears, stop it and start it from a shell without them`.
+    A host is also missing for a moment after this server starts, and after
+    120 seconds without a poll. Its next poll lists it again.
   - Attached, with a BiDi connection listed under another ID: that
     connection is this host's if it registered again under an ID it could
     not write to its record, and another host's otherwise. Hover and drag
@@ -119,7 +120,8 @@ The rows under it:
     when the host asked, not that it holds one now.
 - A host that left no reason: `Its session may be left in Firefox · restart
   Firefox if a host is refused`.
-- A record that cannot be read: `Detail:` and why.
+- A record that cannot be read: `Detail:` and why. While a host still runs
+  the row before it says to stop that host first.
 - A report this TUI cannot read: `masc doctor reads the host's record and
   says where the host stands`, then `Detail:` and why, then the paragraph the
   server wrote for the operator, as `Server:`. The paragraph is longer than
@@ -137,9 +139,10 @@ The rows under it:
   address are written as one shell word each, in single quotes. When the
   workspace has no launcher, or one that is not as an installation wrote it,
   the row says to install the browser lane first. The last row names where
-  the steps are written. Three states show no command, because there is
-  none to run: a running host, an unreadable record a host still holds, and
-  a lock that could not be asked.
+  the steps are written. Four states show no command, because there is
+  none to run or none to trust: a running host, an unreadable record a host
+  still holds, a lock that could not be asked, and a report this TUI cannot
+  read.
 - A server that does not report the host draws none of these rows.
 
 The first row of each state is this TUI's own words and fits 80 columns.
@@ -149,12 +152,18 @@ of it is cut.
 
 The host's rows cannot be scrolled to. On a terminal too short for
 everything, rows are cut from the end and the frame says how many are not
-shown. The host's first two rows keep their place while at least three
-choices fit beside them, or every choice when there are fewer than three.
-Where that does not fit, the first row keeps its place by the same rule, and
-on a shorter terminal the choices keep the room. With no live connection
-listed, the host's rows come before the three rows on the extension, so
-those are what a short screen cuts first.
+shown. What keeps its place depends on whether the rows report a host:
+
+- A host that runs or ran, or a record or report that cannot be read: the
+  first two rows and the row that counts the rest keep their place while at
+  least three choices fit beside them, or every choice when there are fewer
+  than three. Where that does not fit, the first row and the count keep
+  theirs. With no live connection listed, these rows come before the three
+  rows on the extension, so those are what a short screen cuts first.
+- No host yet: the rows only say how one is started. They take no row from
+  the choices or from the rows on the extension, and are drawn where the
+  screen has rows left. A workspace that has not run a BiDi host sees every
+  row it saw before these existed.
 
 In a Keeper's chat, the tool results view shows a refused browser call as its
 case, what the connection leaves out and how many connected browsers serve it,

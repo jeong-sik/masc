@@ -243,9 +243,10 @@ does next:
   acknowledgement for, and the command that starts one
   ([the rows](../guides/tui-browser-lanes.md)).
 
-Each of the three reads the record first and asks the server for its
-connections once, after that. What an answer says of the host and the
-connections it lists are of that one list.
+The doctor, the connection list and the Keeper's answer each read the
+record first and ask the server for its connections once, after that. What
+an answer says of the host and the connections it lists are of that one
+list. The TUI draws what the connection list answered.
 
 The paragraph says what comes before the next host. That follows what became
 of the last one's session. Once a host has run, the host command in the

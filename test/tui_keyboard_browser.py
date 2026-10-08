@@ -204,7 +204,7 @@ def run_browser_bidi_host_status_regression(executable: str) -> None:
         unlisted = picker("unlisted", b"r", BIDI_HOST_UNLISTED_ROW)
         require(unlisted,
             "No BiDi connection is listed · hover and drag stay refused".encode(),
-            b"MASC_HTTP_BASE_URL or MASC_HTTP_PORT in its shell names another server",
+            b"With MASC_HTTP_BASE_URL or MASC_HTTP_PORT set, it polls another server",
             b"If none appears, stop it and start it from a shell without them",
             b"At: ws://127.0.0.1:9222/session")
         forbid(unlisted, b"Attach:", "Firefox · BiDi · existing login".encode(), attached_row)
@@ -286,6 +286,7 @@ def run_browser_bidi_host_short_terminal_regression(executable: str) -> None:
         "unlisted": {"clients": rows,
                      "bidiHost": bidi_host_report("running", bidi_host_record(client=bidi),
                                                   lock_held=True)},
+        "never": {"clients": rows, "bidiHost": bidi_host_report("never_started")},
     }
     now = ["ended"]
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (
@@ -321,8 +322,8 @@ def run_browser_bidi_host_short_terminal_regression(executable: str) -> None:
             start=end_of_needle(output, b"Independent Firefox/Zen", start), timeout=3)
         require(screen_text(bytes(output)), b"Independent Firefox/Zen", BIDI_HOST_ENDED_ROW,
             b"rows not shown")
-        # A host that is attached and not listed: the row that is kept says
-        # so, though the rows that say what it costs are not shown.
+        # A host that is attached and not listed: the two rows that are kept
+        # say so and what it costs. The rows on why are not shown.
         now[0] = "unlisted"
         read_available(master, output)
         start = len(output)
@@ -331,9 +332,26 @@ def run_browser_bidi_host_short_terminal_regression(executable: str) -> None:
         wait_for_output(process, master, output, FRAME_END,
             start=end_of_needle(output, BIDI_HOST_UNLISTED_ROW, start), timeout=3)
         unlisted = screen_text(bytes(output))
-        require(unlisted, BIDI_HOST_UNLISTED_ROW, b"rows not shown")
+        require(unlisted, BIDI_HOST_UNLISTED_ROW,
+            "No BiDi connection is listed · hover and drag stay refused".encode(), b"rows not shown")
         if b"At: ws://127.0.0.1:9222/session" in unlisted:
             raise AssertionError(f"every host row fits; use fewer rows: {unlisted!r}")
+        # With no host yet the rows only say how one is started, and take no
+        # row from the choices: all six are drawn, as before those rows
+        # existed, and the one row left says more is hidden.
+        now[0] = "never"
+        first_choice = connected[0].encode()[:13]
+        read_available(master, output)
+        start = len(output)
+        os.write(master, b"r")
+        wait_for_output(process, master, output, first_choice, start=start, timeout=5)
+        wait_for_output(process, master, output, FRAME_END,
+            start=end_of_needle(output, first_choice, start), timeout=3)
+        never = screen_text(bytes(output))
+        require(never, *(client.encode()[:13] for client in connected), b"Stagehand Chromium",
+            b"Independent Firefox/Zen", b"rows not shown")
+        if b"BiDi host:" in never:
+            raise AssertionError(f"a row is left for the host's how-to; use more connections: {never!r}")
         # The picker closes onto the lane, which has no browser chosen.
         send_and_wait(process, master, output, b"\x1b", b"Esc:hide lane")
         send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
@@ -344,46 +362,85 @@ def run_browser_bidi_host_short_terminal_regression(executable: str) -> None:
 
 
 def run_browser_bidi_host_empty_list_regression(executable: str) -> None:
-    """With no connection listed, a short picker still says where the host stands.
+    """With no connection listed, a short picker says what the operator needs first.
 
-    An operator who attaches a BiDi host and has no extension sees an empty
-    list when that host ends. The picker then has two choices, the row that
-    says the list is empty, the host's rows, and three rows on the extension.
-    The host's rows come before the extension's, so on 18 and on 17 rows the
-    host's first row is drawn and the extension's are what is cut.
+    The picker then has two choices, the row that says the list is empty, the
+    BiDi host's rows, and three rows on the extension.
+
+    A host that ran is something that happened: an operator who attaches a
+    BiDi host and has no extension sees an empty list when that host ends.
+    Its rows come before the extension's, so on 18 and on 17 rows the host's
+    first rows are drawn and the extension's are what is cut.
+
+    With no host yet, the host's rows only say how one is started. They take
+    no row from the extension's: a screen the extension's rows fill exactly
+    is drawn as it was before the host's rows existed, and the host's rows
+    begin where a row is left.
     """
     bidi = "22222222-2222-4222-8222-222222222222"
-    listing = {"clients": [],
-               "bidiHost": bidi_host_report("ended", bidi_host_record(client=bidi,
-                                                                      ended=BIDI_HOST_STOPPED))}
-    extension_row = b"The MASC extension and its registered native host connect a live browser."
+    ended = {"clients": [],
+             "bidiHost": bidi_host_report("ended", bidi_host_record(client=bidi,
+                                                                    ended=BIDI_HOST_STOPPED))}
+    never = {"clients": [], "bidiHost": bidi_host_report("never_started")}
+    extension_rows = (
+        b"The MASC extension and its registered native host connect a live browser.",
+        b"Setup: connectors/browser/host/README.md",
+        b"Enable the extension in your Zen/Firefox profile, then r:refresh.")
+    never_row = b"BiDi host: none has run for this workspace"
+    always = (b"Stagehand Chromium", b"Independent Firefox/Zen", b"No active native browser connections")
 
-    def at(rows: int) -> None:
+    def draw(listing: dict, rows: int, name: str, needle: bytes,
+             check: Callable[[bytes], None]) -> None:
         fixtures = overview_event_http_fixtures()
         fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": listing})
 
         def interact(process, master, _slave, output, _base):
-            palette_go(process, master, output, b"go Browser Lane", BIDI_HOST_ENDED_ROW)
+            palette_go(process, master, output, b"go Browser Lane", needle)
             wait_for_output(process, master, output, FRAME_END,
-                start=end_of_needle(output, BIDI_HOST_ENDED_ROW, 0), timeout=3)
+                start=end_of_needle(output, needle, 0), timeout=3)
             screen = screen_text(bytes(output))
-            for needle in (b"Stagehand Chromium", b"Independent Firefox/Zen",
-                           b"No active native browser connections", BIDI_HOST_ENDED_ROW,
-                           b"rows not shown"):
-                if needle not in screen:
-                    raise AssertionError(f"{rows}-row empty picker lacks {needle!r}: {screen!r}")
-            if extension_row in screen:
-                raise AssertionError(f"every row fits {rows} rows; use fewer: {screen!r}")
+            for expected in always:
+                if expected not in screen:
+                    raise AssertionError(f"{rows}-row empty picker lacks {expected!r}: {screen!r}")
+            check(screen)
             send_and_wait(process, master, output, b"\x1b", b"Esc:hide lane")
             send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
             os.write(master, b"q")
 
         run_terminal_scenario(executable,
-            description=f"Browser picker says where the BiDi host stands with no connection, {rows} rows",
+            description=f"Browser picker with no connection, {name}, {rows} rows",
             interact=interact, http_fixtures=fixtures, terminal_cols=80, terminal_rows=rows)
 
-    at(18)
-    at(17)
+    def a_host_that_ran(rows: int, *shown: bytes) -> None:
+        def check(screen: bytes) -> None:
+            for needle in (*shown, b"rows not shown"):
+                if needle not in screen:
+                    raise AssertionError(f"{rows}-row picker lacks {needle!r}: {screen!r}")
+            if extension_rows[0] in screen:
+                raise AssertionError(f"every row fits {rows} rows; use fewer: {screen!r}")
+        draw(ended, rows, "a host that ended", BIDI_HOST_ENDED_ROW, check)
+
+    def no_host_yet(rows: int, shown: tuple[bytes, ...], cut: tuple[bytes, ...]) -> None:
+        def check(screen: bytes) -> None:
+            for needle in shown:
+                if needle not in screen:
+                    raise AssertionError(f"{rows}-row picker lacks {needle!r}: {screen!r}")
+            for needle in cut:
+                if needle in screen:
+                    raise AssertionError(f"{needle!r} fits {rows} rows; use fewer: {screen!r}")
+            if never_row in screen and screen.index(extension_rows[2]) > screen.index(never_row):
+                raise AssertionError(f"the host's how-to came before the extension's: {screen!r}")
+        draw(never, rows, "no host yet", shown[0], check)
+
+    a_host_that_ran(18, BIDI_HOST_ENDED_ROW, BIDI_HOST_SESSION_ROW)
+    a_host_that_ran(17, BIDI_HOST_ENDED_ROW)
+    # The extension's three rows fill 17 rows exactly, so nothing else is
+    # drawn, not even the row that says more is hidden. On 18 that row has a
+    # place, and from 19 the host's first row.
+    no_host_yet(17, extension_rows, (never_row, b"rows not shown"))
+    no_host_yet(18, (*extension_rows, b"rows not shown"), (never_row,))
+    no_host_yet(19, (*extension_rows, never_row, b"rows not shown"), ())
+    no_host_yet(24, (*extension_rows, never_row, *BIDI_HOST_ATTACH_ROWS), (b"rows not shown",))
 
 
 def run_browser_client_picker_regression(executable: str) -> None:

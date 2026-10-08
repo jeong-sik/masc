@@ -720,6 +720,12 @@ let board_event_note_fields = function
       > Keeper_world_observation.delegate_reply_preview_max_len
     then [ "reply_full", reply ]
     else []
+  | Keeper_world_observation.Delegate_completed
+      (Keeper_event_queue.Delegate_no_reply
+      | Keeper_event_queue.Delegate_failed _) ->
+    (* No side fact: these payloads are short by construction and the
+       row already carries them whole; see the note above. *)
+    []
   (* The answer is the row's title and preview; there is no side fact to add. *)
   | Keeper_world_observation.Ask_answered_row _
   | Keeper_world_observation.Composition_completed -> []

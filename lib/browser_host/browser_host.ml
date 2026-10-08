@@ -129,7 +129,7 @@ type config =
   ; destination : destination
   ; server : Uri.t
   ; token_file : string
-  ; client_id : string
+  ; client_id : Browser_lane.client_id
   }
 type browser_info = { browser : string; version : string; engine_version : string;
   transport : Browser_lane.live_transport }
@@ -213,7 +213,7 @@ let resolve_config ~base_path ~server ~token_file =
           if Filename.is_relative path then Filename.concat base path else path
       | None -> Filename.concat (Filename.concat base Common.masc_dirname) "browser-lane/token"
     in
-    Ok { base; destination; server; token_file; client_id = Random_id.uuid_v7 () }
+    Ok { base; destination; server; token_file; client_id = Random_id.uuid_v7_value () }
   with
   | Env_config_core.Config_error message -> Error message
   | Invalid_argument _ -> Error "invalid server origin or base path"
@@ -350,7 +350,7 @@ let post ~clock ~client ~server ~client_id ~info ~token path json =
             Cohttp_eio.Client.post client ~sw
               ~headers:(Cohttp.Header.of_list
                 [ "Content-Type", "application/json"; "x-lane", Browser_lane.Lane_name.(to_wire Live); "x-lane-token", token;
-                  "x-browser-client-id", client_id; "x-browser-name", info.browser;
+                  "x-browser-client-id", Browser_lane.client_id_to_string client_id; "x-browser-name", info.browser;
                   "x-browser-version", info.version; "x-browser-engine-version", info.engine_version;
                   "x-browser-transport", Browser_lane.live_transport_to_string info.transport ])
               ~body:(Cohttp_eio.Body.of_string (Yojson.Safe.to_string json))
@@ -434,7 +434,7 @@ type link =
   (* Who the host polls as. [polled] says a poll under this ID has been
      sent. The server registers an ID when its poll arrives, before it
      answers, so from then on it may know the ID. *)
-  ; mutable client_id : string
+  ; mutable client_id : Browser_lane.client_id
   ; mutable polled : bool
   }
 
@@ -808,11 +808,11 @@ let run_bidi env config url ~stop =
         | Ok (Error Retired) ->
             (* Nothing starts another BiDi host, so this one registers again.
                A poll is sent only while no command is in hand. *)
-            link.client_id <- Random_id.uuid_v7 ();
+            link.client_id <- Random_id.uuid_v7_value ();
             link.polled <- false;
             Log.Transport.info
               "browser-host: the server had ended this connection; registering again as client %s"
-              link.client_id;
+              (Browser_lane.client_id_to_string link.client_id);
             keep "new client ID" (Record.client_changed record ~client_id:link.client_id);
             serve ()
         | Ok (Ok Empty) -> serve ()
@@ -878,7 +878,14 @@ let run_bidi env config url ~stop =
                       (Masc.Browser_bidi_peer.session_end_failure_message failure));
               let* version =
                 match within ~clock extension_timeout_sec (fun () -> Masc.Browser_bidi_peer.metadata peer) with
-                | Some version -> version
+                | Some (Ok version) -> Ok version
+                | Some (Error failure) ->
+                    (* A session Firefox holds for someone else is what the
+                       next host meets too, so the record says so. *)
+                    (match failure with
+                     | Masc.Browser_bidi_peer.Session_refused _ -> session := Record.Session_refused
+                     | Masc.Browser_bidi_peer.Session_failed _ -> ());
+                    Error (Masc.Browser_bidi_peer.session_failure_message failure)
                 | None -> Error "BiDi metadata deadline exceeded" in
               let info =
                 { browser = "firefox"; version; engine_version = version
@@ -893,8 +900,13 @@ let run_bidi env config url ~stop =
            | Ok (), Record.Session_left -> Error "stopped with its BiDi session left in Firefox"
            | Ok (), Record.Session_unknown ->
                Error "stopped without learning whether Firefox still holds its BiDi session"
+           (* Not reached today: the refusal is itself the [Error] this
+              scope returns. Named so that no later way out of the scope
+              can report a refused host as one that left in order. *)
+           | Ok (), Record.Session_refused ->
+               Error "stopped after Firefox refused it a BiDi session"
            | Ok (), Record.No_session_left
-           | Error _, Record.(No_session_left | Session_left | Session_unknown) -> served))
+           | Error _, Record.(No_session_left | Session_left | Session_unknown | Session_refused) -> served))
   in
   let outcome =
     Eio.Fiber.first serving (fun () ->

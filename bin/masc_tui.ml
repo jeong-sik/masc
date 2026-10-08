@@ -4264,6 +4264,9 @@ let launch_lane_declaration state ~mailbox ~edit request =
     state.lane_addons_generation <- state.lane_addons_generation + 1;
     let generation = state.lane_addons_generation in
     state.lane_addons_reading <- (match request with Document.Read _ -> Some generation | Save _ -> None);
+    state.lane_nested_read_resume <- (match request with
+      | Document.Read path -> Some (generation, Lane_declaration_read {path; edit})
+      | Document.Save _ -> None);
     let document_key = Some (match request with Document.Read path -> Filename.basename path | Document.Save session -> session.file_name) in
     state.lane_addons <- Some {view with generation;loading=true;error=None;editor_ready=false;document_key;
       application_reading=Masc_tui_lane_application.empty};
@@ -4292,6 +4295,9 @@ let launch_lane_subscriptions state ~mailbox request =
       state.lane_addons_generation <- state.lane_addons_generation + 1;
       let generation=state.lane_addons_generation in
       state.lane_addons_reading <- (match request with Subs.Inspect -> Some generation | Save _ -> None);
+      state.lane_nested_read_resume <- (match request with
+        | Subs.Inspect -> Some (generation, Lane_subscriptions_read)
+        | Subs.Save _ -> None);
       state.lane_addons <- Some {view with generation;loading=true;error=None};
       let host=server_peer_host and port=state.port in
       launch_workspace_request
@@ -11016,6 +11022,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   state.lane_addons <- None;
   state.lane_addons_cached <- Masc_tui_lane_addons.initial;
+  state.lane_nested_read_resume <- None;
   reset_verification_rows state;
   state.verification <- None;
   state.verification_error <- None;
@@ -12501,12 +12508,22 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
       launch_voice_agent_voices state ~mailbox ~kind ~api_key_env) session.vas_lookup)
       state.voice_agent_voices;
     (match state.lane_addons with
-     | None -> state.lane_installer_read_resume <- None
+     | None ->
+         state.lane_installer_read_resume <- None;
+         state.lane_nested_read_resume <- None
      | Some view ->
+         let nested = state.lane_nested_read_resume in
+         state.lane_nested_read_resume <- None;
          let pending = state.lane_installer_read_resume in
          state.lane_installer_read_resume <- None;
-         (match pending with
-          | Some (generation, read) when generation = view.generation ->
+         (match nested, pending with
+          | Some (generation, Lane_subscriptions_read), _
+            when generation = view.generation && Option.is_some view.subscription_panel ->
+              launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect
+          | Some (generation, Lane_declaration_read {path; edit}), _
+            when generation = view.generation && view.document_key = Some (Filename.basename path) ->
+              launch_lane_declaration state ~mailbox ~edit (Masc_tui_lane_declaration.Read path)
+          | _, Some (generation, read) when generation = view.generation ->
               (match read with
                | Masc_tui_lane_installer.Read_catalog directory -> launch_lane_package_catalog state ~mailbox directory
                | Read_preview path -> launch_lane_package_preview state ~mailbox path)
@@ -14415,6 +14432,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       map_lane_addons state (fun view ->
         Masc_tui_lane_addons.finish_application_read view ticket result)
   | Lane_subscriptions_loaded (generation,result) ->
+      (match state.lane_nested_read_resume with
+       | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
+       | Some _ | None -> ());
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
         {view with loading=false;subscription_panel=Option.map
@@ -14469,6 +14489,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | _ -> ())
   | Lane_declaration_loaded (generation, request, edit, create_directory, result) ->
+      (match state.lane_nested_read_resume with
+       | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
+       | Some _ | None -> ());
       let module Addons = Masc_tui_lane_addons in
       let module Document = Masc_tui_lane_declaration in
       let visible = Option.is_some state.lane_addons in

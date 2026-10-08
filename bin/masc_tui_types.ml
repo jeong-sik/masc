@@ -5175,6 +5175,10 @@ type schedule_form_refusal =
   ; sfr_workspace : workspace_input_identity option
   }
 
+type lane_nested_read =
+  | Lane_subscriptions_read
+  | Lane_declaration_read of { path : string; edit : bool }
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5499,6 +5503,7 @@ type state = {
   (* The keeper-voice screen, drawn instead of the voice pane while it is
      open. Never both this and the wizard: each is a whole surface. *)
   mutable voice_agent_voices: voice_agent_session option;
+  mutable lane_nested_read_resume: (int * lane_nested_read) option;
   mutable lane_installer_read_resume: (int * Masc_tui_lane_installer.read) option;
   (* The number the next wizard save is sent under. Never reused, so a reply
      for a save made by a session that has since closed cannot match the one
@@ -9028,6 +9033,7 @@ let create_state
   voice_setup_error = None;
   voice_wizard = None;
   voice_agent_voices = None;
+  lane_nested_read_resume = None;
   lane_installer_read_resume = None;
   voice_wizard_requests = 0;
   resources_list = None;

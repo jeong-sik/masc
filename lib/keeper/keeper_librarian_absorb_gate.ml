@@ -780,7 +780,8 @@ let failure_detail ~absorbed = function
      | Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Keeper_excluded -> None
      | Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination
      | Typesafeai_config.Board_attention_disabled | Typesafeai_config.Context_review_disabled
-     | Typesafeai_config.Skill_applicability_disabled | Typesafeai_config.Librarian_preflight_disabled ->
+     | Typesafeai_config.Skill_applicability_disabled | Typesafeai_config.Librarian_preflight_disabled
+     | Typesafeai_config.Workspace_memory_selection_disabled ->
        Some ("enabled absorb judgment unavailable: " ^
              Typesafeai_config.unavailable_reason_to_string reason))
   | Skipped { reason = No_absorptions; _ } -> None

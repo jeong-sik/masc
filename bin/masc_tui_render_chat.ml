@@ -2846,6 +2846,8 @@ let search_reply_source (message : msg_entry) =
 let search_anchor_of_tag = function
   | Tagged_row message -> Some (Search_history {
       row_anchor = msg_anchor message; reply_source = search_reply_source message })
+  | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request request_id), _) ->
+      Some (Search_admission request_id)
   | Tagged_block (log, Some origin, canonical_reply) ->
       Some (Search_journal {
         source = Masc_tui_types.turn_log_execution_source log; origin; canonical_reply })
@@ -2853,6 +2855,10 @@ let search_anchor_of_tag = function
 
 let search_anchor_matches anchor tag =
   match anchor, tag with
+  | Search_admission request_id,
+      Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request origin_request_id), _) ->
+      String.equal request_id origin_request_id
+  | Search_admission _, (Tagged_row _ | Tagged_block _) -> false
   | Search_history anchor, Tagged_row message -> same_msg_anchor anchor.row_anchor message
   | Search_history {reply_source=Some source; _}, Tagged_block (log, _, true) ->
       source = Masc_tui_types.turn_log_execution_source log

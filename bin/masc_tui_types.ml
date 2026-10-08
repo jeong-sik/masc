@@ -817,6 +817,9 @@ type msg_anchor =
    A surviving journal stretch keeps its origin when reasoning is folded or
    a final reply replaces its streamed text. *)
 type chat_search_anchor =
+  | Search_admission of string
+      (** Full request identity: admission belongs to the input even when
+          batch binding changes the execution that consumes it. *)
   | Search_history of {
       row_anchor : msg_anchor;
       reply_source : Masc_tui_keeper_chat_log.journal_source option;

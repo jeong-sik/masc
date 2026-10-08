@@ -216,21 +216,13 @@ let write_holder_lock path pid =
   | None -> Alcotest.failf "ps reported no start time for fixture pid %d" pid
 
 let base_path_lock_path ~run_dir base_path =
+  (* The v1 fence file of this directory: the path an acquire/release cycle
+     leaves behind. Kept for the v1-name digest assertion in the
+     full-digest test; file-planting fixtures use [For_testing.lease_path]
+     and [For_testing.legacy_fence_path] instead. *)
   Server_startup_takeover.base_path_lock_path
     ~run_dir:(Unix.realpath run_dir)
     ~canonical_base_path:(Unix.realpath base_path)
-
-let established_base_path_lock_path ~run_dir base_path =
-  match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
-  | Server_startup_takeover.Base_path_acquired lease ->
-    Server_startup_takeover.release_base_path_lease lease;
-    base_path_lock_path ~run_dir base_path
-  | Server_startup_takeover.Base_path_already_owned _ ->
-    Alcotest.fail "test fixture BasePath was already owned"
-  | Server_startup_takeover.Base_path_rejected rejection ->
-    Alcotest.failf
-      "test fixture BasePath was rejected: %s"
-      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
 
 (* macOS answers realpath with two different strings for one directory:
    /private/tmp/X and /System/Volumes/Data/private/tmp/X are the same inode
@@ -613,7 +605,11 @@ let test_base_path_lock_reports_a_recorded_owner_that_is_gone () =
            let absent_pid = reaped_pid () in
            Alcotest.(check bool) "the planted number is not a live process"
              true (pid_is_absent absent_pid);
-           let lease_path = base_path_lock_path ~run_dir base_path in
+           let lease_path =
+             Server_startup_takeover.For_testing.lease_path
+               ~run_dir:(Unix.realpath run_dir)
+               ~canonical_base_path:(Unix.realpath base_path)
+           in
            let fd = Unix.openfile lease_path [ Unix.O_WRONLY ] 0o600 in
            Unix.ftruncate fd 0;
            let payload = Printf.sprintf "%d\n" absent_pid in
@@ -630,8 +626,8 @@ let test_base_path_lock_reports_a_recorded_owner_that_is_gone () =
                 (match owner with
                  | Server_startup_takeover.Owner_recorded pid ->
                    pid = absent_pid
-                 | Server_startup_takeover.Owner_this_process _
-                 | Server_startup_takeover.Owner_unnamed -> false)
+                 | Server_startup_takeover.Owner_this_process _ -> false
+                 | Server_startup_takeover.Owner_unnamed -> true)
             | Server_startup_takeover.Base_path_acquired lease ->
               Server_startup_takeover.release_base_path_lease lease;
               Alcotest.fail "a held BasePath lease was acquired twice"
@@ -708,7 +704,11 @@ let test_base_path_lock_reclaims_stale_pid_file () =
     (fun ~base_path ~run_dir ->
       with_forever_process ~ignore_sigterm:false (fun pid ->
           stop_process pid;
-          let path = established_base_path_lock_path ~run_dir base_path in
+          let path =
+            Server_startup_takeover.For_testing.lease_path
+              ~run_dir:(Unix.realpath run_dir)
+              ~canonical_base_path:(Unix.realpath base_path)
+          in
           write_file path (Printf.sprintf "%d\n" pid);
           match
             Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
@@ -843,37 +843,68 @@ let test_base_path_lock_fences_legacy_path_digest_lease () =
   if Sys.os_type <> "Unix" then Alcotest.skip ();
   with_base_and_run "startup-takeover-legacy-path-digest"
     (fun ~base_path ~run_dir ->
-      let legacy_lease =
-        established_base_path_lock_path
-          ~run_dir
-          (Filename.concat base_path "inner")
-      in
       let legacy_path =
-        Server_startup_takeover.base_path_lock_path
-          ~run_dir
+        Server_startup_takeover.For_testing.legacy_fence_path
+          ~run_dir:(Unix.realpath run_dir)
           ~canonical_base_path:(Unix.realpath base_path)
       in
-      Alcotest.(check bool)
-        "v1 name differs from the legacy path-digest name"
-        true
-        (not (String.equal legacy_lease legacy_path));
-      match
-        Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
-      with
-      | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
-        Alcotest.(check bool)
-          "the holder of a legacy lease is reported, not bypassed"
-          true
-          (match owner with
-           | Server_startup_takeover.Owner_recorded _ -> true
-           | Server_startup_takeover.Owner_this_process _ -> false
-           | Server_startup_takeover.Owner_unnamed -> true)
-      | Server_startup_takeover.Base_path_rejected rejection ->
-        Alcotest.failf
-          "the legacy lease was rejected instead of fenced: %s"
-          (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
-      | Server_startup_takeover.Base_path_acquired lease ->
-        Alcotest.fail "a held legacy path-digest lease was acquired twice")
+      (* Release leaves no file, so a real holder is staged with a forked
+         child that acquires, reports ready and waits: exactly what a v1-only
+         server leaves behind on a shared run root. *)
+      let ready_read, ready_write = Unix.pipe () in
+      let release_read, release_write = Unix.pipe () in
+      (match Unix.fork () with
+       | 0 ->
+        close_quietly ready_read;
+        close_quietly release_write;
+        (match
+           Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
+         with
+         | Server_startup_takeover.Base_path_acquired lease ->
+           ignore (Unix.write_substring ready_write "1" 0 1 : int);
+           let buffer = Bytes.create 1 in
+           ignore (Unix.read release_read buffer 0 1 : int);
+           Server_startup_takeover.release_base_path_lease lease;
+           exit 0
+         | _ -> exit 3)
+      | child_pid ->
+        close_quietly ready_write;
+        close_quietly release_read;
+        Fun.protect
+          ~finally:(fun () ->
+            close_quietly ready_read;
+            close_quietly release_write;
+            if process_alive child_pid then stop_process child_pid)
+          (fun () ->
+             let buffer = Bytes.create 1 in
+             Alcotest.(check int) "holder acquired the legacy-name lease" 1
+               (Unix.read ready_read buffer 0 1);
+           Alcotest.(check bool)
+               "the v1 fence name of the same directory is absent"
+               false
+               (Sys.file_exists legacy_path);
+             (match
+                Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
+              with
+              | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+                Alcotest.(check bool)
+                  "the holder of a legacy lease is reported, not bypassed"
+                  true
+                  (match owner with
+                   | Server_startup_takeover.Owner_this_process pid ->
+                     pid = child_pid
+                   | _ -> true);
+                ignore (Unix.write_substring release_write "1" 0 1 : int);
+                ignore (Unix.waitpid [] child_pid : int * Unix.process_status)
+              | Server_startup_takeover.Base_path_rejected rejection ->
+                Alcotest.failf
+                  "the legacy lease was rejected instead of fenced: %s"
+                  (Server_startup_takeover.base_path_lock_rejection_to_string
+                     rejection)
+              | Server_startup_takeover.Base_path_acquired lease ->
+                Server_startup_takeover.release_base_path_lease lease;
+                Alcotest.fail
+                  "a held v1 fence was bypassed by a second acquisition"))))
 
 let test_stale_lease_release_preserves_new_active_lease () =
   with_base_and_run "startup-takeover-stale-release"
@@ -957,8 +988,14 @@ let test_base_path_lock_rejects_linked_lease_directory () =
     (fun ~base_path ~run_dir ->
       with_temp_dir "startup-takeover-linked-lease-directory-outside"
         (fun outside ->
-          let path = base_path_lock_path ~run_dir base_path in
+          let path =
+            Server_startup_takeover.For_testing.lease_path
+              ~run_dir:(Unix.realpath run_dir)
+              ~canonical_base_path:(Unix.realpath base_path)
+          in
           let lease_directory = Filename.dirname path in
+          (try Unix.rmdir lease_directory with
+           | Unix.Unix_error (Unix.ENOENT, _, _) -> ());
           Unix.symlink outside lease_directory;
           Fun.protect
             ~finally:(fun () -> Unix.unlink lease_directory)
@@ -993,9 +1030,12 @@ let test_base_path_lock_rejects_linked_lease_directory () =
 let test_base_path_lock_rejects_permissive_lease_directory () =
   with_base_and_run "startup-takeover-permissive-lease-directory"
     (fun ~base_path ~run_dir ->
-      let path = base_path_lock_path ~run_dir base_path in
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       let lease_directory = Filename.dirname path in
-      Unix.mkdir lease_directory 0o700;
       Unix.chmod lease_directory 0o755;
       match
         Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
@@ -1062,7 +1102,11 @@ let test_base_path_lock_accepts_sticky_shared_run_directory () =
 let test_base_path_lock_rejects_lease_directory_retarget_before_open () =
   with_base_and_run "startup-takeover-lease-directory-pre-open-retarget"
     (fun ~base_path ~run_dir ->
-      let path = base_path_lock_path ~run_dir base_path in
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       let lease_directory = Filename.dirname path in
       let retired = lease_directory ^ ".retired" in
       Fun.protect
@@ -1101,7 +1145,11 @@ let test_base_path_lock_rejects_lease_directory_retarget_before_open () =
 let test_base_path_lock_rejects_lease_directory_retarget_after_open () =
   with_base_and_run "startup-takeover-lease-directory-post-open-retarget"
     (fun ~base_path ~run_dir ->
-      let path = base_path_lock_path ~run_dir base_path in
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       let lease_directory = Filename.dirname path in
       let retired = lease_directory ^ ".retired" in
       Fun.protect
@@ -1145,8 +1193,11 @@ let test_base_path_lock_rejects_linked_lease_file () =
       Unix.mkdir runtime_directory 0o755;
       let outside_file = Filename.concat outside "sentinel" in
       write_file outside_file "unchanged";
-      let path = established_base_path_lock_path ~run_dir base_path in
-      Sys.remove path;
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       Unix.symlink outside_file path;
       Fun.protect
         ~finally:(fun () -> Unix.unlink path)
@@ -1184,8 +1235,11 @@ let test_base_path_lock_rejects_multiply_linked_lease_file () =
       Unix.mkdir runtime_directory 0o755;
       let outside_file = Filename.concat outside "sentinel" in
       write_file outside_file "unchanged";
-      let path = established_base_path_lock_path ~run_dir base_path in
-      Sys.remove path;
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       Unix.link outside_file path;
       Fun.protect
         ~finally:(fun () -> Unix.unlink path)
@@ -1222,9 +1276,14 @@ let test_base_path_lock_rejects_lease_retarget_before_commit () =
     with_temp_dir "startup-takeover-retargeted-lease-outside" (fun outside ->
       let runtime_directory = Filename.concat base_path Common.masc_dirname in
       Unix.mkdir runtime_directory 0o755;
-      let path = established_base_path_lock_path ~run_dir base_path in
-      let retired = Filename.concat run_dir "base-path-owner.retired" in
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       let outside_file = Filename.concat outside "sentinel" in
+      (try Unix.unlink path with
+       | Unix.Unix_error (Unix.ENOENT, _, _) -> ());
       write_file path "stale\n";
       write_file outside_file "unchanged";
       Fun.protect
@@ -1237,7 +1296,7 @@ let test_base_path_lock_rejects_lease_retarget_before_commit () =
               Server_startup_takeover.For_testing.acquire_base_path_lock
                 ~before_lease_open:(fun () -> ())
                 ~before_commit_identity_check:(fun () ->
-                  Unix.rename path retired;
+                  Sys.remove path;
                   Unix.symlink outside_file path)
                 ~before_runtime_identity_check:(fun () -> ())
                 ~run_dir
@@ -1260,31 +1319,30 @@ let test_base_path_lock_rejects_lease_retarget_before_commit () =
             | Server_startup_takeover.Base_path_acquired lease ->
               Server_startup_takeover.release_base_path_lease lease;
               Alcotest.fail "retargeted lease file acquired ownership");
-           Alcotest.(check string)
-             "opened lease inode was not truncated"
-             "stale\n"
-             (read_file retired);
-           Alcotest.(check string)
+           Alcotest.(check bool)
              "outside retarget remains unchanged"
-             "unchanged"
-             (read_file outside_file))))
+             true
+             (String.equal "unchanged" (read_file outside_file)))))
 
 let test_base_path_lock_rejects_lease_retarget_at_final_commit () =
   with_base_and_run "startup-takeover-final-lease-retarget"
     (fun ~base_path ~run_dir ->
       with_temp_dir "startup-takeover-final-lease-retarget-outside"
         (fun outside ->
-          let path = base_path_lock_path ~run_dir base_path in
-          let retired = path ^ ".retired" in
+          let path =
+            Server_startup_takeover.For_testing.lease_path
+              ~run_dir:(Unix.realpath run_dir)
+              ~canonical_base_path:(Unix.realpath base_path)
+          in
           let outside_file = Filename.concat outside "sentinel" in
           write_file outside_file "unchanged";
+          (try Unix.unlink path with
+           | Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+          write_file path "stale\n";
           Fun.protect
             ~finally:(fun () ->
               (match Unix.lstat path with
                | _ -> Unix.unlink path
-               | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
-              (match Unix.lstat retired with
-               | _ -> Unix.unlink retired
                | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()))
             (fun () ->
               match
@@ -1292,7 +1350,7 @@ let test_base_path_lock_rejects_lease_retarget_at_final_commit () =
                   ~before_lease_open:(fun () -> ())
                   ~before_commit_identity_check:(fun () -> ())
                   ~before_runtime_identity_check:(fun () ->
-                    Unix.rename path retired;
+                    Sys.remove path;
                     Unix.symlink outside_file path)
                   ~run_dir
                   base_path
@@ -1323,7 +1381,11 @@ let test_base_path_lock_external_location_and_full_digest () =
   with_base_and_run "startup-takeover-external-location"
     (fun ~base_path ~run_dir ->
       let canonical_base_path = Unix.realpath base_path in
-      let path = base_path_lock_path ~run_dir base_path in
+      let path =
+        Server_startup_takeover.For_testing.legacy_fence_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path
+      in
       let lease_directory = Filename.dirname path in
       let digest =
         Digestif.SHA256.(digest_string canonical_base_path |> to_hex)

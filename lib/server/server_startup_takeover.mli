@@ -252,6 +252,17 @@ module For_testing : sig
     -> run_dir:string
     -> string
     -> base_path_acquire_result
+
+  (** The v1 path-digest upgrade-fence file name of an already-canonical
+      BasePath, creating its private parent directory if needed. Name-only:
+      nothing is opened or locked. *)
+  val legacy_fence_path :
+    run_dir:string -> canonical_base_path:string -> string
+
+  (** The v2 (st_dev, st_ino)-digest lease file name of an already-canonical
+      BasePath, creating its private parent directory if needed. Name-only:
+      nothing is opened or locked. *)
+  val lease_path : run_dir:string -> canonical_base_path:string -> string
 end
 
 type owner_capture_error =

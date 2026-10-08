@@ -1333,11 +1333,14 @@ let verify_open_lease_file prepared fd expected_file_stat =
     let descriptor_stat = Unix.fstat fd in
     if descriptor_stat.Unix.st_kind <> Unix.S_REG
     then reject (Lease_file_non_regular { path = prepared.path; kind = descriptor_stat.st_kind })
-    else if descriptor_stat.st_nlink <> 1
+    else if descriptor_stat.st_nlink > 1
     then
       reject
         (Lease_file_multiply_linked
            { path = prepared.path; links = descriptor_stat.st_nlink })
+    (* st_nlink = 0 is not "multiply linked": the descriptor is the only
+       remaining reference, so the name was replaced after the open. The
+       lstat below reports what the path became instead. *)
     else if descriptor_stat.st_uid <> prepared.owner_uid
     then
       reject
@@ -1363,12 +1366,12 @@ let verify_open_lease_file prepared fd expected_file_stat =
          with
          | Error rejection -> reject rejection
          | Ok () ->
-           (match Unix.lstat prepared.path with
+         (match Unix.lstat prepared.path with
          | path_stat when path_stat.Unix.st_kind <> Unix.S_REG ->
            reject
              (Lease_file_non_regular
                 { path = prepared.path; kind = path_stat.st_kind })
-         | path_stat when path_stat.st_nlink <> 1 ->
+         | path_stat when path_stat.st_nlink > 1 ->
            reject
              (Lease_file_multiply_linked
                 { path = prepared.path; links = path_stat.st_nlink })
@@ -1664,26 +1667,14 @@ let acquire_base_path_lock_with
                    composition-root invariant tracked by #24344. *)
                 (match verify_open_lease_file prepared fd None with
                   | Error rejection ->
-                    (match
-                       close_acquisition_fd
-                         ~operation:"close_rejected_lease_file"
-                         ~path:prepared.path
-                         ~context:
-                           (base_path_lock_rejection_to_string rejection)
-                         fd
-                     with
-                     | Ok () ->
-                       (match legacy_fence with
-                        | None -> ()
-                        | Some fence ->
-                          close_legacy_fence_fd ~path:prepared.path fence);
-                       Base_path_rejected rejection
-                     | Error close_rejection ->
-                       (match legacy_fence with
-                        | None -> ()
-                        | Some fence ->
-                          close_legacy_fence_fd ~path:prepared.path fence);
-                       Base_path_rejected close_rejection)
+                    (* verify_open_lease_file already closed the descriptor
+                       on the rejection path; releasing the fence is the only
+                       cleanup left. *)
+                    (match legacy_fence with
+                     | None -> ()
+                     | Some fence ->
+                       close_legacy_fence_fd ~path:prepared.path fence);
+                    Base_path_rejected rejection
                   | Ok fd ->
                     (match establish_runtime_directory prepared with
                      | Error rejection ->
@@ -1736,31 +1727,16 @@ let acquire_base_path_lock_with
                                 close_legacy_fence_fd ~path:prepared.path fence);
                              Base_path_rejected close_rejection)
                         | Ok () ->
+                          (* verify_open_lease_file closes the descriptor on
+                             rejection itself; an outer close would race it
+                             for EBADF. Only the fence is released here. *)
                           (match verify_open_lease_file prepared fd None with
                            | Error rejection ->
-                             (match
-                                close_acquisition_fd
-                                  ~operation:"close_rejected_lease_file"
-                                  ~path:prepared.path
-                                  ~context:
-                                    (base_path_lock_rejection_to_string
-                                       rejection)
-                                  fd
-                              with
-                              | Ok () ->
-                                (match legacy_fence with
-                                 | None -> ()
-                                 | Some fence ->
-                                   close_legacy_fence_fd ~path:prepared.path
-                                     fence);
-                                Base_path_rejected rejection
-                              | Error close_rejection ->
-                                (match legacy_fence with
-                                 | None -> ()
-                                 | Some fence ->
-                                   close_legacy_fence_fd ~path:prepared.path
-                                     fence);
-                                Base_path_rejected close_rejection)
+                             (match legacy_fence with
+                              | None -> ()
+                              | Some fence ->
+                                close_legacy_fence_fd ~path:prepared.path fence);
+                             Base_path_rejected rejection
                            | Ok fd ->
                              (* NDT-OK: persist the OS lease holder identity for operator observation. *)
                              let pid = Unix.getpid () in
@@ -1789,6 +1765,35 @@ let acquire_base_path_lock =
 module For_testing = struct
   let acquire_pid_lock_with_start_reader = acquire_pid_lock_with_start_reader
   let acquire_base_path_lock = acquire_base_path_lock_with
+
+  (* The v1 upgrade-fence file of an already-canonical BasePath, without
+     acquiring anything: a fixture that must stage a pre-upgrade lease
+     computes the same name the fence layer does. *)
+  let legacy_fence_path ~run_dir ~canonical_base_path =
+    let owner_uid = Unix.geteuid () in
+    let lease_directory =
+      base_path_lease_directory ~run_dir ~owner_uid
+    in
+    (try Unix.mkdir lease_directory 0o700 with
+     | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    base_path_lock_path_for_owner
+      ~run_dir
+      ~canonical_base_path
+      ~owner_uid
+
+  (* The v2 lease file of an already-canonical BasePath, again name-only. *)
+  let lease_path ~run_dir ~canonical_base_path =
+    let owner_uid = Unix.geteuid () in
+    let lease_directory =
+      base_path_lease_directory ~run_dir ~owner_uid
+    in
+    (try Unix.mkdir lease_directory 0o700 with
+     | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    Filename.concat
+      lease_directory
+      (Printf.sprintf
+         "masc-base-path-owner-v2-%s.lease"
+         (base_path_lock_digest_of_stats (Unix.stat canonical_base_path)))
 end
 
 type owner_capture_error =

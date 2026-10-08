@@ -2176,13 +2176,18 @@ status: reference
   검증을 통과한 `Validated_preset`만 게이트와 orchestrator로 흐른다. 패널 정체성은
   `panelist_id` — 라벨이 있으면 `label (model)`, 없으면 `model`이고, 같은 model이라도
   라벨이 다르면 다른 패널이다. JOJ(judge-of-judges)는 1차 심판 여럿과 meta 심판을 둔다.
-  여기서 Fusion은 MASC의 Board-backed 실행을 뜻하며, Lane Add-on의 조립형 계산과는 다르다.
-  → [Fusion_policy](../../lib/fusion_core/fusion_policy.mli)
+  여기서 Fusion은 MASC의 native 패널·심판 실행을 뜻한다. 계산은 Board 없이 진행하며,
+  Board는 결과 증거를 게시하는 best-effort 투영이다. 일반적인 Board 게시 오류에도
+  chat/wake 전달은 진행한다. 단, 기존 게시물과 실행 정체성이 충돌하면 투영을 거절한다.
+  계산 완료와 결과 투영은 별개이며, Lane Add-on의 조립형 계산과도 실행 경로가 다르다.
+  → [Fusion_policy](../../lib/fusion_core/fusion_policy.mli),
+  [Fusion_orchestrator](../../lib/fusion/fusion_orchestrator.mli),
+  [Fusion_sink](../../lib/fusion/fusion_sink.mli)
 
 **Assembled Fusion Computation (조립형 Fusion 계산)**
 : `fusion-compute` Lane Add-on이 패널과 심판을 각각 격리 worker로 실행해 보존 입력과
   이름 지정 Lane 출력을 계산한다. `fusion/computation` 출력을 내고 `fusion-report`가
-  이를 에이전트가 읽을 보고서로 렌더한다. MASC의 Board-backed Fusion 실행과는 다르다.
+  이를 에이전트가 읽을 보고서로 렌더한다. MASC의 native Fusion 실행과는 실행 경로가 다르다.
   계산 완료는 보고서 전달·게시를 뜻하지 않는다. 보고서 읽기나 Broadcast에는 명시적
   evidence action이 필요하다.
   → [fusion-compute](../../addons/fusion-compute/README.md),

@@ -1335,6 +1335,9 @@ let test_a_turn_the_server_ended_without_a_closing_event_is_closed () =
         inflight_with_log ~keeper_name:"alpha" ~started_at:10.
           [ Live.Run_started; Live.Text "partial" ]
       in
+      (* The running turn is owned by an in-flight request; a live log with no
+         owner, authority or observed operation is not drawn as progress. *)
+      state.msg_inflight <- [ entry ];
       state.msg_live <- Some entry.log;
       check string "before settling it is the running turn" "working" (phase_name entry);
       check bool "and the pane draws it" true
@@ -2951,7 +2954,10 @@ let test_a_journal_revision_draws_its_facts_in_columns () =
     in
     let full = draw Tui_types.Memory_full in
     let row_with affix = List.find_opt (Astring.String.is_infix ~affix) full in
-    (match row_with "+ lesson  verifier_exact", row_with "the ran-on-main contract" with
+    (* The claim wraps inside the turn rail's narrower column, so the phrase
+       "the ran-on-main contract" can split across two rows; the first
+       wrapped row opens on "Actions job log". *)
+    (match row_with "+ lesson  verifier_exact", row_with "Actions job log" with
      | Some first, Some wrapped ->
          let column row affix =
            match Astring.String.find_sub ~sub:affix row with
@@ -2960,7 +2966,7 @@ let test_a_journal_revision_draws_its_facts_in_columns () =
          in
          check int "the wrapped claim starts under the claim, not under the sign"
            (column first "verifier_exact")
-           (column wrapped "the ran-on-main")
+           (column wrapped "Actions job log")
      | _ -> fail ("the fact did not draw in columns: " ^ String.concat "\n" full));
     (* The summary wraps at this width; its head is what the row opens on. *)
     check bool "the summary heads the revision" true
@@ -3000,8 +3006,16 @@ let test_a_nameless_heading_is_the_mark_and_the_rule () =
           with Tui_types.me_keeper_name = "alpha" } ];
     let frame, _ = Masc_tui_render_chat.render_keeper_message state in
     let lines = frame.Masc_tui_frame_presenter.lines in
-    check bool "no row spells the request id" false
-      (List.exists (Astring.String.is_infix ~affix:request) lines);
+    (* The request id is drawn once, on the first line of the request group
+       (docs/TUI-GUIDE.md); the heading row below must not spell it. *)
+    let spelling = List.filter (Astring.String.is_infix ~affix:request) lines in
+    check int "the request id is spelled by one row" 1 (List.length spelling);
+    check bool "that row is the request line, not a heading" true
+      (List.for_all
+         (fun line ->
+           Astring.String.is_infix ~affix:"\xec\x9a\x94\xec\xb2\xad "
+             (Masc_tui_theme.strip_sgr line))
+         spelling);
     let mark = "\xe2\x97\x8f" in
     match
       List.find_opt
@@ -3198,8 +3212,8 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
          check int "a lead one short of the room still fills the row" inner
            (arrival_blank + Masc_tui_message_layout.display_width (String.trim line))
      | None -> fail "no heading spells the exact-width name");
-    (* A turn that opens on a tool block draws the keeper's mark and the
-       rule: no name, no dot with nothing on its left. *)
+    (* A turn that opens on a tool block draws the keeper's mark, the TOOLS
+       label and the rule: no name, no dot with nothing on its left. *)
     state.msg_history <-
       [ { (chat_entry ~request_id:request ~role:Tui_types.Message_tool
              ~text:"read_file a.ml" ~at ())
@@ -3214,8 +3228,8 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
      | Some line ->
          check bool "no dot with an empty name on its left" false
            (Astring.String.is_infix ~affix:"\xc2\xb7" line);
-         check bool "the mark runs straight into the rule" true
-           (String.starts_with ~prefix:("\xe2\x97\x8f " ^ Masc_tui_theme.Box.h)
+         check bool "the mark is followed by the TOOLS label and the rule" true
+           (String.starts_with ~prefix:("\xe2\x97\x8f TOOLS " ^ Masc_tui_theme.Box.h)
               (String.trim line))
      | None -> fail "no heading for the tool row"))
 ;;

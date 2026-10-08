@@ -365,6 +365,12 @@ jobs:
       # probed once here: a shim that cannot answer --probe is not an asset.
       # It is built before the installer smoke so the smoke can stage it and
       # check that install.sh places it with its sha256 sidecar (B-2).
+      - name: Prepare static shim compiler
+        if: matrix.shim-arch != ''
+        uses: ./.github/actions/prepare-shim-builder
+        with:
+          arch: ${{ matrix.shim-arch }}
+
       - name: Build exec shim (static ${{ matrix.shim-arch }})
         if: matrix.shim-arch != ''
         run: |

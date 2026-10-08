@@ -171,6 +171,9 @@ let test_stdio_controller () =
               let ejected = call ~controller:(admission (Some "fixture")) "masc_dos_eject" (`Assoc []) in
               check bool "eject succeeds" false (ejected.is_error = Some true);
               let empty_screen = call "masc_dos_screen" (`Assoc []) in
+              check bool "empty screen refuses before any effect" true
+                (Lane_addon_tool_result.failure empty_screen =
+                  (Tool_result.Workflow_rejection, Tool_result.Proven_pre_effect));
               check bool "screen preserves explicit no-machine status for HTTP" true
                 (match empty_screen._meta with
                  | Some (`Assoc fields) ->

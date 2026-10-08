@@ -704,6 +704,9 @@ let event_floats_are_finite = function
   | Agent_core_stream_message_start
       { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
     float_is_finite cost_usd
+  | Agent_core_stream_message_delta
+      { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
+    float_is_finite cost_usd
   | Audio_block { duration_sec = Some duration_sec; _ } ->
     float_is_finite duration_sec
   | _ -> true

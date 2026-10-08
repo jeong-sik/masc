@@ -321,7 +321,8 @@ val take_nonblocking : t -> keeper_chat_event option
 val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
 
 (** JSON for cumulative mid-stream counters and provider-reported charge:
-    only reported fields appear, so "not reported" stays distinguishable from 0. *)
+    only reported fields appear, so "not reported" stays distinguishable from 0.
+    Non-finite charges are omitted to keep live projection JSON valid. *)
 val delta_usage_to_json : Agent_core.Types.delta_usage -> Yojson.Safe.t
 
 (** The wire spelling of why the provider stopped writing, as

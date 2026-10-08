@@ -356,10 +356,17 @@ let test_search_pin_before_first_frame_and_at_tail () = at_sizes (fun origin ->
     [false; true])
 
 let admission_log state ~id ~at =
-  log state ~id ~at [Live.Accepted {
+  let sent_request = { (Chat.create_request ~keeper_name:"alpha" ~message:"input" ()) with
+      Chat.request_id=id } in
+  let held = T.turn_log_create ~keeper_name:"alpha" ~request_id:id ~started_at:at in
+  T.turn_log_add ~now:at held ~seq:None (Live.Accepted {
     admission=Live.Queued; queue_length=3;
     interactive=Some {Chat.outcome=Chat.Paused; chat_control_token="paused-control";
-      signalled=false; resumed=false; interrupt_error=None} }]
+      signalled=false; resumed=false; interrupt_error=None} });
+  let entry : T.inflight = {sent_request; submitted_at=at; sent_at=at;
+    control_generation=0; phase=T.Turn_streaming; log=held} in
+  state.msg_inflight <- state.msg_inflight @ [entry];
+  held
 
 let bind_admission_batch logs =
   List.iter (fun (log : T.turn_log) ->

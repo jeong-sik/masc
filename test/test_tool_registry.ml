@@ -25,7 +25,7 @@ let () =
             let stats = Tool_registry.get_stats () in
             let count =
               List.assoc_opt "masc_status" stats
-              |> Option.map (fun s -> Atomic.get s.Tool_registry.call_count)
+              |> Option.map (fun s -> s.Tool_registry.call_count)
               |> Option.value ~default:0
             in
             check int "call_count" 2 count)
@@ -53,10 +53,10 @@ let () =
               ();
             let stats = Tool_registry.get_stats () in
             let s = List.assoc "masc_bind" stats in
-            check int "call_count" 4 (Atomic.get s.call_count);
-            check int "success_count" 2 (Atomic.get s.success_count);
-            check int "deferred_count" 1 (Atomic.get s.deferred_count);
-            check int "failure_count" 1 (Atomic.get s.failure_count))
+            check int "call_count" 4 (s.call_count);
+            check int "success_count" 2 (s.success_count);
+            check int "deferred_count" 1 (s.deferred_count);
+            check int "failure_count" 1 (s.failure_count))
         ; test_case "accumulates duration" `Quick (fun () ->
             Tool_registry.reset ();
             Tool_registry.record_call
@@ -71,7 +71,7 @@ let () =
               ();
             let stats = Tool_registry.get_stats () in
             let s = List.assoc "masc_broadcast" stats in
-            check int "total_duration_ms" 300 (Atomic.get s.total_duration_ms))
+            check int "total_duration_ms" 300 (s.total_duration_ms))
         ; test_case "ignores unknown tool names when gated" `Quick (fun () ->
             Tool_registry.reset ();
             Tool_registry.record_call_if_known
@@ -98,8 +98,8 @@ let () =
               ();
             let stats = Tool_registry.get_stats () in
             let s = List.assoc "keeper_lane_status" stats in
-            check int "call_count" 1 (Atomic.get s.call_count);
-            check int "agent_internal_count" 1 (Atomic.get s.agent_internal_count))
+            check int "call_count" 1 (s.call_count);
+            check int "agent_internal_count" 1 (s.agent_internal_count))
         ; test_case "tracks source attribution" `Quick (fun () ->
             Tool_registry.reset ();
             Tool_registry.record_call
@@ -122,12 +122,33 @@ let () =
               ();
             let stats = Tool_registry.get_stats () in
             let s = List.assoc "masc_status" stats in
-            check int "call_count" 3 (Atomic.get s.call_count);
-            check int "external_mcp_count" 1 (Atomic.get s.external_mcp_count);
-            check int "agent_internal_count" 2 (Atomic.get s.agent_internal_count))
+            check int "call_count" 3 (s.call_count);
+            check int "external_mcp_count" 1 (s.external_mcp_count);
+            check int "agent_internal_count" 2 (s.agent_internal_count))
         ] )
     ; ( "get_top_n"
-      , [ test_case "returns top N by call count" `Quick (fun () ->
+      , [ test_case "retained observations do not change" `Quick (fun () ->
+            Tool_registry.reset ();
+            Tool_registry.record_call ~tool_name:"snapshot_tool"
+              ~source:External_mcp ~assignment_id:"first"
+              ~disposition:(Tool_result.Completed ()) ~duration_ms:10 ();
+            let retained = List.assoc "snapshot_tool" (Tool_registry.get_stats ()) in
+            Tool_registry.record_call ~tool_name:"snapshot_tool"
+              ~source:Agent_internal ~assignment_id:"second"
+              ~disposition:(Tool_result.Failed ()) ~duration_ms:20 ();
+            let current = List.assoc "snapshot_tool" (Tool_registry.get_stats ()) in
+            check int "retained count" 1 retained.call_count;
+            check int "retained failures" 0 retained.failure_count;
+            check (option string) "retained assignment" (Some "first") retained.last_assignment_id;
+            check int "current count" 2 current.call_count;
+            check int "current duration" 30 current.total_duration_ms;
+            check int "all dispositions partition calls" current.call_count
+              (current.success_count + current.deferred_count + current.failure_count);
+            check int "all sources partition calls" current.call_count
+              (current.external_mcp_count + current.agent_internal_count);
+            Tool_registry.reset ();
+            check int "reset leaves retained observations intact" 2 current.call_count)
+        ; test_case "returns top N by call count" `Quick (fun () ->
             Tool_registry.reset ();
             for _ = 1 to 3 do
               Tool_registry.record_call

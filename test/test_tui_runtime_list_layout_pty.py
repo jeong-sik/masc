@@ -7,6 +7,7 @@ import tui_keyboard_runtime as _keyboard_runtime
 
 
 RUNTIME_ID = "fixture-runtime-한글-very-long-identity-tailZ"
+HEALTHY_ID = "fixture-runtime-healthy"
 LANE_ID = "fixture-lane-아주긴이름-primary-tailL"
 
 
@@ -21,16 +22,21 @@ def run(executable, no_color):
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     _, resolved = _keyboard_runtime.runtime_resolved_response()
     assert isinstance(resolved, dict)
-    runtime = _keyboard_runtime.runtime_resolved_runtime(RUNTIME_ID, "fixture-provider", "fixture-model")
-    resolved["runtimes"] = [runtime]
-    resolved["default_runtime"] = runtime
+    exhausted = _keyboard_runtime.runtime_resolved_runtime(RUNTIME_ID, "fixture-provider", "fixture-model")
+    exhausted["quota_exhausted"] = True
+    healthy = _keyboard_runtime.runtime_resolved_runtime(HEALTHY_ID, "fixture-provider", "fixture-model")
+    resolved["runtimes"] = [exhausted, healthy]
+    resolved["default_runtime"] = exhausted
     resolved["default_route"] = LANE_ID
-    resolved["lanes"] = [{"id": LANE_ID, "runtime_ids": [RUNTIME_ID], "declared": True}]
+    resolved["lanes"] = [{"id": LANE_ID, "runtime_ids": [RUNTIME_ID, HEALTHY_ID], "declared": True}]
     resolved["assignments"] = []
     _, probe = _keyboard_runtime.runtime_probe_response(fresh=True)
-    probe["probe"]["providers"] = [_keyboard_runtime.runtime_probe_provider(RUNTIME_ID, status="reachable")]
-    probe["probe"]["summary"].update({"runtimes": 1, "probed": 1,
-        "reachable": 1, "failed": 0, "skipped": 0, "default_runtime_id": RUNTIME_ID})
+    probe["probe"]["providers"] = [
+        _keyboard_runtime.runtime_probe_provider(RUNTIME_ID, status="reachable"),
+        _keyboard_runtime.runtime_probe_provider(HEALTHY_ID, status="reachable"),
+    ]
+    probe["probe"]["summary"].update({"runtimes": 2, "probed": 2,
+        "reachable": 2, "failed": 0, "skipped": 0, "default_runtime_id": RUNTIME_ID})
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = (200, resolved)
     fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = (200, probe)
     fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = (200, probe)
@@ -40,6 +46,62 @@ def run(executable, no_color):
         _keyboard_harness.send_and_wait(process, fd, output, b"9", b"MASC System / Runtime")
         _keyboard_harness.wait_for_output(process, fd, output, b"tailZ", start=0, timeout=10)
         _keyboard_harness.wait_for_output(process, fd, output, b"reachable", start=0, timeout=10)
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", HEALTHY_ID.encode())
+        for all_runtimes in (False, True):
+            if all_runtimes:
+                _keyboard_harness.send_and_wait(process, fd, output, b"p", b"All runtimes")
+            rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=True)
+            exhausted_index, exhausted_row = next(
+                (row_id, row)
+                for row_id, row in rows.items()
+                if RUNTIME_ID.encode() in row
+                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
+            )
+            healthy_index, _ = next(
+                (row_id, row)
+                for row_id, row in rows.items()
+                if HEALTHY_ID.encode() in row
+                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
+            )
+            assert exhausted_index < healthy_index, rows
+            initial_text = _keyboard_harness.CSI_RE.sub(b"", exhausted_row)
+            start = len(output)
+            os.write(fd, b"h")
+            _keyboard_harness.wait_for_output(process, fd, output, b"tailZ", start=start, timeout=3)
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
+            dimmed_off_rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=True)
+            dimmed_off = next(
+                row
+                for row in dimmed_off_rows.values()
+                if RUNTIME_ID.encode() in row
+                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
+            )
+            assert _keyboard_harness.CSI_RE.sub(b"", dimmed_off) == initial_text, dimmed_off
+            if not no_color:
+                assert dimmed_off != exhausted_row, (exhausted_row, dimmed_off)
+            start = len(output)
+            os.write(fd, b"h")
+            _keyboard_harness.wait_for_output(process, fd, output, b"tailZ", start=start, timeout=3)
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
+            dimmed_on_rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=True)
+            dimmed_on_index, dimmed_on = next(
+                (row_id, row)
+                for row_id, row in dimmed_on_rows.items()
+                if RUNTIME_ID.encode() in row
+                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
+            )
+            healthy_index, _ = next(
+                (row_id, row)
+                for row_id, row in dimmed_on_rows.items()
+                if HEALTHY_ID.encode() in row
+                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
+            )
+            assert _keyboard_harness.CSI_RE.sub(b"", dimmed_on) == initial_text, dimmed_on
+            assert dimmed_on_index < healthy_index, dimmed_on_rows
+            if not no_color:
+                assert dimmed_on == exhausted_row, (exhausted_row, dimmed_on)
+        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"Service lanes")
+        _keyboard_harness.send_and_wait(process, fd, output, b"k", b"tailZ")
         for all_runtimes in (False, True):
             if all_runtimes:
                 # The lane sweep already ended at120x32; an unchanged size

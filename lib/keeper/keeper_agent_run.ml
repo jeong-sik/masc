@@ -1785,6 +1785,7 @@ let run_turn
                 dispatch_input
                   ~dispatch:(fun ~checkpoint initial_messages ->
                     Keeper_turn_driver.run_named
+                      ~on_memory_capacity_refusal:s.Keeper_run_tools.on_memory_capacity_refusal
                       ~input_policy:meta.input_policy
                       ~runtime_id:(match native_resume with
                         | None -> runtime_id_string

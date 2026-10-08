@@ -83,6 +83,20 @@ let runtime_line = function
   | D.Preset_runtime_failed reason -> "runtime: failed — " ^ reason
 ;;
 
+let default_prompt_lines = function
+  | Masc.Prompt_preset.Defaults_unknown -> [ "Default prompts: saved baseline unknown" ]
+  | Masc.Prompt_preset.Defaults_match -> [ "Default prompts: match saved baseline" ]
+  | Masc.Prompt_preset.Defaults_differ changes ->
+      "Default prompts: differ from saved baseline (current Markdown stays in use)"
+      :: List.map (fun (key, saved, current) ->
+           let change = match saved, current with
+             | None, Some _ -> "added"
+             | Some _, None -> "removed or unreadable"
+             | Some _, Some _ -> "changed"
+             | None, None -> "unavailable" in
+           Printf.sprintf "  - %s: %s" key change) changes
+;;
+
 let restore_lines (report : D.preset_restore_report) =
   (Printf.sprintf
      "restored preset %s (the state before it is %s)"
@@ -91,6 +105,7 @@ let restore_lines (report : D.preset_restore_report) =
    :: part_lines ~label:"prompt overrides" report.D.prr_prompt_overrides)
   @ part_lines ~label:"keeper instructions" report.D.prr_instructions
   @ [ runtime_line report.D.prr_runtime ]
+  @ default_prompt_lines report.D.prr_default_prompts
 ;;
 
 (* One list row in the Config pane: the name, then the counts, then when it
@@ -132,6 +147,7 @@ let contents_lines (d : D.preset_detail) =
      | D.Preset_settings_differ -> "Saved workspace settings differ from this preset"
      | D.Preset_settings_unavailable reason -> "Settings comparison unavailable: " ^ reason)
   ]
+  @ default_prompt_lines d.D.pd_default_prompts
   @ List.map (fun (key, path, source) ->
       Printf.sprintf "Prompt %s · current effective %s · Markdown %s" key
         (match source with D.Prompt_override -> "override" | D.Prompt_file -> "file" | D.Prompt_missing -> "missing")

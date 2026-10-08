@@ -1505,6 +1505,7 @@ type preset_detail = {
   pd_name : string;
   pd_directory : string;
   pd_settings_match : preset_settings_match;
+  pd_default_prompts : Prompt_preset.default_comparison;
   pd_prompt_files : (string * string option * prompt_source) list;
   pd_overrides : (string * int) list;  (** prompt key, bytes *)
   pd_instructions : (string * int) list;  (** keeper TOML file name, bytes *)
@@ -1534,6 +1535,7 @@ type preset_restore_report = {
   prr_prompt_overrides : preset_part;
   prr_instructions : preset_part;
   prr_runtime : preset_runtime_status;
+  prr_default_prompts : Prompt_preset.default_comparison;
 }
 
 val decode_presets : Yojson.Safe.t -> (presets_snapshot, string) result

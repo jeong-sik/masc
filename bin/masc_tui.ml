@@ -3689,6 +3689,23 @@ let launch_preset_call state ~mailbox ~call ~wrap =
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
     ~deliver:wrap (fun () -> call ~host ~port)
 
+let launch_chat_command_read state ~mailbox ~label ~call ~wrap =
+  if not (server_authority_ready state) then
+    report_action state "error" (label ^ " waits for confirmed workspace identity; retry after reconnecting")
+  else begin
+    let ticket = ref () in
+    state.chat_command_reads <- (ticket, state.workspace_read_authority, label) :: state.chat_command_reads;
+    launch_preset_call state ~mailbox ~call
+      ~wrap:(fun result -> Chat_command_read_completed (ticket, wrap result))
+  end
+
+let settle_retired_chat_command_reads state =
+  let retired, current = List.partition
+      (fun (_, reading, _) -> reading != state.workspace_read_authority) state.chat_command_reads in
+  state.chat_command_reads <- current;
+  List.iter (fun (_, _, label) -> report_action state "error"
+    (label ^ " was interrupted by workspace reconnection; retry after reconnecting")) retired
+
 (* A revoked invite's link opens nothing, so its card goes, whether or not it
    is the one on screen. The card carries the name the server sent, made safe
    to draw, so the name asked for is compared in the same form. *)
@@ -10154,7 +10171,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
              "/context needs a Keeper selected on the roster")
   | Masc_tui_command.Preset_list ->
       Masc_tui_message_input.clear state.msg_input;
-      launch_preset_call state ~mailbox
+      launch_chat_command_read state ~mailbox ~label:"/preset"
         ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
         ~wrap:(fun result -> Presets_listed (Preset_to_chat target, result))
   | Masc_tui_command.Preset_save_missing_name ->
@@ -10173,7 +10190,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (* [/preset] alone lists names and counts; a count cannot be read, so
          this asks the server what that one preset actually holds. *)
       Masc_tui_message_input.clear state.msg_input;
-      launch_preset_call state ~mailbox
+      launch_chat_command_read state ~mailbox ~label:"/preset show"
         ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
         ~wrap:(fun result -> Preset_contents_shown (Preset_to_chat target, result))
   | Masc_tui_command.Preset_restore name ->
@@ -10196,7 +10213,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       notice ~kind:Notice_failure reason
   | Masc_tui_command.Play_invites ->
       Masc_tui_message_input.clear state.msg_input;
-      launch_preset_call state ~mailbox
+      launch_chat_command_read state ~mailbox ~label:"/play invites"
         ~call:Masc_tui_http.list_play_invites
         ~wrap:(fun result ->
           Play_invites_listed (target, Result.bind result Tui_decode.decode_play_invites))
@@ -11149,6 +11166,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.lane_nested_read_resume <- None;
   state.sent_image_read <- None;
   state.msg_copy_pending <- None;
+  state.chat_command_reads <- [];
   state.play_invite_inflight <- false;
   reset_verification_rows state;
   state.verification <- None;
@@ -11614,6 +11632,7 @@ let apply_server_identity_reading state reading =
     settle_retired_sent_image state;
     settle_retired_chat_copy state;
     settle_retired_queue_inspections state;
+    settle_retired_chat_command_reads state;
     (match !msx_pending_poll with
      | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
      | Poll_ready _ | Poll_pending _ -> ())
@@ -12501,6 +12520,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
   settle_retired_sent_image state;
   settle_retired_chat_copy state;
   settle_retired_queue_inspections state;
+  settle_retired_chat_command_reads state;
   resume_task_followups state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup;
   let workspace_moved = before.read_workspace <> state.workspace_authority in
@@ -14512,6 +14532,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Keeper_chat_done (_, _, _, acknowledge) ->
           ignore (Eio.Promise.try_resolve acknowledge ())
         | _ -> ())
+  | Chat_command_read_completed (ticket, message) ->
+      if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
+        state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
+        apply_async_message state ~base_path ~http_refresh_inflight
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
+      end
   | Workspace_operation message ->
       apply_async_message state ~base_path ~http_refresh_inflight
         ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message

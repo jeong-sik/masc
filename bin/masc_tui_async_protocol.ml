@@ -120,6 +120,7 @@ type resume_confirmation =
 type async_msg =
   | Workspace_scoped of workspace_authority * unit ref option * async_msg
   | Workspace_operation of async_msg
+  | Chat_command_read_completed of unit ref * async_msg
   | Workspace_identity_unconfirmed of
       { detail : string
       ; latest : (Masc.Tui_decode.server_identity, string) result
@@ -625,7 +626,8 @@ let account_login_action_is_read = function
   | Cancel | Prepare _ | Save _ | Close | Nothing | Remove _ -> false
 
 let rec workspace_message_is_read = function
-  | Workspace_scoped (_, _, message) -> workspace_message_is_read message
+  | Workspace_scoped (_, _, message)
+  | Chat_command_read_completed (_, message) -> workspace_message_is_read message
   | Workspace_operation _ -> false
   | Keeper_queue_loaded (_, _, action, _) ->
     (match action with Masc_tui_queue_inspection.Inspect -> true

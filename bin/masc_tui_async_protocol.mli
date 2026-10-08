@@ -120,6 +120,7 @@ type resume_confirmation =
 type async_msg =
   | Workspace_scoped of workspace_authority * unit ref option * async_msg
   | Workspace_operation of async_msg
+  | Chat_command_read_completed of unit ref * async_msg
   | Workspace_identity_unconfirmed of
       { detail : string
       ; latest : (Masc.Tui_decode.server_identity, string) result

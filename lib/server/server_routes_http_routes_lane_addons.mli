@@ -60,3 +60,12 @@ val package_preview_payload : Mcp_server.server_state -> (string * string) list 
     captures and validates workspace config in the same request. Returned pixels
     are current at this read and may reflect effects later than that receipt. *)
 val msx_live : Machine_lane.t -> since:since option -> unit -> Yojson.Safe.t
+
+val live_workspace_precondition :
+  config:Workspace.config -> (string * string) list ->
+  ((string * string) list, [ `Bad_request | `Conflict ] * string) result
+(** The optional [expected_base_path] and [expected_masc_root] pair of a live
+    read. Absent, the fields are returned unchanged. Present and equal to this
+    workspace, they are removed. A different workspace is a [`Conflict] and a
+    lone or malformed one a [`Bad_request]; the read is not served in either
+    case. *)

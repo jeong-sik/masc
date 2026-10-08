@@ -8489,25 +8489,17 @@ let observe_msx_frame ?(clear_notice = false) ?expected_workspace
     ?(current = fun () -> true) (state : Masc_tui_types.state) =
   if Option.is_some (checkpoint_for_workspace state) then () else
   let captured_view = !msx_poll_view in
-  let read () =
+  (* The read that follows a change the server admitted for [expected_workspace]
+     carries that workspace, and the server that answers it compares it with
+     its own. A server swapped in at any point, including A -> B -> A, answers
+     409 and its picture never reaches this view. *)
+  let result =
     (* The decoder has checked that MSX has no activity feed. Only its
        picture answer is needed by the MSX view. *)
     Result.map fst
-      (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-         Masc.Machine_lane.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
-  in
-  (* The read that follows a change the server admitted for [expected_workspace]
-     is applied only when the port named that workspace before and after it, so
-     a server swapped in between never draws its picture into this view. *)
-  let result =
-    match expected_workspace with
-    | None -> read ()
-    | Some expected ->
-        let ( let* ) = Result.bind in
-        let* () = probe_expected_workspace ~host:server_peer_host ~port:state.port expected in
-        let picture = read () in
-        let* () = probe_expected_workspace ~host:server_peer_host ~port:state.port expected in
-        picture
+      (Masc_tui_http.fetch_machine_live ?expected_workspace ~host:server_peer_host
+         ~port:state.port Masc.Machine_lane.Msx
+         ~since:(Masc_tui_machine_live.since state.msx_live))
   in
   if current () && captured_view == !msx_poll_view
      && Option.is_none (checkpoint_for_workspace state) then begin

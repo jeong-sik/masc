@@ -12028,13 +12028,13 @@ let preset_detail_lines (state : state) ~cols ~selected =
        if String.equal line "" then [""]
        else Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2)) line)
 
-let preset_pane_heights (state : state) ~rows ~count =
+let preset_pane_heights (state : state) ~rows ~count ~presets_count =
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
   let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
   (* Top, title, divider, list/detail divider, bottom, and footer. The error
      is outside the selection list, so a retained list keeps its full slot. *)
   let combined_height = max 2 (rows - 6 - error_rows - entry_rows) in
-  let list_height = min 8 (max 1 (combined_height / 3)) in
+  let list_height = min (max 1 presets_count) (min 8 (max 1 (combined_height / 3))) in
   let detail_rows = max 1 (combined_height - list_height) in
   let detail_height = Masc_tui_scroll.content_height ~rows:detail_rows ~chrome:0
       ~count ~preview_keep:None ~overflow_takes_row:true
@@ -12049,7 +12049,8 @@ let presets_viewport (state : state) =
   let selected = List.nth_opt presets cursor in
   let count = List.length (preset_detail_lines state ~cols ~selected) in
   let _, height = preset_pane_heights state
-      ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows) ~count in
+      ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows) ~count
+      ~presets_count:(List.length presets) in
   count, height
 
 let render_presets (state : state) =
@@ -12079,7 +12080,7 @@ let render_presets (state : state) =
   box_divider buf cols;
   let detail = preset_detail_lines state ~cols ~selected in
   let count = List.length detail in
-  let list_height, detail_height = preset_pane_heights state ~rows ~count in
+  let list_height, detail_height = preset_pane_heights state ~rows ~count ~presets_count:total in
   let preset_rows = list_height in
   let first = if cursor < preset_rows then 0 else cursor - preset_rows + 1 in
   (match state.presets_error with

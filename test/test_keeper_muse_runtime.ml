@@ -432,9 +432,8 @@ let user_message text : Agent_core.Types.message =
 ;;
 
 (* MSP has no system-prompt channel: a start carries the system prompt, the
-   history and the goal in one prompt, in that order, and never measures
-   more than the window charged for it. *)
-let test_start_prompt_frames_and_fits_its_charge () =
+   history and the goal in one prompt, in that order. *)
+let test_start_prompt_frames_system_history_and_goal () =
   let system_prompt = "MUSE_SYSTEM_PROMPT" in
   let goal = "MUSE_GOAL" in
   let history = [ user_message "history-one"; user_message "history-two" ] in
@@ -450,15 +449,7 @@ let test_start_prompt_frames_and_fits_its_charge () =
      | [ Some system; Some first; Some second; Some goal_at ] ->
        check bool "system, history, goal in order" true
          (system < first && first < second && second < goal_at)
-     | _ -> fail "a section is missing from the start prompt");
-    let charged =
-      Adapter.reserved_prompt_bytes ~system_prompt ~goal
-      + List.fold_left
-          (fun total message -> total + Adapter.measure_model_input_message_bytes message)
-          0
-          history
-    in
-    check bool "the prompt fits what the window charged" true (String.length prompt <= charged)
+     | _ -> fail "a section is missing from the start prompt")
 ;;
 
 (* ── One turn through a scripted [muse serve] ────────────────────────── *)
@@ -881,8 +872,6 @@ let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) 
   let outcome =
     Keeper_muse_runtime.run
       ?composed_context
-      ~prompt_capacity:
-        (Runtime_muse_prompt_capacity.start_prompt_bytes ~max_context:(Some 200_000))
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
       ~turn_timeout_s:(Runtime_inference.resolve_turn_timeout_s ~runtime_id)
       ~quota_scope:(Runtime_quota_window.scope_of_muse_home selected_home)
@@ -2579,8 +2568,8 @@ let () =
             test_documented_refusal_exits_are_not_dropped_connections
         ] )
     ; ( "prompt"
-      , [ test_case "start prompt frames and fits its charge" `Quick
-            test_start_prompt_frames_and_fits_its_charge
+      , [ test_case "start prompt frames system, history and goal" `Quick
+            test_start_prompt_frames_system_history_and_goal
         ] )
     ; ( "scripted host"
       , [ test_case "start and resume through muse serve with a MASC tool" `Quick

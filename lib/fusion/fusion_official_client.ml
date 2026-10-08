@@ -469,19 +469,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
-    let* () =
-      match Runtime_instance.muse_prompt_capacity runtime with
-      | Error error ->
-        Error (Muse_failure (Runtime_muse_serve.Invalid_config
-          ("Muse Code has no prompt ceiling: "
-           ^ Runtime_muse_prompt_capacity.error_to_string error)))
-      | Ok capacity_bytes when String.length prompt > capacity_bytes ->
-        Error (Muse_failure (Runtime_muse_serve.Invalid_config
-          (Printf.sprintf
-            "Muse Code framed input is %d bytes, exceeding the prompt ceiling %d"
-            (String.length prompt) capacity_bytes)))
-      | Ok _ -> Ok ()
-    in
     Eio.Switch.run
     @@ fun sw ->
     (* Enter the cancellation scope before acquiring the directory, then

@@ -430,6 +430,135 @@ let test_private_jsonl_slice_rejects_incomplete_tail () =
   | _ -> fail "incomplete JSONL tail was not rejected"
 ;;
 
+let read_private_tail path ~max_bytes =
+  match Fs_compat.read_private_jsonl_tail_locked_result path ~max_bytes with
+  | Fs_compat.Private_file_succeeded value -> value
+  | Fs_compat.Private_file_failed error ->
+    fail (Fs_compat.Private_jsonl_tail.error_to_string error)
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+  | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+    fail "unexpected tail descriptor settlement failure"
+;;
+
+let test_private_jsonl_tail_keeps_only_complete_bounded_rows () =
+  let row1 = "{\"row\":1}\n" in
+  let row2 = "{\"row\":2}\n" in
+  let row3 = "{\"row\":3}\n" in
+  let check_tail ~contents ~max_bytes ~expected ~omitted ~incomplete =
+    with_temp_jsonl contents @@ fun path ->
+    match read_private_tail path ~max_bytes with
+    | Fs_compat.Private_jsonl_tail.Tail_missing -> fail "present tail read as missing"
+    | Fs_compat.Private_jsonl_tail.Tail_present
+        { rows; prefix_omitted; incomplete_tail; end_offset } ->
+      check string "complete rows within window" expected rows;
+      check bool "older prefix omitted" omitted prefix_omitted;
+      check bool "incomplete suffix exposed" incomplete incomplete_tail;
+      check int "locked file length" (String.length contents) end_offset
+  in
+  check_tail ~contents:(row1 ^ row2 ^ row3) ~max_bytes:(String.length row3)
+    ~expected:row3 ~omitted:true ~incomplete:false;
+  check_tail ~contents:(row1 ^ row2 ^ row3) ~max_bytes:(String.length row3 + 3)
+    ~expected:row3 ~omitted:true ~incomplete:false;
+  check_tail ~contents:(row1 ^ row2 ^ "fragment") ~max_bytes:100
+    ~expected:(row1 ^ row2) ~omitted:false ~incomplete:true;
+  check_tail ~contents:(String.make 100000 'x' ^ "\n") ~max_bytes:32
+    ~expected:"" ~omitted:true ~incomplete:false;
+  check_tail ~contents:(row1 ^ String.make 100000 'x') ~max_bytes:32
+    ~expected:"" ~omitted:true ~incomplete:true;
+  check_tail ~contents:"" ~max_bytes:1
+    ~expected:"" ~omitted:false ~incomplete:false
+;;
+
+let test_private_jsonl_tail_missing_invalid_and_nonregular () =
+  let path = Filename.temp_file "masc_private_jsonl_tail_missing_" ".jsonl" in
+  Sys.remove path;
+  check bool "missing tail is distinct" true
+    (read_private_tail path ~max_bytes:32 = Fs_compat.Private_jsonl_tail.Tail_missing);
+  List.iter (fun max_bytes ->
+    match Fs_compat.read_private_jsonl_tail_locked_result path ~max_bytes with
+    | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_tail.Invalid_max_bytes value) ->
+      check int "invalid limit retained" max_bytes value
+    | _ -> fail "nonpositive limit must be a typed failure") [0; -1];
+  Unix.mkfifo path 0o600;
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    match Fs_compat.read_private_jsonl_tail_locked_result path ~max_bytes:32 with
+    | Fs_compat.Private_file_failed
+        (Fs_compat.Private_jsonl_tail.Read_error (Fs_compat.Private_jsonl_rows.Non_regular_file Unix.S_FIFO)) -> ()
+    | _ -> fail "FIFO must be rejected before locking or reading")
+;;
+
+let test_private_jsonl_tail_waits_for_writer_rollback () =
+  let committed = "{\"committed\":true}\n" in
+  with_temp_jsonl committed @@ fun path ->
+  let ready_read, ready_write = Unix.pipe ~cloexec:true () in
+  let release_read, release_write = Unix.pipe ~cloexec:true () in
+  let signal fd = ignore (Unix.write_substring fd "x" 0 1 : int) in
+  let receive fd =
+    let byte = Bytes.create 1 in
+    if Unix.read fd byte 0 1 <> 1 then fail "child closed before its signal"
+  in
+  let writer = match Unix.fork () with
+    | 0 ->
+      Unix.close ready_read;
+      Unix.close release_write;
+      (try
+         let fd = Unix.openfile path [Unix.O_RDWR; Unix.O_CLOEXEC] 0 in
+         Unix.lockf fd Unix.F_LOCK 0;
+         ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+         let pending = "{\"committed\":false}\n" in
+         ignore (Unix.write_substring fd pending 0 (String.length pending) : int);
+         signal ready_write;
+         receive release_read;
+         Unix.ftruncate fd (String.length committed);
+         Unix.fsync fd;
+         Unix.close fd;
+         Unix._exit 0
+       with _ -> Unix._exit 2)
+    | pid -> pid
+  in
+  Unix.close ready_write;
+  Unix.close release_read;
+  receive ready_read;
+  Unix.close ready_read;
+  let started_read, started_write = Unix.pipe ~cloexec:true () in
+  let result_read, result_write = Unix.pipe ~cloexec:true () in
+  let reader = match Unix.fork () with
+    | 0 ->
+      Unix.close release_write;
+      Unix.close started_read;
+      Unix.close result_read;
+      (try
+         signal started_write;
+         let observed = read_private_tail path ~max_bytes:1024 in
+         (match observed with
+          | Fs_compat.Private_jsonl_tail.Tail_present { rows; incomplete_tail = false; _ }
+            when String.equal rows committed -> signal result_write
+          | _ -> Unix._exit 3);
+         Unix._exit 0
+       with _ -> Unix._exit 2)
+    | pid -> pid
+  in
+  Unix.close started_write;
+  Unix.close result_write;
+  let released = ref false in
+  let release () = if not !released then (released := true; signal release_write) in
+  Fun.protect ~finally:(fun () ->
+    release ();
+    Unix.close release_write;
+    Unix.close started_read;
+    Unix.close result_read;
+    List.iter (fun pid -> match Unix.waitpid [] pid with
+      | _, Unix.WEXITED 0 -> ()
+      | _ -> fail "JSONL lock fixture child failed") [writer; reader]) (fun () ->
+    receive started_read;
+    (* A short observation interval checks exclusion while the writer holds
+       its lock; it is not a runtime deadline or a completion criterion. *)
+    let ready, _, _ = Unix.select [result_read] [] [] 0.05 in
+    check int "reader cannot expose a newline before writer settlement" 0 (List.length ready);
+    release ();
+    receive result_read)
+;;
+
 (* A crash between an append's write and its rollback leaves a last row with
    no newline. The next plain append cuts it back to the last complete row and
    writes from there; the rows before it stay as they were. *)
@@ -453,6 +582,25 @@ let test_private_jsonl_append_cuts_incomplete_tail () =
      | Fs_compat.Private_file_succeeded_with_cleanup_failure _
      | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
        fail "unexpected descriptor settlement failure");
+    check string
+      (Printf.sprintf "%S is cut and the complete rows kept" fragment)
+      (complete ^ suffix)
+      (Fs_compat.load_file path)
+  in
+  cut_then_append ~complete:"{\"row\":1}\n" ~fragment:"{\"row\":2";
+  cut_then_append ~complete:"" ~fragment:"{\"row\":1}"
+;;
+
+(* A journal observation row carries no receipt and is written through the
+   stable append. After a crash left a torn last row, that append cuts the
+   fragment and writes, the same as the plain append above. *)
+let test_private_jsonl_stable_append_cuts_incomplete_tail () =
+  let suffix = "{\"row\":3}\n" in
+  let cut_then_append ~complete ~fragment =
+    with_temp_jsonl (complete ^ fragment) @@ fun path ->
+    (match Fs_compat.append_private_jsonl_durable_stable_result path suffix with
+     | Ok _ -> ()
+     | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
     check string
       (Printf.sprintf "%S is cut and the complete rows kept" fragment)
       (complete ^ suffix)
@@ -1240,6 +1388,18 @@ let () =
             `Quick
             test_private_jsonl_rows_reads_complete_rows_and_reports_torn_tail
         ; test_case
+            "private JSONL tail returns bounded complete rows with omission"
+            `Quick
+            test_private_jsonl_tail_keeps_only_complete_bounded_rows
+        ; test_case
+            "private JSONL tail distinguishes invalid, missing, and nonregular stores"
+            `Quick
+            test_private_jsonl_tail_missing_invalid_and_nonregular
+        ; test_case
+            "private JSONL tail waits for an in-flight writer to roll back"
+            `Quick
+            test_private_jsonl_tail_waits_for_writer_rollback
+        ; test_case
             "private JSONL append cuts incomplete tail"
             `Quick
             test_private_jsonl_append_cuts_incomplete_tail
@@ -1247,6 +1407,10 @@ let () =
             "private JSONL offset append refuses incomplete tail"
             `Quick
             test_private_jsonl_append_at_end_offset_refuses_incomplete_tail
+        ; test_case
+            "private JSONL stable append cuts incomplete tail"
+            `Quick
+            test_private_jsonl_stable_append_cuts_incomplete_tail
         ; test_case
             "private JSONL append rejects incomplete suffix"
             `Quick

@@ -45,6 +45,12 @@ let generic_provider_rejection =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rejected-1","result":"API Error: Sonnet safeguards flagged this message","api_error_status":null}|}
 ;;
 
+let access_rejection status =
+  Printf.sprintf
+    {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-access-rejected","result":"Your organization has disabled Claude subscription access for Claude Code","api_error_status":%d,"terminal_reason":"api_error"}|}
+    status
+;;
+
 let prompt_too_long_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400,"terminal_reason":"prompt_too_long"}|}
 ;;
@@ -336,7 +342,7 @@ let content_of_wire_message raw =
    newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
-let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
+let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report
@@ -371,7 +377,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                     let run () =
                       Result.map
                         (fun selected -> selected.Keeper_turn_driver.run_result)
-                        (Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                        (Keeper_turn_driver.run_named ?accept ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                            ~runtime_id:"claude.claude"
                            ~keeper_name:"claude-fixture"
                            ~base_path
@@ -2476,6 +2482,55 @@ let test_quota_enters_typed_recovery () =
          | _ -> fail "quota rejection did not require explicit recovery"))
 ;;
 
+let test_access_refusal_uses_status_and_keeps_pre_effect_rotation () =
+  List.iter (fun status ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture [ Emit (access_rejection status) ] (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"REVIEW_ACCESS" () with
+        | Ok _ -> fail "provider access rejection completed the turn"
+        | Error error ->
+          let route = Keeper_runtime_failure_route.route_of_error
+              ~boundary:Keeper_runtime_failure_route.Agent_core_execution error in
+          let expected = match status with
+            | 401 -> Keeper_runtime_failure_route.Auth_failed
+            | 403 -> Keeper_runtime_failure_route.Authorization_refused
+            | _ -> Keeper_runtime_failure_route.Provider_reported_failure in
+          check bool "numeric status selects the existing typed route" true
+            (route = Keeper_runtime_failure_route.Rotate_now { rotate = expected });
+          check bool "access rejection does not resume the same failed path" false
+            (Keeper_runtime_failure_route.route_resumes_on_same_path route);
+          if status = 403 then
+            check bool "receipt retains authorization refusal" true
+              (match Keeper_agent_error.terminal_reason_code_of_core_error error
+                 |> Keeper_terminal_reason.of_wire with
+               | Keeper_terminal_reason.Authorization_refused _ -> true
+               | _ -> false);
+          (match (load_state base_path).phase with
+           | Recovery_required { failure = Provider_rejected; _ } -> ()
+           | _ -> fail "account refusal lost the durable provider rejection"))))
+    [401; 403; 400]
+;;
+
+let test_access_refusal_after_native_tool_remains_fenced () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [ Emit (native_tool_call_block ~turn_id:"native-access"
+          ~call_id:"native-access-call" ~tool_name:"Write")
+      ; Emit (native_tool_result ~call_id:"native-access-call" ~content:"written")
+      ; Emit (access_rejection 403)
+      ] (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"TOOL_THEN_ACCESS_REFUSAL" () with
+        | Error error ->
+          (match Keeper_internal_error.classify_masc_internal_error error with
+           | Some (Keeper_internal_error.Provider_attempt_effect_fenced { effect_disposition; _ }) ->
+             check bool "account refusal cannot bypass an observed effect" false
+               (Keeper_provider_attempt_effect.allows_same_turn_retry effect_disposition)
+           | _ -> fail (Agent_core.Error.to_string error))
+        | Ok _ -> fail "post-effect access rejection completed the turn"))
+;;
+
 let test_quota_after_tool_effect_remains_fenced () =
   let base_path = temp_workspace () in
   let call_count = ref 0 in
@@ -3687,6 +3742,32 @@ let test_a_working_state_that_displaces_nothing_goes () =
       (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
+let test_quiet_result_preserves_claude_output_presence () =
+  let absent = {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"quiet"}|} in
+  let null_result = {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"quiet","result":null}|} in
+  List.iter (fun (label, final, policy, quiet) ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture [Emit (assistant ~turn_id:"quiet" ""); Emit final] (fun cli_path ->
+        match run_keeper_turn ~accept:(Keeper_tooling.Response.accepts_response ~policy)
+            ~base_path ~cli_path ~goal:"Continue useful work or finish quietly if nothing changed." () with
+        | Error _ when not quiet -> ()
+        | Error error -> failf "%s: %s" label (Agent_core.Error.to_string error)
+        | Ok _ when not quiet -> failf "%s was incorrectly accepted as quiet" label
+        | Ok run_result ->
+          match Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+              ~response_policy:policy ~runtime_id:"claude.claude" ~initial_messages:[]
+              ~run_result ~text:"" ~tool_names:[] () with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok text -> check string label "" text)))
+    [ "explicit", result ~turn_id:"quiet" "", Keeper_tooling.Response.Allow_quiet_final, true
+    ; "absent", absent, Allow_quiet_final, false
+    ; "null", null_result, Allow_quiet_final, false
+    ; "direct", result ~turn_id:"quiet" "", Require_progress, false
+    ; "failure", generic_provider_rejection, Allow_quiet_final, false
+    ]
+;;
+
 let () =
   (* Pin the prompt directory explicitly. Under dune the registry falls back to
      [DUNE_SOURCEROOT], but a test executable run directly has neither that
@@ -3697,7 +3778,9 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    [ ( "quiet completion", [test_case "explicit result survives adapter and caller acceptance" `Quick
+        test_quiet_result_preserves_claude_output_presence] )
+    ; ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick
             test_result_only_usage_keeps_client_turn_scope
@@ -3786,6 +3869,10 @@ let () =
             `Quick
             test_pre_effect_provider_rejection_keeps_failover_open
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
+        ; test_case "access refusal preserves structured status and rotation" `Quick
+            test_access_refusal_uses_status_and_keeps_pre_effect_rotation
+        ; test_case "access refusal after native tool remains fenced" `Quick
+            test_access_refusal_after_native_tool_remains_fenced
         ; test_case "quota after tool effect remains fenced" `Quick
             test_quota_after_tool_effect_remains_fenced
         ; test_case "quota after native tool remains fenced" `Quick

@@ -4,8 +4,9 @@
     stopped picking. Codex, HTTP and Antigravity reads record provider reports
     in [Runtime_provider_usage_window] for the operator projection. Routing
     and admission do not read that observation table. An HTTP account read
-    after a 403 ({!read_after_account_refusal}) can also rest a
-    spent scope on {!Runtime_quota_window}. A Muse [usage/read] records the
+    after a 403, or after a 429 that states no wait
+    ({!read_after_account_refusal}), can also rest a spent scope on
+    {!Runtime_quota_window}. A Muse [usage/read] records the
     account's rolling and weekly windows in [Runtime_provider_usage_window]
     ({!Runtime_muse_usage.observe}), and a provider-stated exhausted window
     with a future reset also rests [scope] on {!Runtime_quota_window}.
@@ -175,7 +176,8 @@ module For_testing : sig
 end
 
 (** What a usage read said after the provider refused the account: an HTTP
-    403 ({!read_after_account_refusal}). Only windows whose role is
+    403, or an HTTP 429 that states no wait ({!read_after_account_refusal}).
+    Only windows whose role is
     {!Runtime_provider_usage_window.Gates_model_calls} count. *)
 type account_refusal_read =
   | Spent_until of float
@@ -190,7 +192,8 @@ type account_refusal_read =
   | No_window_spent
       (** Every gating window has headroom, and the read rests nothing.
           After a 403 the refusal is not a spent quota (a blocked client, a
-          suspended account). *)
+          suspended account); after a 429 it is a throttle, which the walk
+          rests on the throttle floor. *)
 
 val account_refusal_read_of_report :
   Runtime_provider_usage_window.report -> account_refusal_read

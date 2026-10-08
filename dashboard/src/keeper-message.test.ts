@@ -1,67 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
-  formatKeeperVisibleReply,
   keeperTurnOutcomeSuppressesReply,
   normalizeKeeperConversationDetails,
   normalizeKeeperExternalEffectTarget,
   normalizeKeeperToolResponse,
 } from './keeper-message'
-
-// ================================================================
-// formatKeeperVisibleReply
-// ================================================================
-
-describe('formatKeeperVisibleReply', () => {
-  it('returns trimmed text without SKILL lines', () => {
-    const input = `Hello
-SKILL some-skill
-World`
-    expect(formatKeeperVisibleReply(input)).toBe('Hello\nWorld')
-  })
-
-  it('removes SKILL lines', () => {
-    const input = `Line1
-SKILL route-to-keeper
-Line2`
-    expect(formatKeeperVisibleReply(input)).toBe('Line1\nLine2')
-  })
-
-  it('removes SKILL lines with leading whitespace', () => {
-    const input = `Line1
-  SKILL indented
-Line2`
-    expect(formatKeeperVisibleReply(input)).toBe('Line1\nLine2')
-  })
-
-  it('collapses 3+ newlines to 2', () => {
-    expect(formatKeeperVisibleReply('a\n\n\nb')).toBe('a\n\nb')
-  })
-
-  it('collapses many newlines to 2', () => {
-    expect(formatKeeperVisibleReply('a\n\n\n\n\nb')).toBe('a\n\nb')
-  })
-
-  it('preserves single newline', () => {
-    expect(formatKeeperVisibleReply('a\nb')).toBe('a\nb')
-  })
-
-  it('preserves double newline', () => {
-    expect(formatKeeperVisibleReply('a\n\nb')).toBe('a\n\nb')
-  })
-
-  it('trims leading and trailing whitespace', () => {
-    expect(formatKeeperVisibleReply('  hello  ')).toBe('hello')
-  })
-
-  it('handles empty string', () => {
-    expect(formatKeeperVisibleReply('')).toBe('')
-  })
-
-  it('handles whitespace-only string', () => {
-    expect(formatKeeperVisibleReply('   \n\n   ')).toBe('')
-  })
-
-})
 
 // ================================================================
 // normalizeKeeperConversationDetails
@@ -246,6 +189,13 @@ describe('keeperTurnOutcomeSuppressesReply', () => {
 // ================================================================
 
 describe('normalizeKeeperToolResponse', () => {
+  it('preserves authored lines and whitespace in plain and JSON replies', () => {
+    const reply = '    들여쓰기\nSKILL.md is a file\n\n\n끝  \n\n'
+    expect(normalizeKeeperToolResponse(reply).text).toBe(reply)
+    expect(normalizeKeeperToolResponse(JSON.stringify({ reply })).text).toBe(reply)
+    expect(normalizeKeeperConversationDetails({ reply })?.replyText).toBe(reply)
+    expect(normalizeKeeperConversationDetails({ raw_payload: { reply } })?.replyText).toBe(reply)
+  })
   it('parses valid JSON payload', () => {
     const raw = JSON.stringify({
       reply: 'Hello World',
@@ -265,7 +215,7 @@ describe('normalizeKeeperToolResponse', () => {
 
   it('handles plain text with leading whitespace', () => {
     const result = normalizeKeeperToolResponse('  Hello World  ')
-    expect(result.text).toBe('Hello World')
+    expect(result.text).toBe('  Hello World  ')
     expect(result.details).toBeNull()
   })
 
@@ -275,19 +225,18 @@ describe('normalizeKeeperToolResponse', () => {
     expect(result.details).toBeNull()
   })
 
-  it('strips SKILL lines from JSON reply', () => {
+  it('preserves SKILL-prefixed lines from JSON reply', () => {
     const raw = JSON.stringify({
       reply: 'Line1\nSKILL route\nLine2',
     })
     const result = normalizeKeeperToolResponse(raw)
-    expect(result.text).toBe('Line1\nLine2')
+    expect(result.text).toBe('Line1\nSKILL route\nLine2')
   })
 
   it('returns raw text when JSON has no reply field', () => {
     const raw = JSON.stringify({ other: 'value' })
     const result = normalizeKeeperToolResponse(raw)
-    // When payload is a record but has no reply, asString returns undefined,
-    // falls back to trimmed original string
+    // Missing reply falls back to the original payload string.
     expect(result.text).toBe(raw)
   })
 
@@ -334,16 +283,16 @@ describe('normalizeKeeperToolResponse', () => {
 
   it('handles whitespace-only input', () => {
     const result = normalizeKeeperToolResponse('   ')
-    expect(result.text).toBe('')
+    expect(result.text).toBe('   ')
     expect(result.details).toBeNull()
   })
 
-  it('collapses multiple newlines in reply', () => {
+  it('preserves multiple newlines in reply', () => {
     const raw = JSON.stringify({
       reply: 'A\n\n\n\nB',
     })
     const result = normalizeKeeperToolResponse(raw)
-    expect(result.text).toBe('A\n\nB')
+    expect(result.text).toBe('A\n\n\n\nB')
   })
 })
 

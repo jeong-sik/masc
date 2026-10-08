@@ -1,23 +1,16 @@
 (** Keeper_agent_core_execution_error_phase — closed sum for the [phase] label on
-    two keeper-side metrics:
+    [metric_keeper_agent_core_execution_errors].
 
-    - [metric_keeper_agent_core_execution_errors] (8 phases from
-      [keeper_unified_turn], [keeper_turn_runtime_budget],
-      [keeper_post_turn])
-    - [metric_keeper_write_meta_failures] ([turn_start])
-
-    Replaces hardcoded string literals scattered across 3 files.
-    The compiler enforces exhaustive coverage in [to_label] (a missing
-    constructor is a compile error there) so adding a new phase
-    requires a single edit here and the new wire string surfaces
-    immediately. *)
+    Each phase has one producer: [keeper_unified_turn] ([Cycle_failed]),
+    [keeper_unified_turn_execution] ([Provider_context_overflow]) and
+    [keeper_unified_turn_terminal_error] ([Runtime_exhausted],
+    [Terminal_non_exhaustion]). [to_label] is exhaustive, so a new phase
+    is a single edit here. *)
 
 type t =
-  | Turn_start
   | Runtime_exhausted
   | Terminal_non_exhaustion
   | Cycle_failed
-  | Persistent_escalation
   | Provider_context_overflow
 
 val to_label : t -> string

@@ -67,25 +67,18 @@ let result_after_activity_projection
            operation
            detail)
 
+(* The post handler returns the created post as its typed data
+   ([Board.post_to_yojson]); its id is read from there, not parsed back out of
+   the message text written for the client. *)
+let created_post_id result =
+  Option.map
+    (fun (post : Board.post) -> Board.Post_id.to_string post.id)
+    (Board.post_of_yojson (Tool_result.data result))
+
 module For_testing = struct
   let result_after_activity_projection = result_after_activity_projection
+  let created_post_id = created_post_id
 end
-
-let extract_board_post_id (message : string) =
-  match String.index_opt message '{' with
-  | None -> None
-  | Some idx ->
-      try
-        let json =
-          Yojson.Safe.from_string
-            (String.sub message idx (String.length message - idx))
-        in
-        match Json_util.assoc_member_opt "id" json with
-        | Some (`String id) when not (String.equal (String.trim id) "") -> Some id
-        | _ -> None
-      with
-      | Invalid_argument _
-      | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 let json_upsert_assoc_field name value fields =
   (name, value) :: List.filter (fun (k, _) -> not (String.equal k name)) fields
@@ -273,7 +266,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         if Tool_result.is_success result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
-        let post_id = extract_board_post_id (Tool_result.message result_tr) in
+        let post_id = created_post_id result_tr in
+        if Option.is_none post_id then
+          Log.Misc.error "board_post succeeded but its result data is not a post";
         (* Record board activity as a fitness metric so board-active agents
            appear in agent_fitness queries (Issue #1861). *)
         (try
@@ -299,7 +294,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("author", `String author);
           ("author_identity", Server_utils.board_actor_identity_json author);
           ("content", `String (board_notification_content content));
-          ("post_id", `String (Option.value post_id ~default:"unknown"));
+          ("post_id", Json_util.string_opt_to_json post_id);
           ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;

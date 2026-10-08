@@ -1772,12 +1772,35 @@ let schedule_list_freshness (state : state) =
   | None -> Tui_decode.List_latest
   | Some _ -> Tui_decode.List_kept
 
+(* A refused create or modify form, wrapped to the frame, for as long as the
+   last-action window lasts; the action line alone is lost under a workspace
+   warning. *)
+let schedule_form_refusal_rows (state : state) ~cols =
+  match state.schedule_form_refusal with
+  | Some { sfr_action; sfr_detail; sfr_at; sfr_workspace = _ }
+    when Unix.gettimeofday () -. sfr_at <= Masc_tui_types.last_action_window_s ->
+      Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
+        (Terminal_text.single_line (sfr_action ^ ": " ^ sfr_detail))
+  | Some _ | None -> []
+
+(* Rows the Schedules page spends around its list, counted once so the
+   refusal budget and the list height read the same numbers: the request
+   count, next due and its divider; the column names and their rule; the two
+   delivery rows. *)
+let schedule_summary_rows = 3
+let schedule_column_header_rows = 2
+let schedule_delivery_rows = 2
+
+let schedule_rows_around_list =
+  schedule_summary_rows + schedule_column_header_rows + schedule_delivery_rows
+
 (** Render the Schedules surface: the scheduled-automation list, with an
     armed cancel. The server sorts active rows first by due time and caps the
     list at its own limit; [scs_truncated] and [scs_request_count] say what
     of the whole store this page is. *)
 let render_schedule_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let refusal_rows = schedule_form_refusal_rows state ~cols in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -1790,6 +1813,33 @@ let render_schedule_list (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
     ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Schedules)
     ~body:(fun ~budget c ->
+  (* The refusal rows go first and take what the list's fixed rows leave;
+     past that, the last row says where the rest is. The fixed rows are the
+     ones [content_height] subtracts below (next due and its divider, the
+     column names and their rule, the two delivery rows) plus one list row. *)
+  let selected_row_exists, reserved_rows =
+    match state.schedules with
+    | Some snapshot when String.equal snapshot.scs_status "ok" ->
+        let warning = if Option.is_some (schedule_source_warning state) then 1 else 0 in
+        let cancel = (if Option.is_some state.schedule_cancel_armed then 1 else 0)
+          + (if Option.is_some state.schedule_cancel_error then 1 else 0) in
+        let selected = Option.is_some (List.nth_opt snapshot.scs_rows state.schedule_cursor) in
+        selected, warning + cancel +
+          (if snapshot.scs_rows = [] then schedule_summary_rows
+           else schedule_rows_around_list + 1)
+    | Some _ | None -> false, 1
+  in
+  let room = max 0 (budget - reserved_rows) in
+  let refusal_rows =
+    if List.length refusal_rows <= room then refusal_rows
+    else if room = 0 then []
+    else
+      let cue = if selected_row_exists then "… Enter: full refusal diagnostic"
+        else "… refusal diagnostic truncated" in
+      List.filteri (fun index _ -> index < room - 1) refusal_rows
+      @ [Message_layout.fit_width cue (max 1 (framed_inner_width cols))]
+  in
+  List.iter (c.push_styled ~style:(Theme.bad ())) refusal_rows;
   (match state.schedules with
    | None ->
        (match schedule_source_warning state with
@@ -1896,12 +1946,11 @@ let render_schedule_list (state : state) =
            c.push_divider ();
            (* The column names and the rule under them, the two rows every
               other list on this screen already spends to say what it draws. *)
-           let header_rows = 2 in
            (* The body outside the list: the source warning, the request count,
               next due and its divider, the column names and their rule, the
               two delivery rows, and the cancel rows. *)
            let content_height =
-             max 1 (budget - warning_rows - 3 - header_rows - 2 - cancel_rows)
+             max 1 (budget - List.length refusal_rows - warning_rows - schedule_rows_around_list - cancel_rows)
            in
            let scroll_offset =
              if state.schedule_cursor >= content_height then
@@ -2327,6 +2376,9 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
   let wire text = String.concat "\n"
       (List.map Terminal_text.single_line (String.split_on_char '\n' text)) in
   let warnings =
+    (* A refused form's full diagnostic, which the list may have cut. *)
+    List.map (fun line -> Theme.bad (), line) (schedule_form_refusal_rows state ~cols)
+    @
     (* The latest action refusal is the row the result handler reveals.
        Source freshness still has its fixed summary outside this document. *)
     (match state.schedule_cancel_error with
@@ -9715,7 +9767,15 @@ let runtime_detail_lines state target ~width =
           Masc_tui_runtime_evidence.lines evidence ~runtime_id:runtime.ro_id
           |> List.concat_map (fun (label, value) ->
             runtime_detail_field ~width ~style:Ansi.reset label value) in
-      fields @ candidate @ evidence_lines @ usage_lines @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
+      let failed_attempt =
+        match runtime.ro_failed_attempt with
+        | None -> []
+        | Some attempt ->
+          runtime_detail_field ~width ~style:(Theme.warn ()) "Last failure"
+            (Terminal_text.single_line (runtime_failed_attempt_text attempt))
+      in
+      fields @ candidate @ evidence_lines @ usage_lines @ quota @ rate_limit @ failed_attempt
+      @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in

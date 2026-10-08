@@ -1466,6 +1466,51 @@ sandbox_image = "base"
         | None -> Alcotest.fail "prompt omitted system_prompt")
      | None -> Alcotest.fail "config snapshot omitted prompt")
 
+let test_config_snapshot_exposes_retrievable_recent_work () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  within_eio @@ fun () ->
+  let name = "recent-work-preview" in
+  write_file (Filename.concat keepers_dir (name ^ ".toml"))
+    "[keeper]\ninstructions = \"review fixture\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let session = Masc.Keeper_context_core.create_session ~session_id:trace_id
+      ~base_dir:(Masc.Keeper_fs.session_store_path config) in
+  let request = "Finish this review: " ^ String.make 2000 'x' in
+  Masc.Keeper_context_core_history.persist_message ~keeper_name:name
+    ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:1) ~source:"direct_user" session
+    {Agent_core.Types.role=User; content=[Text request]; name=None;tool_call_id=None;metadata=[]};
+  let work = Masc.Keeper_recent_work.collect ~config ~meta in
+  let expected = match Masc.Keeper_recent_work.preview ~base_path:base work with
+    | Preview text -> text
+    | Absent | Evidence _ | Unavailable _ -> Alcotest.fail "no inspectable preview" in
+  (* Real dashboard entrypoint, not a manually supplied prompt transmission. *)
+  let assembled = match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+    | `Not_found,_ -> Alcotest.fail "snapshot absent"
+    | `OK,json ->
+      let prompt = json_assoc_field "prompt" json |> json_assoc_field "system_prompt" in
+      (match json_string_field "assembled" prompt with
+       | Some text -> text
+       | None -> Alcotest.failf "assembled prompt absent: %s" (Yojson.Safe.to_string prompt)) in
+  Alcotest.(check bool) "snapshot exposes the retained excerpt reference" true
+    (String_util.contains_substring assembled expected);
+  (match Tool_output.decode_from_agent_core expected with
+   | Tool_output.Decoded reference ->
+     let result = Masc.Keeper_artifact_read.handle ~base_path:base
+         ~args:(`Assoc ["sha256",`String reference.sha256;"offset",`Int 0;
+                       "max_bytes",`Int Masc.Keeper_artifact_read.maximum_max_bytes]) in
+     let content = match result.disposition,result.data with
+       | Tool_result.Completed (),Some json -> Yojson.Safe.Util.(json |> member "content" |> to_string)
+       | _ -> Alcotest.fail "preview artifact is not retrievable" in
+     Alcotest.(check bool) "whole request can be inspected" true
+       (String_util.contains_substring content request)
+   | Tool_output.Not_marker | Invalid_marker _ -> Alcotest.fail "long preview was not externalized");
+  match Masc.Keeper_recent_work.transmit ~base_path:base ~tools:[] work with
+  | Unavailable _ -> ()
+  | Absent | Evidence _ | Preview _ -> Alcotest.fail "preview granted a model tool capability"
+;;
+
 (* #38354: a turn is refused when the constitution ledger cannot be read, so
    the snapshot states that reason as typed data and sends no prompt text. *)
 let test_config_snapshot_reports_an_unbuildable_system_prompt () =
@@ -1697,6 +1742,7 @@ let test_turn_profile_and_meta_applies_the_declared_profile () =
 ;;
 
 let () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   init_runtime_default_for_tests ();
   Alcotest.run "keeper_effective_meta_overlay"
     [
@@ -1776,6 +1822,8 @@ let () =
           Alcotest.test_case
             "config snapshot prompt is nested only"
             `Quick test_config_snapshot_prompt_is_nested_only;
+          Alcotest.test_case "config snapshot exposes retrievable recent work" `Quick
+            test_config_snapshot_exposes_retrievable_recent_work;
           Alcotest.test_case "config snapshot reports an unbuildable system prompt" `Quick
             test_config_snapshot_reports_an_unbuildable_system_prompt;
           Alcotest.test_case "invalid primary keeps config editable" `Quick

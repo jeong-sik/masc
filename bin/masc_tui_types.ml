@@ -367,19 +367,9 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
             meant knowing the two words were one axis. *)
          | Memory_hidden -> Some "journal:off"
          | Memory_full -> Some "journal:full")
-      ; (* The short clock is the resting layout. It was the bare gutter, on
-           the grounds that a clock on every row was noise -- and it was, back
-           when it drew on every row. It is now drawn only where the minute
-           moved, which over 531 captured rows left it blank on 45% of them,
-           and a gutter that spends seventeen cells without saying when
-           anything happened is the emptier column of the two.
-
-           So the header names the two projections away from it: the bare
-           gutter, because a pane with no clock at all should say that it is
-           the reader's choice, and the full row. *)
-        (match origin with
-         | Masc_tui_message_layout.Origin_bare -> Some "metadata:off"
-         | Masc_tui_message_layout.Origin_inline -> None
+      ; (match origin with
+         | Masc_tui_message_layout.Origin_bare -> None
+         | Masc_tui_message_layout.Origin_inline -> Some "metadata:inline"
          | Masc_tui_message_layout.Origin_row -> Some "metadata:full")
       ; (match reasoning with
          | Reasoning_folded -> None
@@ -400,11 +390,8 @@ let next_reasoning_visibility = function
   | Reasoning_full -> Reasoning_hidden
 ;;
 
-(* One key walks the whole axis, and the walk is unchanged: from the resting
-   short clock to the full timestamp and request id on a row of their own,
-   then to the bare gutter, then back. What moved is where it rests -- see
-   [chat_visibility_summary]. Every stop is still reachable, and the two ends
-   are still one press apart from each other. *)
+(* Start without clocks; Ctrl-F adds the short clock, then full headings,
+   then returns to the reading layout. *)
 let next_origin_display = function
   | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_inline
   | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_row
@@ -3060,14 +3047,29 @@ let autonomous_journal_candidates ~keeper_name rows =
    and no KEEPER_REPLY_DETAILS), whose ending the log cannot draw; and a log
    that never heard the end -- the request went without a live view (no Eio
    clock), or the stream was cut and nothing replayed it -- holds part of the
-   turn at most. In both the committed rows keep saying what the turn did. *)
+   turn at most. In both the committed rows keep saying what the turn did.
+   A log closed from the operation record alone is the second kind: it never
+   heard the end, so appends it missed may be absent, and a retained
+   continuation checkpoint is not the final reply. *)
 let turn_log_holds_the_turn turn_log =
   Masc_tui_keeper_chat_log.committed turn_log.tl_log
   &&
+  match Masc_tui_keeper_chat_transcript.ending_source turn_log.tl_transcript with
+  | Masc_tui_keeper_chat_transcript.Ending_read_from_record -> false
+  | Masc_tui_keeper_chat_transcript.Ending_heard_in_stream ->
   match Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
   | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
   | Masc_tui_keeper_chat_transcript.Stream_ended ->
-      Option.is_some
+      Option.exists (fun (reply : Masc_tui_keeper_chat_transcript.reply) ->
+        match reply.reply_outcome with
+        | Masc.Keeper_turn_outcome.Continuation_checkpoint ->
+            (* An autonomous journal owns one finished turn. A direct
+               operation can continue past this checkpoint, so its final
+               history must remain visible if that later journal is lost. *)
+            (match Masc_tui_keeper_chat_log.source turn_log.tl_log with
+             | Autonomous_turn _ -> true
+             | Operation _ -> false)
+        | Visible_reply | Terminal_effect_settled | Awaiting_gate_approval | No_visible_reply -> true)
         (Masc_tui_keeper_chat_transcript.reply turn_log.tl_transcript)
   | Masc_tui_keeper_chat_transcript.Waiting
   | Masc_tui_keeper_chat_transcript.Working ->
@@ -3532,7 +3534,7 @@ type palette_mode =
 module Browser_lane_view = struct
   type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
   type browser = Firefox | Zen
-  type client = { client_id : string; browser : browser }
+  type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport }
   type discovery = Read_after_discovery | Choose_client
   type tab = { id : int; title : string; url : string; active : bool }
   type page = {
@@ -3694,7 +3696,11 @@ module Browser_lane_view = struct
     | Stagehand_browser -> t.source = Stagehand
     | Automation_browser -> t.source = Automation
   let browser_choice_label = function
-    | Connected_browser client -> browser_name client.browser ^ " · existing login · " ^ client.client_id
+    | Connected_browser client ->
+        let transport = match client.transport with
+          | Browser_lane.Web_extension -> "WebExtension"
+          | Browser_lane.Webdriver_bidi -> "BiDi" in
+        browser_name client.browser ^ " · " ^ transport ^ " · existing login · " ^ client.client_id
     | Stagehand_browser -> "Stagehand Chromium · sentence actions · separate login"
     | Automation_browser -> "Independent Firefox/Zen · automation · separate login"
   let request_body t =
@@ -3791,8 +3797,10 @@ module Browser_lane_view = struct
     let* browser = get (function
       | `String "firefox" -> Ok Firefox | `String "zen" -> Ok Zen
       | _ -> Error "unknown native browser") "browser" json in
+    let* transport = get string "transport" json in
+    let* transport = Browser_lane.live_transport_of_string transport in
     if String.trim client_id = "" then Error "empty browser client ID"
-    else Ok { client_id; browser }
+    else Ok { client_id; browser; transport }
   let decode_clients json =
     let* ok = get boolean "ok" json in
     if not ok then let* detail = get string "error" json in Error detail
@@ -4909,6 +4917,17 @@ type preset_arm =
   | Restore_armed of string
   | Delete_armed of string
 
+(* A refused schedule create or modify form, kept on the Schedules surface for
+   the last-action window. [sfr_workspace] is the workspace the form was sent
+   to: a reading that only loses the identity, or reads that workspace again,
+   keeps the refusal; a reading of another workspace retires it. *)
+type schedule_form_refusal =
+  { sfr_action : string
+  ; sfr_detail : string
+  ; sfr_at : float
+  ; sfr_workspace : workspace_input_identity option
+  }
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5498,6 +5517,9 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
+  (* Roster row to return to when the Keeper message view closes. Kept by name
+     so an empty roster read, which clamps [keeper_cursor], does not lose it. *)
+  mutable keeper_message_return: string option;
   (* The first Keepers list row on screen, as the last frame drew it
      ([Keeper_list_scroll]). A cursor move to a row already on screen leaves
      the window where it is. *)
@@ -5766,6 +5788,9 @@ type state = {
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: (string * string) option;
+  (* The latest refused create/modify form, kept on the Schedules surface for
+     the last-action window. *)
+  mutable schedule_form_refusal: schedule_form_refusal option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
@@ -7041,6 +7066,33 @@ let journal_held_request_ids state keeper_name =
   @ state.msg_journal_inflight
 ;;
 
+(* A journal's permanent failure says nothing about the exact operation
+   endpoint. On a later history refresh, retained partial direct logs still
+   need that endpoint until it records an ending. Reuse the source read's
+   inflight exclusion; the operation-only read never advances a journal cursor.
+   Autonomous turns have no operation record, and pane-owned requests settle
+   through their own subscription. *)
+let unavailable_journal_operation_targets state keeper_name =
+  state.msg_settled_logs
+  |> List.filter_map (fun log ->
+      let request_id = turn_log_request_id log in
+      let journal_unavailable = state.msg_journal_reads_refused
+        || List.mem request_id state.msg_journal_unavailable in
+      let read_inflight = List.mem request_id state.msg_journal_inflight in
+      let owned = List.exists (fun (entry : inflight) ->
+        String.equal entry.sent_request.request_id request_id) state.msg_inflight in
+      let terminal = Option.exists Keeper_chat_operation.is_terminal
+        (Masc_tui_keeper_chat_log.operation_state log.tl_log) in
+      match Masc_tui_keeper_chat_log.source log.tl_log with
+      | Operation operation_id
+        when String.equal (turn_log_keeper_name log) keeper_name
+             && journal_unavailable && not read_inflight && not owned && not terminal
+             && not (turn_log_holds_the_turn log) ->
+          Some operation_id
+      | Operation _ | Autonomous_turn _ -> None)
+  |> List.sort_uniq String.compare
+;;
+
 (* A settled log takes its place among the others by when its turn started,
    so a turn rebuilt from its journal sits where a turn settled live would
    have. A request already held by a log that stands for its turn is not
@@ -7414,12 +7466,23 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
       List.iter
         (fun (row : msg_entry) ->
           if String.equal row.me_request_id request_id then
-            List.iter
-              (Masc_tui_keeper_chat_transcript.note_skill_activity
-                 turn_log.tl_transcript)
+            List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
+              let observed =
+                Option.is_some skill.turn_ref && Option.is_some skill.skill_tool_use_id
+                && List.exists (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+                  match item.drawn with
+                  | Drawn_skill skills -> List.exists
+                      (fun (shown : Masc_tui_keeper_chat_transcript.skill_activity) ->
+                        shown.turn_ref = skill.turn_ref
+                        && shown.skill_tool_use_id = skill.skill_tool_use_id) skills
+                  | Drawn_tools _ | Drawn_thinking _ | Drawn_text _ | Drawn_reply _
+                  | Drawn_status _ | Drawn_error _ -> false)
+                    (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+              if turn_log_holds_the_turn turn_log || observed then
+                Masc_tui_keeper_chat_transcript.note_skill_activity turn_log.tl_transcript skill)
               row.me_skill_block)
         rows)
-    (List.filter turn_log_holds_the_turn (settled_logs_for_keeper state keeper_name))
+    (selected_source_logs_for_keeper state keeper_name)
 ;;
 
 (* Settling a turn: its log is committed and, when it has anything to draw,
@@ -7435,6 +7498,18 @@ let settle_turn_log state (entry : inflight) =
     when String.equal (turn_log_request_id visible) (turn_log_request_id entry.log) ->
       state.msg_live <- None
   | Some _ | None -> ()
+;;
+
+(* Settle a log whose request the server ended without a closing event
+   reaching it. The transcript is closed from the operation record first:
+   settling alone keeps the log and leaves its transcript Working, which the
+   pane draws as a running turn. [None] settles the log as it stands. *)
+let settle_turn_log_ended_by state (entry : inflight) ~record =
+  Option.iter
+    (Masc_tui_keeper_chat_transcript.close_from_operation_record
+       ~now:(Unix.gettimeofday ()) entry.log.tl_transcript)
+    record;
+  settle_turn_log state entry
 ;;
 
 (* The strict decode's row for a completed turn, or nothing when the settled
@@ -8543,6 +8618,7 @@ let create_state
   opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
+  keeper_message_return = None;
   keeper_list_scroll = 0;
   runtime_pick_keeper = None;
   runtime_pick_list = Masc_tui_pick_list.closed;
@@ -8678,6 +8754,7 @@ let create_state
   keeper_schedules_error = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
+  schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
   lane_inventory = None;
@@ -8957,7 +9034,7 @@ let create_state
   (* Chat opens on the answer, not its bookkeeping. The gutter still carries
      the typed speaker/kind; Ctrl-F adds inline, then full timestamp/request
      metadata when the operator needs to trace a turn. *)
-  msg_origin_display = Masc_tui_message_layout.Origin_inline;
+  msg_origin_display = Masc_tui_message_layout.Origin_bare;
   msg_tool_visibility = tool_visibility;
   msg_turn_folded = true;
   msg_spill = None;
@@ -9364,6 +9441,47 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
         | _ -> true)
       rows
   in
+  (* Partial selected logs own the exact activities already drawn, even
+     when they cannot own the final reply. Keep unmatched durable activities
+     and evidence gaps; a call name or transcript position is not identity. *)
+  let partial_logs = selected_source_logs_for_keeper state keeper_name
+    |> List.filter (fun log -> not (turn_log_holds_the_turn log)) in
+  let remaining_activity (row : msg_entry) =
+    let module Transcript = Masc_tui_keeper_chat_transcript in
+    let drawn = partial_logs
+      |> List.filter (fun log -> String.equal row.me_request_id (turn_log_execution_id log))
+      |> List.concat_map (fun log -> Transcript.drawn log.tl_transcript) in
+    if drawn = [] then Some row else match row.me_role with
+    | Message_tool ->
+        (match row.me_tool_block with
+         | None -> Some row
+         | Some block ->
+             let executions = List.concat_map (fun (item : Transcript.drawn_item) ->
+               match item.drawn with
+               | Drawn_tools observed -> List.filter_map (fun (activity : Transcript.tool_activity) ->
+                   activity.execution_id) observed.activities
+               | _ -> []) drawn in
+             let activities = List.filter (fun (activity : Transcript.tool_activity) ->
+               not (Option.exists (fun id -> List.mem id executions) activity.execution_id)) block.activities in
+             if activities = [] && block.omitted_steps = 0 then None
+             else Some {row with me_tool_block=Some (Transcript.tool_block
+               ~omitted_steps:block.omitted_steps activities)})
+    | Message_skill _ when row.me_skill_block <> [] ->
+        let observed = List.concat_map (fun (item : Transcript.drawn_item) ->
+          match item.drawn with Drawn_skill skills -> skills | _ -> []) drawn in
+        let skills = List.filter (fun (skill : Transcript.skill_activity) ->
+          not (List.exists (fun (shown : Transcript.skill_activity) ->
+            Option.is_some skill.skill_tool_use_id
+            && skill.skill_tool_use_id = shown.skill_tool_use_id
+            && skill.turn_ref = shown.turn_ref
+            && skill.runtime_id = shown.runtime_id) observed)) row.me_skill_block in
+        if skills = [] then None
+        else Some {row with me_skill_block=skills;
+          me_role=Message_skill (Transcript.skill_block_state skills)}
+    | _ -> Some row
+  in
+  let loaded = List.filter_map remaining_activity loaded in
+  let session = List.filter_map remaining_activity session in
   let loaded = without_partial_replies loaded in
   let session = without_partial_replies session in
   chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
@@ -11298,6 +11416,28 @@ let runtime_rate_limit_label (runtime : Tui_decode.runtime_option) =
         Printf.sprintf "rate limited (retry %02d:%02d)" tm.Unix.tm_hour tm.Unix.tm_min
     | None -> "rate limited")
 
+(* What the last failed attempt was, in the words the failure route uses. *)
+let runtime_attempt_failure_word = function
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Server_error -> "server error"
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_capacity ->
+      "provider at capacity"
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Network_transient ->
+      "network failure"
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout -> "timeout"
+  | Tui_decode.Unrecognised_attempt_failure raw -> raw
+
+(* The failed attempt the lane walk orders by, for the runtime detail. It says
+   what the walk does with it: the Keeper that saw it tries the runtime first
+   on its next cycle, every other Keeper tries it after the candidates that
+   answered, and only an answer clears it. *)
+let runtime_failed_attempt_text (attempt : Tui_decode.runtime_failed_attempt) =
+  let tm = Unix.localtime attempt.rfa_noted_at in
+  Printf.sprintf
+    "%s at %02d:%02d, seen by %s; other Keepers try it after the ones that \
+     answered, until it answers"
+    (runtime_attempt_failure_word attempt.rfa_failure)
+    tm.Unix.tm_hour tm.Unix.tm_min attempt.rfa_recorded_by
+
 let runtime_usage_label state runtime =
   match state.runtime_surface with
   | None -> Some "usage unknown"
@@ -12080,8 +12220,14 @@ let keeper_effects_at_the_gate (state : state) ~keeper_name =
    returns and the pane draws what this returns, which is the arrangement that
    kept the unavailable row from going missing while the send hint still read
    Enter:send. Folding would have been a second place to disagree. *)
-let keeper_message_unfolded_status_rows (_state : state) live ~now =
-  Masc_tui_keeper_chat_transcript.status_rows ~now live
+let keeper_message_timing_visible (state : state) =
+  match state.msg_origin_display with
+  | Masc_tui_message_layout.Origin_bare -> false
+  | Origin_inline | Origin_row -> true
+
+let keeper_message_unfolded_status_rows (state : state) live ~now =
+  Masc_tui_keeper_chat_transcript.status_rows
+    ~show_timing:(keeper_message_timing_visible state) ~now live
 
 (* The most recently submitted input can be queued behind the execution that
    is streaming. Status follows the selected execution, including a journal
@@ -12091,14 +12237,37 @@ let keeper_message_status_log (state : state) =
   | None -> None
   | Some keeper_name ->
       let logs = selected_source_logs_for_keeper state keeper_name in
-      (match List.find_opt (fun log ->
-          Masc_tui_keeper_chat_transcript.phase log.tl_transcript = Working
-          && not (observed_log_has_ended state log)
-          && not (observed_log_is_unavailable state log)) logs with
+      let owned log =
+        List.exists (fun (entry : inflight) ->
+          turn_log_keeper_name entry.log = keeper_name
+          && turn_log_execution_id entry.log = turn_log_execution_id log)
+          state.msg_inflight
+      in
+      let autonomous log =
+        List.exists (fun (source, _) -> source = Masc_tui_keeper_chat_log.source log.tl_log)
+          (autonomous_journal_candidates ~keeper_name state.keeper_turns)
+      in
+      let observed log =
+        match Masc_tui_keeper_chat_log.operation_state log.tl_log with
+        | Some (Keeper_chat_operation.Running _) -> true
+        | Some (Queued | Succeeded _ | Failed _ | Cancelled _) | None -> false
+      in
+      let current log = owned log || autonomous log || observed log in
+      let working log =
+        Masc_tui_keeper_chat_transcript.phase log.tl_transcript = Working
+        && not (observed_log_has_ended state log)
+        && not (observed_log_is_unavailable state log)
+      in
+      let active = List.find_map (fun authority ->
+        List.find_opt (fun log -> authority log && working log) logs)
+        [owned; autonomous; observed] in
+      (match active with
        | Some log -> Some log
        | None ->
            match state.msg_live with
-           | Some log when turn_log_keeper_name log = keeper_name -> Some log
+           | Some log when turn_log_keeper_name log = keeper_name
+               && (Masc_tui_keeper_chat_transcript.phase log.tl_transcript <> Working
+                   || current log) -> Some log
            | Some _ | None ->
                List.find_opt (fun log ->
                  Masc_tui_keeper_chat_transcript.awaiting_continuation log.tl_transcript
@@ -12244,6 +12413,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
           ; keys = "" } ]
       | None ->
         Masc_tui_answering.chat_activity ~frame:state.activity_frame
+          ~show_timing:(keeper_message_timing_visible state)
           ?stop_keys:(keeper_observed_stop_hint state)
           ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
           state.keeper_turns
@@ -12345,8 +12515,6 @@ let keeper_message_activity_rows (state : state) =
                     request entry.sent_request) waiting)
           | Turn_preflight _ | Turn_streaming -> false) own then
         attention "메시지 전달 재확인 중";
-      if any_phase Masc_tui_keeper_chat_transcript.awaiting_continuation then
-        add "이어서 처리하기를 기다리는 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
       if has_working then add "기존 작업 처리 중";
@@ -12526,6 +12694,7 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
   in
   let summary group =
     let age =
+      if not (keeper_message_timing_visible state) then "" else
       match Masc_tui_message_layout.age_text ~now ~since:group.representative.sent_at with
       | None -> ""
       | Some text -> " · " ^ text

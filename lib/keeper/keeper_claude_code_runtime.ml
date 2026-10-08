@@ -328,6 +328,19 @@ let claude_error_to_core_error = function
          ; retry_after = retry_after_of_rate_limit rate_limit
          ; detail = Runtime_claude_code.error_to_string (Quota_blocked blocked)
          })
+  (* The CLI reports these denials in a terminal result, even when its
+     process subtype is [success]. Preserve the provider's HTTP distinction:
+     the existing account-access route asks for operator action after the
+     declared candidates are exhausted; a generic provider failure does not.
+     Activity still controls the separate effect fence at the caller. *)
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = Some 401; detail; _ } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError { provider = "claude_code"; detail })
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = Some 403; detail; _ } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthorizationError { provider = "claude_code"; detail })
   | Runtime_claude_code.Turn_failed detail
   | Runtime_claude_code.Turn_failed_with_observation { detail; _ } ->
     Agent_core.Error.Provider

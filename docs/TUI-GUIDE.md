@@ -958,13 +958,13 @@ steps in two cells and reads behind a solid bar in the sender's colour, where
 the journal's rows carry a dotted one. The operator's lines, the keeper's
 replies and its work rows stay at the conversation's edge.
 
-Chat opens with a short clock beside the speaker mark and label. The clock is
-drawn only where the minute moved, so a run of rows inside one minute leaves
-the column blank and keeps its width. `Ctrl-F` walks the axis: a full
-timestamp heading, then the bare clock-free gutter, then back. The
-header names the two stops away from rest as `metadata:full` or
-`metadata:off`. A streaming
-row uses its actual start clock rather than the word `live`. In compact and
+Chat opens without timestamps, turn time ranges, hourly separators or generated
+progress timers (request age, call age and model silence).
+`Ctrl-F` adds a short clock (`metadata:inline`), then full timestamp headings
+(`metadata:full`), then returns to the default. The short clock appears only
+where the minute moved. An open request between continuation segments has no
+progress banner or growing wait timer; progress returns when its next run starts.
+Approval prompts and diagnostics remain available. In compact and
 results modes, one quiet status below the history summarizes current work,
 your waiting messages, and their observed delivery or priority receipts.
 Waiting for confirmation and confirmed acceptance remain distinct. If a priority

@@ -70,6 +70,12 @@ let client_of_request request =
   let* client_id = Browser_lane.client_id_of_string raw_id in
   let* name = required "x-browser-name" in
   let* browser = Browser_lane.browser_of_string name in
+  (* The transport-less native identity is the WebExtension poll contract.
+     BiDi hosts declare their transport explicitly; malformed declarations
+     are rejected rather than inferred from the browser name. *)
+  let* transport = match header "x-browser-transport" with
+    | None -> Ok Browser_lane.Web_extension
+    | Some transport -> Browser_lane.live_transport_of_string transport in
   let version name =
     let* value = required name in
     if String.length value <= 64 && String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) value
@@ -79,7 +85,7 @@ let client_of_request request =
   if String.length engine_version > 64
      || not (String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) engine_version)
   then Error "invalid_browser_version"
-  else Ok ({client_id; browser; version; engine_version} : Browser_lane.client_info)
+  else Ok ({client_id; browser; version; engine_version; transport} : Browser_lane.client_info)
 ;;
 
 (* A poll holds one command for the window. The answer is flat

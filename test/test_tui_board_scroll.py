@@ -92,8 +92,8 @@ SIDE_READ_PANE_LEAST = 120
 SIDE_COLUMNS = ACTING_PANE_COLUMNS + ROSTER_PANE_COLUMNS + SIDE_READ_PANE_LEAST
 # In the stacked layout a comment starts near the read pane's left edge
 # (column 40 at 34 + 6). At the side-by-side minimum it starts after the
-# 78-column post and the comment pane's margins. Anything in the right half
-# of the read pane can only be beside the post. Columns are
+# 78-column post and the 2-column gutter, at 34 + 78 + 2 = 114. Anything in
+# the right half of the read pane can only be beside the post. Columns are
 # screen cells, not bytes: a box-drawing rule is one cell and three UTF-8 bytes.
 SIDE_COMMENT_COLUMN_LEAST = ROSTER_PANE_COLUMNS + SIDE_READ_PANE_LEAST // 2
 
@@ -130,29 +130,61 @@ def run_side_by_side(executable: str) -> None:
         _, stacked = comment_row(output)
         if b"Side body line" in stacked:
             raise AssertionError("at 100 columns the comment shares a row with the post body: " + repr(stacked))
+        # Source access before the resize: both the post body and the comment
+        # original text are readable in the stacked layout.
+        if b"Side body line" not in h.screen_text(bytes(output)):
+            raise AssertionError("the post body source is not on the stacked screen")
         h.resize_and_wait(process, fd, output, rows=30, columns=SIDE_COLUMNS,
                           needle=b"Comment 000", controls=(h.FULL_REDRAW,))
         h.read_available(fd, output)
+        rows = h.screen_rows(bytes(output))
         _, beside = comment_row(output)
-        text = beside.decode("utf-8", "strict")
-        comment_at = text.index("Comment 000")
-        at = h.fixture_cell_width(text[:comment_at])
-        if at < SIDE_COMMENT_COLUMN_LEAST:
+        # The frame rule that used to sit between the columns is gone with the
+        # spacious list layout (#41558), so separation is asserted as geometry:
+        # where the two source texts sit in screen cells. Cells, not string
+        # byte indexes — a box rule or a wide glyph is one cell and three
+        # UTF-8 bytes.
+        comment_row_index, comment_start, _ = h.marker_cells(rows=rows, needle=b"Comment 000")
+        if comment_start < SIDE_COMMENT_COLUMN_LEAST:
             # The whole screen, not just this row: whether the columns right of
             # the read pane hold the acting pane or nothing decides whether the
             # test's width model or the pane reservation is wrong.
             raise AssertionError(
-                f"the comment starts at column {at}, not in the right-hand column: " + repr(beside)
+                f"the comment starts at cell {comment_start}, not in the right-hand column: " + repr(beside)
                 + "\nscreen:\n" + h.screen_text(bytes(output)).decode("utf-8", "replace"))
-        body = re.search(r"Side body line \d{2}", text[:comment_at])
-        if body is None or not text[body.end():comment_at].isspace():
+        # The frame rule that used to sit between the columns is gone with the
+        # spacious list layout (#41558), so separation is asserted as geometry
+        # by the shared helper — including the demand that the panes share at
+        # least one row: a body pushed under every comment row is stacked,
+        # not side-by-side, and must fail here, not pass silently.
+        compared = h.board_side_separation(rows, b"Side body line 02", b"Comment 000")
+        # Negative controls run the exact same helper path, every scenario
+        # run, on synthetic layouts. A shared row with the comment before the
+        # body must be refused, and the no-shared-row layout woman reproduced
+        # (body on one row, the comment alone past the column minimum on the
+        # next) must fail with zero compared rows — that was the silent pass
+        # this test used to have.
+        reversed_row = {0: b"Comment 000 is drawn before Side body line 02"}
+        stacked = {0: b"Side body line 02",
+                   1: b" " * SIDE_COMMENT_COLUMN_LEAST + b"Comment 000 alone"}
+        try:
+            h.board_side_separation(reversed_row, b"Side body line 02", b"Comment 000")
+        except AssertionError as refusal:
+            if "left of the comment" not in str(refusal):
+                raise AssertionError("order control failed for the wrong reason: " + str(refusal))
+        else:
+            raise AssertionError("order control passed: " + repr(reversed_row[0]))
+        try:
+            h.board_side_separation(stacked, b"Side body line 02", b"Comment 000")
+        except AssertionError as refusal:
+            if "no row carries both" not in str(refusal):
+                raise AssertionError("stacked control failed for the wrong reason: " + str(refusal))
+        else:
             raise AssertionError(
-                f"at {SIDE_COLUMNS} columns the comment has no separate body/comment columns: " + repr(beside))
-        # Full-screen panes use whitespace margins, so a box rule is not
-        # evidence of the split. Both actual texts must share this row with
-        # the layout's two-cell gutter and remain inside the read pane.
-        assert h.fixture_cell_width(text[body.end():comment_at]) >= 2, beside
-        assert at + len("Comment 000") <= ROSTER_PANE_COLUMNS + SIDE_READ_PANE_LEAST, beside
+                f"stacked control passed with compared={compared}: body and comment "
+                "share no row, yet the separation checks accepted the layout")
+        if b"Side body line" not in h.screen_text(bytes(output)):
+            raise AssertionError("the post body source left the screen after the resize")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Board read comments beside the post",

@@ -2080,10 +2080,9 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
             )
-        # Leaving the chat returns to the Keepers list with the chat target
-        # selected: message navigation follows its explicit target, so the
-        # roster cursor is alpha, not the beta it held before the palette jump.
-        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"alpha"))
+        # The palette targets alpha without moving the beta roster cursor.
+        # Esc returns to that roster selection, not the chat target's row.
+        send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"beta"))
         os.write(master_fd, b"q")
 
     return interact
@@ -2391,13 +2390,8 @@ def message_origin_badge_interaction(
     operator_body = b"operator-body-neutral"
     keeper_body = b"keeper-body-neutral"
 
-    # Ctrl-F walks bare -> inline -> row -> bare and the pane opens on inline,
-    # which is the one stop with no header word: the summary names the two
-    # projections away from the resting layout ("metadata:off" and
-    # "metadata:full") and stays silent about the layout itself. So the first
-    # press lands on the full row, and the press that comes back to inline is
-    # waited on by the short clock instead -- the one thing neither other stop
-    # draws.
+    # Clocks are opt-in: bare -> inline -> row -> bare.
+    send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
     full_row = send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
     # The pane's own keeper is not named on its full heading -- the
     # breadcrumb says whose chat this is -- so its row opens on the mark and
@@ -2432,7 +2426,7 @@ def message_origin_badge_interaction(
         )
     assert_bodies_unwashed(full_row, "the full origin row")
 
-    bare = send_and_wait(process, master_fd, output, b"\x06", b"metadata:off")
+    bare = send_and_wait(process, master_fd, output, b"\x06", keeper_body)
     for badge, body, description in (
         (operator_badge, operator_body, "operator"),
         (keeper_badge, keeper_body, "Keeper"),

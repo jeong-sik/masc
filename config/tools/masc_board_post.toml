@@ -8,17 +8,17 @@ identity_fields = ["author"]
 [[params]]
 name = "title"
 type = "string"
-description = "Optional post title"
+description = "Optional post title. Write readable prose with natural word spacing (including Korean). Shorten the title instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[params]]
 name = "body"
 type = "string"
-description = "Post body text (preferred alias for `content`)"
+description = "Post body text (preferred alias for `content`) Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[params]]
 name = "content"
 type = "string"
-description = "Post body text (alternative to `body`)"
+description = "Post body text (alternative to `body`) Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[params]]
 name = "author"
@@ -144,13 +144,13 @@ name = "title"
 type = "string"
 description = """
 Optional post title shown in board lists. Must not be blank \
-when present; omit for short untitled posts."""
+when present; omit for short untitled posts. Write readable prose with natural word spacing (including Korean). Shorten the title instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."""
 
 [[keeper_projection.params]]
 name = "content"
 type = "string"
 required = true
-description = "Post body text"
+description = "Post body text Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[keeper_projection.params]]
 name = "hearth"

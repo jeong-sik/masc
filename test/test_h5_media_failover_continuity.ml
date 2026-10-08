@@ -392,12 +392,11 @@ let s5_failover_summary () =
     fallback_audio_bytes
 ;;
 
+(* dune (test) 스탠자는 인자 없이 실행하므로, 인자가 없으면 전체 시나리오를
+   돈다 — runtest 기본 alias 에서 exit 2 가 나지 않게 한다. *)
 let () =
-  if Array.length Sys.argv < 2 then begin
-    print_endline "usage: test_h5_media_failover_continuity.exe <all>";
-    exit 2
-  end;
-  match Sys.argv.(1) with
+  let scenario = if Array.length Sys.argv < 2 then "all" else Sys.argv.(1) in
+  match scenario with
   | "all" ->
     s1_serialization_roundtrip ();
     s3_fail_closed_sources ();

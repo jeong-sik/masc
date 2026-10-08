@@ -662,7 +662,7 @@ let decode_reply_details json =
   let surface = "KEEPER_REPLY_DETAILS.value" in
   let* fields =
     exact_object_fields ~surface
-      ~allowed:[ "reply"; "turn_outcome"; "turn_ref" ] json
+      ~allowed:[ "reply"; "turn_outcome"; "turn_ref"; "terminal_stream_scope" ] json
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
   let* reply =
@@ -691,6 +691,8 @@ let decode_reply_details json =
     | Some _ -> Ok ()
     | None -> Error (Malformed_event (surface ^ ".turn_ref is invalid"))
   in
+  let* _ = optional_nonnegative_int ~surface "terminal_stream_scope" fields
+    |> Result.map_error (fun detail -> Malformed_event detail) in
   Ok { reply; turn_outcome; turn_ref }
 
 type terminal =

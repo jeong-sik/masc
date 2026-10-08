@@ -78,7 +78,7 @@ let delta_to_string : Live.delta -> string = function
       Printf.sprintf "accepted(%s,%d)" admission queue_length
   | Live.Checkpoint -> "checkpoint"
   | Live.External_effect_completed -> "external_effect_completed"
-  | Live.Reply_details { reply; turn_outcome; turn_ref } ->
+  | Live.Reply_details { reply; turn_outcome; turn_ref; _ } ->
       Printf.sprintf "reply_details(%s,%s,%s)" reply
         (Masc.Keeper_turn_outcome.to_label turn_outcome)
         turn_ref
@@ -395,7 +395,7 @@ let reply_details_value ?(outcome = "visible_reply") ?(turn_ref = "trace-1#3") (
 let test_reply_details_is_read_whole () =
   check (list delta) "the three fields come through"
     [ Live.Reply_details
-        { reply = "done"
+        { terminal_stream_scope = None; reply = "done"
         ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
         ; turn_ref = "trace-1#3"
         }
@@ -415,7 +415,13 @@ let test_reply_details_short_of_a_field_is_reported () =
        (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ~outcome:"shrug" ()))));
   check bool "a turn_ref that is not <trace>#<turn>" true
     (undecodable
-       (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ~turn_ref:"nope" ()))))
+       (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ~turn_ref:"nope" ()))));
+  List.iter (fun scope ->
+    let fields = match reply_details_value () with `Assoc fields -> fields | _ -> assert false in
+    check bool "malformed terminal provenance is not silently discarded" true
+      (undecodable (sse (custom "KEEPER_REPLY_DETAILS"
+        (`Assoc (("terminal_stream_scope", scope) :: fields))))))
+    [`Int (-1);`String "1";`Null]
 
 (* Multiple data fields form one JSON payload and carry the frame's id. *)
 let test_two_data_lines_in_one_frame_share_the_seq () =

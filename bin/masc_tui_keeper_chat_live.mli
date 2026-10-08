@@ -153,6 +153,7 @@ type delta =
       { reply : string
       ; turn_outcome : Masc.Keeper_turn_outcome.t
       ; turn_ref : string
+      ; terminal_stream_scope : int option
       }
       (** The terminal reply as the server recorded it (KEEPER_REPLY_DETAILS):
           the text the transcript keeps, the typed outcome, and the store join

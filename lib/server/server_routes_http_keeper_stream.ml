@@ -2830,6 +2830,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                { reply = visible_reply
                ; turn_outcome
                ; turn_ref = canonical_reply.turn_ref
+               ; terminal_stream_scope = Keeper_chat_agent_core_stream_bridge.terminal_text_scope bridge_state
                });
           (match canonical_reply.external_effect_target with
            | Some target ->

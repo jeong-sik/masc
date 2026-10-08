@@ -139,7 +139,7 @@ let test_replaced_settled_logs_are_seen () =
     Masc_tui_keeper_chat_live.Run_started;
   Tui_types.turn_log_add ~now:3.0 log ~seq:(Some 1)
     (Masc_tui_keeper_chat_live.Reply_details
-       { reply = "row at 3"
+       { terminal_stream_scope = None; reply = "row at 3"
        ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
        ; turn_ref = "trace-1#1"
        });
@@ -190,7 +190,7 @@ let test_a_held_log_completed_in_place_is_seen () =
   let _ = Tui_types.turn_log_add_journaled log
     [ line 2 3.2
         (E.Reply_details
-           { reply = "row at 3"
+           { terminal_stream_scope = None; reply = "row at 3"
            ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
            ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
            })

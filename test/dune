@@ -9774,4 +9774,4 @@
  (name test_msx_addon_worker)
  (modules test_msx_addon_worker)
  (libraries masc.lane_addon_call_context masc.msx_worker masc.msx_lane masc.masc_core masc.machine_configuration
-  mcp_protocol mcp_protocol.eio eio_main eio.unix alcotest yojson base64 digestif unix))
+  mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64 digestif unix))

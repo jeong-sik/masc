@@ -20789,7 +20789,7 @@ and is loaded on demand through keeper_skill.
                      | "D" -> update {view with
                          presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);
                          focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
-                     | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);document_key=None;scroll=0}
+                     | "f" -> update (Addons.toggle_flow view)
                      | "a" ->
                          if view.loading || Option.is_some (Addons.pending_action view)
                          then update {view with error=lane_addons_input_failure "An action or read is pending; t checks its status."}
@@ -20835,11 +20835,12 @@ and is loaded on demand through keeper_skill.
                                | None -> ()
                                | Some configuration -> update {view with configuration_cursor=max 0
                                    (min (List.length configuration.declarations - 1) (view.configuration_cursor + delta))})
-                          | Some snapshot, Addons.Overview, _ ->
-                              let cursor = max 0 (min (Addons.overview_count ~mode:view.overview_mode snapshot - 1)
-                                (view.instance_cursor + delta)) in
-                              if cursor <> view.instance_cursor then
-                                update {view with instance_cursor=cursor; scroll=0}
+                          | Some _, Addons.Overview, _ ->
+                              (* Flow draws only workers; moving among the
+                                 declarations it hides left the action target
+                                 on a row nobody could see. *)
+                              let next = Addons.move_instance view delta in
+                              if next.instance_cursor <> view.instance_cursor then update next
                           | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()
                           | Some _, Addons.Detail _, Addons.Rows ->
                               update (Addons.move_record view delta)

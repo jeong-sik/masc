@@ -8959,7 +8959,7 @@ let browser_lane_source_hint view =
 let browser_lane_unserved_gesture_rows (view : Browser_lane_view.t) =
   match view.unserved_gesture with
   | None -> []
-  | Some unserved -> Browser_lane_view.unserved_gesture_rows ~host:view.bidi_host unserved
+  | Some unserved -> Browser_lane_view.unserved_gesture_rows unserved
 
 let browser_lane_fixed_rows view =
   (* Status, selection, tab, URL, divider and text position are always drawn.
@@ -8972,6 +8972,17 @@ let browser_lane_fixed_rows view =
    divider above them, the detail row for the highlighted choice below them,
    and the row an empty connection list explains itself on. *)
 let browser_picker_frame_rows = 5
+
+(* What the picker keeps for the BiDi host when it has rows for it: its first
+   row, and the row that says how many more the screen could not hold. *)
+let browser_host_reserved_rows = 2
+
+(* Choosing is what the picker is for. On a terminal that would be left with
+   fewer choices than this beside the host's rows, the choices keep the room. *)
+let browser_picker_least_choices = 3
+
+(* The cells a BiDi host row has behind the surface's two-cell indent. *)
+let browser_host_row_cells ~cols = max 1 (framed_inner_width cols - 2)
 
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -9089,7 +9100,18 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";
           c.push_divider ();
+          (* The BiDi host's rows come last and cannot be scrolled to. Their
+             first row, which says whether a host runs, keeps a place however
+             many choices there are, with the row that says more is hidden,
+             unless that would leave too few choices to choose from. *)
+          let host_rows =
+            Browser_lane_view.bidi_host_rows ~width:(browser_host_row_cells ~cols) view in
           let room = max 1 (budget - browser_picker_frame_rows) in
+          let room =
+            match host_rows with
+            | _ :: _ when room - browser_host_reserved_rows >= browser_picker_least_choices ->
+                room - browser_host_reserved_rows
+            | [] | _ :: _ -> room in
           let start = max 0 (cursor - room + 1) in
           browser_choices view |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
@@ -9111,12 +9133,11 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               c.push_styled ~style:(Theme.recede ())
                 ("  " ^ transport_setup_row [Browser_lane.Web_extension]);
               c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh."));
-          (* Last, so a terminal too short for everything keeps the choices
-             and loses these from the end: how to start a host goes first,
-             whether one runs last. *)
+          (* Last, so a terminal too short for everything loses these from
+             the end: how to start a host goes first, whether one runs last. *)
           List.iter (fun row ->
               c.push_styled ~style:(Theme.recede ()) ("  " ^ Terminal_text.single_line row))
-            (bidi_host_rows view.bidi_host)
+            host_rows
       | None ->
       List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ Terminal_text.single_line row))
         (browser_lane_unserved_gesture_rows view);

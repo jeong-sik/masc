@@ -3617,22 +3617,25 @@ module Browser_lane_view = struct
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
     scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+  (* What the server said of the BiDi host when it listed the connections:
+     the host's own record, read by the server. Nothing is reported before a
+     discovery answers, after one that failed, and by a server from before
+     the report existed. A report this build cannot read keeps the paragraph
+     the server wrote for the operator, when it has one. *)
+  type bidi_host =
+    | Host_not_reported
+    | Host_reported of Masc.Browser_lane_launcher.bidi_host_report
+    | Host_report_unreadable of { detail : string; message : string option }
   (* A pointer gesture that was not sent, because the connection the
      screenshot came from does not serve it. [serving_listed] is whether a
-     listed connection does. *)
+     listed connection does, and [host] what was known of the BiDi host then:
+     the rows say why it was not sent as of the moment it was not. *)
   type unserved_gesture = {
     asked : Browser_lane.live_transport;
     capability : Browser_lane.live_capability;
     serving_listed : bool;
+    host : bidi_host;
   }
-  (* What the server said of the BiDi host when it listed the connections:
-     the host's own record, read by the server. Nothing is reported before a
-     discovery answers, after one that failed, and by a server from before
-     the report existed. *)
-  type bidi_host =
-    | Host_not_reported
-    | Host_reported of Masc.Browser_lane_launcher.bidi_host_report
-    | Host_report_unreadable of string
   (* One answer of the connection list: the connections and the BiDi host
      are as of the same read. *)
   type discovered = { listed : client list; bidi_host : bidi_host }
@@ -3859,43 +3862,52 @@ module Browser_lane_view = struct
               List.exists (fun (other : client) ->
                 Browser_lane.live_transport_serves other.transport capability)
                 (listed_clients t) in
-            Pointer_unserved {asked = client.transport; capability; serving_listed}
+            Pointer_unserved {asked = client.transport; capability; serving_listed; host = t.bidi_host}
   let refuse_gesture unserved t = {t with unserved_gesture = Some unserved}
   let withdraw_unserved_gesture t = match t.unserved_gesture with
     | None -> t
     | Some _ -> {t with unserved_gesture = None}
-  (* The BiDi host in the operator's words. Each row is written to fit 76
-     cells behind the surface's two-cell indent; the reason a host gave and
-     the launcher's path are the two parts whose length is not this file's. *)
+  (* The BiDi host in the operator's words, as lines: what a line opens
+     with, and what it says. A line this file writes whole fits 74 cells,
+     which is an 80-column surface behind its two-cell indent. What another
+     program wrote, a reason, an address, a path, is a line of its own. *)
+  type host_breaks = At_spaces | At_slashes
+  type host_line = { lead : string; said : string; breaks : host_breaks }
+  let host_line said = { lead = ""; said; breaks = At_spaces }
+  let host_said lead said = { lead; said; breaks = At_spaces }
   let host_time seconds = Time_codec.rfc3339_of_unix seconds
-  let host_session_rows (ending : Masc.Browser_bidi_host_record.ending) =
-    match ending.session with
-    | No_session_left -> []
-    | Session_left -> ["Session end not confirmed · restart that Firefox before attaching"]
-    | Session_unknown -> ["Session not ended · restart that Firefox if it is still running"]
-  (* Whether a host runs, and what stands in the way of the next one. *)
-  let bidi_host_state_rows = function
-    | Host_not_reported -> []
-    | Host_report_unreadable detail ->
-        ["BiDi host: this TUI cannot read the server's report · " ^ detail]
-    | Host_reported report ->
-        (match report.state with
-         | Never_started -> ["BiDi host: none has run for this workspace"]
-         | Running entry ->
-             [Printf.sprintf "BiDi host: %s · pid %d · %s"
-                (match entry.attached_at with Some _ -> "attached" | None -> "connecting")
-                entry.pid entry.bidi_url]
-         | Ended (_, ending) ->
-             (Printf.sprintf "BiDi host: ended %s · %s" (host_time ending.at) ending.reason)
-             :: host_session_rows ending
-         | Died entry ->
-             [Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid;
-              "Its session may be left in Firefox · restart Firefox if a host is refused"]
-         | Unreadable detail -> ["BiDi host: its record cannot be read · " ^ detail])
+  (* Whether the connection list has the client a running host's record
+     names. A host serves hover and drag on the server that lists it. *)
+  let host_listed (clients : client list) (entry : Masc.Browser_bidi_host_record.entry) =
+    let named = Browser_lane.client_id_to_string entry.client_id in
+    List.exists (fun (client : client) ->
+      client.transport = Browser_lane.Webdriver_bidi && String.equal client.client_id named)
+      clients
+  type host_standing = Host_serving | Host_unlisted | Host_connecting
+  (* Only a host that has its session polls, so a listed client is an
+     attached host whatever its record has caught up to. *)
+  let host_standing clients (entry : Masc.Browser_bidi_host_record.entry) =
+    match host_listed clients entry, entry.attached_at with
+    | true, (Some _ | None) -> Host_serving
+    | false, Some _ -> Host_unlisted
+    | false, None -> Host_connecting
+  (* What comes before the next host, by what became of the last one's
+     session. A Firefox that holds a session refuses every host until it is
+     restarted; one that holds none takes the next host as it is. *)
+  let host_session_lines (ending : Masc.Browser_bidi_host_record.ending) =
+    List.map host_line
+      (match ending.session with
+       | No_session_left -> ["That Firefox takes the next host if it still runs"]
+       | Session_left -> ["Session end not confirmed · restart that Firefox before attaching"]
+       | Session_unknown ->
+           ["Could not ask Firefox to end the session · restart it if it still runs"]
+       | Session_refused ->
+           ["Firefox holds another session and refused this host one";
+            "Stop the other host, or restart that Firefox if none is attached"])
   (* The results the host holds no acknowledgement for: how many, and the
      last one. Without an acknowledgement the server may still have taken it,
      so the cause is said only when it settles that. *)
-  let host_unacknowledged_rows (entry : Masc.Browser_bidi_host_record.entry) =
+  let host_unacknowledged_lines (entry : Masc.Browser_bidi_host_record.entry) =
     match List.rev entry.unacknowledged with
     | [] -> []
     | last :: earlier ->
@@ -3910,38 +3922,169 @@ module Browser_lane_view = struct
         let request = match last.request_id with
           | Some id -> Masc.Browser_bidi_host_record.request_id_to_wire id
           | None -> "not a UUID" in
-        [Printf.sprintf "%d result%s unacknowledged · last: %s, %s%s"
-           count (if count = 1 then "" else "s") verb outcome cause;
-         Printf.sprintf "at %s · request %s" (host_time last.at) request]
-  let host_attach_rows (attach : Masc.Browser_lane_launcher.bidi_attach) =
-    ["Attach: " ^ attach.launcher; "        " ^ attach.arguments]
-  (* Everything the picker says of the BiDi host. A host that is running is
-     not told how to start one. *)
-  let bidi_host_rows = function
-    | (Host_not_reported | Host_report_unreadable _) as host -> bidi_host_state_rows host
-    | Host_reported report as host ->
-        let state = bidi_host_state_rows host in
+        [host_line (Printf.sprintf "%d result%s unacknowledged · last: %s, %s%s"
+           count (if count = 1 then "" else "s") verb outcome cause);
+         host_line (Printf.sprintf "at %s · request %s" (host_time last.at) request)]
+  (* How a host is started. [address] is the one the last host was given,
+     which is the one to give again while that Firefox runs; with none the
+     launcher's own words stand, and say PORT for the port. A launcher that
+     is not there, or not as an installation wrote it, is not one to run. *)
+  let host_attach_lines ~address (attach : Masc.Browser_lane_launcher.bidi_attach) =
+    let lead = "Attach: " in
+    let under = String.make (String.length lead) ' ' in
+    (match attach.standing with
+     | Launcher_installed ->
+         { lead; said = attach.launcher; breaks = At_slashes }
+         :: (match address with
+             | Some address -> [host_said under ("--bidi-url " ^ address)]
+             | None ->
+                 [host_said under attach.arguments;
+                  host_said under "PORT: the --remote-debugging-port Firefox was started with"])
+     | Launcher_not_installed -> [host_said lead "install the browser lane in this workspace first"]
+     | Launcher_needs_reinstall ->
+         [host_said lead "install the browser lane again first (launcher not as installed)"])
+    @ [host_line (transport_setup_row [Browser_lane.Webdriver_bidi])]
+  (* Everything the picker says of the BiDi host: whether one runs, what
+     stands in the way of the next one, and how one is started. A host that
+     is running is not told how to start one. *)
+  let bidi_host_lines t =
+    match t.bidi_host with
+    | Host_not_reported -> []
+    | Host_report_unreadable { detail; message } ->
+        [host_line "BiDi host: this TUI cannot read the server's report";
+         host_said "Detail: " detail]
+        @ (match message with None -> [] | Some message -> [host_said "Server: " message])
+    | Host_reported report ->
+        let attach ~address = host_attach_lines ~address report.attach in
         (match report.state with
-         | Running entry -> state @ host_unacknowledged_rows entry
-         | Ended (entry, _) | Died entry ->
-             state @ host_unacknowledged_rows entry @ host_attach_rows report.attach
-         | Never_started | Unreadable _ -> state @ host_attach_rows report.attach)
+         | Never_started ->
+             host_line "BiDi host: none has run for this workspace" :: attach ~address:None
+         | Running entry ->
+             let state name =
+               [host_line (Printf.sprintf "BiDi host: %s · pid %d" name entry.pid);
+                host_said "At: " entry.bidi_url] in
+             (match host_standing (listed_clients t) entry with
+              | Host_serving -> state "attached"
+              | Host_unlisted ->
+                  state "attached"
+                  @ List.map host_line
+                      ["This server does not list its connection · hover and drag stay refused";
+                       "It polls another server or stopped polling · restart it if this stays"]
+              | Host_connecting -> state "connecting")
+             @ host_unacknowledged_lines entry
+         | Ended (entry, ending) ->
+             (* What to do comes before why: on a screen that holds two of
+                these rows, the step is the one that has to be there. *)
+             (host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)
+              :: host_session_lines ending)
+             @ [host_said "Reason: " ending.reason]
+             @ host_unacknowledged_lines entry
+             @ attach ~address:(Some entry.bidi_url)
+         | Died entry ->
+             List.map host_line
+               [Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid;
+                "Its session may be left in Firefox · restart Firefox if a host is refused"]
+             @ host_unacknowledged_lines entry
+             @ attach ~address:(Some entry.bidi_url)
+         | Unreadable { detail; held = Some true } ->
+             [host_line "BiDi host: one runs, and its record cannot be read";
+              host_said "Detail: " detail;
+              host_line "Stop that host before starting another · it refuses a second one"]
+         | Unreadable { detail; held = Some false } ->
+             [host_line "BiDi host: none runs, and the last record cannot be read";
+              host_said "Detail: " detail]
+             @ attach ~address:None
+         | Unreadable { detail; held = None } ->
+             [host_line "BiDi host: could not check whether one runs";
+              host_said "Detail: " detail])
+  (* A path on rows of [max_cells], broken before a slash so each name
+     stays whole. A single name longer than a row has nowhere better to
+     break and is cut where the row ends. *)
+  let host_path_rows ~max_cells path =
+    let cells = Masc_tui_message_layout.display_width in
+    let pieces =
+      let length = String.length path in
+      let rec cut start index pieces =
+        if index >= length then
+          if index > start then String.sub path start (index - start) :: pieces else pieces
+        else if Char.equal path.[index] '/' && index > start then
+          cut index (index + 1) (String.sub path start (index - start) :: pieces)
+        else cut start (index + 1) pieces
+      in
+      List.rev (cut 0 0 [])
+    in
+    let close current rows = if String.equal current "" then rows else current :: rows in
+    let rows, current =
+      List.fold_left (fun (rows, current) piece ->
+          if cells (current ^ piece) <= max_cells then rows, current ^ piece
+          else if cells piece <= max_cells then close current rows, piece
+          else
+            match List.rev (Masc_tui_message_layout.wrap_words ~max_cells piece) with
+            | [] -> close current rows, ""
+            | last :: earlier -> earlier @ close current rows, last)
+        ([], "") pieces
+    in
+    List.rev (close current rows)
+  (* A line on as many rows as it needs at [width] cells: the first behind
+     its lead, the rest under what the lead opened. Nothing is cut, so a
+     reason or a path longer than the screen is still read whole. What is
+     said is made printable first, so the rows are measured as they are
+     drawn. *)
+  let host_line_rows ~width { lead; said; breaks } =
+    let said = Masc.Tui_terminal_text.sanitize_terminal_text said in
+    let under = String.make (String.length lead) ' ' in
+    let max_cells = Int.max 1 (width - String.length lead) in
+    let rows = match breaks with
+      | At_spaces -> Masc_tui_message_layout.wrap_words ~max_cells said
+      | At_slashes -> host_path_rows ~max_cells said in
+    match rows with
+    | [] -> [lead]
+    | first :: rest -> (lead ^ first) :: List.map (fun row -> under ^ row) rest
+  let bidi_host_rows ~width t = List.concat_map (host_line_rows ~width) (bidi_host_lines t)
+  (* The one row a refused gesture has for the BiDi host. It is this file's
+     words only, so it fits whatever the record holds; the picker says the
+     rest. *)
+  let bidi_host_brief = function
+    | Host_not_reported -> None
+    | Host_report_unreadable _ ->
+        Some "BiDi host: this TUI cannot read the server's report · b:details"
+    | Host_reported report ->
+        Some (match report.state with
+          | Never_started -> "BiDi host: none has run for this workspace · b:how to attach"
+          (* A gesture is refused for want of a listed BiDi connection, so a
+             host that runs is one this server does not list. *)
+          | Running { attached_at = Some _; pid; _ } ->
+              Printf.sprintf "BiDi host: pid %d attached, not listed by this server · b:details" pid
+          | Running { attached_at = None; pid; _ } ->
+              Printf.sprintf "BiDi host: pid %d is connecting · b:details" pid
+          | Ended (_, ending) ->
+              Printf.sprintf "BiDi host: ended %s · b:why and what next" (host_time ending.at)
+          | Died entry ->
+              Printf.sprintf "BiDi host: pid %d is gone, no reason recorded · b:what next" entry.pid
+          | Unreadable { held = Some true; _ } ->
+              "BiDi host: one runs, and its record cannot be read · b:details"
+          | Unreadable { held = Some false; _ } ->
+              "BiDi host: none runs, and the last record cannot be read · b:details"
+          | Unreadable { held = None; _ } -> "BiDi host: could not check whether one runs · b:details")
   (* The rows a refused gesture draws: what was not sent and why, then the
      operator's next step. With a serving connection listed the step is the
-     picker and fits the same row; with none listed it is where attaching one
-     is written, on a row of its own, and for a gesture a BiDi connection
-     serves, where the BiDi host stands comes between the two. Each row fits
-     80 columns. *)
-  let unserved_gesture_rows ~host (unserved : unserved_gesture) =
+     picker and fits the same row. With none listed, a gesture a BiDi
+     connection serves says where the BiDi host stood and points at the
+     picker for the rest; without a report, and for other work, the second
+     row is where attaching a connection is written. Each row fits 80
+     columns, and there are never more than two. *)
+  let unserved_gesture_rows (unserved : unserved_gesture) =
     let cause = "Not sent · " ^ lacking_clause unserved.asked [unserved.capability] in
     match Browser_lane.live_transports_serving unserved.capability with
     | [] -> [cause]
     | serving when unserved.serving_listed ->
         [cause ^ " · " ^ transport_names serving ^ " serves it · b:choose browser"]
     | serving ->
-        ((cause ^ " · no " ^ transport_names serving ^ " connection is listed")
-         :: (if List.mem Browser_lane.Webdriver_bidi serving then bidi_host_state_rows host else []))
-        @ [transport_setup_row serving]
+        let host =
+          if List.mem Browser_lane.Webdriver_bidi serving then bidi_host_brief unserved.host else None
+        in
+        [cause ^ " · no " ^ transport_names serving ^ " connection is listed";
+         Option.value host ~default:(transport_setup_row serving)]
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -4062,21 +4205,28 @@ module Browser_lane_view = struct
           in loop [] rows
       | _ -> Error "expected browser clients array"
   (* The BiDi host's part of the same answer. A report this TUI cannot read
-     does not cost the operator the connection list. *)
-  let decode_bidi_host data =
-    match data with
-    | `Assoc fields ->
-        (match List.assoc_opt "bidiHost" fields with
-         | None | Some `Null -> Host_not_reported
-         | Some report ->
-             (match Masc.Browser_lane_launcher.bidi_host_report_of_json report with
-              | Ok report -> Host_reported report
-              | Error detail -> Host_report_unreadable detail))
-    | _ -> Host_not_reported
+     does not cost the operator the connection list, nor the paragraph the
+     server wrote for them. *)
+  let decode_bidi_host = function
+    | None | Some `Null -> Host_not_reported
+    | Some report ->
+        (match Masc.Browser_lane_launcher.bidi_host_report_of_json report with
+         | Ok report -> Host_reported report
+         | Error detail ->
+             let message = match report with
+               | `Assoc fields ->
+                   (match List.assoc_opt "message" fields with
+                    | Some (`String message) -> Some message
+                    | Some _ | None -> None)
+               | _ -> None in
+             Host_report_unreadable { detail; message })
   let decode_discovery json =
     let* listed = decode_clients json in
     let* data = field "data" json in
-    Ok { listed; bidi_host = decode_bidi_host data }
+    let* fields = match data with
+      | `Assoc fields -> Ok fields
+      | _ -> Error "expected browser clients object" in
+    Ok { listed; bidi_host = decode_bidi_host (List.assoc_opt "bidiHost" fields) }
   let parse_client_id source json =
     let* value = field "clientId" json in
     match source, value with

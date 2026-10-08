@@ -314,7 +314,13 @@ def superseded_scoped_match_journey(executable):
         fixtures["/health?full=1"] = lambda: health("/health?full=1")
 
     def interact(process, fd, _slave, output, _base):
-        runtime_log = Path(_base) / ".masc" / "logs" / f"masc-tui-{process.pid}.log"
+        # The harness PID belongs to its shell launcher, not the TUI child.
+        # Startup already rendered a frame after stderr redirection. This
+        # fresh workspace has one launch, hence exactly one TUI-owned log
+        # (the same discovery used by tui_keyboard_startup.exit_reason_log).
+        runtime_logs = list(Path(_base, ".masc", "logs").glob("masc-tui-*.log"))
+        assert len(runtime_logs) == 1, ("expected one TUI child log", runtime_logs)
+        runtime_log, = runtime_logs
 
         def gate_refresh_tickets():
             # Read the explicit diagnostic fields. Startup Poll tickets must

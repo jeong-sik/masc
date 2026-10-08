@@ -1559,7 +1559,7 @@ let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw
     ["masc_msx_step";"masc_dos_step"];
   let runtime_path = Filename.concat dir "runtime-fixture.toml" in
   write runtime_path (machine_runtime_config ~enabled:false);
-  ignore (unwrap (Masc.Runtime.init_default ~config_path:runtime_path));
+  ignore (unwrap (Host_runtime.init_default ~config_path:runtime_path));
   List.iter (fun name ->
     let before = List.length !(state.admissions) in
     check bool "off is an explicit host refusal" true
@@ -1574,7 +1574,7 @@ let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw
   check bool "off still permits returning the controller" true
     (Result.is_ok (call "masc_dos_pass" (`Assoc ["to",`String ""])));
   write runtime_path (machine_runtime_config ~enabled:true);
-  ignore (unwrap (Masc.Runtime.init_default ~config_path:runtime_path));
+  ignore (unwrap (Host_runtime.init_default ~config_path:runtime_path));
   check bool "reenabling resumes the same attached worker" true (Result.is_ok (call "masc_msx_step" (`Assoc [])));
   detach config id;
   await_phase (Eio.Stdenv.clock env) config id "detached")

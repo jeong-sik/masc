@@ -715,14 +715,6 @@ let agent_tools ~(provider : Provider.t) catalog =
       | Error detail ->
         { acc with unusable = (name, detail) :: acc.unusable }
       | Ok schema ->
-        (* The policy runs mid-turn with only a name, so what the service
-           said about this tool has to be somewhere it can reach. Recorded
-           before the tool is handed out, not after: a tool the model could
-           call while the row was missing would be asked about with a reason
-           nobody can act on. *)
-        Keeper_identity_tool_index.record
-          (Keeper_identity_tool_index.shared ())
-          ~tool_name:name ~read_only:tool.Mcp_client.read_only;
         let offered_tool =
           { schema
           ; read_only = tool.Mcp_client.read_only

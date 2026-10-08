@@ -161,4 +161,3 @@ val tool_schema_to_json : tool_schema -> Yojson.Safe.t
 val tool_schema_of_json : Yojson.Safe.t -> (tool_schema, string) result
 
 val result_all : ('a, 'e) result list -> ('a list, 'e) result
-

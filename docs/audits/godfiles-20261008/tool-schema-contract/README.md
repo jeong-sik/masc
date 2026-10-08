@@ -55,12 +55,16 @@ schema blocks against the owner after the declared header/comment change, the
 remaining `types.ml` after the two block replacements, the selected owner
 signature, and the unchanged public signature. This is extraction evidence,
 not a substitute for the executed consumers or independent source review.
-Terminal logs normalize trailing whitespace.
+Terminal logs normalize trailing whitespace. Independent review found two P3
+extra EOF blank lines in the extracted files; both were removed, and the final
+focused build and all 136 consumer cases were re-run successfully. The initial
+passing receipts remain available at the pre-review Git head named in checks.
+Compiler boundary probes predate only this whitespace normalization.
 
 ## Remaining scope
 
-`types.ml` changes from 2,027 to 1,252 lines; the pure schema owner has 783 lines
-and a 164-line interface. This separates one coherent responsibility; it does
+`types.ml` changes from 2,027 to 1,252 lines; the pure schema owner has 782 lines
+and a 163-line interface. This separates one coherent responsibility; it does
 not establish that all remaining message/provenance/hash/telemetry/streaming
 responsibilities are fully assessed. The baseline candidate remains partial.
 All original 171 candidates remain in scope: 18 production candidates have

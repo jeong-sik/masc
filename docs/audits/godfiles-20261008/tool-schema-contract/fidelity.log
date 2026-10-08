@@ -1,5 +1,5 @@
 Testing `tool_input_schema_fidelity'.
-This run has ID `VHRCZ4PG'.
+This run has ID `TRP2UJCS'.
 
   [OK]          wire fidelity          0   authoritative schema reaches the w...
   [OK]          wire fidelity          1   the billed encoding is smaller tha...
@@ -22,4 +22,4 @@ This run has ID `VHRCZ4PG'.
   [OK]          round-trip             0   tool_schema json round-trip.
 
 Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/tool_input_schema_fidelity'.
-Test Successful in 0.002s. 19 tests run.
+Test Successful in 0.003s. 19 tests run.

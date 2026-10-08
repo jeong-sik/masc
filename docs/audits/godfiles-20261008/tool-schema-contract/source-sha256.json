@@ -1,8 +1,8 @@
 {
   "packages/agent_core/lib/llm_provider/types.ml": "32161b9a03400dcb64f1436877cee663ce17a7b46f1192c17c673a57be4ec408",
   "packages/agent_core/lib/llm_provider/types.mli": "235fc31934b26d718167363445e44e702db97ff1abc68caad9abd7a247372a0f",
-  "packages/agent_core/lib/llm_provider/tool_schema_contract.ml": "70491f8319db812243163bc2bad65e70bf38bf5bc68a8220738cb6e5157fd02d",
-  "packages/agent_core/lib/llm_provider/tool_schema_contract.mli": "cf62982dd6cc44bdd7a657876f10d3e30e6044e6dc695f7b1828056362552de6",
+  "packages/agent_core/lib/llm_provider/tool_schema_contract.ml": "042bfc689d04c746e70720384b1c8ce80e0580ac7139d9a34ca110f9cd7b40be",
+  "packages/agent_core/lib/llm_provider/tool_schema_contract.mli": "ffeaa0207db2c614d1f992a0acd35bf69576beb6cd9ad842d74bfcdfa4248d2b",
   "packages/agent_core/lib/llm_provider/dune": "a620ab9155b3fa70a63e69895aa29ede059ea61476889dd54e88dbcb79477d7a",
   "packages/agent_core/lib/base/types.ml": "02596450a0a69491ef985646d303179f7d02cf198cd608e586a750f9cad95af2",
   "packages/agent_core/lib/protocol/mcp_schema.ml": "c9269fe3d7a710dadc0484cb01a8982620eaa088ba9c3e24780b19737a0aaf1d",

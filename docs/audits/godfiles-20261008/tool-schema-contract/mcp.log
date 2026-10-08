@@ -1,5 +1,5 @@
 Testing `MCP'.
-This run has ID `JQ1BNU8G'.
+This run has ID `3P2P7CT7'.
 
   [OK]          schema_conversion          0   type mapping.
   [OK]          schema_conversion          1   unknown type fails.
@@ -32,4 +32,4 @@ This run has ID `JQ1BNU8G'.
   [OK]          mcp_tool_of_json           4   non-assoc.
 
 Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/MCP'.
-Test Successful in 0.003s. 29 tests run.
+Test Successful in 0.005s. 29 tests run.

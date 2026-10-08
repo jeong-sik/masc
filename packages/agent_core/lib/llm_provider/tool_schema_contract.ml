@@ -780,4 +780,3 @@ let tool_schema_of_json (json : Yojson.Safe.t) : (tool_schema, string) result =
          ()
      | None -> Ok (tool_schema_of_params ?strict ~name ~description ~parameters ()))
 ;;
-

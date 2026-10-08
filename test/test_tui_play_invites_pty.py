@@ -124,6 +124,17 @@ def run(executable: str) -> None:
                                 path="/api/v1/play/invites/guest1")
         command(b"/play link", b"No play link has been issued")
         command(b"/play revoke guest1", b"controller still busy")
+        command(b"/play revoke guest1", b"unknown outcome")
+        assert len(revoke_methods) == 2, "an unknown DELETE was blindly retried"
+        h.send_and_wait(process, master, output, b"\x15", h.composer_showing(b""))
+        h.escape_to_keeper_detail(process, master, output, name=b"alpha")
+        h.send_and_wait(process, master, output, b":go Collab\r", b"MASC Collab")
+        h.send_and_wait(process, master, output, b"u", b"original request cannot still complete")
+        # This fixture's 500 response has completed; unlike an inventory read,
+        # that is independent evidence no delayed DELETE can still execute.
+        h.send_and_wait(process, master, output, b"\r", b"Operator confirmed")
+        h.send_and_wait(process, master, output, b"\x1b", b"Keepers")
+        h.send_and_wait(process, master, output, b"m", CHAT)
         command(b"/play revoke guest1", b"controller released")
         command(b"/play invite guest1 24", LINK.encode())
         close_card()

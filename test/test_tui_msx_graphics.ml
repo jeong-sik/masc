@@ -31,12 +31,12 @@ let surface_of ?(w = 256) ?(h = 192) () =
   Masc_tui_interactive.Pixels { width = w; height = h; rgb = String.make (w * h * 3) '\128' }
 ;;
 
-let drawn ?(f = frame ()) ?(surface = surface_of ()) ?notice () =
+let drawn ?(f = frame ()) ?(surface = surface_of ()) ?notice ?interaction () =
   let buf = Buffer.create 65536 in
   Msx.render ~live:Masc_tui_machine_live.Unread
     ~write:(Buffer.add_string buf)
     ~connection:Masc_tui_types.Connected
-    ?notice
+    ?notice ?interaction
     (Some f)
     (Some surface);
   Buffer.contents buf
@@ -169,13 +169,22 @@ let test_meta_pixels_do_not_draw () =
       (mentions ~needle:"f=24" (Buffer.contents buf)))
 ;;
 
+(* The checkpoint keys are named only while controlling, and that footer is
+   90 cells wide. The terminal is pinned wide enough to hold it, so the case
+   reads the bindings and not whatever width the probe's default leaves. *)
 let test_checkpoint_bindings_and_result_are_visible () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) @@ fun () ->
+  set_size (24, 100);
   with_protocol Graphics.Kitty_protocol (fun () ->
-    let out = drawn () in
+    let out = drawn ~interaction:Types.Control_machine () in
     check bool "footer names quick save" true (mentions ~needle:"F6: save quick" out);
     check bool "footer names quick restore" true (mentions ~needle:"F7: restore quick" out);
     List.iter (fun notice ->
-      let out = drawn ~notice () in
+      let out = drawn ~notice ~interaction:Types.Control_machine () in
       check bool "checkpoint outcome remains visible beside the frame" true
         (mentions ~needle:notice out);
       (* In Kitty the explicit placement cursor used to jump back onto the
@@ -325,7 +334,15 @@ let test_surface_lifecycle () =
     Buffer.clear buf;
     ignore (Msx.consume ~write:(Buffer.add_string buf) state "esc");
     check bool "exit removes image" true (mentions ~needle:"d=I,i=32" (Buffer.contents buf));
-    check bool "reopen sends pixels" true (mentions ~needle:"f=24" (drawn ())))
+    check bool "reopen sends pixels" true (mentions ~needle:"f=24" (drawn ()));
+    state.msx_open <- true;
+    Buffer.clear buf;
+    Msx.close ~write:(Buffer.add_string buf) state;
+    Types.withdraw_machine_control state;
+    check bool "workspace withdrawal deletes the image" true
+      (mentions ~needle:"d=I,i=32" (Buffer.contents buf));
+    check bool "workspace withdrawal releases screen ownership" false state.msx_open;
+    check bool "new workspace sends its pixels" true (mentions ~needle:"f=24" (drawn ())))
 
 let test_synchronized_batch () =
   with_protocol Graphics.Kitty_protocol (fun () ->

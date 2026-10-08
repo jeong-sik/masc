@@ -71,6 +71,10 @@ type http_refresh_outcome =
         approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option
       }
 
+type play_sink = Play_chat of string option
+  | Play_collab of { owner : unit ref; mutation : Masc_tui_collab.mutation }
+type play_list_sink = Play_chat_list of string option | Play_collab_list of Masc_tui_collab.read
+
 type preset_sink =
   | Preset_to_chat of string option
   | Preset_to_pane
@@ -98,6 +102,7 @@ type lane_addons_reply = {
 type 'a play_mutation =
   | Play_answered of ('a, string) result
   | Play_refused of string
+  | Play_not_dispatched of string
   | Play_unanswered of string
 
 type play_revoke =
@@ -515,9 +520,9 @@ type async_msg =
   | Preset_saved of preset_sink * (Masc.Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Masc.Tui_decode.preset_restore_report, string) result
   | Preset_deleted of preset_sink * (string, string) result
-  | Play_invites_listed of string option * (Masc.Tui_decode.play_invite_row list, string) result
-  | Play_invite_issued of string option * Masc.Tui_decode.play_invite_issued play_mutation
-  | Play_invite_revoked of string option * string * play_revoke
+  | Play_invites_listed of play_list_sink * (Masc.Tui_decode.play_invite_row list, string) result
+  | Play_invite_issued of Masc_tui_types.play_change_request * play_sink * Masc.Tui_decode.play_invite_issued play_mutation
+  | Play_invite_revoked of Masc_tui_types.play_change_request * play_sink * string * play_revoke
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   (* The scope travels with the directory. Without it a reply names a

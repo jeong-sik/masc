@@ -307,10 +307,24 @@ let test_the_issue_notice_never_carries_the_link () =
   check bool "and still does not carry a link" false (contains ~sub:"play#" retained)
 ;;
 
+let test_local_link_explains_device_scope () =
+  List.iter (fun (host, local) ->
+    let card = match make ~link:("http://" ^ host ^ "/play#fixture") () with
+      | Ok card -> card | Error error -> fail error in
+    let notes = Card.draw card ~width:140 ~rows:100 |> List.filter_map (function
+      | Card.Note text -> Some text | _ -> None) |> String.concat " " in
+    check bool ("local address " ^ host) local (contains ~sub:"this computer only" notes))
+    ["localhost:8935", true; "127.5.2.1:8935", true; "[::1]:8935", true;
+     "[::ffff:127.0.0.1]:8935", true; "[::ffff:127.5.2.1]:8935", true;
+     "[::ffff:192.168.0.7]:8935", false;
+     "play.example.test", false]
+;;
+
 let () =
   run "Masc_tui_play_card"
     [ ( "card"
-      , [ test_case "a link the card cannot draw is refused" `Quick
+      , [ test_case "local links explain which device can open them" `Quick test_local_link_explains_device_scope
+        ; test_case "a link the card cannot draw is refused" `Quick
             test_a_link_the_card_cannot_draw_is_refused
         ; test_case "the QR is the library's QR with its quiet zone" `Quick
             test_the_qr_is_the_libraries_qr_with_its_quiet_zone

@@ -1,0 +1,2 @@
+### Fixed
+- Accept typed native tool start, end, and progress observations in Dashboard stream validation without inferring tool success or changing the conversation body.

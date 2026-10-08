@@ -363,3 +363,50 @@ At baseline `3623434008`, the Dashboard's closed custom vocabulary and payload
 contracts also omit `KEEPER_NATIVE_TOOL_START`, `KEEPER_NATIVE_TOOL_END`, and
 `KEEPER_NATIVE_TOOL_PROGRESS`; that separate gap remains, so this unit does not
 claim complete Dashboard/server wire parity.
+
+
+## Dashboard native observation contract
+
+The Dashboard schema now admits `KEEPER_NATIVE_TOOL_START`,
+`KEEPER_NATIVE_TOOL_END`, and `KEEPER_NATIVE_TOOL_PROGRESS`. Before this repair,
+the operation observer's closed event-name list rejected these valid server
+frames and `malformedKeeperOperationProjection` converted that rejection to
+`RUN_ERROR`. The typed union, exact outer field table, and nested validators now
+follow `Server_keeper_chat_agui_projection.native_tool_to_json` and
+`Runtime_native_tools.completion_of_json` / `progress_of_json`.
+
+All three payloads require nonnegative integral `toolStreamScope` and
+`toolCallBlockIndex`. Optional provider message id, call id and tool name remain
+absent when unknown; supplied values must be nonblank strings. START carries no
+completion or progress fields. END may omit `completion` for the existing
+end-observed-only contract; a present null or malformed object is rejected.
+PROGRESS requires its typed `progress` object. Unknown outer keys, including a
+fabricated execution receipt, are rejected.
+
+Completion preserves the six closed kinds: `end_observed`,
+`completion_reported`, `error_reported`, `decline_reported`, `result_received`,
+and `unrecognized_status`. Every completion requires `exit_code` as an integer
+or null; negative codes remain negative. `result_received` additionally requires
+`is_error` as boolean or null, and `unrecognized_status` requires the original
+`status` string, including an empty string. Fields from another variant are not
+accepted. Neither a completion nor zero exit status is converted into MASC tool
+success or an execution receipt. Progress is either `output_observed` with a
+strictly positive integral `byte_count`, or `message_reported` with a string
+`message`, including an empty string. It never supplies assistant body text.
+JavaScript numeric fields retain the existing safe-integer validation policy.
+
+The existing Dashboard no-view handler accepts these side observations without
+adding native tool rows, changing model activity, finalizing the response, or
+settling a MASC tool with coincident provider identifiers. This is wire contract
+support, not native tool rendering. TUI behavior and the OCaml codecs are
+unchanged by this unit. Focused schema and operation-observer fixtures cover
+valid encoder shapes, malformed required fields, incompatible variant fields,
+absent END metadata, retained provider facts, and delivery of subsequent authored
+text after native metadata.
+
+Scope of parity: this repairs the native event names and decoded-object payload
+contracts. The Dashboard transport calls `JSON.parse` before these validators;
+repeated raw JSON keys have already collapsed by that boundary. This unit does
+not replace that parser or claim the OCaml decoder's duplicate-key rejection for
+raw Dashboard JSON. GLM's missing streamed MessageStart remains the separate
+provider-boundary unit recorded above.

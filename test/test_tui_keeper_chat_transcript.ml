@@ -912,6 +912,36 @@ let test_progress_row_carries_the_turn_age () =
       check string "a backwards clock drops the age" "working" text
   | got -> failf "expected a progress row, got %d rows" (List.length got)
 
+(* Two separate choices meet in the default chat view. [compact] picks which
+   facts the row carries; [show_timing] says whether generated ages are drawn.
+   The reading layout asks for the compact row without timing, and a silence
+   age must not come back through the compact row's own wording. *)
+let test_compact_progress_row_follows_timing_visibility () =
+  let t = fresh () in
+  feed t [ Live.Run_started ];
+  feed ~now:(origin +. 10.) t [ Live.Thinking "weighing the observed state" ];
+  (match Transcript.status_rows ~compact:true ~now:(origin +. 90.) t with
+   | (Transcript.Progress, text) :: _ ->
+       check bool "the compact row keeps the activity" true
+         (contains ~needle:"reasoning" text);
+       check bool "shown timing keeps the turn age on the compact row" true
+         (contains ~needle:"1m30s" text);
+       check bool "shown timing keeps the silence age on the compact row" true
+         (contains ~needle:"nothing back for" text)
+   | got -> failf "expected a compact progress row, got %d rows" (List.length got));
+  match
+    Transcript.status_rows ~compact:true ~show_timing:false
+      ~now:(origin +. 90.) t
+  with
+  | (Transcript.Progress, text) :: _ ->
+      check bool "hidden timing keeps the activity" true
+        (contains ~needle:"reasoning" text);
+      check bool "hidden timing drops the turn age" false
+        (contains ~needle:"1m30s" text);
+      check bool "hidden timing drops the silence age" false
+        (contains ~needle:"nothing back for" text)
+  | got -> failf "expected a compact progress row, got %d rows" (List.length got)
+
 (* The age answers "how long has this been going". Once the run said it was
    over that question is closed: the row keeps the turn's span instead, so a
    settled turn does not read as one that keeps getting older while nothing
@@ -3016,6 +3046,8 @@ let () =
             test_a_registered_length_name_passes_through_whole
         ; test_case "the progress row carries the turn age" `Quick
             test_progress_row_carries_the_turn_age
+        ; test_case "the compact progress row follows timing visibility" `Quick
+            test_compact_progress_row_follows_timing_visibility
         ; test_case "a settled turn reports its span, not a growing age" `Quick
             test_a_settled_turn_reports_its_span_not_a_growing_age
         ; test_case "a replayed turn reports an age, not a frozen span" `Quick

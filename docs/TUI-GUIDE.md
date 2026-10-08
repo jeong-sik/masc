@@ -957,36 +957,31 @@ switched away or left and returned is discarded instead of replacing the
 newer transcript. The shortcut is withdrawn while a turn is in flight or the
 roster cannot be read.
 
-The speaker is a reverse-video badge for conversation sources: operator
-sources are cyan, Keepers blue, status yellow, and errors red. Tool and
-reasoning stretches are subordinate activity, so they use a quiet gray section
-label instead of competing with the people speaking. Ordinary operator and
-Keeper prose uses the terminal's default foreground so Markdown, code, links,
-and emphasis keep their own hierarchy. Connector and agent origins remain in
-the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
-inferred from row position.
+Chat opens in a conversation layout: a small `›` marks your message, `●`
+marks the Keeper, and `◀` marks another sender. Other senders keep their name
+and origin above their message. Prose starts at one column, wraps within a
+100-cell reading width, and has a blank line between messages. Tool calls keep
+their own name and result mark without a second TOOLS label. Operator and Keeper
+prose uses the terminal foreground; tools and reasoning remain subdued.
 
-A line someone else wrote -- another keeper, another person, a connector --
-steps in two cells and reads behind a solid bar in the sender's colour, where
-the journal's rows carry a dotted one. The operator's lines, the keeper's
-replies and its work rows stay at the conversation's edge.
+`Ctrl-F` cycles conversation → inline metadata → full origin headings →
+conversation. Inline metadata includes the minute clock, aligned speaker labels
+and turn rails; full headings give origins a row of their own. These expanded
+modes also show request IDs, recorded turn numbers and input-reflection receipts.
+The header labels only expanded modes (`metadata:inline`, `metadata:full`).
+Font size, letter spacing and line height come from your terminal settings.
 
-Chat opens without timestamps, turn time ranges, hourly separators or generated
-progress timers (request age, call age and model silence).
-`Ctrl-F` adds a short clock (`metadata:inline`), then full timestamp headings
-(`metadata:full`), then returns to the default. The short clock appears only
-where the minute moved. An open request between continuation segments has no
-progress banner or growing wait timer; progress returns when its next run starts.
-Approval prompts and diagnostics remain available. In compact and
-results modes, one quiet status below the history summarizes current work,
-your waiting messages, and their observed delivery or priority receipts.
-Waiting for confirmation and confirmed acceptance remain distinct. If a priority
-reply is unavailable, the status says confirmation is unavailable and retains
-the diagnostic detail; it does not claim the priority change was refused. Full mode
-(`Ctrl-D` twice from compact, or `/tools full`) shows execution IDs, elapsed
-time and priority receipt details. Each pending input already shows its own
-delivery state in the default view. Failures, approval
-requests, and explicit stop targets remain visible in the concise modes.
+The input area shows progress for the current conversation. Other Keepers' running
+requests remain in Keepers and Activity, without extra interrupt commands beside
+the composer. The default progress row shows the current activity without generated
+progress timers (request age, call age and model silence); those timers,
+runtime identity and cumulative tool details are available in the metadata views.
+An open request between continuation segments has no progress row or growing
+wait timer; progress returns when its next run starts.
+Pending inputs retain their delivery state. Failures, unconfirmed delivery,
+interrupt outcomes and approval requests stay visible. `Ctrl-S:details` opens
+folded approval records. `Ctrl-D` expands tool details independently of metadata.
+
 Auto-next requests priority for your message; current work continues until it
 finishes or yields. Use the explicit interrupt controls to stop current work.
 When
@@ -1043,12 +1038,11 @@ how long the turn has run and which tool it last touched; the `Latest
 output:` tail it used to carry is left out while the pane draws that text.
 A turn whose stream the TUI opened and lost is followed the same way.
 
-Memory journal rows open in summary mode, using producer-owned compact text
-instead of reconstructing a summary from rendered prose. The footer's
-`Ctrl-N:journal` or `/memory`
-cycles those rows through summary, full, and hidden; the header names the two
-non-default states as `journal:full` and `journal:off`. Neutral system rows that
-share the journal lane have no summary projection and therefore remain whole.
+Memory journal rows start hidden. `Ctrl-N` or `/memory` cycles hidden → summary
+→ full → hidden. The header names the expanded modes as `journal:summary` and
+`journal:full`; the default needs no badge. Summary uses producer-owned compact
+text. Neutral system rows with no summary projection remain whole when the
+journal is shown. The help sheet lists the journal and metadata shortcuts.
 
 A failed Librarian pass is not a row in summary mode. While the passes after
 the last commit keep failing, the header's second row names the run once, in

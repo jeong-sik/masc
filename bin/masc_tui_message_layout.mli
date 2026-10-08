@@ -275,6 +275,7 @@ type shade =
 type row_kind =
   | Metadata of metadata
   | Body
+  | Spacing  (** Decorative message separation, omitted at the live edge. *)
   | Viewport_gap of { hidden_rows : int }
       (** A synthetic row marking content omitted from an oversized newest
           entry at the live edge, including an explicitly collapsed run of
@@ -285,13 +286,12 @@ type origin_display =
   | Origin_row  (** The origin keeps a row of its own, above the body. *)
   | Origin_inline
       (** The origin folds into the body's left margin, clock included. *)
-  | Origin_bare  (** The same margin without clocks, spans or time separators. *)
-(** Where a message's origin is drawn. [Origin_bare] is the chat default
-    (see [Masc_tui_types.create_state]). [Origin_inline] draws a short clock
-    only where the minute moved. [Origin_row] gives each turn a heading row
-    with the speaker and the full timestamp. Folding headings into the
-    gutter hands their rows back to the conversation: eight speakers taking
-    turns otherwise spend eight rows of a forty-row pane on headings.
+  | Origin_bare
+      (** Conversation: a small speaker mark, no clock or turn rail.
+          Other senders keep a name above their message. *)
+(** [Origin_bare] is the chat default. Prose uses a bounded reading width and
+    messages are separated by whitespace. [Origin_inline] exposes the aligned
+    clock, speaker and turn rail; [Origin_row] gives origins their own heading.
 
     Every layout and scroll function takes this, and passing it to one but not
     another would measure the pane against a height it does not draw. *)

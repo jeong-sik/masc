@@ -1771,6 +1771,8 @@ def chat_visibility_modes_interaction(
             b"keeper alpha",
             b"ci-red-attribution",
         )
+        # This scenario examines runtime and work diagnostics in the expanded layout.
+        send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
         wait_for_output(
             process,
             master_fd,
@@ -2393,7 +2395,24 @@ def message_origin_badge_interaction(
     operator_body = b"operator-body-neutral"
     keeper_body = b"keeper-body-neutral"
 
-    # Clocks are opt-in: bare -> inline -> row -> bare.
+    # The default reading mode keeps the inbound sender above the message and
+    # identifies this pane's Keeper with its mark. Diagnostic metadata is opt-in.
+    def assert_reading_layout() -> None:
+        rows = screen_rows(bytes(output))
+        sender_row = screen_row_of(rows, b"vincent")
+        operator_row = screen_row_of(rows, operator_body)
+        keeper_row = screen_row_of(rows, keeper_body)
+        if min(sender_row, operator_row, keeper_row) < 0 or sender_row >= operator_row:
+            raise AssertionError(f"reading layout lost the inbound sender or message: {rows!r}")
+        if "◀".encode() not in rows[sender_row] or "●".encode() not in rows[keeper_row]:
+            raise AssertionError(f"reading layout lost its speaker identity: {rows!r}")
+        for row in (rows[sender_row], rows[operator_row], rows[keeper_row]):
+            if re.search(rb"\d\d:\d\d", row) is not None:
+                raise AssertionError(f"reading layout still drew a message clock: {row!r}")
+
+    drain_until_quiet(process, master_fd, output)
+    assert_reading_layout()
+    assert_bodies_unwashed(bytes(output[pane_start:]), "the reading layout")
     send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
     full_row = send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
     # The pane's own keeper is not named on its full heading -- the
@@ -2429,26 +2448,10 @@ def message_origin_badge_interaction(
         )
     assert_bodies_unwashed(full_row, "the full origin row")
 
-    bare = send_and_wait(process, master_fd, output, b"\x06", keeper_body)
-    for badge, body, description in (
-        (operator_badge, operator_body, "operator"),
-        (keeper_badge, keeper_body, "Keeper"),
-    ):
-        row, gap = origin_screen_shape(output, badge, body)
-        if gap != 0:
-            raise AssertionError(
-                f"the clock-free layout did not keep the {description} body beside "
-                f"its origin (gap {gap}): {screen_text(bytes(output))!r}"
-            )
-        if body not in row:
-            raise AssertionError(
-                f"the clock-free {description} row lost its body: {row!r}"
-            )
-        if re.search(rb"\d\d:\d\d", row) is not None:
-            raise AssertionError(
-                f"the clock-free {description} row still drew a clock: {row!r}"
-            )
-    assert_bodies_unwashed(bare, "the clock-free layout")
+    bare = send_and_wait(process, master_fd, output, b"\x06" + FULL_REDRAW, keeper_body)
+    drain_until_quiet(process, master_fd, output)
+    assert_reading_layout()
+    assert_bodies_unwashed(bare, "the reading layout")
 
     inline = send_and_wait(
         process,
@@ -2488,13 +2491,10 @@ def message_origin_badge_interaction(
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    # Restore only the foreground after the accented prompt. A full reset
-    # would erase the input surface background; accepting arbitrary SGR here
-    # could instead leave the draft tinted or clear its background with 49m.
-    if b"\x1b[96m  > \x1b[39mdraft-neutral" not in draft_frame:
-        raise AssertionError(
-            f"chat composer did not restore default foreground while preserving its background: {draft_frame!r}"
-        )
+    # The prompt's dim weight must end before the draft. A background may be
+    # reopened after the reset without tinting the text itself.
+    if re.search(rb"  > \x1b\[0m(?:\x1b\[48;[0-9;]*m)?draft-neutral", draft_frame) is None:
+        raise AssertionError(f"chat composer did not restore readable draft text: {draft_frame!r}")
     escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")
 
@@ -2665,6 +2665,8 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        # Runtime attribution is diagnostic information; opt into its display.
+        send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
         if not wait_for_fixture_event(
             process, master_fd, output, alpha_history.requested, timeout=10.0
         ):

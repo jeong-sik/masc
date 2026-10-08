@@ -2910,6 +2910,7 @@ let test_a_failing_librarian_is_named_on_the_header () =
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
+    state.msg_memory_visibility <- Tui_types.Memory_summary;
     let failed at =
       { (chat_entry ~request_id:"" ~role:Tui_types.Message_memory
            ~memory_summary:"Librarian failed \xc2\xb7 exact_execution_failure"
@@ -2973,6 +2974,7 @@ let test_a_journal_revision_draws_its_facts_in_columns () =
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     let summary = "Librarian \xc2\xb7 revision 454 \xc2\xb7 +1 \xe2\x88\x920 \xc2\xb7 63 retained" in
     let claim =
       "verifier_exact cannot read the GitHub Actions job log, so ancestry alone \
@@ -3957,63 +3959,46 @@ let test_approval_detail_scroll_accepts_the_rendered_clamp () =
 (* The header names what is unusual, not what is normal.
 
    Reasoning folded and tools compact are the defaults: observed work stays
-   identifiable while its details remain one shortcut away. Spelling those modes in every header
-   would spend width to describe the ordinary case.
-
-   Every combination is listed rather than described, because the rule is
-   about which of eight cases produce which string. *)
+   identifiable while its details remain one shortcut away. Spelling those modes
+   in every header would spend width to describe the ordinary case. *)
 let test_the_header_names_only_unusual_modes () =
   let summary ?(origin = Masc_tui_message_layout.Origin_bare) memory
       reasoning tools =
     Tui_types.chat_visibility_summary ~memory ~reasoning ~tools ~origin
   in
-  let memory_summary = Tui_types.Memory_summary in
   let memory_hidden = Tui_types.Memory_hidden in
-  let memory_full = Tui_types.Memory_full in
   let full = Tui_types.Reasoning_full and folded = Tui_types.Reasoning_folded in
   let hidden = Tui_types.Reasoning_hidden in
   let tools_full = Tui_types.Tools_full and compact = Tui_types.Tools_compact in
-  (* The header says nothing for the state the TUI actually starts in, so the
-     default has to be read rather than restated here. *)
   let started =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
-  check
-    bool
-    "the pane starts without clocks"
-    true
-    (started.Tui_types.msg_origin_display
-     = Masc_tui_message_layout.Origin_bare);
+  check bool "the pane starts with the reading layout" true
+    (started.Tui_types.msg_origin_display = Masc_tui_message_layout.Origin_bare);
   check string "everything at its default says nothing" ""
-    (summary ~origin:started.Tui_types.msg_origin_display memory_summary
-       started.msg_reasoning_visibility compact);
-  check string "the optional short clock is named" "metadata:inline"
-    (summary ~origin:Masc_tui_message_layout.Origin_inline memory_summary folded
-       compact);
+    (summary ~origin:started.Tui_types.msg_origin_display started.msg_memory_visibility
+       started.msg_reasoning_visibility started.msg_tool_visibility);
+  check string "inline diagnostics are named" "metadata:inline"
+    (summary ~origin:Masc_tui_message_layout.Origin_inline memory_hidden folded compact);
   check string "full metadata is named" "metadata:full"
-    (summary ~origin:Masc_tui_message_layout.Origin_row memory_summary folded
-       compact);
+    (summary ~origin:Masc_tui_message_layout.Origin_row memory_hidden folded compact);
   check string "full reasoning alone" "reasoning:full"
-    (summary memory_summary full compact);
+    (summary memory_hidden full compact);
   check string "hidden reasoning is explicit" "reasoning:hidden"
-    (summary memory_summary hidden compact);
+    (summary memory_hidden hidden compact);
   check string "full tools alone" "tools:full"
-    (summary memory_summary folded tools_full);
+    (summary memory_hidden folded tools_full);
   check string "short results mode is named" "tools:results"
-    (summary memory_summary folded Tui_types.Tools_results);
-  check string "journal off alone" "journal:off"
-    (summary memory_hidden folded compact);
+    (summary memory_hidden folded Tui_types.Tools_results);
+  check string "journal summary alone" "journal:summary"
+    (summary Tui_types.Memory_summary folded compact);
   check string "full journal alone" "journal:full"
-    (summary memory_full folded compact);
-  check string "two of them" "reasoning:full tools:full"
-    (summary memory_summary full tools_full);
-  check string "all three, in a fixed order"
-    "journal:off reasoning:full tools:full"
+    (summary Tui_types.Memory_full folded compact);
+  check string "two expanded modes" "reasoning:full tools:full"
     (summary memory_hidden full tools_full);
-  check int "at rest it now costs nothing" 0
-    (String.length (summary memory_summary folded compact));
-  check int "all three deviations still fit as one compact label" 37
-    (String.length (summary memory_hidden full tools_full))
+  check string "all three expanded modes retain their order"
+    "journal:summary reasoning:full tools:full"
+    (summary Tui_types.Memory_summary full tools_full)
 ;;
 
 let test_chat_header_resolves_the_effective_modes () =
@@ -4060,9 +4045,9 @@ let test_skill_usage_time_does_not_invent_never () =
    added to [chat_visibility_summary] without a footer hint fails this. *)
 let test_every_header_mode_is_named_by_a_footer_key () =
   let summary =
-    Tui_types.chat_visibility_summary ~memory:Tui_types.Memory_hidden
+    Tui_types.chat_visibility_summary ~memory:Tui_types.Memory_summary
       ~reasoning:Tui_types.Reasoning_full ~tools:Tui_types.Tools_full
-      (* Every axis away from its default, so all four are named. *)
+      (* Explicitly expand each axis so every available diagnostic has a key. *)
       ~origin:Masc_tui_message_layout.Origin_row
   in
   let axis_of part =
@@ -4107,9 +4092,9 @@ let test_chat_visibility_defaults_and_cycles () =
     (Tui_types.reasoning_visibility_to_string default.msg_reasoning_visibility);
   check string "tool calls start as one activity summary" "compact"
     (Tui_types.tool_visibility_to_string default.msg_tool_visibility);
-  check string "Memory journal starts as one line per pass" "summary"
+  check string "Memory journal starts hidden" "hidden"
     (Tui_types.memory_visibility_to_string default.msg_memory_visibility);
-  check (list string) "the walk adds clocks and returns to reading"
+  check (list string) "the walk starts at reading mode and comes back"
     [ "off"; "inline"; "row"; "off" ]
     (let rec collect count mode =
        if count = 0
@@ -4143,7 +4128,7 @@ let test_chat_visibility_defaults_and_cycles () =
      in
      collect 3 Tui_types.Reasoning_hidden);
   check (list string) "Memory detail cycles through all three states"
-    [ "summary"; "full"; "hidden"; "summary" ]
+    [ "hidden"; "summary"; "full"; "hidden" ]
     (let rec collect count mode =
        if count = 0
        then [ Tui_types.memory_visibility_to_string mode ]
@@ -4151,7 +4136,7 @@ let test_chat_visibility_defaults_and_cycles () =
          Tui_types.memory_visibility_to_string mode
          :: collect (count - 1) (Tui_types.next_memory_visibility mode)
      in
-     collect 3 Tui_types.Memory_summary);
+     collect 3 default.msg_memory_visibility);
   check (list string) "Ctrl-D cycles summary, results, full, summary"
     [ "compact"; "results"; "full"; "compact" ]
     (let rec collect count mode =
@@ -4550,6 +4535,7 @@ let test_batch_reply_follows_all_original_inputs () =
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     state.msg_loaded_keeper <- Some "alpha";
     let member request_id at =
       let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:1. in
@@ -5065,6 +5051,7 @@ let test_status_details_and_fold_counts_reach_the_frame () =
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [Live.Run_started] in
     state.msg_inflight <- [entry];
     state.msg_tool_visibility <- Tui_types.Tools_full;
@@ -5175,7 +5162,7 @@ let test_delivery_states_and_observed_work_are_identifiable () =
       check bool "started input leaves pending area" false (has started "대기 입력 1건");
       Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 1) (Live.Thinking "OBSERVED_THOUGHT");
       let thought = screen () in
-      check bool "default reasoning lane has its name" true (has thought "THINKING");
+      check bool "diagnostic reasoning lane has its name" true (has thought "THINKING");
       let occurrence : Live.tool_occurrence =
         {stream_scope=0; block_index=1; provider_message_id=None; tool_call_id=Some "native-read"} in
       Tui_types.turn_log_add ~now:5. entry.log ~seq:(Some 2)
@@ -5183,7 +5170,7 @@ let test_delivery_states_and_observed_work_are_identifiable () =
       Tui_types.turn_log_add ~now:6. entry.log ~seq:(Some 3) (Live.Native_tool_ended {occurrence});
       Tui_types.turn_log_add ~now:7. entry.log ~seq:(Some 4) (Live.Text "OBSERVED_ANSWER");
       let streaming = screen () in
-      List.iter (fun marker -> check bool ("default work label: " ^ marker) true (has streaming marker))
+      List.iter (fun marker -> check bool ("diagnostic work label: " ^ marker) true (has streaming marker))
         ["THINKING"; "TOOLS"; "STREAMING"; "OBSERVED_ANSWER"];
       check string "display annotations do not alter recall" "DISTINCT_INPUT"
         (List.hd state.msg_history).me_text)
@@ -5201,6 +5188,7 @@ let test_search_counts_visible_request_annotations () =
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     state.msg_history <- List.init 24 (fun index ->
       let id = Printf.sprintf "search-%d" index in
       let row = chat_entry ~request_id:id
@@ -5253,7 +5241,7 @@ let test_attachment_caption_whitespace_reaches_chat_rows () =
       ~height:100 [entry]
     |> List.filter_map (fun (row : Layout.row) -> match row.kind with
       | Layout.Body -> Some (Masc_tui_theme.strip_sgr row.text)
-      | Layout.Metadata _ | Layout.Viewport_gap _ -> None) in
+      | Layout.Metadata _ | Layout.Spacing | Layout.Viewport_gap _ -> None) in
   List.iter (fun (caption, expected) ->
     check (list string) (Printf.sprintf "displayed caption %S" caption)
       (List.map (fun line -> "  " ^ line) (expected @ ["⎘ #1 notes.txt"]))

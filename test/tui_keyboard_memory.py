@@ -475,12 +475,8 @@ def autonomous_turn_history_interaction() -> Interaction:
             # alone, which the body's own " · " separators also carry.
             (re.compile("\u00b7\\s+2 reasoning steps".encode()),
              "the thinking lane"),
-            # The block header row carries the badge, the quoted rail and
-            # the first call's status on one stripped row, so the mark is
-            # pinned against them the way the thinking lane is pinned
-            # against its body -- never the bare mark alone.
-            (re.compile("\u25a0\\s+\u2502\\s+\u2717".encode()),
-             "the tool block mark"),
+            # The call's own failure mark identifies it in reading mode.
+            (re.compile("✗\\s+tool_execute".encode()), "the failed tool identity"),
         ):
             if find_needle(plain_pane, needle) < 0:
                 raise AssertionError(
@@ -585,12 +581,12 @@ def memory_journal_timeline_interaction(
             b"m",
             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
         )
-        # This scenario verifies timestamps, so opt into both clock levels.
+        # This scenario verifies the complete timestamp axis and journal
+        # ordering, so explicitly open both diagnostic projections.
         send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
         send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
-        # At rest the journal draws only its one-line summary: the header
-        # with source, revision, and counts. The change fence under it is a
-        # keypress away.
+        send_and_wait(process, master_fd, output, b"\x0e", b"journal:summary")
+        # The journal summary is one line; its change fence opens on demand.
         wait_for_output(
             process,
             master_fd,
@@ -798,20 +794,18 @@ def memory_journal_timeline_interaction(
             b"direct turn after Librarian",
         )
 
-        # Ctrl-N walks the same cycle without the composer: full -> hidden.
-        # Each check reads only the frame that drew the new mode. The bytes
-        # send_and_wait returns start at the key press, so a refresh frame the
-        # loop drew before it read the key -- still in the previous mode --
-        # can sit in front of it: under the full keyboard suite the hidden
-        # check once found the row in the frame before "journal:off".
-        hidden = frame_containing(
-            send_and_wait(process, master_fd, output, b"\x0e", b"journal:off"),
-            b"journal:off",
+        # Full -> hidden returns to the default, which has no mode badge.
+        # Read the completed screen after a full redraw to check disappearance.
+        send_and_wait(
+            process, master_fd, output, b"\x0e" + FULL_REDRAW,
+            b"direct turn after Librarian",
         )
+        drain_until_quiet(process, master_fd, output)
+        hidden = screen_text(bytes(output))
         if b"Librarian \xc2\xb7 revision 9" in hidden:
             raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
 
-        # ... and hidden -> summary, the resting default.
+        # ... and hidden -> summary restores the explicitly opened journal.
         restored = frame_containing(
             send_and_wait(
                 process,
@@ -822,8 +816,8 @@ def memory_journal_timeline_interaction(
             ),
             b"Librarian \xc2\xb7 revision 9",
         )
-        if b"journal:off" in restored:
-            raise AssertionError(f"Restored Memory timeline stayed off: {restored!r}")
+        if b"journal:summary" not in screen_text(bytes(output)):
+            raise AssertionError(f"Restored Memory timeline did not open summary mode: {restored!r}")
         if b"superseded by provider grouping" in restored:
             raise AssertionError(
                 f"Summary mode drew the change fence after restore: {restored!r}"
@@ -909,8 +903,9 @@ def memory_journal_timeline_interaction(
         wait_for_output(
             process, master_fd, output, failing_header, start=failing_from, timeout=5.0
         )
-        # journal:full -> off -> summary.
-        send_and_wait(process, master_fd, output, b"\x0e", b"journal:off")
+        # journal:full -> hidden -> summary.
+        send_and_wait(process, master_fd, output, b"\x0e" + FULL_REDRAW,
+                      b"direct turn after Librarian")
         send_and_wait(process, master_fd, output, b"\x0e", b"Librarian \xc2\xb7 revision 9")
         drain_until_quiet(process, master_fd, output)
         rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))

@@ -264,7 +264,7 @@ let test_keeps_newest_metadata_and_bytes () =
            check bool "the marker fits without the generic truncation mark" true
              (Layout.display_width gap.text <= 20
               && not (String.ends_with ~suffix:"…" gap.text))
-       | Layout.Metadata _ | Layout.Body ->
+       | Layout.Metadata _ | Layout.Body | Layout.Spacing ->
            fail "oversized newest entry hid rows without a typed gap");
       check string "the newest body tail remains visible"
         (List.hd (List.rev all_rows)).text latest.text
@@ -291,7 +291,7 @@ let test_inline_oversized_entry_marks_the_missing_middle () =
        | Layout.Viewport_gap { hidden_rows } ->
            check int "inline marker reports only rows not drawn"
              (List.length all_rows - 3) hidden_rows
-       | Layout.Metadata _ | Layout.Body ->
+       | Layout.Metadata _ | Layout.Body | Layout.Spacing ->
            fail "inline oversized entry hid its middle without a typed gap");
       check bool "the two newest rows remain in chronological order" true
         (not (String.equal penultimate.text latest.text));
@@ -329,7 +329,7 @@ let test_live_edge_collapses_repeated_wrapped_tail_rows () =
          | Layout.Viewport_gap { hidden_rows } ->
            hidden_rows > 0
            && String.starts_with ~prefix:"↻" (String.trim row.text)
-         | Layout.Metadata _ | Layout.Body -> false)
+         | Layout.Metadata _ | Layout.Body | Layout.Spacing -> false)
       visible
   in
   check int "one visible repeated run is collapsed" 1 (List.length repeated_gaps);
@@ -342,7 +342,7 @@ let test_live_edge_collapses_repeated_wrapped_tail_rows () =
     (List.for_all
        (fun (row : Layout.row) ->
           match row.kind with
-          | Layout.Metadata _ | Layout.Body -> true
+          | Layout.Metadata _ | Layout.Body | Layout.Spacing -> true
           | Layout.Viewport_gap _ -> false)
        scrolled)
 ;;
@@ -373,7 +373,39 @@ let test_oversized_entry_small_height_policy () =
             (match gap.kind with Layout.Viewport_gap _ -> true | _ -> false);
           check string "three rows preserve the latest" latest.text kept_latest.text
       | _ -> fail "three-row viewport omitted its first/gap/latest contract")
-    [ Layout.Origin_row; Layout.Origin_inline ]
+    [ Layout.Origin_row; Layout.Origin_inline ];
+  List.iter
+    (fun (style, mark, opening) ->
+      let newest =
+        entry ~speaker:"sender.one" style "sender.one" "oversized-bare"
+          "opening\nsecond\nthird\nfourth\nfifth\nlatest"
+      in
+      List.iter
+        (fun height ->
+          let visible =
+            Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:20
+              ~height [entry Layout.User "YOU" "previous" "earlier message"; newest]
+          in
+          match visible, List.rev visible with
+          | first :: _, latest :: _ ->
+              check string "bare clipping preserves message identity" mark first.gutter;
+              check string "bare clipping preserves the opening or inbound sender"
+                opening first.text;
+              check string "bare clipping preserves the actual latest output"
+                "  latest" latest.text;
+              check bool "bare clipping states the omitted middle" true
+                (List.exists
+                   (fun (row : Layout.row) ->
+                     match row.kind with
+                     | Layout.Viewport_gap _ -> true
+                     | Layout.Metadata _ | Layout.Body | Layout.Spacing -> false)
+                   visible)
+          | _ -> fail "bare clipping lost the newest message")
+        [ 3; 4 ])
+    [ Layout.User, "›", "  opening"
+    ; Layout.Keeper, "●", "  opening"
+    ; Layout.Inbound, "◀", "  sender.one"
+    ]
 
 let test_scrolling_into_an_oversized_entry_shows_transcript_rows_only () =
   let newest =
@@ -387,7 +419,7 @@ let test_scrolling_into_an_oversized_entry_shows_transcript_rows_only () =
     (List.for_all
        (fun (row : Layout.row) ->
          match row.kind with
-         | Layout.Metadata _ | Layout.Body -> true
+         | Layout.Metadata _ | Layout.Body | Layout.Spacing -> true
          | Layout.Viewport_gap _ -> false)
        rows)
 
@@ -813,7 +845,7 @@ let test_chat_history_height_uses_the_shared_chrome () =
     (Layout.message_history_height ~terminal_rows:46 ~status_rows:3)
 
 let test_chat_title_yields_before_projection_modes () =
-  let modes = "  journal:off · reasoning:full · tools:full" in
+  let modes = "  journal:summary · reasoning:full · tools:full" in
   let row =
     Layout.chat_title_row ~inner_cells:52
       ~title:"Keepers ▸ a-very-long-keeper-identity ▸ chat"
@@ -1241,7 +1273,7 @@ let without_hour_rail rows =
       match row.kind with
       | Layout.Metadata (Layout.Timeline_break _) -> false
       | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
-      | Layout.Body | Layout.Viewport_gap _ ->
+      | Layout.Body | Layout.Spacing | Layout.Viewport_gap _ ->
           true)
     rows
 
@@ -1339,7 +1371,7 @@ let test_a_turn_keeps_one_heading_across_its_blocks () =
          match row.kind with
          | Layout.Metadata (Layout.Origin _) -> Some row.style
          | Layout.Metadata (Layout.Continued_at _ | Layout.Timeline_break _)
-         | Layout.Body | Layout.Viewport_gap _ ->
+         | Layout.Body | Layout.Spacing | Layout.Viewport_gap _ ->
              None)
        drawn
    with
@@ -1475,7 +1507,7 @@ let test_timeline_breaks_follow_civil_hours () =
         | Layout.Metadata (Layout.Timeline_break bucket) ->
             Some (bucket.tb_hour, row.text)
         | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
-        | Layout.Body
+        | Layout.Body | Layout.Spacing
         (* The fold marker is not a timeline rail. Named rather than matched
            by a wildcard, so the next row kind fails here instead of being
            silently counted as "not a rail". *)
@@ -1582,7 +1614,7 @@ let test_repeated_dst_hour_has_distinct_rails () =
          match row.kind with
          | Layout.Metadata (Layout.Timeline_break _) -> Some row.text
          | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
-         | Layout.Body
+         | Layout.Body | Layout.Spacing
          | Layout.Viewport_gap _ ->
              None)
   in
@@ -1659,7 +1691,7 @@ let test_an_arrival_steps_in_from_the_conversation () =
     |> List.filter (fun (row : Layout.row) ->
            match row.kind with
            | Layout.Body -> true
-           | Layout.Metadata _ | Layout.Viewport_gap _ -> false)
+           | Layout.Metadata _ | Layout.Spacing | Layout.Viewport_gap _ -> false)
   in
   List.iter
     (fun width ->
@@ -1988,25 +2020,32 @@ let test_row_mode_draws_what_it_always_did () =
        (fun (row : Layout.row) ->
          match row.kind with
          | Layout.Metadata _ -> true
-         | Layout.Body | Layout.Viewport_gap _ -> false)
+         | Layout.Body | Layout.Spacing | Layout.Viewport_gap _ -> false)
        rows)
 
-let test_folding_returns_one_row_per_message () =
+let test_folding_preserves_message_bodies () =
   let entries = origin_entries () in
   let full = Layout.total_rows ~inner_width:40 entries in
   let inline =
     Layout.total_rows ~origin:Layout.Origin_inline ~inner_width:40 entries
   in
-  let bare =
-    Layout.total_rows ~origin:Layout.Origin_bare ~inner_width:40 entries
-  in
   check int "inline drops a row per message" (full - 2) inline;
-  check int "bare drops the same" (full - 2) bare;
+  let bare =
+    Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:40 ~height:20 entries
+  in
+  check (list string) "bare mode preserves both messages in order"
+    [ "  first"; "  second" ]
+    (List.filter_map
+       (fun (row : Layout.row) ->
+         match row.kind with
+         | Layout.Body -> Some row.text
+         | Layout.Metadata _ | Layout.Spacing | Layout.Viewport_gap _ -> None)
+       bare);
   check bool "no metadata rows survive" true
     (List.for_all
        (fun (row : Layout.row) ->
          match row.kind with
-         | Layout.Metadata _ | Layout.Viewport_gap _ -> false
+         | Layout.Metadata _ | Layout.Spacing | Layout.Viewport_gap _ -> false
          | Layout.Body -> true)
        (Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:40
           ~height:20 entries))
@@ -2026,7 +2065,7 @@ let test_inline_margin_carries_clock_and_speaker () =
   let entries = [ entry Layout.User "you" "tui-..aaaaaaaa" "hello" ] in
   check string "clock cut to the minute, speaker kept" (no_rail ^ "12:34 you")
     (first_gutter ~origin:Layout.Origin_inline entries);
-  check string "bare keeps the speaker only" (no_rail ^ "you")
+  check string "bare identifies the operator with its prompt mark" "›"
     (first_gutter ~origin:Layout.Origin_bare entries)
 
 let inline_rows ~terminal_cols source =
@@ -2258,12 +2297,11 @@ let test_unowned_entries_at_different_timestamps_do_not_fold () =
     Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:40 ~height:20
       entries
   with
-  | [ first; second ] ->
-      check bool "first keeps its full speaker label" true
-        (String.contains first.Layout.gutter 'k');
-      check bool "unowned row at later timestamp keeps speaker label" true
-        (String.contains second.Layout.gutter 'k')
-  | _ -> failwith "expected two rows"
+  | [ first; { Layout.kind = Layout.Spacing; _ }; second ] ->
+      check string "first identifies the keeper" "●" first.Layout.gutter;
+      check string "an unowned later message keeps its own speaker mark" "●"
+        second.Layout.gutter
+  | _ -> failwith "expected two messages separated by spacing"
 
 
 (* The layout hands the renderer a margin and the offset to cut it at, and the
@@ -2392,7 +2430,7 @@ let test_skill_marks_keep_state_without_colour () =
           (fun (row : Layout.row) ->
             match row.kind with
             | Layout.Body -> true
-            | Layout.Metadata _ | Layout.Viewport_gap _ -> false)
+            | Layout.Metadata _ | Layout.Spacing | Layout.Viewport_gap _ -> false)
           rows
       in
       check bool "the sample holds evidence rows" true (evidence <> []);
@@ -2531,6 +2569,16 @@ let test_the_margin_comes_out_of_the_body () =
    mode for the clamp and another for the slice, the pane comes out a row
    short of where it says it is. *)
 let test_scrolling_measures_the_mode_it_draws () =
+  let fitting = [entry Layout.User "YOU" "one" "one";
+                 entry Layout.Keeper "alpha" "two" "two"] in
+  check int "a fitting conversation has no phantom scroll step" 0
+    (Layout.max_scroll ~origin:Layout.Origin_bare ~inner_width:40 ~height:3 fitting);
+  check (list string) "live edge and zero-offset scroll show the same rows"
+    (List.map (fun (row : Layout.row) -> row.gutter ^ row.text)
+       (Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:40 ~height:3 fitting))
+    (List.map (fun (row : Layout.row) -> row.gutter ^ row.text)
+       (Layout.scrolled_rows ~origin:Layout.Origin_bare ~inner_width:40 ~height:3
+          ~from_bottom:0 fitting));
   let entries =
     List.init 12 (fun index ->
       entry
@@ -3195,8 +3243,8 @@ let () =
             test_every_row_gets_the_same_badge
         ; test_case "origin rows draw what they always did" `Quick
             test_row_mode_draws_what_it_always_did
-        ; test_case "folding returns one row per message" `Quick
-            test_folding_returns_one_row_per_message
+        ; test_case "folding preserves message bodies" `Quick
+            test_folding_preserves_message_bodies
         ; test_case "inline margin carries clock and speaker" `Quick
             test_inline_margin_carries_clock_and_speaker
         ; test_case "a narrow inline margin keeps the source" `Quick

@@ -498,8 +498,9 @@ let origin_heading buf cols ~plain ~styled ~clock =
   in
   box_line buf cols (lead ^ rule ^ tail)
 
-let render_chat_row ~theme ~tool_visibility buf cols (row : Message_layout.row) =
+let render_chat_row ~theme ~origin ~tool_visibility buf cols (row : Message_layout.row) =
   match row.kind with
+  | Message_layout.Spacing -> box_empty buf cols
   | Message_layout.Viewport_gap { hidden_rows = _ } ->
       (* The glyph survives NO_COLOR; the adaptive recede keeps the separator
          visible without competing with the message above and below it. *)
@@ -615,11 +616,15 @@ let render_chat_row ~theme ~tool_visibility buf cols (row : Message_layout.row) 
               Printf.sprintf "%s┊%s " (Chat_theme.origin row.style) Ansi.reset
           | Message_layout.Inbound, _ -> snd (arrival_bar row.style)
           | _, Message_layout.Shade_none -> "  "
+          | _, Message_layout.Shade_quoted when origin = Message_layout.Origin_bare -> "  "
           | _, Message_layout.Shade_quoted ->
               Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
         in
         let body_style = context.opening in
-        if context.ambient_background && not is_tool then
+        if context.ambient_background && origin = Message_layout.Origin_bare then
+          box_line buf cols
+            (margin ^ context.opening ^ "  " ^ dress rest ^ Ansi.reset)
+        else if context.ambient_background && not is_tool then
           box_line_styled buf cols ~style:context.opening
             (Printf.sprintf "%s  %s" margin (dress rest))
         else
@@ -801,7 +806,9 @@ let keeper_message_identity ~max_cells state keeper_name =
           ; stance
           ]
       in
-      (match runtime with
+      if state.msg_origin_display = Message_layout.Origin_bare then
+        fit_identity (status ^ Ansi.reset)
+      else (match runtime with
        | None ->
            let detail = match keeper.k_origin with
              | Tui_decode.Declared_keeper requirements ->
@@ -1689,7 +1696,9 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               | Masc_tui_types.Turn_continues | Masc_tui_types.Turn_closes
               | Masc_tui_types.Turn_outside ->
                   "")
-          | Message_user _ | Message_status | Message_local | Message_memory
+          | Message_user (Sent_by_other { speaker; surface }) ->
+              Message_layout.fit_speaker ~column:chat_cols ~speaker ~surface ()
+          | Message_user (Sent_by_operator _) | Message_status | Message_local | Message_memory
           | Message_error | Message_tool | Message_skill _ | Message_thinking ->
               grouped_role_label
         in
@@ -1846,8 +1855,12 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
      ; role_label_mark_cells =
          Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
      ; request_label = request_id
-     ; body = "YOU · " ^ note ^ " · 요청 "
-         ^ Keeper_chat.terminal_safe_text (Keeper_chat.compact_request_id request_id) ^ "\n"
+     ; body = "YOU · " ^ note
+         ^ (match state.msg_origin_display with
+            | Message_layout.Origin_bare -> ""
+            | Origin_inline | Origin_row -> " · 요청 "
+                ^ Keeper_chat.terminal_safe_text (Keeper_chat.compact_request_id request_id))
+         ^ "\n"
          ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true body
      ; journal = []
      ; markdown_source = Message_layout.Markdown_streaming
@@ -2230,7 +2243,7 @@ let same_identity_source_revisions =
 (* One pure decoration pass for both the frame and search's row measurement.
    Only a row's own turn sequence or an autonomous journal's typed identity
    supplies TURN: the latest Reply_details cannot label earlier continuations. *)
-let identify_chat_entries ~source_logs tagged_entries =
+let identify_chat_entries ~details ~source_logs tagged_entries =
   let owners = Hashtbl.create 16 and started = Hashtbl.create 16 in
   List.iter (fun log ->
     let request_id = Masc_tui_types.turn_log_request_id log in
@@ -2291,7 +2304,8 @@ let identify_chat_entries ~source_logs tagged_entries =
     in
     tag, {entry with request_label = request_id;
       body = String.concat "\n"
-        (heading @ (if reflected then ["입력 반영됨"] else []) @ [entry.body])})
+        ((if details then heading @ (if reflected then ["입력 반영됨"] else []) else [])
+         @ [entry.body])})
     tagged_entries
 
 
@@ -2339,7 +2353,8 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
       keeper_message_layout_entries state ~keeper_name ~chat_cols
       |> List.combine messages
       |> List.map (fun (message, entry) -> Tagged_row message, entry)
-      |> identify_chat_entries ~source_logs:(identity_source_logs state ~keeper_name)
+      |> identify_chat_entries ~details:(state.msg_origin_display <> Message_layout.Origin_bare)
+           ~source_logs:(identity_source_logs state ~keeper_name)
       |> List.map snd
     in
     let count = List.length entries in
@@ -2435,6 +2450,7 @@ type merged_blocks_memo = {
 let merged_blocks_memo : merged_blocks_memo option ref = ref None
 
 type identified_entries_memo = {
+  iem_details : bool;
   iem_committed : Message_layout.entry list;
   iem_blocks : log_block list;
   iem_sources : (Masc_tui_types.turn_log * int * int) list;
@@ -2563,7 +2579,8 @@ let render_keeper_message (state : state) =
        the width needed to identify the runtime the composer will address. *)
     let telemetry_cells = max 0 (cols - 1) in
     let telemetry_keeper =
-      Masc_tui_theme.tone Masc_tui_theme.Accent
+      if state.msg_origin_display = Message_layout.Origin_bare then ""
+      else Masc_tui_theme.tone Masc_tui_theme.Accent
       ^ fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ Ansi.reset ^ " · "
     in
     let telemetry_identity_cells =
@@ -2581,7 +2598,9 @@ let render_keeper_message (state : state) =
         with
         | Some { observation = Some observation; error = None } ->
             Observation_layout.context_header_item
-              ~max_cells:(min 48 (telemetry_identity_cells / 2))
+              ~max_cells:(min
+                (if state.msg_origin_display = Message_layout.Origin_bare then 24 else 48)
+                (telemetry_identity_cells / 2))
               ~inspect_key:Masc_tui_keys.context_inspector_label observation
         | Some {error = Some _; _} -> Some "Context unavailable"
         | Some _ | None -> Some "Context —"
@@ -3176,19 +3195,21 @@ let render_keeper_message (state : state) =
     in
     let identity_sources = identity_source_logs state ~keeper_name in
     let identity_revisions = identity_source_revisions identity_sources in
+    let details = state.msg_origin_display <> Message_layout.Origin_bare in
     (* Preserve list identity while the sources are unchanged: the viewport
        reuses its measured rows on idle repaints. *)
     let tagged_layout_entries, layout_entries =
       match !identified_entries_memo with
-      | Some memo when memo.iem_committed == committed_layout_entries
+      | Some memo when memo.iem_details = details
+          && memo.iem_committed == committed_layout_entries
           && List.length memo.iem_blocks = List.length blocks
           && List.for_all2 ( == ) memo.iem_blocks blocks
           && same_identity_source_revisions memo.iem_sources identity_revisions ->
           memo.iem_tagged, memo.iem_entries
       | Some _ | None ->
-          let tagged = identify_chat_entries ~source_logs:identity_sources tagged_layout_entries in
+          let tagged = identify_chat_entries ~details ~source_logs:identity_sources tagged_layout_entries in
           let entries = List.map snd tagged in
-          identified_entries_memo := Some {iem_committed = committed_layout_entries;
+          identified_entries_memo := Some {iem_details = details; iem_committed = committed_layout_entries;
             iem_blocks = blocks; iem_sources = identity_revisions;
             iem_tagged = tagged; iem_entries = entries};
           tagged, entries
@@ -3314,7 +3335,8 @@ let render_keeper_message (state : state) =
       done
     end else begin
       List.iter
-        (render_chat_row ~theme:chat_theme ~tool_visibility:state.msg_tool_visibility
+        (render_chat_row ~theme:chat_theme ~origin:state.msg_origin_display
+           ~tool_visibility:state.msg_tool_visibility
            chat_buf chat_cols)
         visible_rows;
       (* Fill remaining space *)
@@ -3538,10 +3560,20 @@ let render_keeper_message (state : state) =
            (fun (kind, text) ->
              (match kind with
               | Keeper_chat_transcript.Progress ->
-                  box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
-                    ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
-                     ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                     ^ " · " ^ text ^ queue_hint ^ fold_suffix)
+                  if state.msg_origin_display = Message_layout.Origin_bare then
+                    box_line_styled chat_buf chat_cols
+                      ~style:(match Keeper_chat_transcript.phase live with
+                        | Stream_failed _ -> Theme.bad ()
+                        | Waiting | Working | Stream_ended -> Theme.recede ())
+                      ("  " ^ running_mark ^ " " ^ text
+                       ^ (if folded_away > 0 then
+                            " · " ^ Masc_tui_keys.expand_turn_label ^ ":details"
+                          else ""))
+                  else
+                    box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
+                      ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
+                       ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                       ^ " · " ^ text ^ queue_hint ^ fold_suffix)
               (* The gate and this row describe the same held call, so the
                  note rides the row that asks -- which is this one by its
                  kind now, rather than by being first among the Attention
@@ -3842,6 +3874,9 @@ let render_keeper_message (state : state) =
       | None ->
       if state.keeper_message_focus = Left_pane then
         "Up/Down:move  Enter:open  Right/Esc:chat"
+      else if state.msg_origin_display = Message_layout.Origin_bare then
+        String.concat "  "
+          [enter_hint; "Ctrl-J:newline"; escape_hint; "/:commands"; "?:help"]
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with

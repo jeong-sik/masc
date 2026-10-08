@@ -41,7 +41,9 @@ module names or the extraction implementation.
 
 Running the selected Muse case directly initially failed before normalization
 with `missing required Antigravity prompt: keeper.antigravity.current_goal_label`.
-[muse-before.log](muse-before.log) preserves that failure. Muse frames its start
+[muse-before.log](muse-before.log) preserves that failure; whitespace-only
+indentation on an empty diagnostic line is normalized in the stored log.
+Muse frames its start
 prompt with shared Antigravity assets; its test runner did not register the source
 prompt directory. It now uses `Masc_test_deps.source_path` and
 `Prompt_registry.set_markdown_dir`, as the adjacent Claude runner does.

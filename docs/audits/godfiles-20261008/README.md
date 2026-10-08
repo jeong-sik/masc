@@ -29,7 +29,6 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41969](https://github.com/jeong-sik/masc/pull/41969) | Blocking orphan inventory/preservation owned separately; pure writer/sweep filename grammar shared; existing public API bound directly | `atomic_write.ml`, `fs_compat.ml` |
 | [#41972](https://github.com/jeong-sik/masc/pull/41972) | Duplicate recovery report types/projections removed; existing consumer reads canonical rich rows and exact operation identities | `atomic_write.ml/.mli`, publication reconciliation tests |
 | [#41974](https://github.com/jeong-sik/masc/pull/41974) | Ordinary atomic replacement effect owner separated; direct public bindings; cancellation docs and cold file-ingestion evidence corrected | `atomic_write.ml/.mli`, `fs_compat.ml/.mli`, blob tests |
-
 | [#41987](https://github.com/jeong-sik/masc/pull/41987) | Pure turn completion policy and response normalization; ignored history argument and testing forwarders removed; Muse fixture preparation repaired | `keeper_agent_run.ml/.mli`, direct adapter and policy tests |
 
 The declared branch dependencies follow that order, starting at `main`.

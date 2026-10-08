@@ -51,7 +51,7 @@ let response_policy_for_turn ~turn_kind ~input_speaker
       | Schedule_due wake -> Option.is_none wake.result_delivery
       | Board_post_created | Board_post_updated | Board_comment_added _
       | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
-      | Delegate_completed | Ask_answered_row _ | Composition_completed
+      | Delegate_completed _ | Ask_answered_row _ | Composition_completed
       | External_attention _ | Completion_authority_rejected _
       | Task_outcome _ | Task_cancelled _ -> false in
     if observation.pending_messages = []

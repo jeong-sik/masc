@@ -25,7 +25,7 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed _
   | Ask_answered_row of { answered_by : Keeper_input_speaker.person }
       (** A human answered a question this Keeper asked. Like
           {!Composition_completed} the row carries the answer itself: the
@@ -82,7 +82,7 @@ let is_board_activity_event (event : pending_board_event) =
      same reason it is still counted here: this block is the only one that
      renders the row's title and preview, and the answer is the whole point of
      the wake. Excluded, the Keeper would be woken with nothing to read. *)
-  | Delegate_completed
+  | Delegate_completed _
   (* Same shape: no Board post behind the id, and this block is the only one
      that renders the row, so leaving it out would wake the Keeper with an
      empty pending-events list. *)
@@ -107,7 +107,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | External_attention _
@@ -125,7 +125,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | Schedule_due _
@@ -145,7 +145,7 @@ let is_task_outcome_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | Schedule_due _
@@ -160,7 +160,7 @@ let is_task_outcome_event (event : pending_board_event) =
 let is_task_cancellation_event (event : pending_board_event) =
   match event.event_kind with
   | Task_cancelled _ -> true
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | Board_post_created
@@ -837,7 +837,7 @@ let pending_board_event_of_delegate_completion
       if String.equal note "" then cut else cut ^ "\n" ^ note
     else cut
   in
-  { event_kind = Delegate_completed
+  { event_kind = Delegate_completed dc.dc_terminal
   ; post_id = Keeper_event_queue.delegate_completion_post_id dc
   ; author = dc.dc_keeper
   ; title = Printf.sprintf "%s %s" dc.dc_keeper outcome

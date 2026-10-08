@@ -1,0 +1,286 @@
+{
+  "ocaml_version": "5.5.1",
+  "scope": "Parsing only, no typing, native link, runtime or PTY execution",
+  "ocaml": [
+    {
+      "path": "bin/masc_tui.ml",
+      "sha256": "d34b15d5b1bda138df1ff9353825233c3724985477edc350e80e79efdf9b4522",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "bin/masc_tui.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_addons.ml",
+      "sha256": "ce5f3add45d15e7b39db29f49a55a57206926ab592cfc65312922cf1df698869",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "bin/masc_tui_lane_addons.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_addons.mli",
+      "sha256": "96735d538cb54b73d905326bde82b114445f550873ceba559780db1d3e29d080",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "bin/masc_tui_lane_addons.mli"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_declaration.ml",
+      "sha256": "ccee25e16fed51b0b7b56a2e01a313bd23a17ad1b2dd08c64f85725ade713a28",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "bin/masc_tui_lane_declaration.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_declaration.mli",
+      "sha256": "60d720162b8389b279ee2c0c32c35d3f83b5a994f924475aa4f642ff89cf5043",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "bin/masc_tui_lane_declaration.mli"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_installer.ml",
+      "sha256": "6dbf0202b7c3c4e1017f921af71c7b4387351cc1792461075c269e25d9f1793c",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "bin/masc_tui_lane_installer.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_inventory.ml",
+      "sha256": "8add12353fcaef8a60247d1b57985a80caf25e7ce23ab5a0c9ada7bea26cb919",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "bin/masc_tui_lane_inventory.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/lane_addon/lane_addon_config.ml",
+      "sha256": "151084261c5e45fb03c70548008bec61c282c74504208cc242912025c1d462e1",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "lib/lane_addon/lane_addon_config.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/lane_addon/lane_addon_config.mli",
+      "sha256": "34879bd9a7ec267f31cef45c1ed9e5d02db499e20efa86bb21c5e073ec062764",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "lib/lane_addon/lane_addon_config.mli"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/lane_addon/lane_addon_runtime.ml",
+      "sha256": "aba6e82e246be68e51f2fe72544a12a925e575a8ff3d7637a698140efd426ca5",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "lib/lane_addon/lane_addon_runtime.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_lane_inventory.ml",
+      "sha256": "dcbe784150a3f47538b6de348d8e542097102644fb796d0b8eaa70b9c0e0fe98",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "lib/server/server_lane_inventory.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/toml_line_editor/toml_line_editor.ml",
+      "sha256": "8f837763a9abea4a5494b00e6b168b1de4f9f1f284ba95d28810891660f2b045",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "lib/toml_line_editor/toml_line_editor.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/toml_line_editor/toml_line_editor.mli",
+      "sha256": "504727d302e6661dcd3669e37cb36d1c73217cbde404867c1488b390e9927db6",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "lib/toml_line_editor/toml_line_editor.mli"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.ml",
+      "sha256": "344934d8623bcf537e7d8dcf75b3baaca09fbd3b9ef51404b5a90945b5b324dc",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "lib/tui_decode_lane_inventory.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.mli",
+      "sha256": "4af97ee227c61e30bcfdf803752e9693dcbcd10b958bf12def221700e640b04c",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "lib/tui_decode_lane_inventory.mli"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_lane_addon_declaration.ml",
+      "sha256": "76b94ccfe79e0bf538da82f9547d2e43ee3387ded3d1d6dbdfe638a6a89a78cd",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "test/test_lane_addon_declaration.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_lane_addon_reconcile.ml",
+      "sha256": "3ed7a2b62d03fa8a11a44457eed140ff80590c845a690e12d8d013a33671b0cf",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "test/test_lane_addon_reconcile.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_lane_addon_reading.ml",
+      "sha256": "cfc1a81ce4574ac3cfb9d30d29c275f187d2bc984ea28ae40345df84525612cf",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "test/test_tui_lane_addon_reading.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_lane_addons.ml",
+      "sha256": "d19ad71a193cdf1b0e3fda9dc0655895cfc17b598c6c24d5daa30813f3d33996",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "test/test_tui_lane_addons.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_lane_declaration_path.ml",
+      "sha256": "7eb25aa24f5f0cc5353aafe53c1608dbfd0423642ac9aa204c14292f71a5b5ff",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "test/test_tui_lane_declaration_path.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_lane_inventory.ml",
+      "sha256": "0135245d6f231aab57c939e7c4a4f81619b6159a78efb387bc7467ce49b9f706",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "test/test_tui_lane_inventory.ml"
+      ],
+      "exit_code": 0,
+      "stderr": ""
+    }
+  ],
+  "python_ast": [
+    "test/test_tui_lane_heading_keeps_its_reading.py",
+    "test/test_tui_lane_inventory_pty.py",
+    "test/test_tui_lane_operator_pty.py",
+    "test/test_tui_lane_package_pty.py",
+    "test/test_tui_lane_visual_pty.py"
+  ]
+}

@@ -24,7 +24,7 @@ const configurationSchema = Schema.Struct({
   directory: text, complete: Schema.Boolean,
   issues: Schema.Array(Schema.Struct({ source_path: text, id: nullableText, message: text })),
   declarations: Schema.Array(Schema.Struct({
-    id: text, source_path: text, desired_revision: text,
+    id: text, source_path: text, enabled: Schema.Boolean, desired_revision: text,
     applied_revision: nullableText, instance_id: nullableText,
   })),
 })
@@ -32,10 +32,20 @@ const outputSelectionSchema = Schema.Union(
   Schema.Struct({ lanes: Schema.NonEmptyArray(text), all_lanes: Schema.optional(Schema.Never) }),
   Schema.Struct({ all_lanes: Schema.Literal(true), lanes: Schema.optional(Schema.Never) }),
 )
+const readingSchema = Schema.Struct({
+  lane_id: text, path: Schema.NonEmptyArray(text), label: text,
+  unit: Schema.NullOr(text), format: Schema.Literal('text', 'number', 'boolean', 'json'),
+})
+const presentationSchema = Schema.Struct({
+  description: Schema.NullOr(text), readings: Schema.Array(readingSchema),
+})
 const instanceSchema = Schema.Struct({
   instance_id: text, run_id: text, addon_id: text, title: text, revision: text,
   incarnation: text, action_schema: Schema.NullOr(jsonObject),
-  package: Schema.Struct({ outputs: Schema.Record({ key: text, value: outputSelectionSchema }) }),
+  package: Schema.Struct({
+    outputs: Schema.Record({ key: text, value: outputSelectionSchema }),
+    binding_schema: Schema.NullOr(jsonObject), presentation: presentationSchema,
+  }),
   configuration: Schema.NullOr(instanceConfigurationSchema),
   phase: Schema.Struct({
     kind: Schema.Literal('attached', 'observing', 'failed', 'detaching', 'detached'),
@@ -57,6 +67,7 @@ const actionReceiptSchema = Schema.Struct({
   state: Schema.Literal('queued', 'running', 'confirmed', 'failed_before_effect', 'outcome_unknown'),
   result: Schema.NullOr(jsonObject), detail: Schema.NullOr(Schema.String),
 })
+export type LaneAddonReading = Schema.Schema.Type<typeof readingSchema>
 export type LaneAddonRow = Schema.Schema.Type<typeof laneAddonRowSchema>
 export type LaneAddonInstance = Schema.Schema.Type<typeof instanceSchema>
 export type LaneAddonSnapshot = Schema.Schema.Type<typeof snapshotSchema>

@@ -436,6 +436,69 @@ let test_valid_body_composition () =
    recall reads back. The assertion goes through [read_facts_all] — the same
    reader [Keeper_memory_os_recall] calls — because routing is what this test
    is about and rendering is covered in test_keeper_memory_os. *)
+(* The repeat guard reads a write's answer out of the receipt the tool writes
+   (Keeper_tool_answer). Writing the same claim again re-observes it: the
+   snapshot revision and recorded_at move, nothing else does, so the second
+   and third receipts must give one fingerprint and the insert another. A
+   receipt field renamed on one side and not the other breaks this. *)
+let test_a_rewrite_receipt_has_the_same_answer () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "rewrite-answer" in
+  let args = make_args ~title:"t" ~content:"the deployment region is eu-west-1" in
+  let write () =
+    (Runtime.keeper_memory_write_with_outcome ~config ~meta ~args)
+      .Masc.Keeper_tool_execution.raw_output
+  in
+  let fingerprint receipt =
+    match
+      Masc.Keeper_tool_progress_identity.digest_tool_io
+        ~tool_name:"keeper_memory_write" ~input:args ~output_text:receipt
+    with
+    | Some io -> io.Masc.Keeper_tool_progress_identity.output_fingerprint
+    | None -> Alcotest.fail "no fingerprint for a memory write receipt"
+  in
+  let inserted = write () in
+  let rewrite_a = write () in
+  let rewrite_b = write () in
+  Alcotest.(check string)
+    "first write inserts" "inserted"
+    (string_field "identity_disposition" (Yojson.Safe.from_string inserted));
+  Alcotest.(check string)
+    "second write re-observes" "reobserved"
+    (string_field "identity_disposition" (Yojson.Safe.from_string rewrite_a));
+  Alcotest.(check bool)
+    "the receipts themselves differ (revision moves)" false
+    (String.equal rewrite_a rewrite_b);
+  Alcotest.(check string)
+    "two rewrites: one answer" (fingerprint rewrite_a) (fingerprint rewrite_b);
+  Alcotest.(check bool)
+    "the insert is another answer" false
+    (String.equal (fingerprint inserted) (fingerprint rewrite_a));
+  (* The answer keeps the fields it names, so a field the receipt gains
+     drops out of it unseen. Pinning what the real receipt leaves out makes
+     a new field a decision: answer or stamp. [what_committed] is the prose
+     [identity_disposition] already names. *)
+  let keys = function
+    | `Assoc fields -> List.sort String.compare (List.map fst fields)
+    | _ -> Alcotest.fail "a memory write receipt is a JSON object"
+  in
+  let answer_keys =
+    match
+      Masc.Keeper_tool_answer.answer ~tool_name:"keeper_memory_write"
+        ~output_text:rewrite_a
+    with
+    | Some answer -> keys answer
+    | None -> Alcotest.fail "keeper_memory_write read no answer from its receipt"
+  in
+  Alcotest.(check (list string))
+    "only the stamps are left out of the answer"
+    [ "recorded_at"; "revision"; "rows_written"; "what_committed" ]
+    (List.filter
+       (fun key -> not (List.mem key answer_keys))
+       (keys (Yojson.Safe.from_string rewrite_a)))
+
 let test_write_comes_back_through_recall () =
   with_temp_dir
   @@ fun base_path ->
@@ -1391,8 +1454,14 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
               |> Yojson.Safe.from_string in
           Alcotest.(check (list string)) "unverified-only search supplies no claim" []
             (match_texts result);
-          Alcotest.(check bool) "unverified-only search is not a definitive miss" true
-            (json_field "no_match" result = `Null);
+          (* The producer either asserts no_match = true or omits the key
+             (keeper_tool_memory_runtime.ml); it never writes null, and
+             json_field fails on an absent key. A non-definitive miss is the
+             absent key. *)
+          Alcotest.(check bool) "unverified-only search is not a definitive miss" false
+            (match result with
+             | `Assoc fields -> List.mem_assoc "no_match" fields
+             | _ -> Alcotest.fail "memory search result must be an object");
           Alcotest.(check string) "current and all expose incomplete verification" "incomplete"
             (string_field "status" (json_field "source_verification" result));
           Alcotest.(check bool) "deferred identity does not leak withheld claim" false
@@ -1402,8 +1471,13 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
             ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
             ~args:(`Assoc ["query", `String "no matching astronomy"; "limit", `Int 10])
             |> Yojson.Safe.from_string in
+        (* source_verification is written only when some selected source was
+           deferred (keeper_tool_memory_runtime.ml, [] -> []); a complete
+           lookup omits the key, and json_field fails on an absent key. *)
         Alcotest.(check bool) "unselected unreadable sources do not make a lookup incomplete" true
-          (json_field "source_verification" unrelated = `Null
+          ((match unrelated with
+            | `Assoc fields -> not (List.mem_assoc "source_verification" fields)
+            | _ -> Alcotest.fail "memory search result must be an object")
            && json_field "no_match" unrelated = `Bool true);
         Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
   in
@@ -3529,11 +3603,89 @@ let test_ordinary_commit_budget_counts_source_facts () =
     (Fs_compat.load_file source_store_path)
 ;;
 
+let test_dropped_originals_are_historical_and_searchable () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "dropped-search" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let retired = fact "canary deployment needs rollback assets" in
+  let current = fact "current unrelated preference" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [retired;current];
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
+  Fs_compat.invalidate_cached_writer journal;
+  Sys.remove journal;
+  Unix.mkdir journal 0o700;
+  let retract reason =
+    match Current.retract_fact ~keepers_dir ~keeper_id:meta.name ~now:3.
+        ~source:{kind=Current.Explicit_retract;trace_id="drop"}
+        ~memory_id:(Masc.Keeper_memory_os_types.memory_id retired) ~reason () with
+    | Ok _ -> () | Error _ -> Alcotest.fail "retraction failed" in
+  retract "deployment rule superseded";
+  let search source =
+    Runtime.keeper_memory_search_json ~config ~meta ~ctx_work:(empty_ctx ())
+      ~args:(`Assoc ["query",`String "canary deployment";
+                    "source",`String source;"limit",`Int 10])
+    |> Yojson.Safe.from_string in
+  Alcotest.(check string) "pending archive is an explicit search failure"
+    "dropped_read_failed" (string_field "error_kind" (search "dropped"));
+  let partial = search "all" in
+  Alcotest.(check bool) "pending archive does not report a clean miss" false
+    (Yojson.Safe.Util.member "no_match" partial = `Bool true);
+  Alcotest.(check bool) "pending archive is exposed in all search" true
+    (Yojson.Safe.Util.member "dropped_store_unavailable" partial <> `Null);
+  Unix.rmdir journal;
+  Alcotest.(check string) "missing journal cannot hide pending archive evidence"
+    "dropped_read_failed" (string_field "error_kind" (search "dropped"));
+  (match Current.upsert_fact ~keepers_dir ~keeper_id:meta.name ~now:3.5
+      ~source:{kind=Current.Explicit_write;trace_id="resume"} current with
+   | Ok _ -> () | Error _ -> Alcotest.fail "pending archive recovery failed");
+  Alcotest.(check (list string)) "default current corpus has no retired body"
+    [] (match_texts (search "current"));
+  let result = search "dropped" in
+  Alcotest.(check (list string)) "archive recalls exact original"
+    [retired.claim] (match_texts result);
+  let row = Yojson.Safe.Util.(member "matches" result |> to_list |> List.hd) in
+  Alcotest.(check bool) "explicitly non-current" true (json_field "current" row = `Bool false);
+  Alcotest.(check string) "reason travels with original" "deployment rule superseded"
+    (string_field "reason" row);
+  Alcotest.(check (list string)) "all includes removed originals"
+    [retired.claim] (match_texts (search "all"));
+  Alcotest.(check int) "search does not restore memory" 1
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
+  (* Explicit restoration is deduplicated by the ordinary write path. *)
+  (match Current.upsert_fact ~keepers_dir ~keeper_id:meta.name ~now:4.
+      ~source:{kind=Current.Explicit_write;trace_id="restore"} retired with
+   | Ok _ -> () | Error _ -> Alcotest.fail "restoration failed");
+  Alcotest.(check (list string)) "re-added identity leaves archive"
+    [] (match_texts (search "dropped"));
+  retract "new removal reason";
+  let result = search "dropped" in
+  Alcotest.(check int) "repeated drops produce one latest original" 1 (int_field "match_count" result);
+  let row = Yojson.Safe.Util.(member "matches" result |> to_list |> List.hd) in
+  Alcotest.(check string) "latest reason is authoritative history" "new removal reason"
+    (string_field "reason" row);
+  let out = open_out_gen [Open_wronly;Open_append;Open_binary] 0o600 journal in
+  Fun.protect ~finally:(fun () -> close_out out) (fun () -> output_string out "{broken}\n");
+  Alcotest.(check string) "broken archive is a read failure" "dropped_read_failed"
+    (string_field "error_kind" (search "dropped"));
+  let partial = search "all" in
+  Alcotest.(check bool) "partial all search is not a clean miss" false
+    (Yojson.Safe.Util.member "no_match" partial = `Bool true);
+  Alcotest.(check bool) "partial failure is exposed" true
+    (Yojson.Safe.Util.member "dropped_store_unavailable" partial <> `Null)
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
     [ ( "commit notification"
       , [ Alcotest.test_case "source writes and invalidations notify after locks" `Quick test_source_snapshot_commit_notifications ] )
+    ; ( "repeat guard answer"
+      , [ Alcotest.test_case
+            "a rewrite receipt has the same answer"
+            `Quick
+            test_a_rewrite_receipt_has_the_same_answer
+        ] )
     ; ( "validation"
       , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
         ; Alcotest.test_case
@@ -3701,6 +3853,10 @@ let () =
             "absorbed facts are searchable"
             `Quick
             test_absorbed_facts_are_searchable
+        ; Alcotest.test_case
+            "dropped originals remain historical, searchable and read-only"
+            `Quick
+            test_dropped_originals_are_historical_and_searchable
         ; Alcotest.test_case
             "absorbed rows follow later merges and leave room"
             `Quick

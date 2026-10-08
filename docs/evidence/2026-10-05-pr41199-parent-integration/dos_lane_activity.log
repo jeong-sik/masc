@@ -1,0 +1,9 @@
+Testing `DOS activity with retained state'.
+This run has ID `IZD26IR5'.
+
+  [OK]          activity          0   off preserves machine/controller/checkp...
+  [OK]          activity          1   unobserved keeps inspection/cleanup.
+  [OK]          activity          2   accepted input finishes after off.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/review-pr41199-20261005/_build/_tests/DOS activity with retained state'.
+Test Successful in 0.082s. 3 tests run.

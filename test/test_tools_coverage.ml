@@ -586,7 +586,7 @@ let test_masc_goal_transition_schema () =
            | Some action_schema ->
              Alcotest.(check (list string))
                "only lifecycle actions are public"
-               [ "request_complete"; "drop"; "reopen" ]
+               [ "request_complete"; "drop"; "reopen"; "pause"; "resume"; "block"; "unblock" ]
                (match get_json_list "enum" action_schema with
                 | Some values ->
                   List.map
@@ -662,11 +662,10 @@ let test_masc_dashboard_schema () =
   | None -> Alcotest.fail "masc_dashboard not found"
   | Some _ -> ()
 
-(* The enum the model reads and the vocabulary Dashboard accepts sit on
-   opposite sides of the cut that keeps the descriptor generator out of its own
-   consumer, and they used to be spelled separately (#27069). A scope in one
-   and not the other either hides it from the model or advertises one the
-   runtime refuses. *)
+(* The enum the model reads is declared in the tool TOML; the vocabulary
+   Dashboard accepts is declared in OCaml (#27069). A scope in one and not the
+   other either hides it from the model or advertises one the runtime
+   refuses. *)
 let test_masc_dashboard_scope_enum_matches_the_runtime () =
   match find_registered_tool "masc_dashboard" with
   | None -> Alcotest.fail "masc_dashboard not found"

@@ -95,6 +95,12 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Admission_allowances_disagree of
+      Llm_provider.Provider_admission.allowance_disagreement list
+      (** Runtimes on one provider account that declare different
+          [max-concurrent] or [admission-priority-run-limit]. Admission keeps
+          one allowance per account, so the configuration is refused, naming
+          each runtime and its values. *)
   | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
       (** The exact-output slots a save would add on an HTTP provider that
           declares no [exact-body-timeout-s], compared with the file on disk.
@@ -104,10 +110,6 @@ type load_failure =
   | Context_marks_exceed_max_context of
       { runtime_id : string
       ; high_water_tokens : int
-      ; max_context : int
-      }
-  | Muse_window_below_host_overhead of
-      { runtime_id : string
       ; max_context : int
       }
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable

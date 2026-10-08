@@ -59,7 +59,10 @@ let goal_ids events =
        | E.Payout_failed { goal_id; _ } -> Some goal_id
        | E.Paid p -> Some p.identity.goal_id
        | E.Half_life_set _ -> None
-       | E.Equipped _ | E.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
+       | E.Equipped _ | E.Purchased _ -> Alcotest.fail "a purchase has no Goal identity"
+       | E.Granted _ -> Alcotest.fail "a grant has no Goal identity"
+        | E.Gifted _ -> Alcotest.fail "a gift has no Goal identity"
+        | E.Gifted_item _ -> Alcotest.fail "an item gift has no Goal identity")
     events
 ;;
 
@@ -131,7 +134,8 @@ let payment_of_event (row : E.t) =
   match row.body with
   | E.Paid payment -> payment
   | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _
-  | E.Payout_failed _ | E.Half_life_set _ | E.Purchased _ | E.Equipped _ ->
+  | E.Payout_failed _ | E.Half_life_set _ | E.Purchased _ | E.Equipped _
+  | E.Granted _ | E.Gifted _ | E.Gifted_item _ ->
     Alcotest.fail "expected a Paid receipt"
 ;;
 
@@ -545,7 +549,7 @@ let test_item_http_seed_replays_current_contract () =
       Alcotest.(check int) "synthetic payout amount matches fixture policy"
         (Option.get (Candle_config.grade_amount_milli policy.payout payment.grade)) payment.total_milli
     | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
-    | E.Unattributed _ | E.Payout_failed _ | E.Purchased _ | E.Equipped _ -> ()) events;
+    | E.Unattributed _ | E.Payout_failed _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Equipped _ -> ()) events;
   (match Candle_ledger.recover_at_start ~base_path with
    | Ok recovered -> Alcotest.(check bool) "restart retains synthetic provenance"
        true (Candle_ledger.events recovered = events)

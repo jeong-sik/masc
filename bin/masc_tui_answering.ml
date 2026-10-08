@@ -103,7 +103,8 @@ let chat_activity_row_text row = row.lead ^ row.rest ^ row.keys
    ([running_glyph]); a surface with no ticker passes none and gets the
    still mark. Reply text belongs to the scrollable conversation; this band
    carries only activity and the keys that act on it. *)
-let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error rows =
+let chat_activity ?(frame = -1) ?(stop_keys = "") ?(show_timing = true)
+    ~now ~keeper_name ~error rows =
   let plain text = { lead = text; rest = ""; keys = "" } in
   let stale = match error with None -> [] | Some detail -> [plain ("Activity unavailable: " ^ detail)] in
   match List.find_opt (fun (row : Tui_decode.keeper_turn_row) ->
@@ -115,6 +116,7 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error rows 
   | Some { ktr_state = Tui_decode.Keeper_turn_running { lane; started_at_unix; preview }; _ } ->
     let status = match preview with
       | None -> "progress has not been reported"
+      | Some preview when not show_timing -> preview.Tui_decode.ktp_status_text
       | Some preview ->
         Printf.sprintf "%s · last activity %s ago"
           preview.Tui_decode.ktp_status_text
@@ -130,8 +132,8 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error rows 
       | Some _ -> running_still, "last observed "
     in
     stale
-    @ [ { lead = Printf.sprintf "%s %s%s · %s" mark observed (lane_word lane)
-                   (elapsed_text ~now started_at_unix)
+    @ [ { lead = Printf.sprintf "%s %s%s%s" mark observed (lane_word lane)
+                   (if show_timing then " · " ^ elapsed_text ~now started_at_unix else "")
         ; rest = " · " ^ Masc.Tui_terminal_text.sanitize_terminal_text status
         ; keys = stop_keys
         } ]
@@ -174,7 +176,7 @@ let anything_running ~turns ~live_transcript ~lanes ~awaiting_detail_read =
   | Some snapshot ->
       List.exists
         (fun (lane : Tui_decode.standalone_lane) ->
-          lane.sl_status = Tui_decode.Standalone_running)
+          lane.sl_running_count > 0)
         snapshot.Tui_decode.sls_lanes
 ;;
 

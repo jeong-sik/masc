@@ -362,7 +362,6 @@ type try_provider_ctx =
   ; transport_resolved : Masc_grpc_transport.t
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
-  ; yield_on_tool : bool
   ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
   ; checkpoint_progress : checkpoint_progress Atomic.t
   ; context_injector : Agent_core.Hooks.context_injector option
@@ -371,6 +370,8 @@ type try_provider_ctx =
   ; preserve_thinking : bool option
   ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
   ; agent_core_checkpoint : Agent_core.Checkpoint.t option
+  ; native_binding : Keeper_direct_native_continuation.binding option
+  ; native_retired_history_cut : Keeper_direct_native_continuation.retired_history_cut option
   ; sw : Eio.Switch.t
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; on_event : (Agent_core.Types.sse_event -> unit) option
@@ -515,6 +516,8 @@ val context_overflow_shrink_sequence :
   ?shrink_capacity:
     (capacity:int -> default_capacity:int -> int) ->
   ?final_shrink_capacity:(capacity:int -> int option) ->
+  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
+  ?on_memory_retry:(unit -> unit) ->
   starting_capacity:int ->
   same_run_retry_authorized:(unit -> bool) ->
   shrink_admits_history:(capacity:int -> bool) ->
@@ -530,6 +533,11 @@ val context_overflow_shrink_sequence :
     seed history is cut against a declared prompt byte cap; the capacity is
     in bytes. The Agent Core lane answers the same refusal by moving its
     carried front ({!run_try_provider_with_carried_range_eviction}).
+    After a typed window refusal and same-run effect authorization, memory
+    reprojection is offered first. [Reprojected] retries at the same history
+    capacity after [on_memory_retry] resets caller recovery state. [Unchanged]
+    uses history shrinking; a callback error preserves the original refusal
+    without retry. The default callback returns [Unchanged].
     [default_capacity] is the policy's ordinary halved value;
     a custom [shrink_capacity] can replace only exceptional starting values
     without copying the shared divisor. The walk carries no attempt count:
@@ -660,7 +668,19 @@ val current_turn_demotion_sequence :
     result is returned as it is. The range is not narrowed. With nothing to
     demote, and on every other failure, the failure is returned at once. *)
 
+val memory_capacity_retry_sequence :
+  same_run_retry_authorized:(unit -> bool) ->
+  on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
+  on_projection_failure:(unit -> unit) ->
+  attempt:(unit -> ('ok, Agent_core.Error.t) result) -> unit ->
+  ('ok, Agent_core.Error.t) result
+(** Agent Core memory feedback before any carried-range mutation. Only typed
+    window/body capacity refusals and current checkpoint/effect authority permit
+    retry. Receipt failure calls [on_projection_failure] so enclosing history
+    recovery cannot bypass it. Unchanged memory returns the original refusal. *)
+
 val run_try_provider_with_carried_range_eviction :
+  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
   Runtime_candidate.t ->
@@ -678,6 +698,7 @@ val run_try_provider_with_carried_range_eviction :
     recovery view runs one attempt. *)
 
 val run_try_provider_with_truncation_recovery :
+  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
   Runtime_candidate.t ->

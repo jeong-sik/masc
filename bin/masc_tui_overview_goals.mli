@@ -10,8 +10,8 @@
 module Tui_decode = Masc.Tui_decode
 
 val drawn_phase : Goal_phase.t -> bool
-(** [Executing], [Verifying] and [Awaiting_confirmation]: the phases a goal
-    still takes work in. *)
+(** All nonterminal phases, including [Paused] and [Blocked], so the operator
+    can find suspended Goals and restore them. *)
 
 val drawn_goals : Tui_decode.overview_goal list -> Tui_decode.overview_goal list
 (** The goals in a {!drawn_phase}, by priority (lower number first), then by

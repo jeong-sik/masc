@@ -1,0 +1,30 @@
+{
+  "base": "2e34863666dde7dd334adb47dee397b81358f928",
+  "previous_response_tree": "0147eb99c1c72913ae915c3237d9be59c40b96d4",
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_store.ml": "9eaf3f65a886c87635746bdb6cd1df1b0a1f9998c478a6bd9bc7cc96d8526dcd",
+    "test/test_lane_addon_worker.ml": "f25b06504e2f550395f72a49311ab21aaf0747ceb5e8d72447be7bf22613efee"
+  },
+  "artifacts_sha256": {
+    "red-build.log": "b4905b522429d4b7a5bd0160d8f8deedb302db3d134d99fe0ababf47ced21464",
+    "red-build-fixed.log": "4e4971582fa4bdc97a2026d60d7d63a300eb7f9a61305eae215151ec418c6cdf",
+    "red-test.log": "596e2639d7f0668eea194520583785ef295955e0a46abede2b96452dee9e45a6",
+    "red-identities.json": "676bf6d26f4dbd157c2bf66dab3f1068e97b9116aa95e01d327ecb777508da75",
+    "red-case0.log": "3d1889cf9fd5ff30d4a3260b84fa14e1ee0028c832a2a2688f6183e2ad037f6a",
+    "red-case1.log": "3d1889cf9fd5ff30d4a3260b84fa14e1ee0028c832a2a2688f6183e2ad037f6a",
+    "red-case2.log": "3d1889cf9fd5ff30d4a3260b84fa14e1ee0028c832a2a2688f6183e2ad037f6a",
+    "green-build.log": "4e4971582fa4bdc97a2026d60d7d63a300eb7f9a61305eae215151ec418c6cdf",
+    "green-test.log": "920d6481a61b4566fb372bfb723abdff6c6f3cb917deac07ed162a95013dd4cb",
+    "final-build.log": "4e4971582fa4bdc97a2026d60d7d63a300eb7f9a61305eae215151ec418c6cdf",
+    "final-test.log": "e7832cf2e8716d8b710c079c5bf54c794756537a0a36b21c9b5eca9ceaf4d701"
+  },
+  "binary_sha256": "16488b3075d24059bfcb414bd26878f5728d556f18b68c56007e759cf6f2b7af",
+  "results": {
+    "new_parent_cases_red": "3 intended assertion failures; external file was created",
+    "first_repair": "34 PASS/1 FAIL: external writes prevented but symlinked canonical parent still enabled fallback",
+    "final_focused_build": "PASS",
+    "final_worker_suite": "35 PASS in 6.591s",
+    "initial_fixture_compile": "reserved external keyword typo; corrected before RED runtime",
+    "full_suite_or_live_runtime": "NOT RUN"
+  }
+}

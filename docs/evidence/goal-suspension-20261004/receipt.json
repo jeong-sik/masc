@@ -1,0 +1,87 @@
+{
+  "scope": "Production source GoalTree in Chromium with synthetic HTTP. Native backend evidence is separate. No live mutations.",
+  "passed": true,
+  "calls": [
+    {
+      "goal_id": "goal-suspension-fixture",
+      "action": "block",
+      "actor": {
+        "id": "dashboard",
+        "display_name": "dashboard"
+      },
+      "_agent_name": "dashboard"
+    },
+    {
+      "goal_id": "goal-suspension-fixture",
+      "action": "unblock",
+      "actor": {
+        "id": "dashboard",
+        "display_name": "dashboard"
+      },
+      "_agent_name": "dashboard"
+    },
+    {
+      "goal_id": "goal-suspension-fixture",
+      "action": "pause",
+      "actor": {
+        "id": "dashboard",
+        "display_name": "dashboard"
+      },
+      "_agent_name": "dashboard"
+    },
+    {
+      "goal_id": "goal-suspension-fixture",
+      "action": "resume",
+      "actor": {
+        "id": "dashboard",
+        "display_name": "dashboard"
+      },
+      "_agent_name": "dashboard"
+    }
+  ],
+  "errors": [],
+  "frames": [
+    {
+      "name": "desktop-paused",
+      "text": "재개 시 검증 중 · 연결된 Task는 별도로 진행됩니다.\n\nGOAL LIFECYCLE\npaused\nDrop\nReopen\nResume\nBlock",
+      "geometry": {
+        "x": 696.09375,
+        "y": 804.640625,
+        "width": 472.890625,
+        "height": 121.140625
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 1000
+      }
+    },
+    {
+      "name": "desktop-blocked",
+      "text": "재개 시 검증 중 · 연결된 Task는 별도로 진행됩니다.\n\nGOAL LIFECYCLE\nblocked\nDrop\nReopen\nPause\nUnblock\nBlock applied",
+      "geometry": {
+        "x": 696.09375,
+        "y": 804.640625,
+        "width": 472.890625,
+        "height": 167.140625
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 1000
+      }
+    },
+    {
+      "name": "mobile-paused",
+      "text": "재개 시 검증 중 · 연결된 Task는 별도로 진행됩니다.\n\nGOAL LIFECYCLE\npaused\nDrop\nReopen\nResume\nBlock\nPause applied",
+      "geometry": {
+        "x": 21,
+        "y": 332.828125,
+        "width": 348,
+        "height": 178.15625
+      },
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    }
+  ]
+}

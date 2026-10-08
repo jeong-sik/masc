@@ -48,10 +48,17 @@ val handle_goal_measure
     the idempotent [Already] response and emits a fresh verifier scan wake;
     verifier verdicts are not public actions.
 
-    [drop] decides against the current Goal under its store lock and commits
-    the phase and audit intent together. A committed cancellation remains a
-    success when effect delivery is deferred; [effect_delivery] reports that
-    separately. A repeated drop preserves the original Goal and drains the
+    [pause]/[block] commit a suspension with its previous live state;
+    [resume]/[unblock] restore that state and explicitly wake verification
+    when restoring [Verifying]. These decisions and their audit intents hold
+    the Goal lock. Linked Tasks and Keeper turns are unaffected.
+
+    [drop] is refused unless [note] says why, after trimming. The note
+    becomes the Goal's review note and the reason each cancelled Task's
+    author is told. It decides against the current Goal under its store lock
+    and commits the phase and audit intent together. A committed cancellation
+    remains a success when effect delivery is deferred; [effect_delivery]
+    reports that separately. A repeated drop preserves the original Goal and drains the
     pending outbox without duplicating its event or verifier cancellation. *)
 val handle_goal_transition
   :  tool_name:string
@@ -91,7 +98,10 @@ type confirmation_step =
     cannot supply or impersonate it. The ledger commit precedes any phase
     write, and a stale/non-pending verdict is refused. An exact replay after
     the target phase committed returns success without rewriting state or
-    repeating phase events and announcements.
+    repeating phase events and announcements. A bound result arriving during
+    a suspension of [Verifying] only commits its exact ledger result, with
+    Candle-before-proof ordering. The suspension and its restore state remain
+    unchanged; phase progression and completion notices wait for resume.
 
     [before_proof_commit] runs for a [Proof_proven] verdict that moves the
     Goal, after the criterion and phase checks and before the verdict reaches

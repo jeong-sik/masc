@@ -70,29 +70,11 @@ type meta_command =
       { latch : shutdown_latch
       ; updated_at : string
       }
-  | Set_activation_mode of
-      { mode : Keeper_activation_mode.t
-      ; updated_at : string
-      }
   | Update_profile of profile_update
   | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
-  | Turn_started_projection of { updated_at : string }
-  | Turn_succeeded of
-      { usage : usage_delta
-      ; updated_at : string
-      }
-  | Turn_failed of
-      { usage : usage_delta option
-      ; updated_at : string
-      }
   | Commit_turn_runtime of turn_runtime_delta
-  | Add_usage of usage_delta
   | Set_current_task of
       { task_id : Keeper_id.Task_id.t option
-      ; updated_at : string
-      }
-  | Ack_message_scope of
-      { message_id : string option
       ; updated_at : string
       }
 
@@ -323,12 +305,6 @@ let add_usage meta delta =
       Ok (Keeper_meta_contract.map_usage (fun _ -> usage) meta)
 ;;
 
-let update_usage meta usage =
-  match usage with
-  | None -> Ok meta
-  | Some delta -> add_usage meta delta
-;;
-
 let apply_observed_change current = function
   | Unchanged -> current
   | Changed value -> value
@@ -424,8 +400,6 @@ let apply_existing (state : state) meta command =
          ; updated_at
          ; runtime
          })
-  | Set_activation_mode { mode; updated_at } ->
-    Ok (with_meta state { meta with activation_mode = mode; updated_at })
   | Update_profile update ->
     Ok
       (with_meta
@@ -450,29 +424,12 @@ let apply_existing (state : state) meta command =
          ; agent_core_env = update.agent_core_env
          ; updated_at = update.updated_at
          })
-  | Turn_started_projection { updated_at } ->
-    Ok (with_meta state { meta with updated_at })
-  | Turn_succeeded { usage; updated_at } ->
-    (match add_usage meta usage with
-     | Error _ as error -> error
-     | Ok meta -> Ok (with_meta state { meta with updated_at }))
-  | Turn_failed { usage; updated_at } ->
-    (match update_usage meta usage with
-     | Error _ as error -> error
-     | Ok meta -> Ok (with_meta state { meta with updated_at }))
   | Commit_turn_runtime delta ->
     (match apply_turn_runtime_delta meta delta with
      | Error _ as error -> error
      | Ok meta -> Ok (with_meta state meta))
-  | Add_usage delta ->
-    (match add_usage meta delta with
-     | Error _ as error -> error
-     | Ok meta -> Ok (with_meta state meta))
   | Set_current_task { task_id; updated_at } ->
     Ok (with_meta state { meta with current_task_id = task_id; updated_at })
-  | Ack_message_scope { message_id; updated_at } ->
-    let runtime = { meta.runtime with message_scope_ack_id = message_id } in
-    Ok (with_meta state { meta with runtime; updated_at })
 ;;
 
 let apply_meta (state : state) command =

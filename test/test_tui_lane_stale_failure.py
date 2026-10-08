@@ -1,4 +1,4 @@
-"""A stale standalone reading carries its read cause without a second verdict."""
+"""A stale inventory reading carries its read cause without a second verdict."""
 
 import os
 import re
@@ -11,13 +11,13 @@ import tui_keyboard_runtime as _keyboard_runtime
 
 
 
-# The standalone heading's own clock, drawn only from a standalone lane read.
+# The inventory heading's own clock, drawn only from a common Lane read.
 # A bare "observed " does not say that read landed: the Dashboard draws
 # "Health: not observed" and its other unread rows before any read, and the
 # wait searches from the start of the output, so it can match there and "r"
 # can go out before the first lane reading it is meant to refresh.
 LANES_OBSERVED = re.compile(
-    rb"Lanes \xc2\xb7 observed \d{2}:\d{2}:\d{2}"
+    rb"All lanes \xc2\xb7 observed \d{2}:\d{2}:\d{2}"
 )
 
 def run(executable: str) -> None:
@@ -30,8 +30,8 @@ def run(executable: str) -> None:
         ("decode", (200, {}), b"schema"),
     ):
         fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
-        fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_harness.SequencedHttpResponse(
-            [_keyboard_keepers.standalone_lanes_response(), failed_reading]
+        fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_harness.SequencedHttpResponse(
+            [_keyboard_keepers.lane_inventory_response(), failed_reading]
         )
         fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (
             _keyboard_keepers.standalone_lane_runtime_config_response()
@@ -44,20 +44,23 @@ def run(executable: str) -> None:
             )
             _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
             _keyboard_harness.wait_for_output(process, fd, output, LANES_OBSERVED, start=0, timeout=5)
-            drawn = _keyboard_harness.send_and_wait(process, fd, output, b"r", b"STALE")
-            frame = _keyboard_chat.unwrapped(_keyboard_harness.screen_text(drawn))
-            if b"STALE \xc2\xb7 lanes load failed:" not in frame:
+            _keyboard_harness.send_and_wait(process, fd, output, b"r", b"STALE")
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            frame = _keyboard_chat.unwrapped(_keyboard_harness.screen_text(bytes(output)))
+            if b"STALE \xc2\xb7" not in frame:
                 raise AssertionError(f"stale reading lost the failure verdict: {frame!r}")
             if cause not in frame:
                 raise AssertionError(f"stale reading lost the cause: {frame!r}")
-            if frame.count(b"lanes load failed:") != 1:
-                raise AssertionError(f"stale reading repeated its verdict: {frame!r}")
+            if frame.count(b"STALE") != 1 or frame.count(cause) != 1:
+                raise AssertionError(f"stale reading repeated its verdict or cause: {frame!r}")
+            if b"Board Attention" not in frame:
+                raise AssertionError(f"failed inventory read discarded retained rows: {frame!r}")
             _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
             os.write(fd, b"q")
 
         _keyboard_harness.run_terminal_scenario(
             executable,
-            description=f"stale standalone lane reading keeps one {kind} failure",
+            description=f"stale common lane reading keeps one {kind} failure",
             interact=interact,
             http_fixtures=fixtures,
         )
@@ -65,4 +68,4 @@ def run(executable: str) -> None:
 
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
-    print("stale standalone lane failure: PASS")
+    print("stale common lane failure: PASS")

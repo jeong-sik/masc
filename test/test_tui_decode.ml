@@ -1203,7 +1203,7 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
                   ; "verifying_count", `Int 0
                   ; "awaiting_confirmation_count", `Int 0
                   ; "done_count", `Int 0
-                  ; "dropped_count", `Int 0
+                  ; "paused_count", `Int 0; "blocked_count", `Int 0; "dropped_count", `Int 0
                   ] )
             ; ( "task_backlog"
               , `Assoc
@@ -1355,7 +1355,7 @@ let test_planning_goal_without_the_verifier_field_is_refused () =
         , `Assoc
             [ "active_count", `Int 0; "verifying_count", `Int 1
             ; "awaiting_confirmation_count", `Int 0; "done_count", `Int 0
-            ; "dropped_count", `Int 0 ] )
+            ; "paused_count", `Int 0; "blocked_count", `Int 0; "dropped_count", `Int 0 ] )
       ; ( "task_backlog"
         , `Assoc
             [ "todo", `Int 0; "claimed", `Int 0; "in_progress", `Int 0
@@ -1418,7 +1418,7 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
           ; "verifying_count", `Int 3
           ; "awaiting_confirmation_count", `Int 0
           ; "done_count", `Int 4
-          ; "dropped_count", `Int 5
+          ; "paused_count", `Int 0; "blocked_count", `Int 0; "dropped_count", `Int 5
           ] )
     ; ( "task_backlog"
       , `Assoc
@@ -8229,6 +8229,7 @@ let keeper_turns_json =
                 , `Assoc
                     [ ("lane", `String "autonomous")
                     ; ("interrupt_token", `String "echo-turn-token")
+                    ; ("turn_ref", Ids.Turn_ref.to_yojson (Ids.Turn_ref.make ~trace_id:"autonomous" ~absolute_turn:3))
                     ; ("started_at_unix", `Float 1787828193.5)
                     ] )
               ]
@@ -8254,12 +8255,16 @@ let test_decode_keeper_turns () =
         running.Tui_decode.ktr_keeper_name;
       (match running.ktr_state with
        | Tui_decode.Keeper_turn_running
-           { lane; started_at_unix; interrupt_token; _ } ->
+           { lane; started_at_unix; interrupt_token; turn_ref; _ } ->
            Alcotest.(check bool) "autonomous lane" true
              (lane = Tui_decode.Turn_lane_autonomous);
            Alcotest.(check (float 0.001)) "started at" 1787828193.5
              started_at_unix;
-           Alcotest.(check string) "stop handle" "echo-turn-token" interrupt_token
+           Alcotest.(check string) "stop handle" "echo-turn-token" interrupt_token;
+           Alcotest.(check bool) "autonomous journal identity" true
+             (match turn_ref with
+              | Some turn_ref -> Ids.Turn_ref.equal turn_ref (Ids.Turn_ref.make ~trace_id:"autonomous" ~absolute_turn:3)
+              | None -> false)
        | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ ->
            Alcotest.fail "running keeper decoded as not running");
       Alcotest.(check bool) "idle keeper" true
@@ -8396,6 +8401,7 @@ let picker_default_runtime =
     ; ("is_default", `Bool false)
     ; ("rate_limited", `Bool false)
     ; ("rate_limit_resets_at", `Null)
+    ; ("failed_attempt", `Null)
     ]
 
 let picker_exact_runtime =
@@ -8413,6 +8419,7 @@ let picker_exact_runtime =
     ; ("is_default", `Bool false)
     ; ("rate_limited", `Bool false)
     ; ("rate_limit_resets_at", `Null)
+    ; ("failed_attempt", `Null)
     ]
 
 let runtime_resolved_json =
@@ -8420,6 +8427,7 @@ let runtime_resolved_json =
     [ ("generated_at_iso", `String "2026-08-24T10:20:02Z")
     ; ("source", `String "/api/v1/runtime/resolved")
     ; ("config_path", `String "/workspace/config/runtime.toml")
+    ; ("default_route", `String "ollama_cloud.deepseek")
     ; ("default_runtime", picker_default_runtime)
     ; "media_failover", `List []
     ; "media_failover_declared", `List []
@@ -8448,6 +8456,60 @@ let runtime_resolved_json =
               ]
           ] )
     ]
+
+(* The failed attempt the lane walk orders by. A failure name this build does
+   not know is kept by name; a value that is not an object or null is a broken
+   payload, and so is a row that leaves the field out. *)
+let test_runtime_failed_attempt_is_read_typed () =
+  let row value =
+    match picker_default_runtime with
+    | `Assoc fields ->
+      let fields = List.remove_assoc "failed_attempt" fields in
+      `Assoc (match value with None -> fields | Some value -> ("failed_attempt", value) :: fields)
+    | _ -> Alcotest.fail "runtime fixture must be an object"
+  in
+  let decode value =
+    runtime_resolved_json
+    |> replace_assoc_field "default_runtime" (row value)
+    |> replace_assoc_field "runtimes" (`List [ row value; picker_exact_runtime ])
+    |> Tui_decode.decode_runtime_resolved
+    |> Result.map (fun (rows, _) ->
+         (List.find
+            (fun (row : Tui_decode.runtime_option) ->
+              String.equal row.ro_id "ollama_cloud.deepseek")
+            rows).Tui_decode.ro_failed_attempt)
+  in
+  let attempt failure =
+    `Assoc
+      [ ("noted_at", `Float 1790000000.)
+      ; ("failure", `String failure)
+      ; ("recorded_by", `String "alpha")
+      ]
+  in
+  (match decode (Some (attempt "provider_timeout")) with
+   | Ok
+       (Some
+         { Tui_decode.rfa_failure =
+             Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout
+         ; rfa_recorded_by = "alpha"
+         ; rfa_noted_at = 1790000000.
+         }) -> ()
+   | Ok _ -> Alcotest.fail "a known failure was not read as its kind"
+   | Error detail -> Alcotest.fail detail);
+  (match decode (Some (attempt "quota_drift")) with
+   | Ok (Some { Tui_decode.rfa_failure = Tui_decode.Unrecognised_attempt_failure "quota_drift"; _ }) -> ()
+   | Ok _ -> Alcotest.fail "an unknown failure was not kept by name"
+   | Error detail -> Alcotest.fail detail);
+  (match decode (Some `Null) with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "null read as a failed attempt"
+   | Error detail -> Alcotest.fail detail);
+  List.iter
+    (fun value ->
+       match decode value with
+       | Ok _ -> Alcotest.fail "a missing or malformed failed_attempt decoded"
+       | Error _ -> ())
+    [ None; Some (`String "provider_timeout") ]
 
 let test_runtime_rate_limit_requires_an_observation () =
   let row value =
@@ -8581,6 +8643,39 @@ let test_exact_slot_group_is_typed () =
     (Result.is_error
        (Tui_decode.decode_runtime_resolved
           (change_second_runtime (`String "other") runtime_resolved_json)))
+
+(* The listing's rule-3 flag is optional: an older server's rows lack it
+   and read as no gap, a present flag is kept, and a mistyped one refuses
+   the catalog rather than guessing. *)
+let test_exact_body_deadline_flag_is_optional () =
+  let mark value = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, v) ->
+              match key, v with
+              | "runtimes", `List [ first; `Assoc second ] ->
+                key, `List [ first; `Assoc (("exact_body_deadline_missing", value) :: second) ]
+              | _ -> key, v)
+           fields)
+    | json -> json
+  in
+  (match Tui_decode.decode_runtime_resolved runtime_resolved_json with
+   | Ok (runtimes, _) ->
+     List.iter
+       (fun (r : Tui_decode.runtime_option) ->
+          Alcotest.(check bool) "an older server's row reads as no gap" false
+            r.ro_exact_body_deadline_missing)
+       runtimes
+   | Error detail -> Alcotest.fail detail);
+  (match Tui_decode.decode_runtime_resolved (mark (`Bool true) runtime_resolved_json) with
+   | Ok ([ _; marked ], _) ->
+     Alcotest.(check bool) "the listed gap is kept" true marked.ro_exact_body_deadline_missing
+   | Ok _ -> Alcotest.fail "expected two runtimes"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "a mistyped flag refuses the catalog" true
+    (Result.is_error
+       (Tui_decode.decode_runtime_resolved (mark (`String "yes") runtime_resolved_json)))
 
 (* [declared] tells a lane a table declares from the single candidate an
    assignment naming a runtime rests on. The two are the same shape otherwise,
@@ -8750,6 +8845,7 @@ let resolved_runtime id provider model =
     ; "is_default", `Bool false
     ; "rate_limited", `Bool false
     ; "rate_limit_resets_at", `Null
+    ; "failed_attempt", `Null
     ]
 
 let runtime_lane ?(declared = true) id runtime_ids =
@@ -8772,6 +8868,7 @@ let runtime_resolved_surface_json () =
     [ "generated_at_iso", `String "2026-08-24T10:20:02Z"
     ; "source", `String "/api/v1/runtime/resolved"
     ; "config_path", `String "/workspace/config/runtime.toml"
+    ; "default_route", `String "primary"
     ; "default_runtime", runtime_a
     ; "media_failover", `List []
     ; "media_failover_declared", `List []
@@ -9086,12 +9183,29 @@ let test_runtime_default_limits_must_match_listed_row () =
      "declared_reasoning_effort", `String "low";
      "is_local", `Bool true]
 
+let test_default_route_must_enter_the_reported_runtime () =
+  let replace_route route = function
+    | `Assoc fields ->
+        `Assoc (("default_route", `String route) :: List.remove_assoc "default_route" fields)
+    | json -> json
+  in
+  let json = runtime_resolved_surface_json () |> replace_route "degraded" in
+  match Tui_decode.decode_runtime_resolved_snapshot json with
+  | Error detail ->
+      Alcotest.(check string) "a lane cannot claim another entry runtime"
+        "default_route disagrees with its lane's entry runtime" detail
+  | Ok _ -> Alcotest.fail "contradictory default route was accepted"
+
 let test_runtime_surface_keeps_resolved_rows_without_a_probe () =
   match
     Tui_decode.decode_runtime_resolved_snapshot (runtime_resolved_surface_json ())
   with
   | Error detail -> Alcotest.fail detail
   | Ok resolved ->
+      Alcotest.(check (option string)) "configured route is a lane"
+        (Some "primary") resolved.rrs_default_route;
+      Alcotest.(check (option string)) "entry runtime is distinct"
+        (Some "runtime-a") resolved.rrs_default_runtime_id;
       (match
          Tui_decode.join_runtime_surface ~probe:None
            ~probe_error:(Some "probe permission denied") ~resolved
@@ -9328,7 +9442,7 @@ let restore_payload : Yojson.Safe.t =
     ; ( "report"
       , `Assoc
           [ ("restored", `String "morning")
-          ; ("autosave", `String "_autosave-20260903T103201Z")
+          ; ("autosave", `String "_autosave")
           ; ( "prompt_overrides"
             , `Assoc
                 [ ("effect", `String "immediate")
@@ -9361,7 +9475,7 @@ let test_decode_preset_restore_reads_each_surface () =
   match Tui_decode.decode_preset_restore restore_payload with
   | Error detail -> Alcotest.fail detail
   | Ok report ->
-    Alcotest.(check string) "autosave" "_autosave-20260903T103201Z" report.Tui_decode.prr_autosave;
+    Alcotest.(check string) "autosave" "_autosave" report.Tui_decode.prr_autosave;
     Alcotest.(check (list string)) "overrides applied" [ "keeper" ]
       report.Tui_decode.prr_prompt_overrides.Tui_decode.pp_applied;
     Alcotest.(check (list (pair string string))) "overrides skipped"
@@ -9407,6 +9521,18 @@ let test_decode_preset_refusal_is_the_servers_sentence () =
   match Tui_decode.decode_presets refused with
   | Error detail -> Alcotest.(check string) "list refusal" "invalid preset name: bad name" detail
   | Ok _ -> Alcotest.fail "a refused list decoded as a snapshot"
+
+let test_decode_preset_deleted_reads_the_removed_name () =
+  let deleted : Yojson.Safe.t = `Assoc [ ("ok", `Bool true); ("deleted", `String "_autosave") ] in
+  (match Tui_decode.decode_preset_deleted deleted with
+   | Ok name -> Alcotest.(check string) "the removed name" "_autosave" name
+   | Error detail -> Alcotest.fail detail);
+  let refused : Yojson.Safe.t =
+    `Assoc [ ("ok", `Bool false); ("error", `String "no preset named morning") ]
+  in
+  match Tui_decode.decode_preset_deleted refused with
+  | Error detail -> Alcotest.(check string) "the server's sentence" "no preset named morning" detail
+  | Ok _ -> Alcotest.fail "a refused delete decoded as a removed name"
 
 let test_decode_prompts_reads_the_live_shape () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -10851,6 +10977,21 @@ let test_decode_gate_identity_row_reads_its_target () =
           Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
 let test_decode_gate_rows_distinguish_operator_phases () =
+  let module Q = Keeper_approval_queue_rules_types in
+  (* The server sets human_required only from an available Require_human
+     summary, so that row carries one. *)
+  let handed_over =
+    Q.summary_status_to_yojson
+      (Q.Summary_available
+         { summary_version = Q.current_hitl_context_summary_version
+         ; generated_at = 1.0
+         ; model_run_id = "run-phase"
+         ; context_summary = "checks the GitHub login"
+         ; key_questions = []
+         ; judgment = Q.Require_human
+         ; rationale = "reads credentials"
+         })
+  in
   let phase ?phase_field () =
     let base_fields =
       [ "id", `String "appr-phase"
@@ -10860,6 +11001,10 @@ let test_decode_gate_rows_distinguish_operator_phases () =
       ; "waiting_s", `Int 42
       ; "input", `Assoc []
       ]
+      @
+      match phase_field with
+      | Some (`String "human_required") -> [ "summary_status", handed_over ]
+      | Some _ | None -> []
     in
     let fields =
       match phase_field with
@@ -10968,6 +11113,47 @@ let test_decode_gate_block_reason_and_retry_contract () =
     terminal.gp_auto_judge_detail;
   Alcotest.check Alcotest.bool "terminal exact failure is never replayable" false
     (Option.is_some terminal.gp_retry_request)
+;;
+
+(* Auto Judge hands a row to a person with its rationale and questions; the
+   row must carry them to the screen. The summary is written with the
+   server's own encoder, so the fixture follows the wire. *)
+let test_decode_gate_human_required_carries_the_judges_advice () =
+  let module Q = Keeper_approval_queue_rules_types in
+  let row summary_status =
+    `Assoc
+      [ "id", `String "appr-human"
+      ; "keeper_name", `String "advice-keeper"
+      ; "tool_name", `String "tool_execute"
+      ; "phase", `String "human_required"
+      ; "input_preview", `String "rm -rf build"
+      ; "summary_status", summary_status
+      ; "summary_attempt_disposition", `Assoc [ "code", `String "settled" ]
+      ]
+  in
+  let decode row = Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:(`List [ row ]) ()) in
+  let summary : Q.hitl_context_summary =
+    { summary_version = Q.current_hitl_context_summary_version
+    ; generated_at = 1.0
+    ; model_run_id = "run-1"
+    ; context_summary = "deletes the build directory"
+    ; key_questions = [ "Is build/ tracked?"; "Does anything else write there?" ]
+    ; judgment = Q.Require_human
+    ; rationale = "deletes tracked files"
+    }
+  in
+  (match decode (row (Q.summary_status_to_yojson (Q.Summary_available summary))) with
+   | Ok { gs_pending = [ pending ]; _ } ->
+     (match pending.gp_judge_advice with
+      | Some advice ->
+        Alcotest.(check string) "rationale" "deletes tracked files" advice.rationale;
+        Alcotest.(check (list string)) "questions"
+          [ "Is build/ tracked?"; "Does anything else write there?" ] advice.key_questions
+      | None -> Alcotest.fail "human_required row lost the judge's advice")
+   | Ok _ -> Alcotest.fail "expected one gate row"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "a human_required row without a summary is a wire error" true
+    (Result.is_error (decode (row (Q.summary_status_to_yojson Q.Summary_pending))))
 ;;
 
 let execute_gate_row ~preview ~input =
@@ -11277,10 +11463,35 @@ let test_decode_gate_null_queue_is_empty_with_modes () =
         (List.length snapshot.Tui_decode.gs_pending);
       match snapshot.Tui_decode.gs_modes with
       | Some modes ->
-          Alcotest.check Alcotest.string "workspace lane" "always_allow"
-            modes.Tui_decode.glm_workspace;
-          Alcotest.check Alcotest.string "external lane" "manual"
-            modes.Tui_decode.glm_external
+          Alcotest.check Alcotest.bool "workspace lane" true
+            (modes.Tui_decode.glm_workspace
+             = Tui_decode.Gate_mode Keeper_gate_mode.Always_allow);
+          Alcotest.check Alcotest.bool "external lane" true
+            (modes.Tui_decode.glm_external
+             = Tui_decode.Gate_mode Keeper_gate_mode.Manual)
+      | None -> Alcotest.fail "the lanes went missing")
+
+(* A lane word this build does not know is kept by name. The snapshot that
+   carries it also carries the queue, so refusing the word would take the
+   operator's pending decisions off the screen with it. *)
+let test_decode_gate_unknown_lane_mode_is_kept_by_name () =
+  let hitl =
+    `Assoc
+      [ ("gate_mode", `Assoc [ ("mode", `String "escalate_to_human") ]);
+        ("external_gate_mode", `Assoc [ ("mode", `String "manual") ]);
+      ]
+  in
+  match Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:`Null ~hitl ()) with
+  | Error message -> Alcotest.failf "an unknown lane word failed the snapshot: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_modes with
+      | Some modes ->
+          Alcotest.check Alcotest.bool "kept as the server wrote it" true
+            (modes.Tui_decode.glm_workspace
+             = Tui_decode.Unrecognised_gate_mode "escalate_to_human");
+          Alcotest.check Alcotest.bool "the known lane still reads" true
+            (modes.Tui_decode.glm_external
+             = Tui_decode.Gate_mode Keeper_gate_mode.Manual)
       | None -> Alcotest.fail "the lanes went missing")
 
 let test_decode_gate_unreadable_queue_carries_the_detail () =
@@ -11356,8 +11567,8 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
   match Tui_decode.decode_keeper_gate_settings keeper_gate_settings_json with
   | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
   | Ok (modes, exact_lanes) ->
-    Alcotest.(check (list (pair string string)))
-      "modes" [ ("echo", "manual") ] modes;
+    Alcotest.(check bool)
+      "modes" true (modes = [ ("echo", Tui_decode.Gate_mode Keeper_gate_mode.Manual) ]);
     Alcotest.(check (list (pair string (pair string string))))
       "exact lanes" [ ("echo", ("hitl_auto_judge", "glm-coding.glm-5-turbo")) ]
       (List.map
@@ -11367,6 +11578,22 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
     Alcotest.(check (list bool)) "offered is carried, not defaulted" [ false ]
       (List.map (fun (first : Tui_decode.keeper_exact_lane_first) -> first.Tui_decode.kel_offered)
          exact_lanes)
+
+let test_decode_keeper_gate_settings_keeps_an_unknown_mode_by_name () =
+  let json =
+    `Assoc
+      [ ( "modes"
+        , `List
+            [ `Assoc [ ("keeper_name", `String "echo"); ("mode", `String "escalate_to_human") ] ] )
+      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+      ; ("exact_lanes", `List [])
+      ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
+      ]
+  in
+  match Tui_decode.decode_keeper_gate_settings json with
+  | Ok ([ ("echo", Tui_decode.Unrecognised_gate_mode "escalate_to_human") ], []) -> ()
+  | Ok _ -> Alcotest.fail "the unknown mode was not kept by name"
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
 
 (* An unreadable store answers an empty list beside state=unavailable. Read
    as the list alone, that is "nobody singled out". *)
@@ -12479,6 +12706,49 @@ let test_keeper_usage_cache_failures_remain_visible () =
   Alcotest.(check bool) "unknown cache is rejected" true
     (Result.is_error (decode {|{"generated_at":1,"window_minutes":1440,"keepers":[],"cache":{"state":"future"}}|}))
 
+let test_keeper_usage_rejects_unrenderable_generated_at () =
+  let decode timestamp =
+    Masc.Tui_decode_usage.decode_keeper_usage_window
+      (`Assoc [ "cache", `Assoc [ "state", `String "fresh" ];
+                "generated_at", `Float timestamp; "window_minutes", `Int 1440;
+                "keepers", `List [] ])
+  in
+  List.iter (fun timestamp ->
+    match decode timestamp with
+    | Error reason -> Alcotest.(check bool) "failure names generated_at" true
+        (String_util.contains_substring reason "generated_at")
+    | Ok _ -> Alcotest.fail "unrenderable generated_at was accepted")
+    [ Float.nan; Float.infinity; Float.neg_infinity; 1e300; -1e300 ];
+  List.iter (fun timestamp ->
+    match decode timestamp with
+    | Ok (Keeper_usage_window { kuw_generated_at; _ }) ->
+        Alcotest.(check (float 0.)) "representable timestamp is preserved"
+          timestamp kuw_generated_at;
+        ignore (Unix.gmtime kuw_generated_at)
+    | Ok _ -> Alcotest.fail "a timestamp became a loading placeholder"
+    | Error reason -> Alcotest.fail reason)
+    [ -1.; 0.; 1790985600. ]
+
+let test_keeper_usage_unread_turns_remain_partial () =
+  let decode unread =
+    let json = Yojson.Safe.from_string (Printf.sprintf
+      {|{"cache":{"state":"fresh"},"generated_at":1,"window_minutes":1440,
+      "keepers":[{"keeper_name":"alpha","sample_count":1,"total_tokens":100,
+      "total_cost_usd":1.0,"tokens_reported_samples":1,"tokens_unreported_samples":0,
+      "tokens_unread_samples":0,"cost_reported_samples":1,"cost_unreported_samples":0,
+      "cost_unread_samples":0,"metrics_read":{"state":"read","malformed_rows":0,
+      "unread_turn_rows":%d}}]}|} unread) in
+    Masc.Tui_decode_usage.decode_keeper_usage_window json in
+  (match decode 2 with
+   | Ok (Keeper_usage_window { kuw_rows = [{ kur_coverage =
+       Keeper_usage_partial { malformed_rows = 0; unread_turn_rows = 2 }; _ }]; _ }) -> ()
+   | Ok _ -> Alcotest.fail "unread turns became complete coverage"
+   | Error detail -> Alcotest.fail detail);
+  (match decode 0 with
+   | Ok (Keeper_usage_window { kuw_rows = [{ kur_coverage = Keeper_usage_complete; _ }]; _ }) -> ()
+   | _ -> Alcotest.fail "fully read window must remain complete");
+  Alcotest.(check bool) "negative unread count is rejected" true (Result.is_error (decode (-1)))
+
 let test_play_revoke_failure_detail () =
   Alcotest.(check string) "500 preserves actual controller failure"
     "controller busy (HTTP 500: controller release failed)"
@@ -12506,48 +12776,56 @@ let test_play_invite_refusal_says_the_servers_sentence () =
   let check_sentence label expected ~status_code body =
     Alcotest.(check (option string)) label expected (refusal ~status_code body)
   in
+  (* Built by the server's own refusal writer, so the fixture cannot keep an
+     old wire shape after the server changes. *)
+  let server ?code ?fields sentence =
+    Yojson.Safe.to_string (Server_refusal.json ?code ?fields sentence)
+  in
   check_sentence "not ready lists what is missing"
     (Some "HTTP 409: an invite needs auth (missing: auth_disabled, no_public_base_url)")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":["auth_disabled","no_public_base_url"]}|};
+    (server ~code:"not_ready"
+       ~fields:[ ("missing", `List [ `String "auth_disabled"; `String "no_public_base_url" ]) ]
+       "an invite needs auth");
   check_sentence "a taken name says who holds it"
     (Some "HTTP 409: another participant already has this name (held by a keeper)")
     ~status_code:409
-    {|{"error":"name_taken","message":"another participant already has this name","taken_by":"keeper"}|};
+    (server ~code:"name_taken" ~fields:[ ("taken_by", `String "keeper") ]
+       "another participant already has this name");
   check_sentence "blank and non-string gaps are not listed"
     (Some "HTTP 409: an invite needs auth (missing: no_public_base_url)")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":["", 7, "no_public_base_url", null]}|};
+    {|{"error":"an invite needs auth","code":"not_ready","missing":["", 7, "no_public_base_url", null]}|};
   check_sentence "a missing that lists nothing adds nothing"
     (Some "HTTP 409: an invite needs auth")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":["  "]}|};
+    {|{"error":"an invite needs auth","code":"not_ready","missing":["  "]}|};
   check_sentence "a missing that is not a list adds nothing"
     (Some "HTTP 409: an invite needs auth")
     ~status_code:409
-    {|{"error":"not_ready","message":"an invite needs auth","missing":"no_public_base_url"}|};
+    {|{"error":"an invite needs auth","code":"not_ready","missing":"no_public_base_url"}|};
   check_sentence "a plain sentence stands alone"
     (Some "HTTP 400: hours must be between 1 and 8760, got 0")
     ~status_code:400
-    {|{"error":"invalid_request","message":"hours must be between 1 and 8760, got 0"}|};
+    (server ~code:"invalid_request" "hours must be between 1 and 8760, got 0");
   List.iter
     (fun (why, status_code, body) -> check_sentence why None ~status_code body)
-    [ ("a 401 is about the credential", 401, {|{"error":"unauthorized","message":"bad token"}|})
-    ; ("a 403 is about the credential", 403, {|{"error":"forbidden","message":"admin only"}|})
-    ; ("a success is not a refusal", 200, {|{"error":"x","message":"fine"}|})
-    ; ("a server failure is not a refusal", 500, {|{"error":"x","message":"disk"}|})
-    ; ("a body with no message", 409, {|{"error":"not_ready"}|})
-    ; ("a blank message", 409, {|{"error":"x","message":"   "}|})
-    ; ("a message that is not a string", 409, {|{"error":"x","message":7}|})
+    [ ("a 401 is about the credential", 401, server ~code:"unauthorized" "bad token")
+    ; ("a 403 is about the credential", 403, server ~code:"forbidden" "admin only")
+    ; ("a success is not a refusal", 200, server "fine")
+    ; ("a server failure is not a refusal", 500, server "disk")
+    ; ("a body with no sentence", 409, {|{"code":"not_ready"}|})
+    ; ("a blank sentence", 409, {|{"error":"   ","code":"x"}|})
+    ; ("a sentence that is not a string", 409, {|{"error":7,"code":"x"}|})
     ; ("a body that is not an object", 409, {|["not_ready"]|})
     ; ("a body that is not JSON", 409, "<html>bad gateway</html>")
     ];
   (* Every part comes from the far end, so every part is made safe to draw. *)
   match
     refusal ~status_code:409
-      "{\"error\":\"x\",\"message\":\"a\\u001b[31mred\\nnext\",\"missing\":[\"g\\u001b]0;t\\u0007\"],\"taken_by\":\"k\\u001b\"}"
+      "{\"code\":\"x\",\"error\":\"a\\u001b[31mred\\nnext\",\"missing\":[\"g\\u001b]0;t\\u0007\"],\"taken_by\":\"k\\u001b\"}"
   with
-  | None -> Alcotest.fail "a body with a message gave no sentence"
+  | None -> Alcotest.fail "a body with a sentence gave no sentence"
   | Some said ->
     Alcotest.(check bool) "no control byte is left in the sentence" false
       (String.exists (fun c -> c < ' ' || c = '\127') said)
@@ -12620,18 +12898,24 @@ let () =
           test_runtime_route_keeps_declared_order
       ; Alcotest.test_case "default limits match listed runtime" `Quick
           test_runtime_default_limits_must_match_listed_row
+      ; Alcotest.test_case "default route agrees with entry runtime" `Quick
+          test_default_route_must_enter_the_reported_runtime
       ; Alcotest.test_case "keeps resolved rows without a probe" `Quick
           test_runtime_surface_keeps_resolved_rows_without_a_probe
       ] );
     ( "decode_runtime_resolved",
       [ Alcotest.test_case "requires a rate-limit observation" `Quick
           test_runtime_rate_limit_requires_an_observation;
+        Alcotest.test_case "reads the failed attempt typed" `Quick
+          test_runtime_failed_attempt_is_read_typed;
         Alcotest.test_case "carries runtimes and assignments" `Quick
           test_decode_runtime_resolved;
         Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick
           test_decode_runtime_resolved_full;
         Alcotest.test_case "exact slot destination is typed" `Quick
           test_exact_slot_group_is_typed;
+        Alcotest.test_case "exact body deadline flag is optional" `Quick
+          test_exact_body_deadline_flag_is_optional;
         Alcotest.test_case "runtime catalog keeps unavailable assignment evidence" `Quick
           test_decode_unavailable_runtime_assignment;
         Alcotest.test_case "a lane says whether a table declares it" `Quick
@@ -13166,6 +13450,8 @@ let () =
           test_decode_preset_restore_reads_each_surface
       ; Alcotest.test_case "a preset refusal decodes to the server's sentence" `Quick
           test_decode_preset_refusal_is_the_servers_sentence
+      ; Alcotest.test_case "decode_preset_deleted reads the removed name" `Quick
+          test_decode_preset_deleted_reads_the_removed_name
       ; Alcotest.test_case "a 200 carrying only an error is an error" `Quick
           test_a_two_hundred_carrying_only_an_error_is_an_error
       ; Alcotest.test_case "a JSON refusal shows its sentence, not the envelope" `Quick
@@ -13248,6 +13534,8 @@ let () =
           test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper;
         Alcotest.test_case "refuses an unavailable store" `Quick
           test_decode_keeper_gate_settings_refuses_an_unavailable_store;
+        Alcotest.test_case "keeps an unknown mode by name" `Quick
+          test_decode_keeper_gate_settings_keeps_an_unknown_mode_by_name;
       ] );
     ( "keeper_secret_projection",
       [
@@ -13270,6 +13558,8 @@ let () =
           test_decode_gate_rows_distinguish_operator_phases;
         Alcotest.test_case "blocked reason and retry contract" `Quick
           test_decode_gate_block_reason_and_retry_contract;
+        Alcotest.test_case "gate human_required carries the judge's advice" `Quick
+          test_decode_gate_human_required_carries_the_judges_advice;
         Alcotest.test_case "an execute row leads with the command" `Quick
           test_decode_execute_gate_row_leads_with_the_command;
         Alcotest.test_case "an execute row shows the command line" `Quick
@@ -13293,6 +13583,8 @@ let () =
           test_decode_gate_row_of_another_operation_keeps_its_preview;
         Alcotest.test_case "a null queue is empty with modes" `Quick
           test_decode_gate_null_queue_is_empty_with_modes;
+        Alcotest.test_case "an unknown lane mode is kept by name" `Quick
+          test_decode_gate_unknown_lane_mode_is_kept_by_name;
         Alcotest.test_case "an unreadable queue carries the detail" `Quick
           test_decode_gate_unreadable_queue_carries_the_detail;
         Alcotest.test_case "a ready queue state is not a warning" `Quick
@@ -13372,7 +13664,11 @@ let () =
       ] );
     ( "keeper usage cache"
     , [ Alcotest.test_case "compute and refresh failures remain visible" `Quick
-          test_keeper_usage_cache_failures_remain_visible ] );
+          test_keeper_usage_cache_failures_remain_visible;
+        Alcotest.test_case "Keeper usage rejects unrenderable generated_at" `Quick
+          test_keeper_usage_rejects_unrenderable_generated_at;
+        Alcotest.test_case "Keeper usage unread turns remain partial" `Quick
+          test_keeper_usage_unread_turns_remain_partial ] );
     ( "play invites"
     , [ Alcotest.test_case "preserves partial revoke and rejects unreadable links"
           `Quick test_play_invite_responses_preserve_recovery_facts

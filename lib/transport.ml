@@ -136,14 +136,11 @@ end
 (** REST API helpers *)
 module Rest = struct
   (** HTTP method type *)
-  type http_method = GET | POST | PUT | DELETE | PATCH
+  type http_method = GET | POST
 
   let method_to_string = function
     | GET -> "GET"
     | POST -> "POST"
-    | PUT -> "PUT"
-    | DELETE -> "DELETE"
-    | PATCH -> "PATCH"
 
   let method_json_key method_ =
     String.lowercase_ascii (method_to_string method_)
@@ -154,13 +151,11 @@ module Rest = struct
   type auth_mode =
     | Public
     | Conditional_bearer
-    | Same_origin_or_bearer
     | Bearer_required
 
   let auth_mode_name = function
     | Public -> "public"
     | Conditional_bearer -> "conditional_bearer"
-    | Same_origin_or_bearer -> "same_origin_or_bearer"
     | Bearer_required -> "bearer_required"
 
   let auth_mode_description = function
@@ -168,8 +163,6 @@ module Rest = struct
         "No bearer token is required for this route."
     | Conditional_bearer ->
         "Bearer token auth is required when workspace auth/token enforcement is active; loopback-local development may allow access without a bearer."
-    | Same_origin_or_bearer ->
-        "Loopback browser requests may use same-origin checks; non-browser clients should use Authorization: Bearer <token>."
     | Bearer_required ->
         "Authorization: Bearer <token> is required for this route."
 
@@ -223,7 +216,7 @@ module Rest = struct
   let auth_response_entries mode =
     match mode with
     | Public -> []
-    | Same_origin_or_bearer | Conditional_bearer | Bearer_required ->
+    | Conditional_bearer | Bearer_required ->
         [
           ( "401",
             `Assoc
@@ -241,7 +234,7 @@ module Rest = struct
       ]
     in
     match mode with
-    | Public | Same_origin_or_bearer -> base
+    | Public -> base
     | Conditional_bearer | Bearer_required ->
         ("security", openapi_bearer_security) :: base
 
@@ -434,13 +427,13 @@ module Rest = struct
     in
     let request_fields =
       match method_ with
-      | GET | DELETE ->
+      | GET ->
           let params = parameters_from_schema schema.input_schema in
           if params = [] then
             base_fields
           else
             ("parameters", `List params) :: base_fields
-      | POST | PUT | PATCH ->
+      | POST ->
           ( "requestBody",
             `Assoc
               [

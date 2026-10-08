@@ -107,10 +107,14 @@ def main():
 
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
     spec = importlib.util.spec_from_file_location('capture', inputs['terminal_helper'])
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f'capture helper failed to load: {inputs["terminal_helper"]}')
     c = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(c)
-    c.EXECUTABLE = executable
-    c.TTYD = Path(ttyd).resolve()
+    # The helper carries these as module globals; a dynamically loaded
+    # ModuleType does not declare them, so set them by name.
+    setattr(c, 'EXECUTABLE', executable)
+    setattr(c, 'TTYD', Path(ttyd).resolve())
     os.environ['MASC_TOKEN'] = 'masc-tui-keyboard-regression-token'
     os.environ['PATH'] = _keyboard_harness.path_without_masc(os.environ.get('PATH', ''))
     fixtures = _keyboard_harness.overview_event_http_fixtures()
@@ -119,11 +123,15 @@ def main():
     fixtures["/api/v1/gate/keepers?detailed=true"] = _keyboard_harness.keeper_runtime_http_fixtures()["/api/v1/gate/keepers?detailed=true"]
     fixtures["/api/v1/runtime/config/raw"] = (503, {"error": "runtime config load failed: fixture configuration unavailable"})
     if args.workspace_currency:
-        _, roster = fixtures["/api/v1/gate/keepers?detailed=true"]
+        roster = _keyboard_harness.json_payload_fixture(
+            fixtures, "/api/v1/gate/keepers?detailed=true")
         roster["candle"] = {"status": "ready", "issued_milli": "100000", "burned_milli": "10000", "circulating_milli": "90000"}
-        for keeper in roster["keepers"]:
-            keeper["candle_balance_milli"] = "12500"
-            keeper["candle_account_revision"] = "a" * 64
+        keepers = roster["keepers"]
+        assert isinstance(keepers, list)
+        for keeper in keepers:
+            if isinstance(keeper, dict):
+                keeper["candle_balance_milli"] = "12500"
+                keeper["candle_account_revision"] = "a" * 64
     fixtures[_keyboard_repositories.REPOSITORIES_PATH] = _keyboard_repositories.repositories_fixture()
     goal = _keyboard_harness.planning_goal('goal-audit-ready', 'Audit goal')
     goal.update(metric='checks', target_value='5', task_count=1, task_done_count=0,
@@ -132,6 +140,7 @@ def main():
     fixtures[_keyboard_harness.PLANNING_PATH] = _keyboard_harness.planning_snapshot([goal])
     fixtures[_keyboard_harness.DASHBOARD_GOALS_PATH] = (200, {'tree': [goal]})
     _, runtime = _keyboard_harness.empty_runtime_resolved_fixture()
+    assert isinstance(runtime, dict)
     runtime['provider_usage_windows'] = [{
         'scope': 'provider:audit', 'scope_id': hashlib.md5(b'provider:audit').hexdigest(),
         'providers': [{'id': 'audit', 'display_name': 'Audit provider'}],

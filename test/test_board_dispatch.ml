@@ -1164,6 +1164,26 @@ let test_get_post_and_comments_missing_post () =
         (Printf.sprintf "expected Post_not_found, got %s"
            (Board.show_board_error e))
 
+(* A read answers only that the id did not parse or that nothing has it. The
+   [board_error] form keeps the same answers for callers that also write. *)
+let test_read_answers_only_parse_and_absence () =
+  (match Board_dispatch.read_post ~post_id:"never-existed" with
+   | Error (Board.Read_post_not_found "never-existed") -> ()
+   | Error e -> Alcotest.fail ("expected Read_post_not_found, got " ^ Board.show_board_read_error e)
+   | Ok _ -> Alcotest.fail "a missing post was read");
+  (match Board_dispatch.read_comments ~post_id:"../escape" with
+   | Error (Board.Read_invalid_id _) -> ()
+   | Error e -> Alcotest.fail ("expected Read_invalid_id, got " ^ Board.show_board_read_error e)
+   | Ok _ -> Alcotest.fail "an invalid post id was read");
+  (match Board_dispatch.read_comments ~post_id:"never-existed" with
+   | Ok [] -> ()
+   | Ok _ -> Alcotest.fail "a missing post returned comments"
+   | Error e -> Alcotest.fail ("expected Ok [], got " ^ Board.show_board_read_error e));
+  match Board_dispatch.get_post ~post_id:"never-existed" with
+  | Error (Board.Post_not_found "never-existed") -> ()
+  | Error e -> Alcotest.fail ("expected Post_not_found, got " ^ Board.show_board_error e)
+  | Ok _ -> Alcotest.fail "a missing post was read"
+
 (** {1 Vote Operations} *)
 
 let test_vote_post () =
@@ -1254,6 +1274,33 @@ let test_current_vote_lookup () =
                Alcotest.(check (option string)) "comment vote state"
                  (Some "down") (vote_label vote))
 
+(* A flusher start that fails must clear the started flag so a later backend
+   access can start one. The rollback compared against a freshly allocated
+   [Active (b, true)], which [Atomic.compare_and_set] never matches, so the
+   flag stayed set and no flusher ever started again. *)
+let test_failed_flusher_start_clears_the_flag () =
+  try
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Eio_context.with_test_env
+      ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~mono_clock:(Eio.Stdenv.mono_clock env)
+      ~sw
+      (fun () ->
+        ignore (fresh_test_base_path ());
+        Board.reset_global_for_test ();
+        Board_dispatch.reset_for_test ();
+        (* The flusher forks on whatever switch the context names; a finished
+           one makes the fork raise, which is the failure under test. *)
+        let finished = Eio.Switch.run (fun inner -> inner) in
+        Eio_context.with_turn_switch finished Board_dispatch.init_jsonl;
+        Alcotest.(check bool) "a failed start leaves no started flag" false
+          (Board_dispatch.flusher_started_for_test ());
+        Eio.Switch.fail sw Exit)
+  with Exit -> ()
+
 let test_vote_persisted_by_flusher_actor () =
   try
     Eio_main.run @@ fun env ->
@@ -1300,41 +1347,6 @@ let test_vote_persisted_by_flusher_actor () =
         Eio.Switch.fail sw Exit)
   with Exit -> ()
 
-let test_flusher_start_retries_forced_cas_conflicts () =
-  try
-    Eio_main.run @@ fun env ->
-    Eio.Switch.run @@ fun sw ->
-    let clock = Eio.Stdenv.clock env in
-    Fs_compat.set_fs (Eio.Stdenv.fs env);
-    Eio_context.with_test_env
-      ~net:(Eio.Stdenv.net env)
-      ~clock
-      ~mono_clock:(Eio.Stdenv.mono_clock env)
-      ~sw
-      (fun () ->
-        ignore (fresh_test_base_path ());
-        Board.reset_global_for_test ();
-        Board_dispatch.reset_for_test ();
-        Board_dispatch.force_flusher_start_cas_conflicts_for_test 2;
-        Board_dispatch.init_jsonl ();
-        Alcotest.(check bool)
-          "flusher starts after forced CAS contention" true
-          (Board_dispatch.flusher_started_for_test ());
-        Eio.Switch.fail sw Exit)
-  with Exit -> ()
-
-let test_flusher_start_backoff_delay_doubles_and_caps () =
-  Alcotest.(check (float 0.0001))
-    "attempt 0 delay" 0.001
-    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:0);
-  Alcotest.(check (float 0.0001))
-    "attempt 1 delay doubles" 0.002
-    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:1);
-  Alcotest.(check (float 0.0001))
-    "large attempt caps" 0.02
-    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:10)
-
-(** {1 Reaction Operations} *)
 
 let test_reaction_toggle_and_summary () =
   match
@@ -2765,6 +2777,8 @@ let () =
         (with_eio test_get_post_and_comments_atomic);
       Alcotest.test_case "get_post_and_comments missing post" `Quick
         (with_eio test_get_post_and_comments_missing_post);
+      Alcotest.test_case "read answers only parse failure and absence" `Quick
+        (with_eio test_read_answers_only_parse_and_absence);
     ];
     "votes", [
       Alcotest.test_case "upvote" `Quick (with_eio test_vote_post);
@@ -2774,10 +2788,8 @@ let () =
         (with_eio test_current_vote_lookup);
       Alcotest.test_case "vote persisted by flusher actor" `Quick
         test_vote_persisted_by_flusher_actor;
-      Alcotest.test_case "flusher start retries forced CAS conflicts" `Quick
-        test_flusher_start_retries_forced_cas_conflicts;
-      Alcotest.test_case "flusher start backoff doubles and caps" `Quick
-        test_flusher_start_backoff_delay_doubles_and_caps;
+      Alcotest.test_case "failed flusher start clears the flag" `Quick
+        test_failed_flusher_start_clears_the_flag;
     ];
     "reactions", [
       Alcotest.test_case "toggle and summary" `Quick

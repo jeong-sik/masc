@@ -807,34 +807,55 @@ let abort scope reason =
   |> Result.map ignore
 ;;
 
-let terminal_recovery_action scope =
-  let rec visit = function
-    | [] -> Ok Retire
+type recovery_evidence =
+  { recovery : recovery_action
+  ; has_tool_attempts : bool
+  ; settled_tool_results : Llm_provider.Types.content_block list
+  }
+
+let recovery_evidence_from_tree ~read_node ~root =
+  let open Result_syntax in
+  let* root_view = read_node root in
+  let root_run_id = Event.node_run_id root_view.Journal.node in
+  let rec visit evidence = function
+    | [] -> Ok {evidence with settled_tool_results=List.rev evidence.settled_tool_results}
     | node :: rest ->
-      (match Writer.find_node scope.writer node with
-       | Error error -> Error (Scope_unavailable error)
-       | Ok None -> Error (Resume_topology_mismatch "execution descendant disappeared")
-       | Ok (Some view) ->
-         (match view.Journal.materialized, view.children with
-          | Journal.Tool_invocation_state { result = None; _ }, _ :: _ ->
-            Ok (Operator_repair_required Effect_outcome_unknown)
-          | ( ( Journal.Agent_run_state
-              | Journal.Agent_turn_state
-              | Journal.Provider_attempt_state _
-              | Journal.Output_block_state _
-              | Journal.Tool_attempt_state
-              | Journal.Tool_invocation_state { result = Some _; _ }
-              | Journal.Tool_invocation_state { result = None; _ } )
-            , children ) ->
-            visit
-              (List.rev_append
-                 (List.map
-                    (fun (child : Event.node Journal.event_record) ->
-                       Event.node_id child.value)
-                    children)
-                 rest)))
+      (match read_node node with
+       | Error _ as error -> error
+       | Ok (view : Journal.node_view) ->
+         let evidence = match view.materialized, view.children with
+           | Journal.Tool_invocation_state {result=None; _}, _ :: _ ->
+             {evidence with recovery=Operator_repair_required Effect_outcome_unknown;
+                            has_tool_attempts=true}
+           | Journal.Tool_invocation_state {result=Some result; _}, children ->
+             {evidence with
+              has_tool_attempts=evidence.has_tool_attempts || children <> [];
+              settled_tool_results=(if Event.Run_id.equal root_run_id (Event.node_run_id view.node)
+                then result :: evidence.settled_tool_results else evidence.settled_tool_results)}
+           | Journal.Tool_attempt_state, _ -> {evidence with has_tool_attempts=true}
+           | (Journal.Agent_run_state | Journal.Agent_turn_state
+             | Journal.Provider_attempt_state _ | Journal.Output_block_state _), _
+           | Journal.Tool_invocation_state {result=None; _}, [] -> evidence in
+         visit evidence
+           (List.rev_append
+             (List.rev_map (fun (child : Event.node Journal.event_record) ->
+               Event.node_id child.value) view.children) rest))
   in
-  visit [ Journal.run_root scope.run ]
+  visit {recovery=Retire; has_tool_attempts=false; settled_tool_results=[]} [root]
+;;
+
+let recovery_action_from_tree ~read_node ~root =
+  recovery_evidence_from_tree ~read_node ~root
+  |> Result.map (fun evidence -> evidence.recovery)
+;;
+
+let terminal_recovery_action scope =
+  recovery_action_from_tree ~root:(Journal.run_root scope.run)
+    ~read_node:(fun node ->
+      match Writer.find_node scope.writer node with
+      | Error error -> Error (Scope_unavailable error)
+      | Ok None -> Error (Resume_topology_mismatch "execution descendant disappeared")
+      | Ok (Some view) -> Ok view)
 ;;
 
 let record_provider_response provider response =

@@ -1085,8 +1085,13 @@ let prepare_microvm_shim_dir (t : t) =
 
 (** Return the host blocks the work volume's guest freed, before a fresh boot
     attaches it. Only [Boot] reaches here, after the name's old guest was
-    deleted, so no guest holds the volume. A failed trim permits boot only
-    after the named trim container is confirmed absent. *)
+    deleted, so no guest holds the volume. A stale guest of another network
+    mode whose removal failed would still hold it, and then the helper does
+    not start at all: Virtualization.framework refuses a second attachment of
+    the same image (measured 2026-10-06 on container 1.3.1, "The storage
+    device attachment is invalid"), so the helper never mounts, or removes
+    build output from, a volume a guest has mounted. A failed trim permits
+    boot only after the named trim container is confirmed absent. *)
 let reclaim_work_volume_space ~backend ~keeper_name ~image ~volume_name ~timeout_sec =
   match (backend : Keeper_microvm_backend.t) with
   | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
@@ -1246,7 +1251,9 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
     for a guest whose checkouts rarely change mid-turn. The gap this
     leaves: a checkout the keeper creates after this guest's first
     adoption keeps writing to the unified work volume until the guest
-    restarts. *)
+    restarts, when the boot's work volume helper removes that real [_build]
+    before the guest starts ({!Keeper_sandbox_microvm.build_output_removal_script})
+    and this scan links the checkout. *)
 let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
   match (backend : Keeper_microvm_backend.t) with
   | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> ()
@@ -1270,7 +1277,7 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
          (fun (row : Keeper_sandbox_microvm.build_link_row) ->
            match row.plan with
            | Link_refused_real_directory ->
-             Log.Keeper.warn
+             Log.Keeper.warn ~keeper_name:t.meta.name
                "%s"
                (Keeper_sandbox_microvm.build_link_refusal_message ~checkout:row.checkout)
            | Link_already_correct | Link_create _ | Link_retarget _ -> ())
@@ -1297,15 +1304,15 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
              (match run_argv_with_status ?timeout_sec apply with
               | Unix.WEXITED 0, _ -> ()
               | _, out ->
-                Log.Keeper.warn
+                Log.Keeper.warn ~keeper_name:t.meta.name
                   "microvm_build_link_apply_failed: %s"
                   (Keeper_sandbox_runtime.docker_failure_output_for_log out))
            | (_, out), _ ->
-             Log.Keeper.warn
+             Log.Keeper.warn ~keeper_name:t.meta.name
                "microvm_build_link_mkdir_failed: %s"
                (Keeper_sandbox_runtime.docker_failure_output_for_log out)))
      | _, out ->
-       Log.Keeper.warn
+       Log.Keeper.warn ~keeper_name:t.meta.name
          "microvm_build_scan_failed: %s"
          (Keeper_sandbox_runtime.docker_failure_output_for_log out))
 ;;
@@ -2948,6 +2955,21 @@ let cleanup (t : t) =
 
 type build_cleanup_report = { cleaned : int; failed : int }
 
+let build_cleanup_report_of_string stdout =
+  try
+    let open Yojson.Safe.Util in
+    let report = Yojson.Safe.from_string stdout in
+    match member "skip" report with
+    | `String reason -> Error ("Keeper guest cleanup skipped: " ^ reason)
+    | `Null ->
+      let entries = member "entries" report |> to_list in
+      let count action = List.fold_left (fun n entry ->
+          if member "action" entry = `String action then n + 1 else n) 0 entries in
+      Ok { cleaned = count "cleaned"; failed = count "clean failed" }
+    | _ -> Error "invalid Keeper cleanup report"
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+    Error "invalid Keeper cleanup report"
+
 (* Called only while the Owner holds its exclusive maintenance slot. Attach to
    the recorded guest; never boot, stop, pause, or refresh its credentials. *)
 let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
@@ -2978,14 +3000,7 @@ let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
              match outcome, !observation with
              | Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout; _ },
                Keeper_sandbox_remote.Execution_observed _ ->
-             (try
-                let open Yojson.Safe.Util in
-                let entries = Yojson.Safe.from_string stdout |> member "entries" |> to_list in
-                let count action = List.fold_left (fun n entry ->
-                    if member "action" entry = `String action then n + 1 else n) 0 entries in
-                Ok (Some { cleaned = count "cleaned"; failed = count "clean failed" })
-              with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
-                Error "invalid Keeper cleanup report")
+               Result.map Option.some (build_cleanup_report_of_string stdout)
              | Masc_exec.Sandbox_target.Transport_failed { reason; _ }, _ ->
                Error ("Keeper guest cleanup transport failed: " ^ reason)
              | _, Keeper_sandbox_remote.Execution_unavailable _ ->

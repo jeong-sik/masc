@@ -174,6 +174,46 @@ let test_rate_limit_lifecycle_reaches_the_tui () =
   assert_state "success clears a stated wait before expiry" false None (project ~now:0.)
 ;;
 
+(* The failed attempt the lane walk orders by reaches the runtime detail, with
+   the Keeper that saw it, and an answer takes it away again. *)
+let test_failed_attempt_reaches_the_tui () =
+  with_runtimes @@ fun () ->
+  let runtime =
+    match Runtime.get_runtime_by_id "usage_claude.sonnet" with
+    | Some runtime -> runtime
+    | None -> fail "fixture runtime missing"
+  in
+  let candidate = runtime.Runtime_instance.candidate_backpressure in
+  let project () =
+    let json =
+      Server_dashboard_runtime_resolved_json.build_at ~now:0.
+        ~generated_at_iso:"2026-10-07T00:00:00Z"
+        ~config:(Workspace.default_config (Filename.get_temp_dir_name ()))
+    in
+    match Tui_decode.decode_runtime_resolved json with
+    | Error detail -> fail detail
+    | Ok (rows, _) ->
+      (List.find (fun (row : Tui_decode.runtime_option) -> String.equal row.ro_id runtime.id) rows)
+        .Tui_decode.ro_failed_attempt
+  in
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  check bool "clear before any failure" true (Option.is_none (project ()));
+  Runtime_candidate_backpressure.note_failed_attempt ~candidate
+    ~failure:Runtime_candidate_backpressure.Provider_timeout
+    ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"alpha");
+  (match project () with
+   | Some
+       { Tui_decode.rfa_failure =
+           Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout
+       ; rfa_recorded_by = "alpha"
+       ; _
+       } -> ()
+   | Some _ -> fail "the failed attempt lost its kind or its recorder"
+   | None -> fail "the failed attempt did not reach the resolved document");
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  check bool "an answer clears it" true (Option.is_none (project ()))
+;;
+
 let test_reports_reach_the_resolved_document () =
   with_runtimes @@ fun () ->
   let claude_scope = scope_of "usage_claude.sonnet" in
@@ -527,8 +567,9 @@ let kimi_coding_usages_zero_counts_left_out =
   {|{"usage":{"limit":"100","used":"100","resetTime":"2026-09-24T02:09:07.465054Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"100","resetTime":"2026-09-21T01:09:07.465054Z"}}],"usages":{"limit_5h":{"used_ratio":0,"reset_time":"2026-09-21T01:09:06Z"},"limit_7d":{"used_ratio":0,"reset_time":"2026-09-24T02:09:06Z"}}}|}
 ;;
 
-let ollama_usage_response =
-  {|{"activity":{"requests":1},"limits":{"session":{"usage":0,"models":[]},"weekly":{"usage":1,"models":[{"name":"m","request_count":48876}]}}}|}
+(* ollama/ollama docs/api/balance.mdx's legacy-plan example (2026-10-07). *)
+let ollama_balance_response =
+  {|{"included":{"session":{"remaining_percent":75,"resets_at":"2026-10-01T07:00:00Z"},"weekly":{"remaining_percent":40,"resets_at":"2026-10-05T00:00:00Z"}},"purchased":{"balance_usd":25}}|}
 ;;
 
 let kind_to_string : Usage.window_kind -> string = function
@@ -576,20 +617,20 @@ let refused decode body =
 
 let test_openrouter_key () =
   check (list string) "windows"
-    [ "limit=- label \"credit limit\" usd 100 limit=100 resets=- role=gates"
+    [ "limit=- label \"API key credit limit\" usd 100 limit=100 resets=- role=gates"
     ; "limit=- label \"free model requests, daily\" fraction 0 resets=- role=other"
     ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        openrouter_key_response);
   check (list string) "a stated reset period is not part of the label, which keys the row"
-    [ "limit=- label \"credit limit\" usd 5 limit=20 resets=- role=gates" ]
+    [ "limit=- label \"API key credit limit\" usd 5 limit=20 resets=- role=gates" ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":20,"limit_reset":"monthly","limit_remaining":15}}|});
   check (list string) "a null limit has no credit window" []
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":null,"limit_remaining":null}}|});
   check (list string) "uncapped all-time USD usage is retained"
-    [ "limit=- label \"credit usage (all time)\" usd 12.3456 limit=none resets=- role=other" ]
+    [ "limit=- label \"API key usage (all time)\" usd 12.3456 limit=none resets=- role=other" ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":null,"limit_remaining":null,"usage":12.3456}}|});
   check string "invalid USD totals do not become zero"
@@ -735,22 +776,42 @@ let test_kimi_coding_usages () =
        {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"20"}},{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"90"}}]}|})
 ;;
 
-let test_ollama_usage () =
-  check (list string) "windows"
-    [ "limit=- label \"session\" fraction 0 resets=- role=gates"
-    ; "limit=- seven_day fraction 1 resets=- role=gates"
+let test_ollama_balance () =
+  check (list string) "a purchased balance pays past both windows"
+    [ "limit=- label \"session\" fraction 0.25 resets=1790838000 role=other"
+    ; "limit=- seven_day fraction 0.6 resets=1791158400 role=other"
     ]
-    (decoded_windows Usage.decode_ollama_usage ~source:"ollama.usage" ollama_usage_response);
-  check (list string) "a float usage is a fraction; a missing entry is no window"
-    [ "limit=- seven_day fraction 0.42 resets=- role=gates" ]
-    (decoded_windows Usage.decode_ollama_usage ~source:"ollama.usage"
-       {|{"limits":{"weekly":{"usage":0.42}}}|});
-  check string "a missing limits object is refused" "ollama-usage.limits is missing"
-    (refused Usage.decode_ollama_usage {|{"activity":{}}|});
-  check string "usage above 1 is refused" "ollama-usage.limits.weekly.usage must be within 0..1"
-    (refused Usage.decode_ollama_usage {|{"limits":{"weekly":{"usage":1.5}}}|});
-  check string "a negative usage is refused" "ollama-usage.limits.session.usage must be within 0..1"
-    (refused Usage.decode_ollama_usage {|{"limits":{"session":{"usage":-0.1}}}|})
+    (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance" ollama_balance_response);
+  check (list string) "without a purchased balance both windows refuse model calls"
+    [ "limit=- label \"session\" fraction 0.1614 resets=1791360000 role=gates"
+    ; "limit=- seven_day fraction 0.9919 resets=1791763200 role=gates"
+    ]
+    (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance"
+       {|{"included":{"session":{"remaining_percent":83.86,"resets_at":"2026-10-07T08:00:00Z"},"weekly":{"remaining_percent":0.81,"resets_at":"2026-10-12T00:00:00Z"}},"purchased":{"balance_usd":0}}|});
+  check (list string) "nothing left is a spent window; a missing entry is no window"
+    [ "limit=- seven_day fraction 1 resets=- role=gates" ]
+    (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance"
+       {|{"included":{"weekly":{"remaining_percent":0}},"purchased":{"balance_usd":0}}|});
+  check string "a missing purchased balance is refused" "ollama-balance.purchased is missing"
+    (refused Usage.decode_ollama_balance {|{"included":{"weekly":{"remaining_percent":0}}}|});
+  check string "a negative purchased balance is refused"
+    "ollama-balance.purchased.balance_usd must be 0 or more"
+    (refused Usage.decode_ollama_balance
+       {|{"included":{"weekly":{"remaining_percent":0}},"purchased":{"balance_usd":-1}}|});
+  check string "a missing included object is refused" "ollama-balance.included is missing"
+    (refused Usage.decode_ollama_balance {|{"range":"7d","totals":{"request_count":1}}|});
+  check string "a credit plan's balance is refused by name"
+    "ollama-balance.included.balance_usd must be absent: only a legacy plan's session and weekly windows are read"
+    (refused Usage.decode_ollama_balance
+       {|{"included":{"balance_usd":72.5,"allowance_usd":100,"period":{"from":"2026-09-15T09:30:00Z","until":"2026-10-15T09:30:00Z"}},"purchased":{"balance_usd":25}}|});
+  check string "more than 100 percent left is refused"
+    "ollama-balance.included.weekly.remaining_percent must be within 0..100"
+    (refused Usage.decode_ollama_balance
+       {|{"included":{"weekly":{"remaining_percent":101}},"purchased":{"balance_usd":0}}|});
+  check string "an unreadable reset time is refused"
+    "ollama-balance.included.session.resets_at must be an RFC 3339 timestamp"
+    (refused Usage.decode_ollama_balance
+       {|{"included":{"session":{"remaining_percent":5,"resets_at":"soon"}},"purchased":{"balance_usd":0}}|})
 ;;
 
 (* agy 1.2.11's answer to [agy -p "/usage" --output-format json], taken on
@@ -836,7 +897,7 @@ let http_readable ~provider_id ~url ~key ~refresh_s =
   ; how =
       Http
         { credential = Llm_provider.Provider_config.Static_credential, Llm_provider.Secret.of_string key
-        ; usage_read = { shape = Runtime_schema.Ollama_usage; url; refresh_s }
+        ; usage_read = { shape = Runtime_schema.Ollama_balance; url; refresh_s }
         }
   }
 ;;
@@ -931,7 +992,7 @@ let test_a_raising_scope_does_not_stop_the_rest () =
   let after = http_readable ~provider_id:"usage_read_after" ~url:"https://ok.invalid" ~key:"k" ~refresh_s:None in
   let fetch ~api_key:_ url =
     if String.equal url "https://ok.invalid"
-    then Ok ollama_usage_response
+    then Ok ollama_balance_response
     else failwith "connection closed by peer"
   in
   let codex ~scope:_ _ = failwith "codex app-server died" in
@@ -983,7 +1044,15 @@ let test_only_gating_windows_explain_a_refusal () =
     "no window spent"
     (refusal_read Usage.decode_openrouter_key
        {|{"data":{"limit":100,"limit_remaining":40,"free_model_daily_requests":{"used":50,"limit":50}}}|});
-  check string "a spent OpenRouter credit limit states no reset"
+  check string "a spent Ollama weekly window with no purchased balance rests until its reset"
+    "spent until 1791763200"
+    (refusal_read Usage.decode_ollama_balance
+       {|{"included":{"session":{"remaining_percent":83.86,"resets_at":"2026-10-07T08:00:00Z"},"weekly":{"remaining_percent":0,"resets_at":"2026-10-12T00:00:00Z"}},"purchased":{"balance_usd":0}}|});
+  check string "a spent Ollama window that the purchased balance pays past is not a spent quota"
+    "no window spent"
+    (refusal_read Usage.decode_ollama_balance
+       {|{"included":{"session":{"remaining_percent":0,"resets_at":"2026-10-07T08:00:00Z"},"weekly":{"remaining_percent":0,"resets_at":"2026-10-12T00:00:00Z"}},"purchased":{"balance_usd":4.5}}|});
+  check string "a spent OpenRouter API key credit limit states no reset"
     "spent without reset"
     (refusal_read Usage.decode_openrouter_key
        {|{"data":{"limit":100,"limit_remaining":0}}|});
@@ -1021,7 +1090,7 @@ let fetch_counting counts ~on_fetch ~api_key:_ url =
   let count = 1 + Option.value ~default:0 (Hashtbl.find_opt counts url) in
   Hashtbl.replace counts url count;
   on_fetch url count;
-  Ok ollama_usage_response
+  Ok ollama_balance_response
 ;;
 
 let fetched counts url = Option.value ~default:0 (Hashtbl.find_opt counts url)
@@ -1115,7 +1184,7 @@ let test_a_raising_repeat_does_not_end_the_repeats () =
     then failwith "connection reset by peer"
     else (
       catalogue := [];
-      Ok ollama_usage_response)
+      Ok ollama_balance_response)
   in
   Read.refresh_readables ~clock ~fetch ~catalogue:(fun () -> !catalogue);
   check int "the repeat after the raising one still read" 2 !fetches;
@@ -1144,7 +1213,7 @@ let test_catalogue_publication_wakes_usage_reads () =
   let fetch ~api_key:_ _ =
     incr http_count;
     Eio.Condition.broadcast read_done;
-    Ok ollama_usage_response in
+    Ok ollama_balance_response in
   let http = http_readable ~provider_id:"usage_added_after_setup"
       ~url:"https://ok.invalid/added" ~key:"k" ~refresh_s:(Some changed_period_s) in
   let codex_account =
@@ -1179,12 +1248,122 @@ let test_runtime_publication_is_visible_before_wait () =
       (Runtime.await_catalogue_change ~after:before))
 ;;
 
+(* The [usage] object of a Muse Code [usage/changed] or [usage/read] answer,
+   in the MSP field names. *)
+let muse_usage ~window_mins ~window_percent =
+  let json =
+    Printf.sprintf
+      {|{"usage":{"observedAtMs":1791250000000,"tier":"power","window":{"usedPercent":%d,"resetsAtMs":1791262200000,"windowDurationMins":%d},"weekly":{"usedPercent":12,"resetsAtMs":1791730800000}}}|}
+      window_percent window_mins
+  in
+  match Runtime_muse_msp.parse_usage_read_result (Yojson.Safe.from_string json) with
+  | Ok (Some usage) -> usage
+  | Ok None -> fail "usage fixture parsed as absent"
+  | Error error -> fail (Runtime_muse_msp.error_to_string error)
+;;
+
+let muse_window_rows (windows : Usage.window list) =
+  List.map
+    (fun (window : Usage.window) ->
+       ( Option.value window.limit_id ~default:"-"
+       , (match window.kind with
+          | Usage.Five_hour -> "5h"
+          | Usage.Seven_day -> "7d"
+          | Usage.Duration_minutes minutes -> Printf.sprintf "%dmin" minutes
+          | Usage.Provider_label label -> label)
+       , (match window.utilization with
+          | Usage.Percent percent -> percent
+          | Usage.Fraction _ | Usage.Usd _ -> fail "Muse states percentages")
+       , Option.value window.resets_at ~default:0
+       , Usage.window_role_to_string window.role ))
+    windows
+;;
+
+let muse_row = Alcotest.(list (pair (pair string string) (pair int (pair int string))))
+
+let nest rows = List.map (fun (limit, kind, percent, resets, role) -> (limit, kind), (percent, (resets, role))) rows
+
+let test_muse_report_names_both_windows () =
+  let usage = muse_usage ~window_mins:300 ~window_percent:37 in
+  let changed = decode_ok (Runtime_muse_usage.report Runtime_muse_usage.Usage_changed usage) in
+  check string "pushed usage source" "muse.subscription_usage" (Usage.source_to_string changed.source);
+  check muse_row "rolling and weekly windows"
+    (nest
+       [ "-", "5h", 37, 1791262200, "gates_model_calls"
+       ; "-", "7d", 12, 1791730800, "gates_model_calls" ])
+    (nest (muse_window_rows changed.windows));
+  let read = decode_ok (Runtime_muse_usage.report Runtime_muse_usage.Usage_read usage) in
+  check bool "a read answer is the same source" true (read.source = changed.source);
+  check bool "it is a complete snapshot" true
+    (Usage.report_shape changed.source = Usage.Complete_snapshot);
+  let other_length = decode_ok
+    (Runtime_muse_usage.report Runtime_muse_usage.Usage_changed
+       (muse_usage ~window_mins:5 ~window_percent:1)) in
+  check (list string) "an unnamed rolling length keeps its minutes"
+    [ "5min"; "7d" ]
+    (List.map (fun (_, kind, _, _, _) -> kind) (muse_window_rows other_length.windows));
+  match Runtime_muse_usage.report Runtime_muse_usage.Usage_changed
+          (muse_usage ~window_mins:10080 ~window_percent:1) with
+  | Error (Usage.Duplicate_window { kind = Usage.Seven_day; limit_id = None; _ }) -> ()
+  | Error error -> fail (Usage.decode_error_to_string error)
+  | Ok _ -> fail "a seven-day rolling window shared the weekly row"
+;;
+
+let test_muse_observe_records_and_rests_by_one_rule () =
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+    let scope = Runtime_quota_window.scope_of_muse_home "/fixture/muse-observe-account" in
+    let now = Time_compat.now () in
+    Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_changed
+      (muse_usage ~window_mins:300 ~window_percent:37);
+    (match Usage.state ~scope with
+     | Usage.Reported (first, rest) ->
+       check muse_row "recorded as stated"
+         (nest
+            [ "-", "5h", 37, 1791262200, "gates_model_calls"
+            ; "-", "7d", 12, 1791730800, "gates_model_calls" ])
+         (nest (muse_window_rows (List.map (fun (r : Usage.recorded) -> r.window) (first :: rest))))
+     | Usage.Not_reported_since_start | Usage.Reported_no_windows _ ->
+       fail "observed Muse usage was not recorded");
+    check bool "an unspent window rests nothing" false
+      (Runtime_quota_window.is_exhausted ~scope ~now);
+    Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_read
+      (muse_usage ~window_mins:300 ~window_percent:100);
+    check bool "a spent window rests the account until its reset" true
+      (Runtime_quota_window.is_exhausted ~scope ~now:1791262199.);
+    check bool "the rest ends at the stated reset" false
+      (Runtime_quota_window.is_exhausted ~scope ~now:1791262200.);
+    let relength = Runtime_quota_window.scope_of_muse_home "/fixture/muse-relength-account" in
+    Runtime_muse_usage.observe ~scope:relength Runtime_muse_usage.Usage_changed
+      (muse_usage ~window_mins:300 ~window_percent:37);
+    Runtime_muse_usage.observe ~scope:relength Runtime_muse_usage.Usage_read
+      (muse_usage ~window_mins:180 ~window_percent:40);
+    (match Usage.state ~scope:relength with
+     | Usage.Reported (first, rest) ->
+       check (list string) "a read with a new rolling length replaces the pushed row"
+         [ "180min"; "7d" ]
+         (List.map (fun (_, kind, _, _, _) -> kind)
+            (muse_window_rows (List.map (fun (r : Usage.recorded) -> r.window) (first :: rest)))
+          |> List.sort String.compare)
+     | Usage.Not_reported_since_start | Usage.Reported_no_windows _ ->
+       fail "relength usage was not recorded");
+    let refused = Runtime_quota_window.scope_of_muse_home "/fixture/muse-refused-account" in
+    Runtime_muse_usage.observe ~scope:refused Runtime_muse_usage.Usage_changed
+      (muse_usage ~window_mins:10080 ~window_percent:100);
+    check bool "a refused report records nothing" true
+      (Usage.state ~scope:refused = Usage.Not_reported_since_start);
+    check bool "a refused report still rests a spent account" true
+      (Runtime_quota_window.is_exhausted ~scope:refused ~now:1791262199.))
+;;
+
 let () =
   run
     "provider_usage_windows"
     [ ( "resolved"
       , [ test_case "rate-limit lifecycle reaches the TUI" `Quick
             test_rate_limit_lifecycle_reaches_the_tui
+        ; test_case "failed attempt reaches the TUI" `Quick
+            test_failed_attempt_reaches_the_tui
         ; test_case "reports reach the resolved document" `Quick
             test_reports_reach_the_resolved_document
         ; test_case "malformed window is a typed error" `Quick
@@ -1207,16 +1386,22 @@ let () =
         ; test_case "OpenRouter USD reaches operator API" `Quick test_openrouter_amounts_reach_operator_api
         ; test_case "zai-quota-limit" `Quick test_zai_quota_limit
         ; test_case "kimi-coding-usages" `Quick test_kimi_coding_usages
-        ; test_case "ollama-usage" `Quick test_ollama_usage
+        ; test_case "ollama-balance" `Quick test_ollama_balance
         ; test_case "only gating windows explain a refusal" `Quick
             test_only_gating_windows_explain_a_refusal
+        ] )
+    ; ( "muse usage"
+      , [ test_case "a report names the rolling and weekly windows" `Quick
+            test_muse_report_names_both_windows
+        ; test_case "observe records and rests by one rule" `Quick
+            test_muse_observe_records_and_rests_by_one_rule
         ] )
     ; ( "antigravity /usage"
       , [ test_case "antigravity-usage" `Quick test_antigravity_usage
         ; test_case "version" `Quick test_antigravity_version
         ] )
     ; ( "reading scopes"
-      , [ test_case "empty HTTP report removes old credit limits" `Quick
+      , [ test_case "empty HTTP report removes old API key credit limits" `Quick
             test_http_empty_report_replaces_old_limit
         ; test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest

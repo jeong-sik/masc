@@ -17,6 +17,8 @@ export type GoalPhaseFilter =
   | 'awaiting_confirmation'
   | 'completed'
   | 'dropped'
+  | 'paused'
+  | 'blocked'
 
 // -- Task-level search (case-insensitive, title + description + assignee) --
 
@@ -140,7 +142,9 @@ export function goalPhaseLabel(phase: string): string {
     case 'awaiting_confirmation': return '사람 확인 대기'
     case 'verifying': return '검증 중'
     case 'completed': return '완료'
-    case 'dropped': return '중단'
+    case 'dropped': return '포기'
+    case 'paused': return '일시정지'
+    case 'blocked': return '차단'
     default: return phase
   }
 }
@@ -151,6 +155,8 @@ export function goalPhaseStatus(phase: string): string {
     case 'awaiting_confirmation': return 'awaiting_verification'
     case 'verifying': return 'awaiting_verification'
     case 'dropped': return 'offline'
+    case 'paused': return 'paused'
+    case 'blocked': return 'blocked'
     case 'executing':
     default:
       return 'active'
@@ -180,6 +186,8 @@ export function phaseFilterLabel(value: GoalPhaseFilter): string {
     case 'verifying':
     case 'completed':
     case 'dropped':
+    case 'paused':
+    case 'blocked':
       return goalPhaseLabel(value)
     default:
       return '전체'

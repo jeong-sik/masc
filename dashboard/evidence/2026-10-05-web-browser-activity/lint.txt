@@ -1,0 +1,2 @@
+Command (dashboard cwd): node node_modules/eslint/bin/eslint.js src/lib/browser-lane-activity.ts src/lib/browser-lane-activity-session.ts src/lib/browser-lane-observation.ts src/components/browser-lane-activity-panel.ts src/components/browser-lane-activity-panel.test.ts src/components/lane-inventory-panel.ts
+Exit: 0

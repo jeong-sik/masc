@@ -2,14 +2,21 @@
     arrives. The rows only change when a new answer does, so the frame draws
     them as they are instead of regrouping every point on every repaint. *)
 
+type day_report =
+  | Measured of Masc.Tui_decode_usage.provider_usage_utilization * float option
+  | Reported_no_windows
+
+type sample = { observed_at : float; report : day_report }
+
 type row = {
   scope_id : string;  (** The server's opaque scope id. *)
   kind : string;  (** The provider's window kind. *)
   limit_id : string option;
   marks : string;
       (** One glyph per UTC day, oldest first: the day's latest reported
-          share as a {!Masc_tui_chart.sparkline} level, or {!no_report_mark}
+          share as a {!Masc_tui_chart.sparkline} level (0 for reported zero), or {!no_report_mark}
           for a day with no report. *)
+  samples : sample option list; (** UTC days, oldest first; gaps stay absent. *)
   reported_days : int;  (** Days in the window that have a report. *)
 }
 
@@ -37,3 +44,11 @@ val of_history :
     without windows draws [empty_report_mark] and counts as a reported day.
     A point outside the answered window keeps its row and draws no day. When one day
     holds several points for a row, the last one in the answer is drawn. *)
+
+val latest : row -> sample option
+(** Most recent report in the answered window, not the answer's generation time. *)
+
+val plot : width:int -> t -> row -> string list
+(** A four-row, fixed 0–100% daily bar plot with UTC day labels. Missing days
+    draw a dot at the baseline; reported zero draws 0. Values outside the scale
+    are clipped only for drawing and retain their original [sample.report]. *)

@@ -1,0 +1,214 @@
+Testing `keeper_librarian_absorb_gate'.
+This run has ID `GV3R2WPI'.
+
+  [OK]          statements          0   the cut matches the golden.
+  [OK]          judgment            0   every statement conveyed absorbs as a...
+  [OK]          judgment            1   a statement not conveyed keeps its me...
+  [OK]          judgment            2   the boundary is inclusive.
+  [OK]          judgment            3   the model not answering preserves the...
+  [OK]          judgment            4   an absorption the pass cannot place s...
+  [OK]          judgment            5   an absorption into a restated memory ...
+  [OK]          judgment            6   statements are asked in bounded reque...
+  [OK]          judgment            7   a noul outside the unit interval keep...
+  [OK]          judgment            8   a statement too large to judge keeps ...
+  [OK]          judgment            9   an oversized memory stays current whe...
+  [OK]          judgment           10   a claim over the state bound keeps al...
+  [OK]          judgment           11   a rejection completed before a later ...
+  [OK]          judgment           12   a conveyed verdict survives a later f...
+  [OK]          judgment           13   failure retains unjudged from unvisit...
+  [OK]          judgment           14   one run uses one endpoint and model s...
+  [OK]          judgment           15   a run records the destination passed ...
+  [OK]          judgment           16   cancelled next request retains its co...
+  [OK]          judgment           17   skipped run publishes its completed o...
+  [OK]          judgment           18   an excluded keeper is applied as answ...
+  [OK]          judgment           19   a gate declared on without a lane kee...
+  [OK]          judgment           20   a gate declared off applies as answer...
+  [OK]          judgment           21   transport diagnostics retain cause wi...
+  [OK]          judgment           22   failure bodies omit configured creden...
+  [OK]          judgment           23   invalid responses retain all typed an...
+  [OK]          judgment           24   a rejection in an answered request su...
+  [OK]          judgment           25   partly conveyed source stays current ...
+  [OK]          judgment           26   a missing seventeenth statement keeps...
+> [FAIL]        judgment           27   selection gate and store preserve the...
+  [OK]          judgment           28   payment failure cannot multiply curre...
+  [OK]          reverse             0   a claim its sources convey is not app...
+  [OK]          reverse             1   a claim with a new statement is applied.
+  [OK]          reverse             2   a claim the judge cannot answer for i...
+  [OK]          reverse             3   a gate without a lane applies every c...
+  [OK]          reverse             4   a claim with an absorption applied is...
+  [OK]          reverse             5   a claim that continues a dropped memo...
+  [OK]          reverse             6   a restated memory is not asked back.
+  [OK]          reverse             7   the reverse question names the memories.
+  [OK]          reverse             8   a reverse tie keeps the claim.
+  [OK]          reverse             9   a claim without a statement is not ju...
+  [OK]          reverse            10   a statement only the second state con...
+  [OK]          reverse            11   a statement no state conveys applies ...
+  [OK]          reverse            12   a memory over the state bound is left...
+  [OK]          reverse            13   a statement never asked is told apart...
+  [OK]          reverse            14   the runtime does not save a copy.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        judgment           27   selection gate and store preserve ...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT the answer projection already removed the originals
+[llm_provider] [WARN] [backend_openai] clamping max_tokens 4096 to the output ceiling 1024 (declared capability override) for model masc-exact-fixture-model-0: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+[2026-10-05 00:39:37] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/librarian-absorb-gate-c4298f (no git root found)
+[2026-10-05 00:39:37] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/Users/dancer/me for requested path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/librarian-absorb-gate-c4298f
+[2026-10-05 00:39:37] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/librarian-absorb-gate-c4298f for test executable test_keeper_librarian_absorb_gate.exe
+[2026-10-05 00:39:37] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+[2026-10-05 00:39:37] [INFO] [Keeper/absorb-gate-judged] librarian absorb gate: 1 absorbed, 1 kept current (1 statement(s) not conveyed), 0 unjudged, 0 too large to judge (kept current), 1 request(s) 19cab1184bdd80d05db771d287dbbe97026e31c3b24fdf17861f810523a6bccf
+[2026-10-05 00:39:37] [INFO] [Keeper/absorb-gate-judged] memory os librarian committed current snapshot revision=2 facts=4 added=2 removed=1
+ASSERT real Librarian request
+ASSERT JEV request count
+ASSERT each actual JEV request has its own retained evaluation
+ASSERT Memory result remains distinct from JEV result
+ASSERT the complete durable report is valid UTF-8
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT outbound endpoint path remains unchanged
+ASSERT outbound endpoint query remains unchanged
+ASSERT the full execution evidence survives disk replay
+ASSERT gate status
+ASSERT the gate records the applied probability boundary
+ASSERT endpoint observation omits userinfo/query/fragment
+ASSERT actual JEV request model
+ASSERT actual JEV request state
+ASSERT actual JEV request questions
+ASSERT the configured request model was sent
+ASSERT answered evaluation
+ASSERT actual answer model
+ASSERT destination observation is sanitized
+ASSERT actual HTTP request digest
+ASSERT raw probability s0_0
+ASSERT raw probability s1_0
+ASSERT correct originals remain current
+ASSERT only applied originals are archived
+ASSERT the answer projection already removed the originals
+[2026-10-05 00:39:37] [INFO] [Keeper/absorb-gate-disabled] librarian absorb gate off (absorb_gate_disabled): 2 absorption(s) applied as answered
+[2026-10-05 00:39:37] [INFO] [Keeper/absorb-gate-disabled] memory os librarian committed current snapshot revision=2 facts=2 added=1 removed=2
+ASSERT real Librarian request
+ASSERT JEV request count
+ASSERT each actual JEV request has its own retained evaluation
+ASSERT Memory result remains distinct from JEV result
+ASSERT the complete durable report is valid UTF-8
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT the full execution evidence survives disk replay
+ASSERT gate status
+ASSERT the actual unavailability is retained
+ASSERT a skipped gate has no applied boundary
+ASSERT no invented evaluations
+ASSERT correct originals remain current
+ASSERT only applied originals are archived
+ASSERT the answer projection already removed the originals
+[2026-10-05 00:39:37] [WARN] [Keeper/absorb-gate-lane-disabled] librarian absorb gate declared on but unavailable (lane_disabled): 2 absorption(s) kept current
+[2026-10-05 00:39:37] [INFO] [Keeper/absorb-gate-lane-disabled] memory os librarian committed current snapshot revision=2 facts=4 added=1 removed=0
+ASSERT real Librarian request
+ASSERT JEV request count
+ASSERT each actual JEV request has its own retained evaluation
+ASSERT Memory result remains distinct from JEV result
+ASSERT the complete durable report is valid UTF-8
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT the full execution evidence survives disk replay
+ASSERT gate status
+ASSERT the actual unavailability is retained
+ASSERT a skipped gate has no applied boundary
+ASSERT no invented evaluations
+ASSERT correct originals remain current
+ASSERT only applied originals are archived
+ASSERT the answer projection already removed the originals
+[2026-10-05 00:39:37] [WARN] [Keeper/absorb-gate-missing-key] librarian absorb gate declared on but unavailable (no_armed_destination): 2 absorption(s) kept current
+[2026-10-05 00:39:37] [INFO] [Keeper/absorb-gate-missing-key] memory os librarian committed current snapshot revision=2 facts=4 added=1 removed=0
+ASSERT real Librarian request
+ASSERT JEV request count
+ASSERT each actual JEV request has its own retained evaluation
+ASSERT Memory result remains distinct from JEV result
+ASSERT the complete durable report is valid UTF-8
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT the full execution evidence survives disk replay
+ASSERT gate status
+ASSERT the actual unavailability is retained
+ASSERT a skipped gate has no applied boundary
+ASSERT no invented evaluations
+ASSERT correct originals remain current
+ASSERT only applied originals are archived
+ASSERT the answer projection already removed the originals
+[2026-10-05 00:39:37] [INFO] [Keeper/absorb-gate-excluded] librarian absorb gate off (keeper_excluded): 2 absorption(s) applied as answered
+[2026-10-05 00:39:37] [INFO] [Keeper/absorb-gate-excluded] memory os librarian committed current snapshot revision=2 facts=2 added=1 removed=2
+ASSERT real Librarian request
+ASSERT JEV request count
+ASSERT each actual JEV request has its own retained evaluation
+ASSERT Memory result remains distinct from JEV result
+ASSERT the complete durable report is valid UTF-8
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT the full execution evidence survives disk replay
+ASSERT gate status
+ASSERT the actual unavailability is retained
+ASSERT a skipped gate has no applied boundary
+ASSERT no invented evaluations
+ASSERT correct originals remain current
+ASSERT only applied originals are archived
+ASSERT the answer projection already removed the originals
+[2026-10-05 00:39:37] [INFO] [Keeper/absorb-gate-http-failure] librarian absorb gate reverse: 1 claim(s) absorbed nothing; 0 copy (not applied), 0 carry a new statement, 1 not judged (applied); 0 request(s)
+[2026-10-05 00:39:37] [INFO] [Keeper/absorb-gate-http-failure] librarian absorb gate reverse: claim sha256:3b7c41e50752eb281546458af797787a261e768f3eb093fc959872bef923dfe6 applied unjudged (gate_judgment_failed)
+[2026-10-05 00:39:37] [WARN] [Keeper/absorb-gate-http-failure] memory os librarian lane=librarian_exact: absorb judgment failed; current memory unchanged: typesafeai: HTTP 503 returned by http://127.0.0.1:55384/evaluate: fixture unavailable; 0 of 2 absorption(s) confirmed (2 kept current, including unconfirmed sources: 0 too large to judge, 0 not conveyed); requests= current_snapshot=present
+ASSERT real Librarian request
+ASSERT JEV request count
+ASSERT each actual JEV request has its own retained evaluation
+ASSERT Memory result remains distinct from JEV result
+ASSERT the complete durable report is valid UTF-8
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT configured URL credentials are absent from durable output
+ASSERT outbound endpoint path remains unchanged
+ASSERT outbound endpoint query remains unchanged
+ASSERT the full execution evidence survives disk replay
+ASSERT absorb_gate evidence must precede exact_output
+FAIL absorb_gate evidence must precede exact_output
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_keeper_librarian_absorb_gate.run_runtime_evidence.(fun) in file "test/test_keeper_librarian_absorb_gate.ml", line 523, characters 15-77
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 107, characters 8-13
+Re-raised at Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 109, characters 30-38
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/test/_build/_tests/keeper_librarian_absorb_gate/judgment.027.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/test/_build/_tests/keeper_librarian_absorb_gate'.
+1 failure! in 0.135s. 45 tests run.

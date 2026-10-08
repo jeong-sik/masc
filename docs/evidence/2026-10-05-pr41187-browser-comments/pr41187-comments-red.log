@@ -1,0 +1,44 @@
+Testing `Browser activity draft and save'.
+This run has ID `05G8SP6S'.
+
+  [OK]          operator flow          0   Live guidance respects client-owne...
+  [OK]          operator flow          1   explicit save preserves paths, oth...
+  [OK]          operator flow          2   conflict reapplies activity only.
+  [OK]          operator flow          3   fresh read retains and discard res...
+  [OK]          operator flow          4   clean draft follows external activ...
+  [OK]          operator flow          5   clean draft preserves latest unrel...
+  [OK]          operator flow          6   durable draft follows next file wh...
+  [OK]          operator flow          7   uncertain drafts need explicit rea...
+  [OK]          operator flow          8   clean draft keeps changed-path bou...
+  [OK]          operator flow          9   backend flags and flat automation ...
+> [FAIL]        operator flow         10   flat paths retain operator comments.
+  [OK]          operator flow         11   unavailable and malformed input.
+  [OK]          operator flow         12   workspace roundtrip ignores old ca...
+  [OK]          operator flow         13   unconfirmed write and preview refu...
+  [OK]          operator flow         14   changed file path needs discard.
+  [OK]          operator flow         15   quoted and multiline table shapes.
+  [OK]          operator flow         16   stored setting does not hide appli...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        operator flow         10   flat paths retain operator comm...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT # deployment
+ASSERT # managed driver
+ASSERT # pinned driver
+File "list.ml", line 114, character 12:
+FAIL # pinned driver
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Dune__exe__Test_tui_browser_activity.flat_paths_preserve_operator_comments in file "test/test_tui_browser_activity.ml", lines 112-113, characters 2-95
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41187-raw-save-docs-20261005/_build/_tests/Browser activity draft and save/operator flow.010.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41187-raw-save-docs-20261005/_build/_tests/Browser activity draft and save'.
+1 failure! in 0.007s. 17 tests run.

@@ -76,6 +76,11 @@ val opens_keepers : message_mode:bool -> string -> bool
     declined it. Message mode never treats the printable {!keepers_jump} key
     as this jump. *)
 
+val chat_quiet_leave : input_supported:bool -> turn_active:bool -> draft_empty:bool -> string -> bool
+(** [Q] leaves a transcript-only viewport, or an active turn with an empty
+    visible draft. Ctrl-Q leaves independently of the draft and turn state.
+    Neither key requests a turn interrupt. *)
+
 val cancels_two_press :
   input_seen:bool -> key:string option -> second_press:string list -> bool
 (** Whether the input the loop just read cancels a standing two-press
@@ -95,6 +100,9 @@ val for_surface : Masc_tui_types.surface -> binding list
 (** The surface's own bindings, in declaration order within each group.
     Feeds both projections; a surface whose footer is not yet converted is
     still read by the help overlay. *)
+
+val keeper_navigation_hints : string
+(** Keys while the Keeper navigator opened with Left holds focus. *)
 
 val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
@@ -135,6 +143,10 @@ val footer_hints_board_compose_writing : string
 (** The Board draft while it takes letters: a literal "type to write" and the
     keys that are not letters. *)
 
+val footer_hints_goal_drop_reason : string
+(** A Goal drop reason while it takes letters: a literal "type why" and the
+    keys that are not letters. *)
+
 val footer_hints_board_compose_armed : reply:bool -> string
 (** The Board draft's send menu after Esc. [reply] drops the hearth cycle a
     comment has no use for. *)
@@ -172,7 +184,6 @@ type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
-  | Code_overlay  (** diff is drawn over the file *)
   | Code_notes  (** wrapped memo document is drawn over the file *)
   | Code_history  (** complete history document is drawn over the file *)
 

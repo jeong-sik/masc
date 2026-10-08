@@ -28,6 +28,7 @@ type resolution_failure =
   ; declared_drop : drop_reason option
   ; runtime_count : int
   }
+
 (* One exact-output lane slot whose HTTP provider declares no
    [exact-body-timeout-s] (rule 3 of RFC-runtime-two-layers, #38779). *)
 type exact_slot_body_deadline_gap =
@@ -89,14 +90,12 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Admission_allowances_disagree of
+      Llm_provider.Provider_admission.allowance_disagreement list
   | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
   | Context_marks_exceed_max_context of
       { runtime_id : string
       ; high_water_tokens : int
-      ; max_context : int
-      }
-  | Muse_window_below_host_overhead of
-      { runtime_id : string
       ; max_context : int
       }
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
@@ -139,12 +138,13 @@ let resolution_suffix (resolution : resolution_failure) : string =
    and the startup degradation report. *)
 let exact_slot_body_deadline_gap_to_string (gap : exact_slot_body_deadline_gap) =
   Printf.sprintf
-    "[runtime.exact_output_lanes.%s] slot %S runs on provider %S; add %s to \
+    "[runtime.exact_output_lanes.%s] slot %S runs on provider %S; add %s = %s to \
      [providers.%s]"
     gap.lane_id
     gap.slot_id
     gap.provider_id
     Runtime_schema.exact_body_timeout_s_key
+    (Printf.sprintf "%.1f" Runtime_setup_spec.setup_exact_body_timeout_s)
     gap.provider_id
 ;;
 
@@ -157,6 +157,8 @@ let exact_slot_body_deadline_gap_to_yojson (gap : exact_slot_body_deadline_gap) 
     ; "message", `String (exact_slot_body_deadline_gap_to_string gap)
     ]
 ;;
+
+let max_concurrent_key = "max-concurrent"
 
 let to_diagnostic_text ~(config_path : string) : load_failure -> string = function
   | Toml_unparsable errors ->
@@ -233,14 +235,34 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       high_water_tokens
       max_context
-  | Muse_window_below_host_overhead { runtime_id; max_context } ->
+  | Admission_allowances_disagree disagreements ->
+    let allowance_text (allowance : Llm_provider.Provider_admission_state.allowance) =
+      match allowance.priority_run_limit with
+      | None -> Printf.sprintf "%s = %d" max_concurrent_key allowance.max
+      | Some limit ->
+        Printf.sprintf
+          "%s = %d, %s = %d"
+          max_concurrent_key
+          allowance.max
+          Runtime_schema.admission_priority_run_limit_key
+          limit
+    in
     Printf.sprintf
-      "%s: runtime %S has no start-prompt ceiling: %s, so the host compacts any \
-       input. Raise max-context"
+      "%s: runtimes on one provider account declare different admission \
+       allowances. An account admits requests under one %s and %s, so give \
+       every runtime on it the same values:\n%s"
       config_path
-      runtime_id
-      (Runtime_muse_prompt_capacity.error_to_string
-         (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }))
+      max_concurrent_key
+      Runtime_schema.admission_priority_run_limit_key
+      (disagreements
+       |> List.map (fun (disagreement : Llm_provider.Provider_admission.allowance_disagreement) ->
+         Printf.sprintf "  %s account at %s:" disagreement.kind disagreement.base_url
+         :: List.map
+              (fun (runtime_id, allowance) ->
+                 Printf.sprintf "    %s: %s" runtime_id (allowance_text allowance))
+              disagreement.declarations
+         |> String.concat "\n")
+       |> String.concat "\n")
   | Exact_slot_body_deadlines_absent gaps ->
     Printf.sprintf
       "%s: this change adds %d exact-output slot(s) on a provider that declares \
@@ -302,7 +324,7 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Lane_candidate_unresolved _
   | Max_context_absent _
   | Context_marks_exceed_max_context _
-  | Muse_window_below_host_overhead _
+  | Admission_allowances_disagree _
   | Exact_slot_body_deadlines_absent _
   | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure
 ;;

@@ -23,13 +23,6 @@ type fiber_drop_cause =
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Stale_termination_storm of { count : int }
-      (** #10765 Phase 2: latched when [record_stale_termination] returns a
-          window count >= [escalation_threshold]. The supervisor's
-          [`Crashed] branch checks this variant and skips [to_restart],
-          persisting [meta.paused = true] instead so an operator must
-          investigate the underlying runtime/provider/fd issue before
-          resuming the keeper. *)
   | Provider_runtime_error of
       { code : string
       ; detail : string
@@ -54,9 +47,6 @@ type failure_reason =
   | Official_client_recovery_required of Keeper_internal_error.official_client_recovery
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string
-  | Turn_overflow_failure
-      (** Context-overflow compact-retry exhaustion observed for the current
-          turn. It does not change Keeper lifecycle state. *)
   | Operator_interrupt
       (** The current turn was cancelled by an explicit operator request,
           typically from the dashboard "stop current turn" action. *)
@@ -267,16 +257,6 @@ val validate_decision_transition
   :  from:decision_stage
   -> to_:decision_stage_active
   -> unit
-
-module Decision_transition : sig
-  type ('from, 'to_) t =
-    | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
-    | Undecided_to_tool_policy_selected : (decision_undecided, decision_tool_policy_selected) t
-    | Guard_ok_to_tool_policy_selected : (decision_guard_ok, decision_tool_policy_selected) t
-    | Tool_policy_selected_to_guard_ok : (decision_tool_policy_selected, decision_guard_ok) t
-
-  val to_tag : ('from, 'to_) t -> string
-end
 
 type turn_attempt_state = {
   turn_id : int;
@@ -527,14 +507,6 @@ val registry_key_parts : string -> (string * string, string) result
     Pure function, no state access. *)
 val completed_turn_outcome_of_observation :
   turn_observation -> Keeper_transition_audit.completed_turn_outcome
-
-(** Dispatch origin for post-turn lifecycle events. *)
-type lifecycle_event_origin =
-  | Generic_dispatch
-  | Post_turn_lifecycle
-
-(** Pure converter for diagnostic / log labels. *)
-val lifecycle_event_origin_to_string : lifecycle_event_origin -> string
 
 (** Pure: derive the next [pending_turn_measurement] field after observing
     [event] at wall-clock [now], preserving the prior value when the event

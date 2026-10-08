@@ -1,0 +1,19 @@
+Testing `TUI Lane inventory'.
+This run has ID `9Z4V4ZD5'.
+
+  [OK]          wire and display          0   disabled intent keeps unfinishe...
+  [OK]          wire and display          1   running observation survives in...
+  [OK]          wire and display          2   bounded run reading remains vis...
+  [OK]          wire and display          3   all builtins and manual identity.
+  [OK]          wire and display          4   invalid declaration and live wo...
+  [OK]          wire and display          5   partial reading and unknown owner.
+  [OK]          wire and display          6   absent declaration and failed c...
+  [OK]          wire and display          7   unknown wire rejected.
+  [OK]          wire and display          8   missing and duplicate rejected.
+  [OK]          wire and display          9   targets remain coherent.
+  [OK]          wire and display         10   embedded exact decoder retained.
+  [OK]          wire and display         11   overview agrees with exact detail.
+  [OK]          wire and display         12   instance ownership unique.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41135-skill-withdrawal-20261004/_build/_tests/TUI Lane inventory'.
+Test Successful in 0.003s. 13 tests run.

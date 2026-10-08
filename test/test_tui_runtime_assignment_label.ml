@@ -5,6 +5,7 @@ let unavailable_runtime_json =
     [ "generated_at_iso", `String "2026-09-20T00:00:00Z"
     ; "source", `String "/api/v1/runtime/resolved"
     ; "config_path", `String "/workspace/config/runtime.toml"
+    ; "default_route", `Null
     ; "default_runtime", `Null
     ; "runtimes", `List []
     ; "lanes", `List []

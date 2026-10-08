@@ -1,0 +1,38 @@
+{
+  "base": "5d673773d03b1cf9008a01543cb1e3833c9f02ea",
+  "scope": "Machine inventory producer/decoder/display/direct tests; not parent configuration/admission review",
+  "source_sha256": {
+    "lib/server/server_lane_inventory.ml": "b4d4e5b60e7ab60bdf0ba4895e653f645324cd09f89142945f3cfb7d090d2815",
+    "lib/server/server_lane_inventory.mli": "048cde3368123899ddd3c9d3eb9600d286cbb2e88742faf1f24a8354ebed506e",
+    "lib/tui_decode_lane_inventory.ml": "acad740bbff9b190a24d7ac97d6bb22d6606ea55cd42b8e858b90b52c17c182a",
+    "lib/tui_decode_lane_inventory.mli": "3aefe4288017aa00abfc0be0d840d4837ad6165b47052a6cb6e730f2f2253c98",
+    "bin/masc_tui_lane_inventory.ml": "bc04d034da178e5b9259c21f64d3f78a73e241a47d48bd1ba55c77a56c4354b9",
+    "bin/masc_tui_lane_inventory.mli": "82c57a3faf235930307dce1d6c659f014669de30b9a6dfbe9efe89e192b8e46d",
+    "test/test_tui_lane_inventory.ml": "54f03b304484313dc0f2e5728a0960aa42e101f69f88e130e30c6a92bb062d3b",
+    "test/test_server_lane_inventory.ml": "e9ca29a6875e4dd97beff02550584bd6cd72c1599f96721eb1c7ee2d21491930",
+    "test/test_tui_keys.ml": "9ba15d444863fd843bae8cc29d2bd9914bb833fb95e85fd69330aa35474eebcb",
+    "test/tui_keyboard_keepers.py": "98c25cfee58af299f646c75e5229a1796209f3acc8ae47220f99e066a0533b7f",
+    "dashboard/src/api/lane-inventory.ts": "2d6a854734448b231b144bf6fdf58edef912bc7854f60d4f95da51a5fdba187a",
+    "dashboard/src/api/lane-inventory.test.ts": "c8baee85edccbf46b76a1d3fe2424e1d90d6a3958a7a9917160aa7beb490ad90",
+    "dashboard/src/api/fixtures/lane-inventory.json": "39a442ae09a43767d8c329debd42ba2675ab39153a4152ee7eb70f972be0e0dc",
+    "dashboard/src/components/lane-inventory-panel.ts": "af134a52b01af061f9d929afe6181c6beb5ed28c73252127a37cb3369f46000a",
+    "dashboard/src/components/lane-inventory-panel.test.ts": "fe7c61c3c85af95113517e04374df47a49c6a606d06cbee924e783d057842308"
+  },
+  "artifact_sha256": {
+    "dashboard/evidence/2026-10-05-machine-lane-activity/README.md": "1c35d008233d5b70c5bd89739eb573e032c3ef136d65e1a66651a0d6d4009a41",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/browser-fixture.mjs": "4826922ebdd4e718cc77224249bb6c7a1ffaebb63fadef4c612327b45c312b14",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/browser-result.json": "0e88d0ce458d4290cf64a89975ab73d575e5db1a882dc6b12a9df35a789f821b",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/browser.txt": "eab8388f7dc19d1c1f3421bab5411b4a33a08be0072f7b57edd323c819a26406",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/check-inventory.py": "89e87f645e2d45485c267194569700d302287f69cd7d2eaa1016bc5e49224b49",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/fixture.html": "7ba9b8ed6780c568ef6dea57abd8115146fdf4b4bcc23e5603ffc025c8b269c1",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/fixture.ts": "25f9cb722ff511ce82495993cda61bcc719fd5354fc23a95167440cd2a1a6c7f",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/inventory-check.txt": "850cb51ab3afa4477d0606b226123a42ee2f7c7681defc172145a9767c295b28",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/inventory-provenance.json": "373a012c99a3a6b66b78df6d3114cde39ab4dd07d41b69d1feaaca7088ada9af",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/machine-mobile-on.png": "7cae3a53cf79651d22538a1d1fef171f01d122dcdccd6a3415c5a88966668a7b",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/machine-off-stable.png": "f5872d29a4d3de100a13a693a6537818f5fff97fa753d0e64708919598cd1619",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/syntax.json": "75312fd57ee40ad16a4c74a9668eea92a946bb5a148d747c1562918aaf08b22a",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-05-machine-lane-activity/web-tests.txt": "db3900b484a9a01c4ecbf491cecd4c5f6102278dcdbaf0eea5867271d515d0be"
+  }
+}

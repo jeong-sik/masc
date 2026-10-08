@@ -51,7 +51,18 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
               | None ->
                   "y/n: decide now (this exact attempt cannot be replayed)" )
           ]
-        | Gate_queued | Gate_judging | Gate_human_required -> []
+        | Gate_human_required ->
+          (* Auto Judge handed the row over with its reasons; the person
+             deciding reads them here instead of guessing why. *)
+          (match pending.Tui_decode.gp_judge_advice with
+           | Some advice ->
+             ( "judge said", Terminal_text.single_line advice.rationale )
+             :: List.mapi
+                  (fun index question ->
+                     ((if index = 0 then "asks" else ""), Terminal_text.single_line question))
+                  advice.key_questions
+           | None -> [])
+        | Gate_queued | Gate_judging -> []
       in
       [ "keeper", pending.Tui_decode.gp_keeper
       ; "tool", pending.Tui_decode.gp_display_tool
@@ -441,7 +452,15 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
                headline Ansi.dim
                (fit_width detail (max 8 (cols - 12))) Ansi.reset
                Ansi.dim (fit_width next (max 8 (cols - 4))) Ansi.reset
-         | Gate_queued | Gate_judging | Gate_human_required -> headline)
+         | Gate_human_required ->
+             (match pending.gp_judge_advice with
+              | Some advice ->
+                  Printf.sprintf "%s\n  %sjudge: %s%s"
+                    headline Ansi.dim
+                    (fit_width (Terminal_text.single_line advice.rationale) (max 8 (cols - 11)))
+                    Ansi.reset
+              | None -> headline)
+         | Gate_queued | Gate_judging -> headline)
     | None -> ""
 ;;
 
@@ -553,6 +572,8 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
   String.concat "\n" metadata_rows, payload_line
 ;;
 
+module Window = Masc_tui_approvals_window
+
 let render_approvals (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -573,16 +594,13 @@ let render_approvals (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  (* The same population the tab badge and the Overview row count: the
-     approval rows plus the open questions. This title counted the approval
-     rows alone, so an operator who came here from a badge of 1 was met with
-     "(0)" and had to find the question block further down to learn what the
-     badge had been counting. *)
+  (* The approval rows plus the open questions. A title that counted the
+     approval rows alone read "(0)" over a screen with a question waiting. *)
   let count = Masc_tui_approvals_model.approvals_surface_pending state in
   (* The count is what is on screen. It used to be the pending-confirm queue's
      own visible/total pair, and that queue is one of the three lists this
      screen draws: with seven Gate rows waiting and no confirm entries, the
-     title read "(0/0, hidden 0)" while the tab beside it read "7".
+     title read "(0/0, hidden 0)" over seven rows.
 
      The filter clause stays -- an actor filter really does hide confirm
      entries, and [visible_entries]/[hidden_entries] partition the same list,
@@ -597,8 +615,7 @@ let render_approvals (state : state) =
     | Some _ | None -> ""
   in
   (* Which list the count cannot stand behind, one clause per list, from the
-     same readings that keep the strip entry and put "?" on the Overview
-     count. A stale list still draws its earlier rows, and those are the rows
+     same readings Home and the empty queue use. A stale list still draws its earlier rows, and those are the rows
      an operator decides against. *)
   let reading = Masc_tui_approvals_model.approvals_reading state in
   let reading_notes = Masc_tui_approvals_model.approvals_title_notes reading in
@@ -657,16 +674,20 @@ let render_approvals (state : state) =
      footer key like any other -- it reaches the footer and the [?] help
      through the Approvals row of Masc_tui_keys, which is where it was
      missing until 2026-08-29. *)
+  (* A lane word this build does not know is drawn as the server wrote it,
+     the same spelling the chat header and the Keeper detail draw. *)
+  let lane_mode_label = function
+    | Tui_decode.Gate_mode mode -> Masc_tui_palette.gate_mode_label mode
+    | Tui_decode.Unrecognised_gate_mode raw -> Terminal_text.single_line raw
+  in
   box_line buf cols
     (match state.gate_modes, Terminal_text.optional_single_line state.gate_error with
      | Some modes, _ ->
          Printf.sprintf
            "  %s[w] Workspace: %s  |  [e] Outside services: %s%s"
            (Theme.info ())
-           (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_workspace with
-            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
-           (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
-            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
+           (lane_mode_label modes.Tui_decode.glm_workspace)
+           (lane_mode_label modes.Tui_decode.glm_external)
            Ansi.reset
      (* No prefix: [data_unreliable_row] already opens "(data unreliable: "
         and the loader's message already opens "gate load failed:", so a third
@@ -741,8 +762,8 @@ let render_approvals (state : state) =
   let approval_body_rows = max 1 (rows - around_rows - ask_rows) in
 
   (* The queue's own population, not the surface's. [count] above is the
-     approval rows plus the open questions -- the right reading for the title
-     and the badge, which name the screen -- and this block is about the three
+     approval rows plus the open questions -- the right reading for the title,
+     which names the screen -- and this block is about the three
      lists that hold approval rows. With the queue empty and a question
      waiting, [count] was three, so the list drew its empty self: a cursor
      mark on a blank row and nothing to say the queue was empty, where the
@@ -780,7 +801,15 @@ let render_approvals (state : state) =
       box_empty buf cols
     done
   end else begin
-    let content_height = approval_body_rows in
+    (* A queue longer than its rows says which of them these are, the way the
+       Keepers roster does: the line costs one of the rows it describes, so it
+       is drawn only where there is something to say and a row to spend on it.
+       Without it the rows past the window were not drawn at all and nothing
+       said so -- an operator on a short frame could read the first screen,
+       believe it whole, and decide against a queue they had not seen. *)
+    let approval_total = List.length approvals in
+    let overflowing = Window.overflows ~body_rows:approval_body_rows ~total:approval_total in
+    let content_height = Window.rows ~body_rows:approval_body_rows ~total:approval_total in
     let scroll_offset =
       if content_height > 0 && state.approval_cursor >= content_height then
         state.approval_cursor - content_height + 1
@@ -883,6 +912,14 @@ let render_approvals (state : state) =
                 (Terminal_text.single_line_or ~default:"(no input preview)"
                    pending.Tui_decode.gp_input_preview)
         in
+        (* One row and more rows than it: no room for the window line, so the
+           row says where it sits in the queue itself. *)
+        let line =
+          if Window.hides_rows ~body_rows:approval_body_rows ~total:approval_total
+             && not overflowing
+          then Printf.sprintf "%s[%d/%d]%s %s" Ansi.dim (idx + 1) approval_total Ansi.reset line
+          else line
+        in
         let is_selected = idx = state.approval_cursor in
         if is_selected then
           box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ line))
@@ -890,7 +927,12 @@ let render_approvals (state : state) =
           box_line buf cols ("  " ^ line)
       end else
         box_empty buf cols
-    done
+    done;
+    if overflowing then
+      box_line_styled buf cols ~style:(Theme.recede ())
+        ("  "
+         ^ Window.note ~scroll:scroll_offset ~height:content_height
+             ~total:approval_total)
   end;
 
   Buffer.add_buffer buf below_buf;

@@ -97,9 +97,6 @@ let config_bindings =
   ; b Act "n" "new"
       ~help:"on presets, name a preset holding the configuration as it stands",
       Some [ Config_presets ]
-  ; b Act "u" "restore"
-      ~help:"on presets, put the selected one back; press twice to confirm",
-      Some [ Config_presets ]
   ; b Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
   ; b Act "a" "fragments / voice / account"
@@ -109,6 +106,33 @@ let config_bindings =
              declare one more Claude Code, Codex or Antigravity account by \
              copying a provider the file declares",
       Some [ Config_runtime; Config_prompts; Config_voice ]
+    (* [u] and the retained-draft keys come after [a]: a cut row drops them
+       first, and while a draft is retained the runtime.toml pane names them
+       in its own heading. *)
+  ; b Act "u" "restore / adopt revision"
+      ~help:"on presets, put the selected one back; press twice to confirm; \
+             on runtime.toml, keep the draft and adopt the displayed current \
+             file revision; S saves",
+      Some [ Config_presets; Config_runtime ]
+    (* Upper case, as Runtime's lane removal: x on the other panes puts a
+       default back, and a delete cannot be put back. *)
+  ; b Act "D" "delete"
+      ~help:"on presets, delete the selected one; press twice to confirm. \
+             A preset listed with ! under a valid name is deleted with \
+             /preset delete <name>",
+      Some [ Config_presets ]
+  ; b Act "S" "save draft"
+      ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
+      Some [ Config_runtime ]
+  ; b Act "C" "compare file"
+      ~help:"runtime.toml: switch between the retained draft and the current file read with r",
+      Some [ Config_runtime ]
+  ; b Act "U" "use current text"
+      ~help:"runtime.toml: replace the retained draft with the displayed current file without writing",
+      Some [ Config_runtime ]
+  ; b Act "X" "discard draft"
+      ~help:"runtime.toml: discard only the local draft and read the current file",
+      Some [ Config_runtime ]
   ; b Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
@@ -131,6 +155,7 @@ let config_bindings =
 type runtime_key =
   | Every_reading of binding
   | Keeper_lanes_only of binding
+  | All_runtimes_only of binding
   | Reading_walk
 
 let runtime_reading_walk_help =
@@ -143,12 +168,18 @@ let runtime_keys =
       (b Act "Right / Enter" "detail"
          ~help:"show the full runtime, lane, dispatch, and probe fields")
   ; Every_reading
+      (b Act "h" "dim refusals"
+         ~help:"toggle de-emphasis for exhausted, rate-limited, and spent runtimes")
+  ; Every_reading
       (b Act "v" "routes / status"
          ~help:"read complete default and media routes, boot admission and probe diagnostics")
   ; Reading_walk
   ; Every_reading
       (b Navigate "c" "clients"
          ~help:"everyone attached to this workspace, off the ring under Runtime")
+  ; All_runtimes_only
+      (b Act "e" "model settings"
+         ~help:"open the selected binding in Config Models; Esc then c copies a variant")
   ; Keeper_lanes_only
       (b Act "e" "add candidate"
          ~help:"append a candidate to the candidate order of the lane under the cursor (keeper lanes only)")
@@ -185,7 +216,7 @@ let runtime_keys =
   ]
 
 let runtime_sheet_binding = function
-  | Every_reading binding | Keeper_lanes_only binding -> binding
+  | Every_reading binding | Keeper_lanes_only binding | All_runtimes_only binding -> binding
   | Reading_walk ->
     b Navigate "p" "keeper lanes / all runtimes / service lanes"
       ~help:runtime_reading_walk_help
@@ -196,6 +227,8 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
     (match mode with
      | Runtime_lanes -> Some binding
      | Runtime_all -> None)
+  | All_runtimes_only binding ->
+    (match mode with Runtime_all -> Some binding | Runtime_lanes -> None)
   | Reading_walk ->
     Some
       (b Navigate "p"
@@ -253,7 +286,7 @@ let global =
       "the MSX screen: the emulator core over the whole terminal (esc: back; \
        also `:` go MSX)"
   ; b Meta roster_toggle_key "show or hide the Keeper roster"
-      ~help:"wide chats show the roster by default; this choice persists \
+      ~help:"the roster starts hidden; this choice persists \
              across navigation and resizing"
   ; b Meta "Ctrl-L"
       "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
@@ -376,9 +409,12 @@ let board_read_focus_key =
 let fusion_caller_key = b Navigate "K" "calling Keeper"
 let fusion_board_key = b Navigate "B" "Board evidence"
 
+let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
+
 let for_surface = function
   | Overview ->
-      [ b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      [ b Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
+      ; b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
       ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
       ; b Navigate "p" "requests" ~help:"approvals and questions"
       ; b Navigate ";" "agenda" ~help:"Goal confirmations and tasks waiting on you"
@@ -486,7 +522,7 @@ let for_surface = function
       ]
       @ listing_meta
   | Keepers Keeper_message ->
-      [ b Navigate "Left" "roster" ~help:"focus the visible Keeper roster"
+      [ b Navigate "Left" "roster" ~help:"empty composer: open the Keeper list; with text: move the cursor left"
       ; b Navigate "Right" "chat"
           ~help:"roster focused: return focus to the chat composer"
       ; (* One key, two focuses: the roster when it holds focus, the history
@@ -525,8 +561,8 @@ let for_surface = function
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "/copy" "copy reply"
           ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"
-      ; b Act "Ctrl-Q" "leave"
-          ~help:"leave with a turn running, without interrupting it"
+      ; b Act "Q / Ctrl-Q" "leave"
+          ~help:"Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting"
       ; (* One key, two focuses, listed once for the reason [Up / Down] above
            is: the dispatcher reads Esc from the roster as the way back to the
            composer and from the chat as the way off the screen. Spelled as two
@@ -571,11 +607,15 @@ let for_surface = function
          presses [A] and the guide's first line names it. *)
       ; b Navigate "o / A" "Lane Add-ons"
           ~help:"inspect Lane Add-on declarations, instances and observations"
-      ; b Act "Right / Enter" "runs"
-          ~help:"open this lane's exact runs"
-      ; b Act "a" "append slot"
-          ~help:"add a candidate to this lane's walk order"
-      ; b Act "s" "models"
+      ; b Navigate "d" "reading" ~help:"read the selected Lane's complete configuration and observation"
+      ; b Navigate "i" "read issues" ~help:"read inventory problems without hiding the Lane list"
+      ; b Act "Right / Enter" "open"
+          ~help:"open exact runs, the selected Browser or machine, or a package configuration/instance"
+      ; b Act "a" "exact: add slot"
+          ~help:"add a candidate to the selected exact-output lane's walk order"
+      ; b Act "Space" "activity"
+          ~help:"open Exact, Browser or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off"
+      ; b Act "s" "exact: models"
           ~help:"edit the model order: r replaces the selected model/effort, \
                  a adds a fallback, 1 makes it first within its HTTP/CLI group, \
                  x removes, J/K reorders, Enter/d opens the selected \
@@ -584,12 +624,12 @@ let for_surface = function
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)
-      ; b Navigate "e" "lane config"
+      ; b Navigate "e" "exact: config"
           ~help:
             "open this lane's runtime.exact_output_lanes section in the \
              preview-checked runtime.toml editor; slots is a catalog-ref array \
              and cli_slots an official-client runtime-id array, either may be \
-             left out, and the lane needs one slot across the two"
+             left out, and an enabled lane needs one slot across the two"
       ; b Navigate "p" "runtime"
           ~help:"open the Runtime surface"
       ; b Act "Esc" "dashboard" ~help:"back to Dashboard"
@@ -698,6 +738,7 @@ let for_surface = function
       ; b Act "a" "confirm proof"
           ~help:"read the proven Goal evidence; press again to confirm that exact proof"
       ; b Act "x" "drop"
+          ~help:"type why the goal is dropped; Enter drops it and cancels its unclaimed tasks"
       ; b Act "o" "reopen"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
         (* Over the goals [f] and [s] left on screen, in the order they are
@@ -811,6 +852,8 @@ let for_surface = function
           ~help:"browse and search consolidated memory across the entire fleet"
       ; b Act "s" "sort"
           ~help:"cycle sort keepers (facts, size, delta, state, name)"
+      ; b Act "u" "units"
+          ~help:"switch stored memory and request input between tokens and KiB"
       ; b Act "d" "detail"
           ~help:"show the selected keeper's ledger rows, or fold them back to \
                  its state, last save and actions"
@@ -1116,6 +1159,16 @@ let board_compose_armed_bindings ~reply =
 let footer_hints_board_compose_armed ~reply =
   hints_of_bindings (board_compose_armed_bindings ~reply)
 
+(* No [q] here either: while a drop reason has the keys, every printable
+   scalar is a letter of it. *)
+let goal_drop_reason_bindings =
+  [ b Act "Enter" "drop" ~help:"drop the goal with this reason; its unclaimed tasks are cancelled"
+  ; b Meta "Esc" "cancel" ~help:"close the reason; the goal stays as it is"
+  ]
+
+let footer_hints_goal_drop_reason =
+  "type why  " ^ hints_of_bindings goal_drop_reason_bindings
+
 (* A pane's own keys, then the keys all seven panes share. *)
 let config_pane_bindings pane =
   let own =
@@ -1148,16 +1201,20 @@ let config_row ~own ~shared =
 
 let footer_hints_config ~pane =
   let own, shared = config_pane_bindings pane in
-  if pane = Config_params then
+  match pane with
+  | Config_params | Config_presets ->
     (* At 80 cells the page/selection hints otherwise outlive E, the only
        door to advanced JSON. The pane body already names those navigation
-       keys; keep its distinct edit actions ahead of them in the footer. *)
+       keys; keep its distinct edit actions ahead of them in the footer.
+       Presets the same at 120: n, u and D are the pane's three writes, and
+       behind the navigation keys D was the one cut. *)
     let actions, navigation =
       List.partition (fun binding -> binding.group = Act) own in
     String.concat "  "
       [ hints_of_bindings actions; hints_of_bindings navigation
       ; hints_of_bindings shared ]
-  else config_row ~own ~shared
+  | Config_runtime | Config_models | Config_prompts | Config_themes | Config_voice ->
+    config_row ~own ~shared
 
 (* The keeper-voice screen: two lists and one write. The keys are its own --
    the keeper walks under [j]/[k] and the voice under the arrows, so an
@@ -1271,7 +1328,6 @@ type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
-  | Code_overlay  (** diff is drawn over the file *)
   | Code_notes  (** wrapped memo document is drawn over the file *)
   | Code_history  (** complete history document is drawn over the file *)
 
@@ -1285,7 +1341,8 @@ let code_notes_bindings =
   ]
 
 let code_history_bindings =
-  [ b Navigate "j/k" "scroll"
+  [ b Meta "r" "refresh"
+  ; b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
   ; b Navigate "H" "close"
   ; b Navigate "Home/End" "edges"
@@ -1309,7 +1366,7 @@ let footer_hints_code ~pane =
     | Code_file -> overlay_keys
     | Code_diff -> overlay_keys @ ("Right / Enter" ::
         List.filter (fun key -> not (String.equal key "Shift-Left / Shift-Right")) file_keys)
-    | Code_overlay | Code_notes -> "Right / Enter" :: overlay_keys @ file_keys
+    | Code_notes -> "Right / Enter" :: overlay_keys @ file_keys
     | Code_history ->
         (* [Right / Enter] names the tree and file panes' open. With the
            history overlay up, the one arm behind Right and Enter takes the
@@ -1326,7 +1383,7 @@ let footer_hints_code ~pane =
         List.map (fun b -> { b with key = "Shift-←/→" }) pan
         @ List.map (fun b ->
             if String.equal b.key "Left / Esc" then { b with key = "Esc" } else b) others
-    | Code_tree | Code_file | Code_overlay | Code_notes | Code_history -> visible in
+    | Code_tree | Code_file | Code_notes | Code_history -> visible in
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
@@ -1337,7 +1394,7 @@ let footer_hints_code ~pane =
       match pane with
       | Code_notes -> hints_of_bindings code_notes_bindings
       | Code_history -> hints_of_bindings code_history_bindings
-      | Code_tree | Code_file | Code_overlay | Code_diff -> hints
+      | Code_tree | Code_file | Code_diff -> hints
 
 (* The Runtime footer is the table's, with the two keys that depend on the
    reading on screen: [p] names where it goes from here, and [e] exists only on
@@ -1371,6 +1428,11 @@ let footer_hints_resources ~detail_focus =
 
 let opens_keepers ~message_mode key =
   (not message_mode) && String.equal key keepers_jump.key
+
+let chat_quiet_leave ~input_supported ~turn_active ~draft_empty key =
+  (String.equal key "Q"
+   && (not input_supported || (turn_active && draft_empty)))
+  || (String.length key = 1 && Char.code key.[0] = 17)
 
 (* An armed two-press action expires on the next unrelated input: otherwise
    it waits indefinitely and a later press of the same key -- after the
@@ -1857,9 +1919,27 @@ let workspace_activity_bindings ~context =
   ] @ (if context then [b Navigate "Home/End / g/G" "edges"]
        else [b Navigate "v / V" "context" ~help:"read the selected record's full path, Task and execution metadata"])
 
+let exact_activity_bindings =
+  [ b Act "Space" "change activity draft" ~help:"preserve configuration; no write until s"
+  ; b Act "s" "save" ~help:"preview and save against the original file revision"
+  ; b Act "r" "read current" ~help:"keep edits; otherwise follow current file"
+  ; b Act "u" "reapply activity" ~help:"keep only the desired on/off change over the current file; s then saves"
+  ; b Act "x" "discard draft" ~help:"use the displayed current file; no write"
+  ; b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "top/bottom"
+  ; b Navigate "Esc / q" "back" ~help:"retain the activity draft for this workspace and lane"
+  ]
+
 let help_sections_for_state (state : state) =
   let active =
     if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
+    else if state.view = Lanes && Option.is_some state.exact_activity_open then
+      Some ("Exact activity", exact_activity_bindings)
+    else if state.view = Lanes && Option.is_some state.browser_activity_open then
+      Some ("Browser activity", exact_activity_bindings)
+    else if state.view = Lanes && Option.is_some state.machine_activity_open then
+      Some ("Machine activity", exact_activity_bindings)
     else if Option.is_some state.voice_agent_voices then
       let bindings =
         match state.voice_agent_voices with

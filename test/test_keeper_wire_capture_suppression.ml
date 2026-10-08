@@ -145,7 +145,7 @@ let test_input_required_question_is_not_suppressed_for_internal_source () =
 
 let test_direct_response_observation_preserves_raw_response_text () =
   let raw_response_text =
-    "I cannot act on that from the current keeper state, but I am still here."
+    "    첫 줄의 들여쓰기\n    둘째 줄  \n\n"
   in
   let finalized =
     Response_text.finalize

@@ -2,8 +2,8 @@
 
 type finalized = {
   response_text : string;
-      (** What the keeper said, trimmed. Blank only when the model produced no
-          text.
+      (** What the keeper said, with its original whitespace. Visibility and
+          blankness are decided separately by the typed outcome and consumers.
 
           A turn whose text is kept out of replay still carries it here.
           Blanking it was one decision standing for two different questions --

@@ -216,7 +216,8 @@ class Grader:
         # The host keeps the authenticated requester. This worker only knows
         # the claimed label, which belongs in fields. Upstream question IDs
         # also stay in fields: related_ids are local to this worker's output.
-        grade = {"id": stable_id(self.context["incarnation"], "grade", request_id),
+        incarnation = self.context["incarnation"] if self.context else "unbound"
+        grade = {"id": stable_id(incarnation, "grade", request_id),
                  "lane_id": "quiz/grades", "kind": "event",
                  "title": ("정답 ✓ — 질문 " if correct else "오답 ✗ — 질문 ") + action["question_id"],
                  "observed_at": time.time(), "subject_id": action["question_id"],

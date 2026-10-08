@@ -219,7 +219,7 @@ let test_late_execution_keeps_successor_preview_and_redactor () =
   with_secret_redaction ~keeper_name "successor-secret" (fun redaction ->
     let config = Workspace.default_config (Filename.get_temp_dir_name ()) in
     let callbacks preview =
-      let _, _, _, _, on_event =
+      let _, _, _, on_event =
         Keeper_agent_run_turn_helpers.turn_progress_callbacks
           ~preview ~observation_token:None ~config ~keeper_name
           ~downstream:None ~turn_id:1

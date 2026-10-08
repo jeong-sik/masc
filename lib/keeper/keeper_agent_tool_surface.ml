@@ -42,3 +42,26 @@ let on_the_wire ~agent_cell ~built =
   | Some agent -> Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent)
   | None -> built
 ;;
+
+type attempt_surface =
+  { tools : Agent_core.Tool.t list
+  ; loader_alive : bool
+  }
+
+let for_attempt ~checkpoint_owner ~agent_cell ~built =
+  match checkpoint_owner, !agent_cell with
+  | Some Runtime_execution.Masc_agent_core, Some agent ->
+    { tools = Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent)
+    ; loader_alive = true }
+  | Some Runtime_execution.Masc_agent_core, None
+  | (Some Runtime_execution.Official_client | None), _ ->
+    { tools = built; loader_alive = false }
+;;
+
+let for_request ~checkpoint_owner ~enabled ~tool_choice ~schema_names ~agent_cell ~built =
+  match enabled, tool_choice with
+  | false, _ | true, Some Agent_core.Types.None_ -> []
+  | true, (None | Some (Agent_core.Types.Auto | Any | Tool _)) ->
+    (for_attempt ~checkpoint_owner ~agent_cell ~built).tools
+    |> List.filter (fun (tool : Agent_core.Tool.t) -> List.mem tool.schema.name schema_names)
+;;

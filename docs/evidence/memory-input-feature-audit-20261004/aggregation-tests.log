@@ -1,0 +1,9 @@
+Testing `Memory input observations'.
+This run has ID `PCNUT59L'.
+
+  [OK]          request statistics          0   mixed coverage and missing la...
+  [OK]          request statistics          1   zero and empty.
+  [OK]          request statistics          2   refuse partial or misattribut...
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-memory-feature-check-0mfc3tl9/_build/_tests/Memory input observations'.
+Test Successful in 0.001s. 3 tests run.

@@ -269,6 +269,24 @@ val start_held_context :
     names it, except blocks {!Prompt_block_id.resent_when_held} sends every
     time. *)
 
+type carried_summary =
+  { label : string
+  ; bytes : int
+  ; sha256_prefix : string
+  ; resent_every_resume : bool
+  }
+(** One carried context as a log line names it: what composed it, the bytes a
+    resume renders for it, the first 12 hex digits of its digest, and whether
+    its block is sent on every resume. *)
+
+val carried_summaries :
+  ?composed_context:composed_context ->
+  Agent_core.Types.message list ->
+  carried_summary list
+(** The contexts {!resume_prompt} selects, in order, summarized for logging.
+    A lane without a held set compares the digests across turns to see which
+    contexts it resends unchanged. *)
+
 val resume_prompt :
   goal:string ->
   held:Keeper_official_client_session_store.held_context list ->
@@ -300,14 +318,7 @@ val resume_prompt :
 val measure_message_bytes : Agent_core.Types.message -> int
 (** Bytes one message occupies in the canonical MASC encoding
     ({!encode_history_message}), which is what the range this module composes
-    is reported in.
-
-    This is not a ceiling for a lane's own window. Antigravity charges a role
-    label and a separator on top of this per message and charges its preamble
-    whether or not one is inserted, so a range that measures inside a
-    prompt ceiling here can still be refused there. A lane that has
-    a byte ceiling enforces it with its own measure, at the point the refusal
-    is raised. *)
+    is reported in. *)
 
 (** Who named the front of a start seed. *)
 type carried_start_front =
@@ -446,16 +457,16 @@ val carried_start_range
     one that wins: a position the seed or the lane cut already passed stands for
     atoms the range is carrying anyway, and summarising those would say twice
     what the request already says. When it does win, the request grows by
-    those bytes, and they are pinned, so a lane with a byte ceiling of its
-    own has to be ready for a composition that does not fit it.
+    those bytes, and they are pinned, so a lane that cuts the range to a
+    capacity has to be ready for a composition that does not fit it.
 
     [own_first_atom] is the front the lane already chose for its own reason
-    (Antigravity cuts its seed to the ceiling derived from its window). A
-    seed at or past that cut decides, even when it is older than
-    [turn_start]: the range the last answered request carried is this lane's
-    continuity. Without a seed the range starts at the later of the lane's
-    cut and [turn_start]; a lane with no cut of its own passes 0. A seed
-    whose index this history does not open with the seed's message is
+    (Claude Code and Codex cut their seed to the capacity a typed overflow
+    narrowed the turn to). A seed at or past that cut decides, even when it is
+    older than [turn_start]: the range the last answered request carried is
+    this lane's continuity. Without a seed the range starts at the later of
+    the lane's cut and [turn_start]; a lane with no cut of its own passes 0. A
+    seed whose index this history does not open with the seed's message is
     dropped and reported, and the range starts over as with no seed. *)
 
 (** {1 One window, one decision (RFC-0460)} *)
@@ -468,22 +479,6 @@ type windowed_range =
 
 val carried_atoms : carried_start -> int
 (** The durable atoms a range carries, before any window. *)
-
-val window_carried_range
-  :  measure_message_bytes:(Agent_core.Types.message -> int)
-  -> capacity_bytes:int
-  -> reserved_bytes:int
-  -> ?source_projection:
-       (Agent_core.Types.message list
-        -> (Agent_core.Types.message list, Agent_core.Error.t) result)
-  -> carried_start
-  -> (windowed_range, Agent_core.Error.t) result
-(** The range under a declared ceiling. [source_projection] runs first, on
-    the range as composed. An omission preamble the range opened on is taken
-    off before the window, which charges one itself, and put back when the
-    window dropped nothing; a range that fit therefore goes exactly as cut.
-    [atoms_kept] counts the range's durable atoms only: what the source
-    projection appends is reached by a drop only after all of them. *)
 
 val read_seed_once
   :  (unit -> Keeper_carried_front.seed_read) option
@@ -538,9 +533,9 @@ val start_range_projection :
 (** Capacity-first Start projection shared by Claude Code and Codex. The
     zero-history floor stays empty; otherwise the latest of the capacity,
     seed, Librarian, and turn-start fronts is composed and observed once.
-    Source-specific projection runs after this range. Antigravity composes
-    source context before its range window, so it uses {!window_carried_range}
-    directly. *)
+    Source-specific projection runs after this range. Antigravity and Muse
+    Code cut nothing, so they compose with {!carried_start_range} and
+    {!compose_librarian_range} directly. *)
 
 val prepare_turn :
   runtime_label:string ->

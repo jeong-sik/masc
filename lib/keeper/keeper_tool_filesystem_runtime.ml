@@ -62,7 +62,6 @@ type fs_guidance = Keeper_tool_filesystem_guidance.t =
       ; cwds : string
       }
   | Checkout_scan_failed of { detail : string }
-  | Cwd_not_directory of { cwd : string }
   | Offset_beyond_window of
       { offset : int
       ; window_bytes : int
@@ -2459,11 +2458,7 @@ let handle_file_write_content_with_outcome
   let via_field =
     match turn_sandbox_factory with
     | Some _ ->
-      [ ( "via"
-        , `String
-            (Keeper_sandbox_runner.route_label
-               Keeper_sandbox_runner.Sandbox_backend) )
-      ]
+      [ "via", `String Keeper_sandbox_runner.sandbox_backend_via ]
     | None -> []
   in
   let path = Safe_ops.json_string ~default:"" "path" args in

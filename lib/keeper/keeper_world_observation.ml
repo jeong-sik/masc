@@ -25,7 +25,7 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed of Keeper_event_queue.delegate_terminal
   | Ask_answered_row of { answered_by : Keeper_input_speaker.person }
       (** A human answered a question this Keeper asked. Like
           {!Composition_completed} the row carries the answer itself: the
@@ -82,7 +82,7 @@ let is_board_activity_event (event : pending_board_event) =
      same reason it is still counted here: this block is the only one that
      renders the row's title and preview, and the answer is the whole point of
      the wake. Excluded, the Keeper would be woken with nothing to read. *)
-  | Delegate_completed
+  | Delegate_completed _
   (* Same shape: no Board post behind the id, and this block is the only one
      that renders the row, so leaving it out would wake the Keeper with an
      empty pending-events list. *)
@@ -107,7 +107,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | External_attention _
@@ -125,7 +125,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | Schedule_due _
@@ -145,7 +145,7 @@ let is_task_outcome_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | Schedule_due _
@@ -160,7 +160,7 @@ let is_task_outcome_event (event : pending_board_event) =
 let is_task_cancellation_event (event : pending_board_event) =
   match event.event_kind with
   | Task_cancelled _ -> true
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | Board_post_created
@@ -571,7 +571,7 @@ let pending_board_event_of_board_observation
   : (pending_board_event, Board_signal.board_unavailable) result
   =
   let matched = Board_signal.match_observation ~meta ~observation in
-  match Board_dispatch.get_post ~post_id:observation.post_id with
+  match Board_dispatch.read_post ~post_id:observation.post_id with
   | Error error ->
     Error
       { Board_signal.operation = Board_signal.Get_post
@@ -738,6 +738,29 @@ let pending_board_event_of_composition_completion
     | Keeper_event_queue.Composition_failed detail -> "failed", detail
     | Keeper_event_queue.Composition_cancelled reason -> "cancelled", reason
   in
+  (* Same silent-cut gap as the delegate reply above: a failed or cancelled
+     composition's detail exists nowhere else, so a cut here is never silent
+     either -- the row appends the request id the title already carries. *)
+  let preview =
+    (* [short_preview] measures after [String.trim], so the cut test must
+       measure the same trimmed bytes: a space-padded short answer must not
+       read as cut. Trim once here and share it with the preview. *)
+    let message = String.trim message in
+    let cut = short_preview ~max_len:delegate_reply_preview_max_len message in
+    if String.length message > delegate_reply_preview_max_len then
+      let note =
+        event_row_text
+          Prompt_names.keeper_world_event_rows_composition_detail_lookup
+          [ "request_id", cc.cc_request_id ]
+          ~fallback:(Yojson.Safe.to_string
+            (`Assoc
+               [ "tool", `String "keeper_composition_status"
+               ; "arguments", `Assoc [ "request_id", `String cc.cc_request_id ]
+               ]))
+      in
+      if String.equal note "" then cut else cut ^ "\n" ^ note
+    else cut
+  in
   { event_kind = Composition_completed
   ; post_id = Keeper_event_queue.composition_completion_post_id cc
   ; author = keeper_name
@@ -745,7 +768,7 @@ let pending_board_event_of_composition_completion
        model-facing prose slot, and the three fields already say everything
        the row states. *)
   ; title = String.concat " " [ cc.cc_tool; outcome; cc.cc_request_id ]
-  ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
+  ; preview
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -779,11 +802,39 @@ let pending_board_event_of_delegate_completion
     | Keeper_event_queue.Delegate_no_reply -> "no_reply", ""
     | Keeper_event_queue.Delegate_failed detail -> "failed", detail
   in
-  { event_kind = Delegate_completed
+  (* The preview stays bounded, while [Delegate_completed] preserves the
+     original terminal payload. The unified prompt adds [reply_full] for a
+     cut reply; the configured note names that field as the primary source
+     and retains the operation lookup only for events without it. A prompt
+     render failure still leaves the lookup coordinates as structured data. *)
+  let preview =
+    (* [short_preview] measures after [String.trim], so the cut test must
+       measure the same trimmed bytes: a space-padded short reply must not
+       read as cut. Trim once here and share it with the preview. *)
+    let message = String.trim message in
+    let cut = short_preview ~max_len:delegate_reply_preview_max_len message in
+    if String.length message > delegate_reply_preview_max_len then
+      let note =
+        event_row_text
+          Prompt_names.keeper_world_event_rows_delegate_reply_lookup
+          [ "operation_id", dc.dc_operation_id; "keeper", dc.dc_keeper ]
+          ~fallback:(Yojson.Safe.to_string
+            (`Assoc
+               [ "tool", `String "masc_keeper_delegate_status"
+               ; "arguments", `Assoc
+                   [ "target", `Assoc
+                       [ "kind", `String "keeper"; "name", `String dc.dc_keeper ]
+                   ; "operation_id", `String dc.dc_operation_id
+                   ] ]))
+      in
+      if String.equal note "" then cut else cut ^ "\n" ^ note
+    else cut
+  in
+  { event_kind = Delegate_completed dc.dc_terminal
   ; post_id = Keeper_event_queue.delegate_completion_post_id dc
   ; author = dc.dc_keeper
   ; title = Printf.sprintf "%s %s" dc.dc_keeper outcome
-  ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
+  ; preview
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -1186,7 +1237,8 @@ type board_replay_failure =
 
     Replay each new post/comment through the same audience route as live
     delivery. Historical participation is not an address. Cursor progress
-    follows complete posts; a transient source failure retains its boundary. *)
+    follows complete posts; a failed candidate-storage write retains its
+    boundary. *)
 let collect_board_events_with_cursor_policy
       ~advance_cursor
       ~(base_path : string)
@@ -1227,38 +1279,20 @@ let collect_board_events_with_cursor_policy
     in
     let new_count = List.length posts in
     let mention_count = ref 0 in
-    (* Board-unavailable-result: classify + log + count a failed read
-       encountered mid-scan, without raising. [Permanent] means this one post
-       can never resolve (e.g. swept from the store) — the caller skips it
-       and keeps scanning. [Transient] means the caller stops scanning here
-       and returns what it already has, so the cursor is not advanced past
-       the blocked post and the same post is retried next cycle (preserves
-       the pre-existing "retained cursor" semantics, now via Result instead
-       of exception + re-raise). *)
+    (* A read that answers no row mid-scan names a post that was swept or an
+       id that does not parse. Reading again gives the same answer, so the
+       scan counts it, logs it and moves past that post. *)
     let log_and_count_unavailable ~context (unavailable : Board_signal.board_unavailable) =
-      let disposition = Board_signal.disposition_of_unavailable unavailable in
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ObservationQueryFailures)
         ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
         ();
-      (match disposition with
-       | Board_signal.Permanent ->
-         Log.Keeper.warn
-           "board event collection (%s): permanently unavailable, skipping post_id=%s \
-            keeper=%s: %s"
-           context
-           unavailable.Board_signal.post_id
-           meta.name
-           (Board_signal.unavailable_to_string unavailable)
-       | Board_signal.Transient ->
-         Log.Keeper.warn
-           "board event collection (%s): retained cursor (transient unavailable) \
-            post_id=%s keeper=%s: %s"
-           context
-           unavailable.Board_signal.post_id
-           meta.name
-           (Board_signal.unavailable_to_string unavailable));
-      disposition
+      Log.Keeper.warn
+        "board event collection (%s): unavailable, skipping post_id=%s keeper=%s: %s"
+        context
+        unavailable.Board_signal.post_id
+        meta.name
+        (Board_signal.unavailable_to_string unavailable)
     in
     let signal_after_cursor (p : Board.post) created_at =
       match base_cursor with
@@ -1342,7 +1376,7 @@ let collect_board_events_with_cursor_policy
     in
     let events_of_post (p : Board.post) =
       let post_id = Board.Post_id.to_string p.id in
-      match Board_dispatch.get_comments ~post_id with
+      match Board_dispatch.read_comments ~post_id with
       | Error error -> Error (Source_unavailable { Board_signal.operation = Board_signal.Get_comments; post_id; error })
       | Ok comments ->
         let post_signal : Board_dispatch.board_signal =
@@ -1389,9 +1423,8 @@ let collect_board_events_with_cursor_policy
             meta.name (Board.Post_id.to_string p.id) detail;
           List.rev acc, last_cursor
         | Error (Source_unavailable unavailable) ->
-          (match log_and_count_unavailable ~context:"signal replay" unavailable with
-           | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
-           | Board_signal.Transient -> List.rev acc, last_cursor)
+          log_and_count_unavailable ~context:"signal replay" unavailable;
+          consume_posts (Some next_cursor) acc rest
     in
     let final_events, last_cursor = consume_posts None [] posts in
     if advance_cursor

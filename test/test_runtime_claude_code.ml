@@ -983,7 +983,7 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
   let reports = ref [] in
   let on_stream_event = function
     | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
-    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Conversation_compacted
     | Usage_reported _ | Turn_finished _ -> ()
   in
@@ -1057,7 +1057,7 @@ let test_quota_refusal_still_reports_the_turns_spend () =
       reported :=
         (turn_id, model, usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens)
         :: !reported
-    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1085,7 +1085,7 @@ let test_quota_refusal_before_any_response_reports_no_spend () =
   let reported = ref 0 in
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
-    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1103,7 +1103,7 @@ let test_result_of_another_session_reports_no_spend () =
   let reported = ref 0 in
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
-    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1254,7 +1254,7 @@ let test_api_diagnostic_preserves_native_effects () =
                     true
                   | Turn_started _ | Usage_windows_reported _ | Conversation_compacted
                   | Usage_reported _ -> false
-                  | Text_delta _
+                  | Text_delta _ | Thinking_delta _
                   | Dynamic_tool_started _
                   | Dynamic_tool_finished _
                   | Turn_finished _ -> fail "native-only turn emitted response content")
@@ -1327,7 +1327,8 @@ let test_api_diagnostic_preserves_terminal_error_detail () =
     match run_fixture path with
     | Error
         (Runtime_claude_code.Turn_failed_with_observation
-           { detail; tool_effect_attempted = false; response_emitted = false }) ->
+           { detail; api_error_status = Some 400
+           ; tool_effect_attempted = false; response_emitted = false }) ->
       check
         string
         "terminal detail retained"
@@ -1768,6 +1769,43 @@ let test_partial_text_streams_before_complete_block () =
         | _ -> fail "partial text must arrive as separate deltas without repeating the complete block")
 ;;
 
+let test_partial_thinking_preserves_complete_suffix () =
+  let frame event =
+    "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  let events = ref [] in
+  with_fixture
+    [Emit (frame {|{"type":"message_start","message":{"id":"msg-thinking","model":"claude-fixture"}}|});
+     Emit (frame {|{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}|});
+     Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Inspect "}}|});
+     Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"opaque-signature"}}|});
+     Emit (frame {|{"type":"content_block_stop","index":0}|});
+     Emit {|{"type":"assistant","session_id":"__SESSION__","uuid":"thinking-envelope","message":{"id":"msg-thinking","role":"assistant","model":"claude-fixture","content":[{"type":"thinking","thinking":"Inspect the state","signature":"opaque-signature"},{"type":"redacted_thinking","data":"opaque-data"}]}}|};
+     Emit assistant; Emit result]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+          let thinking = List.rev !events |> List.filter_map (function
+            | Runtime_claude_code.Thinking_delta {message_id; text} -> Some (message_id, text)
+            | _ -> None) in
+          check (list (pair (option string) string)) "only missing thinking suffix follows the delta"
+            [Some "msg-thinking", "Inspect "; Some "msg-thinking", "the state"] thinking)
+;;
+
+let test_partial_thinking_rejects_text_block () =
+  let frame event =
+    "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  with_fixture
+    [Emit (frame {|{"type":"message_start","message":{"id":"msg-thinking","model":"claude-fixture"}}|});
+     Emit (frame {|{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}|});
+     Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"wrong channel"}}|});
+     Emit assistant; Emit result]
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "thinking was accepted into an assistant text block")
+;;
+
 let test_four_partial_messages_preserve_all_blocks () =
   let frame event = Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
       "session_id", `String "__SESSION__"; "event", event]) in
@@ -1929,6 +1967,59 @@ let test_mcp_notification_is_acknowledged_on_the_control_channel () =
       match run_fixture path with
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
+;;
+
+let test_a_client_reconnect_handshakes_again_on_the_same_session () =
+  let session = Runtime_official_client_mcp.create_session () in
+  let send ~id ~method_name ~params =
+    Runtime_official_client_mcp.handle_message
+      ~session
+      ~server_name:"masc"
+      ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
+      ~tool_specs:(fun () -> [])
+      ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> None)
+      (`Assoc
+         ([ "jsonrpc", `String "2.0"; "method", `String method_name; "params", params ]
+          @ match id with
+            | Some id -> [ "id", `Int id ]
+            | None -> []))
+  in
+  let initialize id =
+    send
+      ~id:(Some id)
+      ~method_name:"initialize"
+      ~params:
+        (`Assoc
+           [ "protocolVersion", `String "2025-11-25"
+           ; "capabilities", `Assoc []
+           ; ( "clientInfo"
+             , `Assoc [ "name", `String "claude-code"; "version", `String "fixture" ] )
+           ])
+  in
+  let admitted label = function
+    | Ok _ -> ()
+    | Error { Runtime_official_client_mcp.detail; _ } -> failf "%s refused: %s" label detail
+  in
+  let phase () =
+    match (Runtime_official_client_mcp.snapshot_session session).phase with
+    | Runtime_official_client_mcp.Awaiting_initialize -> "awaiting_initialize"
+    | Runtime_official_client_mcp.Awaiting_initialized -> "awaiting_initialized"
+    | Runtime_official_client_mcp.Ready -> "ready"
+  in
+  admitted "first initialize" (initialize 1);
+  admitted
+    "first initialized"
+    (send ~id:None ~method_name:"notifications/initialized" ~params:(`Assoc []));
+  check string "ready after first handshake" "ready" (phase ());
+  admitted "reconnect initialize" (initialize 2);
+  check string "reconnect restarts the handshake" "awaiting_initialized" (phase ());
+  (match send ~id:(Some 3) ~method_name:"tools/list" ~params:(`Assoc []) with
+   | Error { stage; _ } -> check string "stage" "MCP tools/list" stage
+   | Ok _ -> fail "tools/list ran before the reconnect handshake finished");
+  admitted
+    "second initialized"
+    (send ~id:None ~method_name:"notifications/initialized" ~params:(`Assoc []));
+  admitted "tools/list after reconnect" (send ~id:(Some 4) ~method_name:"tools/list" ~params:(`Assoc []))
 ;;
 
 let test_shared_mcp_bridge_owns_exact_dispatch () =
@@ -2397,41 +2488,21 @@ let stub_dynamic_tool =
   }
 ;;
 
-(* The settings layers are part of the same argv contract: empty renders the
-   historical bare [--setting-sources=] so nothing loads, and a declared list
-   renders comma-joined in declaration order. *)
-let test_setting_sources_render_in_argv () =
-  let argv sources =
-    let config =
-      { (Runtime_claude_code.default_config ~cwd:"/tmp") with
-        setting_sources = sources
-      }
-    in
-    match
-      Runtime_claude_code.command ~system_prompt_file:None
-        config
-        ~dynamic_tools:[]
-        ~reasoning_effort:None
-        ~session_mode:Runtime_claude_code.Start
-        ~session_id:"11111111-1111-4111-8111-111111111111"
-    with
-    | Ok argv -> argv
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-  in
-  check bool "default keeps the bare no-layer token" true
-    (List.mem "--setting-sources=" (argv []));
-  check bool "declared layers render comma-joined in order" true
-    (List.mem
-       "--setting-sources=project,user"
-       (argv
-          [ Runtime_native_tools.Settings_project
-          ; Runtime_native_tools.Settings_user
-          ]));
-  check bool "a declared list drops the bare token" true
-    (not
-       (List.mem
-          "--setting-sources="
-          (argv [ Runtime_native_tools.Settings_local ])))
+(* The CLI loads no settings layer: the argv always carries the bare
+   [--setting-sources=] token. *)
+let test_command_loads_no_settings_layer () =
+  match
+    Runtime_claude_code.command ~system_prompt_file:None
+      (Runtime_claude_code.default_config ~cwd:"/tmp")
+      ~dynamic_tools:[]
+      ~reasoning_effort:None
+      ~session_mode:Runtime_claude_code.Start
+      ~session_id:"11111111-1111-4111-8111-111111111111"
+  with
+  | Ok argv ->
+    check bool "argv carries the bare no-layer token" true
+      (List.mem "--setting-sources=" argv)
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
 ;;
 
 (* A Resume leaves out carried context the session already holds, which
@@ -2549,9 +2620,9 @@ let () =
             `Quick
             test_native_posture_selects_tools_flag
         ; Alcotest.test_case
-            "setting sources render in argv"
+            "command loads no settings layer"
             `Quick
-            test_setting_sources_render_in_argv
+            test_command_loads_no_settings_layer
         ; test_case "system prompt snapshot is pinned on" `Quick
             test_system_prompt_snapshot_is_pinned_on
         ; test_case "large system context uses file argv" `Quick test_system_file_keeps_large_context_off_argv
@@ -2743,6 +2814,10 @@ let () =
             test_four_partial_messages_preserve_all_blocks
         ; test_case "partial text precedes complete block without duplication" `Quick
             test_partial_text_streams_before_complete_block
+        ; test_case "partial thinking retains only the complete suffix" `Quick
+            test_partial_thinking_preserves_complete_suffix
+        ; test_case "thinking cannot enter a public text block" `Quick
+            test_partial_thinking_rejects_text_block
         ; test_case
             "stream preserves native tool origin"
             `Quick
@@ -2781,6 +2856,10 @@ let () =
             test_tool_result_inline_ceiling_is_lane_specific
         ; test_case "host stop carries the newest request input" `Quick
             test_host_stop_carries_the_newest_request_input
+        ; test_case
+            "client reconnect handshakes again on the same session"
+            `Quick
+            test_a_client_reconnect_handshakes_again_on_the_same_session
         ; test_case
             "shared bridge owns exact dispatch"
             `Quick

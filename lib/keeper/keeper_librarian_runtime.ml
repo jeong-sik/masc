@@ -62,7 +62,6 @@ let served_slot_id = function
 
 type extraction_error =
   | Prompt_render_failed of string
-  | Execution_clock_unavailable
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
   | Cli_slots_exhausted of
@@ -83,7 +82,6 @@ type extraction_error =
 let rec extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
   = function
   | Prompt_render_failed _ -> Prompt_render_failure
-  | Execution_clock_unavailable -> Execution_clock_unavailable
   | Exact_setup_failed _ -> Exact_setup_failure
   | Exact_execution_failed _ ->
     Exact_execution_failure
@@ -129,8 +127,6 @@ let exact_setup_error_to_string = function
 
 let rec extraction_error_to_string = function
   | Prompt_render_failed detail -> detail
-  | Execution_clock_unavailable ->
-    "execution clock unavailable"
   | Exact_setup_failed error -> exact_setup_error_to_string error
   | Exact_execution_failed { outward_effect; detail; _ } ->
     Printf.sprintf
@@ -172,7 +168,6 @@ let selected_slot_of_extraction_error = function
   | Absorb_judgment_failed { selected_slot; _ }
   | Memory_snapshot_write_failed { selected_slot; _ } -> Some selected_slot
   | Prompt_render_failed _
-  | Execution_clock_unavailable
   | Exact_setup_failed _
   | Exact_execution_failed _
   | Cli_slots_exhausted _
@@ -432,7 +427,9 @@ let prepare_attempt ~requirement ~selected_slots messages =
       |> Result.map_error (fun error ->
         Exact_setup_failed (Exact_flow_snapshot_failed error))
     in
-    Exact_output.start_flow snapshot
+    Exact_output.start_flow
+      ~admission_class:(Standalone_lane.admission_class Librarian)
+      snapshot
     |> Result.map_error (fun error ->
       Exact_setup_failed (Exact_flow_start_failed error))
 ;;
@@ -516,7 +513,7 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
      | Auth_failed | Authorization_refused | Payment_required | Not_found -> false)
   (* An answer that came back unusable is a refused output, which §4.3 counts
      among the failures reading less answers. *)
-  | Incomplete_output | Missing_output | Ambiguous_output _
+  | Output_limit_reached | Incomplete_output | Missing_output | Ambiguous_output _
   | Unexpected_output_content | Invalid_json_output
   | Response_body_deadline_exceeded -> true
   | Completion_failed { error; dispatch } -> completion_failure_shows_size ~dispatch error
@@ -612,7 +609,7 @@ let rec extraction_shows_size = function
         | None -> false)
   | Cli_prompt_unavailable { prior_error = Some error } -> extraction_shows_size error
   | Cli_prompt_unavailable { prior_error = None } -> false
-  | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
+  | Prompt_render_failed _ | Exact_setup_failed _
   | No_transport_declared | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> false
 ;;
 
@@ -637,7 +634,7 @@ let extraction_cli_input_limit = function
           then Some observed else selected)
       None failures
   | Exact_execution_failed _
-  | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
+  | Prompt_render_failed _ | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared
   | Domain_output_invalid _ | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> None
 ;;
@@ -825,6 +822,8 @@ let with_cli_failure prior_error = function
 ;;
 
 let execute_answer
+      ~selected_slots
+      ~cli_slots
       ~requirement
       ~validate
       ?cli_runner
@@ -836,7 +835,6 @@ let execute_answer
       ()
   =
   let open Result.Syntax in
-  let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
   match selected_slots with
   | [] ->
     (* Registry publication rejects a lane with neither transport, and lane
@@ -972,7 +970,9 @@ let execute_exact_output_classified
       ~messages
       ()
   =
-  execute_answer
+  let open Result.Syntax in
+  let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
+  execute_answer ~selected_slots ~cli_slots
     ~requirement:(output_requirement_of_pass (Memory_pass continuity))
     ~validate:(validate_selection ?continuity selected_input)
     ?cli_runner ~clock ~net ~base_path ~keeper_id ~messages ()
@@ -1158,7 +1158,7 @@ let context_write_json = function
   | Write_failed detail -> `Assoc ["status", `String "failed"; "detail", `String detail]
 ;;
 
-type write_scope = Context_only | Context_and_memory
+type write_scope = Context_only | Context_and_memory | Memory_maintenance
 
 (* How one continuity publication ended. The caller that owns nothing else
    decides its run's outcome from it. *)
@@ -1203,6 +1203,17 @@ let run_best_effort
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
+        (* Admission owns the whole pass, including a JEV NoChange shortcut.
+           Retain its slots across preflight: turning the lane off after this
+           point must not revoke accepted work or make its HTTP/CLI fallback
+           re-acquire from a different publication. *)
+        let acquired = resolve_librarian_slots ~base_path ~keeper_id in
+        (match acquired with
+         | Error (Exact_setup_failed (Exact_lane_unavailable (Exact_lane_off _))) ->
+           let detail = "Librarian is off; pending input remains unconsumed" in
+           on_not_committed {detail; walk_shows_size=false};
+           Log.Keeper.info ~keeper_name:keeper_id "%s" detail
+         | Ok _ | Error _ ->
         let registry = Exact_lane_run_registry.global () in
         let run_id = Random_id.prefixed ~prefix:"librarian-exact-" ~bytes:16 in
         let started_at = Time_compat.now () in
@@ -1215,6 +1226,7 @@ let run_best_effort
         let pass =
           match write_scope, continuity with
           | Context_and_memory, continuity -> Memory_pass continuity
+          | Memory_maintenance, _ -> Memory_pass None
           | Context_only, Some prepared -> Continuity_state_pass prepared
           | Context_only, None -> Working_context_pass
         in
@@ -1312,23 +1324,33 @@ let run_best_effort
             ~destinations
             ~state
             ~questions =
+          let started_at = Time_compat.now () in
+          let started_at_ns = Mtime_clock.elapsed_ns () in
           let evaluation_id = Random_id.prefixed ~prefix:"librarian-absorb-" ~bytes:16 in
           Exact_lane_run_registry.register_running
             registry
             ~run_id:evaluation_id
             ~lane:Exact_lane_run_registry.Librarian
             ~actor:keeper_id
-            ~started_at:(Time_compat.now ())
+            ~started_at
             ~input:
               (Exact_lane_run_registry.Exact_input
                  (Keeper_librarian_absorb_gate.evaluation_request_to_yojson
                     ~direction ~destinations ~state ~questions));
-          evaluation_id
+          evaluation_id, started_at_ns
         in
-        let complete_absorb_evaluation ~evaluation_id evaluation =
+        let absorb_evaluation_elapsed_s started_at_ns =
+          Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_at_ns) /. 1_000_000_000.
+        in
+        let complete_absorb_evaluation ~evaluation_id:(evaluation_id, started_at_ns) evaluation =
           let outcome =
             match evaluation.Keeper_librarian_absorb_gate.result with
-            | Ok _ -> Exact_lane_run_registry.Succeeded
+            | Ok _ ->
+              (match Keeper_librarian_absorb_gate.validate_evaluation_answer evaluation with
+               | Ok () -> Exact_lane_run_registry.Succeeded
+               | Error detail ->
+                 Exact_lane_run_registry.Failed
+                   { code = "absorb_gate_invalid_answer"; detail })
             | Error failure ->
               Exact_lane_run_registry.Failed
                 { code = "absorb_gate_provider_failure"
@@ -1340,7 +1362,7 @@ let run_best_effort
                registry
                ~run_id:evaluation_id
                ~outcome
-               ~elapsed_s:0.0
+               ~elapsed_s:(absorb_evaluation_elapsed_s started_at_ns)
                ~selected_slot:None
                ~output:
                  (Keeper_librarian_absorb_gate.observation_to_yojson
@@ -1354,7 +1376,7 @@ let run_best_effort
                evaluation_id
                (Exact_lane_run_registry.completion_error_to_string error))
         in
-        let abort_absorb_evaluation ~evaluation_id result =
+        let abort_absorb_evaluation ~evaluation_id:(evaluation_id, started_at_ns) result =
           let outcome, output =
             match result with
             | `Cancelled -> Exact_lane_run_registry.Cancelled, `Null
@@ -1368,7 +1390,7 @@ let run_best_effort
                registry
                ~run_id:evaluation_id
                ~outcome
-               ~elapsed_s:0.0
+               ~elapsed_s:(absorb_evaluation_elapsed_s started_at_ns)
                ~selected_slot:None
                ~output
            with
@@ -1383,23 +1405,35 @@ let run_best_effort
         (try
            let result =
              let open Result.Syntax in
+             let* selected_slots, cli_slots = acquired in
              let* prompt =
                prompt_material
                |> Result.map (fun material -> material.rendered)
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
              let* (answer, exact_output), served_slot =
-               let eligible = match pass with
-                 | Memory_pass None ->
-                   prompt_input.working_context = Keeper_librarian_context.empty
-                 | Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _ -> false in
+               (* Judged by what the prompt shows. Once a Keeper has any
+                  working-context snapshot, [previous] is [Some] on every
+                  capture, and a running Keeper usually carries an execution
+                  basis too; neither reaches the prompt without a source, yet
+                  comparing the record with [empty] refused every live pass. *)
+               (* Maintenance is already a request to review excess memory.
+                  A no-change shortcut must not stand in for that review:
+                  cleanup remembers a committed input as reviewed. *)
+               let eligible = match write_scope, pass with
+                 | Context_and_memory, Memory_pass None ->
+                   Keeper_librarian_context.shows_no_working_context
+                     prompt_input.working_context
+                 | (Memory_maintenance | Context_only), _
+                 | Context_and_memory,
+                   (Memory_pass (Some _) | Working_context_pass | Continuity_state_pass _) -> false in
                let observation = Typesafeai_librarian_preflight.assess
                  ~observe:(fun observation -> observed_preflight := Some observation)
                  ~clock ~keeper_id ~eligible ~prompt () in
                observed_preflight := Some observation;
                let execute_full () =
                  full_lane_entered := true;
-                 execute_answer
+                 execute_answer ~selected_slots ~cli_slots
                    ~requirement:(output_requirement_of_pass pass)
                    ~validate:(validate_answer pass prompt_input)
                    ?cli_runner ~clock ~net ~base_path ~keeper_id
@@ -1519,10 +1553,15 @@ let run_best_effort
              (* A continuity range owns no pending input; only a Memory pass
                 without one organizes the working context. An organization the
                 answer left out or got wrong is skipped for this pass and
-                recorded on the run; the Memory decision below is kept. *)
+                recorded on the run; the Memory decision below is kept.
+                A no-change judgment reaches here only with nothing pending,
+                where the empty organization is the only valid answer; writing
+                it retires consumed contexts exactly as a generated one does. *)
              (match selection.working_contexts, continuity_answer with
               | Keeper_librarian.Working_contexts_organized pockets, Memory_only ->
-               if not !full_llm_skipped then organize_working_context pockets
+               (match write_scope with
+                | Memory_maintenance -> ()
+                | Context_only | Context_and_memory -> organize_working_context pockets)
               | Keeper_librarian.Working_contexts_organized _, Continuity _ -> ()
               | Keeper_librarian.Working_contexts_missing, (Memory_only | Continuity _) ->
                 context_write := Answer_missing;
@@ -1810,7 +1849,7 @@ let run_best_effort
                 ; detail = "Librarian raised: " ^ Printexc.to_string exn
                 })
              (failed_output !observed_absorb_gate);
-           raise exn)
+           raise exn))
       (* Missing Eio context is a failed pass like any other: the keeper's
          memory does not advance. It was previously a bare WARN with no record,
          which hid a restart-shaped outage behind the same silence as a healthy

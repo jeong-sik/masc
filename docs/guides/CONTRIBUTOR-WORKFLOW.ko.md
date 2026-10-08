@@ -136,6 +136,11 @@ AI를 활용한 기여도 환영합니다. 제출한 작성자는 diff를 이해
 무엇을 누가 또는 어떤 에이전트가 확인했고 무엇은 확인하지 못했는지 적으세요.
 생성된 결과와 셀프 리뷰만으로 런타임 동작이나 독립 승인을 증명할 수는 없습니다.
 
+Keeper 메시지와 위임 요청은 운영자의 채팅 화면에도 보입니다. 사용자에게 답할 때처럼
+자연스러운 띄어쓰기, 문장 부호와 문단 구분을 지키세요. 요청을 줄일 때는 반복을 덜거나
+문장을 다시 쓰고, 단어 사이의 공백을 없애지 마세요. 인용한 원문, 코드, 경로와 식별자는
+그대로 보존합니다.
+
 **Commit 경계.** `.githooks`가 활성화되어 있으면 코드 commit의 pre-commit이 로컬
 Dune 빌드를 실행합니다. 로컬 빌드를 하지 않는 외부 코딩 세션은 해당 commit에
 `git -c core.hooksPath=/dev/null commit -m "your message"`를 사용합니다. 이 명령에서만
@@ -194,8 +199,10 @@ PR과 일반 push의 자동 CI는 없습니다. 운영자가 요청한
 `main-minimal-build.yml`은 30분마다 main을 확인하며, 문서·changelog 외 입력에
 성공한 빌드 기록이 없을 때만 운영 실행 파일 4개를 빌드합니다. opam/Dune 캐시를
 재사용하고 실제 빌드 SHA와 생략을 구분합니다. 일반 리뷰와 Release/Tag 요구사항은 같습니다.
-`release/vX.Y.Z`에서는
-[release-candidate.yml](../../.github/workflows/release-candidate.yml)을 명시적으로 요청하여
+`release/vX.Y.Z`에서는 먼저 [릴리즈 freeze](RELEASE-FREEZE.md)에 따라 포함 범위와
+후보 SHA를 고정합니다. 이후에는 검토된 출시 차단 수리만 반영하며, main의 새 변경은
+다음 버전에서 처리합니다. 고정된 후보에 main을 병합하거나 rebase하지 않습니다.
+그다음 [release-candidate.yml](../../.github/workflows/release-candidate.yml)을 명시적으로 요청하여
 같은 head의 전체 빌드·타입 검사·동작 테스트·설치 검증을 실행합니다. 태그 발행에도 전체
 검사와 테스트가 필요합니다. 정확한 절차는 [CI와 리뷰 안내](../CI-REVIEW-WORKFLOW.md)를 따릅니다.
 

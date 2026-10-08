@@ -139,7 +139,7 @@ label = "x"
       (fun name ->
         check bool (Printf.sprintf "%S is not a file name here" name) true
           (Result.is_error (Pad.load ~base_path ~saves_name:name)))
-      [ ""; "../samguk3"; "a/b"; "samguk3.toml" ])
+      [ ""; "."; ".."; ".hidden"; "../samguk3"; "a/b"; "a\\b"; "C:game" ])
 
 let test_workspace_read_authority () =
   with_workspace (fun base_path ->

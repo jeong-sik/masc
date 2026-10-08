@@ -1,0 +1,42 @@
+{
+  "base": "487023eb3c91e9d91e3aaabb5dd9f3fa6b8f2d8a",
+  "checked_at": "2026-10-04T10:45:26.749827+00:00",
+  "before": {
+    "failed": 6,
+    "meaning": "old workspace data accepted or retained"
+  },
+  "after": {
+    "passed": 299,
+    "files": 12,
+    "resource_boundary_cases": 16
+  },
+  "typescript": "pass",
+  "changed_ts_lint": "pass",
+  "browser": {
+    "assertions": 8,
+    "writes": 0,
+    "page_errors": 0
+  },
+  "native_backend": "not_run",
+  "tui": "not_run",
+  "deployment": "not_run",
+  "sha256": {
+    "dashboard/src/components/fleet-aside-extras.test.ts": "5253fc84af9eeee2f84b3478374715db541b81c9944c5ff995b48ad5b2e626fa",
+    "dashboard/src/components/fleet-aside-extras.ts": "4bad2fd444d1b0675de082bcfd83626cff7f6f60948353b50b99e31efbea0bda",
+    "dashboard/src/components/keeper-config-panel.test.ts": "5421ed1af578f74491e2ef35e50f721d0df4ff10f1c4509da7ea3999705ca84a",
+    "dashboard/src/components/keeper-detail-runtime.test.ts": "d651bc8004465b63bba6ec882b18feb074d817f69191683b7b525c4176759504",
+    "dashboard/src/components/keeper-runtime-model-editor.test.ts": "3c63b23353374c58ec809d9f4252f631d52e792146fd9569c726f71fabd51eb7",
+    "dashboard/src/components/keeper-workspace/keeper-workspace-rail.test.ts": "2cf66f1357a241837fc6d9145a6ac7a226b35cfa79fadeb2acd0c3164bf63afa",
+    "dashboard/src/components/overview/runtime-stats.test.ts": "d93f623094d572db962d83c0183b87adaeecdd8e61ee86e73b3b38f731f042f3",
+    "dashboard/src/components/tools/config-resolution-panel.test.ts": "801b4a597b21bd12255e8d2907bbb81c2ec3855f37278aa394207510de756862",
+    "dashboard/src/lib/runtime-catalog-resource.test.ts": "3ec6a082d7a5681311cadf12770654db921724c433c43afafbc038ef304b1e82",
+    "dashboard/src/lib/runtime-catalog-resource.ts": "6c4166aed7ed5dc3d0a21322dcca9d70b4b59cd3dba66bc86cfdc7eabaa5afc7",
+    "dashboard/src/lib/runtime-resolved-resource.ts": "e62741e931c3e245568a5b233df7a68c8ba1d251ccb60d3a9a22091de61d26e7",
+    "dashboard/src/lib/runtime-workspace-resource.ts": "e7fa1d977cb4c9f2027b8d8de8a77e211215de3258f190abc78d75993392f05f",
+    "dashboard/src/lib/runtime-workspace-resource.test.ts": "b979d9f2a727759a688e7186d3d2e35a477ca1a624c0226a158a8b7f6c81a6a8",
+    "dashboard/src/lib/runtime-workspace.test-fixture.ts": "3ac5b9c13030094f56d4463072a01f3b1cf15e4a41f33907f3a154b58bad2a36",
+    "dashboard/evidence/2026-10-04-runtime-workspace-cache/fixture.ts": "45ac83373410cadf7c8999b216098419892306bf522c412bc69c21d9a1d44d76",
+    "dashboard/evidence/2026-10-04-runtime-workspace-cache/fixture.html": "ac5412a0729528b636a1309fe99fb0f51d01490ff818dfdd29038833ba5cccfc",
+    "dashboard/evidence/2026-10-04-runtime-workspace-cache/browser-fixture.mjs": "1124a66ea5c5c477b02dda0f72ac819010ff56a63fd20160859aa7361e78aa1b"
+  }
+}

@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-activity-recovery-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts src/components/runtime-toml-editor.test.ts src/components/settings-surface.test.ts src/components/lane-inventory-panel.test.ts src/components/model-setup-resume-control.test.ts src/api/dashboard.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-activity-recovery-20261005/dashboard
+
+
+ Test Files  6 passed (6)
+      Tests  427 passed (427)
+   Start at  01:16:37
+   Duration  7.35s (tests 42%, import 24%, transform 15%, environment 11%, setup 8%)
+
+    Isolate  6 workers spawned · ~213ms startup each (spawn + environment, per file)
+             at least ~1.07s faster with isolate: false — reuses workers across files instead of one per file
+

@@ -1,3 +1,4 @@
+import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -258,6 +259,7 @@ function makeRuntimeResolved(
 ): RuntimeResolvedResponse {
   return {
     config_path: '/cfg/runtime.toml',
+    default_route: null,
     default_runtime: null,
     runtimes: [],
     lanes: [],
@@ -499,3 +501,5 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
       .toContain('runtime resolved unavailable')
   })
 })
+
+beforeEach(() => { confirmRuntimeTestWorkspace() })

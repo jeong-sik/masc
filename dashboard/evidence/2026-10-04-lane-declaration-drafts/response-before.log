@@ -1,0 +1,142 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-web-lane-declaration-drafts-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-declaration-editor.test.ts -t 'discards an old comparison' --reporter verbose
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-lane-declaration-drafts-20261004/dashboard
+
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > explains unavailable editing and verifies authority before admitting a fresh configuration
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps verification failures actionable without admitting an unknown workspace
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > restores new-file and existing-file drafts after actual Status route unmounts
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > finishes an original read while Status has unmounted the editor
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > retains the receipt and edits typed during a save after a routed unmount
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > migrates a late create and rotates the new-file key without a mounted callback
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > isolates workspaces even when their configured directory is identical and rejects an old A response after A-B-A
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps an old-workspace write outcome uncertain in its own draft and never saves without current authority
+ × src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > discards an old comparison after a pending read crosses A-B-A and requires a fresh read 51ms
+   → expected <section …(2)>…(3)</section> to be null
+ × src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > discards an old comparison after a pending save crosses A-B-A and requires a fresh read 28ms
+   → expected <section …(2)>…(3)</section> to be null
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > creates a user TOML file without Attach and separates the file receipt from application
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > resumes an unsaved new-file draft after closing and starts fresh after creating it
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps newer create-time edits when reopening the now-existing file
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > preserves the reopened file draft when an earlier create response arrives late
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps both the create-time draft and the separately reopened draft recoverable
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > recovers a lost create response through the file list while retaining the new-file draft
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > reads invalid original text from the issue entry and preserves a rejected correction
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > offers issue editing only for exact declaration files in the configured directory
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps the draft on conflict and only adopts a new raw revision after an explicit choice
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > preserves edits made while a save is pending and keeps them dirty afterward
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps a file draft across closing and another new-file session
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps a draft when a save response fails and reads the current file without replacing it
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > does not claim durable storage when a file receipt reports unconfirmed durability
+ ↓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps saving unavailable after a failed original read and permits a successful retry
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > discards an old comparison after a pending read crosses A-B-A and requires a fresh read
+ FAIL  src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > discards an old comparison after a pending save crosses A-B-A and requires a fresh read
+AssertionError: expected <section …(2)>…(3)</section> to be null
+
+- Expected:
+null
+
++ Received:
+<section
+  aria-label="Current file comparison"
+  class="space-y-2"
+>
+  <p>
+    Current file source revision:
+    <code>
+      old-comparison-revision
+    </code>
+  </p>
+  <pre
+    aria-label="Current file source"
+    class="overflow-auto whitespace-pre-wrap break-all"
+  >
+    # old comparison
+# preserve this comment
+id = "custom"
+run_id = "run"
+manifest_path = "../custom/lane.toml"
+[binding]
+sources = []
+
+  </pre>
+  <div
+    class="flex flex-wrap gap-2"
+  >
+    <button
+      class="cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover"
+      data-action-button="true"
+      data-action-button-aria-label-length="0"
+      data-action-button-block="false"
+      data-action-button-busy="false"
+      data-action-button-class-length="0"
+      data-action-button-disabled="false"
+      data-action-button-has-aria-label="false"
+      data-action-button-has-children="true"
+      data-action-button-has-click-handler="true"
+      data-action-button-has-custom-class="false"
+      data-action-button-has-id="false"
+      data-action-button-has-test-id="false"
+      data-action-button-has-title="false"
+      data-action-button-id-length="0"
+      data-action-button-pressed-state="unset"
+      data-action-button-size="md"
+      data-action-button-test-id-length="0"
+      data-action-button-title-length="0"
+      data-action-button-type="button"
+      data-action-button-variant="primary"
+      type="button"
+    >
+      Use current file revision
+    </button>
+    <button
+      class="cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 py-1.5 px-2.5 text-[14px] font-medium rounded-md border border-solid border-brand bg-brand text-white hover:bg-brand-hover"
+      data-action-button="true"
+      data-action-button-aria-label-length="0"
+      data-action-button-block="false"
+      data-action-button-busy="false"
+      data-action-button-class-length="0"
+      data-action-button-disabled="false"
+      data-action-button-has-aria-label="false"
+      data-action-button-has-children="true"
+      data-action-button-has-click-handler="true"
+      data-action-button-has-custom-class="false"
+      data-action-button-has-id="false"
+      data-action-button-has-test-id="false"
+      data-action-button-has-title="false"
+      data-action-button-id-length="0"
+      data-action-button-pressed-state="unset"
+      data-action-button-size="md"
+      data-action-button-test-id-length="0"
+      data-action-button-title-length="0"
+      data-action-button-type="button"
+      data-action-button-variant="primary"
+      type="button"
+    >
+      Replace draft with current file
+    </button>
+  </div>
+</section>
+
+ ❯ src/components/lane-declaration-editor.test.ts:255:64
+    253|     await act(async () => { finish(); await Promise.resolve() })
+    254|     await screen.findByText(/Workspace authority changed while the req…
+    255|     expect(screen.queryByLabelText('Current file comparison')).toBeNul…
+       |                                                                ^
+    256|     expect(screen.queryByRole('button', { name: 'Use current file revi…
+    257|     expect(screen.queryByRole('button', { name: 'Replace draft with cu…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 22 skipped (24)
+   Start at  15:12:11
+   Duration  1.86s (import 38%, transform 35%, environment 12%, setup 11%, tests 5%)
+
+ ELIFECYCLE  Test failed. See above for more details.

@@ -1,0 +1,39 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-runtime-web-draft-session-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/runtime-toml-editor.test.ts -t 'prevents raw edits during a typed patch'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-runtime-web-draft-session-20261004/dashboard
+
+ ❯ src/components/runtime-toml-editor.test.ts (78 tests | 1 failed | 77 skipped) 36ms
+   ❯ RuntimeTomlEditor (78)
+     × prevents raw edits during a typed patch from reverting the accepted routing 35ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/runtime-toml-editor.test.ts > RuntimeTomlEditor > prevents raw edits during a typed patch from reverting the accepted routing
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/components/runtime-toml-editor.test.ts:735:59
+    733|     fireEvent.change(container.querySelector('[aria-label="default run…
+    734|     await waitFor(() => expect(apiMocks.patchRuntimeRouting).toHaveBee…
+    735|     expect(container.querySelector('textarea')?.disabled).toBe(true)
+       |                                                           ^
+    736|     // A queued input handler from before the disabled render must als…
+    737|     fireEvent.input(container.querySelector('textarea')!, { target: { …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 77 skipped (78)
+   Start at  19:23:23
+   Duration  1.14s (transform 43%, import 29%, environment 13%, setup 11%, tests 3%)
+
+ ELIFECYCLE  Test failed. See above for more details.

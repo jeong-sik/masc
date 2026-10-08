@@ -168,6 +168,72 @@ let test_mcp_block_arriving_during_message_start () =
   | _ -> failf "a block raced MessageStart (%d events)" (List.length events)
 ;;
 
+(* A call the bridge answers before MessageStart commits its tool log while
+   its block is still held. The stream rejects a receipt naming a block it
+   has not seen, so the receipt must follow the released block. *)
+let test_receipt_of_a_held_block_follows_the_block () =
+  let module Receipts = Keeper_official_client_tool_receipts in
+  Fun.protect ~finally:Keeper_execution_join.For_testing.clear @@ fun () ->
+  Eio_main.run @@ fun _env ->
+  let timeline = ref [] in
+  let receipts =
+    Receipts.create ~delivery:Receipts.Held_until_released
+      ~notify:(fun ~block_index ~tool_call_id ~execution_id ->
+        timeline :=
+          Printf.sprintf "receipt %d %s %s" block_index tool_call_id
+            (Ids.Execution_id.to_string execution_id)
+          :: !timeline)
+  in
+  let hooks = Receipts.hooks receipts Agent_core.Hooks.empty in
+  let invoke hook event =
+    match hook with
+    | Some hook -> ignore (hook event)
+    | None -> fail "receipt hook missing"
+  in
+  let commit call_id =
+    let invocation =
+      Agent_core.Tool_contract.Invocation.create ~tool_use_id:call_id ~turn:1
+        ~completion:Agent_core.Tool_contract.Continue_after_success
+        ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
+                  ; execution_mode = Agent_core.Tool_contract.Serial }
+    in
+    invoke hooks.pre_tool_use
+      (Agent_core.Hooks.PreToolUse
+         { invocation; tool_name = "masc_probe"; input = `Assoc []
+         ; accumulated_cost_usd = 0. });
+    Keeper_execution_join.record ~invocation ~execution_id:("exec-" ^ call_id);
+    invoke hooks.post_tool_use
+      (Agent_core.Hooks.PostToolUse
+         { invocation; tool_name = "masc_probe"; input = `Assoc []
+         ; output = Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None }
+         ; result_bytes = 2; duration_ms = 1. })
+  in
+  let events =
+    Adapter.project_stream_inputs ~receipts
+      ~during:(fun event ->
+        timeline :=
+          (match event with
+           | Agent_core.Types.MessageStart _ ->
+             (* The bridge's fiber commits while the viewer yields here. *)
+             commit "mcp-held";
+             "message start"
+           | ContentBlockStart { index; _ } -> Printf.sprintf "block start %d" index
+           | ContentBlockStop { index } -> Printf.sprintf "block stop %d" index
+           | _ -> "other")
+          :: !timeline;
+        [])
+      [ mcp_started "mcp-held"
+      ; Adapter.Serve_event turn_started
+      ; Adapter.Mcp_tool_finished { call_id = "mcp-held" }
+      ]
+  in
+  check int "held block and message reached the stream" 4 (List.length events);
+  check (list string) "receipt follows its released block"
+    [ "message start"; "block start 1"; "other"; "receipt 1 mcp-held exec-mcp-held"
+    ; "block stop 1" ]
+    (List.rev !timeline)
+;;
+
 (* ── Usage report ────────────────────────────────────────────────────── *)
 
 let test_usage_report_is_the_turn_total () =
@@ -366,9 +432,8 @@ let user_message text : Agent_core.Types.message =
 ;;
 
 (* MSP has no system-prompt channel: a start carries the system prompt, the
-   history and the goal in one prompt, in that order, and never measures
-   more than the window charged for it. *)
-let test_start_prompt_frames_and_fits_its_charge () =
+   history and the goal in one prompt, in that order. *)
+let test_start_prompt_frames_system_history_and_goal () =
   let system_prompt = "MUSE_SYSTEM_PROMPT" in
   let goal = "MUSE_GOAL" in
   let history = [ user_message "history-one"; user_message "history-two" ] in
@@ -384,15 +449,7 @@ let test_start_prompt_frames_and_fits_its_charge () =
      | [ Some system; Some first; Some second; Some goal_at ] ->
        check bool "system, history, goal in order" true
          (system < first && first < second && second < goal_at)
-     | _ -> fail "a section is missing from the start prompt");
-    let charged =
-      Adapter.reserved_prompt_bytes ~system_prompt ~goal
-      + List.fold_left
-          (fun total message -> total + Adapter.measure_model_input_message_bytes message)
-          0
-          history
-    in
-    check bool "the prompt fits what the window charged" true (String.length prompt <= charged)
+     | _ -> fail "a section is missing from the start prompt")
 ;;
 
 (* ── One turn through a scripted [muse serve] ────────────────────────── *)
@@ -465,7 +522,7 @@ assert init["method"] == "initialize", init
 if SCENARIO == "hang_init":
     drain()
 requested_capabilities = init["params"]["capabilities"]["requestedCapabilities"]
-expected_capabilities = [] if SCENARIO == "text_only" or (FIXTURE.get("usage_read_only") and requested_capabilities == []) else ["sessionMcp"]
+expected_capabilities = [] if SCENARIO in ("text_only", "quiet_final", "missing_final") or (FIXTURE.get("usage_read_only") and requested_capabilities == []) else ["sessionMcp"]
 assert init["params"]["capabilities"]["requestedCapabilities"] == expected_capabilities, init
 send({"jsonrpc": "2.0", "id": init["id"], "result": {
     "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
@@ -508,7 +565,7 @@ else:
 with open(os.path.join(HERE, "sessions.log"), "a") as handle:
     handle.write(mode + "\n")
 servers = opened["params"].get("config", {}).get("mcpServers", {})
-if SCENARIO == "text_only":
+if SCENARIO in ("text_only", "quiet_final", "missing_final"):
     assert servers == {}, servers
     server = None
 else:
@@ -699,6 +756,12 @@ if SCENARIO in ["turn_failed", "turn_failed_with_usage", "read_only_tool_failure
                              "cachedTokens": 0, "reasoningTokens": 0}
     notify("turn/completed", terminal)
     drain()
+if SCENARIO in ["quiet_final", "missing_final"]:
+    if SCENARIO == "quiet_final":
+        item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
+                                "revision": 1, "status": "completed", "text": ""})
+    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
+    drain()
 if SCENARIO == "text_only":
     item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
                             "revision": 1, "status": "completed", "text": "TEXT_ONLY_OK"})
@@ -792,7 +855,7 @@ type observed_run =
 
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
-let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary
+let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary ?on_tool_execution
     ?(admission_timeout_s = 20.) ?(idle_timeout_s = 20.)
     ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
     ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
@@ -815,8 +878,6 @@ let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) 
   let outcome =
     Keeper_muse_runtime.run
       ?composed_context
-      ~prompt_capacity:
-        (Runtime_muse_prompt_capacity.start_prompt_bytes ~max_context:(Some 200_000))
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
       ~turn_timeout_s:(Runtime_inference.resolve_turn_timeout_s ~runtime_id)
       ~quota_scope:(Runtime_quota_window.scope_of_muse_home selected_home)
@@ -846,6 +907,7 @@ let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) 
           native_actions := (official_turn, call_id ^ ":" ^ tool_name) :: !native_actions
         | Runtime_native_tools.Provider_step _ -> fail "Muse Code reports call ids")
       ~on_usage_report:(fun report -> reports := report :: !reports; on_usage report)
+      ?on_tool_execution
       ~event_bus:None
       ~raw_trace:None
       ~on_event:
@@ -969,6 +1031,75 @@ let masc_probe_tool ?descriptor observed_input =
     (fun input ->
        observed_input := input;
        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+;;
+
+(* The committed execution id of a MASC call reaches the stream observer
+   once, named by the block that opened the call and after that block. *)
+let test_scripted_host_reports_the_tool_receipt () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_execution_join.For_testing.clear ();
+      try Fs_compat.remove_tree base_path with _ -> ())
+    (fun () ->
+      let runtime_path = prepare_scripted_host ~base_path in
+      let tool = masc_probe_tool (ref `Null) in
+      let snapshot = Runtime.For_testing.snapshot () in
+      Fun.protect
+        ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+        (fun () ->
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Eio_context.set_env env;
+              Eio_context.with_test_env
+                ~net:(Eio.Stdenv.net env)
+                ~clock:(Eio.Stdenv.clock env)
+                ~mono_clock:(Eio.Stdenv.mono_clock env)
+                ~sw
+                (fun () ->
+                  (match Runtime.init_default ~config_path:runtime_path with
+                   | Ok () -> ()
+                   | Error detail -> fail detail);
+                  persist_fixture_meta ~base_path;
+                  (* Stands in for the Keeper hook that commits the tool log. *)
+                  let hooks =
+                    { Agent_core.Hooks.empty with
+                      post_tool_use =
+                        Some (function
+                          | Agent_core.Hooks.PostToolUse { invocation; _ } ->
+                            Keeper_execution_join.record ~invocation
+                              ~execution_id:"exec-muse-probe";
+                            Agent_core.Hooks.Continue
+                          | _ -> Agent_core.Hooks.Continue)
+                    }
+                  in
+                  let timeline = ref [] in
+                  let run =
+                    run_turn_with ~hooks ~base_path ~tool
+                      ~on_stream_event:(function
+                        | Agent_core.Types.ContentBlockStart
+                            { index; content_type = "tool_use"; _ } ->
+                          timeline := Printf.sprintf "block %d" index :: !timeline
+                        | _ -> ())
+                      ~on_tool_execution:(fun ~block_index ~tool_call_id:_ ~execution_id ->
+                        timeline :=
+                          Printf.sprintf "receipt %d %s" block_index
+                            (Ids.Execution_id.to_string execution_id)
+                          :: !timeline)
+                      ()
+                  in
+                  (match run.outcome.result with
+                   | Error error -> fail (Agent_core.Error.to_string error)
+                   | Ok _ -> ());
+                  match List.rev !timeline with
+                  | [ block; receipt ] ->
+                    let index = Scanf.sscanf block "block %d" Fun.id in
+                    check string "one receipt after its own block"
+                      (Printf.sprintf "receipt %d exec-muse-probe" index)
+                      receipt
+                  | other ->
+                    failf "expected one MASC block then its receipt, got [%s]"
+                      (String.concat "; " other))))))
 ;;
 
 let test_turn_through_scripted_host () =
@@ -1193,6 +1324,26 @@ default = "reloaded.reloaded"
   check int "routed second durable ordinal" 2 second_count
 ;;
 
+(* What the operator surface holds for [scope]: source, window kind, used
+   percent and reset (epoch seconds), sorted. *)
+let recorded_usage_windows scope =
+  let module Usage = Runtime_provider_usage_window in
+  match Usage.state ~scope with
+  | Usage.Not_reported_since_start | Usage.Reported_no_windows _ -> []
+  | Usage.Reported (first, rest) ->
+    List.map (fun (recorded : Usage.recorded) ->
+        let kind = match recorded.window.kind with
+          | Usage.Five_hour -> "5h" | Usage.Seven_day -> "7d"
+          | Usage.Duration_minutes minutes -> Printf.sprintf "%dmin" minutes
+          | Usage.Provider_label label -> label in
+        let percent = match recorded.window.utilization with
+          | Usage.Percent percent -> percent
+          | Usage.Fraction _ | Usage.Usd _ -> -1 in
+        Printf.sprintf "%s %s %d%% resets=%d" (Usage.source_to_string recorded.source) kind
+          percent (Option.value recorded.window.resets_at ~default:0))
+      (first :: rest)
+    |> List.sort String.compare
+
 let test_subscription_exhaustion_is_account_scoped () =
   with_scripted_host (fun ~base_path ->
     Runtime_quota_window.reset_for_testing ();
@@ -1206,6 +1357,10 @@ let test_subscription_exhaustion_is_account_scoped () =
      | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
     check (option (float 0.)) "successful turn retains latest provider reset" (Some 900.)
       (Runtime_quota_window.active_until ~scope ~now:100.);
+    check (list string) "the turn's usage/changed reaches the operator surface"
+      [ "muse.subscription_usage 5min 100% resets=500"; "muse.subscription_usage 7d 101% resets=900" ]
+      (recorded_usage_windows scope);
+    check (list string) "another account records nothing" [] (recorded_usage_windows other);
     check bool "another selected account stays available" false
       (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);
     let same_account = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "account-home") in
@@ -1264,6 +1419,9 @@ let test_muse_usage_read_rests_only_the_selected_account () =
        | Error detail -> fail detail);
       check (option (float 0.)) "weekly reset recorded from usage/read"
         (Some 900.) (Runtime_quota_window.active_until ~scope ~now:100.);
+      check (list string) "usage/read reaches the operator surface"
+        [ "muse.subscription_usage 5min 20% resets=500"; "muse.subscription_usage 7d 101% resets=900" ]
+        (recorded_usage_windows scope);
       check bool "different account remains dispatchable" false
         (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);
       check bool "no model session was started" false
@@ -1941,7 +2099,20 @@ let test_call_usage_survives_missing_terminal_aggregate () =
               check int "two model calls" 14 usage.output_tokens;
               check int "cache reads" 80 usage.cache_read_input_tokens;
               check int "cache writes" 20 usage.cache_creation_input_tokens
-            | None -> fail "per-call usage lost when terminal aggregate was absent")
+            | None -> fail "per-call usage lost when terminal aggregate was absent");
+           (* The context gauge reads one request, not the turn's sum. *)
+           (match result.runtime_observation with
+            | Some { request_context = Some context; _ } ->
+              check int "the newest request's counted-once prompt" 150 context.input_tokens;
+              check (option (pair int int)) "that request's cache writes and reads"
+                (Some (10, 40))
+                (Option.map
+                   (fun (cache : Runtime_observation.request_cache) ->
+                      cache.cache_creation_input_tokens, cache.cache_read_input_tokens)
+                   context.cache);
+              check (option int) "that request's own output" (Some 7) context.output_tokens
+            | Some { request_context = None; _ } -> fail "request context not reported"
+            | None -> fail "runtime observation missing")
          | Error error -> fail (Agent_core.Error.to_string error));
         match run.reports with
         | [report] ->
@@ -2368,10 +2539,29 @@ let test_attached_mcp_approvals_are_exact () =
       (Adapter.native_posture_note Runtime_native_tools.Native_read))
 ;;
 
+let test_quiet_final_preserves_muse_output_presence () =
+  List.iter (fun (name, expected) ->
+    with_scripted_host ~fixture:(scenario name) (fun ~base_path ->
+      let run = run_turn_with ~tools:[] ~base_path ~tool:(masc_probe_tool (ref `Null)) () in
+      match run.outcome.result with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok run_result ->
+        let policy = Keeper_tooling.Response.Allow_quiet_final in
+        check bool "adapter preserves explicit message presence for acceptance" expected
+          (Keeper_tooling.Response.accepts_response ~policy run_result.response);
+        check bool "adapter preserves explicit message presence for finalization" expected
+          (Result.is_ok (Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+            ~response_policy:policy ~runtime_id ~initial_messages:[] ~run_result
+            ~text:"" ~tool_names:[] ()))))
+    ["quiet_final", true; "missing_final", false]
+;;
+
 let () =
   run
     "keeper_muse_runtime"
-    [ ( "stream"
+    [ ( "quiet completion", [test_case "explicit message survives adapter and acceptance" `Quick
+        test_quiet_final_preserves_muse_output_presence] )
+    ; ( "stream"
       , [ test_case "identity-less native tool leaves no open block" `Quick test_native_tool_without_identity_does_not_open_a_block
         ; test_case "projection order" `Quick test_stream_order
         ; test_case "unstreamed reply is forwarded at the end" `Quick
@@ -2379,6 +2569,8 @@ let () =
         ; test_case "a second message starts a paragraph" `Quick
             test_a_second_message_starts_a_paragraph
         ; test_case "MCP blocks wait for MessageStart" `Quick test_mcp_blocks_wait_for_message_start
+        ; test_case "receipt of a held block follows the block" `Quick
+            test_receipt_of_a_held_block_follows_the_block
         ; test_case "MCP block arriving during MessageStart" `Quick
             test_mcp_block_arriving_during_message_start
         ] )
@@ -2401,12 +2593,14 @@ let () =
             test_documented_refusal_exits_are_not_dropped_connections
         ] )
     ; ( "prompt"
-      , [ test_case "start prompt frames and fits its charge" `Quick
-            test_start_prompt_frames_and_fits_its_charge
+      , [ test_case "start prompt frames system, history and goal" `Quick
+            test_start_prompt_frames_system_history_and_goal
         ] )
     ; ( "scripted host"
       , [ test_case "start and resume through muse serve with a MASC tool" `Quick
             test_turn_through_scripted_host
+        ; test_case "a MASC call reports its receipt after its block" `Quick
+            test_scripted_host_reports_the_tool_receipt
         ; test_case "declared Muse runtime routes and resumes Keeper turns" `Quick
             test_declared_muse_runtime_routes_keeper_turns
         ; test_case "subscription exhaustion uses selected account scope" `Quick

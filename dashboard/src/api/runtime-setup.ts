@@ -1,8 +1,9 @@
 import { postControlPlane } from './core'
 import { isRecord } from '../lib/type-guards'
+import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
 export interface Integration { id: string; display_name: string; protocol: string | null; setup_support: string; endpoint?: string; credential_kind?: string; enabled?: boolean }
 export interface Source { integration_id: string; endpoint?: string; api_key?: string; account_ref?: string }
-export interface Model { id: string; label: string; context: number | null; tools: boolean | null; source?: string
+export interface Model { id: string; label: string; context: number | null; tools: boolean | null; supports_image_input?: boolean; source?: string
   supported_reasoning_efforts?: string[]; default_reasoning_effort?: string }
 export type Selection = { kind: 'existing'; id: string; label: string } | { kind: 'new'; source: Source; model: Model; label: string }
 const positive = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0
@@ -29,9 +30,13 @@ function parseModels(response: unknown): Model[] {
   return response.models.map(row => {
     if (!isRecord(row) || typeof row.id !== 'string' || !row.id || seen.has(row.id)) throw new Error('Invalid model identity')
     seen.add(row.id)
+    if (row.supports_image_input != null && typeof row.supports_image_input !== 'boolean') {
+      throw new Error('Invalid model image capability metadata')
+    }
     return { id: row.id, label: typeof row.label === 'string' ? row.label : row.id,
       source: typeof response.source === 'string' ? response.source : undefined,
       ...reasoningEfforts(row),
+      ...(typeof row.supports_image_input === 'boolean' ? { supports_image_input: row.supports_image_input } : {}),
       context: positive(row.context) ? row.context : null, tools: typeof row.tools === 'boolean' ? row.tools : null }
   })
 }
@@ -78,15 +83,19 @@ function readSaveOutcome(response: Record<string, unknown>, runtimeIds: unknown[
   return { unverified, notRechecked: kept }
 }
 export async function saveSetupSelections(revision: string, choices: Selection[], options: { signal?: AbortSignal } = {}): Promise<SaveOutcome> {
-  const connections: { source: Source; models: { id: string; context: number; streaming: boolean }[] }[] = []
+  const connections: { source: Source; models: { id: string; context: number; streaming: boolean; supports_image_input?: boolean }[] }[] = []
   const selection = choices.map(choice => {
     if (choice.kind === 'existing') return { runtime_id: choice.id }
     if (!positive(choice.model.context)) throw new Error('Model context is not reported')
     const index = connections.length
-    connections.push({ source: choice.source, models: [{ id: choice.model.id, context: choice.model.context, streaming: true }] })
+    connections.push({ source: choice.source, models: [{ id: choice.model.id, context: choice.model.context, streaming: true,
+      ...(choice.model.supports_image_input === undefined ? {} : { supports_image_input: choice.model.supports_image_input }) }] })
     return { connection: index, model: 0 }
   })
   const response = await postControlPlane<unknown>('/api/v1/setup/connections', { revision, connections, selection }, undefined, options)
+  // A commit record proves runtime.toml changed even when the rest of the
+  // answer is unreadable, so every screen hears it before the checks below.
+  if (isRecord(response) && isRecord(response.commit)) announceRuntimeTomlWritten()
   if (!isRecord(response) || response.configured !== true
     || !Array.isArray(response.runtime_ids) || response.runtime_ids.length === 0 || response.runtime_ids.length > choices.length
     || new Set(response.runtime_ids).size !== response.runtime_ids.length

@@ -66,6 +66,25 @@ TLA model checks run explicitly through `model-check.yml` when state-machine
 specifications change; they are not a prerequisite for shipping a binary.
 Specialized host and packaging proofs remain manual.
 
+### Essential behavior check before a release
+
+`release-behavior.yml` runs the suites listed in
+[`config/release-behavior.json`](../config/release-behavior.json) (`release-essential-v1`)
+through explicit `workflow_dispatch`. It is a small manual check before the Release/Tag
+candidate, not a replacement for it. `release-candidate.yml` still runs the full
+regression suite, and a green essential check is not full regression evidence.
+
+The same selection runs locally:
+
+```bash
+opam exec -- bash scripts/run-release-behavior.sh
+```
+
+Use the candidate checkout and its pinned dependencies. GNU `timeout` (or `gtimeout` on
+macOS), Python, ripgrep and the OCaml test dependencies must be available. A local result
+records its platform and candidate. Reproduce a behavior failure locally and fix it before
+submitting another candidate.
+
 Prefer short, focused checks: the constitution's "about two minutes"
 describes their intended scale, not a timeout or a pass/fail threshold.
 Only an actual successful completion is build evidence.

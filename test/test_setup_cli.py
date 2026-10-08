@@ -415,8 +415,8 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
             # other runtime names, so a pass here cannot be an embedded alias
             # answering in its place.
             runtime.write_text(_swap_fixture(
-                runtime.read_text(), 'deepseek-v4-flash', 'setup-fixture-owned-model',
-                what='model deepseek-v4-flash'))
+                runtime.read_text(), 'deepseek-v4.1-flash', 'setup-fixture-owned-model',
+                what='model deepseek-v4.1-flash'))
             if missing_key:
                 runtime = config / 'runtime.toml'
                 # The shared fixture already declares one credentials table for

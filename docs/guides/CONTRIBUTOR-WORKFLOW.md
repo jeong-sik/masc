@@ -141,6 +141,12 @@ addressing reviews, and accurately describing the evidence. Identify what was
 checked, by whom or by which agent, and what remains unverified. Generated output
 and self-review alone do not establish runtime behavior or independent approval.
 
+Keeper messages and delegation requests are visible to the operator in chat.
+Write them with the same readable word spacing, punctuation and paragraph breaks
+as a reply to the user, including natural Korean spacing. To shorten a request,
+remove repetition or rewrite sentences; do not concatenate words. Preserve quoted
+source text, code, paths and identifiers exactly.
+
 **Commit boundary.** If `.githooks` is active, code commits run a local Dune
 build in pre-commit. An external coding session following the no-local-build
 rule uses `git -c core.hooksPath=/dev/null commit -m "your message"` for that
@@ -209,6 +215,9 @@ executables only when non-documentation inputs lack a successful build receipt.
 It reuses opam/Dune caches and records actual build SHA versus skipped scope;
 it does not change ordinary review or Release/Tag requirements.
 At `release/vX.Y.Z`, explicitly
+freeze the included scope under [Release freeze](RELEASE-FREEZE.md); admit only
+reviewed release-blocking repairs afterwards. Main updates belong to the next
+version and do not require merging main into this candidate. Then explicitly
 request [release-candidate.yml](../../.github/workflows/release-candidate.yml)
 for full builds, type checks, behavior tests and installation verification on
 that head. Tag publication also requires full checks and tests. See the

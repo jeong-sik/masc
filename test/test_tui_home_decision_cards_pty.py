@@ -91,7 +91,10 @@ def fixtures_with_held(rows):
 
 
 def run(executable, description, fixtures, interact, requests, *, prepare=home.seed_goals,
-        refresh=60.0):
+        refresh=0.5):
+    # The approval aggregate completes only after the operator confirm-queue
+    # read is re-fetched on a tick (the startup burst races workspace
+    # identity), so these scenarios need the short cadence by default.
     _keyboard_harness.run_terminal_scenario(executable, description=description, interact=interact,
                             http_fixtures=fixtures, http_requests=requests,
                             prepare_workspace=prepare, refresh=refresh)
@@ -144,17 +147,17 @@ def failed_source_keeps_known_cards(executable):
     fixtures = fixtures_with_held([held("call-known", "known-held-card")])
     fixtures[OPERATOR_PATH] = (503, {"error": "confirm source offline"})
     gate = copy.deepcopy(_keyboard_approvals.blocked_gate_detail_http_fixtures()[GATE_PATH])
-    gate[1]["approval_queue"][0].update(id="gate-known", phase="human_required",
-                                        tool_name="known-gate-card")
+    gate[1]["approval_queue"][0] = home.human_required_row(
+        gate[1]["approval_queue"][0], id="gate-known", tool_name="known-gate-card")
     fixtures[GATE_PATH] = gate
     requests = []
 
     def interact(process, fd, _slave, output, _base):
         _keyboard_harness.wait_for_output(process, fd, output, b"known-gate-card", start=0, timeout=10)
         _keyboard_harness.wait_for_output(process, fd, output, b"known-held-card", start=0, timeout=10)
-        _keyboard_harness.wait_for_output(process, fd, output, b"confirm queue not fully read", start=0, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, "not fully read · confirm queue".encode(), start=0, timeout=10)
         visible = frame(process, fd, output, "partial-source-success")
-        for label in (b"known-held-card", b"known-gate-card", b"confirm queue not fully read"):
+        for label in (b"known-held-card", b"known-gate-card", "not fully read · confirm queue".encode()):
             assert label in visible, visible
         assert b"No decision is waiting" not in visible, visible
         select_home(process, fd, output, b"known-gate-card", destinations=4)
@@ -219,8 +222,9 @@ def each_failed_source_keeps_other_cards(executable):
     for failed_path, failed_label in cases:
         fixtures = fixtures_with_held([held("call-partial", "retained-held-card")])
         gate = copy.deepcopy(_keyboard_approvals.blocked_gate_detail_http_fixtures()[GATE_PATH])
-        gate[1]["approval_queue"][0].update(id="gate-partial", phase="human_required",
-                                            tool_name="retained-gate-card")
+        gate[1]["approval_queue"][0] = home.human_required_row(
+            gate[1]["approval_queue"][0], id="gate-partial",
+            tool_name="retained-gate-card")
         fixtures[GATE_PATH] = gate
         fixtures[_keyboard_harness.KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
         fixtures[failed_path] = (503, {"error": "isolated source failure"})
@@ -229,7 +233,7 @@ def each_failed_source_keeps_other_cards(executable):
         def interact(process, fd, _slave, output, _base):
             known = b"retained-gate-card" if failed_path == HELD_PATH else b"retained-held-card"
             _keyboard_harness.wait_for_output(process, fd, output, known, start=0, timeout=10)
-            note = b"Approvals and questions: " + failed_label + b" not fully read"
+            note = "Approvals and questions: not fully read · ".encode() + failed_label
             # Match the sole-source label through the end of its drawn row.
             # The last changed row ends the frame without another row cursor.
             settled = re.compile(
@@ -237,6 +241,14 @@ def each_failed_source_keeps_other_cards(executable):
                 + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m"
                 + rb"(?:\x1b\[[0-9;]*H|\x1b\[\?25l\x1b\[\?7h)"
             )
+            # The first identity read withdraws the pre-identity operator
+            # ticket. Read again under the applied workspace authority before
+            # asserting that only the deliberately failed source is unread.
+            _keyboard_harness.wait_for_output(process, fd, output, b"Health: ok", start=0, timeout=10)
+            _keyboard_harness.write_all(fd, output, b"r")
+            # The failed-confirm case already has this exact status; refresh
+            # need not repaint an unchanged row. The forced frames below
+            # assert the current sole-source label at both widths.
             _keyboard_harness.wait_for_output(process, fd, output, settled, start=0, timeout=10)
             _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=81,
                               needle=note, controls=(_keyboard_harness.FULL_REDRAW,),
@@ -247,9 +259,11 @@ def each_failed_source_keeps_other_cards(executable):
                                           final_cursor=b"\x1b[?25l")
                 visible = _keyboard_harness.screen_text(drawn)
                 assert known in visible and note in visible, visible
+                status_row = next(row for row in visible.splitlines() if note in row)
+                source_names = status_row.split("not fully read · ".encode(), 1)[1]
                 for _path, label in cases:
                     if label != failed_label:
-                        assert label + b" not fully read" not in visible, visible
+                        assert label not in source_names, visible
                 assert b"No decision is waiting" not in visible, visible
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")
@@ -355,15 +369,20 @@ def planning_link_failure_has_own_diagnostic(executable):
         # truncates titles, so use its selected ID before opening full detail.
         _keyboard_harness.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         _keyboard_harness.send_and_wait(process, fd, output, b"go Work", b"go Work")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\r", goal["id"].encode())
-        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Open tasks  (links unavailable)")
+        # The Work tab loads asynchronously; wait for its goal row before
+        # selecting, then open the goal detail from there.
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Planning link s")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Title: Planning link source fixture")
+        # The link detail line itself is the proof of the unavailable
+        # registry reading; the detail frame is already on screen.
         unavailable = _keyboard_harness.screen_text(bytes(output))
+        assert b"Open tasks: (links unavailable)" in unavailable, unavailable
         assert goal["title"].encode() in unavailable, unavailable
         assert b"(none)" not in unavailable, unavailable
         assert b"task-777" not in unavailable, unavailable
         path = Path(base) / ".masc" / "tasks" / "goal_task_links.json"
         path.write_text(json.dumps({"version": 1, "links": []}))
-        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Open tasks  (none)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Open tasks: (none)")
         repaired = _keyboard_harness.screen_text(bytes(output))
         assert b"links unavailable" not in repaired, repaired
         home.assert_no_decision_posts(requests)
@@ -391,14 +410,17 @@ def planning_backlog_failure_recovers(executable):
         _keyboard_harness.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         _keyboard_harness.send_and_wait(process, fd, output, b"go Work", b"go Work")
         _keyboard_harness.send_and_wait(process, fd, output, b"\r", goal["title"].encode())
-        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Open tasks  (nothing here is a reading)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Open tasks: (nothing here is a reading)")
         failed = _keyboard_harness.screen_text(bytes(output))
         assert b"links not read" not in failed, failed
-        assert b"Open tasks  (none)" not in failed, failed
+        # The product draws the empty-reading state only in the colon form
+        # (the same form the positive needle above waits for), so the
+        # negative must read that form or it can never fail.
+        assert b"Open tasks: (none)" not in failed, failed
         seed_operator_task(base)
         # An auxiliary archive error must not impersonate a primary failure.
         (Path(base) / ".masc" / "tasks-archive.json").write_text("{unreadable archive")
-        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Open tasks  (none)")
+        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Open tasks: (none)")
         repaired = _keyboard_harness.screen_text(bytes(output))
         assert b"nothing here is a reading" not in repaired, repaired
         assert b"links not read" not in repaired, repaired

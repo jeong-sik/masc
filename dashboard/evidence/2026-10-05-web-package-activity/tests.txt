@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-package-activity-20261005/dashboard
+
+
+ Test Files  6 passed (6)
+      Tests  111 passed (111)
+   Start at  06:12:17
+   Duration  7.11s (tests 38%, import 32%, environment 11%, transform 10%, setup 8%)
+
+     Import  152 modules were evaluated 649 times · 2.06s total, 32% of tracked time
+             ~1.58s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation

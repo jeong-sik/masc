@@ -4,18 +4,8 @@ type error =
   | Client_error of Runtime_muse_serve.error
 
 let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_scope ~config
-    ~prompt_capacity ~reasoning_effort ~tool ~prompt =
+    ~reasoning_effort ~tool ~prompt =
   let ( let* ) = Result.bind in
-  let invalid_prompt detail = Error (Client_error (Runtime_muse_serve.Invalid_config detail)) in
-  let* () = match prompt_capacity with
-    | Error error ->
-      invalid_prompt ("Muse Code has no prompt ceiling: "
-        ^ Runtime_muse_prompt_capacity.error_to_string error)
-    | Ok capacity when String.length prompt > capacity ->
-      invalid_prompt (Printf.sprintf
-        "Muse Code probe input is %d bytes, exceeding the prompt ceiling %d"
-        (String.length prompt) capacity)
-    | Ok _ -> Ok () in
   match Runtime_muse_home.prepare ~account_home with
   | Error error -> Error (Home_error error)
   | Ok home ->
@@ -63,9 +53,7 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_sco
       Runtime_muse_serve.run_turn
         ~on_stream_event:(function
           | Runtime_muse_serve.Subscription_usage_observed usage ->
-            Option.iter (fun reset_ms -> Runtime_quota_window.note_exhausted
-              ~scope:quota_scope ~resets_at:(float_of_int reset_ms /. 1000.))
-              (Runtime_muse_msp.exhausted_subscription_reset_ms usage)
+            Runtime_muse_usage.observe ~scope:quota_scope Runtime_muse_usage.Usage_changed usage
           | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
           | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
           | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _

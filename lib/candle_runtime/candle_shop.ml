@@ -11,6 +11,17 @@ type catalog_entry =
   ; price : Candle_config.price
   }
 
+let catalog_entry_to_yojson (entry : catalog_entry) =
+  `Assoc
+    ([ "id", `String (Keeper_portrait_item.id entry.item)
+     ; "slot", `String (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot entry.item))
+     ]
+     @
+     match entry.price with
+     | Candle_config.Unpriced -> [ "price_status", `String "unpriced" ]
+     | Candle_config.Priced amount ->
+       [ "price_status", `String "priced"; "price_milli", `String (string_of_int amount) ])
+
 type receipt =
   { account : account
   ; item : Keeper_portrait_item.t
@@ -52,8 +63,8 @@ let account_of balance keeper =
   }
 ;;
 
-let read_account view ~now ~base_path ~keeper =
-  let* (view : Candle_status.view) = view ~now ~base_path
+let account ~now ~base_path ~keeper =
+  let* (view : Candle_status.view) = Candle_status.current_view ~now ~base_path
     |> Result.map_error (function
       | Candle_status.Off -> Off
       | Candle_status.Disabled reason -> Disabled reason
@@ -62,9 +73,6 @@ let read_account view ~now ~base_path ~keeper =
       | Candle_status.Ledger_unavailable detail -> Ledger_unavailable detail) in
   Ok (account_of view.balance (Keeper_id.Keeper_name.to_string keeper))
 ;;
-
-let account = read_account Candle_status.current_view
-let observed_account = read_account Candle_status.observed_view
 
 let catalog ~base_path =
   let* policy = policy ~base_path in

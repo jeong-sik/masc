@@ -1,0 +1,4 @@
+empty_answer=rejected:judge.resolved_answer: expected nonblank string
+blank_answer=rejected:judge.resolved_answer: expected nonblank string
+insufficient=accepted
+supported_answer=accepted

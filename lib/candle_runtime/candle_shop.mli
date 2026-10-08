@@ -12,6 +12,10 @@ type catalog_entry =
   ; price : Candle_config.price
   }
 
+val catalog_entry_to_yojson : catalog_entry -> Yojson.Safe.t
+(** One catalog row as the Keeper tool and the dashboard both send it:
+    [id], [slot], [price_status], and [price_milli] when priced. *)
+
 type receipt =
   { account : account
   ; item : Keeper_portrait_item.t
@@ -35,14 +39,9 @@ val account
   -> base_path:string
   -> keeper:Keeper_id.Keeper_name.t
   -> (account, error) result
-
-val observed_account
-  :  now:(unit -> float)
-  -> base_path:string
-  -> keeper:Keeper_id.Keeper_name.t
-  -> (account, error) result
-(** Read-only account using recorded half-life boundaries. Does not publish
-    desired policy changes; read-authorized HTTP callers must use this path. *)
+(** The keeper's account through {!Candle_status.current_view}, which publishes
+    a changed half-life before answering. Read-only surfaces read
+    {!Candle_status.observed_view} instead. *)
 
 val catalog : base_path:string -> (catalog_entry list, error) result
 

@@ -778,6 +778,30 @@ let test_reject_reason_describes_thinking_only_response () =
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
        (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
 
+let test_quiet_final_requires_explicit_completed_response () =
+  let policy = Keeper_tooling.Response.Allow_quiet_final in
+  List.iter (fun (label, result, expected) ->
+    Alcotest.(check bool) (label ^ " provider acceptance") expected
+      (Keeper_tooling.Response.accepts_response ~policy result.Runtime_agent.response);
+    let normalized = Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+      ~response_policy:policy ~runtime_id:"fixture.runtime" ~initial_messages:[]
+      ~run_result:result ~text:"" ~tool_names:[] () in
+    Alcotest.(check bool) (label ^ " finalization") expected (Result.is_ok normalized))
+    [ "explicit empty final", run_result ~content:[Text ""] (), true
+    ; "absent output", run_result (), false
+    ; "hidden reasoning", run_result ~content:[Thinking {signature=None; content="private"}] (), false
+    ; "truncated", run_result ~content:[Text ""] ~stop_reason:MaxTokens (), false
+    ; "refusal", run_result ~content:[Text ""] ~stop_reason:Refusal (), false
+    ];
+  let explicit = run_result ~content:[Text ""] () in
+  Alcotest.(check bool) "direct/default policy rejects an explicit empty final" false
+    (Keeper_tooling.Response.accepts_response ~policy:Require_progress explicit.response);
+  let interrupted = { explicit with Runtime_agent.stop_reason = InputRequired {turns_used=1; request=input_required_request ()} } in
+  Alcotest.(check bool) "input-required is not a quiet completed turn" true
+    (Result.is_error (Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+      ~response_policy:policy ~runtime_id:"fixture.runtime" ~initial_messages:[]
+      ~run_result:interrupted ~text:"" ~tool_names:[] ()))
+
 let test_finalization_blank_response_is_typed_accept_rejection () =
   let result =
     Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
@@ -1539,7 +1563,10 @@ let test_runtime_exhaustion_label_caps_free_text_detail () =
 
 let test_keeper_tool_slot_callbacks_are_always_wired () =
   let config = Masc.Workspace.default_config (Filename.get_temp_dir_name ()) in
-  let _, yield_on_tool, on_yield, on_resume, _ =
+  (* The lease callbacks are plain functions: the type admits no turn
+     without them, so the remaining check is that calling them is safe on a
+     keeper the registry does not hold. *)
+  let _, on_yield, on_resume, _ =
     Masc.Keeper_agent_run_turn_helpers.turn_progress_callbacks
       ~preview:None
       ~observation_token:None
@@ -1548,9 +1575,8 @@ let test_keeper_tool_slot_callbacks_are_always_wired () =
       ~downstream:None
       ~turn_id:1
   in
-  Alcotest.(check bool) "tool execution always yields the provider lease" true yield_on_tool;
-  Alcotest.(check bool) "yield callback is wired" true (Option.is_some on_yield);
-  Alcotest.(check bool) "resume callback is wired" true (Option.is_some on_resume)
+  on_yield ();
+  on_resume ()
 
 let test_official_failure_observation_reaches_receipt () =
   let open Masc in
@@ -1632,6 +1658,8 @@ let () =
             "max_tokens without content keeps its rotation kind"
             `Quick
             test_max_tokens_without_content_keeps_rotation_kind;
+          Alcotest.test_case "quiet final needs explicit completed response" `Quick
+            test_quiet_final_requires_explicit_completed_response;
           Alcotest.test_case
             "blank finalization response is typed no-progress"
             `Quick

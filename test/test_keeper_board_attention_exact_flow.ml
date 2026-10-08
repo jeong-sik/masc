@@ -1333,7 +1333,7 @@ let test_flow_bookkeeping_failures_are_not_provider_exhaustion () =
         ~messages:[ Agent_core.Types.user_msg "classify bookkeeping failure" ]
         requirement
       |> Result.get_ok
-      |> Exact_output.start_flow
+      |> Exact_output.start_flow ~admission_class:Llm_provider.Admission_class.Standard
       |> Result.get_ok
     in
     let measurement = ref None in

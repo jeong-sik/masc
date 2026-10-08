@@ -34,7 +34,7 @@ def run(executable: str, captures: Path | None) -> None:
     )
     for state, expected in cases:
         fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
-        status, payload = _keyboard_keepers.standalone_lanes_response()
+        _status, payload = _keyboard_keepers.standalone_lanes_response()
         snapshot = cast(dict[str, Any], payload)
         board = snapshot["lanes"][0]
         board["jev"] = state
@@ -45,7 +45,10 @@ def run(executable: str, captures: Path | None) -> None:
             board["configured"] = False
             board["configuration_state"] = "unconfigured"
             board["status"] = "unavailable"
-        fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = (status, snapshot)
+            board["admission_error"] = "Board lane is not configured"
+        fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response(
+            exact_snapshot=snapshot
+        )
 
         def interact(
             process: subprocess.Popen[bytes],
@@ -56,8 +59,12 @@ def run(executable: str, captures: Path | None) -> None:
         ) -> None:
             _keyboard_harness.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
             _keyboard_harness.wait_for_output(
-                process, fd, output, expected.encode(), start=0, timeout=10
+                process, fd, output, b"All lanes", start=0, timeout=10
             )
+            _keyboard_harness.wait_for_output(
+                process, fd, output, b"Board Attention", start=0, timeout=10
+            )
+            _keyboard_harness.send_and_wait(process, fd, output, b"d", expected.encode())
             _keyboard_harness.drain_until_quiet(process, fd, output)
             screen = _keyboard_harness.screen_text(bytes(output))
             if expected.encode() not in screen:

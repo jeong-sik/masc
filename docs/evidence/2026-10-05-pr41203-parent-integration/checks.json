@@ -1,0 +1,84 @@
+{
+  "original_head": "a48463a674d43ac4658488eb44f234baa9399756",
+  "parent": "bfe316005dabbf71a45316ec1b64a70aa8db9931",
+  "tested_tree": "dd5390ffe2b01269f7e44a3126d439e80fe9b000",
+  "own_web_source_unchanged": true,
+  "results": [
+    {
+      "name": "install",
+      "exit": 0,
+      "command": [
+        "pnpm",
+        "install",
+        "--frozen-lockfile"
+      ]
+    },
+    {
+      "name": "tests",
+      "exit": 0,
+      "command": [
+        "pnpm",
+        "test",
+        "src/lib/machine-lane-activity.test.ts",
+        "src/components/machine-lane-activity-panel.test.ts",
+        "src/components/lane-inventory-panel.test.ts",
+        "src/components/settings-surface.test.ts",
+        "src/components/runtime-toml-editor.test.ts"
+      ]
+    },
+    {
+      "name": "typecheck",
+      "exit": 0,
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--noEmit",
+        "--pretty",
+        "false"
+      ]
+    },
+    {
+      "name": "lint",
+      "exit": 0,
+      "command": [
+        "pnpm",
+        "exec",
+        "eslint",
+        "src/lib/machine-lane-activity.ts",
+        "src/lib/machine-lane-activity.test.ts",
+        "src/lib/machine-lane-activity-session.ts",
+        "src/lib/machine-lane-observation.ts",
+        "src/components/machine-lane-activity-panel.ts",
+        "src/components/machine-lane-activity-panel.test.ts",
+        "src/components/lane-inventory-panel.ts",
+        "src/components/lane-inventory-panel.test.ts"
+      ]
+    }
+  ],
+  "tests": 263,
+  "suites": 5,
+  "source_sha256": {
+    "dashboard/src/components/lane-inventory-panel.test.ts": "0148123c9a9c9f4271511e0faeb47323826c38feab0f636e71f8188b7d465c7d",
+    "dashboard/src/components/lane-inventory-panel.ts": "cb6ed92e9abc95c969d12b175c4f3153938c1a16d74560ff0c3e01b20337b29a",
+    "dashboard/src/components/machine-lane-activity-panel.test.ts": "58eeed36c4da61639761c9fa81564a1dd1668ca9247f82af31aa9e40051c199b",
+    "dashboard/src/components/machine-lane-activity-panel.ts": "c33db831b7e90803ca373e875d459be3a7e36d7a8cea00c4dca06a634458f4dd",
+    "dashboard/src/lib/machine-lane-activity-session.ts": "e84acacb091512c2b4671474f188137f8f691e4030d7da702269887d93eb22b1",
+    "dashboard/src/lib/machine-lane-activity.test.ts": "e2c2666fc6e386edea8e2f91763d3c20e0c24ba17ff93228bfc845e50b81d5bd",
+    "dashboard/src/lib/machine-lane-activity.ts": "320b564b28778fa13fccb61d38c38c48293718d78c31fae636ae6610eb00a829",
+    "dashboard/src/lib/machine-lane-observation.ts": "ce518d7d6c2e2995a4671ceca8e87b8ca91a5d5a7e93596606bb7e7abe5b754b",
+    "dashboard/src/api/dashboard-runtime.ts": "124a74f713238fe9ec8e0507f3f865cccbf7a25e2336558521a1dc83bb6956c4",
+    "dashboard/src/lib/runtime-toml-session.ts": "9cad5d8366d09db9c93395b7ca889d1cbb6e8d79ee12dbeded52e693f9b38264",
+    "dashboard/src/lib/settings-runtime-session.ts": "d85252b68f3a61a2e56cce02c39299022c4671acea8725f9d8978f2af19fa7d6",
+    "dashboard/src/lib/runtime-toml-source-generation.ts": "f69a21e4183521e5c17db3b102dcd2c9ff62dcfa47db1584875e9e079d2c2b23",
+    "dashboard/src/lib/runtime-config-refresh.ts": "35b29d1e2de390cb6cc55b6c0a3f2fe5f93e219ba882a2afee69bf5ae4d72121",
+    "dashboard/src/lib/runtime-toml-config.ts": "f598cf1497a9c87617aaea1e1778bc9bb1fb206769f4422dfd7fa8323a773ad9",
+    "dashboard/src/components/settings-surface.ts": "62460bd6ea36c8e824b53dc3d56e29acffebc0205135c924a55ff553ab95095e"
+  },
+  "raw_logs_sha256": {
+    "install.log": "0cd11e6587d676a84aedeb981986afc02d33be842b455309efd01e836ff9624a",
+    "tests.log": "e0627be7fd3be690c4468dadb0689ff7c65d7278948756cd34870a780373400f",
+    "typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

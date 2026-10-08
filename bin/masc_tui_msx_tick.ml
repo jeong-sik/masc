@@ -1,6 +1,33 @@
 type reference = { revision : string; width : int; height : int }
 type pixels = { reference : reference; rgb : string }
 type scope = { host : string; port : int; headers : (string * string) list }
+type refusal = Off | Activity_unobserved
+type activity = Enabled | Refused of refusal
+type response = Advanced of Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option
+  | Not_started of refusal
+type poll_policy = Advancing | Observing of refusal | Outcome_unknown
+let policy_after_tick = function
+  | Ok (Advanced _) -> Advancing
+  | Ok (Not_started refusal) -> Observing refusal
+  | Error _ -> Outcome_unknown
+let policy_after_activity policy result = match policy,result with
+  | Observing _, Ok Enabled -> Advancing
+  | Observing _, Ok (Refused refusal) -> Observing refusal
+  | Observing _, Error _ | Advancing, _ | Outcome_unknown, _ -> policy
+let refusal_notice = function
+  | Off -> "MSX is off; watching the retained screen until activity is enabled."
+  | Activity_unobserved -> "MSX activity is unavailable; watching the retained screen until configuration is observed."
+let decode_activity = function
+  | `Assoc fields ->
+      (match List.sort (fun (a,_) (b,_) -> String.compare a b) fields with
+       | ["activity",activity;"schema",`String "masc.msx-activity/v1"] ->
+           (match activity with
+            | `String "on" -> Ok Enabled
+            | `String "off" -> Ok (Refused Off)
+            | `String "unobserved" -> Ok (Refused Activity_unobserved)
+            | _ -> Error "MSX activity: invalid activity")
+       | _ -> Error "MSX activity: invalid observation")
+  | _ -> Error "MSX activity: invalid observation"
 
 let same_scope a b =
   String.equal a.host b.host && Int.equal a.port b.port && a.headers = b.headers
@@ -65,7 +92,7 @@ let decode_mark fields =
       Ok { Masc_tui_machine_live.count = count; incarnation }
   | _ -> Error "MSX tick: invalid change mark"
 
-let decode previous json =
+let decode_frame previous json =
   let ( let* ) = Result.bind in
   match json with
   | `Assoc fields ->
@@ -105,6 +132,16 @@ let decode previous json =
        | _ -> Error "MSX tick: invalid frame response")
   | _ -> Error "MSX tick: expected an object"
 
+let decode previous (status,json) =
+  match status,json with
+  | 409, `Assoc fields when List.length fields = 2 && List.assoc_opt "ok" fields = Some (`Bool false) ->
+      (match List.assoc_opt "code" fields with
+       | Some (`String "activity_disabled") -> Ok (Not_started Off,previous)
+       | Some (`String "activity_unobserved") -> Ok (Not_started Activity_unobserved,previous)
+       | _ -> Error "MSX tick: unknown refusal")
+  | 200, _ -> Result.map (fun (frame,pixels,mark) -> Advanced (frame,mark),pixels) (decode_frame previous json)
+  | _ -> Error "MSX tick: unexpected response status"
+
 let fetch t ~host ~port ~headers ~request =
   let scope = { host; port; headers } and token = ref () in
   let previous = Mutex.protect t.mutex (fun () ->
@@ -119,5 +156,5 @@ let fetch t ~host ~port ~headers ~request =
   let result = Result.bind (request ~body) (decode previous) in
   Mutex.protect t.mutex (fun () ->
     if t.request_token == token then
-      t.pixels <- (match result with Ok (_, pixels, _) -> pixels | Error _ -> None));
-  Result.map (fun (frame, _, mark) -> frame, mark) result
+      t.pixels <- (match result with Ok (_, pixels) -> pixels | Error _ -> None));
+  Result.map fst result

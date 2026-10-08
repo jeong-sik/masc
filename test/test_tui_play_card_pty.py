@@ -352,8 +352,8 @@ def refused_invite(binary: str) -> None:
     fixtures[INVITES] = (
         409,
         {
-            "error": "not_ready",
-            "message": "an invite needs require_token",
+            "error": "an invite needs require_token",
+            "code": "not_ready",
             "missing": ["no_public_base_url"],
         },
     )
@@ -400,7 +400,7 @@ def unreadable_link(binary: str) -> None:
                 "name": "minsu", "expires_at": EXPIRES,
                 "link": "masc.example.com/play#" + TOKEN,
             }
-        return 409, {"error": "not_ready", "message": "auth is off"}
+        return 409, {"error": "auth is off", "code": "not_ready"}
 
     fixtures[INVITES] = h.RequestHttpResponse(issue)
 

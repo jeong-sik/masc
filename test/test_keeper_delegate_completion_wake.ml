@@ -208,6 +208,233 @@ let the_turn_can_read_the_answer () =
     | _ -> fail "the asker's queue holds no answer")
 ;;
 
+(* A reply longer than the preview ceiling keeps only its head in the row, and
+   the exact tail -- export objects, code fences -- lives past the cut. A
+   delivered answer measured on 2026-10-07 lost an artifact marker to this
+   cut while the row said nothing, so the reader had no way to know the text
+   it held was partial. The cut is never silent: the row appends the status
+   read keyed on the operation id it already carries, so one call recovers
+   the original. *)
+let a_cut_reply_names_the_read_path () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    let long_op = operation_id ^ "-long" in
+    (* 480 mirrors delegate_reply_preview_max_len: the reply crosses it by a
+       tail the row cannot hold. *)
+    let long_reply = String.make (480 + 64) 'x' in
+    let deliver ?(op = operation_id) reply =
+      match
+        Wake.deliver
+          ~base_path:config.Workspace.base_path
+          ~asked_by:asker
+          ~operation_id:op
+          ~delegate
+          ~terminal:(Event_queue.Delegate_replied reply)
+      with
+      | Ok () -> ()
+      | Error detail -> fail ("deliver failed: " ^ detail)
+    in
+    deliver "the answer";
+    deliver ~op:long_op long_reply;
+    let meta =
+      match Keeper_meta_store.read_meta config asker with
+      | Ok (Some meta) -> meta
+      | Ok None -> fail "the asker has no meta"
+      | Error err -> fail ("meta load failed: " ^ err)
+    in
+    let rows =
+      queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker
+      |> List.map (fun (stimulus, _) ->
+             match WO.pending_board_event_of_stimulus ~meta stimulus with
+             | Error _ ->
+               fail "the answer must project without a Board read"
+             | Ok None -> fail "the answer projects to nothing the turn can read"
+             | Ok (Some event) -> event)
+    in
+    let short_row, long_row =
+      match
+        List.sort
+          (fun left right ->
+             compare (String.length left.WO.preview) (String.length right.WO.preview))
+          rows
+      with
+      | [ short_row; long_row ] -> (short_row, long_row)
+      | _ -> fail "two delegations must project two rows"
+    in
+    check string "a reply within the ceiling stays the whole text" "the answer"
+      short_row.WO.preview;
+    let first_line =
+      match String.index_opt long_row.WO.preview '\n' with
+      | None -> long_row.WO.preview
+      | Some i -> String.sub long_row.WO.preview 0 i
+    in
+    check
+      string
+      "the row holds the cut head and the ellipsis"
+      (String.make 480 'x' ^ "...")
+      first_line;
+    let contains needle hay =
+      let needle_len = String.length needle and hay_len = String.length hay in
+      let rec go i =
+        i + needle_len <= hay_len
+        && (String.equal (String.sub hay i needle_len) needle || go (i + 1))
+      in
+      go 0
+    in
+    let note =
+      String.sub long_row.WO.preview (String.length first_line + 1)
+        (String.length long_row.WO.preview - String.length first_line - 1)
+    in
+    check
+      bool
+      "the appended note names the exact read path and the ids to read with"
+      true
+      (contains "masc_keeper_delegate_status" note
+       && contains long_op note
+       && contains delegate note))
+;;
+
+(* The re-negotiated task-2192 contract: the cut row keeps its head and its
+   status note, and the full reply also rides in the event itself --
+   [Delegate_replied] carries the original string, the projection keeps it
+   typed, and the prompt's note fields restate it in full exactly when the
+   preview cut. The tail that was lost on 2026-10-07 (an artifact marker
+   past the 480B cut) is lossless from now on, without raising the ceiling
+   and without a store read the turn never holds. *)
+let the_full_reply_rides_lossless_through_the_projection () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    let tail = "끝\"}],\"isError\":false}" in
+    let long_reply =
+      "{\"content\":[{\"type\":\"text\",\"text\":\""
+      ^ String.make 610 'x'
+      ^ tail
+    in
+    let deliver ?(op = operation_id) terminal =
+      match
+        Wake.deliver
+          ~base_path:config.Workspace.base_path
+          ~asked_by:asker
+          ~operation_id:op
+          ~delegate
+          ~terminal
+      with
+      | Ok () -> ()
+      | Error detail -> fail ("deliver failed: " ^ detail)
+    in
+    deliver ~op:(operation_id ^ "-long") (Event_queue.Delegate_replied long_reply);
+    deliver ~op:(operation_id ^ "-short") (Event_queue.Delegate_replied "the answer");
+    deliver ~op:(operation_id ^ "-silent") Event_queue.Delegate_no_reply;
+    deliver ~op:(operation_id ^ "-failed") (Event_queue.Delegate_failed "provider timed out");
+    let meta =
+      match Keeper_meta_store.read_meta config asker with
+      | Ok (Some meta) -> meta
+      | Ok None -> fail "the asker has no meta"
+      | Error err -> fail ("meta load failed: " ^ err)
+    in
+    let fields_of op =
+      let hit =
+        List.find_opt
+          (fun ((_, completion) : _ * Event_queue.delegate_completion) ->
+            String.equal completion.dc_operation_id op)
+          (queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker)
+      in
+      match hit with
+      | None -> fail ("no queued answer for " ^ op)
+      | Some (stimulus, _) ->
+        (match WO.pending_board_event_of_stimulus ~meta stimulus with
+         | Ok (Some event) ->
+           Masc.Keeper_unified_prompt.For_testing.board_event_fields event
+         | _ -> fail ("the answer for " ^ op ^ " must project to a row"))
+    in
+    check int "the preview ceiling is unchanged" 480
+      WO.delegate_reply_preview_max_len;
+    check bool "the exported reply exceeds 648 bytes" true
+      (String.length long_reply >= 648);
+    let long_fields = fields_of (operation_id ^ "-long") in
+    (match List.assoc_opt "reply_full" long_fields with
+     | Some reply_full ->
+       check string "a cut reply is restated in full, byte for byte" long_reply
+         reply_full;
+       check string "the UTF-8 tail after the preview survives" tail
+         (String.sub reply_full
+            (String.length reply_full - String.length tail)
+            (String.length tail))
+     | None -> fail "a cut reply must carry its full text in the note fields");
+    (match List.assoc_opt "preview" long_fields with
+     | Some preview ->
+       check
+         bool
+         "the row preview stays the bounded head of the same text"
+         true
+         (String.length preview >= 483
+          && String.equal (String.sub preview 0 480) (String.sub long_reply 0 480))
+     | None -> fail "the long row must still render its cut preview");
+    let short_fields = fields_of (operation_id ^ "-short") in
+    check
+      bool
+      "an uncropped reply is not rendered twice"
+      true
+      (Option.is_none (List.assoc_opt "reply_full" short_fields));
+    let silent_fields = fields_of (operation_id ^ "-silent") in
+    check
+      bool
+      "no_reply carries no reply to restate"
+      true
+      (Option.is_none (List.assoc_opt "reply_full" silent_fields));
+    let failed_fields = fields_of (operation_id ^ "-failed") in
+    check
+      bool
+      "a failure detail is short by construction and rides in the row whole"
+      true
+      (Option.is_none (List.assoc_opt "reply_full" failed_fields));
+    (match List.assoc_opt "preview" failed_fields with
+     | Some preview -> check string "the failure detail survives whole" "provider timed out" preview
+     | None -> fail "the failed row must render its detail"))
+;;
+
+(* Regression (PR #41766 review): [short_preview] measures after
+   [String.trim], so the cut note must key on the trimmed bytes too. A reply
+   padded past the ceiling with whitespace is short after trimming -- adding
+   the status read note to it would mark a fully delivered answer as partial
+   and send the reader to fetch text it already holds. *)
+let a_padded_short_reply_is_not_cut () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    (* 544 raw bytes so the untrimmed length crosses the ceiling; "OK" after
+       trim stays well inside it. *)
+    let padded = "OK" ^ String.make (480 - 2 + 64) ' ' in
+    match
+      Wake.deliver
+        ~base_path:config.Workspace.base_path
+        ~asked_by:asker
+        ~operation_id
+        ~delegate
+        ~terminal:(Event_queue.Delegate_replied padded)
+    with
+    | Error detail -> fail ("deliver failed: " ^ detail)
+    | Ok () ->
+      let meta =
+        match Keeper_meta_store.read_meta config asker with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "the asker has no meta"
+        | Error err -> fail ("meta load failed: " ^ err)
+      in
+      match
+        queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker
+        |> List.map (fun (stimulus, _) ->
+               match WO.pending_board_event_of_stimulus ~meta stimulus with
+               | Error _ -> fail "the answer must project without a Board read"
+               | Ok None -> fail "the answer projects to nothing the turn can read"
+               | Ok (Some event) -> event)
+      with
+      | [ row ] ->
+        check string "the preview equals the trimmed answer" "OK" row.WO.preview;
+        check bool "no status read note on an uncut answer" true
+          (not (String.contains row.WO.preview '\n'))
+      | _ -> fail "one delegation must project one row")
+;;
+
 (* The queue is durable, so an answer that cannot be read back is lost on the
    next restart — silently, because the reader has no other copy. *)
 let the_answer_survives_a_round_trip () =
@@ -313,6 +540,18 @@ let () =
         ] )
     ; ( "readability"
       , [ test_case "the turn can read the answer" `Quick the_turn_can_read_the_answer
+        ; test_case
+            "a cut reply names the read path"
+            `Quick
+            a_cut_reply_names_the_read_path
+        ; test_case
+            "a padded short reply is not cut"
+            `Quick
+            a_padded_short_reply_is_not_cut
+        ; test_case
+            "the full reply rides lossless through the projection"
+            `Quick
+            the_full_reply_rides_lossless_through_the_projection
         ; test_case
             "the answer survives a round trip"
             `Quick

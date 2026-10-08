@@ -115,17 +115,14 @@ let format_fleet_messages
    no argument is cut mid-string. A keeper that needs the arguments of a call
    that succeeded is asking what it did, which is what the board, the task and
    the goal sections answer. *)
-(* The rejected-call digest is rendered ahead of the rows and outside the row
-   budget, so nothing below can trim it. A refused call replays its argument
-   object, and an argument object has no size of its own: five refusals
-   carrying a 4 KB body put 20 KB into the one part of the briefing the budget
-   cannot reach. That is #29676 again -- a briefing past the runtime's whole
-   request cap, and a turn that cannot be assembled at all.
+(* The rejected-call digest is rendered ahead of the rows. A refused call
+   replays its argument object, and an argument object has no size of its
+   own: five refusals carrying a 4 KB body would put 20 KB into the digest.
 
    The digest exists to name the call so it is not repeated, which the tool
    name and the head of the arguments do. With at most eight digests
    (Keeper_own_recent_actions.digest_failures), bounding each one is what
-   makes the section's worst case a number: about 2 KB. *)
+   makes the digest's worst case a number: about 2 KB. *)
 let rejected_digest_input_bytes = 240
 
 let rejected_digest_input input =
@@ -221,7 +218,8 @@ let format_goal_summaries (summaries : goal_summary list) : string =
             ^ render_fragment
                 Prompt_names.keeper_world_active_goals_verifying_annotation
                 []
-          | Some (Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped) | None
+          | Some (Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
+                 | Goal_phase.Paused _ | Goal_phase.Blocked _) | None
             -> base
           in
           String.concat "\n" (base :: details))
@@ -499,7 +497,7 @@ let board_event_kind_label = function
     "completion_authority_rejected"
   | Keeper_world_observation.Task_outcome _ -> "task_outcome"
   | Keeper_world_observation.Task_cancelled _ -> "task_cancelled"
-  | Keeper_world_observation.Delegate_completed -> "keeper_delegate_completed"
+  | Keeper_world_observation.Delegate_completed _ -> "keeper_delegate_completed"
   | Keeper_world_observation.Composition_completed ->
     "keeper_composition_completed"
   | Keeper_world_observation.Ask_answered_row _ -> "ask_answered"
@@ -704,8 +702,30 @@ let board_event_note_fields = function
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Completion_authority_rejected _
   | Keeper_world_observation.Task_outcome _
-  | Keeper_world_observation.Task_cancelled _
+  | Keeper_world_observation.Task_cancelled _ ->
+    (* No side fact: the row is its own complete account. *)
+    []
+  (* [reply_full] restates the original reply exactly when the row's
+     preview cut at [delegate_reply_preview_max_len]: the tail is where
+     exact export objects and code fences live, and this note is the
+     row's only lossless copy. The cut test compares the trimmed bytes
+     the preview measured, so a padded short reply stays note-free and
+     an uncropped reply is never rendered twice. [Delegate_no_reply] and
+     [Delegate_failed] keep no note: their content is short by
+     construction and the row already carries it whole. *)
   | Keeper_world_observation.Delegate_completed
+      (Keeper_event_queue.Delegate_replied reply) ->
+    if
+      String.length (String.trim reply)
+      > Keeper_world_observation.delegate_reply_preview_max_len
+    then [ "reply_full", reply ]
+    else []
+  | Keeper_world_observation.Delegate_completed
+      (Keeper_event_queue.Delegate_no_reply
+      | Keeper_event_queue.Delegate_failed _) ->
+    (* No side fact: these payloads are short by construction and the
+       row already carries them whole; see the note above. *)
+    []
   (* The answer is the row's title and preview; there is no side fact to add. *)
   | Keeper_world_observation.Ask_answered_row _
   | Keeper_world_observation.Composition_completed -> []
@@ -903,7 +923,7 @@ let group_scheduled_wake_events events =
     | Keeper_world_observation.Completion_authority_rejected _
     | Keeper_world_observation.Task_outcome _
     | Keeper_world_observation.Task_cancelled _
-    | Keeper_world_observation.Delegate_completed
+    | Keeper_world_observation.Delegate_completed _
     | Keeper_world_observation.Ask_answered_row _
     | Keeper_world_observation.Composition_completed -> groups
   in
@@ -1043,7 +1063,7 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Task_cancelled _
-         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
@@ -1093,7 +1113,7 @@ let format_task_outcome_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Task_cancelled _
-         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
@@ -1147,7 +1167,7 @@ let format_task_cancellation_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Task_outcome _
-         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
@@ -1445,16 +1465,46 @@ let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
       ( Keeper_turn_checkpoint_reason.Operation_queued
       | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ) -> []
 
-let format_workspace_memory_observation = function
+let format_workspace_memory_observation ?access = function
   | Workspace_memory_ledger.Missing -> None
   | Workspace_memory_ledger.Unavailable _ ->
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_unavailable [] ^ "\n\n")
   | Workspace_memory_ledger.Available descriptor ->
+    let briefing_status = match descriptor.briefing with
+      | Error _ -> render_fragment Prompt_names.keeper_context_workspace_memory_briefing_unavailable []
+      | Ok Workspace_memory_briefing.Missing ->
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_pending []
+      | Ok (Workspace_memory_briefing.Current _) ->
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_current []
+      | Ok (Workspace_memory_briefing.Stale _) ->
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_stale [] in
+    let route = match access with
+      | None -> Prompt_names.keeper_context_workspace_memory_retrieval_preview
+      | Some access ->
+        match Keeper_request_tool_access.route access ~name:"keeper_workspace_memory_read" with
+        | Direct -> Prompt_names.keeper_context_workspace_memory_retrieval_direct
+        | Discoverable -> Prompt_names.keeper_context_workspace_memory_retrieval_discoverable
+        | Unavailable -> Prompt_names.keeper_context_workspace_memory_retrieval_unavailable in
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_available
       [ "ledger_sha256", descriptor.ledger_sha256;
         "claim_count", string_of_int descriptor.claim_count;
         "conflict_count", string_of_int descriptor.conflict_count;
-        "classified_count", string_of_int descriptor.classified_count ] ^ "\n\n")
+        "classified_count", string_of_int descriptor.classified_count;
+        "briefing_status", briefing_status;
+        "retrieval_route", render_fragment route [] ] ^ "\n\n")
+
+let format_recent_work = function
+  | Keeper_recent_work.Absent -> None
+  | Evidence evidence ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work
+            [ "evidence", evidence ] ^ "\n\n")
+  | Preview evidence ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work_preview
+            [ "evidence", evidence ] ^ "\n\n")
+  | Unavailable detail ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work
+            [ "evidence", Yojson.Safe.to_string (`Assoc ["unavailable", `String detail]) ] ^ "\n\n")
+;;
 
 let build_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
@@ -1465,8 +1515,9 @@ let build_prompt_internal
     ?(active_goal_summaries : (goal_summary list, Goal_store.unavailable) result option)
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
+    ?workspace_memory_access
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
-    ?(context_budget_bytes : int option)
+    ?(recent_work = Keeper_recent_work.Absent)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
   =
@@ -1502,102 +1553,93 @@ let build_prompt_internal
      | None -> [])
     @ previous_turn_stop_lines previous_turn_stop
   in
-  (* A row is a whole turn: the heading counts turns, and half a turn would
-     have the keeper read a partial record of what it did. *)
-  let own_recent_actions_section : Keeper_context_layers.section option =
+  (* A row is a whole turn, and the heading counts turns. *)
+  let own_recent_actions_section : string option =
     match observation.own_recent_actions with
     | Ok [] -> None
     | Error (Keeper_tool_call_log.Index_unavailable detail) ->
       (* The history could not be read. Saying so is the whole section: a
          silent absence reads as "no calls made", which is exactly the
-         repeat-a-finished-task failure this layer exists to prevent. One
-         fixed line, so [Block] rather than trimmable rows. *)
+         repeat-a-finished-task failure this layer exists to prevent. *)
       Some
-        (Keeper_context_layers.Block
-           (render_fragment
-              Prompt_names.keeper_world_own_recent_actions_unavailable
-              [ "detail", detail ]
-            ^ "\n\n"))
+        (render_fragment
+           Prompt_names.keeper_world_own_recent_actions_unavailable
+           [ "detail", detail ]
+         ^ "\n\n")
     | Ok turns ->
       let failures = Keeper_own_recent_actions.digest_failures turns in
-      let render kept =
-        let ubuf = Buffer.create 1024 in
-        Buffer.add_string ubuf
-          (render_fragment
-             Prompt_names.keeper_world_own_recent_actions_heading
-             [ "count", string_of_int (List.length kept) ]
-           ^ "\n");
-        Buffer.add_string ubuf
-          (render_fragment Prompt_names.keeper_world_own_recent_actions_intro [] ^ "\n");
-        (* The digest is the section's reason to exist: refusals buried in a
-           hundred one-line rows below are the calls the keeper repeats
-           (2026-08-28: same nonexistent paths re-read every turn while the
-           refusals sat inside this very window). Rendered ahead of the rows
-           and outside the row budget, so trimming the history never trims
-           the part that changes the next turn's behavior. *)
-        (match failures with
-         | [] -> ()
-         | failures ->
-           (* Both lines are model-facing prose, so they live in
-              config/prompts assets (RFC prompts-and-tool-definitions-
-              outside-ocaml); a registry failure degrades to the bare data,
-              mirroring the held-task skills render above. *)
-           let render key vars ~fallback =
-             match Prompt_registry.render_prompt_template key vars with
-             | Ok text -> String.trim text
-             | Error detail ->
-               Log.Misc.error
-                 "keeper rejected-call digest prompt %s did not render, falling back to \
-                  the bare data: %s"
-                 key
-                 detail;
-               fallback
-           in
-           let heading =
-             render Prompt_names.keeper_observation_rejected_digest_heading [] ~fallback:""
-           in
-           if not (String.equal heading "")
-           then Buffer.add_string ubuf (heading ^ "\n");
-           List.iter
-             (fun (digest : Keeper_own_recent_actions.failure_digest) ->
-               let detail_suffix =
-                 match digest.failure_detail with
-                 | None -> ""
-                 | Some detail -> " — " ^ detail
-               in
-               let count = string_of_int digest.failure_count in
-               let last_turn = string_of_int digest.failure_last_turn in
-               let input = rejected_digest_input digest.failure_input in
-               let row =
-                 render
-                   Prompt_names.keeper_observation_rejected_digest_row
-                   [ "tool", digest.failure_tool
-                   ; "input", input
-                   ; "count", count
-                   ; "last_turn", last_turn
-                   ; "detail_suffix", detail_suffix
-                   ]
-                   ~fallback:
-                     (String.concat
-                        " "
-                        [ "-"
-                        ; digest.failure_tool
-                        ; input
-                        ; "×" ^ count
-                        ; "@" ^ last_turn ^ detail_suffix
-                        ])
-               in
-               Buffer.add_string ubuf (row ^ "\n"))
-             failures);
-        Buffer.add_string ubuf (String.concat "\n" kept);
-        Buffer.add_string ubuf "\n\n";
-        Buffer.contents ubuf
-      in
-      Some
-        (Keeper_context_layers.Rows
-           { rows = List.map format_own_recent_actions_turn turns; render })
+      let rows = List.map format_own_recent_actions_turn turns in
+      let ubuf = Buffer.create 1024 in
+      Buffer.add_string ubuf
+        (render_fragment
+           Prompt_names.keeper_world_own_recent_actions_heading
+           [ "count", string_of_int (List.length rows) ]
+         ^ "\n");
+      Buffer.add_string ubuf
+        (render_fragment Prompt_names.keeper_world_own_recent_actions_intro [] ^ "\n");
+      (* The digest is the section's reason to exist: refusals buried in a
+         hundred one-line rows below are the calls the keeper repeats
+         (2026-08-28: same nonexistent paths re-read every turn while the
+         refusals sat inside this very window). Rendered ahead of the rows. *)
+      (match failures with
+       | [] -> ()
+       | failures ->
+         (* Both lines are model-facing prose, so they live in
+            config/prompts assets (RFC prompts-and-tool-definitions-
+            outside-ocaml); a registry failure degrades to the bare data,
+            mirroring the held-task skills render above. *)
+         let render key vars ~fallback =
+           match Prompt_registry.render_prompt_template key vars with
+           | Ok text -> String.trim text
+           | Error detail ->
+             Log.Misc.error
+               "keeper rejected-call digest prompt %s did not render, falling back to \
+                the bare data: %s"
+               key
+               detail;
+             fallback
+         in
+         let heading =
+           render Prompt_names.keeper_observation_rejected_digest_heading [] ~fallback:""
+         in
+         if not (String.equal heading "")
+         then Buffer.add_string ubuf (heading ^ "\n");
+         List.iter
+           (fun (digest : Keeper_own_recent_actions.failure_digest) ->
+             let detail_suffix =
+               match digest.failure_detail with
+               | None -> ""
+               | Some detail -> " — " ^ detail
+             in
+             let count = string_of_int digest.failure_count in
+             let last_turn = string_of_int digest.failure_last_turn in
+             let input = rejected_digest_input digest.failure_input in
+             let row =
+               render
+                 Prompt_names.keeper_observation_rejected_digest_row
+                 [ "tool", digest.failure_tool
+                 ; "input", input
+                 ; "count", count
+                 ; "last_turn", last_turn
+                 ; "detail_suffix", detail_suffix
+                 ]
+                 ~fallback:
+                   (String.concat
+                      " "
+                      [ "-"
+                      ; digest.failure_tool
+                      ; input
+                      ; "×" ^ count
+                      ; "@" ^ last_turn ^ detail_suffix
+                      ])
+             in
+             Buffer.add_string ubuf (row ^ "\n"))
+           failures);
+      Buffer.add_string ubuf (String.concat "\n" rows);
+      Buffer.add_string ubuf "\n\n";
+      Some (Buffer.contents ubuf)
   in
-  let text_of : Keeper_context_layers.layer_id -> string option = function
+  let content_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. Titles render when the caller
        resolved them (RFC-0315). The count and the list are read off the same
        list, so the heading can never claim goals the body does not show. *)
@@ -1853,7 +1895,7 @@ let build_prompt_internal
        fetch/rebase; nothing here schedules or forces that work. *)
     | Keeper_context_layers.Lane_updates -> Lane_addon_subscription.render lane_updates
     | Keeper_context_layers.Workspace_memory ->
-      format_workspace_memory_observation workspace_memory
+      format_workspace_memory_observation ?access:workspace_memory_access workspace_memory
     | Keeper_context_layers.Repository_freshness ->
       (match repository_freshness with
        | [] -> None
@@ -2074,8 +2116,8 @@ let build_prompt_internal
        briefing describes the world and never the keeper's own history. Both
        outcomes are shown: the rejections are what the keeper must not repeat,
        the successes are what it must not redo. *)
-    | Keeper_context_layers.Own_recent_actions ->
-      Option.map Keeper_context_layers.section_text own_recent_actions_section
+    | Keeper_context_layers.Own_recent_actions -> own_recent_actions_section
+    | Keeper_context_layers.Recent_work -> format_recent_work recent_work
     | Keeper_context_layers.Fleet_messages ->
       if observation.fleet_messages <> [] then (
         let ubuf = Buffer.create 256 in
@@ -2091,32 +2133,6 @@ let build_prompt_internal
         Some (Buffer.contents ubuf))
       else None
   in
-  (* Exhaustive rather than a catch-all: a new layer must state whether it
-     renders one indivisible block or rows the budget may withhold, and
-     {!Keeper_context_layers.retention} must agree. A catch-all here would let
-     a layer declare itself trimmable and silently never trim. *)
-  let content_of : Keeper_context_layers.layer_id -> Keeper_context_layers.section option
-    = function
-    | Keeper_context_layers.Own_recent_actions -> own_recent_actions_section
-    | ( Keeper_context_layers.Active_goals
-      | Keeper_context_layers.Current_task
-      | Keeper_context_layers.Approval_authority
-      | Keeper_context_layers.Connected_surfaces
-      | Keeper_context_layers.Namespace_state
-      | Keeper_context_layers.Workspace_memory
-      | Keeper_context_layers.Lane_updates
-      | Keeper_context_layers.Repository_freshness
-      | Keeper_context_layers.Autonomous_trigger
-      | Keeper_context_layers.Scheduled_automation
-      | Keeper_context_layers.Completion_authority
-      | Keeper_context_layers.Task_cancellations
-      | Keeper_context_layers.Pending_mentions
-      | Keeper_context_layers.Scope_messages
-      | Keeper_context_layers.Own_board_posts
-      | Keeper_context_layers.Board_activity
-      | Keeper_context_layers.Fleet_messages ) as id ->
-      Option.map (fun text -> Keeper_context_layers.Block text) (text_of id)
-  in
   (* The frame is injected as ephemeral context. The turn call site passes an
      explicit [world_state_prompt] source to history persistence, so JSONL
      routing does not depend on any markdown wording below.
@@ -2130,7 +2146,7 @@ let build_prompt_internal
   let world_state =
     render_fragment Prompt_names.keeper_world_frame_frame []
     ^ "\n\n"
-    ^ Keeper_context_layers.assemble ?budget_bytes:context_budget_bytes ~content_of ()
+    ^ Keeper_context_layers.assemble ~content_of
   in
   (* An answered Ask is new conversation input, not just a world observation.
      Dynamic context is transient across tool rounds and is not checkpointed.
@@ -2195,9 +2211,10 @@ let build_prompt
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
+      ?workspace_memory_access
       ?lane_updates
       ?repository_freshness
-      ?context_budget_bytes
+      ?recent_work
       ~observation
       ()
   =
@@ -2208,9 +2225,10 @@ let build_prompt
     ?task_skill_surfaces
     ?active_goal_summaries
     ?workspace_memory
+    ?workspace_memory_access
     ?lane_updates
     ?repository_freshness
-    ?context_budget_bytes
+    ?recent_work
     ~observation
     ()
 ;;
@@ -2220,8 +2238,10 @@ let build_prompt_preview
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
+      ?workspace_memory_access
       ?lane_updates
       ?repository_freshness
+      ?recent_work
       ~observation
       ()
   =
@@ -2231,8 +2251,10 @@ let build_prompt_preview
     ?task_skill_surfaces
     ?active_goal_summaries
     ?workspace_memory
+    ?workspace_memory_access
     ?lane_updates
     ?repository_freshness
+    ?recent_work
     ~observation
     ()
 ;;

@@ -1,10 +1,12 @@
 """Work, Workspace and System responsive panels from the CI fixture PTY."""
 import base64
+import copy
 import hashlib
 import json
 import os
 import re
 import sys
+import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_repositories as _keyboard_repositories
 
@@ -12,15 +14,19 @@ import tui_keyboard_repositories as _keyboard_repositories
 
 def run(executable, no_color=False):
     fixtures = _keyboard_harness.planning_selection_http_fixtures()
-    planning = fixtures[_keyboard_harness.PLANNING_PATH][1]
+    planning = _keyboard_harness.json_payload_fixture(
+        fixtures, _keyboard_harness.PLANNING_PATH)
     planning["task_backlog"] = {"todo": 11, "claimed": 12, "in_progress": 13,
         "awaiting_verification": 14, "done": 15, "cancelled": 16}
     _, repositories = _keyboard_repositories.repositories_fixture()
-    repositories["repositories"][0]["status"] = "wire\n\x1b[9D"
-    repositories["repositories"].append({**repositories["repositories"][0],
+    repo_rows = repositories["repositories"]
+    assert isinstance(repo_rows, list) and isinstance(repo_rows[0], dict)
+    repositories["repositories"] = repo_rows
+    repo_rows[0]["status"] = "wire\n\x1b[9D"
+    repo_rows.append({**repositories["repositories"][0],
         "id":"next-repo", "name":"next-repo", "local_path":"workspace/next-repo",
         "resolved_local_path":"/srv/masc/workspace/next-repo"})
-    repositories["repositories"].append({**repositories["repositories"][0],
+    repo_rows.append({**repositories["repositories"][0],
         "id":"failed-repo", "name":"failed-repo", "status":"error",
         "error_message":"checkout unavailable: refresh credentials",
         "local_path":"workspace/failed-repo",
@@ -28,10 +34,10 @@ def run(executable, no_color=False):
     repositories["total"] = 3
     page_names = [f"page-{index:02d}" for index in range(25)]
     for name in page_names:
-        repositories["repositories"].append({**repositories["repositories"][0],
+        repo_rows.append({**repositories["repositories"][0],
             "id": name, "name": name, "local_path": "workspace/" + name,
             "resolved_local_path": "/srv/masc/workspace/" + name})
-    repositories["total"] = len(repositories["repositories"])
+    repositories["total"] = len(repo_rows)
     refresh_failed = False
     refresh_error = ("Workspace repository refresh unavailable while reading the registered checkout "
         "and its remote identity; the previous repositories remain available for selection. "
@@ -80,6 +86,47 @@ def run(executable, no_color=False):
         for needle in (b"Goals:", b"Backlog:", b"done=15", b"cancelled=16"):
             if needle not in narrow:
                 raise AssertionError(f"Narrow Work omitted {needle!r}")
+        joined = _keyboard_chat.unwrapped(narrow)
+        snapshot_time = planning["generated_at"]
+        assert isinstance(snapshot_time, str)
+        for label in (b"Baseline snapshot: ", b"Current snapshot: "):
+            if label + snapshot_time.encode() not in joined:
+                raise AssertionError(f"Work source time missing: {label!r}")
+        if b"this TUI's first reading" in joined:
+            raise AssertionError("server snapshot time was labeled as process age")
+        for needle in (b"Goals done +0", b"Tasks done +0", b"Goal reviews pending +0"):
+            if needle not in joined:
+                raise AssertionError(f"Narrow Work omitted baseline change {needle!r}")
+        key(b"j", b"plan-beta-29424")
+        selected = _keyboard_harness.screen_text(bytes(output))
+        if b"goal-b-29424" not in selected:
+            raise AssertionError("wrapped summaries obscured selected goal details")
+        key(b"k", b"plan-alpha-29424")
+        narrower = capture("work-narrow-60", 24, 60, b"goal-a-29424")
+        for needle in (b"todo=11", b"claimed=12", b"in_progress=13",
+                       b"awaiting_verification=14", b"done=15", b"cancelled=16"):
+            if needle not in _keyboard_chat.unwrapped(narrower):
+                raise AssertionError(f"60-column Work omitted {needle!r}")
+        capture("work-short", 16, 80, b"goal-a-29424")
+        key(b"j", b"goal-b-29424")
+        key(b"k", b"goal-a-29424")
+        # Wrapped summaries must leave the cursor's row, its identity and
+        # the action footer visible even at the minimum supported viewport.
+        for index, (move, title, identity) in enumerate((
+                (None, b"plan-alpha", b"goal-a-29424"),
+                (b"j", b"plan-beta", b"goal-b-29424"),
+                (b"k", b"plan-alpha", b"goal-a-29424"))):
+            if move is not None:
+                key(move, identity)
+            frame = capture(f"work-minimum-{index}", 16, 40, b"sort:", raw=True)
+            visible_rows = _keyboard_harness.screen_rows(frame)
+            visible = b"\n".join(visible_rows.get(row, b"") for row in range(1, 17))
+            if not any(b"> " in row and title in row
+                       for number, row in visible_rows.items() if 1 <= number <= 16):
+                raise AssertionError(f"40x16 Work hid selected goal {title!r}")
+            for needle in (identity, b"Right / Enter:detail"):
+                if needle not in visible:
+                    raise AssertionError(f"40x16 Work hid {needle!r}")
         for heading in ("Goals · measured outcomes".encode(), "Tasks · Backlog:".encode()):
             if heading in narrow:
                 raise AssertionError("Narrow Work retained wide summary cards")
@@ -162,7 +209,10 @@ def run(executable, no_color=False):
         key(b"\x1b",b"studio.enabled")
         key(b"j",b"studio.mode")
         capture("system-long-comparison",30,80,b"studio.mode")
-        current = fixtures["/api/v1/runtime/params"][1]["parameters"][1]["current"]
+        params = _keyboard_harness.json_payload_fixture(
+            fixtures, "/api/v1/runtime/params")["parameters"]
+        assert isinstance(params, list) and isinstance(params[1], dict)
+        current = params[1]["current"]
         read_selected((b"Current" + json.dumps(current).encode(),
                        b'Default"mention_or_thread"', b"override"))
         key(b":go Dashboard\r",b"MASC Dashboard")
@@ -171,10 +221,94 @@ def run(executable, no_color=False):
         interact=interact,http_fixtures=fixtures,workspace="Surface fixture",
         extra_env={"NO_COLOR":"1"} if no_color else None)
 
+
+def baseline_refresh(executable):
+    fixtures = _keyboard_harness.planning_selection_http_fixtures()
+    response = fixtures[_keyboard_harness.PLANNING_PATH]
+    assert isinstance(response, tuple) and isinstance(response[1], dict)
+    initial = copy.deepcopy(response[1])
+    initial["generated_at"] = "2026-08-22T00:00:00Z"
+    initial["task_backlog"]["done"] = 31
+    updated = copy.deepcopy(initial)
+    updated["generated_at"] = "2026-08-23T01:02:03Z"
+    updated["task_backlog"]["done"] = 34
+    updated["rollup"]["done_count"] += 2
+    updated["rollup"]["verifying_count"] += 1
+    refreshed = False
+    def planning_response():
+        return 200, updated if refreshed else initial
+    fixtures[_keyboard_harness.PLANNING_PATH] = planning_response
+    def interact(process, fd, _slave, output, _base):
+        nonlocal refreshed
+        _keyboard_harness.wait_for_output(process, fd, output, b"MASC Dashboard", start=0, timeout=10)
+        _keyboard_harness.palette_go(process, fd, output, b"go Work", b"MASC Work")
+        _keyboard_harness.wait_for_output(process, fd, output, b"Baseline snapshot:", start=0, timeout=5)
+        refreshed = True
+        _keyboard_harness.send_and_wait(process, fd, output, b"r", b"2026-08-23T01:02:03Z")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=121,
+                         needle=b"2026-08-23T01:02:03Z", controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+        frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=120,
+                                 needle=b"2026-08-23T01:02:03Z", controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+        plain = _keyboard_chat.unwrapped(_keyboard_harness.screen_text(frame))
+        for text in (b"Baseline snapshot: 2026-08-22T00:00:00Z",
+                     b"Current snapshot: 2026-08-23T01:02:03Z",
+                     b"Goals done +2", b"Tasks done +3", b"Goal reviews pending +1"):
+            assert text in plain, f"baseline refresh lost evidence: {text!r}"
+        assert b"this TUI's first reading" not in plain
+        print("STUDIO_CAPTURE=" + json.dumps({"name": "work-baseline-refresh", "rows": 30, "columns": 120,
+              "provenance": "local candidate fixture PTY", "frame_b64": base64.b64encode(frame).decode(),
+              "screen": b"\n".join(_keyboard_harness.screen_rows(frame).get(row, b"") for row in range(1, 31)).decode(errors="replace")}), flush=True)
+        os.write(fd, b"q")
+    _keyboard_harness.run_terminal_scenario(executable, description="Work baseline persists while current snapshot advances",
+                            interact=interact, http_fixtures=fixtures)
+
+def run_summary_priority(executable, no_color=False):
+    fixtures = _keyboard_harness.planning_selection_http_fixtures()
+    response = fixtures[_keyboard_harness.PLANNING_PATH]
+    assert isinstance(response, tuple) and isinstance(response[1], dict)
+    planning = response[1]
+    planning["goal_history"] = {"unlisted": []}
+    # Valid large counters wrap beyond the optional trend; neither may be
+    # clipped merely to make the block fit. The existing scenario keeps small
+    # counters and retained-history coverage.
+    planning["task_backlog"] = {"todo": 111111111111111, "claimed": 222222222222222, "in_progress": 333333333333333,
+        "awaiting_verification": 444444444444444, "done": 555555555555555, "cancelled": 666666666666666}
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.send_and_wait(process, fd, output, b":go Work\r", b"plan-alpha-29424")
+        for columns in (44, 45, 46):
+            frame = _keyboard_harness.resize_and_wait(process, fd, output, rows=19, columns=columns,
+                needle=b"goal-a-29424", controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            rows = _keyboard_harness.screen_rows(frame)
+            visible = b"\n".join(rows.get(row, b"") for row in range(1, 20))
+            print("SUMMARY_PRIORITY=" + json.dumps({"columns": columns, "no_color": no_color,
+                "screen": visible.decode(errors="replace")}), flush=True)
+            if b"Backlog:" not in visible and any(label in visible for label in (
+                b"Baseline snapshot:", b"Current snapshot:", b"Change from baseline:",
+                b"Change: waiting for the first successful snapshot",
+            )):
+                raise AssertionError("Work displayed optional trend while the current backlog did not fit")
+            for needle in (b"goal-a-29424", b"Right / Enter:detail"):
+                if needle not in visible:
+                    raise AssertionError(f"{columns}x19 Work hid {needle!r}")
+            if not any(b"> " in row and b"plan-alpha" in row for row in rows.values()):
+                raise AssertionError("summary priority hid selected goal row")
+        _keyboard_harness.send_and_wait(process, fd, output, b":go Dashboard\r", b"MASC Dashboard")
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(executable, description="Work summary priority",
+        interact=interact, http_fixtures=fixtures,
+        extra_env={"NO_COLOR": "1"} if no_color else None)
+
+
 if __name__ == "__main__":
     executable=os.path.abspath(sys.argv[1])
     with open(executable,"rb") as binary:
         print("STUDIO_BINARY_SHA256="+hashlib.sha256(binary.read()).hexdigest(),flush=True)
+    run_summary_priority(executable)
+    run_summary_priority(executable,True)
     run(executable)
     run(executable,True)
+    baseline_refresh(executable)
     print("tui surface studio PTY: PASS",flush=True)

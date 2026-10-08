@@ -1,0 +1,74 @@
+{
+  "passed": true,
+  "scope": "Actual panel/form/session/API in Chromium with synthetic HTTP. No real backend/worker or full SPA validation.",
+  "browser": "149.0.7827.55",
+  "checks": [
+    "folder navigation, catalog metadata/issues and fresh preview through actual API decoders",
+    "nested source selection; incomplete numeric text refuses drafting with no write",
+    "binding and unsubmitted path inputs survive actual component unmount/remount",
+    "workspace return preserves inputs but requires fresh preview before drafting",
+    "actual styled nested form at mobile width without horizontal overflow",
+    "prepared TOML preserves false/zero/named output and independent pre-existing raw draft",
+    "only explicit Save TOML dispatches one create; receipt remains pending reconciliation"
+  ],
+  "reads": [
+    {
+      "path": "/api/v1/lane-addons",
+      "query": "",
+      "workspace": "/workspace"
+    },
+    {
+      "path": "/api/v1/lane-addons/package-catalog",
+      "query": "",
+      "workspace": "/workspace"
+    },
+    {
+      "path": "/api/v1/lane-addons/package-catalog",
+      "query": "?directory=%2Fworkspace%2Fpackages",
+      "workspace": "/workspace"
+    },
+    {
+      "path": "/api/v1/lane-addons/package-preview",
+      "query": "?manifest_path=%2Fworkspace%2Fpackages%2Freport%2Flane.toml",
+      "workspace": "/workspace"
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": "",
+      "workspace": "/workspace"
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": "",
+      "workspace": "/workspace-b"
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": "",
+      "workspace": "/workspace"
+    },
+    {
+      "path": "/api/v1/lane-addons/package-preview",
+      "query": "?manifest_path=%2Fworkspace%2Fpackages%2Freport%2Flane.toml",
+      "workspace": "/workspace"
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": "",
+      "workspace": "/workspace"
+    }
+  ],
+  "mutations": [
+    {
+      "path": "/api/v1/lane-addons/declaration",
+      "body": {
+        "file_name": "new-report.toml",
+        "source_text": "enabled = true\nid = \"new-report\"\nrun_id = \"run\"\nmanifest_path = \"/workspace/packages/report/lane.toml\"\nbinding = { \"sources\" = [{ \"source_id\" = \"upstream\", \"kind\" = \"lane_output\", \"installation_id\" = \"producer\", \"selection\" = \"latest_completed\", \"output_id\" = \"results\" }], \"count\" = 0, \"enabled\" = false }\n",
+        "mode": "create"
+      },
+      "workspace": "/workspace"
+    }
+  ],
+  "errors": [],
+  "unexpected": []
+}

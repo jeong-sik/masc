@@ -142,6 +142,7 @@
   (bisect_ppx (and :with-test (>= 2.8)))
   (mtime (>= 2.0))
   (markup (>= 1.0.3))
+  (uutf (>= 1.0.0))
   (uucp (>= 17.0.0))
   (uunf (>= 17.0.0))
   (uuseg (>= 17.0.0))

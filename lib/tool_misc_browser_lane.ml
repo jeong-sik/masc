@@ -64,8 +64,10 @@ let answer_to_result ~lane ~tool_name ~start_time = function
   | Browser_lane.Lane_absent -> make_workflow_err ~tool_name ~start_time (Browser_lane.lane_absent_message lane)
   | Browser_lane.Timed_out ->
     make_workflow_err ~tool_name ~start_time "the browser lane did not answer in time"
-  | Browser_lane.Refused reason | Browser_lane.Rejected_before_effect reason ->
-    make_workflow_err ~tool_name ~start_time reason
+  | Browser_lane.Rejected_before_effect reason ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect reason
+  | Browser_lane.Refused reason -> make_workflow_err ~tool_name ~start_time reason
 ;;
 
 let tool_request args =
@@ -76,8 +78,8 @@ let tool_request args =
 let add_client target = function
   | Browser_lane.Answered (`Assoc envelope) ->
     let data = match List.assoc_opt "data" envelope with
-      | Some (`Assoc fields) -> `Assoc (("clientId", Browser_surface.client_id_json target) :: fields)
-      | Some (`List tabs) -> `Assoc ["tabs", `List tabs; "clientId", Browser_surface.client_id_json target]
+      | Some (`Assoc fields) -> `Assoc (Browser_lane.with_connection_fields target fields)
+      | Some (`List tabs) -> `Assoc (Browser_lane.target_connection_fields target @ ["tabs", `List tabs])
       | Some other -> other | None -> `Null in
     Browser_lane.Answered (`Assoc (("data", data) :: List.remove_assoc "data" envelope))
   | other -> other
@@ -100,29 +102,70 @@ let no_client_retry host =
    until resolution succeeds, including when a formerly pinned client vanished,
    and a browser that leaves after resolution is answered the same way. *)
 let selection_error ~base_path ~tool_name ~start_time error =
-  let clients = Browser_lane.active_clients () |> List.map Browser_lane.client_json in
-  let rejection fields =
-    let data = `Assoc (("error", `String (Browser_lane.selection_error_code error))
-                       :: ("clients", `List clients) :: fields) in
+  let clients () = Browser_lane.active_clients () |> List.map Browser_lane.client_json in
+  (* [deciding] are the short fields that say what was refused and what to do
+     next; [listing] are the connection lists, which grow with the number of
+     browsers. The lists go last because several readers of a recorded
+     rejection keep only its beginning. *)
+  let rejection ~deciding ~listing =
+    let data =
+      `Assoc ((("error", `String (Browser_lane.selection_error_code error)) :: deciding) @ listing) in
     Tool_result.make_err ~tool_name ~start_time
-      ~class_:Tool_result.Workflow_rejection ~data (Yojson.Safe.to_string data) in
+      ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
+      ~data (Yojson.Safe.to_string data) in
   let observe () =
     Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
   match error with
+  | Browser_lane.Activity_rejected refusal ->
+    rejection ~deciding:["message", `String (Browser_lane.activity_rejection_message refusal)]
+      ~listing:[]
   | Browser_lane.No_live_client ->
+    let clients = clients () in
     let host = observe () in
-    rejection ["host", Browser_lane_launcher.to_json host; "retry", `String (no_client_retry host)]
+    rejection ~deciding:["retry", `String (no_client_retry host);
+                         "host", Browser_lane_launcher.to_json host]
+      ~listing:["clients", `List clients]
   | Browser_lane.Selected_client_disconnected client_id ->
+    let clients = clients () in
     let host = observe () in
     let retry = match clients with
       | _ :: _ -> "That browser is no longer connected. Choose a browser from clients and retry \
                    with its clientId. No browser command was dispatched."
       | [] -> "That browser is no longer connected and none is. " ^ no_client_retry host in
-    rejection ["clientId", `String (Browser_lane.client_id_to_string client_id);
-               "host", Browser_lane_launcher.to_json host; "retry", `String retry]
+    rejection ~deciding:["clientId", `String (Browser_lane.client_id_to_string client_id);
+                         "retry", `String retry; "host", Browser_lane_launcher.to_json host]
+      ~listing:["clients", `List clients]
   | Browser_lane.Ambiguous_clients _ ->
-    rejection ["retry", `String "Choose a connected browser and retry with its clientId. No \
-                                 browser command was dispatched."]
+    rejection ~deciding:["retry", `String "Choose a connected browser and retry with its clientId. \
+                                           No browser command was dispatched."]
+      ~listing:["clients", `List (clients ())]
+  | Browser_lane.Transport_unsupported { client_id; transport; capability } ->
+    let serving_transports = Browser_lane.live_transports_serving capability in
+    let serving_clients =
+      Browser_lane.active_clients ()
+      |> List.filter (fun (info : Browser_lane.client_info) ->
+           Browser_lane.live_transport_serves info.transport capability) in
+    (* A connection of the other kind may belong to another browser profile,
+       and its tab IDs are its own, so the retry starts from its tabs. *)
+    let retry = match serving_clients with
+      | _ :: _ ->
+        "This browser connection cannot do that. A connection in servingClients can: list its \
+         tabs and observe the page again with its clientId, then retry there. Tab IDs and \
+         observations belong to their connection. No browser command was dispatched."
+      | [] ->
+        "No connected browser connection can do that: "
+        ^ String.concat "; or " (List.map Browser_lane.live_transport_setup serving_transports)
+        ^ ". The same request returns the same answer until then; other work this \
+           connection serves is unaffected. No browser command was dispatched." in
+    rejection
+      ~deciding:["capability", `String (Browser_lane.live_capability_to_wire capability);
+                 "transport", `String (Browser_lane.live_transport_to_string transport);
+                 "clientId", `String (Browser_lane.client_id_to_string client_id);
+                 "retry", `String retry;
+                 "servingTransports", `List (List.map (fun transport ->
+                   `String (Browser_lane.live_transport_to_string transport)) serving_transports)]
+      ~listing:["servingClients", `List (List.map Browser_lane.client_json serving_clients);
+                "clients", `List (clients ())]
 
 let read_failure ~base_path ~tool_name ~start_time = function
   | Browser_surface.Unselected error -> selection_error ~base_path ~tool_name ~start_time error
@@ -132,7 +175,7 @@ let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
   match tool_request args with
   | Error error -> make_input_err ~tool_name ~start_time error
   | Ok request ->
-    match Browser_lane.resolve_target request.route with
+    match Browser_lane.resolve_target ~verb:Browser_lane.Tabs_list request.route with
     | Error error -> selection_error ~base_path ~tool_name ~start_time error
     | Ok target ->
       match Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:default_timeout_sec with
@@ -287,7 +330,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
       match verb with
       | Error detail -> make_input_err ~tool_name ~start_time detail
       | Ok verb ->
-        (match Browser_lane.resolve_target request.route with
+        (match Browser_lane.resolve_target ~verb request.route with
          | Error error -> selection_error ~base_path ~tool_name ~start_time error
          | Ok target ->
            match Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec with
@@ -336,8 +379,9 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
       | Browser_lane.Action.On_tab ({interaction=Upload {selector;_};_} as target), Some paths ->
         Browser_lane.Action.On_tab {target with interaction=Upload {selector;paths}}
       | _ -> action in
-    let issued = Result.bind (Browser_lane.resolve_target route) (fun target ->
-      Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_act action) ~timeout_sec:60.) in
+    let verb = Browser_lane.Page_act action in
+    let issued = Result.bind (Browser_lane.resolve_target ~verb route) (fun target ->
+      Browser_lane.issue_for ~target ~verb ~timeout_sec:60.) in
     match issued with
     | Error error ->
       selection_error ~base_path ~tool_name ~start_time error, Tool_result.Proven_pre_effect
@@ -356,10 +400,10 @@ let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
   match Browser_interaction.parse args with
   | Error error -> make_input_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect
   | Ok request ->
-    let issued = Result.bind (Browser_lane.resolve_target request.route) (fun target ->
-      Browser_lane.issue_for ~target
-        ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
-          expected_url=request.expected_url; action=request.action})
+    let verb = Browser_lane.Page_interact {tab_id=request.tab_id;
+      expected_url=request.expected_url; action=request.action} in
+    let issued = Result.bind (Browser_lane.resolve_target ~verb request.route) (fun target ->
+      Browser_lane.issue_for ~target ~verb
         ~timeout_sec:default_timeout_sec
       |> Result.map (fun answer -> target, answer)) in
     (match issued with

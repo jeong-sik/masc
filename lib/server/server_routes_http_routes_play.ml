@@ -121,7 +121,7 @@ let release_controller ~holder ~by =
   | Ok true -> Released
   | Ok false | Error Dos_lane.No_machine -> Not_held
   | Error
-      (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
+      (( Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved | Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
        | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
        | Dos_lane.Other_program _ ) as err) ->
     Release_failed (Dos_lane.error_to_string err)

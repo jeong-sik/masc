@@ -1,10 +1,12 @@
 type declaration = {
   id : string;
+  enabled : bool;
   run_id : string;
   manifest_path : string;
   package : Lane_addon_types.package;
   binding : Yojson.Safe.t;
   revision : string;
+  source_revision : string;
   source_path : string;
 }
 
@@ -99,10 +101,14 @@ let resolve_snapshot_paths ~directory = function
        | _ -> `Assoc fields)
   | value -> value
 
-let decode ~source_path ~id fields =
-  let allowed = ["id"; "run_id"; "manifest_path"; "binding"] in
+let decode ~source_path ~source_revision ~id fields =
+  let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"] in
   let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
     | None -> Ok () | Some (key, _) -> Error ("unknown declaration field: " ^ key) in
+  let* enabled = match List.assoc_opt "enabled" fields with
+    | None -> Ok true (* Accepting deployment stage; existing declarations still run. *)
+    | Some (Otoml.TomlBoolean enabled) -> Ok enabled
+    | Some _ -> Error "enabled requires a boolean" in
   let* run_id = text fields "run_id" in
   let* manifest_path = text fields "manifest_path" in
   let directory = Filename.dirname source_path in
@@ -119,6 +125,9 @@ let decode ~source_path ~id fields =
     | None -> Ok ()
     | Some schema -> Lane_addon_action.validate_value ~schema ~name:"lane binding" binding |> Result.map (fun _ -> ()) in
   let manifest_path = Unix.realpath manifest_path in
+  (* This revision names worker inputs. Desired activity is separate, so an
+     accepting deployment does not replace unchanged workers and on/off does
+     not change the identity of preserved inputs or their document owner. *)
   let canonical =
     `Assoc ["id", `String id; "run_id", `String run_id;
       "manifest_path", `String manifest_path;
@@ -126,7 +135,7 @@ let decode ~source_path ~id fields =
     |> Yojson.Safe.sort |> Yojson.Safe.to_string
   in
   let revision = Digestif.SHA256.(to_hex (digest_string canonical)) in
-  Ok { id; run_id; manifest_path; package; binding; revision; source_path }
+  Ok { id; enabled; run_id; manifest_path; package; binding; revision; source_revision; source_path }
 
 let parse_declaration ~source_path bytes =
   let failure ?id ~unreadable message =
@@ -139,7 +148,8 @@ let parse_declaration ~source_path bytes =
             | Error message -> failure ~unreadable:false message
             | Ok id ->
                 try
-                  match decode ~source_path ~id fields with
+                  let source_revision = Digestif.SHA256.(to_hex (digest_string bytes)) in
+                  match decode ~source_path ~source_revision ~id fields with
                   | Ok declaration -> Ok declaration
                   | Error message -> failure ~id ~unreadable:false message
                 with (Sys_error _ | Unix.Unix_error _) as exn ->

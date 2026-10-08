@@ -70,6 +70,12 @@ let client_of_request request =
   let* client_id = Browser_lane.client_id_of_string raw_id in
   let* name = required "x-browser-name" in
   let* browser = Browser_lane.browser_of_string name in
+  (* The transport-less native identity is the WebExtension poll contract.
+     BiDi hosts declare their transport explicitly; malformed declarations
+     are rejected rather than inferred from the browser name. *)
+  let* transport = match header "x-browser-transport" with
+    | None -> Ok Browser_lane.Web_extension
+    | Some transport -> Browser_lane.live_transport_of_string transport in
   let version name =
     let* value = required name in
     if String.length value <= 64 && String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) value
@@ -79,7 +85,7 @@ let client_of_request request =
   if String.length engine_version > 64
      || not (String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) engine_version)
   then Error "invalid_browser_version"
-  else Ok ({client_id; browser; version; engine_version} : Browser_lane.client_info)
+  else Ok ({client_id; browser; version; engine_version; transport} : Browser_lane.client_info)
 ;;
 
 (* A poll holds one command for the window. The answer is flat
@@ -111,8 +117,11 @@ let add_routes router =
            respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
          | Ok client_info -> (
            match Browser_lane.take_command ~client_info ~window_sec:25. with
-           | Error message ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+           | Error refusal ->
+             (* The host reads this code to tell a connection the lane ended,
+                which it replaces, from a refusal it would only meet again. *)
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (error_json (Browser_lane.registration_refusal_to_wire refusal))
            | Ok None ->
              respond_json_value_with_cors request reqd (`Assoc [ ("ok", `Bool true); ("empty", `Bool true) ])
            | Ok (Some issued) ->

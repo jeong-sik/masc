@@ -5043,12 +5043,17 @@ let test_keeper_shutdown_rejects_stale_snapshot_delete () =
          }
        in
        Shutdown_store.persist_new ~config operation |> Result.get_ok;
+       let newer_task_id =
+         match Keeper_id.Task_id.of_string "task-newer-snapshot" with
+         | Ok task_id -> task_id
+         | Error detail -> fail detail
+       in
        (match
           Keeper_owner_registry.apply_meta
             ~base_path:config.base_path
             ~keeper_name:meta.name
-            (Masc.Keeper_owner_reducer.Set_activation_mode
-               { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "newer-snapshot" })
+            (Masc.Keeper_owner_reducer.Set_current_task
+               { task_id = Some newer_task_id; updated_at = "newer-snapshot" })
         with
         | Ok (Some _) -> ()
         | Ok None -> fail "concurrent metadata update removed its snapshot"
@@ -5063,7 +5068,9 @@ let test_keeper_shutdown_rejects_stale_snapshot_delete () =
         | Ok _ -> fail "stale cleanup authority deleted a newer metadata snapshot");
        match Keeper_meta_store.read_meta config meta.name with
        | Ok (Some current) ->
-         check bool "newer metadata survives stale cleanup" true (Masc.Keeper_activation_mode.restore_owner current.activation_mode)
+         check bool "newer metadata survives stale cleanup" true
+           (Option.fold ~none:false ~some:(Keeper_id.Task_id.equal newer_task_id)
+              current.current_task_id)
        | Ok None -> fail "stale cleanup removed newer metadata"
        | Error detail -> fail detail)
 

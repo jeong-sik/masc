@@ -199,12 +199,12 @@ function normalizeTrackedOperation(raw: unknown): TrackedKeeperChatOperation | n
   if (!isRecord(raw)) return null
   const operationId = stringField(raw, 'operationId')
   const keeperName = stringField(raw, 'keeperName')
-  const message = stringField(raw, 'message')
+  const message = stringValue(raw.message) ?? ''
   const submittedAt =
     typeof raw.submittedAt === 'number' && Number.isFinite(raw.submittedAt)
       ? raw.submittedAt
       : Date.now()
-  if (!operationId || !keeperName || !message) return null
+  if (!operationId || !keeperName || !message.trim()) return null
   const attachments = Array.isArray(raw.attachments)
     ? raw.attachments.map(normalizeAttachment).filter((att): att is KeeperConversationAttachment => att !== null)
     : []
@@ -259,8 +259,8 @@ export function trackedKeeperChatOperationsForKeeper(keeperName: string): Tracke
 export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOperation): void {
   const operationId = request.operationId.trim()
   const keeperName = request.keeperName.trim()
-  const message = request.message.trim()
-  if (!operationId || !keeperName || !message) return
+  const message = request.message
+  if (!operationId || !keeperName || !message.trim()) return
   const assistantDraft = normalizeAssistantDraft(request.assistantDraft)
   const normalized: TrackedKeeperChatOperation = {
     operationId,

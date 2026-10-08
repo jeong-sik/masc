@@ -88,36 +88,49 @@ let credential_state (ctx : context) ~actual_name =
    Yojson.Json_error _] (the *more common* read-side failure class —
    missing file, malformed JSON) returned the default silently while
    only the rare [exn] catch-all logged. Operators saw the loud path
-   but missed the common one. The three [safe_*] wrappers below now
+   but missed the common one. The [safe_*] wrappers below now
    share the single-warn-arm shape; [Eio.Cancel.Cancelled] is re-raised
    explicitly so cancellation propagation is preserved across all of
-   them. *)
+   them.
+
+   The wrappers return the substituted default *with* the failure beside
+   it (#26656): the backlog path fails loudly through
+   [read_backlog_observation_with_source_r] and the roster travels with its
+   own failure list, but an identity/current-task/session read failure used
+   to end at a warn line while the successful snapshot carried [ctx.agent_name],
+   [None] or [false] as if those reads had answered. The caller decides what
+   the operator sees — the status renderer folds the failures into its
+   observation-failure banner, [inspect_state] refuses to answer assertions
+   on an unreadable state. *)
 let safe_resolve_agent_name (ctx : context) ~session_bound =
   if not session_bound
-  then ctx.agent_name
+  then (ctx.agent_name, [])
   else (
-    try Workspace.resolve_agent_name ctx.config ctx.agent_name with
+    try (Workspace.resolve_agent_name ctx.config ctx.agent_name, []) with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
+      let detail = Stdlib.Printexc.to_string exn in
       Log.Workspace.warn
         "resolve_agent_name failed for %s: %s"
         ctx.agent_name
-        (Stdlib.Printexc.to_string exn);
-      ctx.agent_name)
+        detail;
+      ( ctx.agent_name
+      , [ "identity resolution for " ^ ctx.agent_name ^ ": " ^ detail ] ))
 ;;
 
 let safe_current_task (ctx : context) ~session_bound =
   if not session_bound
-  then None
+  then (None, [])
   else (
-    try Planning_eio.get_current_task ctx.config with
+    try (Planning_eio.get_current_task ctx.config, []) with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
+      let detail = Stdlib.Printexc.to_string exn in
       Log.Workspace.warn
         "get_current_task failed for %s: %s"
         ctx.agent_name
-        (Stdlib.Printexc.to_string exn);
-      None)
+        detail;
+      (None, [ "current task read for " ^ ctx.agent_name ^ ": " ^ detail ]))
 ;;
 
 (* The roster and what went wrong while reading it. Two layers can fail here:
@@ -199,31 +212,40 @@ let status_summary_string (ctx : context) =
   let task_goal_index =
     Workspace_goal_index.build_task_goal_index ~goal_task_links ()
   in
-  let session_bound =
+  let session_bound, session_binding_failures =
     (* status_summary_string is read-only on the workspace file; a missing
        or malformed file is treated as "session not bound" because that's the
        most useful default for status rendering. But the silent path
        hid an operationally meaningful failure (file missing after session bind,
        config corrupted) — surface it via warn while keeping the
-       [false] default. *)
-    try Workspace.is_agent_session_bound ctx.config ~agent_name:ctx.agent_name with
+       [false] default, and hand the failure to the observation banner like
+       every other non-backlog read (#26656). *)
+    try (Workspace.is_agent_session_bound ctx.config ~agent_name:ctx.agent_name, []) with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
+      let detail = Stdlib.Printexc.to_string exn in
       Log.Workspace.warn
         "is_agent_session_bound failed for %s: %s"
         ctx.agent_name
-        (Stdlib.Printexc.to_string exn);
-      false
+        detail;
+      ( false
+      , [ "session binding read for " ^ ctx.agent_name ^ ": " ^ detail ] )
   in
-  let actual_name = safe_resolve_agent_name ctx ~session_bound in
+  let actual_name, resolve_failures = safe_resolve_agent_name ctx ~session_bound in
   let credential_state = credential_state ctx ~actual_name in
   let credential_blocked =
     credential_state.credential_required && not credential_state.credential_available
   in
-  let current_task = safe_current_task ctx ~session_bound in
+  let current_task, task_failures = safe_current_task ctx ~session_bound in
   let effective_cluster_name = effective_cluster_name ctx.config in
   let active_task_assignees = Workspace.active_task_assignees_by_task_id backlog in
-  let roster, observation_failures = safe_get_agents_observed ctx in
+  let roster, roster_failures = safe_get_agents_observed ctx in
+  let observation_failures =
+    List.fold_left
+      (fun acc failures -> acc @ failures)
+      []
+      [ session_binding_failures; resolve_failures; task_failures; roster_failures ]
+  in
   let agents =
     roster
     |> List.map (fun (agent : Masc_domain.agent) ->
@@ -376,16 +398,18 @@ let status_summary_string (ctx : context) =
       ^ snapshot
   in
   (* The backlog already says when it is recovery-backed. An observation
-     outside the backlog said nothing: it logged and answered with an empty
-     list, so the roster below simply came back short. Name it in the screen a
-     person reads, next to the line that reports the backlog. *)
+     outside the backlog said nothing: it logged and answered with its
+     substituted default, so identity, current task, session binding or the
+     roster below simply reflected the default instead of the state. Name it
+     in the screen a person reads, next to the line that reports the
+     backlog. *)
   let snapshot =
     match observation_failures with
     | [] -> snapshot
     | failures ->
       Printf.sprintf
-        "⚠ Observation incomplete — %s. The roster below is missing whatever \
-         that read would have carried.\n%s"
+        "⚠ Observation incomplete — %s. The status below is missing whatever \
+         those reads would have carried.\n%s"
         (String.concat "; " failures)
         snapshot
   in
@@ -463,8 +487,14 @@ type agent_state =
   }
 
 let inspect_state ctx =
-  let binding =
-    let actual_name = safe_resolve_agent_name ctx ~session_bound:true in
+  let actual_name, resolve_failures = safe_resolve_agent_name ctx ~session_bound:true in
+  match resolve_failures with
+  | failure :: _ ->
+    (* #26656: [masc_check] is an assertion surface — it must not answer
+       "passed"/"failed" from a state it could not read. Any non-backlog
+       observation failure is a typed error instead of a claim. *)
+    Error (String.concat "; " resolve_failures)
+  | [] ->
     let matches_you assignee =
       String.equal assignee ctx.agent_name || String.equal assignee actual_name
     in
@@ -472,13 +502,18 @@ let inspect_state ctx =
       Workspace.get_tasks_raw ctx.config
       |> Workspace_status_rendering.assigned_task_ids ~matches_you
     in
-    resolve_current_binding
-      ~assigned_task_ids
-      ~planning_current:(safe_current_task ctx ~session_bound:true)
-  in
-  let task_claimed = Stdlib.List.length binding.assigned_task_ids > 0 in
-  let current_task_set = binding.current_task_set in
-  { task_claimed; current_task_set }
+    let current_task, task_failures = safe_current_task ctx ~session_bound:true in
+    (match task_failures with
+     | failure :: _ -> Error (String.concat "; " task_failures)
+     | [] ->
+       let binding =
+         resolve_current_binding
+           ~assigned_task_ids
+           ~planning_current:current_task
+       in
+       let task_claimed = Stdlib.List.length binding.assigned_task_ids > 0 in
+       let current_task_set = binding.current_task_set in
+       Ok { task_claimed; current_task_set })
 ;;
 
 (* ── State check (assertion-based verification) ────────────────── *)
@@ -508,13 +543,19 @@ type dispatch_handler =
   tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 
 let handle_check ~tool_name ~start_time ctx args =
-  let inspect ctx =
-    let s = inspect_state ctx in
-    { Workspace_assertions.task_claimed = s.task_claimed
-    ; current_task_set = s.current_task_set
-    }
-  in
-  Workspace_assertions.handle_check ~inspect_state:inspect ~tool_name ~start_time ctx args
+  match inspect_state ctx with
+  | Error message ->
+    (* #26656: a non-backlog observation failed while reading the state the
+       assertions are evaluated against. Refuse the whole check with the typed
+       error instead of evaluating claims over substituted values. *)
+    error_result_typed ~tool_name ~start_time ~code:Internal_error message
+  | Ok state ->
+    let inspect _ctx =
+      { Workspace_assertions.task_claimed = state.task_claimed
+      ; current_task_set = state.current_task_set
+      }
+    in
+    Workspace_assertions.handle_check ~inspect_state:inspect ~tool_name ~start_time ctx args
 ;;
 
 (* Goal tools route on their closed type. [dispatchable_names] and the routing

@@ -1,0 +1,27 @@
+name: Changelog fragments
+
+# scripts/bump-version.sh runs scripts/changelog-fragments.py check before it
+# assembles a release, so a malformed fragment only fails at release time —
+# after it has already landed on main. No pull-request workflow ran that check,
+# so a fragment missing its own `#<PR>` citation, a stray paragraph line, or a
+# bullet before any section reached main silently. Run the same check on the
+# pull request that touches changelog.d, so the author sees it before merge.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'changelog.d/**'
+      - 'scripts/changelog-fragments.py'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Changelog fragment format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check every fragment cites its own pull request
+        run: python3 scripts/changelog-fragments.py check --dir changelog.d

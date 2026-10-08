@@ -2,12 +2,18 @@
     no cached query result is authoritative. All paths are below [root]. *)
 type t
 val create : root:string -> t
+(** Resolve a relative root against the working directory at creation. The
+    resulting absolute ownership boundary is retained by the store. *)
 val root : t -> string
 val digest : string -> string
 val blob_reference : string -> Lane_addon_types.evidence
 (** Content-addressed reference without writing. It may be used to measure a
     complete acquisition envelope; publish it only after [write_blob] succeeds. *)
 val write_blob : t -> string -> (Lane_addon_types.evidence, string) result
+val write_sampling_blob : t -> string -> (Lane_addon_types.evidence, string) result
+(** Publish a terminal sampling blob, using an independently writable recovery
+    directory if the ordinary blob location fails. Both readers resolve the
+    same immutable address. Success requires a durable write. *)
 val read_blob : ?max_bytes:int -> t -> Lane_addon_types.evidence -> (string, string) result
 (** [max_bytes] rejects a retained file before allocating its complete body. *)
 type read_budget
@@ -35,7 +41,8 @@ val read_jsonl : t -> Lane_addon_types.evidence -> (string, string) result
     Explicit full-history reads allocate the requested result; capture does not. *)
 val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) result
 val remove_binding : t -> instance_id:string -> (unit, string) result
-(** Removes one binding record. A missing record is already removed. *)
+(** Removes one binding record and syncs the containing directory. A retry
+    syncs even when the record was already unlinked by an uncertain attempt. *)
 val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 (** Requires the configured root parent to exist as the workspace anchor.
     Publishes the root and action directories, syncing each parent even on
@@ -50,23 +57,31 @@ val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
-(** Independently retain the terminal request/outcome link before replacing the
-    primary request index. Terminal records include exact [outcome_bytes] before
-    blob publication; recovery verifies the digest and restores a missing blob. *)
-val iter_sampling_requests : t -> instance_id:string -> max_bytes:int ->
-  f:(Yojson.Safe.t -> (unit, string) result) -> (unit, string) result
-(** Stream recovery records with bounded per-record reads and constant directory
-    memory. Terminal recovery links are visited first, then unresolved requests.
-    The callback can stop immediately with [Error]; directory and decoding errors
-    are explicit. Call from a system thread. No ordering is guaranteed. *)
+(** Retain the terminal request/outcome link independently of the primary
+    request index. [load_sampling_request_bounded] reads this link first. *)
 val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 (** Retain the exact published evidence before sending its idempotent Broadcast.
     Repeated sends read that original artifact, not a changing live binding. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
+(** Confirms containing-directory durability after capturing records/absence,
+    including cold reads used to authorize reconciliation. *)
 (** Reconciles each binding sequence with retained observation filenames so a
     failed binding write cannot hide a renamed observation. Exact record reads
     still require their own durability and payload verification. *)
+type binding_inventory = {
+  records : (string * Yojson.Safe.t) list;
+  issues : (string * string) list;
+  complete : bool;
+}
+val binding_inventory : root:string -> binding_inventory
+(** Read metadata without constructing a store, reconciling observation
+    sequences, rewriting records or creating directories. After capturing the
+    records/absence, sync the containing directory (or its first existing
+    ancestor) to reestablish publication durability after an uncertain rename
+    or unlink by a previous process. Read/sync failures preserve readable
+    siblings but make [complete] false. Offload filesystem I/O. These observed
+    bytes do not authorize mutations. *)
 type observation_write_error =
   | Observation_rejected of string
   | Publication_failed of { failure : Fs_compat.atomic_replace_failure;
@@ -113,10 +128,8 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
-  val iter_sampling_requests :
-    sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
-    t -> instance_id:string -> max_bytes:int ->
-    f:(Yojson.Safe.t -> (unit, string) result) -> (unit, string) result
+  val remove_binding : sync_parent:(string -> unit) -> t -> instance_id:string -> (unit, string) result
+  val binding_inventory : sync_parent:(string -> unit) -> root:string -> binding_inventory
   val write : sync_parent:(string -> unit) -> t -> string -> string -> (unit, string) result
   val load_sampling_request_bounded :
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->

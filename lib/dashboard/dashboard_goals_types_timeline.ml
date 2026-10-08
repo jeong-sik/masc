@@ -22,6 +22,8 @@ let goal_phase_color = function
   | Goal_phase.Awaiting_confirmation -> "#f59e0b"
   | Goal_phase.Completed -> "#60a5fa"
   | Goal_phase.Dropped -> "#6b7280"
+  | Goal_phase.Paused _ -> "#eab308"
+  | Goal_phase.Blocked _ -> "#ef4444"
 
 (* Exhaustive on [task_status], not a string match with a grey catch-all. The
    catch-all silently absorbed every label it did not recognise, which is how a
@@ -255,10 +257,15 @@ let goal_event_timeline_json event =
            string 'unknown'".  Bracketed markers are not emitted by
            any producer, so a non-zero appearance is an unambiguous
            producer-side fix signal. *)
-        let phase =
-          payload_field "phase" |> json_to_string_opt
-          |> Option.value ~default:"<missing payload.phase>"
-        in
+        let decoded_phase = Goal_phase.of_fields payload in
+        let phase = match decoded_phase with
+          | Ok phase -> Goal_phase.to_string phase
+          | Error _ -> payload_field "phase" |> json_to_string_opt
+              |> Option.value ~default:"<missing payload.phase>" in
+        let restoration = match decoded_phase with
+          | Ok phase -> (match Goal_phase.resume_phase phase with
+              | Some target -> "; resumes " ^ Goal_phase.to_string target | None -> "")
+          | Error _ -> "" in
         (* [payload.actor] is the agent name, a bare string: every producer
            builds it that way ([gate_event_payload] and the two inline
            payloads in workspace_goals.ml). Reading it as [actor.id] made
@@ -288,11 +295,11 @@ let goal_event_timeline_json event =
            78 goal_phase rows carry one of the six known tokens, so nothing
            in the store moves to `warn` because of this. *)
         let severity =
-          match Goal_phase.of_string phase with
-          | Some (Executing | Verifying | Awaiting_confirmation | Completed | Dropped) -> "ok"
-          | None -> "warn"
+          match decoded_phase with
+          | Ok (Executing | Verifying | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _) -> "ok"
+          | Error _ -> "warn"
         in
-        ("Goal Phase", Printf.sprintf "phase=%s by %s" phase actor, severity)
+        ("Goal Phase", Printf.sprintf "phase=%s%s by %s" phase restoration actor, severity)
     | "goal_edited" ->
         (* The payload holds only the fields the edit changed, each as
            {from, to}. A due date that was not set is JSON null. Anything else

@@ -16,17 +16,18 @@ let test_a_slot_granted_as_the_deadline_passes_is_owned_and_returned () =
   @@ fun () ->
   let clock = Eio_mock.Clock.make () in
   Eio_mock.Clock.set_time clock 0.0;
-  let scheduler = Slot_scheduler.create ~max_slots:1 in
+  let scheduler = Slot_scheduler.create ~max_slots:1 ~priority_run_limit:None in
   Eio.Switch.run
   @@ fun sw ->
   let ran = ref false in
   let waiter =
-    Slot_scheduler.with_permit scheduler (fun () ->
+    Slot_scheduler.with_permit ~admission_class:Llm_provider.Admission_class.Standard scheduler (fun () ->
       (* The only slot is held here. The waiter joins the queue and sleeps
          toward its deadline; [fork_promise] runs it until it blocks. *)
       let waiter =
         Eio.Fiber.fork_promise ~sw (fun () ->
-          Slot_scheduler.with_permit_until ~clock ~deadline_at:deadline_s scheduler (fun () ->
+          Slot_scheduler.with_permit_until ~clock ~deadline_at:deadline_s
+            ~admission_class:Llm_provider.Admission_class.Standard scheduler (fun () ->
             ran := true))
       in
       check
@@ -56,15 +57,16 @@ let test_a_wait_that_ends_before_any_grant_leaves_the_queue () =
   @@ fun () ->
   let clock = Eio_mock.Clock.make () in
   Eio_mock.Clock.set_time clock 0.0;
-  let scheduler = Slot_scheduler.create ~max_slots:1 in
+  let scheduler = Slot_scheduler.create ~max_slots:1 ~priority_run_limit:None in
   Eio.Switch.run
   @@ fun sw ->
   let release, resolve_release = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-    Slot_scheduler.with_permit scheduler (fun () -> Eio.Promise.await release));
+    Slot_scheduler.with_permit ~admission_class:Llm_provider.Admission_class.Standard scheduler (fun () -> Eio.Promise.await release));
   let waiter =
     Eio.Fiber.fork_promise ~sw (fun () ->
-      Slot_scheduler.with_permit_until ~clock ~deadline_at:deadline_s scheduler (fun () ->
+      Slot_scheduler.with_permit_until ~clock ~deadline_at:deadline_s
+            ~admission_class:Llm_provider.Admission_class.Standard scheduler (fun () ->
         fail "no slot was free; the waiter must not run"))
   in
   Eio_mock.Clock.set_time clock deadline_s;
@@ -89,7 +91,7 @@ let test_a_holder_cancelled_with_the_slot_returns_it_to_the_next_waiter () =
   @@ fun () ->
   let clock = Eio_mock.Clock.make () in
   Eio_mock.Clock.set_time clock 0.0;
-  let scheduler = Slot_scheduler.create ~max_slots:1 in
+  let scheduler = Slot_scheduler.create ~max_slots:1 ~priority_run_limit:None in
   Eio.Switch.run
   @@ fun sw ->
   let holds, holding = Eio.Promise.create () in
@@ -98,7 +100,7 @@ let test_a_holder_cancelled_with_the_slot_returns_it_to_the_next_waiter () =
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Fiber.first
       (fun () ->
-         Slot_scheduler.with_permit scheduler (fun () ->
+         Slot_scheduler.with_permit ~admission_class:Llm_provider.Admission_class.Standard scheduler (fun () ->
            Eio.Promise.resolve holding ();
            Eio.Fiber.await_cancel ()))
       (fun () -> Eio.Promise.await cancel_the_holder));
@@ -107,7 +109,8 @@ let test_a_holder_cancelled_with_the_slot_returns_it_to_the_next_waiter () =
   let ran = ref false in
   let waiter =
     Eio.Fiber.fork_promise ~sw (fun () ->
-      Slot_scheduler.with_permit_until ~clock ~deadline_at:deadline_s scheduler (fun () ->
+      Slot_scheduler.with_permit_until ~clock ~deadline_at:deadline_s
+            ~admission_class:Llm_provider.Admission_class.Standard scheduler (fun () ->
         ran := true))
   in
   check

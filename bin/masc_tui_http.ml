@@ -610,10 +610,9 @@ let http_delete ~(host : string) ~(port : int) ~(path : string) =
 let list_play_invites ~host ~port =
   get_json ~host ~port ~path:"/api/v1/play/invites"
 
-(* The play routes say why in [message]; the shared refusal reads only the
-   [error] code, which leaves the operator with "HTTP 409: not_ready". The
-   credential's own 401 and 403, and a body with no sentence in it, keep the
-   shared wording. *)
+(* The play routes add [missing] and [taken_by] to the refusal sentence; the
+   shared refusal shows only the sentence. The credential's own 401 and 403,
+   and a body with no sentence in it, keep the shared wording. *)
 let play_mutation_outcome = function
   | Ok (status_code, body) as answer when status_code >= 400 && status_code < 500 ->
     (match Masc.Tui_decode.play_invite_refusal ~status_code ~body with
@@ -763,22 +762,29 @@ let post_msx_checkpoint ~host ~port ~restore ~slot =
    instead of a plain frame read so a game flows even when no keeper is pressing.
    The step size is the server's default -- the cadence policy lives there, not
    here -- so the body carries no frame count. Transport/shape errors remain
-   distinct from [Ok None] (no machine); a lost mutation response must not
+   distinct from [Advanced (None, None)] (no machine) and [Not_started]
+   (known activity refusal); a lost mutation response must not
    silently trigger another automatic tick. The operator bearer is captured once.
    Only validated pixels are retained; every tick supplies fresh metadata. *)
 let msx_tick_cache = Masc_tui_msx_tick.create ()
 
 let tick_msx ~(host : string) ~(port : int) :
-    (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result =
+    (Masc_tui_msx_tick.response, string) result =
   let headers = auth_headers () in
   let request ~body =
     match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers
         ~host ~port ~path:msx_tick_path ~body with
     | Error _ as error -> error
-    | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
+    | Ok (status_code, body) ->
+        (* Only the tick decoder may interpret a typed activity refusal. *)
+        Result.map (fun json -> status_code,json)
+          (decode_json ~allow_empty:false ~status_code:(if status_code=409 then 200 else status_code) ~body)
   in
   Masc_tui_msx_tick.fetch msx_tick_cache ~host ~port ~headers ~request
 ;;
+
+let fetch_msx_activity ~host ~port =
+  Result.bind (get_json ~host ~port ~path:"/api/v1/msx/activity") Masc_tui_msx_tick.decode_activity
 
 
 let keeper_chat_body ?expected_workspace ~admission_intent ~since_seq request =
@@ -1400,13 +1406,12 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
     fetch already returns; the pane passes a cursor, so it is required here.
     Defined before {!fetch_keeper_context_inspector}, which reads the answer
     to a turn through it. *)
-(** One page of a turn's journal
-    ([GET /api/v1/keepers/:name/chat/events?operation_id=&since_seq=&since_offset=&limit=],
-    RFC-0412 §3.2). The page is checked against the operation it was asked
+(** One page from the operation or autonomous-turn endpoint selected by its
+    typed source. The page is checked against the exact source it was asked
     for; every failure is typed ({!Masc_tui_keeper_chat_log.events_error}) so
     the caller decides by code, not by reading the server's sentence. *)
 let fetch_keeper_chat_events ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(operation_id : string)
+    ~(keeper_name : string) ~(source : Masc_tui_keeper_chat_log.journal_source)
     ~(since_seq : Masc.Keeper_chat_event_log.replay_position)
     ~(since_offset : Masc.Keeper_chat_event_log.page_start) ~(limit : int) :
     ( Masc_tui_keeper_chat_log.events_page
@@ -1416,11 +1421,8 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
      the module that decodes the answer ([Masc_tui_keeper_chat_log]), where a
      test can reach it. *)
   let path =
-    Printf.sprintf "/api/v1/keepers/%s/chat/events?%s"
-      (percent_encode_path_segment keeper_name)
-      (Masc_tui_keeper_chat_log.events_query
-         ~encode_value:percent_encode_query_value ~operation_id ~since_seq
-         ~since_offset ~limit)
+    Masc_tui_keeper_chat_log.journal_path ~encode_value:percent_encode_path_segment
+      ~keeper_name ~source ~since_seq ~since_offset ~limit
   in
   match http_get ~host ~port ~path with
   | Error detail -> Error (Masc_tui_keeper_chat_log.Events_transport detail)
@@ -1433,14 +1435,9 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
       | json -> (
           match Masc_tui_keeper_chat_log.decode_events_page json with
           | Error detail -> Error (Masc_tui_keeper_chat_log.Events_undecodable detail)
-          | Ok page
-            when not
-                   (String.equal page.Masc_tui_keeper_chat_log.operation_id
-                      operation_id) ->
-              Error
-                (Masc_tui_keeper_chat_log.Events_undecodable
-                   (Printf.sprintf "page is for operation %s, asked for %s"
-                      page.Masc_tui_keeper_chat_log.operation_id operation_id))
+          | Ok page when page.Masc_tui_keeper_chat_log.source <> source ->
+              Error (Masc_tui_keeper_chat_log.Events_undecodable
+                "journal page source does not match the requested source")
           | Ok page -> Ok page)
       | exception Yojson.Json_error detail ->
           Error
@@ -1469,6 +1466,19 @@ let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
       | exception Yojson.Json_error detail ->
           Error ("chat history page was not JSON: " ^ detail))
 
+let fetch_keeper_memory_input ~host ~port ~keeper_name =
+  let path = Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
+      (percent_encode_path_segment keeper_name) Masc_tui_memory_usage.page_limit in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (named_refusal "Memory input" ~status ~body)
+  | Ok (_, body) ->
+      (match Yojson.Safe.from_string body with
+       | json -> Masc_tui_memory_usage.decode ~keeper:keeper_name json
+       | exception Yojson.Json_error detail ->
+           Error ("Memory input was not JSON: " ^ detail))
+
 (** Fetch one completed turn and the immutable provider-input snapshot joined
     by that turn's exact [turn_ref]. A failure on either side stays visible;
     no mutable latest-prompt value is allowed to fill another turn. *)
@@ -1489,7 +1499,8 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
   let encoded = percent_encode_path_segment keeper_name in
   let turn =
     fetch ~label:"turn-records"
-      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=50" encoded)
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
+               encoded Masc_tui_memory_usage.page_limit)
       ~decode:Masc_tui_context_inspector.decode_turn_records
   in
   (* Which row the exact provider input is read for. Stepping back names the
@@ -1696,38 +1707,6 @@ let post_keeper_observed_turn_interrupt ~on_control_token ~host ~port ~keeper_na
     result
 ;;
 
-let fetch_keeper_chat_operation ~(host : string) ~(port : int)
-    (request : Masc_tui_keeper_chat_projection.request) :
-    ( Masc_tui_keeper_chat_projection.operation_reconciliation
-    , Masc_tui_keeper_chat_projection.error )
-    result =
-  let path =
-    Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
-      (percent_encode_path_segment request.keeper_name)
-      (percent_encode_path_segment request.request_id)
-  in
-  match http_get ~host ~port ~path with
-  | Error detail ->
-      Error (Masc_tui_keeper_chat_projection.Transport_error detail)
-  | Ok (status, response_body)
-    when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error
-        (Masc_tui_keeper_chat_projection.Http_error
-           { status; body = response_body })
-  | Ok (_, response_body) ->
-      (match Yojson.Safe.from_string response_body with
-       | json ->
-           Masc_tui_keeper_chat_projection.decode_operation_reconciliation
-             ~request json
-           |> Result.map_error (fun error ->
-                  Masc_tui_keeper_chat_projection.protocol_error error)
-       | exception Yojson.Json_error detail ->
-           Error
-             (Masc_tui_keeper_chat_projection.protocol_error
-                (Masc_tui_keeper_chat_projection.Malformed_event
-                   ("Keeper chat operation response is invalid JSON: "
-                  ^ detail))))
-
 (** Fetch the live keeper roster from [GET /api/v1/gate/keepers].
 
     The Keepers surface needs one fact the durable metadata on disk cannot
@@ -1739,10 +1718,13 @@ let fetch_keeper_chat_operation ~(host : string) ~(port : int)
     The status is returned rather than folded into an error string: this route
     requires an operator token, and "no token" is a different thing for the
     surface to say than "the read failed". *)
-let fetch_keeper_runtimes ~(host : string) ~(port : int) ~expected_workspace :
+let fetch_keeper_runtimes ~(host : string) ~(port : int)
+    ~(expected_workspace : Masc.Tui_decode.server_identity) :
     (int * string, string) result =
   http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&expected_workspace="
-    ^ percent_encode_path_segment expected_workspace)
+    ^ percent_encode_path_segment (Masc_tui_types.canonical_path expected_workspace.sid_base_path)
+    ^ "&expected_masc_root="
+    ^ percent_encode_path_segment (Masc_tui_types.canonical_path expected_workspace.sid_masc_root))
 
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 
@@ -1763,13 +1745,17 @@ let post_keeper_lifecycle ~(host : string) ~(port : int) ~(keeper_name : string)
 (** POST a keeper directive ([pause] / [resume] / [wakeup]). *)
 let post_keeper_directive ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(action : string)
-    ~(operator_operation_id : string) : (int * string, string) result =
+    ~(operator_operation_id : string) ~(expected_workspace : Masc.Tui_decode.server_identity)
+    : (int * string, string) result =
+  let expected_workspace = { expected_workspace with
+    sid_base_path = Masc_tui_types.canonical_path expected_workspace.sid_base_path;
+    sid_masc_root = Masc_tui_types.canonical_path expected_workspace.sid_masc_root } in
   let path =
     Printf.sprintf "/api/v1/keepers/%s/directive"
       (percent_encode_path_segment keeper_name)
   in
   let body =
-    Masc_tui_keeper_control.directive_body ~operator_operation_id action
+    Masc_tui_keeper_control.directive_body ~expected_workspace ~operator_operation_id action
   in
   http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
 
@@ -1880,7 +1866,7 @@ let post_runtime_assignment ~(host : string) ~(port : int)
     error rather than a guessed success, matching [tool_envelope_outcome]. *)
 let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       ~(expected_runtime_ids : string list) ~(runtime_ids : string list) :
-      (unit, string) result =
+      (runtime_config_commit_receipt, string) result =
   let ( let* ) = Result.bind in
   (* The candidate order and revision must come from the same file read.
      /runtime/resolved is a separately published in-process snapshot and can
@@ -1913,7 +1899,6 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       ; "expected_source_revision", `String revision ]) in
     let* json = post_json ~host ~port ~path:"/api/v1/runtime/config/routing" ~body in
     decode_runtime_config_commit_receipt json
-    |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 
 (* The routing API names a standalone lane's walk order "exact/<name>", which
    keeps its names apart from conversation-lane ids. *)
@@ -1927,7 +1912,6 @@ let post_runtime_lane_action ~host ~port fields =
   | Error detail -> Error detail
   | Ok json ->
     decode_runtime_config_commit_receipt json
-    |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 ;;
 
 (** POST /api/v1/runtime/config/routing for [\[runtime\].media_failover]: the
@@ -1935,27 +1919,28 @@ let post_runtime_lane_action ~host ~port fields =
     route -- it has no per-entry action -- so a caller must know it is sending
     everything the file should hold. *)
 let set_media_failover ~(host : string) ~(port : int) ~(runtime_ids : string list)
-  : (unit, string) result =
+  : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String "media_failover"
     ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
     ]
 
-(** POST /api/v1/runtime/config/routing for [\[runtime\].default]: the runtime
-    a keeper with no assignment walks. [None] clears the entry. *)
+(** POST /api/v1/runtime/config/routing for [\[runtime\].default]: the lane
+    or runtime a keeper with no assignment walks. The wire field remains
+    [runtime_id]; [None] clears the entry. *)
 let set_runtime_default ~(host : string) ~(port : int)
-      ~(runtime_id : string option) : (unit, string) result =
+      ~(route_id : string option) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String "default"
     ; ( "runtime_id"
-      , match runtime_id with None -> `Null | Some id -> `String id )
+      , match route_id with None -> `Null | Some id -> `String id )
     ]
 
 (** POST /api/v1/runtime/config/routing with [action = "create"]: declare a
     lane under [lane] with [runtime_ids] as its candidates. The server refuses
     a name the file already declares. *)
 let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
-      ~(runtime_ids : string list) : (unit, string) result =
+      ~(runtime_ids : string list) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String lane
     ; "action", `String "create"
@@ -1967,7 +1952,7 @@ let create_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     header and every reference to it -- assignments and [\[runtime\].default] --
     in one validated write, because a lane's name is its routing key. *)
 let rename_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
-      ~(new_lane : string) : (unit, string) result =
+      ~(new_lane : string) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String lane
     ; "action", `String "rename"
@@ -1981,7 +1966,7 @@ let rename_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     writer added in between is kept. The server refuses an id the lane already
     declares. *)
 let append_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
-      ~(runtime_id : string) : (unit, string) result =
+      ~(runtime_id : string) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String (exact_lane_route lane)
     ; "action", `String "append"
@@ -2002,7 +1987,7 @@ type exact_slot_move =
     declared slot it rejected. The server refuses a slot the lane does not
     declare, and its last one. *)
 let drop_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
-      ~(runtime_id : string) : (unit, string) result =
+      ~(runtime_id : string) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String (exact_lane_route lane)
     ; "action", `String "drop"
@@ -2014,7 +1999,7 @@ let drop_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane
     id and a direction for the same reason as the drop. The server refuses a
     slot already at the end the move heads for. *)
 let move_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
-      ~(runtime_id : string) ~(move : exact_slot_move) : (unit, string) result =
+      ~(runtime_id : string) ~(move : exact_slot_move) : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String (exact_lane_route lane)
     ; "action", `String "move"
@@ -2035,7 +2020,7 @@ let replace_exact_lane_slot ~host ~port ~lane ~runtime_id ~replacement_runtime_i
     through it -- an assignment, or [\[runtime\].default] for every keeper
     without one -- and names each. *)
 let remove_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
-    : (unit, string) result =
+    : (runtime_config_commit_receipt, string) result =
   post_runtime_lane_action ~host ~port
     [ "lane", `String lane; "action", `String "remove" ]
 ;;
@@ -2274,7 +2259,7 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     stamps the author from the HTTP auth resolver, so the payload carries
     text only. The response is the tools envelope [{ok, message}]; interpreting
     it stays with the caller. *)
-let board_workspace_field (identity : Masc.Tui_decode.server_identity) =
+let expected_workspace_field (identity : Masc.Tui_decode.server_identity) =
   "expected_workspace", `Assoc
     [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
     ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
@@ -2288,7 +2273,7 @@ let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : 
   in
   let payload =
     `Assoc
-      ([ board_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
+      ([ expected_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
       @ hearth_field)
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
@@ -2308,12 +2293,13 @@ let post_goal_confirmation ~host ~port confirmation =
     local literal, so the TUI and the tool cannot disagree about what
     "drop" means. The server owns the phase rules; an invalid transition is
     its rejection to return, not the TUI's to pre-guess. *)
-let post_goal_transition ~(host : string) ~(port : int) ~(goal_id : string)
-    ~(action : Goal_phase.Public_action.t)
+let post_goal_transition ~expected_workspace ~(host : string) ~(port : int)
+    ~(goal_id : string) ~(action : Goal_phase.Public_action.t)
     ~(note : string option) : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
-      ([ ("goal_id", `String goal_id)
+      ([ expected_workspace_field expected_workspace
+       ; ("goal_id", `String goal_id)
        ; ("action", `String (Goal_phase.Public_action.to_string action))
        ]
       @
@@ -2330,7 +2316,7 @@ let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id
     ~(up : bool) : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
-      [ board_workspace_field expected_workspace
+      [ expected_workspace_field expected_workspace
       ; ("post_id", `String post_id)
       ; ("direction", `String (if up then "up" else "down"))
       ]
@@ -2343,7 +2329,7 @@ let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id
 let post_board_comment ~expected_workspace ~(host : string) ~(port : int) ~(post_id : string)
     ~(content : string) : (Yojson.Safe.t, string) result =
   let payload =
-    `Assoc [ board_workspace_field expected_workspace; ("post_id", `String post_id); ("content", `String content) ]
+    `Assoc [ expected_workspace_field expected_workspace; ("post_id", `String post_id); ("content", `String content) ]
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
     ~body:(Yojson.Safe.to_string payload)
@@ -2413,26 +2399,6 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
       ]
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
-    ~body:(Yojson.Safe.to_string payload)
-
-(** POST /api/v1/tools/masc_schedule_create. The payload is the tool's own
-    argument contract; the kind-specific timing fields arrive already
-    assembled by the caller (the form's typed spec builds them), and time
-    syntax, cron text, and timezone spellings stay the tool's to validate.
-    The server records the credential's actor as requester and scheduler. *)
-let post_schedule_create ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(message : string)
-    ~(timing_fields : (string * Yojson.Safe.t) list) :
-    (Yojson.Safe.t, string) result =
-  let payload =
-    `Assoc
-      ([ ("keeper_name", `String keeper_name)
-       ; ("message", `String message)
-       ; ("source", `String "operator_request")
-       ]
-      @ timing_fields)
-  in
-  post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_create"
     ~body:(Yojson.Safe.to_string payload)
 
 (** POST /api/v1/verification/verdict — the operator's verdict on a task
@@ -2669,10 +2635,10 @@ let fetch_keeper_lanes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/keepers/composite"
 
-(** Fetch the read-only standalone-lane admission and observation matrix. *)
-let fetch_standalone_lanes ~(host : string) ~(port : int) :
+(** Fetch all Lane families from their read-only operator inventory. *)
+let fetch_lane_inventory ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/dashboard/standalone-lanes"
+  get_json ~host ~port ~path:"/api/v1/lanes"
 
 (** Fetch /api/v1/repositories. *)
 let fetch_repositories ~(host : string) ~(port : int) :
@@ -2910,17 +2876,62 @@ let post_runtime_config_preview ~(host : string) ~(port : int)
   post_json ~host ~port ~path:"/api/v1/runtime/config/raw/preview"
     ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
 
-(** POST /api/v1/runtime/config/raw — write the edited text. Callers go
-    through the preview first; this route also validates, so a race still
-    fails closed. *)
+type runtime_config_save_error =
+  | Runtime_config_conflict of Masc_tui_runtime_config_edit.document
+  | Runtime_config_save_refused of string
+  | Runtime_config_save_unconfirmed of string
+
+let runtime_config_save_error_message = function
+  | Runtime_config_conflict _ -> "The file changed after this draft was opened. Compare the current file before saving."
+  | Runtime_config_save_refused detail -> detail
+  | Runtime_config_save_unconfirmed detail ->
+    detail ^ " The file may already have changed; read the current file before retrying."
+
+let runtime_config_text_revision ~path source_text =
+  let observation = Runtime.config_observation ~path source_text in
+  Runtime.config_source_revision_to_string observation.source_revision
+
+let runtime_config_conflict_document body =
+  let ( let* ) = Result.bind in
+  let* json = try Ok (Yojson.Safe.from_string body)
+    with Yojson.Json_error detail -> Error detail in
+  let* current = match Json_util.assoc_member_opt "code" json, Json_util.assoc_member_opt "current" json with
+    | Some (`String "revision_conflict"), Some (`Assoc _ as current) -> Ok current
+    | _ -> Error "Malformed configuration conflict response" in
+  match Json_util.assoc_member_opt "source_path" current,
+        Json_util.assoc_member_opt "source_text" current,
+        Json_util.assoc_member_opt "source_revision" current with
+  | Some (`String path), Some (`String source_text), Some (`String source_revision)
+    when path <> "" && String_util.is_lowercase_sha256_hex source_revision
+      && String.equal source_revision (runtime_config_text_revision ~path source_text) ->
+    Ok { Masc_tui_runtime_config_edit.path; source_text; source_revision }
+  | _ -> Error "Configuration conflict document has an invalid source revision"
+
+(** Both the preview and guarded save validate, but only the save compares the
+    captured source revision under the server write lock. *)
 let post_runtime_config_raw ~(host : string) ~(port : int)
-    ~(source_text : string) : (runtime_config_commit_receipt, string) result =
-  match
-    post_json ~host ~port ~path:"/api/v1/runtime/config/raw"
-      ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
-  with
-  | Error _ as error -> error
-  | Ok json -> decode_runtime_config_commit_receipt json
+    ~(source_text : string) ~(expected_source_revision : string) ~(expected_source_path : string)
+    : (runtime_config_commit_receipt, runtime_config_save_error) result =
+  let body = Yojson.Safe.to_string (`Assoc
+    [ "source_text", `String source_text;
+      "expected_source_revision", `String expected_source_revision;
+      "expected_source_path", `String expected_source_path ]) in
+  match http_post ~headers:(auth_headers ()) ~host ~port
+      ~path:"/api/v1/runtime/config/raw" ~body with
+  | Error detail -> Error (Runtime_config_save_unconfirmed detail)
+  | Ok (409, body) ->
+    (match runtime_config_conflict_document body with
+     | Ok current -> Error (Runtime_config_conflict current)
+     | Error detail -> Error (Runtime_config_save_unconfirmed detail))
+  | Ok (status_code, body) when status_code >= 400 && status_code < 500 ->
+    Error (Runtime_config_save_refused (refusal ~status_code ~body))
+  | Ok (status_code, body) ->
+    (match Result.bind (decode_json ~allow_empty:false ~status_code ~body)
+        decode_runtime_config_commit_receipt with
+     | Ok receipt when String.equal receipt.source_revision
+         (runtime_config_text_revision ~path:"" source_text) -> Ok receipt
+     | Ok _ -> Error (Runtime_config_save_unconfirmed "Save receipt does not match the submitted draft.")
+     | Error detail -> Error (Runtime_config_save_unconfirmed detail))
 
 type skill_editor_loaded =
   { sel_reference : Skill_reference.t
@@ -3162,6 +3173,12 @@ let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
     | Ok json -> Ok json
     | Error message -> Error (`Refused message))
 
+(** POST /api/v1/presets/delete — body {name}: the server removes that preset
+    directory, whether or not it loads. *)
+let post_preset_delete ~(host : string) ~(port : int) ~(name : string) : post_outcome =
+  post_json_outcome ~host ~port ~path:"/api/v1/presets/delete"
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("name", `String name) ]))
+
 (** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
 let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)
     ~(body_json : string) : (Yojson.Safe.t, string) result =
@@ -3337,7 +3354,7 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
     ([GET /api/v1/keepers/asks]).
 
     Open questions only. The rows carry choice ids next to labels and
-    {!submit_keeper_ask_answer} takes ids back, so nothing on this side ever
+    {!post_keeper_ask_answer} takes ids back, so nothing on this side ever
     matches a choice by its wording. *)
 let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
     (Masc.Tui_decode_asks.asks_snapshot, string) result =
@@ -3365,50 +3382,6 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode_asks.decode_asks_snapshot json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
-
-(** Answer one question of one ask ([POST /api/v1/keepers/ask-answer]).
-
-    A [409] is not a transport failure: another surface answered first. The
-    body carries what landed, and the caller surfaces that rather than
-    retrying — resubmitting would only lose again, and the operator needs to
-    see the decision that stands. *)
-let submit_keeper_ask_answer ~(host : string) ~(port : int) ~(keeper_name : string)
-    ~(ask_id : string) ~(question_id : string) ~(choice_ids : string list) :
-    (unit, string) result =
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("name", `String keeper_name);
-          ("ask_id", `String ask_id);
-          ( "answers",
-            `List
-              [
-                `Assoc
-                  [
-                    ("question_id", `String question_id);
-                    ( "response",
-                      `Assoc
-                        [
-                          ("kind", `String "chose");
-                          ( "choice_ids",
-                            `List (List.map (fun id -> `String id) choice_ids) );
-                        ] );
-                  ];
-              ] );
-        ])
-  in
-  match
-    http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/keepers/ask-answer" ~body
-  with
-  | Error detail -> Error detail
-  | Ok (status, response_body) when Masc.Tui_decode.is_success_http_status status ->
-      let (_ : string) = response_body in
-      Ok ()
-  | Ok (409, response_body) ->
-      Error (named_refusal "another surface answered first" ~status:409 ~body:response_body)
-  | Ok (status, response_body) ->
-      Error (named_refusal "answer" ~status ~body:response_body)
 
 (** Browser Lane shares the authenticated TUI transport. Reads are POST because
     selecting the Firefox tab belongs to the request body. *)

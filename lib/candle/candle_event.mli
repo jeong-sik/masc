@@ -90,6 +90,19 @@ type body =
       ; item : Keeper_portrait_item.t
       ; amount_milli : int
       }
+  | Granted of { keeper : string; amount_milli : int; reason : string }
+      (** An operator gift outside any Goal: the reason names the occasion and
+          is the duplicate key with the keeper. A zero or negative amount and
+          a blank keeper or reason fail the decode. *)
+  | Gifted of { from_keeper : string; to_keeper : string; amount_milli : int; reason : string }
+      (** A keeper-to-keeper money gift: a transfer, never issuance. The
+          (from, to, reason) triple is the duplicate key. A zero or negative
+          amount, blank names or reason, and a gift to self fail the
+          decode. *)
+  | Gifted_item of { from_keeper : string; to_keeper : string; item : Keeper_portrait_item.t }
+      (** A keeper-to-keeper item gift: ownership moves, and a worn item
+          comes off the giver. Blank names, an unknown item, and a gift to
+          self fail the decode. *)
   | Equipped of { keeper : string; slot : Keeper_portrait_item.slot; choice : equipment_choice }
   | Payout_failed of { goal_id : string; request_id : string; verification_run_id : string; due_date : string }
 

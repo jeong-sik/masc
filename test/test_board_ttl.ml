@@ -199,9 +199,9 @@ let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
   Alcotest.(check int) "the expired reply was swept" 1 removed_comments;
   Alcotest.(check int) "the count follows the swept reply" 1 (reply_count ());
   Alcotest.(check int) "the count matches the replies a read returns" 1
-    (match get_post_and_comments store ~post_id with
+    (match read_post_and_comments store ~post_id with
      | Ok (_, comments) -> List.length comments
-     | Error e -> Alcotest.fail (show_board_error e))
+     | Error e -> Alcotest.fail (show_board_read_error e))
 
 (* A swept post takes its comments with it, or they strand with a dangling
    post_id no read can reach. *)

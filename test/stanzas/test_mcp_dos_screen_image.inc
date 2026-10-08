@@ -5,4 +5,4 @@
  (name test_mcp_dos_screen_image)
  (modules test_mcp_dos_screen_image)
  (action (run %{test}))
- (libraries masc_test_deps alcotest yojson unix eio eio_main base64 mirage-crypto-rng.unix masc.masc_core masc.dos_lane))
+ (libraries masc.machine_configuration masc_test_deps alcotest yojson unix eio eio_main base64 mirage-crypto-rng.unix masc.masc_core masc.dos_lane))

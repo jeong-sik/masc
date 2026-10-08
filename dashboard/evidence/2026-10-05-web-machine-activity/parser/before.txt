@@ -1,0 +1,106 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-machine-activity-20261005/dashboard
+
+ ❯ src/lib/machine-lane-activity.test.ts (41 tests | 6 failed) 974ms
+   ❯ machine activity prototype isolation (9)
+     × does not hide or inherit keys: [__proto__.machines.msx]
+enabled = false 136ms
+     × does not hide or inherit keys: __proto__.machines.msx.enabled = false 102ms
+     × does not hide or inherit keys: [machines.__proto__]
+enabled = false 102ms
+     × does not hide or inherit keys: [machines]
+__proto__ = true 105ms
+     × does not hide or inherit keys: [machines.msx]
+__proto__ = true 104ms
+     × does not hide or inherit keys: [machines.msx.__proto__]
+enabled = false 102ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [__proto__.machines.msx]
+enabled = false
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: __proto__.machines.msx.enabled = false
+AssertionError: expected [ '__defineGetter__', …(12) ] to deeply equal [ '__defineGetter__', …(11) ]
+
+- Expected
++ Received
+
+@@ -5,10 +5,11 @@
+    "__lookupSetter__",
+    "__proto__",
+    "constructor",
+    "hasOwnProperty",
+    "isPrototypeOf",
++   "machines",
+    "propertyIsEnumerable",
+    "toLocaleString",
+    "toString",
+    "valueOf",
+  ]
+
+ ❯ src/lib/machine-lane-activity.test.ts:86:26
+     84|     const result = JSON.parse(execFileSync(process.execPath,
+     85|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     86|     expect(result.after).toEqual(result.before)
+       |                          ^
+     87|     expect(result.empty).toEqual({ value: { enabled: true } })
+     88|     if (rejects) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [machines.__proto__]
+enabled = false
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [machines.msx.__proto__]
+enabled = false
+AssertionError: expected [ '__defineGetter__', …(12) ] to deeply equal [ '__defineGetter__', …(11) ]
+
+- Expected
++ Received
+
+@@ -3,10 +3,11 @@
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+    "__proto__",
+    "constructor",
++   "enabled",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toLocaleString",
+    "toString",
+
+ ❯ src/lib/machine-lane-activity.test.ts:86:26
+     84|     const result = JSON.parse(execFileSync(process.execPath,
+     85|       ['--import', 'tsx', '--input-type=module', '--eval', script], { …
+     86|     expect(result.after).toEqual(result.before)
+       |                          ^
+     87|     expect(result.empty).toEqual({ value: { enabled: true } })
+     88|     if (rejects) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [machines]
+__proto__ = true
+ FAIL  src/lib/machine-lane-activity.test.ts > machine activity prototype isolation > does not hide or inherit keys: [machines.msx]
+__proto__ = true
+AssertionError: expected undefined to be type of 'string'
+
+Expected: "string"
+Received: "undefined"
+
+ ❯ src/lib/machine-lane-activity.test.ts:89:33
+     87|     expect(result.empty).toEqual({ value: { enabled: true } })
+     88|     if (rejects) {
+     89|       expect(result.read.error).toBeTypeOf('string')
+       |                                 ^
+     90|       expect(result.write.error).toBeTypeOf('string')
+     91|     } else {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 35 passed (41)
+   Start at  03:40:05
+   Duration  1.33s (tests 79%, environment 9%, setup 7%, transform 4%, import 1%)

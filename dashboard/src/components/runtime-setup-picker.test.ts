@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { render, fireEvent, screen, waitFor, cleanup } from '@testing-library/preact'
 import { afterEach, expect, it, vi } from 'vitest'
+import { discoverSetupModels, saveSetupSelections } from '../api/runtime-setup'
 import { RuntimeSetupPicker } from './runtime-setup-picker'
 import { post, postControlPlane } from '../api/core'
 import { modelSetupResumeState } from '../lib/model-setup-resume'
@@ -449,6 +450,29 @@ it.each([['codex', 'codex-app-server'], ['claude', 'claude-code']])('uses docume
     selection: [{ connection: 0, model: 0 }],
   }))
   expect(vi.mocked(post).mock.calls.some(([path]) => path.endsWith('/context'))).toBe(false)
+})
+
+it.each([true, false, undefined])('preserves image capability %s through discovery and save', async capability => {
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/models')) return { models: [{ id: 'image-model', context: 4096,
+      ...(capability === undefined ? {} : { supports_image_input: capability }) }] }
+    return { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'image-model', runtime_ids: ['image-model'] }
+  })
+  const source = { integration_id: 'openrouter' }
+  const [model] = await discoverSetupModels(source)
+  if (!model) throw new Error('discovery returned no model')
+  expect(model.supports_image_input).toBe(capability)
+  await saveSetupSelections('revision', [{ kind: 'new', source, model, label: 'Image model' }])
+  const call = vi.mocked(post).mock.calls.find(([path]) => path.endsWith('/connections'))
+  expect(call?.[1]).toEqual({ revision: 'revision', connections: [{ source, models: [{
+    id: 'image-model', context: 4096, streaming: true,
+    ...(capability === undefined ? {} : { supports_image_input: capability }),
+  }] }], selection: [{ connection: 0, model: 0 }] })
+})
+
+it('rejects malformed image capability metadata', async () => {
+  vi.mocked(post).mockResolvedValue({ models: [{ id: 'bad-image', context: 4096, supports_image_input: 'true' }] })
+  await expect(discoverSetupModels({ integration_id: 'openrouter' })).rejects.toThrow('Invalid model image capability metadata')
 })
 
 it('identifies grouped accounts by reported email and keeps duplicate runtime connections distinguishable', async () => {

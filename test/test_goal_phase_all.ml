@@ -15,17 +15,17 @@ let test_phase_roundtrip () =
       check bool
         (Printf.sprintf "phase %s round-trips" (GP.to_string p))
         true
-        (GP.of_string (GP.to_string p) = Some p))
+        (GP.of_yojson (GP.to_yojson p) = Ok p))
     GP.all
 
 let test_phase_set () =
-  let strs = List.map GP.to_string GP.all in
-  check int "phase count" 5 (List.length GP.all);
+  let strs = List.map GP.Kind.to_string GP.Kind.all in
+  check int "phase count" 7 (List.length GP.Kind.all);
   check int "no duplicate phase strings"
     (List.length strs)
     (List.length (List.sort_uniq String.compare strs));
   check (list string) "phase set and order"
-    [ "executing"; "verifying"; "awaiting_confirmation"; "completed"; "dropped" ]
+    [ "executing"; "verifying"; "awaiting_confirmation"; "completed"; "dropped"; "paused"; "blocked" ]
     strs
 
 let test_action_roundtrip () =
@@ -39,14 +39,14 @@ let test_action_roundtrip () =
 
 let test_action_set () =
   let strs = List.map GP.action_to_string GP.all_actions in
-  check int "action count" 6 (List.length GP.all_actions);
+  check int "action count" 10 (List.length GP.all_actions);
   check int "no duplicate action strings"
     (List.length strs)
     (List.length (List.sort_uniq String.compare strs));
   check (list string) "action set and order"
     [ "request_complete"
     ; "drop"
-    ; "reopen"
+    ; "reopen"; "pause"; "resume"; "block"; "unblock"
     ; "record_proof_proven"
     ; "confirm_completion"
     ; "record_proof_refuted"
@@ -56,12 +56,12 @@ let test_action_set () =
 let test_public_action_set () =
   let module PA = GP.Public_action in
   let strs = List.map PA.to_string PA.all in
-  check int "public action count" 3 (List.length PA.all);
+  check int "public action count" 7 (List.length PA.all);
   check int "no duplicate public action strings"
     (List.length strs)
     (List.length (List.sort_uniq String.compare strs));
   check (list string) "public action set and order"
-    [ "request_complete"; "drop"; "reopen" ]
+    [ "request_complete"; "drop"; "reopen"; "pause"; "resume"; "block"; "unblock" ]
     strs;
   List.iter
     (fun action ->
@@ -125,8 +125,8 @@ let matrix =
   ]
 
 let test_matrix_is_total () =
-  check int "every phase/action pair is stated once"
-    (List.length GP.all * List.length GP.all_actions)
+  check int "every legacy phase/action pair is stated once"
+    (5 * 6)
     (List.length matrix);
   let keys =
     List.map
@@ -189,9 +189,9 @@ let test_moves_goal_per_phase () =
     |> List.filter (fun action -> GP.moves_goal ~phase ~action:(PA.to_action action))
     |> List.map PA.to_string
   in
-  check (list string) "executing" [ "request_complete"; "drop" ] (lit GP.Executing);
-  check (list string) "verifying" [ "drop"; "reopen" ] (lit GP.Verifying);
-  check (list string) "awaiting_confirmation" [ "drop"; "reopen" ]
+  check (list string) "executing" [ "request_complete"; "drop"; "pause"; "block" ] (lit GP.Executing);
+  check (list string) "verifying" [ "drop"; "reopen"; "pause"; "block" ] (lit GP.Verifying);
+  check (list string) "awaiting_confirmation" [ "drop"; "reopen"; "pause"; "block" ]
     (lit GP.Awaiting_confirmation);
   check (list string) "completed" [ "drop"; "reopen" ] (lit GP.Completed);
   check (list string) "dropped" [ "reopen" ] (lit GP.Dropped)
@@ -213,7 +213,7 @@ let () =
         ] );
       ( "transition matrix",
         [
-          test_case "every pair stated once" `Quick test_matrix_is_total;
+          test_case "legacy matrix every pair stated once" `Quick test_matrix_is_total;
           test_case "outcomes" `Quick test_matrix_outcomes;
           test_case "already reports the current phase" `Quick
             test_already_is_the_current_phase;

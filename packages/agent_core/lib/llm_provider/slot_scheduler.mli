@@ -1,7 +1,9 @@
-(** Fair FIFO slot scheduler for LLM requests.
+(** Slot scheduler for LLM requests.
 
-    Capacity is the only scheduling constraint. When capacity is exhausted,
-    requests are queued and granted slots in arrival order.
+    When capacity is exhausted, requests are queued by their
+    {!Admission_class.t}. Within a class, slots are granted in arrival order.
+    A scheduler created without a priority run limit has a single queue, so
+    every request is granted in arrival order whatever its class.
 
     Cancel-safe: whether a waiter owns a slot once its wait has ended is
     decided by the waiter's state transition, not by how the wait ended. A
@@ -14,12 +16,48 @@
 type t
 
 (** Create a scheduler with [max_slots] concurrent permits.
-    @raise Invalid_argument if [max_slots < 1]. *)
-val create : max_slots:int -> t
 
-(** Run [f] with a permit. If all slots are in use, the request joins the FIFO.
-    Raises the original exception if [f] fails; the permit is still released. *)
-val with_permit : t -> (unit -> 'a) -> 'a
+    With [priority_run_limit = Some limit], a freed slot goes to the oldest
+    [Priority] waiter. Once [Priority] has taken [limit] slots in a row while
+    a [Standard] waiter was queued, the next slot goes to the oldest
+    [Standard] waiter, so [Standard] gets at least one slot in every
+    [limit + 1] while both classes wait. With [None] there is one queue.
+
+    @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
+val create : max_slots:int -> priority_run_limit:int option -> t
+
+(** Change the allowance of a scheduler that may have holders and waiters.
+    A raised [max_slots] hands the new slots to waiters at once. A lowered
+    one takes effect as holders return slots: no slot is handed on while
+    more than [max_slots] are held. A waiter keeps the queue it joined; a
+    request queued after the change joins by the new run limit, and waiters
+    a removed limit left in the [Priority] queue are granted first.
+
+    @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
+val reconfigure : t -> max_slots:int -> priority_run_limit:int option -> unit
+
+(** How a wait for a slot ended. *)
+type wait_end =
+  | Wait_granted
+  | Wait_expired  (** Only a bounded wait ({!with_permit_until}) expires. *)
+
+(** Run [f] with a permit. If all slots are in use, the request queues as
+    [admission_class] (one shared queue when the scheduler has no run
+    limit). Raises the original exception if [f] fails; the permit is still
+    released.
+
+    [on_queue] watches waits: it runs when the request joins the queue, and
+    the function it returns runs once when that wait is granted (before [f])
+    or, for {!with_permit_until}, expires. A slot granted at once calls
+    neither, and a cancelled wait does not call the returned function. Both
+    run on the requesting fiber. A raise from either leaves no slot held or
+    waiter queued. *)
+val with_permit
+  :  ?on_queue:(unit -> wait_end -> unit)
+  -> admission_class:Admission_class.t
+  -> t
+  -> (unit -> 'a)
+  -> 'a
 
 (** A bounded wait for a slot as its caller sees it. The caller owns the
     cell and starts it at [Before_any_wait]; the wait writes
@@ -45,8 +83,10 @@ type permit_wait =
     it. *)
 val with_permit_until
   :  ?wait:permit_wait Atomic.t
+  -> ?on_queue:(unit -> wait_end -> unit)
   -> clock:_ Eio.Time.clock
   -> deadline_at:float
+  -> admission_class:Admission_class.t
   -> t
   -> (unit -> 'a)
   -> ('a, [> `Permit_wait_expired ]) result
@@ -63,5 +103,7 @@ type snapshot =
   ; queue_length : int
   }
 
-(** Non-blocking point-in-time capacity snapshot. *)
+(** Non-blocking point-in-time capacity snapshot. After a lowered
+    {!reconfigure}, [active] can exceed [max_slots] until holders return
+    slots; [available] is then 0. *)
 val snapshot : t -> snapshot

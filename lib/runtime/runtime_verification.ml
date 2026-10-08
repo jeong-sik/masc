@@ -611,7 +611,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
         (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~account_home:execution.account_home
            ~quota_scope:(Runtime_instance.quota_scope_of_runtime runtime) ~config
-           ~prompt_capacity:(Runtime_instance.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
+           ~reasoning_effort ~tool ~prompt with
          | Ok result ->
            (* Every call the host reported for the verification turn must have
               run on the configured model. One on another model fails, and so
@@ -634,7 +634,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                 "Muse Code ran the verification turn on %s, but the configured model is %s"
                 other execution.model))
             | None, true, _ | None, false, [] -> Error Model_unreported
-            | None, false, _ :: _ -> Ok {model=execution.model; text=result.text})
+            | None, false, _ :: _ ->
+              (match result.text with
+               | Some text -> Ok {model=execution.model; text}
+               | None -> Error Empty_response))
          | Error (Runtime_verification_muse.Home_error (Runtime_muse_home.Sign_in_required _ as error)) ->
            Error (Unavailable (Client_not_authenticated (Runtime_muse_home.error_to_string error)))
          | Error (Home_error (Runtime_muse_home.Invalid_account_home detail)) ->
@@ -854,7 +857,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
              ~prompt
              ~images:[]
          with
-         | Ok result -> Ok { model = result.model; text = result.text }
+         | Ok result ->
+           (match result.text with
+            | Some text -> Ok { model = result.model; text }
+            | None -> Error Empty_response)
          | Error (Runtime_codex_app_server.Subscription_required _ as error) ->
            Error
              (Unavailable

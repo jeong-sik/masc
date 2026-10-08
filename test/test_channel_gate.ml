@@ -140,6 +140,21 @@ let test_handle_inbound_surfaces_message_request () =
       | None -> fail "expected message_request")
   | Error e -> fail (Channel_gate.gate_error_to_string e)
 
+let test_handle_inbound_preserves_content () =
+  let content = "    첫 줄\n    둘째 줄  \n\n" in
+  let seen = ref None in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+      ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+      ~content =
+    seen := Some content;
+    Gate_protocol.Reply
+      { content = "ok"; structured = None; stats = None; message_request = None }
+  in
+  let msg = make_message ~content ~idempotency_key:(unique_key "verbatim") () in
+  match Channel_gate.handle_inbound ~dispatch msg with
+  | Ok _ -> check (option string) "original content reaches dispatch" (Some content) !seen
+  | Error error -> fail (Channel_gate.gate_error_to_string error)
+
 let test_handle_inbound_keeper_error () =
   let msg = make_message ~idempotency_key:(unique_key "dispatch-err") () in
   match Channel_gate.handle_inbound ~dispatch:mock_dispatch_error msg with
@@ -256,6 +271,8 @@ let () =
             test_handle_inbound_success;
           test_case "surfaces message_request" `Quick
             test_handle_inbound_surfaces_message_request;
+          test_case "preserves content whitespace" `Quick
+            test_handle_inbound_preserves_content;
           test_case "passes channel context to dispatch" `Quick
             test_handle_inbound_passes_channel_context_to_dispatch;
           test_case "passes metadata to dispatch" `Quick

@@ -199,7 +199,7 @@ let render_recent_direct_conversation_context
       Printf.sprintf "- %s%s: %s"
         (direct_line_role_to_label line.role) speaker line.content
     in
-    (* The header prose lives in config/prompts/keeper.world.transcript.md; a
+    (* The header prose is the [world.transcript.*] slots of config/prompts/keeper.md; a
        slot that does not render is logged and the block degrades to the bare
        rows — the transcript is the data, the framing is the template's
        (#32848 fallback contract). *)

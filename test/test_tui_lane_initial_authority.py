@@ -11,7 +11,7 @@ SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_types.ml")
 
 def run(executable):
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response()
     health = _keyboard_harness.GatedHttpResponse(
         (200, {}), subsequent_response=(200, {}), hold_seconds=20.0
     )
@@ -44,6 +44,11 @@ def run(executable):
                 process, master, output, b"Librarian", start=0, timeout=3.0
             )
             _keyboard_harness.send_and_wait(process, master, output, b"/Librarian", b"Librarian")
+            # The Librarian detail takes typed text, so q does not arm the exit
+            # while it is open. Esc closes it; q then arms and the harness
+            # confirms.
+            os.write(master, b"\x1b")
+            _keyboard_harness.drain_until_quiet(process, master, output)
             os.write(master, b"q")
         finally:
             health.release.set()

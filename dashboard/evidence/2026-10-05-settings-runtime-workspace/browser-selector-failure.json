@@ -1,0 +1,183 @@
+{
+  "error": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('현재 작업공간을 확인한 뒤 Runtime 설정을 읽고 수정할 수 있습니다.', { exact: true }) to be visible\u001b[22m\n",
+  "reads": [
+    {
+      "path": "/api/v1/dashboard/dev-token",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/config",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/tools",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "A"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/config",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/tools",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/shell",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/execution",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/keepers/deletions",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/resolved",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/providers",
+      "owner": "B"
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "owner": "B"
+    }
+  ],
+  "writes": [
+    {
+      "path": "/api/v1/runtime/config/routing",
+      "owner": "B",
+      "body": {
+        "lane": "default",
+        "runtime_id": "B.second"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/routing",
+      "owner": "B",
+      "body": {
+        "lane": "default",
+        "runtime_id": "B.second"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/setup/resume",
+      "owner": "B",
+      "body": {}
+    }
+  ],
+  "errors": [],
+  "unexpected": [],
+  "body": "Synthetic HTTP · actual Settings, workspace store and APIs · no backend/model execution\n\nFixture workspace AFixture workspace BFixture withdraw authorityFixture leave\nOPERATOR\n설정\n계정\n계정\nACCOUNT\nKEEPER 운영\n런타임\nRUNTIME\n모델 라우팅\nROUTING\n기본 프롬프트\nPROMPTS\n패널·심판 심의\nFUSION\n인프라 · 실행\n런타임 관리\nRUNTIMES\n경로 · Path\nPATHS\n연결 · 통합\nMCP 서버\nMCP\n저장소\nREPOSITORIES\n관측 · 알림\n관측 · 시스템 로그\nLOGS\n알림\nNOTIFY\n표시\nDISPLAY\nlive-backed = 직접 읽고 씀 · writer 없는 값은 read-only\n모델 라우팅\nruntime.toml live-backed\n이 화면을 뒷받침하는 것 3건 — 읽기 전용 안내\n현재 작업공간을 확인한 뒤 Runtime 설정을 읽고 수정할 수 있습니다.작업공간 확인\n[runtime] 라우팅 레인. keeper 채팅은 default 를 쓰고, 특정 작업만 전용 런타임으로 분기됩니다.\nMODEL ROUTING\nDefault\n[runtime].default · 기본 — keeper 채팅, 미할당 keeper 가 상속\nMedia failover\n[runtime].media_failover vision runtimes\nnone\n이미지 읽기\n턴을 넘겨받지 않아요. lane 이 이미지를 못 받을 때 이미지를 글로 읽어 주는 런타임입니다.\nfailover 추가\n비우기"
+}

@@ -1,0 +1,9 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-1497917783.lock
+[dune-local] removing stale _build/.lock (no dune process running)
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41122-parent-sync-20261004/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41122-parent-sync-20261004 test/test_tui_lane_addons.exe
+File "test/test_tui_lane_addons.ml", lines 145-146, characters 14-94:
+145 | ..............{owned with installation_id=None;source_path="/config/lane-addons/unrelated.toml";
+146 |       desired=None;applied=None;instance_id=None;issues=["invalid TOML"];origin=UI.Issue_only}........
+Error (warning 23 [useless-record-with]): all the fields are explicitly listed in this record:
+  the with clause is useless.

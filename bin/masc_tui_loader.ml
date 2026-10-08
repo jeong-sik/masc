@@ -368,7 +368,8 @@ let replace_keeper_rows ~preserve_on_error (state : state)
         (match state.msg_target_keeper_name with
          | Some keeper_name ->
              Keeper_selection.Message_keeper
-               { keeper_name; cursor = state.keeper_cursor }
+               { keeper_name; cursor = state.keeper_cursor;
+                 return_keeper = state.keeper_message_return }
          | None -> Keeper_selection.List_cursor state.keeper_cursor)
     | Some Keeper_list
     (* The picker rides the list cursor: its own cursor points into the
@@ -404,6 +405,8 @@ let replace_keeper_rows ~preserve_on_error (state : state)
   (* A roster change no longer dismisses an action notice: the notice answers
      the operator's last action, and a refresh tick would otherwise wipe it
      before it is read. User actions still clear it. *)
+  if current_keeper_mode <> Some Keeper_message then
+    state.keeper_message_return <- None;
   if state.detail_focus_recovery <> None && keepers_error <> None then ()
   else (match
      Keeper_selection.reconcile ~current_ids:current_keeper_ids
@@ -430,8 +433,9 @@ let replace_keeper_rows ~preserve_on_error (state : state)
    | Keeper_selection.Calls_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_calls
-   | Keeper_selection.Message_keeper { cursor; _ } ->
+   | Keeper_selection.Message_keeper { cursor; return_keeper; _ } ->
        state.keeper_cursor <- cursor;
+       state.keeper_message_return <- return_keeper;
        state.view <- Keepers Keeper_message);
 
   let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
@@ -1272,12 +1276,17 @@ let load_approvals ~(host : string) ~(port : int) :
 let load_runtime_resolved ~(host : string) ~(port : int) :
     ( Tui_decode.runtime_option list
       * Tui_decode.runtime_resolved_lane list
-      * Tui_decode.runtime_assignment list,
+      * Tui_decode.runtime_assignment list
+      * string option,
       string )
     result =
   match fetch_runtime_resolved ~host ~port with
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_runtime_resolved_full json
+  | Ok json ->
+      let ( let* ) = Result.bind in
+      let* runtimes, lanes, assignments = Tui_decode.decode_runtime_resolved_full json in
+      let* snapshot = Tui_decode.decode_runtime_resolved_snapshot json in
+      Ok (runtimes, lanes, assignments, snapshot.rrs_default_route)
 
 (** One read of [/api/v1/runtime/resolved] for the Overview: the runtime rows
     and the provider usage windows. The two decode apart, and a failed fetch
@@ -1393,7 +1402,7 @@ let load_dashboard_gate ~(host : string) ~(port : int) :
 
 (** Load the durable per-keeper Gate settings. *)
 let load_keeper_gate_settings ~(host : string) ~(port : int) :
-    ((string * string) list * Tui_decode.keeper_exact_lane_first list, string) result =
+    ((string * Tui_decode.gate_mode) list * Tui_decode.keeper_exact_lane_first list, string) result =
   match fetch_keeper_gate_settings ~host ~port with
   | Error err -> Error ("keeper Gate settings load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_gate_settings json
@@ -1667,13 +1676,13 @@ let load_keeper_lanes ~(host : string) ~(port : int) :
         | Error err -> Error err
         | Ok projections -> Ok (lanes, projections)))
 
-(** Load the standalone lane matrix independently from Keeper lane rows so a
+(** Load the common Lane inventory independently from Keeper lane rows so a
     failure on either observation does not erase the last good other one. *)
-let load_standalone_lanes ~(host : string) ~(port : int) :
-    (Tui_decode.standalone_lanes_snapshot, string) result =
-  match fetch_standalone_lanes ~host ~port with
+let load_lane_inventory ~(host : string) ~(port : int) :
+    (Masc.Tui_decode_lane_inventory.snapshot, string) result =
+  match fetch_lane_inventory ~host ~port with
   | Error err -> Error err
-  | Ok json -> Tui_decode.decode_standalone_lanes_snapshot json
+  | Ok json -> Masc.Tui_decode_lane_inventory.decode json
 
 (** Load the clients roster from /api/v1/dashboard/clients *)
 let load_clients ~(host : string) ~(port : int) :
@@ -1845,8 +1854,20 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
   | Error (`Unknown_outcome message) ->
     Error
       ("preset restore outcome unknown — the server may have finished it; \
-        check the preset list for a new autosave before retrying: " ^ message)
+        check when the preset list says _autosave was saved before retrying: " ^ message)
   | Ok json -> Tui_decode.decode_preset_restore json
+
+(** POST /api/v1/presets/delete — the name the server removed. An unanswered
+    request may still have removed it, so the operator is told to read the
+    list before trying again. *)
+let delete_preset ~(host : string) ~(port : int) ~(name : string) : (string, string) result =
+  match Masc_tui_http.post_preset_delete ~host ~port ~name with
+  | Post_answered json -> Tui_decode.decode_preset_deleted json
+  | Post_refused detail -> Error ("preset delete refused: " ^ detail)
+  | Post_unanswered detail ->
+    Error
+      ("preset delete unanswered — the preset may be gone; \
+        check the preset list before retrying: " ^ detail)
 
 (* The fleet reading answers what the keeper list cannot: a keeper that never
    started has no row, so the roster shows nine keepers whether the tenth is
@@ -1879,12 +1900,6 @@ let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
               Error (Masc_tui_keeper_control.Roster_malformed detail)
           | Ok (rows, errors, truncated, total, candle) ->
               Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
-
-(* Every line these views hand the renderer goes through the terminal
-   sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show
-   escaped, not a control to replay into the frame. *)
-let sanitize_view_lines lines =
-  List.map Masc.Tui_terminal_text.sanitize_terminal_text lines
 
 let load_keeper_config_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
@@ -2023,11 +2038,10 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
             rows))
 
 let load_runtime_config_view ~(host : string) ~(port : int) :
-    (string * string list * Masc_tui_runtime_config_view.metadata, string) result =
+    (Masc_tui_runtime_config_view.reading, string) result =
   match Masc_tui_http.fetch_runtime_config_raw ~host ~port with
   | Error err -> Error ("fetch: " ^ err)
   | Ok json ->
       match Masc_tui_runtime_config_view.decode json with
       | Error detail -> Error ("decode: " ^ detail)
-      | Ok reading -> Ok (reading.path,
-          sanitize_view_lines (String.split_on_char '\n' reading.source_text), reading.metadata)
+      | Ok reading -> Ok reading

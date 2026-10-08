@@ -1,0 +1,5 @@
+{
+  "bin/masc_tui.ml": "ec7789bd0a1fa7faa078ea1035280841f9a222d1c1143491ab8e0c30c3bcfaf0",
+  "test/test_tui_browser_activity_pty.py": "a3ff3ed298fc431d9dc804e99ea69e6f00a3eb6971ed9102348d3193a89ed3e0",
+  "_build/default/bin/masc_tui.exe": "070591770da3cace6e0e7ae0670ae0e40d81a843ef4dcbe4b6d33de61e5f0ded"
+}

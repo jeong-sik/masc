@@ -123,7 +123,7 @@ def run(
     run_id = "paging-" + scenario.replace(" ", "-")
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response()
     detail = cast(dict[str, Any], copy.deepcopy(_keyboard_keepers.hitl_lane_run_detail_response()[1]))
     record = cast(dict[str, Any], detail["run"])
     record.update(

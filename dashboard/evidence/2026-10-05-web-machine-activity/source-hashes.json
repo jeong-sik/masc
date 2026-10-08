@@ -1,0 +1,61 @@
+{
+  "base": "91450e271625da18d3eed4b1574fd4683a6c20bf",
+  "recorded_at": "2026-10-04T18:44:27.959481+00:00",
+  "sources": {
+    "dashboard/evidence/2026-10-05-web-machine-activity/browser-fixture.mjs": "24c5058ec90a7a7789805da38e69758f53f45848c32ee497f115b90ee1ac405e",
+    "dashboard/evidence/2026-10-05-web-machine-activity/fixture.html": "2d46a6ab980b80a24de0e18ad85f5a513622b450b08c40be8178257c3a3794bc",
+    "dashboard/evidence/2026-10-05-web-machine-activity/fixture.ts": "6cad7cebef66610bca82672deb2c518b5721a71d2f976ac50e97537aa71addd4",
+    "dashboard/src/api/dashboard-runtime.ts": "32501b022e54a826281bcc4c36b480950178ab3df3884228ae18035a697875f3",
+    "dashboard/src/api/lane-inventory.ts": "2d6a854734448b231b144bf6fdf58edef912bc7854f60d4f95da51a5fdba187a",
+    "dashboard/src/components/lane-inventory-panel.test.ts": "0148123c9a9c9f4271511e0faeb47323826c38feab0f636e71f8188b7d465c7d",
+    "dashboard/src/components/lane-inventory-panel.ts": "cb6ed92e9abc95c969d12b175c4f3153938c1a16d74560ff0c3e01b20337b29a",
+    "dashboard/src/components/machine-lane-activity-panel.test.ts": "58eeed36c4da61639761c9fa81564a1dd1668ca9247f82af31aa9e40051c199b",
+    "dashboard/src/components/machine-lane-activity-panel.ts": "c33db831b7e90803ca373e875d459be3a7e36d7a8cea00c4dca06a634458f4dd",
+    "dashboard/src/lib/machine-lane-activity-session.ts": "e84acacb091512c2b4671474f188137f8f691e4030d7da702269887d93eb22b1",
+    "dashboard/src/lib/machine-lane-activity.test.ts": "e2c2666fc6e386edea8e2f91763d3c20e0c24ba17ff93228bfc845e50b81d5bd",
+    "dashboard/src/lib/machine-lane-activity.ts": "320b564b28778fa13fccb61d38c38c48293718d78c31fae636ae6610eb00a829",
+    "dashboard/src/lib/machine-lane-observation.ts": "ce518d7d6c2e2995a4671ceca8e87b8ca91a5d5a7e93596606bb7e7abe5b754b",
+    "dashboard/src/lib/runtime-config-refresh.ts": "35b29d1e2de390cb6cc55b6c0a3f2fe5f93e219ba882a2afee69bf5ae4d72121",
+    "dashboard/src/lib/runtime-toml-config.ts": "f598cf1497a9c87617aaea1e1778bc9bb1fb206769f4422dfd7fa8323a773ad9",
+    "dashboard/src/lib/runtime-toml-source-generation.ts": "f69a21e4183521e5c17db3b102dcd2c9ff62dcfa47db1584875e9e079d2c2b23",
+    "docs/guides/machine-activity.md": "c3882dda1656249ef94fdd174602daf0500d549066263baac8136fbe212762a4",
+    "lib/machine_configuration/machine_configuration.ml": "da03d9ae527fea8b2c05df3b2ca06c81c8b315af6ebe876fafaabf6ea4ce526c"
+  },
+  "artifacts": {
+    "dashboard/evidence/2026-10-05-web-machine-activity/README.md": "f3e8b4697e23deaba9bb4caa9453c522fa695be1414481cbd24f61834187e575",
+    "dashboard/evidence/2026-10-05-web-machine-activity/browser-result.json": "e95f0e414a3e87b208f60ee1c4e6d4d152c7ec7430240c2bb48c45815d1ba883",
+    "dashboard/evidence/2026-10-05-web-machine-activity/browser-setup-failure.txt": "ce2452865f7a3c7288054f7ed3d71e7ba473f8889cfff693c538147a4ec86021",
+    "dashboard/evidence/2026-10-05-web-machine-activity/browser.txt": "7de4417fa5bd6af5dcd1f8b526d659e3596f0e1c3612be9e24f73b05b72407a0",
+    "dashboard/evidence/2026-10-05-web-machine-activity/lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-05-web-machine-activity/machine-mobile.png": "cb79297569d4a7c07af9eb6ed6442cb9bf9dd5052d95f9eb2c742ca6970ee152",
+    "dashboard/evidence/2026-10-05-web-machine-activity/machine-off-saved.png": "cc33d1fc9eb5deaf7a8a8a600961710831ee5300a0bb5761260718a717dd3027",
+    "dashboard/evidence/2026-10-05-web-machine-activity/parser/after-isolates.json": "d7cf402489bc8bb1656be4f476ef5b7c1899ed2027e06470b77e15b61249f7a0",
+    "dashboard/evidence/2026-10-05-web-machine-activity/parser/after.txt": "f8dd4bece5bc319d99381f736f127cf14db14fb068e6bcf4c4009ea814078e85",
+    "dashboard/evidence/2026-10-05-web-machine-activity/parser/before-isolates.json": "8b41b366a294f0a69657c393e5c2d98c269e6aae27daf2521c020234c621024c",
+    "dashboard/evidence/2026-10-05-web-machine-activity/parser/before-source.txt": "a77083a58897b2e14b47e184c374333e42c02cc1e0c474ebe9e022e6b5890bfe",
+    "dashboard/evidence/2026-10-05-web-machine-activity/parser/before.txt": "983ba188f72051778ad508262c688f8efe1427bf97f543080de38255f3b0bcbe",
+    "dashboard/evidence/2026-10-05-web-machine-activity/parser/harness-url-failure.txt": "9dc84ea29d967f3dee8b1aecab69d7f3ff861c9299fb065403e0bd2347e617d8",
+    "dashboard/evidence/2026-10-05-web-machine-activity/parser/lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-05-web-machine-activity/parser/provenance.json": "cba1ae9dfd37905c49a0d2aa658fe5c14afebe902aa98331c53e549f8649d159",
+    "dashboard/evidence/2026-10-05-web-machine-activity/tests-initial-async-wait.txt": "f9d7564d1bf4860797e3f23b2c371a5fccef96d672a7e8c2042a7a94a3f6ca6e",
+    "dashboard/evidence/2026-10-05-web-machine-activity/tests.txt": "34f6bf4a032c227c59db2fe0f0113bb35e47b32503a6f0727fcd97c7962dcc8e",
+    "dashboard/evidence/2026-10-05-web-machine-activity/typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "results": {
+    "focused_tests": 134,
+    "test_files": 4,
+    "typecheck_exit_code": 0,
+    "scoped_lint_exit_code": 0,
+    "chromium_synthetic_scenarios": 12,
+    "inventory_reads": 15,
+    "preview_requests": 5,
+    "save_requests": 4,
+    "synthetic_commits": 3,
+    "page_errors": 0,
+    "unexpected_api_routes": 0
+  },
+  "limits": [
+    "No real backend validation/publication or machine execution",
+    "No native TUI/PTY, CI, main integration, deployment or GitHub approval"
+  ]
+}

@@ -81,6 +81,21 @@ def exchange(package, requests, sizes=None):
     return [json.loads(line) for line in lines]
 
 class FusionResults(unittest.TestCase):
+    def test_failed_run_requires_matching_failed_judge(self):
+        for field, value in (("status", "synthesized"),
+                             ("failure_code", "different_failure"),
+                             ("error", "different error")):
+            with self.subTest(field=field):
+                snapshot = detail("failed")
+                judge = snapshot["evidence"]["post"]["meta"]["judge"]
+                if field == "status":
+                    judge.clear()
+                    judge.update(status=value, resolved_answer="claimed success")
+                else:
+                    judge[field] = value
+                self.assertTrue(call("fusion-results", [source(snapshot)])["isError"])
+        self.assertFalse(call("fusion-results", [source(detail("failed"))])["isError"])
+
     def test_protocol_rejections_keep_stdio_alive(self):
         cases = [
             ("id", "\ud800", False),

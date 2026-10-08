@@ -46,11 +46,6 @@ type config =
         (RFC-0390). Built-in calls run inside the client and never reach the
         MASC approval gate, so the keeper layer admits [Native_full] only
         for Yolo keepers. *)
-  ; setting_sources : Runtime_native_tools.claude_setting_source list
-    (** Which settings layers the CLI may load ([--setting-sources]). Empty —
-        the default — keeps the historical no-layer stance; a loaded layer
-        can carry skills and hooks that execute outside the MASC gate, so the
-        keeper layer admits a non-empty list only for Yolo keepers. *)
   ; timeout_s : float option
     (** [None] removes the deadline after the user message is written: the
         spawned client decides when its own turn ends. Initialization remains
@@ -209,12 +204,18 @@ type stream_event =
       { message_id : string option
       ; text : string
       }
-      (** One text block of an [assistant] frame, whole: this client reads
-          complete frames, not partial deltas. [message_id] is the frame's
+      (** A partial text delta or the missing suffix of a complete [assistant]
+          block. [message_id] is the frame's
           [message.id]. The CLI writes each content block of a response as
           its own frame under the same id, so blocks sharing an id are one
           assistant message and a new id is the next one. [None] when the
           frame carries no id. *)
+  | Thinking_delta of
+      { message_id : string option
+      ; text : string
+      }
+      (** Provider-exposed thinking text from partial or complete assistant
+          blocks. Opaque signatures and redacted payloads are not text. *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -281,6 +282,10 @@ type error =
   | Turn_failed of string
   | Turn_failed_with_observation of
       { detail : string
+      ; api_error_status : int option
+        (** The result frame's structured HTTP status, when present. Keep it
+            separate from the diagnostic so callers can distinguish account
+            access from a generic provider rejection without reading prose. *)
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }

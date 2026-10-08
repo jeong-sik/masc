@@ -1,0 +1,103 @@
+{
+  "error": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('radio', { name: 'Fixture worker', exact: true }) to be visible\u001b[22m\n",
+  "checks": [],
+  "reads": [
+    {
+      "path": "/dashboard/src/api/goal-proof.ts",
+      "query": ""
+    },
+    {
+      "path": "/dashboard/src/api/keeper-lifecycle.ts",
+      "query": ""
+    },
+    {
+      "path": "/dashboard/src/api/dashboard-hot.ts",
+      "query": ""
+    },
+    {
+      "path": "/dashboard/src/api/dev-token.ts",
+      "query": ""
+    },
+    {
+      "path": "/dashboard/src/api/dashboard-goals.ts",
+      "query": ""
+    },
+    {
+      "path": "/dashboard/src/api/goal-proof.ts",
+      "query": ""
+    },
+    {
+      "path": "/dashboard/src/api/keeper-lifecycle.ts",
+      "query": ""
+    },
+    {
+      "path": "/dashboard/src/api/dashboard-hot.ts",
+      "query": ""
+    },
+    {
+      "path": "/dashboard/src/api/dev-token.ts",
+      "query": ""
+    },
+    {
+      "path": "/dashboard/src/api/dashboard-goals.ts",
+      "query": ""
+    }
+  ],
+  "writes": [],
+  "errors": [],
+  "unexpected": [
+    "/dashboard/src/api/goal-proof.ts",
+    "/dashboard/src/api/keeper-lifecycle.ts",
+    "/dashboard/src/api/dashboard-hot.ts",
+    "/dashboard/src/api/dev-token.ts",
+    "/dashboard/src/api/dashboard-goals.ts",
+    "/dashboard/src/api/goal-proof.ts",
+    "/dashboard/src/api/keeper-lifecycle.ts",
+    "/dashboard/src/api/dashboard-hot.ts",
+    "/dashboard/src/api/dev-token.ts",
+    "/dashboard/src/api/dashboard-goals.ts"
+  ],
+  "cancelled": [
+    {
+      "path": "/dashboard/src/api/goal-proof.ts",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/dashboard/src/api/keeper-lifecycle.ts",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/dashboard/src/api/dashboard-hot.ts",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/dashboard/src/api/dev-token.ts",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/dashboard/src/api/dashboard-goals.ts",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/dashboard/src/api/goal-proof.ts",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/dashboard/src/api/keeper-lifecycle.ts",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/dashboard/src/api/dashboard-hot.ts",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/dashboard/src/api/dev-token.ts",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/dashboard/src/api/dashboard-goals.ts",
+      "error": "net::ERR_ABORTED"
+    }
+  ],
+  "text": ""
+}

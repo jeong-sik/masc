@@ -1,0 +1,28 @@
+{
+  "captured_at": "2026-10-03T06:16:08.661479+00:00",
+  "provenance": "local candidate fixture PTY with exact browser replay",
+  "base_sha": "494e825336e5f19f00ca8aab3fd838877b04d4c8",
+  "sources_sha256": {
+    "bin/masc_tui_render.ml": "59c1ef96c6cd4c4c96f037a1b103754fa72290af7ecf9edeaeafedcf56adebf5",
+    "test/test_tui_usage_studio_pty.py": "7155ddde1a64dba4580e0eedca89a0feda72232f909016d1d3134401b5433997"
+  },
+  "binary_sha256": "5724a98ec9e031378439076a03d7f0b67f1af14e7dbb83c696c9ad1a1f4107dc",
+  "frames": [
+    "keeper-comparison-wide",
+    "keeper-comparison-compact",
+    "keeper-comparison-bottom"
+  ],
+  "private_live_snapshot": {
+    "captured_at": "2026-10-03T06:05:22.428380+00:00",
+    "rows": 28,
+    "non_null_tokens": 22,
+    "non_null_cost": 0,
+    "snapshot_sha256": "44aa11a888e207051b9a39b6d7a547bb0b83c5b27738923fd6bd340f6373075c",
+    "candidate_replay": "PASS"
+  },
+  "production_install_verified": false,
+  "source_evidence_boundary": {
+    "applies_to_current_pr_head": false,
+    "note": "Historical candidate capture before unread-turn coverage and comparison-bar repairs. The pictured partial rows may show bars; current source excludes them. Binary/frame/source hashes do not verify the corrected head; no new native/PTY/browser execution is claimed."
+  }
+}

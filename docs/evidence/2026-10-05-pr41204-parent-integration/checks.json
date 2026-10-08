@@ -1,0 +1,46 @@
+{
+  "original_head": "8f6fc944a7a317950110df4ce03befc09c08fd61",
+  "parent": "577e2264fa090241274b2ee5bd1ebee4fa04331b",
+  "tested_tree": "7ac21247a9270430086e8c99b5a85b09a819e786",
+  "own_ts_blobs_unchanged": true,
+  "handle": 5147,
+  "exit": 0,
+  "tests": 133,
+  "suites": 4,
+  "tsc_exit": 0,
+  "eslint_exit": 0,
+  "source_sha256": {
+    "dashboard/src/lib/browser-lane-activity.ts": "f32266723e15e1642ac64a976869d6be8fec15f7167edf663a9f1f7601d4e377",
+    "dashboard/src/lib/browser-lane-activity.test.ts": "ee8a253e03711c339419c6e7b66eee8001074ebde4983cbfaaa92a74b6b1c791",
+    "dashboard/src/lib/browser-lane-activity-session.ts": "deb5167fc48c2bdd26ef567021a00aab1189e1b44619b106e157bfbf1f425858",
+    "dashboard/src/lib/machine-lane-activity-session.ts": "37686a70a56c314d599f31a91548847960bf66a579a6be25c7f1d236f5f89be2",
+    "dashboard/src/lib/runtime-toml-config.ts": "f598cf1497a9c87617aaea1e1778bc9bb1fb206769f4422dfd7fa8323a773ad9",
+    "dashboard/src/api/dashboard-runtime.ts": "124a74f713238fe9ec8e0507f3f865cccbf7a25e2336558521a1dc83bb6956c4",
+    "dashboard/src/components/browser-lane-activity-panel.ts": "cf931eff69013c5ce9e9070be2d8e6af76a5011140d02693afd6671844e23e94",
+    "dashboard/src/components/machine-lane-activity-panel.ts": "c33db831b7e90803ca373e875d459be3a7e36d7a8cea00c4dca06a634458f4dd",
+    "dashboard/src/components/lane-inventory-panel.ts": "cb6ed92e9abc95c969d12b175c4f3153938c1a16d74560ff0c3e01b20337b29a",
+    "lib/browser_configuration/browser_configuration.ml": "4c971d4ec539fb8ec66ae0fce46c70bd3fa489d348b8508e637a2ae29e6450cd"
+  },
+  "logs": {
+    "install.log": {
+      "source": "/tmp/pr41204-install.log",
+      "sha256": "b7c64d011543ffd38626b1d87f297bc1ee080387b3420bdc3e409789380e7cb2"
+    },
+    "tests.log": {
+      "source": "/tmp/pr41204-tests.log",
+      "sha256": "6f644d6100b686e25450cf912e2bfa44296a461e178b48f8d8616aeeda8c215e"
+    },
+    "tsc.log": {
+      "source": "/tmp/pr41204-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint.log": {
+      "source": "/tmp/pr41204-eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "historical_manifest_verified": {
+    "source_hashes": 12,
+    "artifact_hashes": 12
+  }
+}

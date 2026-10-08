@@ -13,7 +13,7 @@ let rollup ~active ~done_ : Masc_tui_types.planning_rollup =
   ; pr_verifying = 0
   ; pr_awaiting_confirmation = 0
   ; pr_done = done_
-  ; pr_dropped = 0
+  ; pr_paused = 0; pr_blocked = 0; pr_dropped = 0
   }
 
 let test_no_goals_is_the_count_alone () =
@@ -26,6 +26,23 @@ let test_goals_keep_the_share_and_the_phases () =
   Alcotest.(check bool) "the share" true (contains "(1/2)" row);
   Alcotest.(check bool) "a phase counter" true (contains "Exec: 1" row);
   Alcotest.(check bool) "no sentence for the count" false (contains "no goals" row)
+
+(* Paused and Blocked goals are goals: the share done divides by every phase
+   the row draws. Leaving them out read 1 done of 2 as 50% while 4 goals
+   existed. *)
+let test_paused_and_blocked_goals_are_in_the_total () =
+  let row =
+    plain
+      (Masc_tui_render_prim.planning_rollup_row ~cols:120
+         { pr_active = 1
+         ; pr_verifying = 0
+         ; pr_awaiting_confirmation = 0
+         ; pr_done = 1
+         ; pr_paused = 1; pr_blocked = 1; pr_dropped = 0
+         })
+  in
+  Alcotest.(check bool) "the count includes paused and blocked" true (contains "Goals: 4" row);
+  Alcotest.(check bool) "the share divides by every goal" true (contains "(1/4)" row)
 
 (* A phase with no goal in it is not counted: the list under the row names
    every goal's phase, and five counters with single digits are 92 cells,
@@ -51,7 +68,7 @@ let test_one_mark_means_one_stage_across_the_two_rows () =
          ; pr_verifying = 1
          ; pr_awaiting_confirmation = 1
          ; pr_done = 1
-         ; pr_dropped = 1
+         ; pr_paused = 0; pr_blocked = 0; pr_dropped = 1
          })
   in
   let backlog =
@@ -148,6 +165,8 @@ let () =
             test_no_goals_is_the_count_alone
         ; Alcotest.test_case "goals keep the share and the phases" `Quick
             test_goals_keep_the_share_and_the_phases
+        ; Alcotest.test_case "paused and blocked goals are in the total" `Quick
+            test_paused_and_blocked_goals_are_in_the_total
         ; Alcotest.test_case "an empty phase is not counted" `Quick
             test_an_empty_phase_is_not_counted
         ; Alcotest.test_case "one mark means one stage across the two rows" `Quick

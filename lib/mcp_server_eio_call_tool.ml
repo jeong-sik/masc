@@ -419,6 +419,15 @@ let record_runtime_mcp_keeper_tool_trace
     | Tool_result.Deferred _ -> Tool_result.Unknown
     | Tool_result.Failed _ -> Tool_result.Error
   in
+  (* task-627: the row carries the I/O fingerprints the loop guard's
+     cross-cycle seed reads back, computed from the raw input and output the
+     same way the live hook computes them. *)
+  let progress_io_fingerprints =
+    Keeper_tool_progress_identity.digest_tool_io
+      ~tool_name
+      ~input:arguments
+      ~output_text:message
+  in
   Keeper_tool_call_log.log_call
     ?typed_result
     ~keeper_name:ctx.keeper_name
@@ -442,6 +451,16 @@ let record_runtime_mcp_keeper_tool_trace
       ?network_mode:ctx.network_mode
       ?runtime_profile:ctx.runtime_profile
     ~result_bytes:(String.length message)
+    ?input_fingerprint:
+      (Option.map
+         (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
+            d.input_fingerprint)
+         progress_io_fingerprints)
+    ?output_fingerprint:
+      (Option.map
+         (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
+            d.output_fingerprint)
+         progress_io_fingerprints)
     ();
   (* The receipt above owns retention. Later telemetry cannot undo it. *)
   (try

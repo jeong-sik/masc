@@ -1,0 +1,42 @@
+{
+  "checked_at": "2026-10-04T17:45:37.386328+00:00",
+  "remote_head": "5d673773d03b1cf9008a01543cb1e3833c9f02ea",
+  "parent": "6fade962e1a7ce36baadfe440816943310b225a8",
+  "tested_source_tree": "e70fe1e11f72e43da5ae5956b5669350a433f994",
+  "scope": "local component/API tests with mocked transport, no native/browser rerun/fullsuite/CI/deployment",
+  "results": {
+    "ported_cases": 3,
+    "first_combined_pass": 274,
+    "first_combined_failed": 1,
+    "final_tests": 275,
+    "final_test_files": 9,
+    "final_tests_exit": 0,
+    "tsc_exit": 0,
+    "scoped_eslint_exit": 0
+  },
+  "test_command": "pnpm test src/components/browser-lane-activity-panel.test.ts src/components/lane-inventory-panel.test.ts src/components/settings-surface.test.ts src/components/runtime-toml-editor.test.ts src/components/exact-lane-activity-panel.test.ts src/components/model-setup-resume-control.test.ts src/api/dashboard-runtime-routing-lifetime.test.ts src/lib/runtime-workspace-resource.test.ts src/lib/runtime-catalog-resource.test.ts",
+  "source_sha256": {
+    "changelog.d/41194.md": "26bec9f321eb6ce0bcc4498c8440d3e9d0170a159a5baa518936bfcc3d99a5e9",
+    "dashboard/src/api/dashboard-runtime-routing-lifetime.test.ts": "fa48394db33752777fbd9fd1843335f6d811f1f799e1560c3cafc6d7c84c9d35",
+    "dashboard/src/api/dashboard-runtime.ts": "bccd96181f9f4d25d3d0efbb15367c9bfbb81f64a1db5c481261a12e14f9c4c1",
+    "dashboard/src/components/runtime-toml-editor.test.ts": "e78731846de1d5918278e711737ced821078e10f2342d2edfb79d254299717ee",
+    "dashboard/src/components/settings-surface.test.ts": "b15776bc0b69a108124a0d4ab3de8746daed0bf93650c5ee159ef491e2701bb3",
+    "dashboard/src/components/settings-surface.ts": "62460bd6ea36c8e824b53dc3d56e29acffebc0205135c924a55ff553ab95095e",
+    "dashboard/src/lib/browser-lane-activity-session.ts": "deb5167fc48c2bdd26ef567021a00aab1189e1b44619b106e157bfbf1f425858",
+    "dashboard/src/lib/exact-lane-activity-session.ts": "692d247c2c2571b5e3148f4a481e1bb4fd43855dcede8f8eabe08b2fc01eee8a",
+    "dashboard/src/lib/runtime-toml-session.ts": "4f7ad2216bc3f6401c644d240f05098508961e8c3db2e5496fa7f28d6cbf2558",
+    "dashboard/src/lib/runtime-toml-source-generation.ts": "f69a21e4183521e5c17db3b102dcd2c9ff62dcfa47db1584875e9e079d2c2b23",
+    "dashboard/src/lib/settings-runtime-session.ts": "d85252b68f3a61a2e56cce02c39299022c4671acea8725f9d8978f2af19fa7d6",
+    "docs/DASHBOARD-INTEGRATION.md": "1dc216fe67aad2acf2e0d85125288d6b488577808bc0c35171a6acef84d53129",
+    "docs/guides/settings-runtime-workspace.md": "9c81a1f38fb810a2040152d01427fb6539f4e453ef0c6e8d29871c0e42400898"
+  },
+  "artifact_sha256": {
+    "docs/evidence/2026-10-05-settings-retained-integration/README.md": "8594d3e37e69d4cf023cbd5c356a4560a1e35acf6b568d3b63ea3a28f3688864",
+    "docs/evidence/2026-10-05-settings-retained-integration/ported-tests.log": "bf2fe359010e14d13f51621d413eda9af989cb02e0078a2045f28cd28167e2d7",
+    "docs/evidence/2026-10-05-settings-retained-integration/initial-nine-tests.log": "360632fe47df8d1f325ee92819240a94f77315f2be54aaa6f9488d6e802dfc25",
+    "docs/evidence/2026-10-05-settings-retained-integration/initial-typecheck.log": "3f79f356dd0663199afbe49b72b41ca9e6d6ea454e8f469a6575bcc409828b59",
+    "docs/evidence/2026-10-05-settings-retained-integration/tests.log": "241972888961543bf8c4af0c36def02e765b4d1abca3802da9545ef1c4e3f181",
+    "docs/evidence/2026-10-05-settings-retained-integration/typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/evidence/2026-10-05-settings-retained-integration/eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

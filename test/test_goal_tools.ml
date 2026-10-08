@@ -28,7 +28,14 @@ let rm_rf dir =
   | _ -> ()
 ;;
 
-let with_workspace f =
+(* Freeze the clock used by creation, including calls through the tool API. *)
+let calendar_fixture_now =
+  match Ptime.of_date_time ((2026, 9, 22), ((12, 0, 0), 0)) with
+  | Some now -> now
+  | None -> fail "invalid UTC clock fixture"
+;;
+
+let with_workspace ?now f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -37,9 +44,14 @@ let with_workspace f =
     (Some Server_bootstrap_loops.For_testing.goal_notification_backend) in
   Fun.protect
     ~finally:(fun () ->
+      Option.iter (fun _ -> Time_compat.clear_clock ()) now;
       ignore (Goal_delivery.For_testing.replace_backend previous_delivery);
       rm_rf dir)
     (fun () ->
+       Option.iter (fun now ->
+         let clock = Eio_mock.Clock.make () in
+         Eio_mock.Clock.set_time clock (Ptime.to_float_s now);
+         Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t)) now;
        let config = Workspace.default_config dir in
        ignore (Workspace.init config ~agent_name:(Some "planner"));
        f config)
@@ -190,7 +202,7 @@ let test_goal_transition_unavailable_store () =
   let before = goal_files config in
   let result = Tool_workspace.dispatch (workspace_ctx config)
       ~name:"masc_goal_transition"
-      ~args:(`Assoc [ "goal_id", `String goal_id; "action", `String "drop" ]) in
+      ~args:(`Assoc [ "goal_id", `String goal_id; "action", `String "drop"; "note", `String "scenario no longer needs this Goal" ]) in
   check_unavailable_envelope config ~reason:"schema_rejected"
     ~field:(`String "criterion_revision") ~mirror_status:"mirror_rejected"
     ~mirror_goal_count:`Null ~reset_step:"repair_field" (expect_unavailable result);
@@ -206,7 +218,7 @@ let test_goal_transition_unknown_goal_not_found () =
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let error = expect_error (Tool_workspace.dispatch (workspace_ctx config)
       ~name:"masc_goal_transition"
-      ~args:(`Assoc [ "goal_id", `String "goal-does-not-exist"; "action", `String "drop" ])) in
+      ~args:(`Assoc [ "goal_id", `String "goal-does-not-exist"; "action", `String "drop"; "note", `String "scenario no longer needs this Goal" ])) in
   check string "unknown id on a readable store" "not_found" (get_string_field error "error_code");
   check string "no envelope fields on not_found" "null"
     (Yojson.Safe.to_string (Yojson.Safe.Util.member "reason" error))
@@ -551,21 +563,25 @@ let test_goal_creation_survives_event_recording_failure () =
 
 let test_metadata_edit_survives_event_recording_failure () =
   List.iter (fun phase ->
-    with_workspace @@ fun config ->
+    with_workspace ~now:calendar_fixture_now @@ fun config ->
     let call name args =
       match Tool_workspace.dispatch (workspace_ctx config) ~name ~args:(`Assoc args) with
       | Some result -> parse_json_result result
       | None -> fail (name ^ " not handled") in
+    (* Creation refuses a goal born overdue, so the overdue fixture is created
+       reachable and backdated by update, which stays ungated. *)
     let created = call "masc_goal_upsert"
         [ "title", `String "Overdue shared Goal"; "metric", `String "artifacts"
-        ; "target_value", `String "1"; "due_date", `String "2000-01-01" ] in
+        ; "target_value", `String "1"; "due_date", `String "2026-09-23" ] in
     check_event_recordings "creation reports its actual append"
       [ "goal_created", "recorded" ] created;
     let goal_id = get_string_field created "goal_id" in
+    ignore (call "masc_goal_upsert"
+        [ "id", `String goal_id; "due_date", `String "2000-01-01" ] : Yojson.Safe.t);
     (match phase with
      | `Executing -> ()
      | `Dropped -> ignore (call "masc_goal_transition"
-         [ "goal_id", `String goal_id; "action", `String "drop" ]));
+         [ "goal_id", `String goal_id; "action", `String "drop"; "note", `String "scenario no longer needs this Goal" ]));
     let expected_phase = match phase with `Executing -> "executing" | `Dropped -> "dropped" in
     let path, saved, before = block_goal_event_path config in
     let updated = call "masc_goal_upsert"
@@ -906,7 +922,7 @@ let prove_complete config goal_id =
 (* A Goal belongs to the workspace. Different callers can work on the same
    criterion; their actions and the verifier's verdict keep their provenance. *)
 let test_callers_share_a_goal_without_private_delivery () =
-  with_workspace @@ fun config ->
+  with_workspace ~now:calendar_fixture_now @@ fun config ->
   let open Yojson.Safe.Util in
   let creator = workspace_ctx config in
   let collaborator = workspace_ctx ~agent_name:"reviewer" config in
@@ -939,7 +955,7 @@ let test_callers_share_a_goal_without_private_delivery () =
     (get_string_field incomplete "error_code");
   let created = call creator "masc_goal_upsert"
       [ "title", `String "Ship together"; "metric", `String "verified artifacts"
-      ; "target_value", `String "1"; "due_date", `String "2000-01-01" ] in
+      ; "target_value", `String "1"; "due_date", `String "2026-09-23" ] in
   let goal_id = get_string_field created "goal_id" in
   let initial = shared_row "created Goal" (member "goal" created) in
   check string "a new shared Goal is executing" "executing"
@@ -1022,7 +1038,12 @@ let test_callers_share_a_goal_without_private_delivery () =
    | [ message ] ->
      check string "the verifier announces to the workspace" "verifier_exact" message.from_agent;
      check bool "the shared announcement carries the evidence" true
-       (has_substring ~needle:evidence message.content)
+       (has_substring ~needle:evidence message.content);
+     check bool "refutation announces its committed phase" true
+       (has_substring ~needle:("phase: " ^ get_string_field (member "goal" refuted) "phase")
+          message.content);
+     check bool "refutation does not ask for completion confirmation" false
+       (has_substring ~needle:"human confirmation required" message.content)
    | _ -> fail "the workspace must receive one proof verdict announcement");
   let primary, mirror = goal_files config in
   List.iter (fun (label, bytes) ->

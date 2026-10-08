@@ -1,0 +1,44 @@
+Testing `tui_overview_providers'.
+This run has ID `CD7CB49Y'.
+
+> [FAIL]        providers          0   out-of-range Plan history.
+  [FAIL]        providers          1   unknown report evidence.
+  [FAIL]        providers          2   exact quota window history join.
+  [OK]          providers          3   account summary and reported gauges.
+  [OK]          providers          4   eighth-block meter.
+  [OK]          providers          5   values read in one unit.
+  [OK]          providers          6   failed read is one line.
+  [OK]          providers          7   empty read names missing usage.
+  [OK]          providers          8   unknown state is rejected.
+  [OK]          providers          9   history uses reported points.
+  [OK]          providers         10   empty reports remain observed in the t...
+  [OK]          providers         11   trend is built from the answer.
+  [OK]          providers         12   scope id is the server's.
+  [OK]          providers         13   USD cards preserve amounts without a f...
+  [OK]          providers         14   a silent account draws only its exhaus...
+  [OK]          providers         15   meter width is bounded.
+  [OK]          providers         16   observation clock follows local dates.
+  [OK]          providers         17   a window that gates nothing is not an ...
+  [OK]          providers         18   unknown role is rejected.
+  [OK]          providers         19   account emails name their accounts.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        providers          0   out-of-range Plan history.              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT Plan keeps below-zero and above-limit history distinct
+File "test/test_tui_overview_providers.ml", line 497, character 2:
+FAIL Plan keeps below-zero and above-limit history distinct
+
+   Expected: `"\226\134\147\226\134\1450"'
+   Received: `"\226\150\129\226\150\1360"'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_tui_overview_providers.test_plan_history_preserves_out_of_range_ in file "test/test_tui_overview_providers.ml", line 497, characters 2-91
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr40906-nonfinite-history-20261005/_build/_tests/tui_overview_providers/providers.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr40906-nonfinite-history-20261005/_build/_tests/tui_overview_providers'.
+3 failures! in 0.006s. 20 tests run.

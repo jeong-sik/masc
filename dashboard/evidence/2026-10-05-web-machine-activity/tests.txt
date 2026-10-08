@@ -1,0 +1,11 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-machine-activity-20261005/dashboard
+
+
+ Test Files  4 passed (4)
+      Tests  134 passed (134)
+   Start at  03:43:28
+   Duration  4.73s (tests 44%, import 26%, transform 12%, environment 11%, setup 8%)
+
+    Isolate  4 workers spawned · ~208ms startup each (spawn + environment, per file)
+             at least ~623ms faster with isolate: false — reuses workers across files instead of one per file

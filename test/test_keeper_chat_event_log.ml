@@ -27,6 +27,7 @@ let delta_usage_partial : Agent_core.Types.delta_usage =
   ; output_tokens = None
   ; cache_creation_input_tokens = Some 1
   ; cache_read_input_tokens = None
+  ; cost_usd = None
   }
 
 let protocol_error_full : E.stream_protocol_error =
@@ -114,6 +115,10 @@ let all_events : E.keeper_chat_event list =
   ; E.Tool_call_args_snapshot
       { occurrence; tool_call_id = None; snapshot = "{\"path\":\"/tmp\"}" }
   ; E.Tool_call_end { occurrence; tool_call_id = Some "tc-1" }
+  ; E.Native_tool_start { occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }
+  ; E.Native_tool_end { occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }
+  ; E.Native_tool_start { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }
+  ; E.Native_tool_end { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }
   ; E.Tool_approval_requested
       { tool_call_id = "tc-2"
       ; tool_call_name = "bash"
@@ -167,7 +172,19 @@ let test_codec_round_trip_all_constructors () =
            (Printf.sprintf "constructor %d round-trips" i)
            (Yojson.Safe.to_string encoded)
            (Yojson.Safe.to_string (L.keeper_chat_event_to_json decoded)))
-    all_events
+    all_events;
+  List.iter (fun charge ->
+    let event = E.Agent_core_stream_message_delta
+      { stop_reason = None;
+        usage = Some { delta_usage_partial with cost_usd = Some charge } } in
+    let encoded = L.keeper_chat_event_to_json event in
+    let amount = Yojson.Safe.Util.(encoded |> member "usage" |> member "cost_usd" |> to_float) in
+    Alcotest.(check (float 1e-9)) "live/durable delta encoder reports the charge" charge amount;
+    match L.keeper_chat_event_of_json encoded with
+    | Ok (E.Agent_core_stream_message_delta {usage=Some usage; _}) ->
+        Alcotest.(check (option (float 1e-9))) "delta charge and authoritative zero round-trip"
+          (Some charge) usage.cost_usd
+    | Ok _ | Error _ -> Alcotest.fail "charged delta must decode") [0.001; 0.0]
 
 let test_envelope_round_trip () =
   let entry : L.journaled_event =
@@ -321,6 +338,43 @@ let test_journal_skips_non_finite_floats () =
             ; message_text = "x"
             ; duration_sec = Some Float.nan
             });
+       List.iteri
+         (fun i charge ->
+            let event = E.Agent_core_stream_message_delta
+                { stop_reason = Some Agent_core.Types.EndTurn
+                ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
+            (match L.append_result journal ~seq:(4 + i) ~ts:1_762_300_001.0 event with
+             | Error _ -> ()
+             | Ok () -> Alcotest.fail "non-finite delta charge was journaled");
+            (* The live projection bypasses the durable append guard. Its
+               shared serializer must still produce valid JSON and retain
+               the other reported counters. *)
+            let _, projected = Projection.project ~timestamp:1_762_300_001.0
+                ~redact_text:Fun.id ~redact_json:Fun.id Projection.initial event in
+            let json = match projected with
+              | Some event -> Ag_ui.event_to_json event
+              | None -> Alcotest.fail "usage delta did not project" in
+            let wire = Yojson.Safe.to_string json in
+            let decoded = Yojson.Safe.from_string wire in
+            let usage = Yojson.Safe.Util.(decoded |> member "value" |> member "usage") in
+            Alcotest.(check int) "live counters retained" 10
+              Yojson.Safe.Util.(usage |> member "input_tokens" |> to_int);
+            Alcotest.(check bool) "invalid live charge omitted" true
+              Yojson.Safe.Util.(usage |> member "cost_usd" = `Null))
+         [ Float.nan; Float.infinity; Float.neg_infinity ];
+       List.iter (fun charge ->
+           let event = E.Agent_core_stream_message_delta
+               { stop_reason = None
+               ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
+           let _, projected = Projection.project ~timestamp:1_762_300_001.0
+               ~redact_text:Fun.id ~redact_json:Fun.id Projection.initial event in
+           let json = match projected with
+             | Some event -> Ag_ui.event_to_json event
+             | None -> Alcotest.fail "finite usage delta did not project" in
+           let decoded = Yojson.Safe.from_string (Yojson.Safe.to_string json) in
+           Alcotest.(check (float 0.0)) "finite live charge retained" charge
+             Yojson.Safe.Util.(decoded |> member "value" |> member "usage"
+               |> member "cost_usd" |> to_float)) [ 0.; 0.001 ];
        let journaled = read_ok (L.read_journal journal) in
        Alcotest.(check int) "only the valid line was journaled" 1 (List.length journaled);
        Alcotest.(check int) "seq of the surviving line" 2 (List.nth journaled 0).seq)
@@ -1035,6 +1089,144 @@ let test_continued_short_reply_uses_monotonic_journal_ids () =
       (frames (List.rev !live)) (frames replay))
 ;;
 
+let test_native_activity_survives_bridge_journal_and_projection () =
+  let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
+  let base_dir = temp_base_path "keeper-chat-native-activity" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let journal = L.open_journal ~base_dir ~keeper_name:"k" ~operation_id:"native" () in
+    let bus = E.create ~on_publish:(L.append journal) () in
+    E.reader_gone bus;
+    let state = ref (Bridge.empty_state ()) in
+    let feed event =
+      let translated = Bridge.translate ~redact_text:Fun.id ~base_dir
+          ~stream_scope:4 !state event in
+      state := translated.bridge_state;
+      List.iter (E.publish bus) translated.chat_events
+    in
+    let start index tool_id tool_name =
+      Agent_core.Types.ContentBlockStart
+        { index; content_type = Runtime_native_tools.stream_content_type; tool_id; tool_name }
+    in
+    E.publish bus (E.Run_started {run_id="native-run"; thread_id="keeper:k"});
+    feed (start 1 (Some "call-1") (Some "Read"));
+    feed (start 1 (Some "call-1") (Some "Read"));
+    feed (Agent_core.Types.ContentBlockStop { index = 1 });
+    feed (Agent_core.Types.ContentBlockStop { index = 1 });
+    (* Antigravity can expose only a provider step. Its missing call id is
+       retained; the bridge's scoped block index identifies the visible row. *)
+    feed (start 2 None (Some "search"));
+    feed (Agent_core.Types.ContentBlockStop { index = 2 });
+    (* A message closing around an unfinished native observation cannot turn
+       that observation into a completed provider step. *)
+    feed (start 3 None None);
+    feed Agent_core.Types.MessageStop;
+    E.publish bus (E.Run_finished {run_id="native-run"});
+    E.close bus;
+    let entries = read_ok (L.read_journal journal) in
+    let native = List.filter_map (fun (entry : L.journaled_event) ->
+      match entry.event with
+      | E.Native_tool_start tool -> Some (true, tool)
+      | E.Native_tool_end tool -> Some (false, tool)
+      | _ -> None) entries in
+    Alcotest.(check (list (pair bool int))) "one ordered observation per actual boundary"
+      [true, 1; false, 1; true, 2; false, 2; true, 3]
+      (List.map (fun (started, (tool : E.native_tool)) -> started, tool.occurrence.block_index) native);
+    Alcotest.(check bool) "native activity never claims a MASC execution receipt" false
+      (List.exists (fun (entry : L.journaled_event) -> match entry.event with
+         | E.Tool_call_start _ | E.Tool_call_end _ | E.Tool_result_ready _ -> true
+         | _ -> false) entries);
+    let _, projected = List.fold_left (fun (projection, result) (entry : L.journaled_event) ->
+      let projection, event = Projection.project ~timestamp:entry.ts ~redact_text:Fun.id
+          ~redact_json:Fun.id projection entry.event in
+      let result = match entry.event, event with
+        | (E.Native_tool_start _ | E.Native_tool_end _), Some event -> Ag_ui.event_to_json event :: result
+        | (E.Native_tool_start _ | E.Native_tool_end _), None -> Alcotest.fail "native activity vanished on wire"
+        | _ -> result in
+      projection, result) (Projection.initial, []) entries in
+    let open Yojson.Safe.Util in
+    let projected = List.rev projected in
+    Alcotest.(check (list string)) "native wire lifecycle remains separate from canonical tools"
+      ["KEEPER_NATIVE_TOOL_START"; "KEEPER_NATIVE_TOOL_END"; "KEEPER_NATIVE_TOOL_START";
+       "KEEPER_NATIVE_TOOL_END"; "KEEPER_NATIVE_TOOL_START"]
+      (List.map (fun json -> json |> member "name" |> to_string) projected);
+    List.iter (fun json ->
+      let value = json |> member "value" in
+      Alcotest.(check int) "scope retained" 4 (value |> member "toolStreamScope" |> to_int);
+      Alcotest.(check bool) "no invented execution identity" true (member "executionId" value = `Null);
+      if to_int (member "toolCallBlockIndex" value) = 2 then
+        Alcotest.(check bool) "provider step is not invented call id" true (member "toolCallId" value = `Null)) projected)
+;;
+
+let test_native_content_cannot_become_assistant_text () =
+  let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
+  List.iter (fun ended ->
+    List.iter (fun delta ->
+      let translated = Bridge.translate ~redact_text:Fun.id ~base_dir:"." ~stream_scope:0
+          (Bridge.empty_state ())
+          (Agent_core.Types.ContentBlockStart
+             {index=2; content_type=Runtime_native_tools.stream_content_type;
+              tool_id=None; tool_name=Some "Read"}) in
+      let state = if ended then
+          (Bridge.translate ~redact_text:Fun.id ~base_dir:"." ~stream_scope:0 translated.bridge_state
+             (Agent_core.Types.ContentBlockStop {index=2})).bridge_state
+        else translated.bridge_state in
+      let rejected = Bridge.translate ~redact_text:Fun.id ~base_dir:"." ~stream_scope:0 state
+          (Agent_core.Types.ContentBlockDelta {index=2; delta}) in
+      Alcotest.(check bool) "native index never becomes assistant text or reasoning" false
+        (List.exists (function E.Text_delta _ | E.Agent_core_thinking_delta _ -> true | _ -> false) rejected.chat_events);
+      Alcotest.(check bool) "native channel conflict is observable" true
+        (List.exists (function E.Agent_core_stream_protocol_error {kind=E.Tool_delta_invalid_kind;_} -> true | _ -> false) rejected.chat_events))
+      [Agent_core.Types.TextDelta "native output"; Agent_core.Types.ThinkingDelta "native output"])
+    [false; true]
+;;
+
+let test_autonomous_turn_journal_is_live_and_replayable () =
+  let module Stream = Masc.Keeper_autonomous_stream in
+  let base_dir = temp_base_path "keeper-autonomous-stream" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    Eio_main.run (fun _ ->
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"autonomous-trace" ~absolute_turn:9 in
+      let stream = Stream.create ~base_path:base_dir ~keeper_name:"k" ~turn_ref in
+      Alcotest.(check bool) "cold-open discovers exact in-flight turn" true
+        (match Stream.current ~base_path:base_dir ~keeper_name:"k" with
+         | Some current -> Ids.Turn_ref.equal current turn_ref | None -> false);
+      Stream.on_tool_stream_observation stream
+        (Masc.Keeper_hooks_agent_core.Runtime_attempt_started
+           {runtime_id="codex:test"; lane_attempt_index=1; checkpoint_owner=Runtime_execution.Official_client});
+      Stream.on_event stream (Agent_core.Types.ContentBlockDelta {index=1; delta=ThinkingDelta "checking\n"});
+      Stream.on_event stream (Agent_core.Types.ContentBlockStart
+          {index=2; content_type=Runtime_native_tools.stream_content_type;tool_id=None;tool_name=Some "Read"});
+      Stream.on_event stream (Agent_core.Types.ContentBlockStop {index=2});
+      Stream.on_event stream (Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta "answer\n"});
+      let path = L.turn_journal_path ~base_dir ~keeper_name:"k" ~turn_ref in
+      let during = read_ok (L.read_journal_path_result path) in
+      Alcotest.(check bool) "thinking is readable while turn runs" true
+        (List.exists (fun (entry:L.journaled_event) -> match entry.event with E.Agent_core_thinking_delta _ -> true | _ -> false) during);
+      Alcotest.(check bool) "native tool activity is readable while turn runs" true
+        (List.exists (fun (entry:L.journaled_event) -> match entry.event with E.Native_tool_start _ -> true | _ -> false) during);
+      Alcotest.(check bool) "active stream has no invented terminal" false
+        (List.exists (fun (entry:L.journaled_event) -> match entry.event with E.Run_finished _ | E.Event_error _ -> true | _ -> false) during);
+      Stream.finish stream (Stream.Completed {reply="answer";turn_outcome=Outcome.Visible_reply});
+      Stream.finish stream Stream.Cancelled;
+      Alcotest.(check bool) "completed turn is no longer current" true
+        (Stream.current ~base_path:base_dir ~keeper_name:"k" = None);
+      let entries = read_ok (L.read_journal_path_result path) in
+      Alcotest.(check int) "one authoritative terminal" 1
+        (List.length (List.filter (fun (entry:L.journaled_event) -> match entry.event with E.Run_finished _ -> true | _ -> false) entries));
+      List.iteri (fun seq (entry:L.journaled_event) -> Alcotest.(check int) "monotonic journal seq" seq entry.seq) entries;
+      Alcotest.(check bool) "autonomous turn never creates a chat operation journal" false
+        (Sys.file_exists (L.journal_path ~base_dir ~keeper_name:"k" ~operation_id:(Ids.Turn_ref.to_string turn_ref)));
+      let page = {L.events=entries;has_more=false;next_offset=123} in
+      let body = Server_dashboard_http_keeper_chat_operations.turn_events_page ~turn_ref
+          ~since_seq:L.Whole_turn ~redact_json:Fun.id page in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "typed autonomous wire schema" "masc.keeper_turn_events.v1"
+        (body |> member "schema" |> to_string);
+      Alcotest.(check string) "actual turn identity" (Ids.Turn_ref.to_string turn_ref)
+        (body |> member "turn_ref" |> to_string);
+      Alcotest.(check bool) "no operation identity on autonomous wire" true (member "operation_id" body = `Null)))
+;;
+
 let () =
   Alcotest.run
     "keeper_chat_event_log"
@@ -1122,7 +1314,13 @@ let () =
             test_reader_gone_releases_every_parked_publisher
         ] )
     ; ( "integration"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "native tool observations survive journal and wire" `Quick
+            test_native_activity_survives_bridge_journal_and_projection
+        ; Alcotest.test_case "native content cannot enter assistant channels" `Quick
+            test_native_content_cannot_become_assistant_text
+        ; Alcotest.test_case "autonomous turn stream is live and replayable" `Quick
+            test_autonomous_turn_journal_is_live_and_replayable
+        ; Alcotest.test_case
             "bus journal records every published event"
             `Quick
             test_bus_journal_integration_records_all_events

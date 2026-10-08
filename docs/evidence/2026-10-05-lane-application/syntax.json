@@ -1,0 +1,160 @@
+{
+  "compiler": "5.5.1",
+  "source_commit": "4e672fa75d584e128f81f3966b1bc78cb5a5ce5a",
+  "checks": [
+    {
+      "file": "lib/lane_addon/lane_addon_application.mli",
+      "sha256": "2b4582d6abc290e266e6258580279e0957be693b760e1d3f33317078efb58c2d",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-intf",
+        "lib/lane_addon/lane_addon_application.mli"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/lane_addon/lane_addon_application.ml",
+      "sha256": "1abcceb30266f6a82e8c35cbad659e8d451d9a51deaab0bb45eb6fdd0edb91fc",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-impl",
+        "lib/lane_addon/lane_addon_application.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/lane_addon/lane_addon_config.mli",
+      "sha256": "0fc8c70c333470f4f75903308b48b324583e67838efea51a87449ccb2e24a64f",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-intf",
+        "lib/lane_addon/lane_addon_config.mli"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/lane_addon/lane_addon_config.ml",
+      "sha256": "da81e4e0c9ef59519ac2e275881bdae774a44912a037ade7458f0fa9020bde54",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-impl",
+        "lib/lane_addon/lane_addon_config.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/lane_addon/lane_addon_runtime.mli",
+      "sha256": "bcc0a464714befa9c2b0739e9a3f48bbe7d844c1f2604938687b4fb46defcb14",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-intf",
+        "lib/lane_addon/lane_addon_runtime.mli"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/lane_addon/lane_addon_runtime.ml",
+      "sha256": "4c9f60685331e5da80b97fcdacf7ebda92dd8979374735c86e886a1d35de993b",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-impl",
+        "lib/lane_addon/lane_addon_runtime.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/lane_addon/lane_addon_store.mli",
+      "sha256": "97c00f72dc2d1c22fadd672667b13c058444b9f467ca4ca4aea04c16d20dd4ea",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-intf",
+        "lib/lane_addon/lane_addon_store.mli"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/lane_addon/lane_addon_store.ml",
+      "sha256": "5dc2b2f0a3a95cca42b9fdfbcca023bf0511bc8f44abd9061b45e76763046eab",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-impl",
+        "lib/lane_addon/lane_addon_store.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_lane_addon_application.ml",
+      "sha256": "70f506a95af970f82566f48f5b237da720e08c1dc0e16be0ae5defa1ea7c254e",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-impl",
+        "test/test_lane_addon_application.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_lane_addon_config.ml",
+      "sha256": "4d09f9eb3a8c3469ce84bd4a70300cd53809da72ad71471fbc8af6d4ba4ac189",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-impl",
+        "test/test_lane_addon_config.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_lane_addon_reconcile.ml",
+      "sha256": "55951d02dff2ffb1040d96b1ae0728a3ba1e667f5f2694916a9e74f45946f2a2",
+      "argv": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "-impl",
+        "test/test_lane_addon_reconcile.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    }
+  ]
+}

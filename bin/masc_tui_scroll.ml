@@ -44,6 +44,11 @@ let cursor_move ~count ~delta cursor =
 let cursor_down ~count cursor = cursor_move ~count ~delta:1 cursor
 let cursor_up ~count cursor = cursor_move ~count ~delta:(-1) cursor
 
+let ensure_span_visible ~start ~stop ~height scroll =
+  if stop < scroll then start
+  else if start >= scroll + height then start - height + 1
+  else Int.max 0 scroll
+
 let ensure_visible ~cursor ~height scroll =
   if cursor < scroll then cursor
   else if cursor > scroll + height - 1 then cursor - height + 1

@@ -1,0 +1,13 @@
+{
+  "head": "48573c1a96f01a2bb33e15903161207c99617869",
+  "binary_sha256": "acee521474515ae6a1c80840d2c3d88e216427f0db72e1576f8640270c8e7346",
+  "source_sha256": {
+    "bin/masc_tui.ml": "bedbd9f1191f61b17f03c02e7eb777b221fdd68c67ffd884beb0ae7d7c620ceb",
+    "bin/masc_tui_machine_activity.ml": "dbc32de6f067628c5050eb01d56eb41505e36086902725a5c8da7b50ec33d2ea",
+    "bin/masc_tui_machine_activity.mli": "c0aeaf3b5e6ad54a5066d774e21ca7443cbb786d24926c67b03cf9fc3ea3cfd5",
+    "test/test_tui_machine_activity_pty.py": "3afb75298a1d060a832fe3665c01ef9acd3f96d151352984480fd4bc75dc57a8"
+  },
+  "build_handle": 79624,
+  "build_exit": 0,
+  "scope": "Native product source matches publishedHEAD; onlynew Python assertions before RED"
+}

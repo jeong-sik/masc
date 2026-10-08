@@ -1,0 +1,17 @@
+Testing `Judge unicode contract'.
+This run has ID `T3RDMTVD'.
+
+  [OK]          parse          0   test_judge_valid.
+  [OK]          parse          1   test_judge_recommend.
+  [OK]          parse          2   test_judge_insufficient.
+  [OK]          parse          3   test_judge_rejects_blank_conclusions.
+  [OK]          parse          4   test_judge_unknown_kind.
+  [OK]          parse          5   test_judge_missing_resolved.
+  [OK]          parse          6   test_judge_missing_decision.
+  [OK]          parse          7   test_judge_code_fence.
+  [OK]          parse          8   test_judge_decision_schema_branches.
+  [OK]          parse          9   test_judge_rejects_null_optional_and_unkno...
+  [OK]          parse         10   test_judge_rejects_lossy_collections.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-fusion-unicode-native-7allzoun/candidate/_build/_tests/Judge unicode contract'.
+Test Successful in 0.001s. 11 tests run.

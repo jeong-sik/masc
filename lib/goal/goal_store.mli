@@ -112,6 +112,8 @@ type rollup = {
   awaiting_confirmation_count : int;
   done_count : int;
   dropped_count : int;
+  paused_count : int;
+  blocked_count : int;
 }
 (** Aggregate counts produced by {!compute_rollup}. Consumed by
     [workspace_goals.ml] and the dashboard HTTP endpoint. *)
@@ -191,7 +193,7 @@ val unavailable_to_string : unavailable -> string
     is {!Goal_unavailable_envelope}. *)
 
 val list_goals_result :
-  Workspace_utils.config -> ?phase:Goal_phase.t -> unit ->
+  Workspace_utils.config -> ?phase:Goal_phase.t -> ?kind:Goal_phase.Kind.t -> unit ->
   (goal list, unavailable) result
 (** {!load_source} filtered by [phase] and sorted by
     [(priority asc, updated_at desc)]. {!Uninitialized} is [Ok []] — the one
@@ -313,10 +315,11 @@ val upsert_goal :
     before this write, read inside the write lock. The caller records what
     changed. An edit to the title, [metric] or [target_value] moves a
     [Verifying], [Awaiting_confirmation] or [Completed] goal back to
-    [Executing]. An edit to [due_date] or [priority] moves no phase.
+    [Executing]. Suspended Goals stay suspended with restore target [Executing].
+    An edit to [due_date] or [priority] moves no phase.
 
     {!Rejected}:
-    - [title] required for new goals (omit / empty string on a new goal id).
+    - [title] required for new goals (omit / blank on a new goal id).
     - [due_date] that {!Goal_due.read} cannot read, on a create and on an
       update alike. Nothing is written. [None] leaves the stored due date as
       it is; there is no way to clear one here.
@@ -325,7 +328,14 @@ val upsert_goal :
       previously-unknown [id]. The create/update split is decided inside the
       write lock on the freshly decoded state, so an undecodable store is
       {!Store_unavailable}, never this one. Updating an existing row is not
-      gated. *)
+      gated.
+    - Creation input check: a new row needs a
+      non-blank [title] on every create path (an explicit unknown [id]
+      without one no longer defaults to "Untitled goal"), and a [due_date]
+      already past is refused — a goal born overdue is unreachable by
+      construction. The date is a UTC calendar day and falls due at 23:59:59
+      UTC, independent of the operator's time zone. Updates are not gated:
+      an existing goal's due date passing is ordinary life. *)
 
 (** Run a dependent mutation while all referenced Goals exist in the primary
     store. Lock order: Goal, backlog, goal-task links. The callback must not

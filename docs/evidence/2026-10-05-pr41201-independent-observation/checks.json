@@ -1,0 +1,40 @@
+{
+  "head": "48573c1a96f01a2bb33e15903161207c99617869",
+  "sources_sha256": {
+    "bin/masc_tui.ml": "6438635d191112a7957116b951dccdb73778cb2b2e89b9042e56956444469629",
+    "bin/masc_tui_machine_activity.ml": "0f0ebdce73ded0dee779354cd65f6b55e0571e5f3d62c6fe396eb04c8c85c676",
+    "bin/masc_tui_machine_activity.mli": "cf0731dff608ceb52cac15fba431b38352b7df888e5ce1c19b22247944d14530",
+    "test/test_tui_machine_activity.ml": "4be49af9641f2000829c9104996644dd8daab4afa88917134c67a5cf15059b5c",
+    "test/test_tui_machine_activity_pty.py": "80b3ec2cc096d2046cb4db103bfc3860412161b66e4a30d0ac8da1f149953ead"
+  },
+  "binaries_sha256": {
+    "_build/default/bin/masc_tui.exe": "b0dd24ffedded1e86d3b4d49d48bf7111e7db0d0ec1d98bd98a87a134e7be7ed",
+    "_build/default/test/test_tui_machine_activity.exe": "dcd91d7c25668c1e5034344d7af65f88028e255b9f79910578166f5262580a52"
+  },
+  "raw_logs_sha256": {
+    "red-build.log": "2a138608423ddac67c0348578324df5152f025c145f5ce95a9a2333e72bba049",
+    "file-red.log": "7ad227a953bf254d840b2610653bb78208c35228fd1a25eb97d4cefb279e721a",
+    "refusal-red.log": "55cc13a4265d7578dc4b3c4c0b9d5b0e7dacf8227954e9840a5cec290ed6dff3",
+    "red-identities.json": "b45daddb20a856e117d0a403d3694f4ab186b00b72a60b173b56514117d65c2b",
+    "green-build.log": "2a138608423ddac67c0348578324df5152f025c145f5ce95a9a2333e72bba049",
+    "native-green.log": "39e40d11aa7efdce21462ddedea44cb8a1fb0eccb22cd4c8ab26ad69fd623aa0",
+    "pty-green-initial.log": "dbdc78e3e205ef0f1f1714d0b01813e6c7ab878c108829e95f07ca20164e9ff9",
+    "pty-green.log": "dbdc78e3e205ef0f1f1714d0b01813e6c7ab878c108829e95f07ca20164e9ff9",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "pyright.json": "dfd3bff4d9ba4af7c8279ca4825304cfa2c41e5fb8bbf7bb8f9e799d04de84df",
+    "pyright-baseline.json": "b298b64a3d5c2e54ee5f3de7d942b34d6858d49fdad5f3403dd1b088f39fc02b"
+  },
+  "results": {
+    "baseline_build_exit": 0,
+    "actual_pty_red_failures": 2,
+    "green_build_exit": 0,
+    "native_tests": 16,
+    "final_pty_flows": 3,
+    "final_pty_exit": 0,
+    "ruff_exit": 0,
+    "pyright_baseline": 1,
+    "pyright_current": 1,
+    "pyright_new": 0
+  },
+  "scope": "SyntheticHTTP realTUI PTY, realnative reducer tests; no productionserver/machine/liveprovider/fullsuite/release proof"
+}

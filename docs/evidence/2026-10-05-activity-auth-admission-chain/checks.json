@@ -1,0 +1,59 @@
+{
+  "qualified_commit": "b1570fb55f866976006c77864d152779fdb9dcdf",
+  "sources_sha256": {
+    "bin/masc_tui.ml": "6438635d191112a7957116b951dccdb73778cb2b2e89b9042e56956444469629",
+    "bin/masc_tui_machine_activity.ml": "0f0ebdce73ded0dee779354cd65f6b55e0571e5f3d62c6fe396eb04c8c85c676",
+    "bin/masc_tui_machine_activity.mli": "cf0731dff608ceb52cac15fba431b38352b7df888e5ce1c19b22247944d14530",
+    "dashboard/src/api/dashboard-runtime-raw-save.test.ts": "97ac88bfdf8e69b6b7aff193ab6b99c60e317cc4542d15e5973b372cf2ffe602",
+    "dashboard/src/api/dashboard-runtime.ts": "98ae1d117abeb329ed095c184c5a5a2105746748be2909c0020e912498edc5dd",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "fd80e25de34b8b5d7c0f6a3bf184a02336c2181c831e3efce94a14f9c71db265",
+    "dashboard/src/lib/exact-lane-activity-session.ts": "288253d74a4b17ebfb4f166cd483b7193339179794bb8caf4877df10f181199b",
+    "dashboard/src/lib/runtime-toml-session.ts": "7b883a76637b402bf1505c4c1a9f50a87bc4e24595e58f43f7e55320381332b2",
+    "lib/server/server_runtime_bootstrap.ml": "a4b5d29b5250137af0590383fa38042c2a4c8e1190c76129e63fe57869a7a9a4",
+    "lib/tool_misc_browser_lane.ml": "b70232d0fa250f279965c00e38439b3ae8dc49b157f8cbf9dec5c8e22ca151b5",
+    "test/stagehand_browser_probe.ml": "323ff338149fcbade978ab4ccc6d0cc1444f7fc78187654eec2bf6677d9aad2a",
+    "test/stanzas/test_browser_activity.inc": "0a401fad572be294741747153a669418ed740309cd85e9225c4629ee03ca8cbc",
+    "test/test_browser_observation_composition.ml": "9c10048b62c13566b9693182afcc322f1a255cffc94842689530eba4c5feac98",
+    "test/test_browser_surface.ml": "7df01e556d967ac00c081058c717df5d5626a83855dab6a61830963684584270",
+    "test/test_keeper_tool_dispatch_runtime.ml": "38f75ad569beb52cc2bc0d12c74fa67422e5ed76f009fb9df090c1313a6ce921",
+    "test/test_keeper_vision_tool.ml": "65ebed72fea555b783f6b12b5318b28d8a49f83cf45ed74dbe2631e556e380ae",
+    "test/test_mcp_server_eio_call_tool.ml": "883f7be317067aaa02c339fda99ff9562df15ebb8c293c00f4d7453e332b799d",
+    "test/test_stdio_browser_activity.py": "bf8d1a96cfbb987f31a9f78b917e02d9bd3a6bced49349d376eac566038604a9",
+    "test/test_tui_machine_activity.ml": "4be49af9641f2000829c9104996644dd8daab4afa88917134c67a5cf15059b5c",
+    "test/test_tui_machine_activity_pty.py": "80b3ec2cc096d2046cb4db103bfc3860412161b66e4a30d0ac8da1f149953ead"
+  },
+  "binaries_sha256": {
+    "bin/masc_tui.exe": "3433f2663774b276b977ed16bc81b573f4c1567ad8ff62def5fb50c687c18733",
+    "bin/main_stdio_eio.exe": "0605c0a31300e6ad42493035b8821aaa2d6952b3116c767110fe1348f0c23a97",
+    "test/test_tui_machine_activity.exe": "dcd91d7c25668c1e5034344d7af65f88028e255b9f79910578166f5262580a52",
+    "test/test_browser_surface.exe": "16f2db570d2924a196e483a00493c7f9132f736c3700d8b4c5cd01fbbd7c9c86",
+    "test/test_browser_observation_composition.exe": "358c2fcea8ce1d8acb9265845153916abcdb5b8182ec6878c15bd918357fbb05",
+    "test/test_keeper_tool_dispatch_runtime.exe": "9b623ea5a6da55cbacfcb4278322114fe6db8a7549e7ff76f05be34795d7d608"
+  },
+  "raw_logs_sha256": {
+    "native-build.log": "3e41102c8cc20fba646150673992a3ea295cd29aaf5571a89f8ea57eac0540e9",
+    "web.log": "fd6b5e4f233bfd4e81cc1ad2871c91085f0852467ef7f103e35d81558e663acb",
+    "web-additional.log": "514a1c3bc4cd42cf844847fcd561362a2dc8b7c21b3df0a1cb0e4d2a35cc48c0",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "machine.log": "e94b483ffeb3a2062994db013c8f1a82d587810cfe9d3dbb0f7c1e2b4ffbd0ce",
+    "surface.log": "24584d21f6331ae941181bc222fb0901a895f6572ffba23a4d9c2ed111fd6dee",
+    "composition.log": "913fe7eb595ef5392aba38478e9b18f331107aa0a5ed70950f51dd03835256c8",
+    "dispatch.log": "0c19911066be1d30b10540c81c6e4aab182ddad957be999ebbd402e6dad9ab25",
+    "producer.log": "039b706cd5975d86eb0ed5fdec8e3722ebca41d147293759871f12f7aeed9685",
+    "fixture-build.log": "08d8478bf823d634282e6ce24e27ea25b0f1b11ae7e04a39c790b8d4f88d58a2",
+    "producer-complete-fixture.log": "7bb9f0364136201a23dd1ac28daec172dc300646a314e441bfdfa28e95a91aee",
+    "stdio.log": "18fbbcda12388a4b9334945fb8b3f6ce0c37e18998e1c4feb60fc28aaa331a8f",
+    "machine-pty.log": "dbdc78e3e205ef0f1f1714d0b01813e6c7ab878c108829e95f07ca20164e9ff9"
+  },
+  "results": {
+    "web_tests": 423,
+    "web_suites": 8,
+    "tsc_exit": 0,
+    "scoped_eslint_exit": 0,
+    "native_cases": 44,
+    "stdio_cases": 2,
+    "machine_pty_flows": 3
+  },
+  "limits": "Local composed leaf only; baseline API lint debt disclosed; new Machine stdio issue41207 remains; no fullCI/release/TerminalBench."
+}

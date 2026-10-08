@@ -1,0 +1,13 @@
+{
+  "baseline": {
+    "blank_rejected": 30,
+    "blank_total": 135
+  },
+  "candidate": {
+    "blank_rejected": 135,
+    "blank_total": 135
+  },
+  "parser_tests": 11,
+  "schema_pattern_fields": 5,
+  "meaningful_and_insufficient": 6
+}

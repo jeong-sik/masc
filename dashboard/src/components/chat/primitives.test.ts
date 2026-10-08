@@ -1718,12 +1718,15 @@ describe('ChatComposer IME composition guard', () => {
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement
     expect(textarea).not.toBeNull()
 
-    fireEvent.input(textarea, { target: { value: '소주에 갑오징어' } })
+    const text = '    소주에 갑오징어\nSKILL.md 설명\n\n\n끝  \n'
+    fireEvent.input(textarea, { target: { value: text } })
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
 
     expect(onSend).toHaveBeenCalledTimes(1)
     const sent = onSend.mock.calls[0]?.[0] as ChatComposerSendPayload | undefined
-    expect(sent?.text).toBe('소주에 갑오징어')
+    expect(sent?.text).toBe(text)
+    expect(sent?.userBlocks).toEqual([{ type: 'text', text }])
+    expect(sent?.blocks).toEqual([{ t: 'p', html: text }])
   })
 })
 

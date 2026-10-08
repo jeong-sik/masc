@@ -281,15 +281,6 @@ let install () =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Log.Workspace.warn "activity_graph emit failed: %s" (Printexc.to_string exn));
 
-  Atomic.set Workspace_hooks.subscribe_messages_fn (fun ~subscriber ->
-    let _ =
-      Subscriptions.SubscriptionStore.subscribe
-        ~subscriber
-        ~resource:Subscriptions.Messages
-        ()
-    in
-    ());
-
   Atomic.set Workspace_hooks.tool_assigned_fn Tool_assignment_telemetry.emit_assigned;
 
   Atomic.set Workspace_hooks.workspace_broadcast_observed_fn record_workspace_broadcast;
@@ -303,7 +294,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~candidate_kind ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_call = ref Task.Anti_rationalization.empty_verdict_call in
     let { Task.Anti_rationalization.schemas = lookup_schemas
         ; dispatch = dispatch_lookup
@@ -364,7 +355,7 @@ let install () =
     let selected_runtime_id = ref None in
     match
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
-        match Runtime.verifier_exact_slot_admission ~runtime_id:evaluator_runtime with
+        match Runtime.verifier_exact_slot_admission ~candidate_kind ~runtime_id:evaluator_runtime with
         | Error detail ->
           Error (Agent_core.Error.Config
             (Agent_core.Error.InvalidConfig {field="verifier_exact.cli_slots"; detail}))

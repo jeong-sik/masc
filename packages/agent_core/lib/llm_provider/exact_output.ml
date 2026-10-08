@@ -132,6 +132,7 @@ type execution_error_cause =
       ; refusal : provider_refusal
       ; retry_after_s : float option
       }
+  | Output_limit_reached
   | Incomplete_output
   | Missing_output
   | Ambiguous_output of int
@@ -247,6 +248,7 @@ type flow_attempt =
   ; candidates : flow_candidate_step list
   ; messages : Types.message list
   ; requirement : output_requirement
+  ; admission_class : Admission_class.t
   ; progress :
       ( candidate_admission
         , flow_attempt_publication
@@ -484,7 +486,7 @@ let start_attempt (ready : ready_plan) =
     Ok { ready; receipt }
 ;;
 
-let start_flow (ready : flow_snapshot) =
+let start_flow ~admission_class (ready : flow_snapshot) =
   match Random_id.create () with
   | Error detail -> Error (Flow_id_generation_failed detail)
   | Ok raw_flow_id ->
@@ -508,6 +510,7 @@ let start_flow (ready : flow_snapshot) =
       ; candidates
       ; messages = ready.messages
       ; requirement = ready.requirement
+      ; admission_class
       ; progress = Flow_state.create_progress ()
       }
 ;;
@@ -1223,6 +1226,8 @@ let evidence_transport_failure ~ordinal = function
       { cause = Provider_response_refused { http_status; refusal = Server_error; _ }
       ; raw_response_sha256; _ } ->
     Ok (Validated_flow_evidence.Server_error { http_status }, raw_response_sha256)
+  | Flow_advance_execution_failed { cause = Output_limit_reached; raw_response_sha256; _ }
+    -> Ok (Validated_flow_evidence.Output_limit_reached, raw_response_sha256)
   | Flow_advance_execution_failed { cause = Invalid_json_output; raw_response_sha256; _ }
     -> Ok (Validated_flow_evidence.Invalid_json_output, raw_response_sha256)
   | Flow_advance_execution_failed { cause; _ } ->
@@ -1235,6 +1240,7 @@ let evidence_transport_failure ~ordinal = function
           "provider_response_refused:%s:%d"
           (provider_refusal_to_string refusal)
           http_status
+      | Output_limit_reached -> "output_limit_reached"
       | Incomplete_output -> "incomplete_output"
       | Missing_output -> "missing_output"
       | Ambiguous_output _ -> "ambiguous_output"
@@ -1745,6 +1751,12 @@ let execution_error_cause ~http_status ~dispatch = function
        Provider_response_refused
          { http_status; refusal = Context_overflow; retry_after_s = None }
      | None -> Completion_failed { error; dispatch })
+  (* Empty OpenAI/GLM content is rejected by the provider parser before JSON
+     normalization. Its typed stop reason still proves an output limit. *)
+  | Exec.Provider_error
+      (Http_client.ProviderFailure
+         { kind = Http_client.Empty_completion { stop_reason = Types.MaxTokens }; _ }) ->
+    Output_limit_reached
   (* An empty answer the provider stopped at its window is the same refusal in
      another shape. [Retry.overflow_of_empty_completion] is the one rule for
      which empty answers those are. *)
@@ -1767,6 +1779,8 @@ let execution_error_cause ~http_status ~dispatch = function
       (( Http_client.NetworkError _ | Http_client.TimeoutError _
        | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _
        | Http_client.ProviderFailure _ ) as error) -> Completion_failed { error; dispatch }
+  | Exec.Output_normalization_failed (Exec.Incomplete_structured_response Types.MaxTokens) ->
+    Output_limit_reached
   | Exec.Output_normalization_failed (Exec.Incomplete_structured_response _) ->
     Incomplete_output
   | Exec.Output_normalization_failed Exec.Missing_structured_text -> Missing_output
@@ -1925,6 +1939,7 @@ let execution_cause_is_binding_rest = function
       ; dispatch = _
       } -> false
   | Response_body_deadline_exceeded
+  | Output_limit_reached
   | Incomplete_output
   | Missing_output
   | Ambiguous_output _
@@ -1989,6 +2004,9 @@ let execute_flow_candidate
   match resolve_target candidate.admitted_target with
   | Error cause -> reject (Target_selection_rejected cause)
   | Ok target ->
+    (* The flow's class orders both of its permit waits on the endpoint: the
+       token-count measurement and the generation dispatch. *)
+    let target = selected_target_with_admission_class target flow.admission_class in
     let flow_measurement receipt : flow_measurement_receipt =
       { visit = candidate.visit; receipt }
     in
@@ -2294,6 +2312,7 @@ let execution_error_cause_to_string : execution_error_cause -> string = function
       "provider refused (http_status=%d refusal=%s)"
       http_status
       (provider_refusal_to_string refusal)
+  | Output_limit_reached -> "output limit reached"
   | Incomplete_output -> "incomplete output"
   | Missing_output -> "missing output"
   | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count

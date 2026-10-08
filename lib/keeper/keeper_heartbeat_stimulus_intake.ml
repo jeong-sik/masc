@@ -20,78 +20,23 @@ let stimulus_urgency_to_string = function
   | Keeper_event_queue.Low -> "low"
 ;;
 
-let forced_transient_board_reads_for_test : int Atomic.t = Atomic.make 0
-
-module For_testing = struct
-  let force_transient_board_reads count =
-    Atomic.set forced_transient_board_reads_for_test (Int.max 0 count)
-  ;;
-end
-
-let consume_forced_transient_board_read () =
-  let rec loop () =
-    let remaining = Atomic.get forced_transient_board_reads_for_test in
-    if remaining <= 0
-    then false
-    else
-      Atomic.compare_and_set
-        forced_transient_board_reads_for_test
-        remaining
-        (remaining - 1)
-      || loop ()
-  in
-  loop ()
-;;
-
 let pending_board_event_of_stimulus ~meta_after_triage stim =
-  match stim.Keeper_event_queue.payload with
-  | (Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _)
-    when consume_forced_transient_board_read () ->
-    Error
-      { Keeper_world_observation_board_signal.operation =
-          Keeper_world_observation_board_signal.Get_post
-      ; post_id = stim.post_id
-      ; error = Board.Io_error "forced transient Board stimulus read failure"
-      }
-  | Keeper_event_queue.Board_signal _
-  | Keeper_event_queue.Board_attention _
-  | Keeper_event_queue.Bootstrap
-  | Keeper_event_queue.Fusion_completed _
-  | Keeper_event_queue.Schedule_due _
-  | Keeper_event_queue.Connector_attention _
-  | Keeper_event_queue.Hitl_resolved _
-  | Keeper_event_queue.Ask_answered _
-  | Keeper_event_queue.Completion_authority_rejected _
-  | Keeper_event_queue.Task_cancelled _
-  | Keeper_event_queue.Workspace_message _
-  | Keeper_event_queue.Delegate_completed _
-  | Keeper_event_queue.Composition_completed _
-  | Keeper_event_queue.Task_outcome _ ->
-    Keeper_world_observation.pending_board_event_of_stimulus
-      ~meta:meta_after_triage
-      stim
+  Keeper_world_observation.pending_board_event_of_stimulus ~meta:meta_after_triage stim
 ;;
 
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
-  | Stimulus_retry_later of
-      Keeper_world_observation_board_signal.board_unavailable
   | Stimulus_connector_retry_later of Keeper_external_attention.read_error
   | Stimulus_connector_missing of string
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
-  | Transient_board_read of
-      Keeper_world_observation_board_signal.board_unavailable
   | Connector_read_failed of Keeper_external_attention.read_error
   | Connector_item_missing of string
 
 let event_queue_intake_error_to_string = function
   | Pending_selection_failed detail ->
     "event queue pending selection failed: " ^ detail
-  | Transient_board_read unavailable ->
-    "event queue stimulus intake retry: "
-    ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable
   | Connector_read_failed error ->
     "connector attention intake retry: " ^ Keeper_external_attention.read_error_to_string error
   | Connector_item_missing event_id ->
@@ -100,32 +45,24 @@ let event_queue_intake_error_to_string = function
 
 let event_queue_intake_error_reason_label = function
   | Pending_selection_failed _ -> "event_queue_selection_failed"
-  | Transient_board_read _ -> "event_queue_transient_board_read"
   | Connector_read_failed _ -> "event_queue_connector_read_failed"
   | Connector_item_missing _ -> "event_queue_connector_item_missing"
 ;;
 
 let event_queue_intake_error_counts_as_cycle_failure = function
   | Pending_selection_failed _ -> true
-  | Transient_board_read _ | Connector_read_failed _ | Connector_item_missing _ -> false
+  | Connector_read_failed _ | Connector_item_missing _ -> false
 ;;
 
 let classify_pending_board_event_result = function
   | Ok events_opt -> Stimulus_consumed (Option.to_list events_opt)
-  | Error
-      (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
-    (match
-       Keeper_world_observation_board_signal.disposition_of_unavailable unavailable
-     with
-     | Keeper_world_observation_board_signal.Permanent -> Stimulus_consumed []
-     | Keeper_world_observation_board_signal.Transient ->
-       Stimulus_retry_later unavailable)
+  | Error (_ : Keeper_world_observation_board_signal.board_unavailable) ->
+    Stimulus_consumed []
 ;;
 
-(* Board-unavailable-result: permanent poison is consumed so a swept post
-   cannot crash-loop forever. A transient environment failure remains a typed
-   retry; intake reads an immutable pending selection, so retaining it requires
-   no mutation — only withholding consumption and ACK. *)
+(* A Board read that answers no row names a swept post or an id that does not
+   parse, and reading again gives the same answer. The stimulus is consumed so
+   it cannot be reselected on every snapshot. *)
 let pending_board_events_of_stimulus_result ~meta_after_triage stim =
   let read_result = pending_board_event_of_stimulus ~meta_after_triage stim in
   match read_result with
@@ -138,21 +75,12 @@ let pending_board_events_of_stimulus_result ~meta_after_triage stim =
           , Runtime_observation_query_operation.(to_label Board_stimulus_intake) )
         ]
       ();
-    (match Keeper_world_observation_board_signal.disposition_of_unavailable unavailable with
-     | Keeper_world_observation_board_signal.Permanent ->
-       Log.Keeper.warn
-         "stimulus intake: board read permanently unavailable, consuming stimulus \
-          without retry stimulus_id=%s keeper=%s: %s"
-         stim.Keeper_event_queue.post_id
-         meta_after_triage.name
-         (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-     | Keeper_world_observation_board_signal.Transient ->
-       Log.Keeper.warn
-         "stimulus intake: board read transiently unavailable, retaining exact \
-          pending source stimulus_id=%s keeper=%s: %s"
-         stim.Keeper_event_queue.post_id
-         meta_after_triage.name
-         (Keeper_world_observation_board_signal.unavailable_to_string unavailable));
+    Log.Keeper.warn
+      "stimulus intake: board read unavailable, consuming stimulus \
+       stimulus_id=%s keeper=%s: %s"
+      stim.Keeper_event_queue.post_id
+      meta_after_triage.name
+      (Keeper_world_observation_board_signal.unavailable_to_string unavailable);
     classify_pending_board_event_result read_result
 ;;
 
@@ -459,8 +387,7 @@ let consume_single_heartbeat_stimulus
       Stimulus_consumed []
   in
   match intake_result with
-  | Stimulus_retry_later _ | Stimulus_connector_retry_later _
-  | Stimulus_connector_missing _ -> intake_result
+  | Stimulus_connector_retry_later _ | Stimulus_connector_missing _ -> intake_result
   | Stimulus_consumed _ ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string StimulusConsumed)
@@ -1009,19 +936,6 @@ let heartbeat_event_intake
                 ?connector_attention_items
                 selection.source
             with
-            | Stimulus_retry_later unavailable ->
-              Log.Keeper.info
-                "turn entry: withdrew transiently unavailable stimulus from this \
-                 cycle keeper=%s: %s"
-                keeper_name
-                (Keeper_world_observation_board_signal.unavailable_to_string
-                   unavailable);
-              let first_withdrawn =
-                match first_withdrawn with
-                | None -> Some (selection, Transient_board_read unavailable)
-                | Some _ as kept -> kept
-              in
-              loop remaining observations_rev selections_rev first_withdrawn rest
             | Stimulus_connector_missing event_id ->
               Log.Keeper.warn
                 "turn entry: retaining missing connector attention keeper=%s event_id=%s"
@@ -1049,7 +963,7 @@ let heartbeat_event_intake
               (* Permanent Board absence is terminal before dispatch. It is the
                  one safe empty-source ACK: the post id cannot become readable
                  later, while retaining it would reselect the same poison on
-                 every snapshot. Transient failures take the arm above. *)
+                 every snapshot. *)
               (match
                  Keeper_registry_event_queue.ack_pending_result
                    ~base_path
@@ -1154,7 +1068,7 @@ let heartbeat_event_intake
             | Keeper_world_observation.Completion_authority_rejected _
             | Keeper_world_observation.Task_outcome _
             | Keeper_world_observation.Task_cancelled _
-            | Keeper_world_observation.Delegate_completed
+            | Keeper_world_observation.Delegate_completed _
             | Keeper_world_observation.Ask_answered_row _
             | Keeper_world_observation.Composition_completed ->
               Log.Keeper.info

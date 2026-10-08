@@ -122,7 +122,7 @@ type state = {
 
 let goal_to_yojson (goal : goal) =
   `Assoc
-    [
+    ([
       ("id", `String goal.id);
       ("criterion_revision", `String goal.criterion_revision);
       ("title", `String goal.title);
@@ -130,12 +130,14 @@ let goal_to_yojson (goal : goal) =
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("due_date", Json_util.string_opt_to_json goal.due_date);
       ("priority", `Int goal.priority);
-      ("phase", Goal_phase.to_yojson goal.phase);
+      ("phase", `String (Goal_phase.to_string goal.phase));
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
-    ]
+    ] @ match Goal_phase.resume_phase goal.phase with
+        | None -> []
+        | Some target -> ["resume_phase", `String (Goal_phase.to_string target)])
 
 let pending_notification_to_yojson (notice : pending_notification) =
   let recipients = match notice.delivery with
@@ -178,6 +180,7 @@ let accepted_goal_fields =
   ; "due_date"
   ; "priority"
   ; "phase"
+  ; "resume_phase"
   ; "last_review_note"
   ; "last_review_at"
   ; "created_at"
@@ -215,8 +218,8 @@ let goal_of_yojson : Yojson.Safe.t -> (goal, schema_rejection) result = function
             | None | Some `Null ->
                 rejected ~field:"phase"
                   (Printf.sprintf "goal %S has no phase field" id)
-            | Some phase_json ->
-                (match Goal_phase.of_yojson phase_json with
+            | Some _ ->
+                (match Goal_phase.of_fields json with
                  | Ok phase -> Ok phase
                  | Error detail ->
                      rejected ~field:"phase"
@@ -387,6 +390,8 @@ type rollup = {
   awaiting_confirmation_count : int;
   done_count : int;
   dropped_count : int;
+  paused_count : int;
+  blocked_count : int;
 }
 [@@deriving yojson]
 
@@ -790,7 +795,7 @@ let sort_goals goals =
         String.compare right.updated_at left.updated_at)
     goals
 
-let list_goals_result config ?phase () : (goal list, unavailable) result =
+let list_goals_result config ?phase ?kind () : (goal list, unavailable) result =
   match load_source config with
   | Unavailable u -> Error u
   | Uninitialized -> Ok []
@@ -799,6 +804,8 @@ let list_goals_result config ?phase () : (goal list, unavailable) result =
           |> List.filter (fun goal -> match phase with
               | None -> true
               | Some phase -> goal.phase = phase)
+          |> List.filter (fun goal -> match kind with
+              | None -> true | Some kind -> Goal_phase.kind goal.phase = kind)
           |> sort_goals)
 
 let blank_opt = function
@@ -828,8 +835,10 @@ let upsert_event_intents ~actor ~revision (goal : goal) action =
     | `created -> []
     | `updated previous ->
         let phase = if previous.phase = goal.phase then [] else
-          [ Phase, `Assoc [ actor_field; "phase", Goal_phase.to_yojson goal.phase;
-                           "previous_phase", Goal_phase.to_yojson previous.phase;
+          [ Phase, `Assoc [ actor_field; "phase", `String (Goal_phase.to_string goal.phase);
+                           "resume_phase", Goal_phase.resume_phase_to_yojson goal.phase;
+                           "previous_phase", `String (Goal_phase.to_string previous.phase);
+                           "previous_resume_phase", Goal_phase.resume_phase_to_yojson previous.phase;
                            "cause", `String "criterion_edit" ] ] in
         let change name before after =
           name, `Assoc [ "from", before; "to", after ] in
@@ -979,7 +988,7 @@ let append_audit_event_after_pending config json =
 let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_date
     ?priority () =
   let is_new_goal = id = None in
-  if is_new_goal && (title = None || title = Some "") then
+  if is_new_goal && blank_opt title then
     Error (Rejected "title required for new goal")
   else
     match due_date_refusal due_date with
@@ -1022,10 +1031,7 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                   let next_goal =
                     if not criterion_changed then next_goal
                     else
-                      let phase = match next_goal.phase with
-                        | Goal_phase.Awaiting_confirmation | Goal_phase.Verifying | Goal_phase.Completed -> Goal_phase.Executing
-                        | Goal_phase.Executing | Goal_phase.Dropped as phase -> phase
-                      in
+                      let phase = Goal_phase.criterion_changed next_goal.phase in
                       { next_goal with criterion_revision = Random_id.hex ~bytes:16;
                         phase; last_review_note = None; last_review_at = None }
                   in
@@ -1047,14 +1053,51 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                      not to hold the row. On refusal the closure returns the
                      state it received and [update_state] writes nothing; the
                      error is carried out via [refusal]. *)
-                  if blank_opt metric || blank_opt target_value then (
-                    refusal :=
+                  (* Creation input check, not just a shape check. A goal born
+                     without a name states no
+                     condition to hold it to — the [id = None] path is
+                     refused before the lock, while an explicit unknown id
+                     reaches this arm and used to default to "Untitled
+                     goal". And a goal born past its due date is overdue
+                     before its first observation: unreachable by
+                     construction. Updates stay ungated: an existing goal's
+                     due date passing is ordinary life, and backdating a
+                     stored date is a correction, not a birth. *)
+                  let b2_refusal =
+                    if blank_opt title then
                       Some
-                        "metric and target_value are required for a new goal \
-                         (RFC-0387 B1: a goal must declare a measurable \
-                         success condition)";
-                    state)
-                  else (
+                        "a non-blank title is required for a new goal \
+                         (a goal without a name states no success condition \
+                         to hold it to)"
+                    else (
+                      match due_date with
+                      | None -> None
+                      | Some raw ->
+                        (match Ptime.of_float_s (Time_compat.now ()) with
+                         | None -> None
+                         | Some now ->
+                           if Goal_due.is_overdue ~now (Goal_due.read (Some raw))
+                           then
+                             Some
+                               (Printf.sprintf
+                                  "due_date %S is already past: a goal born \
+                                   overdue is unreachable"
+                                  raw)
+                           else None))
+                  in
+                  (match b2_refusal with
+                   | Some message ->
+                     refusal := Some message;
+                     state
+                   | None ->
+                     if blank_opt metric || blank_opt target_value then (
+                       refusal :=
+                         Some
+                           "metric and target_value are required for a new goal \
+                            (RFC-0387 B1: a goal must declare a measurable \
+                            success condition)";
+                       state)
+                     else (
                   let new_goal =
                       {
                         id = resolved_id;
@@ -1076,7 +1119,7 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                     state with version = state.version + 1;
                     updated_at = now;
                     goals = state.goals @ [ new_goal ];
-                  }) in
+                  })) in
               match actor, !upserted, find_goal_in next.goals resolved_id with
               | Some actor, Some action, Some goal ->
                   pending := upsert_event_intents ~actor ~revision:next.version goal action;
@@ -1116,6 +1159,8 @@ let compute_rollup goals =
     awaiting_confirmation_count = count (fun goal -> goal.phase = Goal_phase.Awaiting_confirmation);
     done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
     dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);
+    paused_count = count (fun goal -> Goal_phase.kind goal.phase = Goal_phase.Kind.Paused);
+    blocked_count = count (fun goal -> Goal_phase.kind goal.phase = Goal_phase.Kind.Blocked);
   }
 
 let pending_notifications config = match load_source config with

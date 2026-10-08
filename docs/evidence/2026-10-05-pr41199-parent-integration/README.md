@@ -1,0 +1,11 @@
+# Machine activity parent integration
+
+Original head 6e2f49595a0a328cfe6192062428615549aefa8e is integrated through a real pending merge of published parent d60c880a3a6870d5d315f370e4465064c4bee37d. Tested staged tree: bbc19513adca285afec08f7dd39b9ee4f131b838. Four conflicts retain parent MSX failed-read retry, typed Runtime commit errors, H2 inventory regression and all added stanzas alongside child activity contracts.
+
+Focused opam 5.5.1/DUNE_JOBS=2 repo-wrapper build passed for TUI and seven test executables. Actual native tests: MSX owner4, DOS owner3, tick6, inventory6, MSX routes13, DOS input routes4, Runtime publication selected case1: 37 total. The Runtime command selects only the Browser/machine visible-file publication case, including conflict, invalid input, pre-rename failure and after-rename uncertainty; other Runtime tests are skipped. Web inventory decoder/component:13 tests across2 suites; TypeScript and scoped ESLint passed. Native executables ran from repository root; Web tests ran through pnpm test for src/api/lane-inventory.test.ts and src/components/lane-inventory-panel.test.ts.
+
+Initial Web commands lacked node_modules; frozen-lockfile installation resolved tool availability. Initial tool failures are preserved, not claimed as product RED. Raw logs retain exact original bytes. checks.json pins current source, binaries and logs; later evidence additions do not alter the tested source closure.
+
+TUI evidence is compile plus tick decoder/policy tests, not an interactive off/on spectator loop. Web inventory has no dedicated machine mutation controls, so its tests prove readings, not Web input refusal. Owner and HTTP route tests prove refusal/retention at their boundaries. No full build/suite, browser rerun, PTY, provider execution, hosted CI, deployment, release qualification or TerminalBench execution is claimed. Historical author evidence remains historical and does not substitute for these integrated tests.
+
+This integrated 37-case execution supersedes historical “not run” notes only for the DOS activity owner, selected Runtime publication case, MSX routes, DOS input routes, inventory and tick targets named above. Other tool suites, fixture families and the interactive TUI loop remain unrun here; isolated historical evidence and its declared normalization remain unchanged.

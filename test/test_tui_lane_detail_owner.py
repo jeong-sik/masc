@@ -24,7 +24,7 @@ RUN_B = "exact-board-attention-836d84223072c444090b8adc50c29631"
 def run(binary, transition, old_fails):
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
-    fixtures[_keyboard_keepers.STANDALONE_LANES_PATH] = _keyboard_keepers.standalone_lanes_response()
+    fixtures[_keyboard_keepers.LANE_INVENTORY_PATH] = _keyboard_keepers.lane_inventory_response()
     row = _keyboard_keepers.verifier_lane_runs_response()[1]["runs"][0]
     fixtures[_keyboard_keepers.lane_runs_path("verifier_exact")] = (200, {
         # The list draws no run id, so the two rows are told apart by the

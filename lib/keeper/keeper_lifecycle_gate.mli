@@ -1,8 +1,7 @@
 (** RFC-0297 Phase 1 (P0-1): closed-variant keeper lifecycle gate.
 
     A lifecycle activity runs only when BOTH the global kill-switch
-    (from [runtime.toml] [reactive]/[proactive]/[autonomous]/[bootstrap]
-    [enabled]) AND the per-keeper flag (projected from [keeper_meta]) are
+    (from [runtime.toml] [reactive]/[proactive]/[autonomous] [enabled]) AND the per-keeper flag (projected from [keeper_meta]) are
     enabled. Every flag defaults to [true] so the historical "keeper alive
     = always on" behaviour is preserved; operators opt in to a kill-switch
     by setting a flag to [false].
@@ -17,7 +16,6 @@ type gate =
   | Reactive
   | Proactive
   | Autonomous
-  | Bootstrap
 
 (** One boolean per gate. Used for both the global (config) and the
     per-keeper (meta) view. [gate_enabled] ANDs the two, so the two views
@@ -26,7 +24,6 @@ type flags =
   { reactive : bool
   ; proactive : bool
   ; autonomous : bool
-  ; bootstrap : bool
   }
 
 (** All gates enabled — the default when neither config nor meta pins a

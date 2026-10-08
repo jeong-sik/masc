@@ -17,6 +17,7 @@ function runtime(id: string): RuntimeResolvedResponse['runtimes'][number] {
 
 const RESOLVED: RuntimeResolvedResponse = {
   config_path: null,
+  default_route: null,
   default_runtime: null,
   runtimes: [runtime('p.two'), runtime('p.one')],
   lanes: [

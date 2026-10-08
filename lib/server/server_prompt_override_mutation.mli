@@ -1,5 +1,7 @@
-(** Persist an admitted HTTP override before notifying an existing curator.
-    The notification only queues work; it does not run a provider. *)
+(** Persist an admitted HTTP override before notifying the existing owner.
+    Candle appraisal prompt changes retry rejected payout obligations; the
+    workspace curator prompt requests its own refresh. Failed writes notify
+    neither worker. Notifications only queue work; they do not run a provider. *)
 type error = Validation of string | Persistence of string
 type applied =
   { message : string

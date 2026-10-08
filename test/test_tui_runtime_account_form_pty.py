@@ -4,13 +4,14 @@
 scenario types a home another Codex provider already signs in at and reads
 the refusal on the form, fixes it, and saves. While the form stands open the
 file on the server gains a line, the way another client or a keeper would
-write it; the save has to carry that line, because the form declares against
-runtime.toml as the server holds it at submit, not as it was opened. The main
+write it; submitting must refuse the stale draft, then reopening reads the
+new revision and preserves that line. The main
 judgement is the text the save posts, read whole at the end. After the save
 the form stays on the sign-in command: [y] sends it whole through OSC 52, and
 Enter closes the form, so the runner's [q] quits again.
 """
 import base64
+import hashlib
 import json
 import os
 import sys
@@ -57,14 +58,14 @@ MEANWHILE = "# added while the form was open\n"
 SIGN_IN = b"(export CODEX_HOME='/tmp/codex-second' && codex login)"
 
 
-def commit_receipt() -> dict[str, object]:
+def commit_receipt(source_text: str) -> dict[str, object]:
     """The shape Masc_tui_runtime_config_receipt.decode reads; the same one
     test_tui_runtime_lane_editor.py serves."""
     return {
         "ok": True,
         "state": "committed",
         "commit": {
-            "source_revision": "source-8",
+            "source_revision": hashlib.sha256(b"runtime_config_source\x00" + source_text.encode()).hexdigest(),
             "order": "8",
             "durability": "durable",
             "warnings": [],
@@ -87,7 +88,7 @@ def commit_receipt() -> dict[str, object]:
             },
             "skills": {
                 "state": "unchanged",
-                "input_source_revision": "source-8",
+                "input_source_revision": hashlib.sha256(b"runtime_config_source\x00" + source_text.encode()).hexdigest(),
                 "snapshot_revision": "snapshot-8",
                 "catalog_revision": "catalog-8",
                 "config_state": "configured",
@@ -105,9 +106,10 @@ class ServerCopy:
     """runtime.toml as the fixture server holds it: GET reads it, a save
     replaces it."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, lose_receipt: bool = False) -> None:
         self.text = SOURCE
         self.lock = threading.Lock()
+        self.lose_receipt = lose_receipt
 
     def append(self, line: str) -> None:
         with self.lock:
@@ -115,11 +117,20 @@ class ServerCopy:
 
     def raw(self, body: bytes):
         with self.lock:
+            revision = hashlib.sha256(b"runtime_config_source\x00" + self.text.encode()).hexdigest()
             if body:
-                self.text = json.loads(body)["source_text"]
-                return 200, commit_receipt()
+                request = json.loads(body)
+                if request.get("expected_source_revision") != revision:
+                    return 409, {"error": "file changed", "code": "revision_conflict",
+                                 "current": {"source_path": "/workspace/config/runtime.toml",
+                                             "source_text": self.text, "source_revision": revision}}
+                self.text = request["source_text"]
+                if self.lose_receipt:
+                    return 503, {"error": "receipt unavailable after commit"}
+                return 200, commit_receipt(self.text)
             return 200, {
                 **_keyboard_runtime.runtime_config_read_metadata(),
+                "source_revision": revision,
                 "path": "/workspace/config/runtime.toml",
                 "source_text": self.text,
             }
@@ -149,6 +160,14 @@ def run(executable: str) -> None:
 
         # Provider, then id, then a home codex_acct1 already signs in at.
         _keyboard_harness.send_and_wait(process, fd, output, b"\r\r/tmp/codex-one", b"CODEX_HOME='/tmp/codex-one'")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"runtime.toml changed since this form opened")
+        if any(path == RAW_PATH for path, _ in requests):
+            raise AssertionError("a stale form wrote the changed source")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"# operator notes stay where they are")
+        _keyboard_harness.wait_for_output(process, fd, output,
+            hashlib.sha256(b"runtime_config_source\x00" + (SOURCE + MEANWHILE).encode()).hexdigest()[:12].encode(), start=0, timeout=5)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"codex_subscription_2")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r\r/tmp/codex-one", b"CODEX_HOME='/tmp/codex-one'")
         _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"already signs in at /tmp/codex-one")
         if any(path == RAW_PATH for path, _ in requests):
             raise AssertionError("a refused declaration was saved")
@@ -166,6 +185,10 @@ def run(executable: str) -> None:
         if len(saves) != 1 or previews != saves:
             raise AssertionError(f"one previewed save expected: saves={saves!r} previews={previews!r}")
         saved = saves[0]
+        request = next(json.loads(body) for path, body in requests if path == RAW_PATH)
+        expected_revision = hashlib.sha256(b"runtime_config_source\x00" + (SOURCE + MEANWHILE).encode()).hexdigest()
+        if request.get("expected_source_revision") != expected_revision:
+            raise AssertionError("the save did not use the revision read at submit")
         if not saved.startswith(SOURCE + MEANWHILE):
             raise AssertionError(f"the save did not keep the line written meanwhile: {saved!r}")
         for needle in (
@@ -195,13 +218,48 @@ def run(executable: str) -> None:
 
     _keyboard_harness.run_terminal_scenario(
         executable,
-        description="The runtime.toml account form declares against the file at submit",
+        description="The runtime.toml account form refuses stale drafts and saves with its read revision",
         interact=interact,
         http_fixtures=fixtures,
         http_requests=requests,
     )
 
 
+def run_unknown_commit(executable: str) -> None:
+    server = ServerCopy(lose_receipt=True)
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[RAW_PATH] = _keyboard_harness.RequestHttpResponse(server.raw)
+    fixtures[PREVIEW_PATH] = (
+        200, {"ok": True, "can_save": True, "validation": {"valid": True, "issues": []}}
+    )
+    requests: list[tuple[str, bytes]] = []
+
+    def interact(process, fd, _slave_fd, output, _base_path) -> None:
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.wait_for_output(process, fd, output, b"codex_acct1", start=0, timeout=5)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"codex_subscription_2")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r\r/tmp/codex-second", b"CODEX_HOME='/tmp/codex-second'")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"The file may already have changed")
+        # The server committed but the response cannot prove that. A retained
+        # draft must not silently resubmit against the now different revision.
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"runtime.toml changed since this form opened")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        if len([path for path, _ in requests if path == RAW_PATH]) != 1:
+            raise AssertionError("unknown save was replayed")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"# operator notes stay where they are")
+        _keyboard_harness.wait_for_output(process, fd, output,
+            hashlib.sha256(b"runtime_config_source\x00" + server.text.encode()).hexdigest()[:12].encode(), start=0, timeout=5)
+        _keyboard_harness.send_and_wait(process, fd, output, b"a", b"codex_subscription_3")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"# operator notes stay where they are")
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(
+        executable, description="A lost commit receipt is unknown and retained draft cannot overwrite it",
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+    )
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
+    run_unknown_commit(os.path.abspath(sys.argv[1]))
     print("runtime account form: PASS")

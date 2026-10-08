@@ -1,0 +1,20 @@
+{
+  "parent": "e341428afdb11ad7c54c1a58dd2b3c501f2db047",
+  "source_sha256": {
+    "test/test_tui_remote_workspace_history_pty.py": "04630cd163b468b03ded10ba063dd83fcf016f236fdffd75e7ce1e89497665fc"
+  },
+  "evidence_sha256": {
+    "README.md": "a790cff9fa77e32ad2c653e5cbe2b43cbad4eee2972f4e0f008374e1126c4a40",
+    "baseline-pty.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "baseline-pyright.json": "848e7174c02210ae166232cf859439a3422bfbb73764b3b888a23c43e21f6340",
+    "baseline-ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "both-pty.log": "1badc8a2e0e8e913212cfa3d33442188e678b34e0d200a3f90259869fab29027",
+    "both-pyright.json": "a7362776d81996fde233fc7baf8a52c543961f9cf08a30786390cc00ae6915ed",
+    "both-ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "final-pty.log": "52007fa6d61abaa404da6f3fadf6c0b20e8e6ecc1758495e1f87c6e54e5d4b52",
+    "final-restored-pty.log": "2c6001ca9320ad9c7de55e8f683c449266bb6c11c2db1b8fcc6af44f784105f3",
+    "green-pty.log": "2c6001ca9320ad9c7de55e8f683c449266bb6c11c2db1b8fcc6af44f784105f3"
+  },
+  "binary_sha256": "196d9fce8ecced88ab44ac424d300d9744299ee1f707d323eac9c0803d7bae0e",
+  "execution": "two focused PTY cases PASS; full profile unrun"
+}

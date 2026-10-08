@@ -132,82 +132,41 @@ let source_to_string = function
 let pads_dir ~base_path =
   Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "pads"
 
-(* 삼국지 III, from the prompts the sangokushi-3 Skill observed: numbered
-   prompts answered with a number and enter, Y/N questions, and "press any
-   key". Numbers and names go through the page's text box, not the pad.
+(* Builtin layouts are data assets, not cases in the pad implementation. A
+   game package can ship [config/pads/<inventory-name>.toml] and the generic
+   loader discovers it from the same embedded config tree as the other
+   distribution assets. Keeping the inventory name in the asset filename is
+   the only coupling needed to select a layout. *)
+let builtin_pads_prefix = "pads/"
+let toml_suffix = ".toml"
 
-   The battle map is made of hexes, and its cursor moves on the digit keys:
-   8 up, 2 down, 7 up-left, 9 up-right, 1 down-left, 3 down-right. The arrow
-   keys, 4 and 6 do nothing there, so the pad sends digits: the D-pad for the
-   four upper and vertical hexes, the shoulders for the two lower diagonals.
-   Placing an officer before a battle takes 0, not enter, so Select sends 0
-   alone. At the command prompt, 0 then enter asks whether to end the month.
+let builtin_layout_name path =
+  let prefix_length = String.length builtin_pads_prefix in
+  let suffix_length = String.length toml_suffix in
+  let path_length = String.length path in
+  if
+    not (String.starts_with ~prefix:builtin_pads_prefix path)
+    || not (String.ends_with ~suffix:toml_suffix path)
+    || path_length <= prefix_length + suffix_length
+  then None
+  else
+    let name_length = path_length - prefix_length - suffix_length in
+    let name = String.sub path prefix_length name_length in
+    (* Only one inventory component is valid here. A nested asset should not
+       silently become a different program's layout. *)
+    if name = "" || String.contains name '/' || String.contains name '\\' then None else Some name
 
-   Esc does nothing anywhere in the game. Enter on an empty prompt goes back
-   one menu, and Backspace deletes the last typed digit, so East sends
-   Backspace. A battle menu takes its digit alone; an enter after it goes back
-   out of the menu the digit opened. *)
-let samguk3 =
-  {toml|[BTN_SOUTH]
-keys = ["return"]
-label = "결정·뒤로"
+let builtin_layouts () =
+  Embedded_config.file_list
+  |> List.filter_map (fun path ->
+    match builtin_layout_name path with
+    | None -> None
+    | Some name -> Option.map (fun contents -> name, contents) (Embedded_config.read path))
 
-[BTN_EAST]
-keys = ["backspace"]
-label = "지우기"
-
-[BTN_NORTH]
-keys = ["y"]
-label = "예 (Y)"
-
-[BTN_WEST]
-keys = ["n"]
-label = "아니오 (N)"
-
-[BTN_DPAD_UP]
-keys = ["8"]
-label = "위 (8)"
-
-[BTN_DPAD_DOWN]
-keys = ["2"]
-label = "아래 (2)"
-
-[BTN_DPAD_LEFT]
-keys = ["7"]
-label = "왼쪽 위 (7)"
-
-[BTN_DPAD_RIGHT]
-keys = ["9"]
-label = "오른쪽 위 (9)"
-
-[BTN_TL]
-keys = ["1"]
-label = "왼쪽 아래 (1)"
-
-[BTN_TR]
-keys = ["3"]
-label = "오른쪽 아래 (3)"
-
-[BTN_START]
-keys = ["space"]
-label = "아무 키"
-
-[BTN_SELECT]
-keys = ["0"]
-label = "0 입력 (배치)"
-|toml}
-
-(* Keyed by the saves name, the inventory name the sangokushi-3 Skill loads
-   the game under. *)
-let builtin_layouts = [ ("samguk3", samguk3) ]
-
-(* The saves name becomes a file name here. Inventory names carry no path and
-   no dot (masc_dos_load refuses them), so anything else did not come from
-   the inventory. *)
+(* The saves name is the inventory entry, including a standalone program's
+   extension. Use the loader's boundary: one plain name, not a path or drive. *)
 let is_file_component name =
-  name <> ""
-  && String.equal (Filename.basename name) name
-  && not (String.contains name '.')
+  name <> "" && not (Dos_lane.escapes name)
 
 let workspace_file_error path detail =
   Printf.sprintf "workspace pad layout %s: %s" path detail
@@ -259,6 +218,6 @@ let load ~base_path ~saves_name =
     | Error message -> Error message
     | Ok (Some contents) -> parsed Workspace contents
     | Ok None ->
-      match List.assoc_opt saves_name builtin_layouts with
+      match List.assoc_opt saves_name (builtin_layouts ()) with
       | Some contents -> parsed Builtin contents
       | None -> Ok None

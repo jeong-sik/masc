@@ -7,26 +7,12 @@
     Pure by construction: no terminal I/O, no mutation, no unhandled exceptions.
     Safe across wide/narrow widths, non-ASCII multi-byte text, and empty/negative inputs. *)
 
-(** Typed style for chart glyphs and bars. *)
-type style =
-  | Status of Masc_tui_theme.status
-  | Tone of Masc_tui_theme.tone
-
 (** {1 Sparklines} *)
 
 val sparkline : ?min:int -> ?max:int -> int list -> string
 (** [sparkline ?min ?max values] renders a single-row sparkline string.
     Each value maps to one of the 8 height levels.
     Returns [""] for empty list. *)
-
-val sparkline_colored :
-  ?min:int ->
-  ?max:int ->
-  style_of_level:(int -> style) ->
-  int list ->
-  string
-(** [sparkline_colored] applies a typed [style] based on level (0..7),
-    resetting with [Masc_tui_theme.Sgr.reset] after each glyph. *)
 
 (** {1 Gauges and Utilization Bars} *)
 
@@ -59,7 +45,7 @@ val heatmap_24h :
 type bar_item = {
   name : string;
   count : int;
-  style : style option;
+  style : Masc_tui_theme.status option;
 }
 
 val distribution_bars :

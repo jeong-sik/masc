@@ -112,7 +112,7 @@ let test_loader_keeps_only_current_rows () =
     "canonical post is present"
     true
     (Result.is_ok
-       (Board_core.get_post
+       (Board_core.read_post
           loaded_store
           ~post_id:(Board.Post_id.to_string post.id)));
   Out_channel.with_open_bin path (fun _ -> ());
@@ -252,7 +252,7 @@ let test_partial_load_never_rewrites_the_file () =
   Alcotest.(check bool) "comments load reports the damage" true
     (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_comments store));
   Alcotest.(check bool) "posts after the damaged line are still served" true
-    (Result.is_ok (Board_core.get_post store ~post_id:(Board.Post_id.to_string after.id)));
+    (Result.is_ok (Board_core.read_post store ~post_id:(Board.Post_id.to_string after.id)));
   Alcotest.(check bool) "comments after the damaged line are still served" true
     (Result.is_ok
        (Board_core.get_comment store ~comment_id:(Board.Comment_id.to_string c_after.id)));
@@ -282,7 +282,7 @@ let test_partial_load_never_rewrites_the_file () =
   Alcotest.(check bool) "delete is refused before it touches memory" true
     (Result.is_error (Board.delete_post store ~post_id:before_id));
   Alcotest.(check bool) "the post is still in memory" true
-    (Result.is_ok (Board_core.get_post store ~post_id:before_id));
+    (Result.is_ok (Board_core.read_post store ~post_id:before_id));
   unchanged "delete";
   (* Only repairing and successfully re-reading both sources restores expiry
      authority; a file edit alone does not erase the recorded load failure. *)

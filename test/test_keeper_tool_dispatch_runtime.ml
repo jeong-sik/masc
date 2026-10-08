@@ -5414,7 +5414,6 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
                      Keeper_runtime_failure_route.Terminal_effect_runtime_failure
-                 ; provenance = Keeper_runtime_failure_route.Masc_internal_error
                  ; _
                  } ->
                ()
@@ -5439,7 +5438,6 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
                      Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable
-                 ; provenance = Keeper_runtime_failure_route.Masc_internal_error
                  ; _
                  } ->
                ()
@@ -7426,6 +7424,7 @@ value = {surface="dashboard", content="must not run"}
       if break_evidence then (
         let path = Filename.concat (Masc.Workspace.masc_root_dir config) "skill-composition-evidence-v1" in
         Out_channel.with_open_bin path (fun channel -> output_string channel "occupied"));
+      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_automation_executor (Some (function
         | Browser_lane.Page_goto _ ->
           incr navigations;
@@ -7443,6 +7442,7 @@ value = {surface="dashboard", content="must not run"}
       let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
         ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~skill_catalog ?turn_ctx_cell () in
       Fun.protect ~finally:(fun () -> bundle.cleanup ();
+        Browser_lane.install_activity_observer None;
         Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
         let projected = match Masc.Keeper_official_client_host.dynamic_tools
@@ -7548,6 +7548,7 @@ id = "second"
       let navigations = ref 0 and seconds = ref 0 in
       Masc.Keeper_tool_call_log.reset_for_testing ();
       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_automation_executor (Some (function
         | Browser_lane.Page_goto _ ->
           incr navigations;
@@ -7561,6 +7562,7 @@ id = "second"
       let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
         ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~skill_catalog ?turn_ctx_cell () in
       Fun.protect ~finally:(fun () -> bundle.cleanup ();
+        Browser_lane.install_activity_observer None;
         Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
         let projected = match Masc.Keeper_official_client_host.dynamic_tools
@@ -7876,8 +7878,11 @@ let test_composition_over_an_empty_msx_lane_returns_the_refusal ?(break_evidence
            ()
        in
        Fun.protect
-         ~finally:bundle.cleanup
+         ~finally:(fun () ->
+           Msx_lane.install_activity_observer None;
+           bundle.cleanup ())
          (fun () ->
+            Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
@@ -8926,12 +8931,16 @@ let test_composable_outputs_satisfy_declared_schema () =
            check=(fun () -> Ok ()); close=(fun () -> ())}
        in
        let driver = Driver.create ~start_downloads ~request () in
+       Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
        Browser_lane.install_automation_executor (Some (Driver.execute driver));
        Fun.protect ~finally:(fun () ->
+         Msx_lane.install_activity_observer None;
+         Browser_lane.install_activity_observer None;
          Browser_lane.install_automation_executor None;
          ignore (Driver.close driver);
          ignore (Msx_lane.eject ()))
        @@ fun () ->
+       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
        List.iter (fun verb -> match Driver.execute driver verb with
          | Browser_lane.Answered _ -> ()
          | _ -> fail "browser producer fixture initialization failed")
@@ -9048,7 +9057,7 @@ let test_native_filesystem_approval_preserves_producer_boundary () =
       (match Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual with
        | Ok _ -> () | Error detail -> fail detail);
       let invoke name input =
-        (match Masc.Keeper_tool_approval_policy.verdict_for ~composition_plan_index:None
+        (match Masc.Keeper_tool_approval_policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None
            ~tool_name:name ~input with
          | Masc.Keeper_tool_approval_policy.Run _ -> ()
          | Masc.Keeper_tool_approval_policy.Ask _ -> fail "duplicate native approval intercepted filesystem call");
@@ -9103,10 +9112,21 @@ let test_workspace_memory_read_dispatch () =
         | Error error -> fail (Ledger.apply_error_to_string error) in
       (match Ledger.save ~base_path:config.base_path ledger with
        | Ok () -> () | Error detail -> fail detail);
-      let listed = invoke (`Assoc []) |> check_success_result "list ledger" in
+      let inventory = invoke (`Assoc []) |> check_success_result "inventory" in
+      check int "inventory counts without listing conflicts" 1
+        Yojson.Safe.Util.(member "workspace_memory" inventory |> member "conflict_count" |> to_int);
+      check bool "inventory omits conflict bodies" true
+        Yojson.Safe.Util.(member "workspace_memory" inventory |> member "conflicts" = `Null);
+      let searched = invoke (`Assoc ["query", `String "PDF"])
+        |> check_success_result "search current concern" in
+      check int "query finds the conflict" 1
+        Yojson.Safe.Util.(member "workspace_memory" searched |> member "matches" |> to_list |> List.length);
+      let listed = invoke (`Assoc ["view", `String "index"]) |> check_success_result "list ledger" in
       let actual = Yojson.Safe.Util.(member "workspace_memory" listed |> member "conflicts" |> to_list) in
       check int "conflict summary is available" 1 (List.length actual);
       let id = Yojson.Safe.Util.(List.hd actual |> member "id" |> to_string) in
+      let mixed = invoke (`Assoc ["id", `String id; "query", `String "PDF"]) in
+      check string "selectors are exclusive" "failure" (outcome_label mixed.disposition);
       let fetched = invoke (`Assoc ["id", `String id]) |> check_success_result "read one conflict" in
       let members = Yojson.Safe.Util.(member "workspace_memory" fetched |> member "members" |> to_list) in
       check int "only the selected conflict's two members are returned" 2 (List.length members);

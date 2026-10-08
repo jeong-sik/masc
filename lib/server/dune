@@ -31,6 +31,8 @@
   masc.masc_process
   masc.sse_wire
   masc.agent_observation
+  masc.browser_configuration
+  masc.machine_configuration
   masc.browser_lane
   masc.slack_lane
   masc.msx_lane
@@ -38,7 +40,7 @@
   ;; GET /api/v1/lane-addons/live reads the DOS machine's change mark and frame.
   masc.dos_lane
   ;; The same route's activity feed: Dos_lane.recent_activity's entry type.
-  masc.lane_activity
+  masc.machine_action_feed
   ;; The LSP client the IDE proxy drives. Extracted out of this library so a
   ;; Keeper tool in [masc] can reach a language server too (RFC
   ;; a-language-server-the-keeper-can-ask §3.2).

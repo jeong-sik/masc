@@ -1,0 +1,53 @@
+{
+  "provenance": "local candidate binary / isolated fixture PTY / browser terminal replay",
+  "verified_at": "2026-10-03T05:15:01.973586+00:00",
+  "base_commit": "8ccf4e5fc73c730ec073d142a6f811dcb3d2f326",
+  "binary_sha256": "aac55c073df6e5f074757f45fce25f407691d1515640da7ff73fd6f29c8c7466",
+  "sources": {
+    "bin/dune": "498f67f097af3a12887f22ece9f6461d6cdeb19a492259a10fcb677c0e5b32ee",
+    "bin/masc_tui_overview_providers.ml": "aabdd49f0f4b929311c92e4ba325d19067f179748c2fd460595058614d2a48d9",
+    "bin/masc_tui_overview_providers.mli": "2323bad28a6fa67a4c48767fa6ee678170a08e06e806b34d349243a1ccab8ddf",
+    "bin/masc_tui_render.ml": "3c0f26b60f1d510836dee915571603eb4e4313f674594696993d415a50100b54",
+    "bin/masc_tui_usage_trend.ml": "29a46c038481a3bffd899b45eda3360427ddf42c157800d0b2d3b4723e534c5c",
+    "bin/masc_tui_usage_trend.mli": "b65adde9495129a5b2fd68a42687bfd3fc7cac7a26b69ac152d988e9e6001c5f",
+    "test/test_tui_overview_providers.ml": "2e98d3e25665085c6dbde9416b0d8c4e51df480ca03b12777c812f54c2eb2b54",
+    "test/test_tui_usage_studio_pty.py": "e1661831ccdcd6bebc8874afcd1863225dc3f7a0c9b79bed77a00f6ed3633265"
+  },
+  "frames": {
+    "plan-compact.ansi": "4362d9f754ef719e5449508603a6b9a5fcb1f38924f27c5c77ef3a8e187f1394",
+    "plan-compact.png": "79a1c5db1ee87af5cd79801cc9f1c92bb7093a39e6540bcf1ee06d1f231ee74a",
+    "plan-compact.txt": "c2a9975bf84f250d795084216c08ecf441251d39649f509b39899d8d3881fa62",
+    "plan-wide.ansi": "a50f8498e160508645ac35c110bd5c9e200102d085c79dece69a6c3f1dc53e13",
+    "plan-wide.png": "a524a71d292d8fd100c489f5ccba0e74efca97568ac89d0a7a6444ba4176848a",
+    "plan-wide.txt": "b572f4f948512fa4b15ab41f7b9781e4b5c2ccec6b888a17282fd3b08ab73b8a",
+    "trend-compact.ansi": "00df6afebe0e793eea90608261e011aad5d0a755afeb41b8c5eb4f56058695c8",
+    "trend-compact.png": "a0090c280731487beadd598323dbe4f34d004982f80815ddeb2ec9e3b8df7bc1",
+    "trend-compact.txt": "836943ed2950d431bd265fd20e83ddc766ed20d5010f25c2efce3a7ca109195a",
+    "trend.ansi": "e5847757447d27970b878f9031530268d1f7c5fb4f19d16b73928fc8953093b4",
+    "trend.png": "ca3b555612f33724be3018eeacbf062d24043d59fbbe4cae9dee2e1b7fcf470a",
+    "trend.txt": "88228035da4cc59f2b9ed034381ea2a5a19ec6f4a2588dfd92eba13113a5c138"
+  },
+  "checks": {
+    "focused_build": "passed",
+    "provider_chart_tests": "16/16",
+    "fixture_pty": "color + no-color + unavailable; passed",
+    "browser_replay": "four fixture frames and two private live-snapshot frames matched every row",
+    "live_snapshot_replay": "passed"
+  },
+  "live_snapshot": {
+    "captured_at": "2026-10-03T03:41:29.941104+00:00",
+    "source": "GET /api/v1/runtime/resolved + GET /api/v1/dashboard/provider-usage-history?days=14",
+    "scope_count": 15,
+    "reported_scope_count": 11,
+    "history_points": 95,
+    "unreadable_reports": 0,
+    "resolved_sha256": "5bc4362261b208359abc9a4e9b8b73ae7e96ed8f35395cbded8199181d652ced",
+    "history_sha256": "ebd8f62390b1ee49568d538d4a8d181e8e1e88a63e92d9d3018b9f0732b45be7"
+  },
+  "check_output_sha256": "6e84bee7aace4a1a070328db85af172a4c6e3e775278dad993ec5e5c0b415506",
+  "source_evidence_boundary": {
+    "captured_candidate_commit": "a842a515",
+    "applies_to_current_pr_head": false,
+    "note": "The source and binary hashes above identify the pre-integration candidate capture only. The integrated tree and review repairs changed build/source inputs; no binary or PTY was rebuilt for those changes. Do not use these captures as exact-current-head execution evidence."
+  }
+}

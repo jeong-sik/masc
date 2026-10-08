@@ -1,0 +1,25 @@
+{
+  "scope": "Only receipt decoder/operator-summary module; not the TUI executable, HTTP handler, UI layout or deployment",
+  "command": [
+    "opam",
+    "exec",
+    "--switch=5.5.1",
+    "--",
+    "ocamlfind",
+    "ocamlc",
+    "-package",
+    "yojson,alcotest",
+    "-linkpkg",
+    "masc_tui_runtime_config_receipt.mli",
+    "masc_tui_runtime_config_receipt.ml",
+    "test_tui_runtime_config_receipt.ml",
+    "-o",
+    "receipt-tests"
+  ],
+  "exit_code": 0,
+  "source_sha256": {
+    "bin/masc_tui_runtime_config_receipt.mli": "e52f87e764ff669ea38ba1c04f87db355496a641bcbfbc89442bd03fbce21482",
+    "bin/masc_tui_runtime_config_receipt.ml": "c1dbb284f214e9b771c92baa7516b5be8df9624d3a43ed31f42388aac2ec8e47",
+    "test/test_tui_runtime_config_receipt.ml": "8100305ec1c7dcf93bc039d3654d7052a6ce2466e4b4b1bae23aabdb5f78f9f2"
+  }
+}

@@ -19,12 +19,14 @@ module StringMap = Set_util.StringMap
 type memory_search_source =
   | Current
   | Absorbed
+  | Dropped
   | History
   | All
 
 let memory_search_source_to_string = function
   | Current -> "current"
   | Absorbed -> "absorbed"
+  | Dropped -> "dropped"
   | History -> "history"
   | All -> "all"
 ;;
@@ -33,12 +35,13 @@ let memory_search_source_of_string_opt raw =
   match String.trim (String.lowercase_ascii raw) with
   | "current" -> Some Current
   | "absorbed" -> Some Absorbed
+  | "dropped" -> Some Dropped
   | "history" -> Some History
   | "all" -> Some All
   | _ -> None
 ;;
 
-let all_memory_search_sources = [ Current; Absorbed; History; All ]
+let all_memory_search_sources = [ Current; Absorbed; Dropped; History; All ]
 
 let valid_memory_search_source_strings =
   List.map memory_search_source_to_string all_memory_search_sources
@@ -80,12 +83,14 @@ type durable_search_error =
   | Snapshot_read_failed of string
   | Source_revalidate_failed of string
   | Absorbed_read_failed of string
+  | Dropped_read_failed of string
   | Events_read_failed of string
 
 let durable_search_error_kind_to_string = function
   | Snapshot_read_failed _ -> "snapshot_read_failed"
   | Source_revalidate_failed _ -> "source_revalidate_failed"
   | Absorbed_read_failed _ -> "absorbed_read_failed"
+  | Dropped_read_failed _ -> "dropped_read_failed"
   | Events_read_failed _ -> "events_read_failed"
 ;;
 
@@ -93,6 +98,7 @@ let durable_search_error_detail = function
   | Snapshot_read_failed detail
   | Source_revalidate_failed detail
   | Absorbed_read_failed detail
+  | Dropped_read_failed detail
   | Events_read_failed detail -> detail
 ;;
 
@@ -473,6 +479,35 @@ let absorbed_match_to_json { row; into; into_current } : Yojson.Safe.t =
 ;;
 
 (* --- History search (checkpoint + current trace) --- *)
+let search_dropped_facts ~keepers_dir ~keeper_id ~current_facts ~query ~limit =
+  match Keeper_memory_os_current.read_dropped ~keepers_dir ~keeper_id ~current_facts with
+  | Error detail -> Error (Dropped_read_failed detail)
+  | Ok rows ->
+    let whole, fragments = answering
+        ~claim_of:(fun (row : Keeper_memory_os_current.archived_fact) -> row.original.claim)
+        ~query rows in
+    Ok (take limit (whole @ fragments), List.length rows)
+;;
+
+let dropped_match_to_json (row : Keeper_memory_os_current.archived_fact) =
+  `Assoc
+    [ "text", `String row.original.claim
+    ; "memory_id", `String (Keeper_memory_os_types.memory_id row.original)
+    ; "category", `String (Keeper_memory_os_types.category_to_string row.original.category)
+    ; "basis", Keeper_memory_os_types.basis_to_json row.original.basis
+    ; "store", `String "dropped_memory"
+    ; "current", `Bool false
+    ; "removed_at", `Float row.removal.removed_at
+    ; "removed_in_revision", `Int row.removal.removed_in_revision
+    ; "removed_by", `String
+        (Keeper_memory_os_current.source_kind_to_string row.removal.removed_by.kind)
+    ; "reason", Json_util.string_opt_to_json row.removal.drop_reason
+    ]
+;;
+
+let dropped_guidance =
+  "Historical removed claims, not current facts. Check the removal reason and original evidence before using or explicitly writing a current claim. Search never restores a fact. Pending removal finalization is a read failure until a writer recovers it; older journal gaps may remain."
+;;
 
 type history_search =
   { matches : string list
@@ -589,17 +624,20 @@ let search_history ~config ~(meta : keeper_meta) ~ctx_work ~query ~limit =
 type all_search_match =
   | All_fact of fact_match
   | All_absorbed of absorbed_match
+  | All_dropped of Keeper_memory_os_current.archived_fact
   | All_history of string
 
 let all_search_match_text = function
   | All_fact match_ -> match_.claim
   | All_absorbed match_ -> match_.row.fact.claim
+  | All_dropped match_ -> match_.original.claim
   | All_history message -> message
 ;;
 
 let all_search_match_to_json = function
   | All_fact match_ -> fact_match_to_json match_
   | All_absorbed match_ -> absorbed_match_to_json match_
+  | All_dropped match_ -> dropped_match_to_json match_
   | All_history message ->
     `Assoc
       [ "source", `String (memory_search_source_to_string History)
@@ -611,6 +649,7 @@ let ordinary_memory_id_of_all_match = function
   | All_fact { identity = Ordinary_memory_id { memory_id; _ }; _ } -> Some memory_id
   | All_fact { identity = Source_sha256 _; _ }
   | All_absorbed _
+  | All_dropped _
   | All_history _ -> None
 ;;
 
@@ -826,7 +865,7 @@ let keeper_memory_search_with_outcome
                    fact_matches
              })
     in
-    (* Source=all combines current facts, absorbed rows, and history. The match
+    (* Source=all combines current facts, absorbed/dropped rows, and history. The match
        tier before the store order ({!answering}): a weaker current fact does
        not take a slot from an absorbed row holding the whole query. The
        explicit all scope is the only combined view. The default current scope
@@ -874,10 +913,17 @@ let keeper_memory_search_with_outcome
                ( { matches = []; candidates = 0; unreadable = []; unreadable_events = [] }
                , Some error )
            in
+           let dropped, dropped_total, dropped_error =
+             match search_dropped_facts ~keepers_dir ~keeper_id:meta.name
+                 ~current_facts:facts ~query ~limit with
+             | Ok (rows, total) -> rows, total, None
+             | Error error -> [], 0, Some error
+           in
            let history = search_history ~config ~meta ~ctx_work ~query ~limit in
            let candidates =
              List.map (fun match_ -> All_fact match_) fact_matches
              @ List.map (fun match_ -> All_absorbed match_) absorbed.matches
+             @ List.map (fun match_ -> All_dropped match_) dropped
              @ List.map (fun message -> All_history message) history.matches
            in
            let whole_query, fragments =
@@ -890,21 +936,29 @@ let keeper_memory_search_with_outcome
              || absorbed.unreadable <> []
              || absorbed.unreadable_events <> []
              || unavailable <> None
+             || dropped_error <> None
            in
            Ok
              { output =
                  durable_json
                    ~fact_jsons:(List.map all_search_match_to_json selected)
-                   ~fact_total:(fact_total + absorbed.candidates)
+                   ~fact_total:(fact_total + absorbed.candidates + dropped_total)
                    ~total_matches:(List.length selected)
                    ~extra_matches:[]
                    ~read_errors
                    ~read_error_fields:
-                     (absorbed_fields ~absorbed ~unavailable
+                     ([ "dropped_guidance", `String dropped_guidance ]
+                      @ (match dropped_error with
+                         | None -> []
+                         | Some error ->
+                           [ "dropped_store_unavailable", `Assoc
+                               [ "error_kind", `String (durable_search_error_kind_to_string error)
+                               ; "detail", `String (durable_search_error_detail error) ] ])
+                      @ absorbed_fields ~absorbed ~unavailable
                       @ history_read_error_fields history
                       @ source_verification_fields deferred_sources)
              ; match_count = List.length selected
-             ; durable_candidates = Some (fact_total + absorbed.candidates)
+             ; durable_candidates = Some (fact_total + absorbed.candidates + dropped_total)
              ; read_errors
              ; matched_memory_ids = List.filter_map ordinary_memory_id_of_all_match selected
              })
@@ -932,6 +986,25 @@ let keeper_memory_search_with_outcome
           ; matched_memory_ids = []
           }
       | All -> all_stores ()
+      | Dropped ->
+        (match read_current_facts ~keepers_dir ~keeper_id:meta.name with
+         | Error _ as error -> error
+         | Ok current_facts ->
+           match search_dropped_facts ~keepers_dir ~keeper_id:meta.name
+               ~current_facts ~query ~limit with
+           | Error _ as error -> error
+           | Ok (rows, total) ->
+             Ok
+               { output = durable_json
+                   ~fact_jsons:(List.map dropped_match_to_json rows)
+                   ~fact_total:total ~total_matches:(List.length rows)
+                   ~extra_matches:[] ~read_errors:false
+                   ~read_error_fields:[ "dropped_guidance", `String dropped_guidance ]
+               ; match_count = List.length rows
+               ; durable_candidates = Some total
+               ; read_errors = false
+               ; matched_memory_ids = []
+               })
       | Absorbed ->
         (* No Retrieved event: an absorbed fact is not a current memory, and
            the events sidecar is about current memories (RFC-0418). *)
@@ -1062,9 +1135,9 @@ let keeper_context_status_json
     Config_dir_resolver.keepers_dir_for_base_path
       ~base_path:config.Workspace.base_path
   in
-  let memory_facts_total =
+  let memory_facts =
     match read_current_facts ~keepers_dir ~keeper_id:meta.name with
-    | Ok facts -> List.length facts
+    | Ok facts -> facts
     | Error error -> failwith (durable_search_error_detail error)
   in
   let source_memory_facts_total, source_memory_invalidations_total =
@@ -1105,7 +1178,9 @@ let keeper_context_status_json
          ]
          @ Keeper_sandbox.context_status_fields sandbox
          @ [ "sandbox_live", sandbox_live
-           ; "memory_facts_total", `Int memory_facts_total
+           ; "memory_facts_total", `Int (List.length memory_facts)
+           ; "memory_limits", Keeper_memory_limits.to_json
+               (Keeper_memory_limits.current memory_facts)
            ; "source_memory_facts_total", `Int source_memory_facts_total
            ; ( "source_memory_invalidations_total"
              , `Int source_memory_invalidations_total )
@@ -1703,13 +1778,60 @@ let support_invalidation_receipt
 (* What a removal took with it: the facts that left the snapshot, and the
    derived facts among them that lost their last complete support path. A
    retraction and a supersession report it in the same two fields. *)
+(* The keys of a [keeper_memory_write] receipt that say what the write did.
+   The receipts below write them through these names and the repeat guard's
+   answer ([memory_write_answer_of_output]) keeps exactly [answer], so the two
+   cannot drift apart without the compiler seeing it. Snapshot stamps
+   ([revision], [recorded_at]), counts and prose ([rows_written],
+   [what_committed]) are not answer keys. *)
+module Write_receipt_key = struct
+  let ok = "ok"
+  let error_kind = "error_kind"
+  let effect_disposition = "effect_disposition"
+  let detail = "detail"
+  let outcome = "outcome"
+  let store = "store"
+  let memory_id = "memory_id"
+  let identity_disposition = "identity_disposition"
+  let basis = "basis"
+  let superseded_memory_id = "superseded_memory_id"
+  let supersedes = "supersedes"
+  let supersedes_already_removed = "supersedes_already_removed"
+  let source_path = "source_path"
+  let source_sha256 = "source_sha256"
+  let missing_premise_ids = "missing_premise_ids"
+  let removed_memory_ids = "removed_memory_ids"
+  let support_invalidations = "support_invalidations"
+
+  let answer =
+    [ ok
+    ; error_kind
+    ; effect_disposition
+    ; detail
+    ; outcome
+    ; store
+    ; memory_id
+    ; identity_disposition
+    ; basis
+    ; superseded_memory_id
+    ; supersedes
+    ; supersedes_already_removed
+    ; source_path
+    ; source_sha256
+    ; missing_premise_ids
+    ; removed_memory_ids
+    ; support_invalidations
+    ]
+  ;;
+end
+
 let removal_receipt (snapshot : Keeper_memory_os_current.t) =
-  [ ( "removed_memory_ids"
+  [ ( Write_receipt_key.removed_memory_ids
     , `List
         (List.map
            (fun fact -> `String (Keeper_memory_os_types.memory_id fact))
            snapshot.change.removed) )
-  ; ( "support_invalidations"
+  ; ( Write_receipt_key.support_invalidations
     , `List (List.map support_invalidation_receipt snapshot.change.invalidated) )
   ]
 ;;
@@ -1749,11 +1871,30 @@ let memory_write_identity_disposition
 
 let memory_write_identity_receipt = function
   | Inserted ->
-    [ "identity_disposition", `String "inserted"
+    [ Write_receipt_key.identity_disposition, `String "inserted"
     ; "what_committed", `String "One current fact was inserted. Its memory_id identifies the exact claim bytes; writing those bytes again reuses this identity, without creating another copy." ]
   | Reobserved ->
-    [ "identity_disposition", `String "reobserved"
+    [ Write_receipt_key.identity_disposition, `String "reobserved"
     ; "what_committed", `String "The existing current fact was re-observed; its observation or support was refreshed. No duplicate copy was created. Retracting this memory_id would remove the current fact." ]
+;;
+
+(* The receipt fields that say what a write did. [revision] and [recorded_at]
+   stamp the snapshot the write landed in and move on every write, including
+   a re-observation that changed nothing, so the repeat guard reads the answer
+   without them (sangsu 2026-10-05: twelve claims rewritten 1,861 times, each
+   receipt different only there). A field this list does not name stays out
+   of the answer: a new stamp then cannot hide a loop, and a new field that
+   does carry a change costs at most one resume. *)
+let memory_write_answer_fields = Write_receipt_key.answer
+
+let memory_write_answer_of_output output_text =
+  let names_answer (key, _) = List.exists (String.equal key) memory_write_answer_fields in
+  match Yojson.Safe.from_string output_text with
+  | `Assoc fields
+    when List.exists (fun (key, _) -> String.equal key Write_receipt_key.ok) fields ->
+    Some (`Assoc (List.filter names_answer fields))
+  | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+  | exception Yojson.Json_error _ -> None
 ;;
 
 let keeper_memory_write_with_outcome
@@ -1764,8 +1905,8 @@ let keeper_memory_write_with_outcome
   =
   let respond ~ok ~error_kind extras =
     let head =
-      [ "ok", `Bool ok
-      ; "error_kind", `String (memory_write_error_kind_to_string error_kind)
+      [ Write_receipt_key.ok, `Bool ok
+      ; Write_receipt_key.error_kind, `String (memory_write_error_kind_to_string error_kind)
       ]
     in
     if ok
@@ -1775,7 +1916,7 @@ let keeper_memory_write_with_outcome
       let payload =
         `Assoc
           (head
-           @ [ ( "effect_disposition"
+           @ [ ( Write_receipt_key.effect_disposition
                , `String (Tool_result.failure_effect_disposition_to_string effect_disposition) )
              ; "what_committed", `String what_committed
              ]
@@ -1837,10 +1978,10 @@ let keeper_memory_write_with_outcome
                ; ( "recorded_at"
                  , `String
                      (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
-               ; "outcome", `String "persisted_source_bound_current"
-               ; "store", `String "source_bound_current_memory"
-               ; "source_path", `String source_path
-               ; "source_sha256", `String source_sha256
+               ; Write_receipt_key.outcome, `String "persisted_source_bound_current"
+               ; Write_receipt_key.store, `String "source_bound_current_memory"
+               ; Write_receipt_key.source_path, `String source_path
+               ; Write_receipt_key.source_sha256, `String source_sha256
                ]
            | None ->
              let detail =
@@ -1855,12 +1996,12 @@ let keeper_memory_write_with_outcome
              respond
                ~ok:false
                ~error_kind:Commit_receipt_inconsistent
-               [ "revision", `Int snapshot.revision; "detail", `String detail ])
+               [ "revision", `Int snapshot.revision; Write_receipt_key.detail, `String detail ])
         | Error (Keeper_memory_source_current.Source_read_failed failure) ->
           respond
             ~ok:false
             ~error_kind:(Source_read_failed failure)
-            [ "detail"
+            [ Write_receipt_key.detail
             , `String (Keeper_memory_source_current.source_read_failure_to_string failure)
             ]
         | Error (Keeper_memory_source_current.Store_write_failed detail) ->
@@ -1868,7 +2009,7 @@ let keeper_memory_write_with_outcome
             "explicit source-bound memory write failed keeper=%s: %s"
             meta.name
             detail;
-          respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ "detail", `String detail ]
+          respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ Write_receipt_key.detail, `String detail ]
         | exception (Eio.Cancel.Cancelled _ as error) -> raise error
         | exception exn ->
           let detail = Printexc.to_string exn in
@@ -1876,7 +2017,7 @@ let keeper_memory_write_with_outcome
             "explicit source-bound memory write failed keeper=%s: %s"
             meta.name
             detail;
-          respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ "detail", `String detail ])
+          respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ Write_receipt_key.detail, `String detail ])
      | None ->
     (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis ~supersedes with
      | Ok (snapshot, supersession) ->
@@ -1918,19 +2059,19 @@ let keeper_memory_write_with_outcome
             ; ( "recorded_at"
               , `String
                   (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
-            ; "outcome", `String "persisted_current_snapshot"
-            ; "store", `String "current_memory_snapshot"
-            ; "memory_id", `String written_memory_id
-            ; "basis", memory_write_basis_receipt written_fact.basis
+            ; Write_receipt_key.outcome, `String "persisted_current_snapshot"
+            ; Write_receipt_key.store, `String "current_memory_snapshot"
+            ; Write_receipt_key.memory_id, `String written_memory_id
+            ; Write_receipt_key.basis, memory_write_basis_receipt written_fact.basis
             ]
              @
              match supersession with
              | No_supersedes -> []
              | Superseded superseded_memory_id ->
-               ("superseded_memory_id", `String superseded_memory_id)
+               (Write_receipt_key.superseded_memory_id, `String superseded_memory_id)
                :: removal_receipt snapshot
              | Target_already_dropped { memory_id; removal } ->
-               [ ( "supersedes_already_removed"
+               [ ( Write_receipt_key.supersedes_already_removed
                  , supersedes_removal_json ~memory_id removal )
                ])
         | None ->
@@ -1943,7 +2084,7 @@ let keeper_memory_write_with_outcome
           respond
             ~ok:false
             ~error_kind:Commit_receipt_inconsistent
-            [ "revision", `Int snapshot.revision; "detail", `String detail ])
+            [ "revision", `Int snapshot.revision; Write_receipt_key.detail, `String detail ])
      | Error (Write_supersede_refused error_kind) ->
        respond
          ~ok:false
@@ -1951,7 +2092,7 @@ let keeper_memory_write_with_outcome
          (Option.fold
             ~none:[]
             ~some:(fun superseded_memory_id ->
-              [ "supersedes", `String superseded_memory_id ])
+              [ Write_receipt_key.supersedes, `String superseded_memory_id ])
             supersedes)
      | Error (Write_supersede_target_removed removal) ->
        (* Still [Supersedes_not_current]; the removal is shown so the keeper
@@ -1962,7 +2103,7 @@ let keeper_memory_write_with_outcome
          (Option.fold
             ~none:[]
             ~some:(fun superseded_memory_id ->
-              [ "supersedes", `String superseded_memory_id
+              [ Write_receipt_key.supersedes, `String superseded_memory_id
               ; ( "supersedes_removed"
                 , supersedes_removal_json ~memory_id:superseded_memory_id removal )
               ])
@@ -1971,7 +2112,7 @@ let keeper_memory_write_with_outcome
        respond
          ~ok:false
          ~error_kind:Unsupported_derivation
-         [ ( "missing_premise_ids"
+         [ ( Write_receipt_key.missing_premise_ids
            , `List
                (List.map
                   (fun premise_id -> `String premise_id)
@@ -1981,7 +2122,7 @@ let keeper_memory_write_with_outcome
        respond
          ~ok:false
          ~error_kind:Supersedes_premise_of_successor
-         (( "missing_premise_ids"
+         (( Write_receipt_key.missing_premise_ids
           , `List
               (List.map
                  (fun premise_id -> `String premise_id)
@@ -1989,14 +2130,14 @@ let keeper_memory_write_with_outcome
           :: Option.fold
                ~none:[]
                ~some:(fun superseded_memory_id ->
-                 [ "supersedes", `String superseded_memory_id ])
+                 [ Write_receipt_key.supersedes, `String superseded_memory_id ])
                supersedes)
      | Error (Write_persistence_failed detail) ->
        Log.Keeper.warn
          "explicit current Memory write failed keeper=%s: %s"
          meta.name
          detail;
-       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ "detail", `String detail ]
+       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ Write_receipt_key.detail, `String detail ]
      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
      | exception exn ->
        (* The store is the only place a long-term claim survives, so a
@@ -2007,7 +2148,7 @@ let keeper_memory_write_with_outcome
          "explicit current Memory write failed keeper=%s: %s"
          meta.name
          detail;
-       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ "detail", `String detail ]))
+       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ Write_receipt_key.detail, `String detail ]))
 ;;
 
 (* --- Explicit memory retraction surface -------------------------- *)

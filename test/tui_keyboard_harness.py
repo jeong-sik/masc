@@ -18,6 +18,7 @@ import tempfile
 import termios
 import threading
 import time
+import unicodedata
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
@@ -109,6 +110,24 @@ class MethodHttpResponse:
         self.resolve = resolve
 
 
+class ConnectionHttpResponse:
+    """Expose the peer socket while a fixture holds an admitted response.
+
+    The resolver may observe cancellation before releasing its response. The
+    handler retains socket ownership; a fixture must not close or consume it.
+    """
+
+    def __init__(self, resolve: Callable[[str, socket.socket], HttpResponse]) -> None:
+        self.resolve = resolve
+
+
+# What a fixture callable may hand the dispatcher: the same response shapes
+# the wrapper objects resolve to. The dispatcher's isinstance chain handles
+# every one of these, so the callable arm of [HttpFixture] accepts them all
+# instead of only the JSON tuple.
+FixtureResponse = (
+    HttpResponse | RawHttpResponse | StreamingHttpResponse | DroppedHttpResponse
+)
 HttpFixture = (
     HttpResponse
     | RawHttpResponse
@@ -116,12 +135,29 @@ HttpFixture = (
     | DroppedHttpResponse
     | RequestHttpResponse
     | MethodHttpResponse
+    | ConnectionHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
-    | Callable[[], HttpResponse]
+    | Callable[[], FixtureResponse]
 )
 HttpFixtures = dict[str, HttpFixture]
 HttpRequests = list[tuple[str, bytes]]
+
+
+def json_payload_fixture(fixtures: HttpFixtures, path: str) -> dict[str, object]:
+    """The JSON object payload of a plain ``(status, payload)`` tuple fixture.
+
+    The fixture map's value union also carries wrapper objects and bare
+    callables that are not subscriptable, so a caller reading a tuple
+    fixture's payload goes through here and the narrowing lives in one
+    place. A non-tuple fixture at ``path``, or a payload that is not a JSON
+    object, is a test-composition error and fails the assert loudly.
+    """
+    fixture = fixtures[path]
+    assert isinstance(fixture, tuple), f"fixture at {path} is not a tuple response"
+    payload = fixture[1]
+    assert isinstance(payload, dict), f"fixture payload at {path} is not a JSON object"
+    return payload
 WorkspaceSetup = Callable[[str], None]
 WORKSPACE_PAYLOAD = "workspace\x1b]8;;https://attacker.invalid\x07owned"
 WORKSPACE_RENDERED = b"workspace\\x1B]8;;https://attacker.invalid\\x07owned"
@@ -286,6 +322,8 @@ def test_http_endpoint(
                     resolved = fixture.resolve(request_body or b"")
             elif isinstance(fixture, MethodHttpResponse):
                 resolved = fixture.resolve(self.command)
+            elif isinstance(fixture, ConnectionHttpResponse):
+                resolved = fixture.resolve(self.command, self.connection)
             elif isinstance(fixture, PathHttpResponse):
                 resolved = fixture.resolve(self.path)
             elif isinstance(fixture, HeadersHttpResponse):
@@ -917,12 +955,8 @@ def tab_until(
 ) -> bytes:
     """Press Tab until the screen shows [needle], or give up after a lap.
 
-    Name the surface the walk is going to, not one on the way. The ring is
-    not fixed: Masc_tui_surface_navigation.is_surface_active leaves Approvals out of it
-    while nothing is pending, so a walk that stopped there first burned
-    every press on a screen that did not exist. Six scenarios used it as a
-    waypoint to Board, and a seventh fabricated a pending tool approval in
-    its fixtures to keep the waypoint alive.
+    Name the surface the walk is going to, not one on the way: a stop on
+    the way couples the scenario to the ring's order.
     """
     for _ in range(TAB_CYCLE_BOUND):
         read_available(master_fd, output)
@@ -1004,6 +1038,87 @@ def frame_containing(
             f"could not isolate frame containing {needle!r}: {segment!r}"
         )
     return segment[frame_start : frame_end + len(FRAME_END)]
+
+
+def marker_cell_width(text: str) -> int:
+    """Screen cells `text` occupies, for marker placement arithmetic.
+
+    Explicit scope — this is not a general Unicode display-width function.
+    It is the width rule for what a marker row in this product can hold:
+    ASCII, the box-drawing rules, hangul and other W/F wide glyphs, plus
+    zero-width combining marks. General-category Mn/Me/Cf characters (a
+    combining acute accent, a zero-width space, a joiner) occupy no cell of
+    their own; every other character counts W/F as two cells and anything
+    else as one. Do not reuse it for arbitrary text layout — region-read
+    pane widths have their own reader.
+    """
+    cells = 0
+    for character in text:
+        if unicodedata.category(character) in ("Mn", "Me", "Cf"):
+            continue
+        cells += 2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
+    return cells
+
+
+def board_side_separation(rows: dict[int, bytes], body_marker: bytes,
+                          comment_marker: bytes) -> int:
+    """Assert side-by-side separation of two source texts, in screen cells.
+
+    Every row that carries both markers must hold them in disjoint cell
+    ranges, counted with marker_cell_width so byte hits become screen cells
+    (a box rule or a wide glyph is one cell and three UTF-8 bytes; a
+    combining mark is no cell). Rows carrying only one marker are not shared
+    rows — their separation is the caller's column check — but at least one
+    shared row must exist: a layout that pushes the body off every comment
+    row is stacked, not side-by-side, and must not pass as separation.
+
+    Returns the number of compared shared rows so the scenario can assert
+    the overlap itself instead of trusting a silent zero.
+    """
+    compared = 0
+    for row_index in sorted(rows):
+        line = rows[row_index]
+        body_at = line.find(body_marker)
+        comment_at = line.find(comment_marker)
+        if body_at < 0 or comment_at < 0:
+            continue
+        compared += 1
+        body_start = marker_cell_width(line[:body_at].decode("utf-8", "replace"))
+        body_end = body_start + marker_cell_width(body_marker.decode("utf-8", "replace"))
+        comment_start = marker_cell_width(line[:comment_at].decode("utf-8", "replace"))
+        comment_end = comment_start + marker_cell_width(comment_marker.decode("utf-8", "replace"))
+        if body_end > comment_start or body_start > comment_start:
+            raise AssertionError(
+                f"row {row_index}: on a shared row the body cells [{body_start}, {body_end}) must "
+                f"sit left of the comment cells [{comment_start}, {comment_end}): " + repr(line))
+    if compared == 0:
+        raise AssertionError(
+            "no row carries both " + repr(body_marker) + " and " + repr(comment_marker)
+            + ": the panes share no row, which is a stacked layout, not "
+            "side-by-side separation. rows:\n" + "\n".join(
+                f"{index}: {rows[index].decode('utf-8', 'replace')}"
+                for index in sorted(rows)))
+    return compared
+
+
+def marker_cells(rows: dict[int, bytes], needle: bytes) -> tuple[int, int, int]:
+    """(row, first cell, last cell+1) of the first drawn occurrence of needle.
+
+    Cells are screen cells counted from column 0 with the marker_cell_width
+    rule (W/F wide glyphs two cells, Mn/Me/Cf zero-width, everything else
+    one), not byte offsets into the decoded row. Same scope: ASCII and box
+    rules, hangul and other wide glyphs, combining marks — not a general
+    Unicode layout width."""
+    for row in sorted(rows):
+        text = rows[row].decode("utf-8", "replace")
+        byte_at = text.encode("utf-8").find(needle)
+        if byte_at < 0:
+            continue
+        prefix = text.encode("utf-8")[:byte_at].decode("utf-8", "replace")
+        start = marker_cell_width(prefix)
+        end = start + marker_cell_width(needle.decode("utf-8", "replace"))
+        return row, start, end
+    raise AssertionError(f"marker not on screen: {needle!r}")
 
 
 def fixture_cell_width(text: str) -> int:
@@ -1455,6 +1570,7 @@ def empty_runtime_resolved_fixture() -> HttpResponse:
         "generated_at_iso": "2026-09-23T00:00:00Z",
         "source": RUNTIME_RESOLVED_PATH,
         "config_path": None,
+        "default_route": None,
         "default_runtime": None,
         "media_failover": [],
         "media_failover_declared": [],
@@ -1466,7 +1582,7 @@ def empty_runtime_resolved_fixture() -> HttpResponse:
     })
 
 
-def fleet_safety_fixture() -> HttpResponse:
+def fleet_safety_fixture() -> tuple[int, dict[str, object]]:
     """A fleet reading the TUI can decode.
 
     Without it the poll fails and the TUI records a "fleet safety data
@@ -1589,7 +1705,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
                     "verifying_count": 0,
                     "awaiting_confirmation_count": 0,
                     "done_count": 0,
-                    "dropped_count": 0,
+                    "dropped_count": 0, "paused_count": 0, "blocked_count": 0,
                 },
                 "task_backlog": {
                     "todo": 0,
@@ -1721,7 +1837,7 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
                 "verifying_count": 0,
                 "awaiting_confirmation_count": 0,
                 "done_count": 0,
-                "dropped_count": 0,
+                "dropped_count": 0, "paused_count": 0, "blocked_count": 0,
             },
             "task_backlog": {
                 "todo": 0,
@@ -2205,6 +2321,7 @@ def run_terminal_scenario(
     omit_operator_token: bool = False,
     starts_in_chat: bool = False,
     launch_count: int = 1,
+    startup_frame_marker: bytes | None = None,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
@@ -2246,6 +2363,10 @@ def run_terminal_scenario(
                 # The harness owns this temporary workspace. An inherited
                 # config override would read the caller's live TUI settings.
                 environment.pop("MASC_CONFIG_DIR", None)
+                # The fixtures report the default cluster's root, and the TUI
+                # composes its own root from the cluster selection; a shell's
+                # MASC_CLUSTER_NAME would turn every fixture into a mismatch.
+                environment.pop("MASC_CLUSTER_NAME", None)
                 environment.pop("LINES", None)
                 environment.pop("COLUMNS", None)
                 # Same reason as LINES/COLUMNS: the terminal the assertions
@@ -2364,15 +2485,20 @@ def run_terminal_scenario(
                     timeout=30.0,
                 )
                 if not starts_in_chat:
+                    # A narrow viewport can clip the workspace label. Such a
+                    # scenario names a visible surface marker and still waits
+                    # for its complete frame; terminal-control checks below
+                    # and after exit remain independent of label width.
+                    frame_marker = workspace_rendered if startup_frame_marker is None else startup_frame_marker
                     wait_for_output(
                         process,
                         master_fd,
                         output,
-                        workspace_rendered,
+                        frame_marker,
                         start=0,
                         timeout=3.0,
                     )
-                    frame_offset = output.find(workspace_rendered) + len(workspace_rendered)
+                    frame_offset = output.find(frame_marker) + len(frame_marker)
                 else:
                     frame_offset = output.find(startup_needle) + len(startup_needle)
                 wait_for_output(
@@ -2759,6 +2885,7 @@ def escape_to_keeper_detail(
     *,
     name: bytes,
     presses: int = 4,
+    destination: bytes | None = None,
 ) -> None:
     """Leave a keeper's chat for its detail, however many Escapes that takes.
 
@@ -2777,7 +2904,7 @@ def escape_to_keeper_detail(
     The bound is here so a surface that never leaves fails as a test rather
     than hangs. Arriving is the assertion; the number of presses is not.
     """
-    title = b"Keepers \xe2\x96\xb8 \x1b[1m" + name
+    title = destination if destination is not None else b"Keepers \xe2\x96\xb8 \x1b[1m" + name
     for _ in range(presses):
         start = len(output)
         os.write(master_fd, b"\x1b")

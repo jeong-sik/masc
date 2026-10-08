@@ -30,7 +30,8 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `o` / `x` | Open / close the automation or stagehand session |
 | Ctrl-^ / Esc / Left | Hide the reader and return to the previous surface |
 
-Browser belongs to Config. Its title shows the source and latest HTTP request
+Browser belongs to Config. Its title shows the source, the browser and how a
+live browser is reached (`live · Firefox · BiDi`), then the latest HTTP request
 status. The browser picker explains which choices use the existing login and
 which have separate sessions. The current browser is marked; choosing it again
 retains the current tab and scroll. Switching to a different browser clears old
@@ -41,6 +42,37 @@ Reads show latency, tab count, selected title, URL, character count and truncati
 A failed or pending refresh retains content labeled as a previous read. Switching
 source clears that content; generation-stamped replies reject earlier requests.
 Reads happen on entry, source or tab selection, navigation, and explicit refresh.
+
+A live browser is reached over its WebExtension or an attached BiDi connection,
+and the two serve different work
+([the table](../design/browser-lane.md#what-each-live-connection-serves)). The
+TUI reads that table in four places:
+
+- The connection row under the status: `Live Firefox · WebExtension: no hover,
+  drag`, or `Live Firefox · BiDi: no tab switch`.
+- The row under the picker, for the highlighted connection: `WebExtension: no
+  hover, drag · BiDi serves them`.
+- The screenshot footer: `drag: move` when the connection the screenshot came
+  from takes a drag, `drag: needs a BiDi connection` when it does not.
+- A pointer gesture on a screenshot whose connection does not serve it is not
+  sent. The screenshot closes and a row under the status says so:
+  `Not sent · WebExtension: no drag · BiDi serves it · b:choose browser` when a
+  BiDi connection is listed. When none is, the row ends `no BiDi connection is
+  listed` and the next row names where attaching one is written
+  (`Setup: docs/design/browser-bidi-live-host.md`). The read badge does not
+  change, because nothing was requested. The rows stay through the lane's own
+  refreshes and go with the next key or click.
+
+These rows fit an 80-column terminal up to the `b:choose browser` key.
+
+In a Keeper's chat, the tool results view shows a refused browser call as its
+case, what the connection leaves out and how many connected browsers serve it,
+for example `BrowserInteract · failed · live_transport_unsupported ·
+WebExtension: no hover · 0 connections serve it`. Other browser refusals that
+sent nothing (`no_live_client`, `ambiguous_browser_clients`,
+`selected_client_disconnected`, `browser_lane_off`,
+`browser_activity_unavailable`) show their case and the refusal's next-step
+sentence.
 
 The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Typing
 belongs to the editor and cannot trigger Browser commands or the Keeper composer.
@@ -61,8 +93,10 @@ existing image support; unsupported terminals receive an explanation in Browser.
 
 In screenshot view, click a visible link to activate it. Mouse wheel, arrows and
 `j`/`k` scroll the actual page, and `r` refreshes the screenshot. The automation
-lane also supports pressing the left button, moving, and releasing to drag with
-trusted browser pointer actions. Live drag reports that automation is required.
+lane and a live BiDi connection also support pressing the left button, moving,
+and releasing to drag with trusted browser pointer actions. A live WebExtension
+connection refuses a drag and names the connection that serves it; the footer
+says which applies to the screenshot on screen.
 Each completed action captures the resulting page again in the same Lane.
 
 Mouse coordinates require the terminal's measured cell size. If that measurement
@@ -72,6 +106,40 @@ size, scroll position and URL. A changed observation requires a fresh screenshot
 before another pointer action can execute.
 
 See [setup and Keeper usage](../design/browser-lane-examples.md).
+
+All Lanes displays each Browser backend's activity separately from its live
+connections or registered executor. Off rejects new reads and actions while
+preserving accepted work and sessions; server session status and close remain
+available. Activity follows validated Runtime configuration saves. Executable,
+extension and profile paths apply at server startup, including when a previously
+unconfigured backend is added. See [backend activity settings](../design/browser-lane-examples.md#backend별-활동-설정)
+for the current Runtime TOML editing workflow and restart requirements.
+
+From All Lanes, select a Browser row and press `Space` to edit its activity.
+`Space` changes the retained draft; `s` previews and saves against the file
+revision you read. `r` reads current settings, `u` reapplies only your activity
+choice after a conflict, `x` discards it, and `Esc` returns with the draft kept.
+These drafts belong to the workspace and backend. A changed configuration path
+requires discarding the old draft before editing the new file. Opening, toggling
+or leaving the screen never saves. A successful save rereads both the file and
+Lane inventory. Saving Automation activity moves existing flat `geckodriver` and
+`binary` paths under `[browser]` into `[browser.automation]`. Saving Live or
+Stagehand activity leaves those paths where they are. Inline/dotted forms that
+cannot be preserved by the line editor require the Runtime source editor.
+
+The Web All Lanes detail offers the same explicit activity draft/save flow via
+**활동 설정 열기** and **활동 설정 저장**. It keeps its draft across navigation,
+leaves the raw Runtime editor's draft intact, and rereads file and inventory after
+save. A file conflict requires explicit activity-only reapplication; a changed
+file path requires discarding the old draft. Enabling an unconfigured backend
+does not install its executor. See the linked backend settings guide for Web
+TOML editing and path migration limits.
+
+The Web activity editor reads decoded Browser TOML paths directly. Unrelated
+provider names are preserved as data, including names such as `__proto__`.
+Unknown Browser backend/field names and non-boolean activity values are shown
+as errors. Absolute-path and required-path-pair validation remains part of the
+server preview before saving; it does not check whether an executor is installed.
 
 ## Verification
 

@@ -93,6 +93,7 @@ let make_gate_pending ~id ~keeper : Decode.gate_pending =
   ; gp_execution_sandbox = None
   ; gp_waiting_s = Some 10.0
   ; gp_phase = Decode.Gate_queued
+  ; gp_judge_advice = None
   ; gp_auto_judge_detail = None
   ; gp_retry_request = None
   }
@@ -161,7 +162,7 @@ let test_calculate_kpis_populated () =
   state.keepers <- [ make_keeper "running"; make_keeper ~paused:true "idle" ];
   state.keeper_turns <-
     [ { Decode.ktr_chat_control_token = None; ktr_keeper_name = "running";
-        ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; interrupt_token = "fixture-token"; preview = None } };
+        ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; interrupt_token = "fixture-token"; turn_ref = None; preview = None } };
       { Decode.ktr_chat_control_token = None; ktr_keeper_name = "idle"; ktr_state = Keeper_turn_idle };
       { Decode.ktr_chat_control_token = None; ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
   state.keeper_turns_observed_at <- Some 100.;
@@ -294,6 +295,41 @@ let test_a_span_reads_the_one_ladder () =
   check bool "the snapshot age carries both figures" true
     (contains output "snapshot 1h01m ago");
   check bool "and not one unit with a tenth" false (contains output "1.0h")
+;;
+
+(* The Usage pane's retained-task lines concatenated [state.tasks_error]
+   straight into the frame, while every other surface runs the same error
+   through [Terminal_text.single_line] first (masc_tui_render.ml:687). A
+   control byte in a Tasks read error could therefore reach the terminal from
+   this pane alone. The renderer now sanitizes both the no-snapshot line and
+   the snapshot warning; this pins that neither path emits the raw sequence. *)
+let test_tasks_error_is_sanitized () =
+  let control = "\027[2J" in
+  let error = "boom " ^ control ^ " wiped" in
+  let state = make_state () in
+  state.task_flow <- None;
+  state.tasks_error <- Some error;
+  let output =
+    String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state)
+  in
+  check bool "the no-snapshot line does not carry the raw control sequence" false
+    (contains output control);
+  check bool "the no-snapshot line escapes it instead" true
+    (contains output "\\x1B[2J");
+  check bool "the error text is still visible" true (contains output "boom");
+  let flow =
+    Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived:[] []
+  in
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  state.tasks_error <- Some error;
+  let output =
+    String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state)
+  in
+  check bool "the snapshot warning does not carry the raw control sequence" false
+    (contains output control);
+  check bool "the snapshot warning escapes it instead" true
+    (contains output "\\x1B[2J")
 ;;
 
 let test_assignee_work_and_daily_flow () =
@@ -1017,6 +1053,8 @@ let () =
             test_one_word_for_a_source_nothing_came_back_from
         ; test_case "a span reads the one ladder" `Quick
             test_a_span_reads_the_one_ladder
+        ; test_case "a Tasks read error is sanitized before it is drawn" `Quick
+            test_tasks_error_is_sanitized
         ; test_case "all_sections" `Quick test_render_metrics_body_all_sections
         ] )
     ]

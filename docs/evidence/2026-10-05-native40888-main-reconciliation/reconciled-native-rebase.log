@@ -1,0 +1,25 @@
+✓ Fetched latest main from origin
+✓ Trunk main is already up to date
+Stack detected: (main) <- fix/tui-runtime-default-route-20261002 <- fix/pr-40824-route-snapshot-20261003
+Rebasing branches in order, starting from fix/tui-runtime-default-route-20261002 to fix/pr-40824-route-snapshot-20261003
+⚠ Rebasing fix/tui-runtime-default-route-20261002 onto main — conflict
+
+Conflicted files:
+  C bin/masc_tui_render.ml
+  C bin/masc_tui_types.ml
+  C lib/runtime/runtime.mli
+  C test/test_tui_keyboard_input.py
+  C test/test_tui_runtime_lane_editor.py
+  C test/test_tui_runtime_listing.ml
+
+To resolve:
+  1. Open each conflicted file and look for conflict markers:
+     <<<<<<< HEAD  (incoming changes from main)
+     =======
+     >>>>>>>  (changes being rebased)
+  2. Edit the file to keep the desired changes and remove the markers
+  3. Stage resolved files: `git add <file>`
+  4. Continue:  `gh stack rebase --continue`
+
+Resolve conflicts on fix/tui-runtime-default-route-20261002, then run `gh stack rebase --continue`
+Or abort this operation with `gh stack rebase --abort`

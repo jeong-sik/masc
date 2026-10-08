@@ -12,6 +12,9 @@
     operator temperature. Thinking-only responses are empty text completions
     and continue to the next declared candidate, retaining their stop reason.
     Responses with no model identity also continue the route before admission.
+    Failed-attempt diagnostics are retained separately; a diagnostic persistence
+    error is recorded in private attempt metadata and does not stop the route.
+    Request and terminal-outcome retention remain required.
     Temperature support remains owned
     by the model's capability/codec contract; this does not promise that a
     reasoning model applies it. Stop sequences and sampling tools are refused explicitly.

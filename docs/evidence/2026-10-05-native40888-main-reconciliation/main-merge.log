@@ -1,0 +1,6 @@
+Auto-merging bin/dune
+Auto-merging bin/masc_tui.ml
+Auto-merging bin/masc_tui_types.ml
+CONFLICT (content): Merge conflict in bin/masc_tui_types.ml
+Auto-merging test/dune
+Automatic merge failed; fix conflicts and then commit the result.

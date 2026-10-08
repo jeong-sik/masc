@@ -678,6 +678,15 @@ let slash_hint_text ~restore draft =
   | [] -> None
   | spans -> Some (String.concat "" (List.map paint spans))
 
+let composer_draft_window state ~cols ~prompt =
+  let draft = Terminal_text.single_line (Masc_tui_message_input.contents state.msg_input) in
+  (* Editing stops at whole grapheme boundaries, so this prefix cannot end
+     inside a ZWJ/variation-selector sequence whose escaping needs its suffix. *)
+  let before = Terminal_text.single_line (Masc_tui_message_input.before_cursor state.msg_input) in
+  Message_layout.input_window
+    ~max_cells:(max 0 (cols - Message_layout.display_width prompt))
+    ~cursor:(String.length before) draft
+
 let composer_line state ~cols =
   if state.view = Overview && not state.composer_focused then
     Theme.recede () ^ fit_width " Choose a Keeper before writing · i:choose" cols ^ Ansi.reset
@@ -692,12 +701,12 @@ let composer_line state ~cols =
   let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
   let tone =
     match (composer.Composer.focus, composer.Composer.target) with
-    | Composer.Focused, _ -> (Theme.info ())
+    | Composer.Focused, _ -> Ansi.default_fg
     | Composer.Unfocused, Composer.Ready _ -> Ansi.dim
     | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) ->
         Ansi.dim
   in
-  let draft = Terminal_text.single_line composer.Composer.draft in
+  let draft, _ = composer_draft_window state ~cols ~prompt in
   let hint =
     match (composer.Composer.focus, composer.Composer.target) with
     (* A focused row draws the draft alone; the voice keys are on the key
@@ -714,7 +723,7 @@ let composer_line state ~cols =
      placed after the draft, does not move. *)
   let slash_hint =
     match composer.Composer.focus with
-    | Composer.Focused -> slash_hint_text ~restore:tone draft
+    | Composer.Focused -> slash_hint_text ~restore:tone composer.Composer.draft
     | Composer.Unfocused -> None
   in
   let body =
@@ -748,10 +757,8 @@ let composer_cursor state ~rows ~cols =
         Message_layout.display_width
           (composer_prompt_text ~voice:(voice_meter_text state) composer)
       in
-      let draft_cells =
-        Message_layout.display_width
-          (Terminal_text.single_line composer.Composer.draft)
-      in
+      let _, draft_cells = composer_draft_window state ~cols
+        ~prompt:(composer_prompt_text ~voice:(voice_meter_text state) composer) in
       Frame_presenter.Visible_at
         { row = rows
         ; column = Composer.cursor_column ~prompt_cells ~draft_cells ~terminal_cols:cols
@@ -786,20 +793,16 @@ let overview_pulse_text (state : state) ~now =
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
-     walking. Ten entries make that cost nothing -- it is an array so the
+     walking. Seven entries make that cost nothing -- it is an array so the
      renderer holds no row lookup that walks, with no exception to carry. *)
-  let ring = Array.of_list (Masc_tui_surface_navigation.visible_surface_ring state) in
+  let ring = Array.of_list Masc_tui_types.surface_ring in
   let n = Array.length ring in
-  let active = Masc_tui_surface_navigation.visible_surface_ring_index state state.view in
+  let active = Masc_tui_surface_navigation.surface_ring_index state state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
      badge would be texture, not information. *)
   let badge surface =
     match (surface : surface) with
-    | Approvals ->
-        (match Masc_tui_approvals_model.approvals_surface_pending state with
-         | 0 -> ""
-         | pending -> Printf.sprintf "\xc2\xb7%d" pending)
     | Planning ->
         (match state.verification with
          | Some snapshot when snapshot.Masc.Tui_decode.vs_total > 0 ->
@@ -813,8 +816,8 @@ let surface_strip (state : state) ~cols =
   in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
   let entry_width ~lo i =
-    (* Cells, not bytes: the Approvals badge's middle dot is two bytes and
-       one cell, and a byte count windows the strip one entry early. *)
+    (* Cells, not bytes: the badge's middle dot is two bytes and one cell,
+       and a byte count windows the strip one entry early. *)
     Message_layout.display_width (label i)
     + (if i = active then 1 else 0)
     + (if i > lo then 2 else 0)
@@ -859,18 +862,10 @@ let surface_strip (state : state) ~cols =
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
     let surface, _ = ring.(i) in
-    let is_alert =
-      match surface with
-      | Approvals -> Masc_tui_approvals_model.approvals_surface_pending state > 0
-      | _ -> false
-    in
     let entry =
       if i = active then
-        Ansi.bold
-        ^ (if is_alert then Theme.warn () else Theme.info ())
-        ^ Masc_tui_theme.Glyph.current_entry
+        Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry
         ^ label i ^ Ansi.reset
-      else if is_alert then Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset
       else Ansi.dim ^ label i ^ Ansi.reset
     in
     Buffer.add_string parts (pressable (Press_surface surface) entry)
@@ -1253,8 +1248,10 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
-  Buffer.add_string framed (composer_line state ~cols:full_cols ^ "\n");
-  let cursor = composer_cursor state ~rows ~cols:full_cols in
+  Buffer.add_string framed
+    ((if state.keeper_navigation_open then "" else composer_line state ~cols:full_cols) ^ "\n");
+  let cursor = if state.keeper_navigation_open then Frame_presenter.Hidden
+    else composer_cursor state ~rows ~cols:full_cols in
   Masc_tui_frame_timing.finish_stage ~name:"surface.chrome" chrome_started;
   Masc_tui_frame_timing.time_stage ~name:"surface.strip_frame" (fun () ->
     finish_frame_with_strip state ?clamped ~surface_key
@@ -1342,10 +1339,13 @@ let surface_window_height state ~terminal_rows ~count =
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
     ~overflow_takes_row:true
 
-let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
+let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let full_cols = cols in
+  let sidebar_cols = match sidebar with None -> 0 | Some (width, _) -> width in
+  let cols = cols - sidebar_cols in
   let buf = Buffer.create 4096 in
   let top, line, line_styled, line_selected, divider, empty, bottom =
     match frame with
@@ -1382,7 +1382,8 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     ; push_divider = (fun () -> hold (fun () -> divider buf cols))
     ; push_empty = (fun () -> hold (fun () -> empty buf cols))
     ; next_origin =
-        (fun () -> (body_top + List.length !pushed, Masc_tui_ansi.framed_content_column))
+        (fun () -> (body_top + List.length !pushed,
+                    sidebar_cols + Masc_tui_ansi.framed_content_column))
     }
   in
   body ~budget body_pushers;
@@ -1434,8 +1435,17 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     empty buf cols
   done;
   bottom buf cols;
-  Buffer.add_string buf (footer_line ?status state ~max_cells:cols ~hints);
-  finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols buf
+  let buf = match sidebar with
+    | None -> buf
+    | Some (left_cols, draw) ->
+        let left = Buffer.create 1024 in
+        draw ~rows:(lines_ended_since buf ~start:0) left;
+        let combined = Buffer.create (Buffer.length left + Buffer.length buf) in
+        write_two_panes combined ~left_cols ~left ~right:buf;
+        combined
+  in
+  Buffer.add_string buf (footer_line ?status state ~max_cells:full_cols ~hints);
+  finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 
 let connection_status_badge (status : Masc_tui_types.connection_status) =
@@ -1508,7 +1518,7 @@ let count_frame_lines buf =
     else !n + 1
 
 
-(* Resolve the chat default or explicit choice before applying the terminal's
+(* Resolve navigation visibility and the explicit choice before applying the terminal's
    width constraint; resizing never overwrites the reader's preference. *)
 let keeper_roster_pane_shown (state : state) ~cols =
   Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols
@@ -1567,62 +1577,105 @@ let fit_runtime_id width runtime_id =
   else Message_layout.fit_middle width runtime_id
 
 
-(* A narrow roster beside the detail: position context, not a second input
-   surface -- the keys keep their detail meaning. The window follows the
-   cursor the way the detail follows the selection. *)
+(* Keeper and document indexes share one quiet edge. The row, including its
+   padding, owns its background and selection; the separator never reverses. *)
+let sidebar_line ?(style = "") buf ~cols text =
+  Buffer.add_string buf
+    (Theme.side_pane_background () ^ style ^ fit_width text (max 0 (cols - 1))
+     ^ Ansi.reset ^ Theme.recede () ^ "│" ^ Ansi.reset ^ "\n")
+
+let sidebar_rule ~cols = "  " ^ draw_hline (max 0 (cols - 5)) ^ "  "
+
+let sidebar_heading ~cols ~title ~count =
+  let title = "  " ^ Terminal_text.single_line title in
+  let count = Terminal_text.single_line count in
+  let count_cells = Message_layout.display_width count in
+  let title_cells = max 0 (cols - 1 - count_cells - 3) in
+  fit_width title title_cells ^ " " ^ count ^ "  "
+
+(* A quiet rail beside the conversation. Only the cursor row gets a band when
+   this pane owns the keys; the selected Keeper's readings sit below the list.
+   [rows] includes the caller's footer, as it does for the detail/chat panes. *)
 let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
-  framed_top buf cols;
-  let title = " KEEPERS" in
-  let hint =
-    if focused then "ENTER OPEN" else Masc_tui_keys.roster_toggle_key ^ " HIDE"
+  let height = max 0 (rows - 1) in
+  let inner = max 0 (cols - 1) in
+  let ground = Theme.side_pane_background () in
+  let restore = Ansi.reset ^ ground in
+  let draw ?style text = sidebar_line ?style buf ~cols text in
+  let rule = sidebar_rule ~cols in
+  let details =
+    if not focused then []
+    else match selected_keeper state with
+      | None -> []
+      | Some keeper ->
+          let reading = keeper_reading state keeper in
+          let health = Keeper_control.health_label reading in
+          let status = if reading.paused then "paused · " ^ health else health in
+          let runtime = match reading.liveness with
+            | Keeper_control.Present runtime -> runtime.kr_runtime_id
+            | Unobserved | Absent | Invalid _ -> "Runtime unavailable"
+          in
+          let label =
+            if state.view = Keepers Keeper_message
+               && state.msg_target_keeper_name = Some keeper.k_name then "현재 대화"
+            else "선택한 Keeper"
+          in
+          [ Theme.recede (), rule
+          ; Theme.recede (), "  " ^ label
+          ; Ansi.bold, "  " ^ Message_layout.fit_middle (max 0 (inner - 4))
+              (Terminal_text.single_line keeper.k_name)
+          ; "", "  " ^ keeper_action_color (Keeper_control.next_action reading)
+              ^ keeper_state_glyph ~paused:reading.paused
+                  ~health:(Keeper_control.health reading)
+              ^ restore ^ " " ^ Theme.recede () ^ status
+          ; Theme.recede (), "  " ^ fit_runtime_id (max 0 (inner - 4))
+              (Terminal_text.single_line runtime)
+          ]
   in
-  let title_gap = max 1 (framed_inner_width cols - String.length title - String.length hint) in
-  let title_row = title ^ String.make title_gap ' ' ^ hint in
-  framed_line buf cols
-    (if focused then Theme.selection ^ title_row ^ Ansi.reset
-     else
-       Ansi.bold ^ title ^ Ansi.reset ^ String.make title_gap ' ' ^ Ansi.dim
-       ^ hint ^ Ansi.reset);
-  framed_divider buf cols;
-  let content_height = max 0 (rows - framed_chrome_rows) in
-  let first =
-    if state.keeper_cursor < content_height then 0
-    else state.keeper_cursor - content_height + 1
+  let header_rows = min 3 height in
+  let available = height - header_rows in
+  let count = List.length state.keepers in
+  (* Supplementary details get no more rows than the list keeps, unless the
+     entire fleet already fits beside them. Short viewports favor the list. *)
+  let detail_rows = List.length details in
+  let details =
+    if available >= detail_rows + min count detail_rows then details else []
   in
-  let keepers_window = Rows.of_list ~first:first ~height:content_height state.keepers in
-  for i = 0 to content_height - 1 do
-    match Rows.at keepers_window (first + i) with
-    | Some (k : keeper) ->
+  let capacity = available - List.length details in
+  let first = max 0 (min (state.keeper_cursor - capacity + 1) (count - capacity)) in
+  let window = Rows.of_list ~first ~height:capacity state.keepers in
+  let count_label =
+    if count > capacity && capacity > 0 then
+      Printf.sprintf "%d–%d/%d" (first + 1) (first + Rows.length window) count
+    else string_of_int count
+  in
+  let header = [ ""; sidebar_heading ~cols ~title:"KEEPERS" ~count:count_label; rule ] in
+  List.iter (draw ~style:(Theme.recede ())) (List.take header_rows header);
+  for i = 0 to capacity - 1 do
+    match Rows.at window (first + i) with
+    | Some (keeper : keeper) ->
         let selected = first + i = state.keeper_cursor in
-        let name = Terminal_text.single_line k.k_name in
-        let name =
-          Masc_tui_roster_pane.name_window ~selected
-            ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7)) name
-        in
-        (* The same glyph the Keepers surface draws, for the same reading.
-           Without it the pane says a keeper exists and nothing else, so a
-           roster of ten looks identical whether one of them is offline. *)
-        let reading = keeper_reading state k in
-        let glyph =
-          keeper_state_glyph
-            ~paused:reading.Keeper_control.paused
-            ~health:(Keeper_control.health reading)
-        in
-        (* Reverse video is the one selection signal every terminal
-           renders, colour or not, and it owns the whole row: a glyph
-           tinted inside it reads as a second highlight. *)
-        let line =
-          if selected then
-            Theme.selection ^ " " ^ glyph ^ " " ^ name ^ Ansi.reset
-          else
-            " "
-            ^ keeper_action_color (Keeper_control.next_action reading)
-            ^ glyph ^ Ansi.reset ^ " " ^ Ansi.dim ^ name ^ Ansi.reset
-        in
-        framed_line buf cols line
-    | None -> framed_empty buf cols
+        let name = Masc_tui_roster_pane.name_window ~selected
+          ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7))
+          (Terminal_text.single_line keeper.k_name) in
+        let reading = keeper_reading state keeper in
+        let glyph = keeper_state_glyph ~paused:reading.paused
+          ~health:(Keeper_control.health reading) in
+        if selected && focused then
+          draw ~style:(Theme.sidebar_selection ()) (" › " ^ glyph ^ " " ^ name ^ " ")
+        else
+          let caret = if selected then " › " else "   " in
+          draw (caret ^ keeper_action_color (Keeper_control.next_action reading)
+                ^ glyph ^ restore ^ " "
+                ^ name ^ restore ^ " ")
+    | None when i = 0 && count = 0 ->
+        draw ~style:(Theme.recede ())
+          (match state.keeper_roster_error with
+           | Some error -> "  " ^ Terminal_text.single_line error
+           | None -> "  No Keepers listed")
+    | None -> draw ""
   done;
-  framed_bottom buf cols
+  List.iter (fun (style, text) -> draw ~style text) details
 
 
 (* What a boxed listing draws under its rows: the scroll line -- a row whether
@@ -1677,17 +1730,12 @@ let list_count_text ~loaded ~holding =
    where leaving it out could not be told from forgetting. *)
 let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
     ~labels ~selection =
-  framed_top buf cols;
-  (* Focus wears a caret, not a key list: which keys work is the footer's
-     sentence; which pane hears them is this one glyph. *)
-  framed_line buf cols
-    ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " %s%s %s"
-         (if focused then Masc_tui_theme.Glyph.current_entry ^ " " else "")
-         title
-         (list_count_text ~loaded:(List.length labels) ~holding)
-     ^ Ansi.reset);
-  framed_divider buf cols;
+  let draw ?style text = sidebar_line ?style buf ~cols text in
+  draw "";
+  draw ~style:(Theme.recede ())
+    (sidebar_heading ~cols ~title
+       ~count:(list_count_text ~loaded:(List.length labels) ~holding));
+  draw ~style:(Theme.recede ()) (sidebar_rule ~cols);
   let content_height = max 0 (rows - framed_chrome_rows) in
   let first =
     match selection with
@@ -1710,27 +1758,20 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
          read "#verification Approved task...", three "#verification Verify:
          wkbl ..." -- and folding from the middle leaves all fifty distinct.
 
-         Every row folds to the same room whether or not the cursor is on it.
-         The caret takes two cells more than the plain lead, so a label
-         fitted to the wider room re-folded as the cursor passed over it. *)
+         Every row uses the same lead and folding width, whether or not
+         the cursor is on it. Moving the caret never shifts the label. *)
       let drawn =
         Message_layout.fit_middle
           (max 1 (framed_inner_width cols - sidebar_row_lead_cells))
           (Terminal_text.single_line label)
       in
-      framed_line buf cols
-        (if Option.equal Int.equal selection (Some (first + i)) then
-           if focused then
-             Theme.selection ^ " " ^ drawn
-             ^ String.make
-                 (max 0 (cols - 5 - Message_layout.display_width drawn))
-                 ' '
-             ^ Ansi.reset
-           else Ansi.bold ^ sidebar_caret_lead ^ drawn ^ Ansi.reset
-         else " " ^ drawn)
-    | None -> framed_empty buf cols
+      if Option.equal Int.equal selection (Some (first + i)) then
+        draw ~style:(if focused then Theme.sidebar_selection () else "")
+          (sidebar_caret_lead ^ drawn)
+      else draw (String.make sidebar_row_lead_cells ' ' ^ drawn)
+    | None -> draw ""
   done;
-  framed_bottom buf cols
+  draw ""
 
 (* The same index for a list whose open row is always in it. *)
 let write_list_sidebar buf ~rows ~cols ~title ~focused ~holding ~labels
@@ -2206,6 +2247,8 @@ let planning_phase_label = function
   | Goal_phase.Awaiting_confirmation -> "confirming"
   | Goal_phase.Completed -> "completed"
   | Goal_phase.Dropped -> "dropped"
+  | Goal_phase.Paused _ -> "paused"
+  | Goal_phase.Blocked _ -> "blocked"
 
 (* The key a goal detail takes for each lifecycle request, and the words its
    Actions and ARMED rows say it with. The Actions row called [c] "Complete"
@@ -2217,11 +2260,24 @@ let planning_action_key = function
   | Goal_phase.Public_action.Request_complete -> "c"
   | Goal_phase.Public_action.Drop -> "x"
   | Goal_phase.Public_action.Reopen -> "o"
+  | Goal_phase.Public_action.Pause -> "p"
+  | Goal_phase.Public_action.Resume -> "r"
+  | Goal_phase.Public_action.Block -> "b"
+  | Goal_phase.Public_action.Unblock -> "u"
+
+let planning_action_of_key key =
+  let key = String.lowercase_ascii key in
+  List.find_opt (fun action -> String.equal (planning_action_key action) key)
+    Goal_phase.Public_action.all
 
 let planning_action_label = function
   | Goal_phase.Public_action.Request_complete -> "Request completion"
   | Goal_phase.Public_action.Drop -> "Drop"
   | Goal_phase.Public_action.Reopen -> "Reopen"
+  | Goal_phase.Public_action.Pause -> "Pause"
+  | Goal_phase.Public_action.Resume -> "Resume"
+  | Goal_phase.Public_action.Block -> "Block"
+  | Goal_phase.Public_action.Unblock -> "Unblock"
 
 
 (* As wide as the widest phase rather than a literal. Three of the four labels
@@ -2256,6 +2312,8 @@ let planning_phase_color = function
   | Goal_phase.Awaiting_confirmation -> Theme.warn ()
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> (Theme.muted ())
+  | Goal_phase.Paused _ -> Theme.warn ()
+  | Goal_phase.Blocked _ -> Theme.bad ()
 
 ;;
 
@@ -2277,12 +2335,21 @@ let planning_phase_color = function
    Verifying and awaiting confirmation are stages only a Goal has, so their
    diamonds are theirs. *)
 let planning_rollup_row ~cols (rollup : planning_rollup) =
-  let total_goals =
-    (* Every phase counts, or the denominator drops the goals waiting on a
-       human and reports a completion share higher than the truth. *)
-    rollup.pr_active + rollup.pr_verifying + rollup.pr_awaiting_confirmation
-    + rollup.pr_done + rollup.pr_dropped
+  (* One list names every phase once: the counters draw from it and the
+     denominator sums it, so a phase on the row cannot be left out of the
+     total. A second, hand-written sum once left Paused and Blocked out and
+     overstated the share done. *)
+  let phases =
+    [ (Goal_phase.Executing, Masc_tui_theme.Glyph.progress_active, "Exec", rollup.pr_active)
+    ; (Goal_phase.Verifying, "◆", "Ver", rollup.pr_verifying)
+    ; (Goal_phase.Awaiting_confirmation, "◇", "Conf", rollup.pr_awaiting_confirmation)
+    ; (Goal_phase.Completed, Masc_tui_theme.Glyph.progress_done, "Done", rollup.pr_done)
+    ; (Goal_phase.Paused Goal_phase.Resume_executing, "Ⅱ", "Pause", rollup.pr_paused)
+    ; (Goal_phase.Blocked Goal_phase.Resume_executing, "!", "Block", rollup.pr_blocked)
+    ; (Goal_phase.Dropped, Masc_tui_theme.Glyph.progress_ended, "Drop", rollup.pr_dropped)
+    ]
   in
+  let total_goals = List.fold_left (fun total (_, _, _, value) -> total + value) 0 phases in
   let count = Printf.sprintf "  Goals: %s%d%s" Ansi.bold total_goals Ansi.reset in
   if total_goals = 0 then count
   else
@@ -2298,12 +2365,7 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
         Ansi.reset
     in
     Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
-      ([ (Goal_phase.Executing, Masc_tui_theme.Glyph.progress_active, "Exec", rollup.pr_active)
-       ; (Goal_phase.Verifying, "◆", "Ver", rollup.pr_verifying)
-       ; (Goal_phase.Awaiting_confirmation, "◇", "Conf", rollup.pr_awaiting_confirmation)
-       ; (Goal_phase.Completed, Masc_tui_theme.Glyph.progress_done, "Done", rollup.pr_done)
-       ; (Goal_phase.Dropped, Masc_tui_theme.Glyph.progress_ended, "Drop", rollup.pr_dropped)
-       ]
+      (phases
        |> List.filter_map (fun (phase, glyph, name, value) ->
               if value = 0 then None else Some (counter phase glyph name value))
        |> String.concat "  ")
@@ -3265,8 +3327,18 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
   ^ piece note ^ tail
 
 
+let runtime_config_unmatched_current (state : state) =
+  match runtime_config_edit_session state, state.runtime_config_view with
+  | Some {rce_view=Config_edit_current _;rce_session={current=Some current;_};_}, Some reading
+    when current.source_revision <> reading.rcv_metadata.source_revision -> Some current
+  | _ -> None
+
 let config_metadata_summary (state : state) =
-  match state.runtime_config_view with
+  match runtime_config_unmatched_current state with
+  | Some current -> [Masc_tui_runtime_config_view.Neutral,
+      "Current snapshot revision: " ^ current.source_revision;
+      Masc_tui_runtime_config_view.Warning, "Validation and application state not read for this snapshot"]
+  | None -> match state.runtime_config_view with
   | None -> []
   | Some reading ->
       let lines = Masc_tui_runtime_config_view.summary_lines reading.rcv_metadata in
@@ -3280,7 +3352,12 @@ let runtime_config_status_lines state ~cols =
     (match state.runtime_config_view_error with
      | None -> []
      | Some detail -> [Masc_tui_runtime_config_view.Bad, detail])
-    @ match state.runtime_config_view with
+    @ match runtime_config_unmatched_current state with
+      | Some current ->
+          [Masc_tui_runtime_config_view.Neutral, "Source: " ^ current.path;
+           Masc_tui_runtime_config_view.Neutral, "Current snapshot revision: " ^ current.source_revision;
+           Masc_tui_runtime_config_view.Warning, "Validation and application state not read for this snapshot"]
+      | None -> match state.runtime_config_view with
       | None -> [Masc_tui_runtime_config_view.Neutral, "Configuration has not been read"]
       | Some reading ->
           [Masc_tui_runtime_config_view.Neutral,

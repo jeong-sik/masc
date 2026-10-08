@@ -198,15 +198,17 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   (* BrowserInstruct acts only on the stagehand lane, which no lane addon
      observes, so no browser source it could move exists. *)
   | Misc_browser_instruct
-  | Misc_msx_save | Misc_msx_screen | Misc_msx_peek | Misc_msx_ram_diff
+  | Misc_msx_save | Misc_msx_screen | Misc_msx_meta | Misc_msx_checkpoint_info
+  | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
-  | Misc_dos_screen | Misc_dos_peek | Misc_dos_save
+  | Misc_dos_meta | Misc_dos_inventory | Misc_dos_screen | Misc_dos_peek | Misc_dos_save
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_attach
   | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
   | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_lane_updates
   | Misc_ask | Misc_ask_status | Misc_ask_withdraw
   | Misc_config | Misc_dashboard | Misc_gc | Misc_keeper_waiting_inventory
   | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase | Misc_candle_equip
+  | Misc_candle_gift
   | Misc_tool_help | Misc_portrait_read | Misc_web_fetch | Misc_web_search -> Tool_completed
 let refresh_fingerprint interest captured =
   let stable = function
@@ -464,13 +466,13 @@ let browser_document ~store ~max_bytes ~id ~selection ~tab_id ~target_id ~enviro
   let route = match selection with
     | Live client -> Browser_lane.Live_route (Some client)
     | Automation -> Browser_lane.Automation_route in
-  let* target = Browser_lane.resolve_target route
-    |> Result.map_error Browser_lane.selection_error_code in
+  let* target = Browser_lane.resolve_target ~verb:(Browser_lane.Page_document {tab_id}) route
+    |> Result.map_error Browser_lane.selection_error_message in
   (* Reuse the existing transport deadline; never create a new session, select
      a different document or wait for a primary browser action to finish. *)
   let* fields = match Browser_lane.issue_document_if_idle ~target ~tab_id
       ~timeout_sec:Tool_misc_browser_lane.default_timeout_sec with
-    | Error error -> Error (Browser_lane.selection_error_code error)
+    | Error error -> Error (Browser_lane.selection_error_message error)
     | Ok (Browser_lane.Answered (`Assoc envelope)) ->
         (match List.assoc_opt "ok" envelope, List.assoc_opt "data" envelope with
          | Some (`Bool true), Some (`Assoc fields) -> Ok fields

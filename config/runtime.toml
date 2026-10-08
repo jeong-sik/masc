@@ -9,6 +9,13 @@
 # sustained turns prove the local box can absorb more load. AGENT_CORE handles Gemma 4
 # thinking through the chat-template control token path, not Ollama think:true.
 
+[memory]
+# Ordinary current working-set targets, including custom categories.
+# Initial rollout: Librarian consolidation guidance and context-status reporting.
+# Existing facts are preserved when targets are exceeded. Counts, not tokens.
+category_cap = 30
+facts_per_category_cap = 30
+
 [skills]
 # The Skill resource read bound is not configured here: it is the shared
 # inline tool-result boundary (Common.max_tool_result_wire_bytes). An older
@@ -107,6 +114,12 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # context_review = false       # source Context + proposed summary preservation review
 # skill_applicability = false  # current request + authorized Skill body advice
 # librarian_preflight = false # Memory-only no-change judgment; generates no text
+# workspace_memory_selection_enabled = false
+# Set true separately to send current input/task context, shared interpretations
+# and source details for host-side shared-memory selection. Board/absorb opt-in
+# does not enable this gate. Lane credentials and excluded_keepers still apply.
+# Capacity-driven host-memory retries support Agent Core, Codex and Claude Code.
+# Muse/Antigravity lack that retry path when their memory reader is suppressed.
 # excluded_keepers = []
 
 # max_output_tokens is the output budget a lane's requests send as max_tokens.
@@ -235,12 +248,13 @@ type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
 # Usage windows for the operator view, read at server start with no model
-# call, then again refresh-s seconds after each read. Undocumented
-# endpoint; Ollama's own client calls it. The decoder supports the observed
-# session/weekly shape and reports other shapes as errors.
+# call, then again refresh-s seconds after each read. GET /api/balance
+# (ollama/ollama docs/api/balance.mdx) states a legacy plan's session and
+# weekly windows with their reset times; a credit plan's answer is reported
+# as an error.
 [providers.ollama_cloud.usage-read]
-shape = "ollama-usage"
-url = "https://ollama.com/api/usage"
+shape = "ollama-balance"
+url = "https://ollama.com/api/balance"
 refresh-s = 600.0
 
 [providers.deepseek]
@@ -277,6 +291,12 @@ connect-timeout-s = 1200.0
 # it matches the measured connect-timeout-s above. See the ollama_cloud
 # comment for what the key bounds.
 exact-body-timeout-s = 1200.0
+# Judgment requests (verifier, board attention, hitl auto judge) take a freed
+# admission permit ahead of other requests (Keeper turns, librarian), at most
+# 3 in a row while one of those waits. It orders the permits of the bindings
+# below that declare max-concurrent (RFC
+# judgment-lanes-take-account-admission-before-keeper-turns).
+admission-priority-run-limit = 3
 
 [providers.glm-coding.healthcheck]
 path = "/models"
@@ -1350,10 +1370,6 @@ path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 [models.antigravity-gemini-3-7-flash-high]
 api-name = "gemini-3.7-flash-high"
 max-context = 1048576
-# Last prompt size proven end to end with agy 1.2.6 on 2026-09-18. Long-lived
-# Keepers later reached 21-48 MB and failed before their first turn (#37123).
-# This conservative ceiling is a measured success point, not the CLI maximum
-# or a tokenizer estimate; raise it only after a larger end-to-end probe.
 tools-support = true
 streaming = true
 
@@ -1364,7 +1380,6 @@ wizard-default = true
 # The rest of `agy models` (2026-09-22); the level is part of each name.
 # Gemini windows are the agent_core catalog's; the two Claude 4.6 models
 # carry Anthropic's published 1M (OpenRouter /models) and gpt-oss-120b 131072.
-# The prompt ceiling is the same measured agy 1.2.6 point as the row above.
 # Called that day: claude-sonnet-4-6 and claude-opus-4-6-thinking answered in
 # 8-10s; every gemini model, the one above included, gave no answer in 80s;
 # gpt-oss-120b-medium answered 503 "No capacity available".
@@ -1759,6 +1774,9 @@ context-low-water-tokens = 70000
 [models.minimax-m3]
 reasoning-uncontrolled = true
 api-name = "minimax-m3"
+# The MiniMax-M3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true
@@ -1791,6 +1809,9 @@ supports-multimodal-inputs = true
 # reasoning on whenever the request carries no control value.
 [models.ollama-cloud-deepseek-v4-1-flash]
 api-name = "deepseek-v4.1-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true
@@ -1818,6 +1839,9 @@ supports-multimodal-inputs = true
 # turns the sibling collapsed (keeper_turn_driver.ml).
 [models.ollama-cloud-deepseek-v4-1-flash-none]
 api-name = "deepseek-v4.1-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 1048576
 tools-support = true
 thinking-support = true
@@ -1835,6 +1859,9 @@ supports-multimodal-inputs = true
 [models.ollama-cloud-deepseek-v4-pro]
 reasoning-uncontrolled = true
 api-name = "deepseek-v4-pro"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true
@@ -1849,6 +1876,9 @@ supports-multimodal-inputs = false
 [models.ollama-cloud-gemma4-31b]
 reasoning-uncontrolled = true
 api-name = "gemma4:31b"
+# The Gemma 4 31B model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 262144
 tools-support = true
 thinking-support = true
@@ -1860,21 +1890,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-gemma4-31b]
-
-[models.ollama-cloud-glm-5-1]
-reasoning-uncontrolled = true
-api-name = "glm-5.1"
-max-context = 202752
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-glm-5-1.capabilities]
-thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-glm-5-1]
 
 [models.ollama-cloud-glm-5-2]
 reasoning-uncontrolled = true
@@ -1898,6 +1913,9 @@ supports-multimodal-inputs = false
 [models.ollama-cloud-glm-5-3]
 reasoning-uncontrolled = true
 api-name = "glm-5.3"
+# The GLM-5.3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 1048576
 tools-support = true
 thinking-support = true
@@ -1922,6 +1940,9 @@ supports-multimodal-inputs = false
 [models.ollama-cloud-glm-5-3-flash]
 reasoning-uncontrolled = true
 api-name = "glm-5.3-flash"
+# The GLM-5.3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 1048576
 tools-support = true
 thinking-support = true
@@ -1946,6 +1967,9 @@ wizard-default = true
 [models.ollama-cloud-gpt-oss-20b]
 reasoning-uncontrolled = true
 api-name = "gpt-oss:20b"
+# The gpt-oss model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 131072
 tools-support = true
 thinking-support = true
@@ -1961,6 +1985,9 @@ supports-multimodal-inputs = false
 [models.ollama-cloud-gpt-oss-120b]
 reasoning-uncontrolled = true
 api-name = "gpt-oss:120b"
+# The gpt-oss model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 131072
 tools-support = true
 thinking-support = true
@@ -2013,6 +2040,9 @@ supports-multimodal-inputs = true
 [models.ollama-cloud-kimi-k3]
 reasoning-uncontrolled = true
 api-name = "kimi-k3"
+# The Kimi-K3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 1048576
 tools-support = true
 thinking-support = true
@@ -2087,6 +2117,9 @@ supports-multimodal-inputs = false
 [models.ollama-cloud-nemotron-3-ultra]
 reasoning-uncontrolled = true
 api-name = "nemotron-3-ultra"
+# The Nemotron 3 Ultra model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 max-context = 262144
 tools-support = true
 thinking-support = true
@@ -2098,30 +2131,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-nemotron-3-ultra]
-
-[models.ollama-cloud-qwen3-5-397b]
-reasoning-uncontrolled = true
-api-name = "qwen3.5:397b"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-qwen3-5-397b.capabilities]
-# ollama.com exposes this binding through its OpenAI-compatible /v1 endpoint.
-# Reasoning is inherent/default-on and no explicit thinking-control field is
-# accepted on this wire. The native provider keeps the catalog's Ollama control.
-thinking-control-format = "none"
-# Measured 2026-08-25 against ollama.com/v1/chat/completions with stream=true:
-# the delta keys are content / reasoning / role. The field is "reasoning", not
-# "reasoning_content", so the previous value read a key the server never sends
-# and this runtime's thinking arrived empty. Nothing failed loudly because
-# delta.content is unaffected.
-reasoning-streaming-format = "delta:reasoning"
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-qwen3-5-397b]
 
 [ollama.gemma4-26b-a4b-qat]
 wizard-default = true
@@ -2591,6 +2600,9 @@ reasoning-effort = "high"
 
 [models.openrouter-deepseek-v4-flash]
 api-name = "deepseek/deepseek-v4-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true
@@ -2601,6 +2613,9 @@ wizard-default = true
 
 [models.openrouter-deepseek-v4-1-flash]
 api-name = "deepseek/deepseek-v4.1-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true
@@ -2610,6 +2625,9 @@ reasoning-effort = "high"
 
 [models.openrouter-deepseek-v4-pro]
 api-name = "deepseek/deepseek-v4-pro"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
 tools-support = true
 thinking-support = true
 streaming = true

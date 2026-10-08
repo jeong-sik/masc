@@ -9,6 +9,15 @@ let read path =
   Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
 ;;
 
+(* Once a case has run Eio_main.run, Eio's SIGCHLD handler stays installed,
+   so a blocking call here returns EINTR when any child of this process ends
+   while it waits. *)
+let rec restart_on_eintr f =
+  match f () with
+  | result -> result
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> restart_on_eintr f
+;;
+
 let stopped pid =
   match Unix.kill pid 0 with
   | () -> false
@@ -52,7 +61,7 @@ let test_failure_stops_child_before_same_switch_retry () =
     done);
   let chrome = Filename.concat masc_root "fake-chromium" in
   fake_chromium ~path:chrome ~port;
-  let config : Masc.Browser_configuration.stagehand = { chrome; extension = masc_root; profile = None } in
+  let config : Browser_configuration.stagehand = { chrome; extension = masc_root; profile = None } in
   let profile = Process.server_profile ~masc_root in
   let record = Process.owner_record_path ~masc_root in
   let log_path = Filename.concat (Filename.dirname profile) "chromium.log" in
@@ -105,7 +114,7 @@ let test_malformed_owner_record_blocks_profile_reset () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let config : Masc.Browser_configuration.stagehand =
+  let config : Browser_configuration.stagehand =
     { chrome = Filename.concat masc_root "missing-chromium"; extension = masc_root; profile = None }
   in
   (match
@@ -139,7 +148,7 @@ let test_unmatched_live_pid_blocks_profile_reset () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let config : Masc.Browser_configuration.stagehand =
+  let config : Browser_configuration.stagehand =
     { chrome; extension = masc_root; profile = None }
   in
   (match
@@ -187,8 +196,8 @@ let test_dead_leader_with_live_group_blocks_profile_reset () =
        | Unix.Unix_error (Unix.ESRCH, _, _) -> ()))
   @@ fun () ->
   let ready = Bytes.create 1 in
-  let count = Unix.read ready_read ready 0 1 in
-  ignore (Unix.waitpid [] leader);
+  let count = restart_on_eintr (fun () -> Unix.read ready_read ready 0 1) in
+  ignore (restart_on_eintr (fun () -> Unix.waitpid [] leader));
   check int "the orphan group was created" 1 count;
   (match Unix.kill leader 0 with
    | () -> fail "the group leader should have exited"
@@ -209,7 +218,7 @@ let test_dead_leader_with_live_group_blocks_profile_reset () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let config : Masc.Browser_configuration.stagehand =
+  let config : Browser_configuration.stagehand =
     { chrome; extension = masc_root; profile = None }
   in
   (match
@@ -226,10 +235,80 @@ let test_dead_leader_with_live_group_blocks_profile_reset () =
   check bool "the orphan group profile remains" true (Sys.file_exists marker)
 ;;
 
+let load_runtime ~config_path text =
+  Out_channel.with_open_bin config_path (fun out -> output_string out
+    ("[providers.snapshot]\nprotocol=\"openai-compatible-http\"\nendpoint=\"http://127.0.0.1:9\"\n[models.sample]\napi-name=\"snapshot-model\"\nmax-context=4096\n[snapshot.sample]\n[runtime]\ndefault=\"snapshot.sample\"\n" ^ text));
+  match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail
+
+let test_start_captures_configuration ~stagehand () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let root = Filename.temp_dir "browser-start-config-" "" |> Unix.realpath in
+    let old = Runtime.For_testing.snapshot () in
+    let old_startup = Runtime_startup_state.get () in
+    Eio.Switch.on_release sw (fun () ->
+      Runtime.For_testing.restore old;
+      Runtime_startup_state.set old_startup;
+      Browser_lane.install_stagehand_executor None;
+      Fs_compat.remove_tree root);
+    let load = load_runtime ~config_path:(Filename.concat root "runtime.toml") in
+    load "";
+    let entered, enter = Eio.Promise.create () and release, finish = Eio.Promise.create () in
+    let cleanup () = Eio.Promise.resolve enter (); Eio.Promise.await release in
+    let configuration = Runtime.browser_configuration () in
+    let worker = if stagehand then Stagehand.For_testing.start_with_cleanup ~cleanup ~sw ~env ~base_path:root ~configuration
+      else Server_browser_webdriver.For_testing.start_with_cleanup ~cleanup ~sw ~env ~base_path:root ~configuration in
+    Eio.Promise.await entered;
+    let marker = Filename.concat root "new-driver-started" in
+    let driver = Filename.concat root "new-driver" in
+    Out_channel.with_open_bin driver (fun out -> Printf.fprintf out "#!/bin/sh\nprintf started > %s\nexit 1\n" (Filename.quote marker));
+    Unix.chmod driver 0o700;
+    load (if stagehand then Printf.sprintf "[browser.stagehand]\nchrome=%S\nextension=%S\n" driver root
+      else Printf.sprintf "[browser.automation]\ngeckodriver=%S\n" driver);
+    Eio.Promise.resolve finish ();
+    Eio.Promise.await_exn worker;
+    if stagehand then check bool "deferred startup did not install newly saved Stagehand config" false
+      (match (Browser_lane.inventory_observation Browser_lane.Lane_name.Stagehand).backend with
+       | Browser_lane.Executor_registered value -> value | _ -> fail "wrong backend")
+    else check bool "deferred startup did not launch newly saved driver" false (Sys.file_exists marker)))
+
+(* The server publishes readiness before it starts the Browser lanes, so a
+   save can land in between. Both lanes start from the snapshot taken before
+   that save, not from whatever Runtime holds when each start runs. *)
+let test_start_uses_snapshot_from_before_a_save () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let root = Filename.temp_dir "browser-start-snapshot-" "" |> Unix.realpath in
+    let old = Runtime.For_testing.snapshot () in
+    let old_startup = Runtime_startup_state.get () in
+    Eio.Switch.on_release sw (fun () ->
+      Runtime.For_testing.restore old;
+      Runtime_startup_state.set old_startup;
+      Browser_lane.install_stagehand_executor None;
+      Fs_compat.remove_tree root);
+    let load = load_runtime ~config_path:(Filename.concat root "runtime.toml") in
+    load "";
+    let configuration = Runtime.browser_configuration () in
+    let marker = Filename.concat root "new-driver-started" in
+    let driver = Filename.concat root "new-driver" in
+    Out_channel.with_open_bin driver (fun out -> Printf.fprintf out "#!/bin/sh\nprintf started > %s\nexit 1\n" (Filename.quote marker));
+    Unix.chmod driver 0o700;
+    load (Printf.sprintf "[browser.automation]\ngeckodriver=%S\n[browser.stagehand]\nchrome=%S\nextension=%S\n" driver driver root);
+    let cleanup () = () in
+    let webdriver = Server_browser_webdriver.For_testing.start_with_cleanup ~cleanup ~sw ~env ~base_path:root ~configuration in
+    let stagehand = Stagehand.For_testing.start_with_cleanup ~cleanup ~sw ~env ~base_path:root ~configuration in
+    Eio.Promise.await_exn webdriver;
+    Eio.Promise.await_exn stagehand;
+    check bool "webdriver startup did not launch the driver saved after the snapshot" false (Sys.file_exists marker);
+    check bool "Stagehand startup did not install the config saved after the snapshot" false
+      (match (Browser_lane.inventory_observation Browser_lane.Lane_name.Stagehand).backend with
+       | Browser_lane.Executor_registered value -> value | _ -> fail "wrong backend")))
+
 let () =
   run "server_browser_stagehand"
     [ "lifetime"
-    , [ test_case "failed open stops Chromium before same-switch retry" `Quick
+    , [ test_case "webdriver startup freezes configuration before cleanup" `Quick (test_start_captures_configuration ~stagehand:false);
+      test_case "Stagehand startup freezes configuration before cleanup" `Quick (test_start_captures_configuration ~stagehand:true);
+      test_case "both lanes start from the snapshot taken before a save" `Quick test_start_uses_snapshot_from_before_a_save;
+      test_case "failed open stops Chromium before same-switch retry" `Quick
           test_failure_stops_child_before_same_switch_retry
       ; test_case "malformed owner record blocks profile reset" `Quick
           test_malformed_owner_record_blocks_profile_reset

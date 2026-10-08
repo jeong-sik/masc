@@ -57,11 +57,15 @@ let with_workspace f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* The server delivers Goal notices with the guard enabled; with it off,
+     guarded store mutexes are skipped and a wrong-context call passes. *)
+  Eio_guard.enable ();
   let dir = temp_dir () in
   let previous_delivery = Goal_delivery.For_testing.replace_backend
     (Some Server_bootstrap_loops.For_testing.goal_notification_backend) in
   Fun.protect
     ~finally:(fun () ->
+      Eio_guard.disable ();
       ignore (Goal_delivery.For_testing.replace_backend previous_delivery);
       rm_rf dir)
     (fun () ->
@@ -540,6 +544,10 @@ let test_measurement_requires_current_criterion_and_evidence () =
 ;;
 
 let transition ctx goal_id ?note ?evidence action =
+  (* A drop must say why; a test that does not care gets this sentence. *)
+  let note = match note with
+    | None when String.equal action "drop" -> Some "scenario no longer needs this Goal"
+    | Some _ | None -> note in
   let args =
     [ "goal_id", `String goal_id; "action", `String action ]
     @ (match note with
@@ -1847,11 +1855,48 @@ let test_roster_read_failure_keeps_the_goal_notification_uncaptured () =
   check int "repaired notification settles" 0 (List.length (notification_store config).pending_notifications)
 ;;
 
+(* A proof request takes its phase from [Goal_phase.decide_transition]: an
+   Executing goal enters Verifying and a Verifying one stays, while a goal the
+   machine answers with any other phase gets no pending proof. Completed is
+   the case that matters: the machine says [Already Completed] there, which is
+   not a request for verification. *)
+let test_proof_request_follows_the_phase_machine () =
+  with_workspace
+  @@ fun config ->
+  let goal =
+    match Goal_store.upsert_goal config ~title:"proof" ~metric:"m" ~target_value:"1" () with
+    | Ok (goal, _) -> goal
+    | Error error -> fail (Goal_store.write_error_to_string error)
+  in
+  let request () = Workspace_goals.request_current_proof config ~goal_id:goal.id in
+  let phase_after label =
+    match request () with
+    | Ok (goal, _) -> Goal_phase.to_string goal.phase
+    | Error _ -> fail label
+  in
+  check string "an executing goal enters verifying" "verifying"
+    (phase_after "an executing goal refused a proof request");
+  check string "a verifying goal stays verifying" "verifying"
+    (phase_after "a verifying goal refused a repeated proof request");
+  (match
+     Goal_store.transact_goal config ~goal_id:goal.id (fun goal ->
+       Ok ({ goal with phase = Goal_phase.Completed }, ()))
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_store.write_error_to_string error));
+  match request () with
+  | Error (Workspace_goals.Refused _) -> ()
+  | Error (Workspace_goals.Store error) -> fail (Goal_store.write_error_to_string error)
+  | Ok _ -> fail "a completed goal accepted a proof request"
+;;
+
 let () =
   run
     "goal_verification_gate"
     [ ( "durable proof effects"
-      , [ test_case "audit and partial recipient failures recover exactly once" `Quick
+      , [ test_case "proof request follows the phase machine" `Quick
+            test_proof_request_follows_the_phase_machine
+        ; test_case "audit and partial recipient failures recover exactly once" `Quick
             test_proof_effect_delivery_recovers_audit_and_partial_recipients
         ; test_case "scan and explicit repeat retain effects across rename/delete" `Quick
             test_proof_delivery_survives_reconciliation_and_goal_removal

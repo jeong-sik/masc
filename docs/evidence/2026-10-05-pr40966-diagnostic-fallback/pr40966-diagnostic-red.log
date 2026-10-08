@@ -1,0 +1,68 @@
+Testing `Server Lane sampling HTTP composition'.
+This run has ID `TZ7W06TW'.
+
+  [SKIP]        host boundary          0   sampling route preflight stays sta...
+  [SKIP]        host boundary          1   captured binding survives same-ID ...
+  [SKIP]        host boundary          2   image-only completion preserves MC...
+  [SKIP]        host boundary          3   installed route, serialized reques...
+  [SKIP]        host boundary          4   image-incapable primary is skipped...
+  [SKIP]        host boundary          5   missing model identity walks the s...
+  [SKIP]        host boundary          6   blank model identity walks the sec...
+  [SKIP]        host boundary          7   existing rate limit demotes the pr...
+  [SKIP]        host boundary          8   existing quota exhaustion demotes ...
+  [SKIP]        host boundary          9   another Keeper's failed attempt de...
+  [SKIP]        host boundary         10   sampling records a rate limit for ...
+  [SKIP]        host boundary         11   sampling records hard quota for it...
+  [SKIP]        host boundary         12   declared zero liveness reaches pro...
+  [SKIP]        host boundary         13   declared positive liveness reaches...
+  [SKIP]        host boundary         14   thinking-only maxTokens falls back...
+> [FAIL]        host boundary         15   diagnostic persistence failure sti...
+  [SKIP]        host boundary         16   oversized primary diagnostics do n...
+  [SKIP]        host boundary         17   fixed model temperature survives a...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        host boundary         15   diagnostic persistence failure ...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-10-05 06:26:11] [INFO] [Workspace] MASC base: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/server-lane-sampling-eb3d6b (no git root found)
+[2026-10-05 06:26:11] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/server-lane-sampling-eb3d6b for test executable test_server_lane_addon_sampling.exe
+ASSERT declared liveness window is admitted unchanged
+ASSERT request is durable before the provider receives HTTP
+ASSERT retained request belongs to the exact worker
+ASSERT retained request uses the operator binding route
+[llm_provider] [WARN] [complete] HTTP 400 from openai_compat (model=sampling-fixture base_url=http://127.0.0.1:62136/primary request_path=/chat/completions key=[REDACTED]): req_body=375 bytes balanced=true parse_ok=true resp_body={"error":{"message":"synthetic primary unavailable"}}
+ASSERT {"status":"retention_error","evidence":{"request":{"uri":"lane-evidence:81696b2bbebd2a14649b747d0980b46fdf27279c85d0517ea34f8df2f3f268bc","sha256":"81696b2bbebd2a14649b747d0980b46fdf27279c85d0517ea34f8df2f3f268bc"},"outcome":{"uri":"lane-evidence:20390442df59033b655a7d487514ab8445bf71c638012853a231fd959e74d3cf","sha256":"20390442df59033b655a7d487514ab8445bf71c638012853a231fd959e74d3cf"}}}
+FAIL {"status":"retention_error","evidence":{"request":{"uri":"lane-evidence:81696b2bbebd2a14649b747d0980b46fdf27279c85d0517ea34f8df2f3f268bc","sha256":"81696b2bbebd2a14649b747d0980b46fdf27279c85d0517ea34f8df2f3f268bc"},"outcome":{"uri":"lane-evidence:20390442df59033b655a7d487514ab8445bf71c638012853a231fd959e74d3cf","sha256":"20390442df59033b655a7d487514ab8445bf71c638012853a231fd959e74d3cf"}}}
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_server_lane_addon_sampling.test_actual_http_route_and_durable_sa in file "test/test_server_lane_addon_sampling.ml", line 234, characters 15-47
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 107, characters 8-13
+Re-raised at Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 109, characters 30-38
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr40966-diagnostic-fallback-20261005/test/_build/_tests/Server Lane sampling HTTP composition/host boundary.015.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr40966-diagnostic-fallback-20261005/test/_build/_tests/Server Lane sampling HTTP composition'.
+1 failure! in 0.023s. 1 test run.

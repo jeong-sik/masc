@@ -37,6 +37,17 @@ let test_image_only_completion_is_sampling_content () =
     (Result.is_error (project (response [block;url_image])));
   check bool "URL-only image cannot become MCP base64 content" true
     (Result.is_error (project (response [url_image])));
+  List.iter (fun extra ->
+    check bool "unsupported content beside image is rejected" true
+      (Result.is_error (project (response [block;extra]))))
+    [L.Audio {media_type="audio/wav";data="YQ==";source_type=L.Base64};
+     L.Document {media_type="application/pdf";data="YQ==";source_type=L.Base64}];
+  List.iter (fun data ->
+    check bool "invalid or empty base64 is rejected" true
+      (Result.is_error (project (response [L.Image {
+        media_type="image/png";data;source_type=L.Base64}])))) ["";"%%%";"a"];
+  check bool "reasoning metadata may accompany a valid image" true
+    (project (response [L.Thinking {content="reason";signature=None};block]) = Ok actual);
   check bool "empty completion remains an error" true
     (Result.is_error (project (response [])))
 
@@ -82,7 +93,7 @@ default="snapshot.sample"
       Yojson.Safe.Util.(body |> member "temperature" |> to_float)
   | _ -> fail "expected one captured binding request"
 
-let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(primary_images=true) ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) () =
+let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(primary_images=true) ?primary_error_bytes ?initial_pressure ?fixed_temperature ?turn_timeout_s ?(omit_temperature=false) ?(diagnostic_write_failure=false) () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -112,7 +123,13 @@ let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(
         let bytes = In_channel.with_open_bin (Filename.concat directory file) In_channel.input_all in
         let json = Yojson.Safe.from_string bytes in
         if member "kind" json=`String "model_request" then Some json else None) in
+  let evidence_directory = Filename.concat (Store.root store) "evidence" in
+  let saved_evidence_directory = evidence_directory ^ ".saved" in
   let callback _connection request body =
+    let primary_request = String.starts_with ~prefix:"/primary/" (Cohttp.Request.resource request) in
+    if diagnostic_write_failure && not primary_request && Sys.file_exists saved_evidence_directory then (
+      Unix.unlink evidence_directory;
+      Unix.rename saved_evidence_directory evidence_directory);
     let body = Eio.Buf_read.(of_flow ~max_size:1048576 body |> take_all) |> Yojson.Safe.from_string in
     let captures = retained_requests () in
     check int "request is durable before the provider receives HTTP" !expected_retained_requests (List.length captures);
@@ -121,7 +138,10 @@ let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(
     check string "retained request uses the operator binding route" "analysis"
       (text "route" (List.hd captures));
     requests := (Cohttp.Request.resource request,body) :: !requests;
-    if String.starts_with ~prefix:"/primary/" (Cohttp.Request.resource request) then
+    if diagnostic_write_failure && primary_request then (
+      Unix.rename evidence_directory saved_evidence_directory;
+      write evidence_directory "diagnostic storage temporarily unavailable");
+    if primary_request then
       (match primary_reply with
       | `Thinking -> Cohttp_eio.Server.respond_string ~status:`OK
           ~body:{|{"id":"thinking-only","model":"actual-primary-model","choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"Provider reasoning without an answer."},"finish_reason":"length"}],"usage":{"prompt_tokens":9,"completion_tokens":37,"total_tokens":46}}|} ()
@@ -137,7 +157,10 @@ let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(
       | `Quota -> Cohttp_eio.Server.respond_string ~status:(Cohttp.Code.status_of_code 402)
           ~body:{|{"error":{"message":"synthetic quota exhaustion"}}|} ()
       | `Bad_request -> Cohttp_eio.Server.respond_string ~status:`Bad_request
-          ~body:{|{"error":{"message":"synthetic primary unavailable"}}|} ())
+          ~body:(match primary_error_bytes with
+            | None -> {|{"error":{"message":"synthetic primary unavailable"}}|}
+            | Some bytes -> Yojson.Safe.to_string (`Assoc ["error",`Assoc [
+                "message",`String (String.make bytes 'x')]])) ())
     else Cohttp_eio.Server.respond_string ~status:`OK
       ~body:{|{"id":"actual-response","model":"actual-secondary-model","choices":[{"index":0,"message":{"role":"assistant","content":"The image comparison is retained."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":6,"total_tokens":15}}|} () in
   let socket = Eio.Net.listen env#net ~sw ~backlog:4 ~reuse_addr:true
@@ -269,6 +292,24 @@ max_reply_bytes=4194304
   if Option.is_none initial_pressure then
     check string "failed attempt identifies the primary configured runtime" "primary.sample"
       (List.hd failed |> text "runtime_id");
+  if diagnostic_write_failure then (
+    check bool "diagnostic retention failure remains explicit in the retained outcome" true
+      (match member "diagnostic_retention_error" (List.hd failed) with `String detail -> detail <> "" | _ -> false);
+    check bool "failed persistence does not fabricate a diagnostic reference" true
+      (member "error_evidence" (List.hd failed) = `Null))
+  else if Option.is_none initial_pressure then (
+    let diagnostic_ref = List.hd failed |> member "error_evidence"
+      |> Lane_addon_types.evidence_of_json |> require in
+    let diagnostic = Store.read_blob store diagnostic_ref |> require |> Yojson.Safe.from_string in
+    check string "failed attempt diagnostic belongs to this sampling request"
+      (member "request" refs |> text "uri") (member "request" diagnostic |> text "uri");
+    check bool "full failure diagnostics stay out of the response" true
+      (member "error" (List.hd failed) = `Null);
+    match primary_error_bytes with
+    | None -> ()
+    | Some bytes ->
+        check bool "large HTTP failure remains retained separately" true
+          (String.length (text "error" diagnostic) >= bytes));
   if primary_reply=`Thinking then
     check string "thinking-only failure preserves its exact provider stop reason" "max_tokens"
       (member "failed_attempts" host |> Yojson.Safe.Util.to_list |> List.hd |> text "provider_stop_reason");
@@ -387,7 +428,7 @@ max_reply_bytes=4194304
       on_created connection; Ok connection);
     acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready=(fun ~package:_ -> Ok ());
-    recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())} in
+    recover_stop=(fun ~instance_id:_ ~container_id:_ -> Ok ())} in
   Lane_addon_runtime.For_testing.with_backend backend (fun () ->
     let reconcile () = require (Lane_addon_runtime.reconcile_configuration ~config ~directory) in
     let inspect () = Lane_addon_runtime.dispatch ~config ~operation:Lane_addon_runtime.Inspect (`Assoc [])
@@ -457,5 +498,9 @@ let () = run "Server Lane sampling HTTP composition" ["host boundary",[
     (test_actual_http_route_and_durable_sampling ~turn_timeout_s:30.);
   test_case "thinking-only maxTokens falls back and fixed model temperature wins" `Quick
     (test_actual_http_route_and_durable_sampling ~primary_reply:`Thinking ~fixed_temperature:0.75);
+  test_case "diagnostic persistence failure still reaches a healthy fallback" `Quick
+    (test_actual_http_route_and_durable_sampling ~diagnostic_write_failure:true);
+  test_case "oversized primary diagnostics do not reject a small fallback answer" `Quick
+    (test_actual_http_route_and_durable_sampling ~primary_error_bytes:(4194304 + 1));
   test_case "fixed model temperature survives an omitted request value" `Quick
     (test_actual_http_route_and_durable_sampling ~fixed_temperature:0.75 ~omit_temperature:true)]]

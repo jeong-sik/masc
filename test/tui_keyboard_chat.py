@@ -1104,13 +1104,15 @@ class AtomicChatFixture:
         def chunks() -> Iterator[bytes]:
             prefix = f"data: {json.dumps(acceptance)}\n\n".encode()
             if working:
-                prefix += blocks[1] + b"\n\n"
+                # Render this request's real text after RUN_STARTED, before
+                # holding its terminal. It is a client-applied Working barrier.
+                prefix += b"\n\n".join(blocks[1:4]) + b"\n\n"
             yield prefix
             if not self.release.wait(timeout=30):
                 raise AssertionError("interaction never released the held server turn")
             # The original request id is retained even when queued text is edited.
             terminal = keeper_chat_succeeded_response(json.dumps({**request, "message": operation["input"]["message"]}).encode())
-            yield b"\n\n".join(terminal.body.split(b"\n\n")[2 if working else 1:])
+            yield b"\n\n".join(terminal.body.split(b"\n\n")[4 if working else 1:])
 
         return StreamingHttpResponse(chunks)
 
@@ -1147,6 +1149,9 @@ class AtomicChatFixture:
         request = json.loads(body)
         if request.get("action") != "resume":
             raise AssertionError(f"retained input expected explicit resume: {request!r}")
+        expected = self.submitted[0]["expected_workspace"]
+        if set(expected) != {"base_path", "masc_root"} or request.get("expected_workspace") != expected:
+            raise AssertionError(f"resume changed the retained input workspace: {request!r}")
         self.paused = False
         self.resume_confirmed = True
         return 200, {"ok": True}
@@ -1274,7 +1279,9 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
         try:
             open_atomic_chat(process, master_fd, output)
             send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
-            send_and_wait(process, master_fd, output, b"\r", "기존 작업 처리 중".encode())
+            # The generic busy status also describes the autonomous fixture.
+            # This text follows this request's RUN_STARTED while its terminal is held.
+            send_and_wait(process, master_fd, output, b"\r", b"reply-working-question")
             wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
             send_and_wait(process, master_fd, output, b"follow-up", composer_showing(b"follow-up"))
             os.write(master_fd, b"\r")
@@ -1314,7 +1321,9 @@ def chat_pending_stop_leave_interaction(fixture: AtomicChatFixture) -> Interacti
         try:
             open_atomic_chat(process, master_fd, output)
             send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
-            send_and_wait(process, master_fd, output, b"\r", "기존 작업 처리 중".encode())
+            # The generic busy status also describes the autonomous fixture.
+            # This text follows this request's RUN_STARTED while its terminal is held.
+            send_and_wait(process, master_fd, output, b"\r", b"reply-working-question")
             os.write(master_fd, b"\x1b")
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("stop acknowledgement was not held")
@@ -1840,28 +1849,38 @@ def chat_visibility_modes_interaction(
                 "chat navigation, composer, operational identity and key footer "
                 f"did not occupy separate ordered rows: {observed_rows!r}"
             )
-        if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
-            raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
-        # The lane word went: the skill row leads with its mark and the
-        # skill's name, with the badge padding and SGR runs between -- the
-        # same token-split shape the tool-lane needles above take, because
-        # a literal "◆ ci-red-attribution" never exists as contiguous
-        # bytes. The rail is a token of its own, the way " · " is above: a
-        # needle anchored on the gutter mark crosses into the body, and
-        # Skill rows are Shade_quoted, so the renderer draws "│" (>= 0x80,
-        # outside the gap class) between badge padding and body.
-        # Body-anchored needles (✗, 씀, proof) never cross it and keep the
-        # plain gap.
-        if re.search(
-            "◆".encode()
-            + rb"[\x1b\x20-\x7e]*?"
-            + "│".encode()
-            + rb"[\x1b\x20-\x7e]*?"
-            + rb"ci-red-attribution",
-            initial,
-        ) is None:
+        if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
+            raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
+        # The skill header and its bold name must belong to one TURN on
+        # the completed screen, not separate turns or historical frames.
+        styled_rows = screen_rows(completed, preserve_styles=True)
+        turn_rows = sorted(
+            row for row, text in observed_rows.items()
+            if title_row < row < composer_row
+            and re.search(rb"TURN #\d+", text)
+        )
+        skill_in_turn = False
+        for index, row in enumerate(turn_rows):
+            if re.search(
+                "◆\\s+SKILL\\s+│\\s+TURN #\\d+".encode(),
+                observed_rows[row],
+            ) is None:
+                continue
+            end_row = (
+                turn_rows[index + 1]
+                if index + 1 < len(turn_rows) else composer_row
+            )
+            if any(
+                b"\x1b[1mci-red-attribution" in text
+                for body_row, text in styled_rows.items()
+                if row < body_row < end_row
+            ):
+                skill_in_turn = True
+                break
+        if not skill_in_turn:
             raise AssertionError(
-                f"the exact Skill evidence did not start its turn: {initial!r}"
+                "the completed Skill TURN did not contain its bold skill name: "
+                f"{styled_rows!r}"
             )
         # How far one invocation got is not on the resting row any more:
         # the row stands for every trigger of that skill.
@@ -1869,8 +1888,6 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"the compact skill row still spells a lifecycle: {initial!r}"
             )
-        if b"\x1b[1mci-red-attribution" not in initial:
-            raise AssertionError(f"the Skill name was not bold: {initial!r}")
         # The rest of the skill row rides the tool toggle now: the action
         # rows and the proof line exist only behind Ctrl-D, so the compact
         # frame must not carry them. Their presence is waited for below,
@@ -1885,28 +1902,10 @@ def chat_visibility_modes_interaction(
                 raise AssertionError(
                     f"skill detail leaked into the compact frame: {initial!r}"
                 )
-        # The lane word is gone for good: a revert that puts SKILL back on
-        # the badge must fail here, not pass silently. Stripped, because
-        # the badge's SGR runs make a raw-byte absence shape-dependent.
-        if b"SKILL" in CSI_RE.sub(b"", initial):
-            raise AssertionError(f"the lane word SKILL is back: {initial!r}")
+        if b"SKILL" not in CSI_RE.sub(b"", initial):
+            raise AssertionError(f"the skill lane lacks its label: {initial!r}")
 
-        folded = send_and_wait(
-            process, master_fd, output, b"\x12", b"reasoning:folded"
-        )
-        # The fold marker's wording changed: the count line is the thinking
-        # lane's mark and its padding over "2 reasoning steps · text not
-        # recorded" (no lane word -- the mark says the lane); for this
-        # one-line count row the old "Reasoning / N line(s) folded" label
-        # does not exist (it still fires for multi-line thinking bodies).
-        if b"2 reasoning steps" not in folded or b"text not recorded" not in folded:
-            raise AssertionError(f"folded reasoning did not draw its count: {folded!r}")
-
-        # \x12 flips reasoning visibility and the renderer answers with a
-        # diff frame: the header tag (reasoning:folded -> reasoning:full)
-        # is what gets re-emitted. The thinking-lane count row is unchanged
-        # by the flip, so it is not redrawn -- asserting its reappearance
-        # here starves even though the row stays on screen.
+        # Reasoning starts folded; one press opens the full content.
         full = send_and_wait(
             process,
             master_fd,
@@ -2092,6 +2091,8 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"exact Skill evidence was duplicated as a generic tool: {tools!r}"
             )
+        # The palette targets alpha without moving the beta roster cursor.
+        # Esc returns to that roster selection, not the chat target's row.
         send_and_wait(process, master_fd, output, b"\x1b", keeper_row_selected(b"beta"))
         os.write(master_fd, b"q")
 
@@ -2400,13 +2401,8 @@ def message_origin_badge_interaction(
     operator_body = b"operator-body-neutral"
     keeper_body = b"keeper-body-neutral"
 
-    # Ctrl-F walks bare -> inline -> row -> bare and the pane opens on inline,
-    # which is the one stop with no header word: the summary names the two
-    # projections away from the resting layout ("metadata:off" and
-    # "metadata:full") and stays silent about the layout itself. So the first
-    # press lands on the full row, and the press that comes back to inline is
-    # waited on by the short clock instead -- the one thing neither other stop
-    # draws.
+    # Clocks are opt-in: bare -> inline -> row -> bare.
+    send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
     full_row = send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
     # The pane's own keeper is not named on its full heading -- the
     # breadcrumb says whose chat this is -- so its row opens on the mark and
@@ -2441,7 +2437,7 @@ def message_origin_badge_interaction(
         )
     assert_bodies_unwashed(full_row, "the full origin row")
 
-    bare = send_and_wait(process, master_fd, output, b"\x06", b"metadata:off")
+    bare = send_and_wait(process, master_fd, output, b"\x06", keeper_body)
     for badge, body, description in (
         (operator_badge, operator_body, "operator"),
         (keeper_badge, keeper_body, "Keeper"),
@@ -2500,12 +2496,19 @@ def message_origin_badge_interaction(
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    # Restore only the foreground after the accented prompt. A full reset
-    # would erase the input surface background; accepting arbitrary SGR here
-    # could instead leave the draft tinted or clear its background with 49m.
-    if b"\x1b[96m  > \x1b[39mdraft-neutral" not in draft_frame:
+    # The prompt recedes in its own span and the draft follows a bare reset:
+    # typed text keeps the terminal foreground. The renderer reopens the input
+    # surface's background after the reset (render_chat.ml), so an explicit
+    # default-background (49m) would be the regression -- it paints the surface
+    # flat instead of preserving it.
+    if b"\x1b[2m  > \x1b[0mdraft-neutral" not in draft_frame:
         raise AssertionError(
-            f"chat composer did not restore default foreground while preserving its background: {draft_frame!r}"
+            f"chat composer did not recede its prompt and hand the draft the "
+            f"terminal foreground: {draft_frame!r}"
+        )
+    if b"\x1b[49m" in draft_frame:
+        raise AssertionError(
+            f"chat composer cleared the input surface background: {draft_frame!r}"
         )
     escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")
@@ -2689,28 +2692,11 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             composer_showing(b"alpha-draft"),
         )
 
-        # Wide chat shows the roster by default. Leave that preference
-        # untouched while checking the selected Keeper and draft handoff.
-        wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
-
+        # A nonempty draft keeps Left for editing. The dedicated next-Keeper
+        # key still switches without losing either conversation's draft.
         beta_start = len(output)
-        # A drawn roster is an input pane: Left focuses it, Down moves its
-        # cursor, and Enter opens that Keeper without changing the draft.
-        send_and_wait(process, master_fd, output, b"\x1b[D", b"Enter:open")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\x1b[B",
-            b"\x1b[7m \xc2\xb7 beta",
-        )
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\r",
-            b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
-        )
+        send_and_wait(process, master_fd, output, b"\x07",
+                      b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         wait_for_output(
             process,
             master_fd,

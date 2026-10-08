@@ -1,0 +1,160 @@
+{
+  "qualified_commit": "d35c75b0e0b6fdda4466bba79617fa94e80a271d",
+  "tree": "81a1f3f2b11073d07c265c1432b335a162e0d8ee",
+  "native_cases": 246,
+  "native": [
+    {
+      "target": "test_browser_surface",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_browser_surface.log",
+      "cases": 15
+    },
+    {
+      "target": "test_browser_stagehand_executor",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_browser_stagehand_executor.log",
+      "cases": 13
+    },
+    {
+      "target": "test_browser_activity",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_browser_activity.log",
+      "cases": 15
+    },
+    {
+      "target": "test_server_browser_stagehand",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_server_browser_stagehand.log",
+      "cases": 6
+    },
+    {
+      "target": "test_dashboard_http_core",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_dashboard_http_core.log",
+      "cases": 2
+    },
+    {
+      "target": "test_tui_browser_activity",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_tui_browser_activity.log",
+      "cases": 16
+    },
+    {
+      "target": "test_tui_exact_activity",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_tui_exact_activity.log",
+      "cases": 15
+    },
+    {
+      "target": "test_runtime_config_validity",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_runtime_config_validity.log",
+      "cases": 148
+    },
+    {
+      "target": "test_tui_machine_activity",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_tui_machine_activity.log",
+      "cases": 16
+    }
+  ],
+  "web_tests": 594,
+  "web_suites": 7,
+  "pty": [
+    {
+      "fixture": "test_tui_browser_activity_pty.py",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_tui_browser_activity_pty.py.log"
+    },
+    {
+      "fixture": "test_tui_machine_activity_pty.py",
+      "exit": 0,
+      "log": "/tmp/browser-machine-composition-test_tui_machine_activity_pty.py.log"
+    }
+  ],
+  "tsc_exit": 0,
+  "adaptation_eslint_exit": 0,
+  "source_sha256": {
+    "bin/masc_tui.ml": "6375c6d823901501b00b4f43d601a0bff94d63326335989efb95093ff6a80743",
+    "bin/masc_tui_browser_activity.ml": "01d9564d3c2e9e8553d0d6bc06d66078e68e677d84bc9f8569f4bafbe29b7ce2",
+    "bin/masc_tui_browser_activity.mli": "477ff3cd686d96c1a76db2f2abddc877b88c7e852a748f43c5509945f821dbce",
+    "bin/masc_tui_exact_activity.ml": "743092a3c63e0c28fa2d51378883099f12e0c594c607b74a618b83cc8b0620c0",
+    "bin/masc_tui_exact_activity.mli": "bc19e6c414f45721350139584f06b625fa709e7e0ba05ef2cf2dc70db6a35145",
+    "bin/masc_tui_http.ml": "1945cff611fb40e170e1098df8bdcc646897420294a4841e8a61f9131cbf10d8",
+    "bin/masc_tui_machine_activity.ml": "47fb3466ffb8ccf229c5f90a0fb6f1bcb2e64abdd49f6a7a72309e4a70efbd42",
+    "bin/masc_tui_machine_activity.mli": "918dcc644a12d7d6927d464151b8484f4242bd291fabab1ea057287caf0016f7",
+    "dashboard/src/api/dashboard-runtime-raw-save.test.ts": "9a030c98bbcf951f92ad0b2a54a2d4ba6d358c29f75638ce9df0c7a6d2297cb8",
+    "dashboard/src/api/dashboard-runtime.ts": "7e1560e12dae1db3bef9329de55f87812794e4c982099b68a437990639eae9fa",
+    "dashboard/src/api/dashboard.test.ts": "b57ae6808195b7e35b459b305091b84ef3432ed03c9d93ac6aa3aee21204c0d3",
+    "dashboard/src/components/browser-lane-activity-panel.test.ts": "a000ff14b642832d305f8e46e16e01d4286742cae57427f845d96825d556f28c",
+    "dashboard/src/components/machine-lane-activity-panel.test.ts": "9b0604f5ee60006712ab0d43e6631e2b304905308de6b59bf05caa94a63f915f",
+    "dashboard/src/components/runtime-toml-editor.test.ts": "620ffc70c9f02a153c43a5b7194d86059759aab04d09d5f22ce97203338db9d8",
+    "dashboard/src/components/runtime-toml-editor.ts": "fc398a9d01d8be0234fc0e8b589ee0011ef3567784f8763425e9a98c62377129",
+    "dashboard/src/lib/browser-lane-activity-session.ts": "6c4bbe713b9531d1b84e03412dc7822072af1ee0a5d393a84b9638377c7bd971",
+    "dashboard/src/lib/exact-lane-activity-session.ts": "975ef5294f730334356583193f45329f877e95e4ca5ce6343543c58eef35ed77",
+    "dashboard/src/lib/machine-lane-activity-session.ts": "e2d05c57e9d26dbaa9423b7c69483e3bd4fb41cb5358b3fb26ce1e21032aea32",
+    "lib/browser_lane/browser_lane.ml": "cfae88ab7b159432bb29aa64db4fc62f8e6a3001695312744fbeec18441d87fa",
+    "lib/browser_surface.ml": "2c54f615f36af5cd06973ecdc46a7c265ee6b25e762909c253aa49f0ec0758f9",
+    "lib/runtime/runtime.ml": "d483479082be460b2f9ca25d7beb83c7e6d0dd9746cffd588435937bff6a49bd",
+    "lib/runtime/runtime.mli": "280db57231ab333b102acb253e592c428798fcaf0252378a5c81d0a9750fa69f",
+    "lib/server/server_browser_stagehand.ml": "09c63c223ed19ef407b66e181c32d9fce09fb90a358173bdc2acdf82881df8ce",
+    "lib/server/server_browser_stagehand.mli": "50052a062b117a09b10a7a12ed83b319267fea524171b923a927e4c3dcaebd60",
+    "lib/server/server_browser_webdriver.ml": "9ea8f36f5f94b01edc55a80b9ba840264149749a28334ae46ce28cf1ccdce981",
+    "lib/server/server_routes_http_routes_dashboard.ml": "5ce9c1a2e7358e042cd987d6ce40e5b6cbdf57e9dfd93f1c9db0becbab3f256c",
+    "test/stanzas/test_server_browser_stagehand.inc": "b26972632641b4413e274da9886aee054a833f7e53c14d4f966b751e9462158c",
+    "test/test_browser_stagehand_executor.ml": "afc87d3f4dd45eab273a6acef655d809544d9972bbd55ff5e68e5f89befd6d1b",
+    "test/test_browser_surface.ml": "32b93f663ee8f578a78de1231fd21420be8c49c8e7db4043473824519b24977c",
+    "test/test_dashboard_http_core.ml": "973cafa5f4d41813738afcc206e068c22b113c8ff7e187e163249762165af1bd",
+    "test/test_runtime_config_validity.ml": "77c5da6bcacbd99bf987042dddfe91401628f9d4faa6f42c0e7b8632b9b046cc",
+    "test/test_server_browser_stagehand.ml": "77f6e1d8cdaad649e766efe810d14484b56e9887efcaaef350806b97de72e803",
+    "test/test_tui_browser_activity.ml": "85bb0ac3736068581cc8b2df492c36e9ce03c69bbdd9122fab866db3de2b8f0c",
+    "test/test_tui_browser_activity_pty.py": "64a944e0766a4e4f3c5c8dd469a169a71c8f3cbdf5316f0a31f0b293b9901a8c",
+    "test/test_tui_exact_activity.ml": "2f73302b415517b36a1cb6cb64dcac45db5f3ba09d922a888d770c09e8524bd7",
+    "test/test_tui_machine_activity.ml": "632ba0665144e8a75695f92192c8b27a2d1447b0ac08fe1b65733a28f909e851",
+    "test/test_tui_machine_activity_pty.py": "27c29d13bc24faeadbf15415057cf3986cc0900af1c9c9ba8531ebebbcdd35cc"
+  },
+  "raw_sha256": {
+    "browser-machine-composition-build.log": "a863cba917dabdd95785ef87c3e2000416aa68282f0569d36e51ac1b161c31d7",
+    "browser-machine-composition-web.log": "1746600b4dacd8b461eedefccc2fba5122cf05bf0ed51699b42f2e9cd288e842",
+    "browser-machine-composition-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "browser-machine-composition-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "browser-machine-composition-test_browser_surface.log": "5473b5236f0eeaa72de1ae9e5e5383ead56431ce1430af731a8dadacfcff7065",
+    "browser-machine-composition-test_browser_stagehand_executor.log": "e65f97c3228b7347ac70fc7e17986b8527abd265176ea0a998a63ea88b4636a1",
+    "browser-machine-composition-test_browser_activity.log": "ee81c4ec852aecd5cbdcd69b3545f362a4d2331355b2a4e125bfbc9b5d0f4377",
+    "browser-machine-composition-test_server_browser_stagehand.log": "3f58e7cd89f7961f3460eac6e0527ce0f0e4927edd2a9aff867f1d3a7b326b2b",
+    "browser-machine-composition-test_dashboard_http_core.log": "da5cb5da08cfddedc17a7e4bc251d3d49a2a9ac4f5f7148c138405a98336e110",
+    "browser-machine-composition-test_tui_browser_activity.log": "5f7f0c8b3f38fe4e58cceaf0fd7d481dacee576404673eb965b6ee93754944c7",
+    "browser-machine-composition-test_tui_exact_activity.log": "3907f9d8c5b8767723b3dda9de2e18f9857bf8181db38873c6ddce66e6e213d2",
+    "browser-machine-composition-test_runtime_config_validity.log": "7da54baaf297de48e4e737a9de9d5d38f94816c6afdb4bb8746c7f4299fa2dd8",
+    "browser-machine-composition-test_tui_machine_activity.log": "711e3aa1890bf0e592f79a54bb6650d4dc3b9b05beefe65d888e7900a868e1a0",
+    "browser-machine-composition-test_tui_browser_activity_pty.py.log": "ffcd219df6bf4a954eba9d04bad42865d90387d02647bb648651357f60ad44a9",
+    "browser-machine-composition-test_tui_machine_activity_pty.py.log": "3ba846e90df674f6a66a3acd24ca93fa15f6913265e9db77ebd3894e677aea60",
+    "browser-path-owner-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "browser-path-owner-tests.log": "1e865a31ec76786fbf373280bf37f3af4d66f030e8837d0979848e0b0cde9b47",
+    "browser-path-owner-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "machine-path-owner-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "machine-path-owner-tests.log": "f5b8d00f9c8082c413ad648d1404fc8a4d7edd6e9d8c6d9e92f323eda4af79f9",
+    "machine-path-owner-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "browser-machine-composition-ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "browser-machine-composition-pyright.json": "12bb014f367671c30525acc78950f69fadc1cbde4e3e2118332a33be3edc3d0a"
+  },
+  "binary_sha256": {
+    "bin/masc_tui.exe": "c69f8cfe24b7fa9dd5fe7659ca65fd56ae87d6a6a0904ccecfd442f252870695",
+    "test/test_browser_surface.exe": "eedff7d900cd54f16a807a66aa3ee0fbe89b113cc36cc187f787d2c23892b5b1",
+    "test/test_browser_stagehand_executor.exe": "b81a9623cd0cea7ee658b5c5009d8322ec6afb3827f59f53ea05765b4d0712e8",
+    "test/test_browser_activity.exe": "9e364ec59c929a52263b7f45e3e0931f2926b581bbd3f9b2ba718744286271b9",
+    "test/test_server_browser_stagehand.exe": "0744a7d5a3f9f05a84692e93fc9c8939ff63c3911ed6ffb62bc78185e1844080",
+    "test/test_dashboard_http_core.exe": "3331b3da2f6b27ed947ac245a8140bc8b0ad49faadf1661ac54d98df657e3f6c",
+    "test/test_tui_browser_activity.exe": "538f37ca2e7a9145e963ef3bdee85e98ccd574949bd600ed7b183c53bac576f5",
+    "test/test_tui_exact_activity.exe": "6fee06cb94cd9d711d24247f21e06c92f901bb7eaf8d94f195d35bc751094ab9",
+    "test/test_runtime_config_validity.exe": "acfa9945e9670bc8c2170903047abbbf912301ca6b1a4d9e07f2fcbf7b5e4e56",
+    "test/test_tui_machine_activity.exe": "abb31aba397a341ecf9f714f0f190e20e8ba6411bfed895a4cbf08e531458ef2"
+  },
+  "limits": "Focused source/native/component and synthetic HTTP PTY only; no fullCI/production/release/TerminalBench",
+  "ruff_exit": 0,
+  "pyright": {
+    "errors": 1,
+    "new_errors": 0,
+    "baseline": "existing Browser fixture reportIndexIssue; Machine0"
+  }
+}

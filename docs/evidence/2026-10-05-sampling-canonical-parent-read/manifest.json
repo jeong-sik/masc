@@ -1,0 +1,23 @@
+{
+  "base": "d3e765062a3f2621b3f4a5f0f2dddb61ac1c26be",
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_store.ml": "2cbd628b413101b787edc5abaa4fe8055b879ac59db9f4af97ac84b63d9afefb",
+    "lib/lane_addon/lane_addon_store.mli": "aadf563b050ff3890c2989ca9464f9ec9b67c15a2b517c098006f75c28f40f7a",
+    "test/test_lane_addon_worker.ml": "3d8d5cba46475cfc2436fbb2f0662f85571f3d067ef548462d0038dfe35672d5",
+    "changelog.d/40960.md": "88b189403c3f864781f71732db2b7794260faa8f8c6550e07ff8b4d3d564b8d1"
+  },
+  "files": {
+    "final-red-0.log": "7e438a3b445c67f5761aa8c9adcea552ca2fd90dcff21fcc33cc05e73d50a0eb",
+    "final-red-1.log": "157901a261502d4e9f09deb39870ccba2b047c3200dfa6834c42d97d1d78c567",
+    "final-red-2.log": "c10ceb849ca50fb7e411af6de2d22838904f85d16f85db7d55c510a0b1b11cea",
+    "final-red-3.log": "784231b466733e800ec72a6a13c8e8c88d9948e73694e63b3dff1d0719d1af06",
+    "final-red-4.log": "ca4debac37b62d77542f309369774af3369404427dc1d1ccf2af92185b13854d",
+    "final-red-5.log": "46837ca911db4f86feefebac8bc9c94a36f3456f8b1ead618531287dd89d0925",
+    "final-red.json": "57c3dc2f86249b6746240c400d483ad4e4ce728c622e88630c22dbd7be7eab3d",
+    "green.log": "8ab6109aaf2a3bd42a4c76391963c093e5f8a56be5cfa87e96dea67ffa6531ec",
+    "green.json": "35493ec3ad06a3b4cc9e82c237720091cdbf50ac1bba823bdc67eda06f3a481c",
+    "red-build.log": "24f96c553ecc4675b4491ec2bee93429d190583517d1919d1f0c694956b89a2e",
+    "green-build.log": "24f96c553ecc4675b4491ec2bee93429d190583517d1919d1f0c694956b89a2e"
+  },
+  "limits": "Focused local worker suite only; not hosted CI, all upstack consumers, or release qualification."
+}

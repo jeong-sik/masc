@@ -355,19 +355,7 @@ let announce_deferral ~goal_id ~request_id ~disposition deferral =
 
 (* Capture the Goal and its durable request under the Goal lock. The callback
    performs no writes; the model runs only after this lock is released. *)
-let bind_review config ~goal_id =
-  Result.map_error Goal_store.write_error_to_string @@
-  Goal_store.transact_goal config ~goal_id (fun goal ->
-    match goal.Goal_store.phase with
-    | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped ->
-      Error "goal is not awaiting verification"
-    | Goal_phase.Verifying ->
-      Result.bind (Goal_verification.get_record_authoritative config ~goal_id)
-        (function
-          | Some { Goal_verification.completion = Goal_verification.Proof_pending pending; submitted_evidence; _ }
-            when Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
-            Ok (goal, (pending.request_id, pending.criterion, submitted_evidence))
-          | Some _ | None -> Error "goal has no pending proof for its current criterion"))
+let bind_review = Goal_verification.bind_review
 ;;
 
 let process_pending_work_inner

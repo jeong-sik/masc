@@ -1285,13 +1285,44 @@ let test_judge_recommend () =
 
 let test_judge_insufficient () =
   let s =
-    {|{ "resolved_answer": "r", "decision": { "kind": "insufficient", "missing": ["data","time"] } }|}
+    {|{ "resolved_answer": "", "decision": { "kind": "insufficient", "missing": ["data","time"] } }|}
   in
   match Fusion_judge_parse.of_string s with
   | Ok js ->
     Alcotest.check jdecision "insufficient"
       (Insufficient { missing_for_decision = [ "data"; "time" ] }) js.decision
   | Error _ -> Alcotest.fail "expected Ok"
+
+let test_judge_rejects_blank_conclusions () =
+  List.iter
+    (fun blank ->
+      let answer text = `Assoc [ "kind", `String "answer"; "answer", `String text ] in
+      let recommend action rationale =
+        `Assoc [ "kind", `String "recommend"; "action", `String action
+               ; "rationale", `String rationale ] in
+      List.iter
+        (fun (resolved, decision, field) ->
+          let json = `Assoc [ "resolved_answer", `String resolved; "decision", decision ] in
+          match Fusion_judge_parse.of_string (Yojson.Safe.to_string json) with
+          | Error detail -> Alcotest.(check string) "blank field is diagnosed"
+              ("judge." ^ field ^ ": expected nonblank string") detail
+          | Ok _ -> Alcotest.fail (field ^ " accepted a blank conclusion"))
+        [ blank, answer "supported", "resolved_answer"
+        ; "supported", answer blank, "decision.answer"
+        ; blank, recommend "act" "evidence", "resolved_answer"
+        ; "supported", recommend blank "evidence", "decision.action"
+        ; "supported", recommend "act" blank, "decision.rationale"
+        ])
+    [ ""; " \t\n\r\012"; "\u{00a0}"; "\u{0085}"; "\u{3000}"
+    ; "\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}"
+    ];
+  let answer = "\u{00a0}근거를 보존합니다. Evidence.\u{3000}\n" in
+  let json = `Assoc [ "resolved_answer", `String answer
+    ; "decision", `Assoc [ "kind", `String "answer"; "answer", `String answer ] ] in
+  match Fusion_judge_parse.of_string (Yojson.Safe.to_string json) with
+  | Ok synthesis -> Alcotest.(check string) "meaningful content is preserved"
+      answer synthesis.resolved_answer
+  | Error detail -> Alcotest.fail detail
 
 let test_judge_unknown_kind () =
   match
@@ -1325,10 +1356,9 @@ let test_judge_decision_schema_branches () =
   let open Yojson.Safe.Util in
   let branches =
     Fusion_judge_parse.output_schema
-    |> member "properties"
-    |> member "decision"
     |> member "oneOf"
     |> to_list
+    |> List.map (fun branch -> branch |> member "properties" |> member "decision")
   in
   let actual =
     List.map
@@ -2049,6 +2079,8 @@ let () =
       , [ Alcotest.test_case "valid" `Quick test_judge_valid
         ; Alcotest.test_case "recommend" `Quick test_judge_recommend
         ; Alcotest.test_case "insufficient" `Quick test_judge_insufficient
+        ; Alcotest.test_case "blank conclusions are rejected" `Quick
+            test_judge_rejects_blank_conclusions
         ; Alcotest.test_case "unknown_kind" `Quick test_judge_unknown_kind
         ; Alcotest.test_case "missing_resolved" `Quick test_judge_missing_resolved
         ; Alcotest.test_case "missing_decision" `Quick test_judge_missing_decision

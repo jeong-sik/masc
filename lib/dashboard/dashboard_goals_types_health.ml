@@ -25,35 +25,19 @@ let keeper_name_matches_meta metas name =
 let keeper_name_of_assignee metas assignee =
   if keeper_name_matches_meta metas assignee then Some assignee else None
 
-let goal_fsm_state_kind = function
-  | Goal_phase.Executing -> "executing"
-  | Goal_phase.Verifying -> "verifying"
-  | Goal_phase.Awaiting_confirmation -> "awaiting_confirmation"
-  | Goal_phase.Completed -> "completed"
-  | Goal_phase.Dropped -> "dropped"
+let goal_fsm_state_kind = Goal_phase.to_string
 
 let goal_fsm_next_actions ~goal_phase =
-  [
-    Goal_phase.Request_complete;
-    Goal_phase.Drop;
-    Goal_phase.Reopen;
-    (* RFC-0387 stage 2: the verifier's proof commits move a goal only out
-       of [Verifying]; on every other phase they are invalid and the filter
-       below drops them. Criterion verdicts are phase-neutral ([Already]), so
-       they never read as a next step. *)
-    Goal_phase.Record_proof_proven;
-    Goal_phase.Record_proof_refuted;
-  ]
-  (* Next actions are the ones that move the goal. [Already] is accepted by
-     the tool but changes nothing, and listing "pause" under a paused goal
-     reads as a step that is still to come. *)
-  |> List.filter (fun action -> Goal_phase.moves_goal ~phase:goal_phase ~action)
-  |> List.map Goal_phase.action_to_string
+  Goal_phase.Public_action.all
+  |> List.filter (fun action -> Goal_phase.moves_goal ~phase:goal_phase
+         ~action:(Goal_phase.Public_action.to_action action))
+  |> List.map Goal_phase.Public_action.to_string
 
 let goal_fsm_to_json (goal : Goal_store.goal) (node : tree_node) =
   `Assoc
     [
-      ("state", Goal_phase.to_yojson goal.phase);
+      ("state", `String (Goal_phase.to_string goal.phase));
+      ("resume_phase", Goal_phase.resume_phase_to_yojson goal.phase);
       ("source", `String "goal.phase");
       ("state_kind", `String (goal_fsm_state_kind goal.phase));
       ( "next_actions",

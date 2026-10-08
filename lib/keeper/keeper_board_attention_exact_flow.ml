@@ -192,7 +192,9 @@ let prepare ~base_path ~keeper_name ~net candidate =
           Exact_output.snapshot_flow ~first ~rest ~messages requirement
           |> Result.map_error (fun _ -> Flow_snapshot_failed)
         in
-        Exact_output.start_flow snapshot
+        Exact_output.start_flow
+          ~admission_class:(Standalone_lane.admission_class Board_attention)
+          snapshot
         |> Result.map (fun attempt -> Http_flow (attempt, resolved))
         |> Result.map_error (fun _ -> Flow_start_failed)
     in
@@ -570,7 +572,8 @@ let ask_jev ~clock prepared =
       ( Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination
       | Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Board_attention_disabled
       | Typesafeai_config.Context_review_disabled | Typesafeai_config.Skill_applicability_disabled
-      | Typesafeai_config.Librarian_preflight_disabled ) ->
+      | Typesafeai_config.Librarian_preflight_disabled
+      | Typesafeai_config.Workspace_memory_selection_disabled ) ->
     Jev_off
   | Ok destinations ->
     (

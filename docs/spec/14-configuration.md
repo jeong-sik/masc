@@ -6,6 +6,11 @@ status: reference
 
 > Part of: [SPEC-INDEX](./SPEC-INDEX.md)
 
+For Dashboard editing, draft retention, revision conflicts and workspace changes,
+see [runtime.toml drafts](../guides/runtime-toml-drafts.md).
+For configuration-preserving Exact Lane activity and its Required/Optional
+boundary, see [Exact Lane activity](../guides/exact-lane-activity.md).
+
 ## 1. SSOT and path boundary
 
 Configuration is loaded from the selected `BasePath` and decoded into a typed,
@@ -150,11 +155,7 @@ sign-in with that selected `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HOME`.
 
 Muse model discovery labels provider, bundled and configured catalog metadata;
 it does not prove account access or a successful invocation. Fake, unresolved
-and unknown catalog sources cannot admit a new setup connection. A selected Muse
-model needs a reported context large enough to hold the host's own overhead
-(75% of it above 11,946 tokens, so at least 15,930); MASC derives its
-start-prompt ceiling from that context (see the template below), so setup asks
-for no byte count.
+and unknown catalog sources cannot admit a new setup connection.
 Saving a connection then requires the separate response and MCP tool challenge.
 
 
@@ -225,12 +226,7 @@ preparation can outlast it if the selected account filesystem stalls.
 This template belongs in the selected base path's `.masc/config/runtime.toml`.
 Replace both uppercase placeholders with the selected vendor model's actual ID
 and documented context window before loading it.
-The Muse host rewrites an input larger than its window instead of refusing it,
-so MASC bounds the prompt it seeds a new session with at
-`4 × (⌊75% of max-context⌋ − 11,946)` bytes, from Muse Code 1.4.0's measured
-behaviour (its token estimate is UTF-8 bytes / 4, its own overhead is 11,946
-estimated tokens, and it compacts at 75% of the window). A Muse model
-whose window leaves no room above the host's overhead is refused at load. No runtime is assigned merely by adding a provider and binding.
+No runtime is assigned merely by adding a provider and binding.
 
 ```toml
 [providers.muse_personal]

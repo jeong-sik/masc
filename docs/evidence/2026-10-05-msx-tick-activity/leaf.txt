@@ -1,0 +1,34 @@
+$ /Users/dancer/.opam/5.5.1/bin/ocamlc -version
+5.5.1
+
+$ /Users/dancer/.opam/5.5.1/bin/ocamlfind ocamlc -thread -package yojson,base64,eio,alcotest -c masc_tui_types.ml
+
+
+$ /Users/dancer/.opam/5.5.1/bin/ocamlfind ocamlc -thread -package yojson,base64,eio,alcotest -c masc_tui_machine_live.ml
+
+
+$ /Users/dancer/.opam/5.5.1/bin/ocamlfind ocamlc -thread -package yojson,base64,eio,alcotest -c masc_tui_msx_tick.mli
+
+
+$ /Users/dancer/.opam/5.5.1/bin/ocamlfind ocamlc -thread -package yojson,base64,eio,alcotest -c masc_tui_msx_tick.ml
+
+
+$ /Users/dancer/.opam/5.5.1/bin/ocamlfind ocamlc -thread -package yojson,base64,eio,alcotest -c test_tui_msx_tick.ml
+
+
+$ /Users/dancer/.opam/5.5.1/bin/ocamlfind ocamlc -thread -package yojson,base64,eio,alcotest -linkpkg masc_tui_types.cmo masc_tui_machine_live.cmo masc_tui_msx_tick.cmo test_tui_msx_tick.cmo -o test.exe
+
+
+$ /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-msx-tick-551-ahp8t0sf/test.exe --color=never
+Testing `retained MSX tick'.
+This run has ID `U9CYDZWR'.
+
+  [OK]          response protocol          0   typed activity refusal preserv...
+  [OK]          response protocol          1   malformed activity cannot auth...
+  [OK]          response protocol          2   fresh metadata with retained a...
+  [OK]          response protocol          3   malformed or failed responses ...
+  [OK]          response protocol          4   server and credential scope.
+  [OK]          response protocol          5   late responses cannot republis...
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-msx-tick-551-ahp8t0sf/_build/_tests/retained MSX tick'.
+Test Successful in 0.010s. 6 tests run.

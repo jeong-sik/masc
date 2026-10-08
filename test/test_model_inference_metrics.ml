@@ -1086,6 +1086,7 @@ let test_an_attempt_reading_beside_the_turn_is_not_a_conflict () =
       | `Assoc fields ->
         `Assoc
           (("usage_projection", `String "resolved_attempt_delta")
+           :: ("routing_run_id", `String "run-of-the-failed-attempt")
            :: ("lane_attempt_index", `Int 0)
            :: ("reading_index", `Int 0)
            :: List.remove_assoc "usage_projection" fields)
@@ -1813,7 +1814,9 @@ let test_runtime_history_invalid_decision_rows () =
     let schema_invalid = `Assoc ["ts_unix", `Float now; "telemetry", `Assoc []] in
     let ignored = [`Assoc ["ts_unix", `Float (now -. 172800.); "telemetry", `Assoc []];
       `Assoc ["ts_unix", `Float now; "event", `String "keeper_started"]] in
-    let open Yojson.Safe.Util in
+    let member = Yojson.Safe.Util.member
+    and to_string = Yojson.Safe.Util.to_string
+    and to_int = Yojson.Safe.Util.to_int in
     let read () = M.compute_runtime_metrics_json ~base_path:base ~window_minutes:1440 in
     write_decisions path (valid :: ignored);
     check string "outside-window and valid non-inference rows do not degrade history"
@@ -1904,7 +1907,10 @@ let test_metrics_cache_retains_last_good () =
           ~cache ~key:"test" ~placeholder:(`Assoc ["state", `String "loading"])
           ~compute:(fun () -> M.compute ~base_path:base ~window_minutes:60
             |> Result.map M.to_json |> Result.map_error M.read_error_to_string)) in
-      let open Yojson.Safe.Util in
+      let member = Yojson.Safe.Util.member
+      and to_int = Yojson.Safe.Util.to_int
+      and to_string = Yojson.Safe.Util.to_string in
+      (* `open` would shadow the local `path` binding with Yojson.Safe.Util.path. *)
       let first = read () in
       check int "complete initial cache" 1 (first |> member "total_entries" |> to_int);
       let broken = make_keeper_dir base "unreadable" in

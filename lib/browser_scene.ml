@@ -245,9 +245,10 @@ let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (r
   let unobserved result = Result.map_error (fun detail -> Browser_surface.Unobserved detail) result in
   let* tab_id = match request.tab_id with
     | Some id -> Ok id | None -> Error (Browser_surface.Unobserved "scene requires tabId") in
-  let* target = Browser_lane.resolve_target request.route
+  let verb = Browser_lane.Page_scene {tab_id;max_chars;view;scope} in
+  let* target = Browser_lane.resolve_target ~verb request.route
     |> Result.map_error (fun error -> Browser_surface.Unselected error) in
-  let* answer = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_scene {tab_id;max_chars;view;scope})
+  let* answer = Browser_lane.issue_for ~target ~verb
     ~timeout_sec:20. |> Result.map_error (fun error -> Browser_surface.Unselected error) in
   unobserved @@
   let* json = Browser_surface.decode_answer ~lane:(Browser_lane.target_lane target) answer in
@@ -273,9 +274,9 @@ let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (r
        Remove every supplied occurrence before attaching the authoritative
        values so first-key and last-key consumers see the same observation. *)
     let fields = List.filter (fun (key, _) ->
-      not (List.mem key ["source"; "clientId"; "elapsed_ms"])) fields in
-    Ok (`Assoc (fields @ ["source",`String (Browser_surface.source_name request.route);
-      "clientId",Browser_surface.client_id_json target;"elapsed_ms",`Float elapsed_ms]))
+      not (List.mem key ("source" :: "elapsed_ms" :: Browser_lane.connection_field_names))) fields in
+    Ok (`Assoc (fields @ ["source",`String (Browser_surface.source_name request.route)]
+      @ Browser_lane.target_connection_fields target @ ["elapsed_ms",`Float elapsed_ms]))
   | _ -> Error "scene must be an object"
 
 

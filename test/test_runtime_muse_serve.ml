@@ -256,7 +256,7 @@ let test_turn_with_tool_and_approval () =
        match result with
        | Error error -> fail (Serve.error_to_string error)
        | Ok turn ->
-         check string "reply" "MASC_MUSE_OK" turn.text;
+         check (option string) "reply" (Some "MASC_MUSE_OK") turn.text;
          check string "streamed" "MASC_MUSE_OK" (Buffer.contents deltas);
          check (option string) "session ready" (Some "s-1") !session_ready;
          check int "tool calls" 1 turn.tool_calls;
@@ -316,7 +316,7 @@ let test_compaction_reaches_the_stream () =
        match result, !observed with
        | Error error, _ -> fail (Serve.error_to_string error)
        | Ok turn, [ compaction ] ->
-         check string "the turn still completes" "MASC_MUSE_OK" turn.text;
+         check (option string) "the turn still completes" (Some "MASC_MUSE_OK") turn.text;
          check bool "automatic compaction" true
            (compaction.Msp.trigger = Some Msp.Compaction_auto
             && compaction.Msp.outcome = Some Msp.Compaction_compacted);
@@ -431,7 +431,7 @@ let test_selected_homes_do_not_inherit_other_account_roots () =
                 @ [ Write agent_completed; Write turn_completed ])
                (fun result _ ->
                   match result with
-                  | Ok turn -> check string "selected account turn completed" "MASC_MUSE_OK" turn.text
+                  | Ok turn -> check (option string) "selected account turn completed" (Some "MASC_MUSE_OK") turn.text
                   | Error error -> fail (Serve.error_to_string error))))
         [ Runtime_native_tools.Native_read, true
         ; Runtime_native_tools.Native_full, false
@@ -473,7 +473,7 @@ let test_prepared_home_is_bound_to_exact_selected_account () =
         (Expect_launch {home; native_read=true} :: handshake_and_session ~granted:[]
          @ [Write agent_completed; Write turn_completed])
         (fun result _ -> match result with
-         | Ok turn -> check string "matching account completes" "MASC_MUSE_OK" turn.text
+         | Ok turn -> check (option string) "matching account completes" (Some "MASC_MUSE_OK") turn.text
          | Error error -> fail (Serve.error_to_string error)))
       [home_a, prepared; alias_a, prepared_alias];
     Unix.unlink alias_a;
@@ -486,7 +486,7 @@ let test_prepared_home_is_bound_to_exact_selected_account () =
       (Expect_launch {home=home_a; native_read=true} :: handshake_and_session ~granted:[]
        @ [Write agent_completed; Write turn_completed])
       (fun result _ -> match result with
-       | Ok turn -> check string "retarget cannot split child roots from auth" "MASC_MUSE_OK" turn.text
+       | Ok turn -> check (option string) "retarget cannot split child roots from auth" (Some "MASC_MUSE_OK") turn.text
        | Error error -> fail (Serve.error_to_string error)))
 ;;
 
@@ -561,7 +561,7 @@ let test_session_identity_is_verified_before_admission () =
        @ resume_steps @ [Read; Write (with_id turn_id turn_ack); Write turn_started;
                           Write agent_completed; Write turn_completed])
       (fun result requests ->
-        (match result with Ok turn -> check string "matching session completes" "MASC_MUSE_OK" turn.text
+        (match result with Ok turn -> check (option string) "matching session completes" (Some "MASC_MUSE_OK") turn.text
          | Error error -> fail (Serve.error_to_string error));
         check int "matching identity persists once" 1 !ready;
         check bool "only a resume selects the model"
@@ -625,7 +625,7 @@ let test_resumed_session_model_is_selected_before_admission () =
       (fun result requests ~ready ~sent:_ ->
         (match result with
          | Ok turn ->
-           check string "re-selected session completes" "MASC_MUSE_OK" turn.text;
+           check (option string) "re-selected session completes" (Some "MASC_MUSE_OK") turn.text;
            check (option string) "the turn names the selected model" (Some requested) turn.model
          | Error error -> fail (Serve.error_to_string error));
         check int "re-selected session persists once" 1 ready;
@@ -791,6 +791,59 @@ let test_view_gap_does_not_fabricate_a_turn_total () =
     ; "another-turn", false, true; "another-turn", true, true ]
 ;;
 
+(* The turn keeps its newest call's own counts: that request's counted-once
+   prompt is the context it carried. Another session's frame is not the
+   turn's, and a view gap after the newest call may hide a later one. *)
+let test_turn_keeps_its_newest_call_usage () =
+  let frame ?(session = "s-1") ~cursor ~prompt ~output () = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "method", `String "session/tokenUsage";
+        "params", `Assoc
+          [ "sessionId", `String session; "turnId", `String "t-1"
+          ; "viewCursor", `String cursor; "promptTokens", `Int prompt
+          ; "totalTokens", `Int (prompt + output)
+          ; "usage", `Assoc
+              [ "inputTokens", `Int prompt; "outputTokens", `Int output
+              ; "cachedTokens", `Int 0; "reasoningTokens", `Int 0 ] ] ]) in
+  let gap = Yojson.Safe.to_string (`Assoc
+    [ "jsonrpc", `String "2.0"; "method", `String "view/gap"
+    ; "params", `Assoc ["after", `String "v:5"; "next", `String "v:9";
+                        "sessionId", `String "s-1"] ]) in
+  List.iter (fun (name, frames, expected) ->
+    run_scripted
+      (handshake_and_session ~granted:[] @ List.map (fun frame -> Write frame) frames
+       @ [Write agent_completed; Write turn_completed])
+      (fun result _ ->
+        match result with
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok turn ->
+          check (option (pair int int)) name expected
+            (Option.map (fun (usage : Msp.token_usage) ->
+               Option.value usage.prompt_tokens ~default:(-1), usage.output_tokens)
+               turn.last_call_usage)))
+    [ "no call reported", [], None
+    ; "the newest of two calls",
+      [ frame ~cursor:"v:5" ~prompt:150 ~output:7 ()
+      ; frame ~cursor:"v:8" ~prompt:400 ~output:9 () ],
+      Some (400, 9)
+    ; "another session's later frame is not the turn's",
+      [ frame ~cursor:"v:5" ~prompt:150 ~output:7 ()
+      ; frame ~session:"s-2" ~cursor:"v:6" ~prompt:999 ~output:1 () ],
+      Some (150, 7)
+    ; "a repeated cursor does not replace the newest call",
+      [ frame ~cursor:"v:5" ~prompt:150 ~output:7 ()
+      ; frame ~cursor:"v:8" ~prompt:400 ~output:9 ()
+      ; frame ~cursor:"v:5" ~prompt:150 ~output:7 () ],
+      Some (400, 9)
+    ; "a gap after the newest call hides it",
+      [ frame ~cursor:"v:5" ~prompt:150 ~output:7 (); gap ],
+      None
+    ; "a call after the gap is the newest",
+      [ frame ~cursor:"v:5" ~prompt:150 ~output:7 (); gap
+      ; frame ~cursor:"v:9" ~prompt:500 ~output:11 () ],
+      Some (500, 11)
+    ]
+;;
+
 let test_turn_lists_the_models_its_calls_ran_on () =
   let token_usage ?(session_id = "s-1") ?(cursor = "v:5") model = Yojson.Safe.to_string
       (`Assoc ["jsonrpc", `String "2.0"; "method", `String "session/tokenUsage";
@@ -903,7 +956,7 @@ let test_session_approval_mode_is_verified_before_admission () =
           Write turn_started; Write agent_completed; Write turn_completed])
         (fun result requests ->
           (match result with
-           | Ok turn -> check string "verified mode completes" "MASC_MUSE_OK" turn.text
+           | Ok turn -> check (option string) "verified mode completes" (Some "MASC_MUSE_OK") turn.text
            | Error error -> fail (Serve.error_to_string error));
           check int "verified mode persists once" 1 !ready;
           check int "verified mode dispatches once" 1 !sent;
@@ -1039,7 +1092,7 @@ let test_absent_durability_admits_the_v1_durable_host () =
      @ [ Write agent_completed; Write turn_completed ])
     (fun result _ ->
        match result with
-       | Ok turn -> check string "v1 durable turn completed" "MASC_MUSE_OK" turn.text
+       | Ok turn -> check (option string) "v1 durable turn completed" (Some "MASC_MUSE_OK") turn.text
        | Error error -> fail (Serve.error_to_string error))
 ;;
 
@@ -1063,6 +1116,7 @@ let () =
             test_turn_lists_the_models_its_calls_ran_on
         ; test_case "call usage counted once in its turn" `Quick test_call_usage_is_counted_once_in_its_turn
         ; test_case "view gap does not fabricate a turn total" `Quick test_view_gap_does_not_fabricate_a_turn_total
+        ; test_case "turn keeps its newest call usage" `Quick test_turn_keeps_its_newest_call_usage
         ; test_case "effective approval mode is verified before admission" `Quick test_session_approval_mode_is_verified_before_admission
         ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused

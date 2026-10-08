@@ -24,6 +24,7 @@ const validLane = {
 function responseWith(runtime: Record<string, unknown>) {
   return {
     config_path: '/workspace/.masc/config/runtime.toml',
+    default_route: 'rt-a',
     default_runtime: runtime,
     runtimes: [runtime],
     lanes: [],
@@ -46,8 +47,14 @@ describe('runtime-resolved schema', () => {
   })
 
   it('accepts a complete resolved max-context contract', () => {
-    expect(parseRuntimeResolvedResponse(responseWith(validRuntime)).default_runtime)
-      .toMatchObject(validRuntime)
+    const parsed = parseRuntimeResolvedResponse(responseWith(validRuntime))
+    expect(parsed.default_runtime).toMatchObject(validRuntime)
+    expect(parsed.default_route).toBe('rt-a')
+  })
+
+  it('requires the configured route separately from the entry runtime', () => {
+    const { default_route: _route, ...missingRoute } = responseWith(validRuntime)
+    expect(() => parseRuntimeResolvedResponse(missingRoute)).toThrow(RuntimeResolvedSchemaDriftError)
   })
 
   it('rejects an unresolved max-context instead of accepting null fallback data', () => {

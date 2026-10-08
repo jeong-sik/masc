@@ -45,10 +45,14 @@ let with_workspace f =
   Unix.mkdir root 0o755;
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* The server projects fleet messages with the guard enabled; with it off,
+     guarded store mutexes are skipped and a wrong-context call passes. *)
+  Eio_guard.enable ();
   let config = Workspace.default_config root in
   ignore (Workspace.init config ~agent_name:None);
   Fun.protect
     ~finally:(fun () ->
+      Eio_guard.disable ();
       ignore (Workspace.reset config);
       Unix.rmdir root)
     (fun () -> f config)

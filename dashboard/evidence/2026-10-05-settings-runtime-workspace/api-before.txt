@@ -1,0 +1,123 @@
+RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-settings-runtime-workspace-20261005/dashboard
+
+ ❯ src/api/dashboard-runtime-routing-lifetime.test.ts (12 tests | 6 failed) 12ms
+   ❯ media failover (4)
+     × does not dispatch if authority changes during token preparation: unknown workspace 4ms
+     × does not dispatch if authority changes during token preparation: A-B-A connection replacement 1ms
+     × checks current authority after token preparation and before sending the unchanged wire request 0ms
+   ❯ candidate lane (4)
+     × does not dispatch if authority changes during token preparation: unknown workspace 1ms
+     × does not dispatch if authority changes during token preparation: A-B-A connection replacement 1ms
+     × checks current authority after token preparation and before sending the unchanged wire request 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/api/dashboard-runtime-routing-lifetime.test.ts > media failover > does not dispatch if authority changes during token preparation: unknown workspace
+ FAIL  src/api/dashboard-runtime-routing-lifetime.test.ts > media failover > does not dispatch if authority changes during token preparation: A-B-A connection replacement
+ FAIL  src/api/dashboard-runtime-routing-lifetime.test.ts > candidate lane > does not dispatch if authority changes during token preparation: unknown workspace
+ FAIL  src/api/dashboard-runtime-routing-lifetime.test.ts > candidate lane > does not dispatch if authority changes during token preparation: A-B-A connection replacement
+AssertionError: promise resolved "{ ok: true, …(15) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "application": {
++     "exact_output_registry": {
++       "requires_restart": false,
++       "status": "applied",
++       "targets": "runtime_bindings",
++     },
++     "keeper_overlay": {
++       "applied_at": null,
++       "applied_keys": [],
++       "configured_count": 0,
++       "pending_keys": [],
++       "preempted_keys": [],
++       "requires_restart": false,
++       "status": "not_configured",
++     },
++     "operation": "test_write",
++     "routing": {
++       "applied_at": null,
++       "requires_restart": false,
++       "status": "applied",
++     },
++     "skills": {
++       "catalog_revision": "catalog",
++       "config_state": "configured",
++       "input_source_revision": "6920d7965efb427938a2fa9861cc3c0d4bb9bb0235286223c6c2cd6cad2c22d1",
++       "snapshot_revision": "snapshot",
++       "state": "unchanged",
++     },
++   },
++   "commit": {
++     "durability": "durable",
++     "order": "7",
++     "source_revision": "6920d7965efb427938a2fa9861cc3c0d4bb9bb0235286223c6c2cd6cad2c22d1",
++     "warnings": [],
++   },
++   "file_name": "runtime.toml",
++   "issues": undefined,
++   "keeper_setting_schema": undefined,
++   "keeper_settings": undefined,
++   "message": null,
++   "ok": true,
++   "path": "/fixture/runtime.toml",
++   "provider_protocols": [
++     {
++       "credential_policy": "optional",
++       "protocol": "openai-compatible-http",
++       "provider_fields": [],
++       "required_provider_fields": [],
++       "requires_non_interactive": false,
++       "semantics": "http_provider",
++       "transport": "endpoint",
++     },
++   ],
++   "reason": null,
++   "reserved_provider_ids": [
++     "providers",
++     "models",
++     "runtime",
++     "voice",
++     "board",
++     "turn",
++   ],
++   "source_revision": "6920d7965efb427938a2fa9861cc3c0d4bb9bb0235286223c6c2cd6cad2c22d1",
++   "source_text": "# routing receipt fixture
++ ",
++   "state": "committed",
++   "validation": undefined,
+  }
+
+ ❯ src/api/dashboard-runtime-routing-lifetime.test.ts:60:40
+     58|         const beforeDispatch = vi.fn(() => { if (current !== admitted)…
+     59|         const pending = request.invoke({ beforeDispatch })
+     60|         const rejected = expect(pending).rejects.toBe(withdrawn)
+       |                                        ^
+     61|         expect(beforeDispatch).not.toHaveBeenCalled()
+     62|         expect(fetchMock).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/api/dashboard-runtime-routing-lifetime.test.ts > media failover > checks current authority after token preparation and before sending the unchanged wire request
+ FAIL  src/api/dashboard-runtime-routing-lifetime.test.ts > candidate lane > checks current authority after token preparation and before sending the unchanged wire request
+AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+ ❯ src/api/dashboard-runtime-routing-lifetime.test.ts:79:30
+     77|       release()
+     78|       await expect(pending).resolves.toMatchObject({ state: 'committed…
+     79|       expect(beforeDispatch).toHaveBeenCalledTimes(1)
+       |                              ^
+     80|       expect(fetchMock).toHaveBeenCalledTimes(1)
+     81|       const [path, init] = fetchMock.mock.calls[0]!
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 6 passed (12)
+   Start at  01:02:41
+   Duration  572ms (environment 37%, setup 33%, transform 21%, import 5%, tests 3%, worker 1%)

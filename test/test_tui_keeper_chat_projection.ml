@@ -354,6 +354,34 @@ let test_terminal_replay_states () =
     ; "Cancelled", (function Chat.Replayed_cancelled -> true | _ -> false)
     ]
 
+let test_operation_record_names_only_a_replayed_ending () =
+  let record_name = function
+    | None -> "none"
+    | Some Chat.Operation_succeeded -> "succeeded"
+    | Some Chat.Operation_failed -> "failed"
+    | Some Chat.Operation_cancelled -> "cancelled"
+  in
+  let record_of events =
+    Chat.operation_record_of_result
+      (Result.map_error (fun error -> Chat.protocol_error error) (decode events))
+  in
+  List.iter
+    (fun (state, expected) ->
+       check string (state ^ " replay is the server's operation record") expected
+         (record_name (record_of [ acceptance ~state () ])))
+    [ "Succeeded", "succeeded"; "Failed", "failed"; "Cancelled", "cancelled" ];
+  check string "a stream that delivered its ending names no record" "none"
+    (record_name
+       (record_of
+          [ acceptance (); run_started; text_start; reply_details (); text_end
+          ; run_finished ]));
+  check string "a stream cut while the operation runs proves nothing" "none"
+    (record_name (record_of [ acceptance (); run_started ]));
+  check string "a transport failure proves nothing about the operation" "none"
+    (record_name
+       (Chat.operation_record_of_result
+          (Error (Chat.Transport_error "connection reset"))))
+
 let test_terminal_replay_flushes_buffered_completion () =
   match
     decode
@@ -1049,6 +1077,9 @@ let test_reconciliation_failure_detail () =
         (has "masc login" detail);
       check bool (label ^ " says the operation survives") true
         (has "untouched on the server" detail);
+      (* Ctrl-R now cycles reasoning; no key settles a request. *)
+      check bool (label ^ " does not send the operator to a key that settles nothing") false
+        (has "Ctrl-R" detail);
       check bool (label ^ " does not paste the server body") false
         (has "auth_error_code" detail))
     [ ("absent", absent); ("rejected", rejected) ];
@@ -1078,74 +1109,6 @@ let test_reconciliation_failure_detail () =
       check bool "every other failure does not blame the credential" false
         (has "masc login" detail))
     [ true; false ]
-
-let operation_json state fields =
-  let input =
-    Masc.Keeper_chat_operation_payload.input_to_json
-      ~message:request.message
-      ~user_blocks:[]
-      ~turn_instructions:None
-      ~surface_context:None
-      ~attachments:[]
-  in
-  let execution_digest =
-    match Keeper_chat_operation.execution_digest input with
-    | Ok digest -> digest
-    | Error detail -> fail detail
-  in
-  let admission_digest = match Keeper_chat_operation.admission_digest ~source:(`Assoc []) ~input with
-    | Ok digest -> digest | Error detail -> fail detail in
-  `Assoc
-    ([ "schema", `String "masc.keeper_chat_operation.v1"
-     ; "operation_id", `String request.request_id
-     ; "sequence", `String "7"
-     ; "created_at", `Float 1.0
-     ; "admission_digest", `String admission_digest
-     ; "execution_digest", `String execution_digest
-     ; "source", `Assoc []
-     ; "input", input
-     ; "state", `String state
-     ]
-     @ fields)
-
-let test_operation_reconciliation_projection () =
-  (match
-     Chat.decode_operation_reconciliation ~request
-       (operation_json "Running" [ "started_at", `Float 2.0 ])
-   with
-   | Ok (Chat.Operation_pending Chat.Running) -> ()
-   | Ok _ -> fail "running operation projected to the wrong state"
-   | Error error -> fail (Chat.stream_error_to_string error));
-  (match
-     Chat.decode_operation_reconciliation ~request
-       (operation_json "Succeeded"
-          [ "completed_at", `Float 3.0; "outcome_ref", `String "turn#9" ])
-   with
-   | Ok (Chat.Operation_succeeded { outcome_ref = "turn#9" }) -> ()
-   | Ok _ -> fail "succeeded operation projected to the wrong state"
-   | Error error -> fail (Chat.stream_error_to_string error));
-  (match
-     Chat.decode_operation_reconciliation ~request
-       (operation_json "Failed"
-          [ "completed_at", `Float 3.0
-          ; "failure_kind", `String "Turn_exception"
-          ; "failure_detail", `String "provider failed"
-          ; "outcome_ref", `Null
-          ])
-   with
-   | Ok
-       (Chat.Operation_failed
-         { failure_kind = "Turn_exception"; detail = "provider failed"; _ }) ->
-       ()
-   | Ok _ -> fail "failed operation projected to the wrong state"
-   | Error error -> fail (Chat.stream_error_to_string error));
-  match
-    Chat.decode_operation_reconciliation ~request
-      (operation_json "Cancelled" [ "completed_at", `Float 3.0 ])
-  with
-  | Ok Chat.Operation_cancelled -> ()
-  | Ok _ -> fail "cancelled operation projected to the wrong state"
-  | Error error -> fail (Chat.stream_error_to_string error)
 
 let test_batch_preserves_original_user_history_once () =
   let module Store = Keeper_chat_operation_store in
@@ -1309,37 +1272,6 @@ let test_batch_member_events_pass_request_bound_stream_decode () =
   | Error error -> fail (Chat.stream_error_to_string error)
 ;;
 
-let test_batch_reconciliation_preserves_original_input_binding () =
-  let replace key value = function `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields) | _ -> fail "object" in
-  let original = operation_json "Running" ["started_at", `Float 2.] in
-  let original_digest = match original with `Assoc fields -> List.assoc "execution_digest" fields | _ -> fail "object" in
-  let combined = Masc.Keeper_chat_operation_payload.input_to_json ~message:"hello\n\nfollowup"
-    ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
-  let combined_digest = match Keeper_chat_operation.execution_digest combined with Ok value -> value | Error detail -> fail detail in
-  let batch = original |> replace "input" combined |> replace "execution_digest" (`String combined_digest)
-    |> replace "batch_execution_id" (`String request.request_id) |> replace "batch_input_digest" original_digest in
-  (match Chat.decode_operation_reconciliation ~request batch with
-   | Ok (Chat.Operation_pending Chat.Running) -> ()
-   | Ok _ -> fail "wrong batch state"
-   | Error error -> fail (Chat.stream_error_to_string error));
-  check bool "batch does not bypass original input identity" true
-    (Result.is_error (Chat.decode_operation_reconciliation ~request
-      (replace "admission_digest" (`String combined_digest) batch)));
-  check bool "batch still validates stored aggregate" true
-    (Result.is_error (Chat.decode_operation_reconciliation ~request
-      (replace "input" (`Assoc ["wrong", `String "input"]) batch)))
-;;
-
-let test_operation_reconciliation_uses_server_canonical_message () =
-  let request_with_whitespace = { request with message = "  hello \n" } in
-  match
-    Chat.decode_operation_reconciliation ~request:request_with_whitespace
-      (operation_json "Running" [ "started_at", `Float 2.0 ])
-  with
-  | Ok (Chat.Operation_pending Chat.Running) -> ()
-  | Ok _ -> fail "canonical operation projected to the wrong state"
-  | Error error -> fail (Chat.stream_error_to_string error)
-
 let test_stale_completion_identity () =
   let current : Chat.request =
     { request_id = "tui-current"; keeper_name = "keeper.one"; message = "one"; attachments = []; references = [] }
@@ -1353,63 +1285,6 @@ let test_stale_completion_identity () =
     (Chat.same_request_identity current stale);
   check bool "wrong keeper rejected" false
     (Chat.same_request_identity current wrong_keeper)
-
-let test_edited_operation_reconnect_keeps_original_admission () =
-  let replace key value = function `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields) | _ -> fail "object" in
-  let original = operation_json "Running" ["started_at", `Float 2.] in
-  let edited_input = Masc.Keeper_chat_operation_payload.input_to_json ~message:"corrected instruction"
-    ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
-  let edited_digest = match Keeper_chat_operation.execution_digest edited_input with Ok digest -> digest | Error detail -> fail detail in
-  let edited = original |> replace "input" edited_input |> replace "execution_digest" (`String edited_digest) in
-  (match Chat.decode_operation_reconciliation ~request edited with
-   | Ok (Chat.Operation_pending Chat.Running) -> ()
-   | Ok _ -> fail "wrong edited operation state"
-   | Error error -> fail (Chat.stream_error_to_string error));
-  let altered_request = {request with message="corrected instruction"} in
-  check bool "reposting edited content cannot impersonate original admission" true
-    (Result.is_error (Chat.decode_operation_reconciliation ~request:altered_request edited))
-;;
-
-let test_operation_reconciliation_binds_original_input () =
-  let valid = operation_json "Running" [ "started_at", `Float 2.0 ] in
-  let replace name value = function
-    | `Assoc fields ->
-        `Assoc
-          (List.map
-             (fun (field, current) ->
-               if String.equal field name then field, value else field, current)
-             fields)
-    | _ -> fail "operation fixture must be an object"
-  in
-  let changed_input =
-    Masc.Keeper_chat_operation_payload.input_to_json
-      ~message:"different message"
-      ~user_blocks:[]
-      ~turn_instructions:None
-      ~surface_context:None
-      ~attachments:[]
-  in
-  (match
-     Chat.decode_operation_reconciliation ~request
-       (replace "input" changed_input valid)
-   with
-   | Error (Chat.Event_identity_mismatch { field = "input"; _ }) -> ()
-   | Error error -> fail (Chat.stream_error_to_string error)
-   | Ok _ -> fail "changed durable input matched the original request");
-  (match
-     Chat.decode_operation_reconciliation ~request
-       (replace "execution_digest" (`String "wrong-digest") valid)
-   with
-   | Error (Chat.Malformed_event _) -> ()
-   | Error error -> fail (Chat.stream_error_to_string error)
-   | Ok _ -> fail "wrong durable execution digest matched the original request");
-  match
-    Chat.decode_operation_reconciliation ~request (replace "input" `Null valid)
-  with
-  | Ok (Chat.Operation_pending Chat.Running) -> ()
-  | Error error -> fail (Chat.stream_error_to_string error)
-  | Ok _ -> fail "digest-bound redacted operation projected to the wrong state"
-
 
 (* A one-pixel PNG. The bytes matter: the media type is read from them, so a
    fixture that only looks like a PNG by filename would pass a test the real
@@ -1670,6 +1545,8 @@ let () =
         ; test_case "media-only visible reply" `Quick
             test_media_only_visible_reply
         ; test_case "terminal replay states" `Quick test_terminal_replay_states
+        ; test_case "operation record names only a replayed ending" `Quick
+            test_operation_record_names_only_a_replayed_ending
         ; test_case "terminal replay flushes buffered completion" `Quick
             test_terminal_replay_flushes_buffered_completion
         ; test_case "current wire only" `Quick test_current_wire_only
@@ -1707,22 +1584,12 @@ let () =
             test_unverified_retry_notice_names_the_cause
         ; test_case "reconciliation failure detail" `Quick
             test_reconciliation_failure_detail
-        ; test_case "operation reconciliation projection" `Quick
-            test_operation_reconciliation_projection
         ; test_case "batch accepted-user history preserves original identities" `Quick
             test_batch_preserves_original_user_history_once
         ; test_case "batch respects interleaved conversation order" `Quick
             test_batch_respects_interleaved_conversation_order
         ; test_case "batch member stream retains strict request identity" `Quick
             test_batch_member_events_pass_request_bound_stream_decode
-        ; test_case "batch reconciliation keeps original request binding" `Quick
-            test_batch_reconciliation_preserves_original_input_binding
-        ; test_case "operation reconciliation uses server-canonical message" `Quick
-            test_operation_reconciliation_uses_server_canonical_message
-        ; test_case "edited operation reconnect retains immutable admission" `Quick
-            test_edited_operation_reconnect_keeps_original_admission
-        ; test_case "operation reconciliation binds original input" `Quick
-            test_operation_reconciliation_binds_original_input
         ; test_case "stale completion identity" `Quick
             test_stale_completion_identity
         ] )

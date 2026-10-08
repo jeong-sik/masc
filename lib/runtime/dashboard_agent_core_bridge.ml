@@ -11,7 +11,6 @@ type status =
   | Success
   | Error of { transient : bool }
   | Cancelled of { reason : string }
-  | Timeout
 
 type sample = {
   provider_id : string;
@@ -55,7 +54,6 @@ let status_to_yojson = function
           ("kind", `String "cancelled");
           ("reason", `String reason);
         ]
-  | Timeout -> `Assoc [ ("kind", `String "timeout") ]
 
 let public_runtime_provider_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
@@ -365,7 +363,7 @@ let summary ?provider ?limit () =
         List.fold_left
           (fun acc (s, _) ->
             match s.status with
-            | Error _ | Timeout -> acc + 1
+            | Error _ -> acc + 1
             | Success | Cancelled _ -> acc)
           0 xs
       in
@@ -374,7 +372,7 @@ let summary ?provider ?limit () =
           (fun acc (s, _) ->
             match s.status with
             | Cancelled _ -> acc + 1
-            | Success | Error _ | Timeout -> acc)
+            | Success | Error _ -> acc)
           0 xs
       in
       {

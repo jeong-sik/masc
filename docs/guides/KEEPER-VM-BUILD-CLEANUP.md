@@ -1,8 +1,10 @@
 # Keeper VM build cleanup
 
-Apple Keeper work volumes persist between boots. Default `_build` directories
-in older checkouts therefore accumulate even though `/masc-build` is recreated
-at boot. Clean generated output separately from source/worktree removal.
+Apple Keeper work volumes persist between boots. A checkout built before its
+`_build` was linked to `/masc-build` holds a real `_build` on the work volume.
+The boot helper removes those before each guest starts (see "Guest space versus
+host disk space"); between boots they grow until the idle cleanup below removes
+them. Clean generated output separately from source/worktree removal.
 
 From the MASC checkout, inspect and clean the selected runtime workspace:
 
@@ -72,7 +74,10 @@ python3 scripts/keeper-vm-cleaner.py stop --base-path /path/to/workspace
 retention. Set `--idle-hours` and `--interval-seconds` on `start` to change those
 settings; stop an existing service before changing its configuration. Duplicate
 starts leave the existing service running. Stop requests finish the current
-sweep before exiting and never signal a PID from a stale file.
+sweep before exiting and never signal a PID from a stale file. `stop` writes
+its request before it waits for `start` to finish, so a stop sent while `start`
+is still bringing the service up is kept: that service exits before its first
+sweep, and only the next `start` clears the request.
 
 State and the latest sweep/error reports are bounded files under
 `<base-path>/.masc/maintenance/keeper-vm-cleaner/`. `config.json` identifies the
@@ -92,7 +97,9 @@ process, not an OS startup service; restart it explicitly after a host reboot.
 Volumes mounted without ext4 discard retain deleted blocks in their sparse
 host images. Keeper guests have no `CAP_SYS_ADMIN`, so live `fstrim` fails.
 At the safe boot boundary MASC's isolated helper now enables ext4's persistent
-default `discard` option and trims existing free blocks,
+default `discard` option, removes the real `_build` of every Dune checkout the
+guest's link scan covers (`build_output_removal_script`; a checkout holding
+`.masc-keep-build` keeps it) and trims existing free blocks,
 after removing the previous guest and before mounting the work volume again
 (`keeper_turn_sandbox_runtime.ml`, `reclaim_work_volume_space`). Subsequent guest
 deletes return their blocks automatically, without extra guest capabilities.
@@ -100,8 +107,10 @@ Existing running guests take the default on their next safe volume mount;
 merging a change does not change their active mount. This cleaner
 does not stop a Keeper or mount its live volume in a second VM to force trimming.
 
-The helper image needs `/usr/bin/findmnt`, `/usr/sbin/tune2fs`, and
-`/usr/sbin/fstrim`. A missing utility reports a reclaim failure; existing runtime
+The helper image needs `/usr/bin/findmnt`, `/usr/sbin/tune2fs` and
+`/usr/sbin/fstrim`. `/usr/bin/mount` is optional: without it the helper says
+the remount was refused and removes build output with `discard` still on,
+which is slower but frees the same blocks. A missing utility reports a reclaim failure; existing runtime
 policy permits boot only after helper removal has been confirmed.
 
 Source contracts: [ext4 persistent discard default](https://kernel.org/doc/html/next/filesystems/ext4/super.html),

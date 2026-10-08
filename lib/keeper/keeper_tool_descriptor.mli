@@ -12,14 +12,10 @@ type executor =
 
 type backend =
   | Ocaml_runtime
-  | Host_process
   | Sandbox_process
 
 type sandbox =
   | No_sandbox
-  | Host_sandbox_roots
-  | Turn_sandbox
-  | Docker_profile
   | Backend_selected
 
 (** One explicit Keeper-model exposure choice per descriptor. Compatibility

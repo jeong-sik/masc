@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 (* Keeper_vision_tool pure-core tests — RFC-keeper-vision-delegation-tool §2.6.
 
    Locks the two contract-critical pure pieces:
@@ -2179,19 +2182,22 @@ let test_browser_screenshot_reaches_vision_reader () =
       Eio_main.run (fun env ->
         Time_compat.set_clock (Eio.Stdenv.clock env);
         Eio.Switch.run (fun sw ->
+          Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
           Browser_lane.install_automation_executor (Some (function
             | Browser_lane.Page_capture {tab_id=73} -> Browser_lane.Answered
                 (`Assoc ["ok",`Bool true;"data",`Assoc [
                   "tabId",`Int 73;"url",`String "https://example.org/form";
                   "title",`String "Form";"mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]])
             | _ -> failwith "unexpected screenshot command"));
-          Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
+          Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer None; Browser_lane.install_automation_executor None);
           let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
             ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
           assert (result.disposition = Tool_result.Completed ());
           let data = match result.data with Some data -> data | None -> failwith "no screenshot metadata" in
           assert (not (String_util.contains_substring result.raw_output encoded));
           verify_pointer_receipt "automation" data;
+          assert (Yojson.Safe.Util.member "clientId" data = `Null);
+          assert (Yojson.Safe.Util.member "transport" data = `Null);
           let handle = assoc_string "artifact" data in
           let root_dir = Vt.vision_store_dir ~keeper_name:meta.name in
           let frames_dir = Vt.frames_dir ~keeper_name:meta.name in
@@ -2212,7 +2218,7 @@ let test_browser_screenshot_reaches_vision_reader () =
           let connect suffix browser =
             let raw = "30000000-0000-4000-8000-" ^ suffix in
             let client_id = Result.get_ok (Browser_lane.client_id_of_string raw) in
-            let info : Browser_lane.client_info = {client_id;browser;version="fixture";engine_version="155.0.1"} in
+            let info : Browser_lane.client_info = {client_id;browser;version="fixture";transport=Browser_lane.Web_extension; engine_version="155.0.1"} in
             Eio.Switch.on_release sw (fun () ->
               ignore (Browser_lane.disconnect_client ~client_id));
             let initial = Browser_lane.take_command ~client_info:info ~window_sec:0.001 in
@@ -2240,6 +2246,9 @@ let test_browser_screenshot_reaches_vision_reader () =
             assert (result.disposition = Tool_result.Completed ());
             let data = match result.data with Some data -> data | None -> failwith "missing client receipt" in
             assert (assoc_string "clientId" data = client_id);
+            (* The stored screenshot is rebuilt from checked fields; the
+               connection's transport is one of them. *)
+            assert (assoc_string "transport" data = "web_extension");
             if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))
 
 let test_browser_screenshot_requires_keeper_owner () =
@@ -2259,14 +2268,19 @@ let test_browser_screenshot_rejects_bad_pixels () =
       assert (Result.is_error result)) ["not base64!";Base64.encode_string "not a PNG"])
 
 let test_browser_screenshot_rejects_invalid_client () =
-  List.iter (fun client_id ->
+  let live_id = `String "30000000-0000-4000-8000-000000000001" in
+  List.iter (fun (connection, expected) ->
     let result = Masc.Browser_screenshot.persist ~keeper_name:"invalid-browser-client"
-      (`Assoc ["tabId",`Int 73;"url",`String "https://example.org";
-        "title",`String "Page";"data",`String "";"clientId",client_id]) in
+      (`Assoc (["tabId",`Int 73;"url",`String "https://example.org";
+        "title",`String "Page";"data",`String ""] @ connection)) in
     match result with
-    | Error ("invalid_client_id" | "invalid screenshot clientId") -> ()
+    | Error detail when String.equal detail expected -> ()
     | _ -> failwith "malformed routing identity must fail before pixel persistence")
-    [`String "not-a-client"; `Int 73]
+    [["clientId",`String "not-a-client"], "invalid_client_id";
+     ["clientId",`Int 73], "invalid_connection_fields";
+     ["clientId",live_id], "client_without_transport";
+     ["clientId",live_id;"transport",`String "carrier_pigeon"], "unsupported_browser_transport";
+     ["transport",`String "web_extension"], "invalid_connection_fields"]
 
 let test_browser_screenshot_rejects_invalid_observation () =
   with_temp_base (fun _ ->

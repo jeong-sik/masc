@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 open Alcotest
 module Observation = Masc.Browser_observation
 module Runtime = Masc.Keeper_tool_in_process_runtime
@@ -38,6 +41,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
             "clientId", `String "11111111-1111-4111-8111-111111111111";
             "source", `String "backend-conflict";
             "clientId", `Null;
+            "transport", `String "backend-conflict";
             "elapsed_ms", `Float (-1.); "elapsed_ms", `Float (-2.)])
         | _ -> assert false) in
       Browser_lane.install_automation_executor (Some (function
@@ -69,6 +73,8 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
         (List.assoc "source" fields = `String "automation");
       check bool "backend cannot attach a live client to automation" true
         (List.assoc "clientId" fields = `Null);
+      check bool "nor a transport: the server's own browser has none" true
+        (not (List.mem_assoc "transport" fields));
       check bool "elapsed time belongs to the local read" true
         (match List.assoc "elapsed_ms" fields with `Float value -> value >= 0. | _ -> false);
       let canonical = Observation.of_json (Yojson.Safe.from_string original) |> ok in

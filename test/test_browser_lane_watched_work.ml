@@ -1,3 +1,6 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
 (* The browser lane's waits keep what arrived as their window passed.
 
    Each wait raced work against a timer with [Fiber.first], which keeps
@@ -20,7 +23,7 @@ let info browser : Lane.client_info =
     | Ok id -> id
     | Error error -> fail error
   in
-  { client_id; browser; version = "1.0"; engine_version = "155.0.1" }
+  { client_id; browser; version = "1.0"; transport = Browser_lane.Web_extension; engine_version = "155.0.1" }
 ;;
 
 let payload = `Assoc [ "ok", `Bool true; "data", `String "the answer" ]
@@ -37,13 +40,13 @@ let connect ~sw ~clock browser =
   (match Eio.Promise.await_exn registered with
    | Ok None -> ()
    | Ok (Some _) -> fail "a fresh client was handed a command nobody issued"
-   | Error error -> fail error);
+   | Error refusal -> fail (Lane.registration_refusal_to_wire refusal));
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:client.client_id));
   client
 ;;
 
 let live client =
-  match Lane.resolve_target (Lane.Live_route (Some client.Lane.client_id)) with
+  match Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some client.Lane.client_id)) with
   | Ok target -> target
   | Error error -> fail (Lane.selection_error_code error)
 ;;
@@ -70,7 +73,7 @@ let test_an_answer_delivered_as_the_timeout_passed_is_the_answer () =
     match Lane.take_command ~client_info:client ~window_sec:window_s with
     | Ok (Some command) -> command
     | Ok None -> fail "the issued command was not handed to its client"
-    | Error error -> fail error
+    | Error refusal -> fail (Lane.registration_refusal_to_wire refusal)
   in
   (* The timeout passes first: the timer's wake-up is queued. The answer
      then arrives, queuing the issuer's wake-up behind it. *)
@@ -104,7 +107,7 @@ let test_a_command_taken_as_the_window_passed_is_delivered () =
     match Eio.Promise.await_exn taken with
     | Ok (Some command) -> command
     | Ok None -> fail "the command issued as the window passed was consumed and dropped"
-    | Error error -> fail error
+    | Error refusal -> fail (Lane.registration_refusal_to_wire refusal)
   in
   (match Lane.deliver_result ~client_id:client.client_id ~id:command.id ~payload with
    | Ok () -> ()

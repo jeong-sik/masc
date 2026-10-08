@@ -44,38 +44,16 @@ let sandbox_env_names =
   ; "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
   ; "MASC_KEEPER_SHELL_TIMEOUT_IO_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_READ_SEC"
-  ; "MASC_KEEPER_SHELL_TIMEOUT_USER_MAX_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_CLEANUP_RM_SEC"
-  ; "MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC"
   ]
 
-(* String-typed env vars whose default is non-empty. OCaml 5.5 adds
-   [Unix.unsetenv], but the supported 5.4 floor has no equivalent, so
-   [Unix.putenv NAME ""] is the closest we can do — but
-   [Env_config_core.get_string ~default] returns the literal "" rather than the
-   default in that case. Workaround: set each string env to its default literal
-   so [get_string] yields the expected value. Drift between this table and the
-   .ml will surface in the cross-module consistency test below. *)
-let string_env_defaults =
-  [ "MASC_KEEPER_SANDBOX_MEMORY", "2g"
-  ; "MASC_KEEPER_SANDBOX_TMPFS_SIZE", "256m"
-  ]
-
-(* Run [f] with every name in [sandbox_env_names] cleared (set to "")
-   except for string-typed names that need explicit default-yielding
-   values.  Saves and restores prior values in a Fun.protect block. *)
+(* Run [f] with every name in [sandbox_env_names] cleared (set to "").
+   Every getter treats "" as unset and yields its default, so no
+   string-typed name needs a pre-seeded literal. Saves and restores prior
+   values in a Fun.protect block. *)
 let with_clean_sandbox_env f =
   let saved = List.map (fun n -> n, Sys.getenv_opt n) sandbox_env_names in
-  let string_default_set =
-    List.fold_left (fun acc (n, _) -> n :: acc) [] string_env_defaults
-  in
-  List.iter
-    (fun n ->
-      if List.mem n string_default_set then
-        let value = List.assoc n string_env_defaults in
-        Unix.putenv n value
-      else Unix.putenv n "")
-    sandbox_env_names;
+  List.iter (fun n -> Unix.putenv n "") sandbox_env_names;
   Fun.protect
     ~finally:(fun () ->
       List.iter
@@ -123,7 +101,6 @@ let test_defaults_pinned () =
   in
   pin S.Shell_timeout.Io 30.0;
   pin S.Shell_timeout.Read 15.0;
-  pin S.Shell_timeout.User_max 180.0;
   (* 10.0 since #23722 (rm -v can outlive 5s on loaded runners); that PR
      changed the lib default without this pin (main red #23901 residual). *)
   pin S.Shell_timeout.Cleanup_rm 10.0
@@ -136,12 +113,8 @@ let test_env_overrides_default () =
   with_clean_sandbox_env @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_MEMORY" (Some "4g") (fun () ->
     check string "memory env override wins" "4g" (S.Hardening.memory ()));
-  (* After with_env restore, original [None] becomes [Some ""], which
-     [get_string] does NOT treat as "default" — it returns the literal
-     empty string.  This is a quirk of the env-restoration model, not a
-     module bug.  We still want a regression guard, so check the
-     observable effect: memory is back to whatever the cleared env
-     yields (default). *)
+  (* After with_env restore, memory is back to whatever the cleared env
+     yields, which is the default. *)
   check string "memory falls back to default after clean restore"
     "2g" (S.Hardening.memory ())
 
@@ -149,7 +122,15 @@ let test_empty_env_treated_as_unset () =
   with_clean_sandbox_env @@ fun () ->
   with_env "MASC_KEEPER_SHELL_TIMEOUT_IO_SEC" (Some "") (fun () ->
     check approx "empty env still hits default" 30.0
-      (S.Shell_timeout.timeout_sec ~bucket:S.Shell_timeout.Io ()))
+      (S.Shell_timeout.timeout_sec ~bucket:S.Shell_timeout.Io ()));
+  with_env "MASC_KEEPER_SANDBOX_MEMORY" (Some "") (fun () ->
+    check string "empty string env hits default" "2g" (S.Hardening.memory ()));
+  with_env "MASC_KEEPER_SANDBOX_MEMORY" (Some "   ") (fun () ->
+    check string "whitespace-only string env hits default" "2g"
+      (S.Hardening.memory ()));
+  with_env "MASC_KEEPER_SANDBOX_MEMORY" (Some " 4g ") (fun () ->
+    check string "non-empty string env kept verbatim" " 4g "
+      (S.Hardening.memory ()))
 
 let test_invalid_float_falls_to_global_default () =
   with_clean_sandbox_env @@ fun () ->
@@ -169,11 +150,7 @@ let test_per_bucket_env_var_shape () =
   check string "Cleanup_rm env var name"
     "MASC_KEEPER_SHELL_TIMEOUT_CLEANUP_RM_SEC"
     (S.Shell_timeout.per_bucket_env_var
-       ~bucket:S.Shell_timeout.Cleanup_rm);
-  check string "Unknown bucket env var lowercases"
-    "MASC_KEEPER_SHELL_TIMEOUT_FUTURE_X_SEC"
-    (S.Shell_timeout.per_bucket_env_var
-       ~bucket:(S.Shell_timeout.Unknown "future-x"))
+       ~bucket:S.Shell_timeout.Cleanup_rm)
 
 let test_per_bucket_env_override () =
   with_clean_sandbox_env @@ fun () ->
@@ -181,17 +158,6 @@ let test_per_bucket_env_override () =
     check approx "Read bucket env override wins"
       7.5
       (S.Shell_timeout.timeout_sec ~bucket:S.Shell_timeout.Read ()))
-
-let test_unknown_bucket_uses_global_env () =
-  with_clean_sandbox_env @@ fun () ->
-  with_env "MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC" (Some "99.0") (fun () ->
-    check approx "Unknown bucket uses global env"
-      99.0
-      (S.Shell_timeout.timeout_sec
-         ~bucket:(S.Shell_timeout.Unknown "future") ());
-    check approx "Known bucket ignores global env"
-      30.0
-      (S.Shell_timeout.timeout_sec ~bucket:S.Shell_timeout.Io ()))
 
 (* ---------------------------------------------------------------- *)
 (* 4. Filesystem derivation                                         *)
@@ -234,8 +200,6 @@ let () =
             test_per_bucket_env_var_shape
         ; test_case "per-bucket env override" `Quick
             test_per_bucket_env_override
-        ; test_case "Unknown bucket -> global env" `Quick
-            test_unknown_bucket_uses_global_env
         ] )
     ; ( "filesystem",
         [ test_case "relax_fs propagates to derived" `Quick

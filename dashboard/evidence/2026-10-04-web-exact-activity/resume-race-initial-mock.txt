@@ -1,0 +1,453 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-web-exact-activity-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts -t 'delayed resume'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-exact-activity-20261004/dashboard
+
+ ❯ src/components/exact-lane-activity-panel.test.ts (29 tests | 2 failed | 27 skipped) 5113ms
+   ❯ Exact activity operator flow (20)
+     × refreshes Runtime after a delayed resume across unmount and remount 7ms
+     × refreshes All Lanes after a delayed resume across unmount and remount 5105ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > refreshes Runtime after a delayed resume across unmount and remount
+Error: [vitest] No "modelSetupResumeState" export is defined on the "../lib/model-setup-resume" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+vi.mock(import("../lib/model-setup-resume"), async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    // your mocked methods
+  }
+})
+
+ ❯ C.ModelSetupResumeControl [as constructor] src/components/model-setup-resume-control.ts:7:17
+      5|   disabled?: boolean; onComplete?: () => Promise<void> | void
+      6| }) {
+      7|   const state = modelSetupResumeState.value
+       |                 ^
+      8|   async function resume() {
+      9|     if (disabled || modelSetupResumeState.peek().kind === 'resuming') …
+ ❯ removeNode ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/src/diff/index.js:664:3
+ ❯ push ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/src/diff/index.js:228:15
+ ❯ newChildrenLength ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/src/diff/children.js:81:18
+ ❯ innerHTML ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/src/diff/index.js:530:65
+ ❯ q ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/src/diff/index.js:311:3
+ ❯ newChildrenLength ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/src/diff/children.js:81:18
+ ❯ innerHTML ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/src/diff/index.js:530:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > refreshes All Lanes after a delayed resume across unmount and remount
+TestingLibraryElementError: Unable to find an element with the text: /관측 상태: off/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"All Lanes"[39m
+      [33mclass[39m=[32m"space-y-4"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mclass[39m=[32m"text-xl font-semibold"[39m
+          [36m>[39m
+            [0mAll Lanes[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0mBuilt-in Lane kinds, package declarations and manual workers.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+        [36m>[39m
+          [0mRefresh Lanes[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"space-y-2"[39m
+      [36m>[39m
+        [36m<p>[39m
+          [0mObserved [0m
+          [0m2026-08-24T07:47:49.715Z[0m
+          [0m · [0m
+          [0m12[0m
+          [0m inventory rows[0m
+        [36m</p>[39m
+        [36m<p>[39m
+          [0mPackage read: [0m
+          [0mcomplete[0m
+          [0m · [0m
+          [0mmanager present[0m
+        [36m</p>[39m
+        [36m<p>[39m
+          [0mExact run reading: [0m
+          [0m60[0m
+          [0m of [0m
+          [0m60[0m
+          [0m[0m
+        [36m</p>[39m
+      [36m</div>[39m
+      [36m<label[39m
+        [33mclass[39m=[32m"block"[39m
+      [36m>[39m
+        [0mFind a Lane[0m
+        [36m<input[39m
+          [33mclass[39m=[32m"block w-full rounded border bg-transparent p-2"[39m
+          [33mtype[39m=[32m"search"[39m
+        [36m/>[39m
+      [36m</label>[39m
+      [36m<div[39m
+        [33mtabindex[39m=[32m"-1"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"Details for Librarian"[39m
+          [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] p-4 space-y-3"[39m
+        [36m>[39m
+          [36m<h3[39m
+            [33mclass[39m=[32m"font-semibold"[39m
+          [36m>[39m
+            [0mLibrarian[0m
+          [36m</h3>[39m
+          [36m<p>[39m
+            [0mSelects the next Memory OS snapshot from immutable Keeper history.[0m
+          [36m</p>[39m
+          [36m<code[39m
+            [33mclass[39m=[32m"break-all"[39m
+          [36m>[39m
+            [0mexact/librarian_exact[0m
+          [36m</code>[39m
+          [36m<p>[39m
+            [0m1 HTTP · 0 CLI admitted[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0munavailable · 0 running · 12 retained runs[0m
+          [36m</p>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"Librarian 활동 설정"[39m
+            [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] p-3 space-y-3"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-expanded[39m=[32m"true"[39m
+              [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m활동 설정 닫기[0m
+              [0m[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"space-y-3"[39m
+            [36m>[39m
+              [36m<p>[39m
+                [0m끄면 새 요청을 받지 않습니다. 이미 접수한 작업은 마무리하며 후보 설정은 보존합니다.[0m
+              [36m</p>[39m
+              [36m<p>[39m
+                [0m관측 상태: [0m
+                [0munavailable[0m
+                [0m · [0m
+                [0m0[0m
+                [0m 실행 중[0m
+              [36m</p>[39m
+              [36m<p[39m
+                [33mrole[39m=[32m"status"[39m
+              [36m>[39m
+                [0m파일 설정: 꺼짐 · HTTP 2 / CLI 1 후보[0m
+              [36m</p>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"space-y-2"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-checked[39m=[32m"false"[39m
+                  [33maria-label[39m=[32m"Librarian 활동 초안"[39m
+                  [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                  [33mrole[39m=[32m"switch"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0m활동 초안: [0m
+                  [0m꺼짐[0m
+                [36m</button>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                  [33mdisabled[39m=[32m""[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0m활동 설정 저장[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0m현재 설정 읽기[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0m초안 버리기[0m
+                [36m</button>[39m
+              [36m</div>[39m
+              [36m<p[39m
+                [33mrole[39m=[32m"status"[39m
+              [36m>[39m
+                [0m커밋 #7 · 라우팅 적용됨 · Skill catalog 변경 없음 (configured) · Exact registry 적용됨 · 파일 내구성 확인됨[0m
+              [36m</p>[39m
+              [36m<details>[39m
+                [36m<summary>[39m
+                  [0m설정 파일과 저장 기준[0m
+                [36m</summary>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"break-all"[39m
+                [36m>[39m
+                  [0m/workspace/runtime.toml[0m
+                [36m</p>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"break-all"[39m
+                [36m>[39m
+                  [0m초안 기준: [0m
+                  [0m4a8bd5cc084769872fc76c20f0413277951360670c83fe6e0ae72ce3f3d06921[0m
+                [36m</p>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"break-all"[39m
+                [36m>[39m
+                  [0m현재 파일: [0m
+                  [0m4a8bd5cc084769872fc76c20f0413277951360670c83fe6e0ae72ce3f3d06921[0m
+                [36m</p>[39m
+              [36m</details>[39m
+            [36m</div>...
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+    [36m<div>[39m
+      [36m<section[39m
+        [33maria-label[39m=[32m"All Lanes"[39m
+        [33mclass[39m=[32m"space-y-4"[39m
+      [36m>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+        [36m>[39m
+          [36m<div>[39m
+            [36m<h2[39m
+              [33mclass[39m=[32m"text-xl font-semibold"[39m
+            [36m>[39m
+              [0mAll Lanes[0m
+            [36m</h2>[39m
+            [36m<p>[39m
+              [0mBuilt-in Lane kinds, package declarations and manual workers.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+          [36m>[39m
+            [0mRefresh Lanes[0m
+          [36m</button>[39m
+        [36m</header>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"space-y-2"[39m
+        [36m>[39m
+          [36m<p>[39m
+            [0mObserved [0m
+            [0m2026-08-24T07:47:49.715Z[0m
+            [0m · [0m
+            [0m12[0m
+            [0m inventory rows[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mPackage read: [0m
+            [0mcomplete[0m
+            [0m · [0m
+            [0mmanager present[0m
+          [36m</p>[39m
+          [36m<p>[39m
+            [0mExact run reading: [0m
+            [0m60[0m
+            [0m of [0m
+            [0m60[0m
+            [0m[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<label[39m
+          [33mclass[39m=[32m"block"[39m
+        [36m>[39m
+          [0mFind a Lane[0m
+          [36m<input[39m
+            [33mclass[39m=[32m"block w-full rounded border bg-transparent p-2"[39m
+            [33mtype[39m=[32m"search"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<div[39m
+          [33mtabindex[39m=[32m"-1"[39m
+        [36m>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"Details for Librarian"[39m
+            [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] p-4 space-y-3"[39m
+          [36m>[39m
+            [36m<h3[39m
+              [33mclass[39m=[32m"font-semibold"[39m
+            [36m>[39m
+              [0mLibrarian[0m
+            [36m</h3>[39m
+            [36m<p>[39m
+              [0mSelects the next Memory OS snapshot from immutable Keeper history.[0m
+            [36m</p>[39m
+            [36m<code[39m
+              [33mclass[39m=[32m"break-all"[39m
+            [36m>[39m
+              [0mexact/librarian_exact[0m
+            [36m</code>[39m
+            [36m<p>[39m
+              [0m1 HTTP · 0 CLI admitted[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0munavailable · 0 running · 12 retained runs[0m
+            [36m</p>[39m
+            [36m<section[39m
+              [33maria-label[39m=[32m"Librarian 활동 설정"[39m
+              [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] p-3 space-y-3"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-expanded[39m=[32m"true"[39m
+                [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m활동 설정 닫기[0m
+                [0m[0m
+              [36m</button>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"space-y-3"[39m
+              [36m>[39m
+                [36m<p>[39m
+                  [0m끄면 새 요청을 받지 않습니다. 이미 접수한 작업은 마무리하며 후보 설정은 보존합니다.[0m
+                [36m</p>[39m
+                [36m<p>[39m
+                  [0m관측 상태: [0m
+                  [0munavailable[0m
+                  [0m · [0m
+                  [0m0[0m
+                  [0m 실행 중[0m
+                [36m</p>[39m
+                [36m<p[39m
+                  [33mrole[39m=[32m"status"[39m
+                [36m>[39m
+                  [0m파일 설정: 꺼짐 · HTTP 2 / CLI 1 후보[0m
+                [36m</p>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"space-y-2"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-checked[39m=[32m"false"[39m
+                    [33maria-label[39m=[32m"Librarian 활동 초안"[39m
+                    [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                    [33mrole[39m=[32m"switch"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [0m활동 초안: [0m
+                    [0m꺼짐[0m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                    [33mdisabled[39m=[32m""[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [0m활동 설정 저장[0m
+                  [36m</button>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [0m현재 설정 읽기[0m
+                  [36m</button>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [0m초안 버리기[0m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<p[39m
+                  [33mrole[39m=[32m"status"[39m
+                [36m>[39m
+                  [0m커밋 #7 · 라우팅 적용됨 · Skill catalog 변경 없음 (configured) · Exact registry 적용됨 · 파일 내구성 확인됨[0m
+                [36m</p>[39m
+                [36m<details>[39m
+                  [36m<summary>[39m
+                    [0m설정 파일과 저장 기준[0m
+                  [36m</summary>[39m
+                  [36m<p[39m
+                    [33mclass[39m=[32m"break-all"[39m
+                  [36m>[39m
+                    [0m/workspace/runtime.toml[0m
+                  [36m</p>[39m
+                  [36m<p[39m
+                    [33mclass[39m=[32m"break-all"[39m
+                  [36m>[39m
+                    [0m초안 기준: [0m
+                    [0m4a8bd5cc084769872fc76c20f0413277951360670c83fe6...
+ ❯ Module.waitForWrapper ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ src/components/exact-lane-activity-panel.test.ts:104:11
+    102|     await act(async () => { published = true; resume.resolve({ kind: '…
+    103|     // Query the current DOM, including any projection-triggered remou…
+    104|     await waitFor(() => expect(next.view.getByText(/관측 상태: off/)).toBe…
+       |           ^
+    105|     expect(next.view.getByText(/Exact registry 적용됨/)).toBeTruthy()
+    106|     expect(next.view.getByRole('button', { name: '활동 설정 닫기' })).toBeTr…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 2 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot read properties of undefined (reading 'length')
+ ❯ $ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:853
+ ❯ $ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:814
+ ❯ I ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:1124
+ ❯ H ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:1575
+ ❯ processTicksAndRejections node:internal/process/task_queues:104:5
+
+This error originated in "src/components/exact-lane-activity-panel.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The last test to run before this error was "refreshes All Lanes after a delayed resume across unmount and remount". This means either:
+- the error was thrown while Vitest was running this test, or
+- the error was thrown after the test completed, and this was the most recent test at that point.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot read properties of undefined (reading 'length')
+ ❯ $ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:853
+ ❯ $ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:814
+ ❯ I ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:1124
+ ❯ H ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:1575
+ ❯ processTicksAndRejections node:internal/process/task_queues:104:5
+
+This error originated in "src/components/exact-lane-activity-panel.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The last test to run before this error was "refreshes All Lanes after a delayed resume across unmount and remount". This means either:
+- the error was thrown while Vitest was running this test, or
+- the error was thrown after the test completed, and this was the most recent test at that point.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 27 skipped (29)
+     Errors  2 errors
+   Start at  21:37:52
+   Duration  6.65s (tests 78%, import 9%, transform 8%, environment 3%, setup 3%)
+
+ ELIFECYCLE  Test failed. See above for more details.

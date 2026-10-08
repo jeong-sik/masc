@@ -1,0 +1,25 @@
+{
+  "base": "5d673773d03b1cf9008a01543cb1e3833c9f02ea",
+  "scope": "MSX tick activity refusal/recovery only; whole file hashes include surrounding parent work",
+  "sources": {
+    "bin/masc_tui_msx_tick.mli": "ad81caaf49562dd874d5f9096c441960f1bff662dce2ca4091788f565968b9a1",
+    "bin/masc_tui_msx_tick.ml": "16993c6019ab483616ee4ece8cfd9dcbe41f6ba251b42e47b5ae103229167fb2",
+    "test/test_tui_msx_tick.ml": "e72133658b38eb7037878fa35e12faa39815fcc1ebe0470a625c02fcf849c198",
+    "bin/masc_tui_async_protocol.mli": "80c2f9b46e9456f7c4ef48e8896902432f2a3b6e772a3f6702600d8f00935b03",
+    "bin/masc_tui_async_protocol.ml": "80c2f9b46e9456f7c4ef48e8896902432f2a3b6e772a3f6702600d8f00935b03",
+    "bin/masc_tui_http.ml": "dba64e9083fb1e8c718beb20df862178b6ac6c18a6ef9911743e1f851e734c48",
+    "bin/masc_tui.ml": "aa4026a182ed6f660c2f414fabdbed9a37fc3943b152f4765de511f69e5ad5f6",
+    "lib/server/server_routes_http_routes_msx.mli": "bb2c6707f120e831c4a850908de64d6a10e27e6438a08b4063b0a228c4ddbbbd",
+    "lib/server/server_routes_http_routes_msx.ml": "ba8dedcd7ac90c367b3bb3dfc276fcba65c5b858dcc321921512143331d84767",
+    "test/test_msx_routes.ml": "a76a56bd4f126f36b7490e3ab34ce3b37c73f755c4340ee04ddc1c6c2516895c",
+    "bin/masc_tui_types.ml": "0cd4db8177ccee8c72e384e64ba4a2e768272135278c3eeac507f1ba06415e1b",
+    "bin/masc_tui_machine_live.ml": "7fbc7772a1a75016e1ad0dad3f1ccd0897c0d18d5c0cf3d05d1fe396a02c2988"
+  },
+  "artifacts": {
+    "docs/evidence/2026-10-05-msx-tick-activity/README.md": "2324959d199fd9321c6f9f46e9aa9b5f39fe25862e51ebd95babc178481cbe47",
+    "docs/evidence/2026-10-05-msx-tick-activity/check-leaf.py": "82ea45e7866ef18d86ee255726f0dca45c05b0a7f325b840b99029b8e127c3bb",
+    "docs/evidence/2026-10-05-msx-tick-activity/leaf.json": "9b21d5c944db44e596c96142bcd120affc4e527ab0fda24a89649b12cb79f456",
+    "docs/evidence/2026-10-05-msx-tick-activity/leaf.txt": "f6e3e65f94fe84384c6d421951942de9b4413b1595c4068d5d0a1f4e68037c01",
+    "docs/evidence/2026-10-05-msx-tick-activity/syntax.json": "16dba29eba1ce2d5fb063b50861c065e8927912610d800a4ba17cf2449897ce3"
+  }
+}

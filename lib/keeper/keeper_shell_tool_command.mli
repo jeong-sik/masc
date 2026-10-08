@@ -9,6 +9,28 @@ type dispatch =
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t option
 
+val reject_duplicate_paths : (string list * string) list -> (unit, string) result
+(** Refuse a [shell_command] declaration list that maps the same path to
+    more than one tool.  The split answers the longest declared path, so a
+    duplicate strands the later tool — answered as a typed error naming the
+    path and both tools, not raised, so a bad tool file cannot poison the
+    declaration table's [lazy] with a cached exception. *)
+
+val declarations_of
+  :  read:(string -> string option)
+  -> files:string list
+  -> (string list * string) list
+(** [declarations_of ~read ~files] loads every [tools/*.toml] entry of
+    [files] through [read] and returns the [(shell_command, tool_name)]
+    declarations it finds, in file order.  [read] and [files] are passed in
+    so a test can drive the same load path with its own TOML bytes; the
+    embedded tree is read through {!entries}. *)
+
+val declaration_error : string option Lazy.t
+(** The duplicate refusal of the embedded declaration table, or [None] when
+    it is well formed.  {!rewrite} answers this as a typed error before any
+    lookup, so every shell line gets the same named refusal. *)
+
 val split_words : string list -> (string * string list) option
 (** Match literal words against the closed [shell_command] declaration table.
     The longest declared path wins. *)

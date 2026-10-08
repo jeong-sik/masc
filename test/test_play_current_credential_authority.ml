@@ -28,6 +28,7 @@ let with_workspace f =
     Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
     Eio.Switch.run @@ fun sw ->
     Eio.Switch.on_release sw (fun () ->
+      Dos_lane.install_activity_observer None;
       (match Dos_lane.screen () with
        | Ok { controller; _ } ->
          (match Dos_lane.eject ~who:(Option.value controller ~default:"cleanup") ~announce:ignore () with
@@ -36,6 +37,7 @@ let with_workspace f =
       Time_compat.clear_clock ();
       Fs_compat.remove_tree base_path;
       Fs_compat.clear_fs ());
+    Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
     Auth.save_auth_config base_path { D.default_auth_config with enabled = true; require_token = true };
     let operator, _ = auth_ok (Auth.create_token_without_expiry base_path ~agent_name:"operator" ~role:D.Admin) in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
@@ -200,7 +202,69 @@ let test_stale_invalid_expiry_does_not_override_current_worker () =
       |> Yojson.Safe.to_string);
   check_routes ~state ~operator ~names:["operator"] ~invites:[]
 
+let test_invite_listing_completes_after_credential_publication () =
+  with_workspace @@ fun base_path state operator ->
+  let _, _, _uuid = seed_guest base_path D.Player in
+  (* Keep HTTP authentication out of the contention being exercised. The
+     fixture clock is fixed, so this index stays current until the deletion. *)
+  ignore (auth_ok (Auth.find_credential_by_token base_path ~token:operator));
+  let lock_path = Filename.concat (Unix.realpath (Auth.auth_dir base_path)) ".credentials.lock" in
+  Eio.Switch.run @@ fun sw ->
+  let completed, resolve = Eio.Promise.create () in
+  ignore (auth_ok (Auth.with_credential_transaction base_path (fun transaction ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve resolve (dispatch ~state ~token:operator ~meth:"GET"
+        ~target:Server_routes_http_routes_play.invites_path ~body:""));
+    let rec await_listing () =
+      (* Two admitted/waiting operations are this publisher and the listing.
+         No elapsed-time threshold stands in for reaching that boundary. *)
+      if File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 2 then ()
+      else match Eio.Promise.peek completed with
+        | Some _ -> fail "invite listing bypassed the credential transaction"
+        | None -> Eio.Fiber.yield (); await_listing () in
+    await_listing ();
+    ignore (auth_ok (Auth.delete_credential_in_transaction transaction "guest")))));
+  let response = Eio.Promise.await completed in
+  check int "the contended HTTP listing completes" 200 (status response);
+  check (option string) "the completed publication determines the invite list" (Some "[]")
+    (Option.map Yojson.Safe.to_string (member "invites" (json response)));
+  check (option string) "listing never changes the machine controller" (Some "operator") (controller ())
+
+let test_waiting_invite_listing_is_cancellable ~invalid_expiry () =
+  with_workspace @@ fun base_path _state _operator ->
+  let _, guest, _uuid = seed_guest base_path D.Player in
+  if invalid_expiry then
+    Auth.save_credential base_path { guest with expires_at = Some "invalid-expiry" };
+  let lock_path = Filename.concat (Unix.realpath (Auth.auth_dir base_path)) ".credentials.lock" in
+  let cancelled = auth_ok (Auth.with_credential_transaction base_path (fun _transaction ->
+    let cancelled = Eio.Fiber.first
+      (fun () -> ignore (Invite.list ~base_path ~now:(Time_compat.now ())); false)
+      (fun () ->
+        let rec await_listing () =
+          if File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 2 then true
+          else (Eio.Fiber.yield (); await_listing ()) in
+        await_listing ()) in
+    (* The publisher still owns this transaction. Cancellation must remove the
+       listing's waiter before this callback releases it, without a worker
+       remaining blocked in a non-Eio mutex or process lock. *)
+    check int "only the publisher remains after request cancellation" 1
+      (File_lock_eio.For_testing.holders_and_waiters ~lock_path);
+    cancelled)) in
+  check bool "the waiting listing is cancelled" true cancelled;
+  check bool "cancellation preserves the invite" true
+    (Sys.file_exists (Auth.credential_file base_path "guest"));
+  let next = Invite.list ~base_path ~now:(Time_compat.now ()) in
+  match invalid_expiry, next with
+  | false, Ok [ { Invite.invite_name = "guest"; _ } ] -> ()
+  | true, Error (Invite.Invalid_expiry (D.Credential_expiry.Invalid_timestamp "invalid-expiry")) -> ()
+  | _ -> fail "the next listing must retain the authoritative invite or expiry refusal"
+
 let () = run "Play current named authority" [ "routes", [
+  test_case "listing completes after credential publication in Eio" `Quick test_invite_listing_completes_after_credential_publication;
+  test_case "current-owner listing admission is cancellable" `Quick
+    (test_waiting_invite_listing_is_cancellable ~invalid_expiry:false);
+  test_case "invalid-expiry recheck admission is cancellable" `Quick
+    (test_waiting_invite_listing_is_cancellable ~invalid_expiry:true);
   test_case "invalid stale UUID cannot override current Worker" `Quick test_stale_invalid_expiry_does_not_override_current_worker;
   test_case "removed Player keeps data but loses seat and invite" `Quick (fun () -> test_surviving_data ~role:D.Player Removed);
   test_case "replaced Player uses current Worker authority" `Quick (fun () -> test_surviving_data ~role:D.Player Worker);

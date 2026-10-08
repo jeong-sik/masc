@@ -58,7 +58,7 @@ def run(binary, *, quit_from_history=False, disconnected=False):
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (200, {
         "keeper": "alpha", "count": 2, "health": "ok", "entries": rows})
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True,
-        "data": {"clients": [] if disconnected else [{"clientId": client, "browser": "firefox"}]}})
+        "data": {"clients": [] if disconnected else [{"clientId": client, "browser": "firefox", "transport": "web_extension"}]}})
 
     def read(body):
         request = json.loads(body)

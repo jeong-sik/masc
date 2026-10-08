@@ -105,7 +105,6 @@ let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s ~output_schem
   ; cwd = base_dir
   ; model = execution.model
   ; native = Runtime_native_tools.claude_code_default
-  ; setting_sources = []
   ; system_prompt
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
@@ -430,7 +429,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        ~mgr ~clock ~cwd config ~prompt ~images:(List.map (fun (image : image_input) ->
            ({ media_type = image.media_type; base64_data = image.base64_data }
             : Runtime_codex_app_server.image_input)) images) with
-     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = (match result.usage with
+     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = Option.value result.text ~default:""; model = result.model; usage = (match result.usage with
          | Some Runtime_codex_app_server.Thread_count_replaced -> !observed_usage
          | usage -> optional_usage codex_usage usage) }
      | Error error -> codex_failed error)
@@ -470,19 +469,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
-    let* () =
-      match Runtime_instance.muse_prompt_capacity runtime with
-      | Error error ->
-        Error (Muse_failure (Runtime_muse_serve.Invalid_config
-          ("Muse Code has no prompt ceiling: "
-           ^ Runtime_muse_prompt_capacity.error_to_string error)))
-      | Ok capacity_bytes when String.length prompt > capacity_bytes ->
-        Error (Muse_failure (Runtime_muse_serve.Invalid_config
-          (Printf.sprintf
-            "Muse Code framed input is %d bytes, exceeding the prompt ceiling %d"
-            (String.length prompt) capacity_bytes)))
-      | Ok _ -> Ok ()
-    in
     Eio.Switch.run
     @@ fun sw ->
     (* Enter the cancellation scope before acquiring the directory, then
@@ -515,9 +501,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          ~on_stream_event:(function
            | Runtime_muse_serve.Usage_reported {usage; _} -> on_usage (muse_usage usage)
            | Runtime_muse_serve.Subscription_usage_observed usage ->
-             Option.iter (fun reset_ms -> Runtime_quota_window.note_exhausted
-               ~scope:quota_scope ~resets_at:(float_of_int reset_ms /. 1000.))
-               (Runtime_muse_msp.exhausted_subscription_reset_ms usage)
+             Runtime_muse_usage.observe ~scope:quota_scope Runtime_muse_usage.Usage_changed usage
            | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
            | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
            | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
@@ -549,7 +533,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Some reported -> reported
          | None -> execution.model
        in
-       succeeded { text = result.text; model; usage = optional_usage muse_usage result.usage }
+       succeeded
+         { text = Option.value result.text ~default:""
+         ; model; usage = optional_usage muse_usage result.usage }
      | Error error -> Error (Muse_failure error))
 ;;
 

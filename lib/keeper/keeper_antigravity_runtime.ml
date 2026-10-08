@@ -98,25 +98,13 @@ let system_instructions_label () =
 let current_goal_label () = required_label (Antigravity_input_frame.current_goal_label ())
 let prompt_section_separator = Antigravity_input_frame.section_separator
 
-let measure_model_input_message_bytes (message : Agent_core.Types.message) =
-  String.length (Host.history_role_label message.role)
-  + String.length (Host.encode_history_message message)
-  + String.length prompt_section_separator
-;;
-
-let prompt_section_framing_reserved_bytes () =
-  String.length (system_instructions_label ())
-  + String.length (current_goal_label ())
-  + (2 * String.length prompt_section_separator)
-;;
-
 (* The carried front is a position in durable checkpoint history, so admit it
    before the source projection appends its bounded Gate replay reference.
-   The byte window still runs last and therefore charges every message that
-   can reach the CLI. Its observation is mapped back to the durable history:
-   a source-only atom is transmitted context, but cannot become a front that
-   a later checkpoint history is expected to open. *)
-let bounded_history_projection ~capacity_bytes ~reserved_bytes
+   The range goes out as composed, as on Claude Code's first attempt, and
+   the CLI compacts its own conversation. The observation is mapped back to
+   the durable history: a source-only atom is transmitted context, but cannot
+   become a front that a later checkpoint history is expected to open. *)
+let carried_history_projection
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
@@ -124,18 +112,9 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
   fun history_messages ->
   let* librarian_front = Host.read_librarian_front librarian_front history_messages in
   let carried_front_seed = Host.read_seed_once carried_front_seed in
-  (* The window drops atoms, never a pinned message, so a request whose
-     pinned messages -- the hooks' system context and the preamble -- exceed
-     what the fixed sections leave is refused for every front. A working
-     state is pinned too, and whether it goes is decided before anything is
-     sent ([Host.compose_librarian_range], RFC-0460): it is carried only
-     where it displaces none of the range's atoms, and otherwise the
-     Librarian position goes alone. The empty history stays open to every
-     composition, because that decision is what keeps a working state from
-     going out with no turn to answer; a range with none is the ceiling
-     saying it cannot hold one atom of this conversation, and the goal and
-     system prompt still go out, as the Claude Code lane's shrink floor
-     composes on purpose. *)
+  (* Nothing cuts the range, so a working state a Librarian snapshot names
+     displaces none of its atoms and goes in front of it
+     ([Host.compose_librarian_range], RFC-0460). *)
   let compose librarian_front =
     let carried =
       Host.carried_start_range
@@ -147,12 +126,12 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
         ~turn_start
         history_messages
     in
-    Host.window_carried_range
-      ~measure_message_bytes:measure_model_input_message_bytes
-      ~capacity_bytes
-      ~reserved_bytes
-      ?source_projection
-      carried
+    let* sent =
+      match source_projection with
+      | None -> Ok carried.Host.messages
+      | Some project -> project carried.Host.messages
+    in
+    Ok { Host.carried; sent; atoms_kept = Host.carried_atoms carried }
   in
   let* windowed =
     Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
@@ -173,47 +152,6 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
             (Host.windowed_projection windowed)))
     on_model_input_window_observation;
   Ok windowed.Host.sent
-;;
-
-let capacity_bounded_model_input_projection ~prompt_ceiling_bytes
-    ~system_prompt ~goal ?on_model_input_window_observation ?carried_front_seed
-    ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id source_projection
-  =
-  match prompt_ceiling_bytes with
-  | None ->
-    Error
-      (config_error
-         ~field:"prompt_ceiling_bytes"
-         "Antigravity requires a resolvable max-context because the CLI has no typed oversized-input refusal")
-  | Some capacity_bytes ->
-    let reserved_bytes =
-      String.length system_prompt
-      + String.length goal
-      + prompt_section_framing_reserved_bytes ()
-    in
-    if reserved_bytes >= capacity_bytes
-    then
-      Error
-        (config_error
-           ~field:"prompt_ceiling_bytes"
-           (Printf.sprintf
-              "Antigravity fixed prompt sections measure %d bytes, at or above the %d-byte prompt ceiling"
-              reserved_bytes
-              capacity_bytes))
-    else
-      Ok
-        (Some
-           (bounded_history_projection
-              ~capacity_bytes
-              ~reserved_bytes
-              ?on_model_input_window_observation
-              ?carried_front_seed
-              ?librarian_front
-              ?on_carried_front
-              ~turn_start
-              ~keeper_name
-              ~runtime_id
-              source_projection))
 ;;
 
 let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.prepared_turn) =
@@ -313,7 +251,7 @@ type mcp_blocks =
   | Streaming
 
 let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
-    ~position on_event =
+    ~position ~receipts on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
@@ -337,7 +275,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
        a pass finds nothing held. *)
     let rec release_mcp_blocks () =
       match !mcp_blocks with
-      | Streaming | Held [] -> mcp_blocks := Streaming
+      | Streaming | Held [] ->
+        mcp_blocks := Streaming;
+        Option.iter Keeper_official_client_tool_receipts.release receipts
       | Held held ->
         mcp_blocks := Held [];
         List.iter emit (List.rev held);
@@ -376,11 +316,17 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
               ~raw_trace_run
               ~phase:`Started
               observation;
-            let index = !next_tool_index in
-            incr next_tool_index;
-            Option.iter
-              (fun identity -> Hashtbl.replace native_tool_indexes identity index)
-              observation.identity;
+            let index =
+              match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
+              | Some index -> index
+              | None ->
+                  let index = !next_tool_index in
+                  incr next_tool_index;
+                  Option.iter
+                    (fun identity -> Hashtbl.add native_tool_indexes identity index)
+                    observation.identity;
+                  index
+            in
             emit
               (Agent_core.Types.ContentBlockStart
                  { index
@@ -434,6 +380,10 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
           Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
+          Option.iter
+            (fun receipts ->
+               Keeper_official_client_tool_receipts.start receipts ~call_id ~block_index:index)
+            receipts;
           Hashtbl.replace tool_indexes call_id index;
           emit_mcp_block
             (Agent_core.Types.ContentBlockStart
@@ -451,6 +401,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                }))
     ; on_tool_finished =
         (fun ~call_id ->
+          Option.iter
+            (fun receipts -> Keeper_official_client_tool_receipts.finish receipts ~call_id)
+            receipts;
           Option.iter
             (fun index ->
                Hashtbl.remove tool_indexes call_id;
@@ -471,7 +424,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
-    ~on_usage_report ~(config : Runtime_execution.antigravity_cli) =
+    ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -485,6 +438,21 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          "Antigravity runtime requires the initialized Eio clock")
   | Some env, Some clock ->
     let hooks = Option.value hooks ~default:Agent_core.Hooks.empty in
+    (* The MCP server can answer a call before init opens the message; its
+       receipt waits with its held block. *)
+    let receipts =
+      Option.map
+        (fun notify ->
+           Keeper_official_client_tool_receipts.create
+             ~delivery:Keeper_official_client_tool_receipts.Held_until_released
+             ~notify)
+        on_tool_execution
+    in
+    let hooks =
+      match receipts with
+      | Some receipts -> Keeper_official_client_tool_receipts.hooks receipts hooks
+      | None -> hooks
+    in
     let owner_epoch = Session_store.process_epoch () in
     let* stored_session =
       Session_store.load ~base_path ~keeper_name
@@ -591,18 +559,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | None -> Ok goal
       | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
     in
-    let prompt_ceiling_bytes =
-      Runtime_inference.resolve_prompt_capacity_bytes ~runtime_id
-    in
-    let* capacity_bytes =
-      match prompt_ceiling_bytes with
-      | Some capacity_bytes -> Ok capacity_bytes
-      | None ->
-        Error
-          (config_error
-             ~field:"prompt_ceiling_bytes"
-             "Antigravity requires a resolvable max-context because the CLI has no typed oversized-input refusal")
-    in
     let* () = match official_task_reference with
       | None -> Ok ()
       | Some _ -> Error (config_error ~field:"official_client_session.context_admission"
@@ -693,11 +649,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                  (runtime_label ^ " runtime model input projection raised: " ^ Printexc.to_string exn)) in
            Ok {prepared with messages})
       else
-        let* capacity_projection =
-          capacity_bounded_model_input_projection
-            ~prompt_ceiling_bytes
-            ~system_prompt:prepared.system_prompt
-            ~goal
+        let project =
+          carried_history_projection
             ?on_model_input_window_observation
             ?carried_front_seed
             ?librarian_front
@@ -708,17 +661,14 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             model_input_projection
         in
         let* messages =
-          match capacity_projection with
-          | None -> Ok prepared.messages
-          | Some project ->
-            (try project prepared.messages with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn ->
-               Error
-                 (Host.internal_error
-                    (runtime_label
-                     ^ " runtime model input projection raised: "
-                     ^ Printexc.to_string exn)))
+          try project prepared.messages with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Error
+              (Host.internal_error
+                 (runtime_label
+                  ^ " runtime model input projection raised: "
+                  ^ Printexc.to_string exn))
         in
         Ok { prepared with messages }
     in
@@ -738,31 +688,35 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
        delivery cannot prove these blocks remain in its current model input,
        so keep the frontier's held set empty and resend on every resume. *)
     let* prompt = prompt_for_turn ?composed_context ~held:[] ~is_resume ~goal prepared in
-    let* () =
-      if String.length prompt <= capacity_bytes
-      then Ok ()
-      else
-        Error
-          (config_error
-             ~field:"prompt_ceiling_bytes"
-             (Printf.sprintf
-                "Antigravity final prompt measures %d bytes, above the %d-byte prompt ceiling"
-                (String.length prompt)
-                capacity_bytes))
-    in
     (* Recording the half this process controls, mirroring the Codex and
        Claude Code composition lines: an oversized prompt was invisible until
        the client's own log showed promptLength=11,386,764 (2026-08-14). *)
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d \
-       goal_bytes=%d prompt_ceiling_bytes=%s"
+       goal_bytes=%d"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
       (String.length prepared.system_prompt)
-      (String.length goal)
-      (string_of_int capacity_bytes);
+      (String.length goal);
+    (* Measurement for the held-set decision: the same blocks with the same
+       digest on consecutive resumes are what a held set would skip. *)
+    if is_resume
+    then
+      Log.Keeper.info
+        ~keeper_name
+        "%s resume carried contexts: %s"
+        runtime_label
+        (Host.carried_summaries ?composed_context prepared.messages
+         |> List.map (fun (item : Host.carried_summary) ->
+           Printf.sprintf
+             "%s bytes=%d sha=%s%s"
+             item.label
+             item.bytes
+             item.sha256_prefix
+             (if item.resent_every_resume then " always_resent" else ""))
+         |> String.concat "; ");
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools
@@ -962,6 +916,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       let stream =
         stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
+          ~receipts
           ~position:
             (match conversation_mode with
              | Runtime_antigravity.Start -> Keeper_usage_resolution.Fresh
@@ -1343,6 +1298,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ?on_usage_report
+    ?on_tool_execution
     ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
@@ -1379,6 +1335,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         ~terminal_effect_state
         ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
         ~on_usage_report
+        ~on_tool_execution
         ~event_bus
         ~raw_trace
         ~on_event
@@ -1400,6 +1357,7 @@ module For_testing = struct
        ~on_native_action:None
        ~on_usage_report:(Some report)
        ~position
+       ~receipts:None
        None).on_runtime_event
       event
   ;;
@@ -1414,6 +1372,7 @@ module For_testing = struct
         ~on_native_action:None
         ~on_usage_report:None
         ~position:Keeper_usage_resolution.Fresh
+        ~receipts:None
         (Some (fun event -> emitted := event :: !emitted))
     in
     List.iter projection.on_runtime_event events;
@@ -1440,6 +1399,7 @@ module For_testing = struct
         ~on_native_action:None
         ~on_usage_report:None
         ~position:Keeper_usage_resolution.Fresh
+        ~receipts:None
         (Some
            (fun event ->
               emitted := event :: !emitted;
@@ -1455,22 +1415,5 @@ module For_testing = struct
     List.rev !emitted
   ;;
 
-  let capacity_bounded_model_input_projection =
-    capacity_bounded_model_input_projection
-  ;;
-
-  let start_prompt_bytes ~system_prompt ~goal messages =
-    let prepared : Host.prepared_turn =
-      { messages; system_prompt; tools = []; reasoning_effort = None }
-    in
-    Result.map String.length (prompt_for_turn ~held:[] ~is_resume:false ~goal prepared)
-  ;;
-
-  let reserved_prompt_bytes ~system_prompt ~goal =
-    String.length system_prompt
-    + String.length goal
-    + prompt_section_framing_reserved_bytes ()
-  ;;
-
-  let measure_model_input_message_bytes = measure_model_input_message_bytes
+  let carried_history_projection = carried_history_projection
 end

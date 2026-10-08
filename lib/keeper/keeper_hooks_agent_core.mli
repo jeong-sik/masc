@@ -98,6 +98,7 @@ val cost_event_payload :
   ?response_id:string ->
   ?runtime_attempt:(string * string * int) ->
   ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
+  ?spend_observation:Keeper_spend_observation.t ->
   ?vendor_total_tokens:int ->
   ?resolution_status:Keeper_usage_resolution.status ->
   ?cache_creation_input_tokens:int ->
@@ -130,6 +131,7 @@ val emit_cost_event :
   ?response_id:string ->
   ?runtime_attempt:(string * string * int) ->
   ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
+  ?spend_observation:Keeper_spend_observation.t ->
   ?vendor_total_tokens:int ->
   ?resolution_status:Keeper_usage_resolution.status ->
   ?cache_creation_input_tokens:int ->
@@ -206,6 +208,10 @@ type tool_stream_observation =
       (** A producer without a pre-admission sidecar completed the turn. Its
           calls without an explicit producer receipt stay delivery-only;
           no ordinal or provider-id guess may attach a canonical execution. *)
+
+type tool_result_commit_policy = Require_commit | Observe_commit
+(** A chat delivery requires its tool receipt. Autonomous visibility observes
+    committed receipts without making a failed observation stop execution. *)
 
 (** [observation_token] is captured for registry callbacks. Omission disables
     registry turn observation; it never adopts a currently active turn. *)

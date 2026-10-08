@@ -381,10 +381,6 @@ val ensure_keeper_credential :
     [x-masc-internal-token] trust path. Existing names must resolve to this
     exact canonical owner, and UUID ownership is validated before publication. *)
 
-type credential_status =
-  | Credential_present of agent_credential
-  | Credential_missing
-
 (** {1 Token Lifecycle} *)
 
 val create_token :

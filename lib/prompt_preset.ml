@@ -17,7 +17,8 @@
    take effect at three different moments; the report names each:
    overrides at once, instructions at the keeper's next up, runtime through
    the runtime.toml commit path (which re-publishes the exact-output lanes in
-   process). The current state is saved first as [_autosave-<stamp>]. *)
+   process). The current state is saved first as [_autosave], over the one
+   the previous restore left. *)
 
 let ( let* ) = Result.bind
 
@@ -25,6 +26,7 @@ module Override = Prompt_override_persistence
 
 type lane =
   { id : string
+  ; enabled : bool
   ; slots : string list
   ; cli_slots : string list
   }
@@ -37,6 +39,7 @@ type snapshot =
   ; instructions : (string * string) list
   ; assignments : (string * string) list
   ; lanes : lane list
+  ; default_revisions : (string * string) list option
   }
 
 type manifest =
@@ -65,12 +68,18 @@ type runtime_result =
   | Runtime_committed
   | Runtime_failed of string
 
+type default_comparison =
+  | Defaults_unknown
+  | Defaults_match
+  | Defaults_differ of (string * string option * string option) list
+
 type restore_report =
   { restored : string
   ; autosave : string
   ; prompt_overrides_result : part_result
   ; instructions_result : part_result
   ; runtime_result : runtime_result
+  ; default_comparison : default_comparison
   }
 
 let schema_version = 1
@@ -79,7 +88,7 @@ let overrides_file = "prompt_overrides.json"
 let runtime_file = "runtime.json"
 let instructions_dir = "instructions"
 let instructions_extension = ".txt"
-let autosave_prefix = "_autosave-"
+let autosave_name = "_autosave"
 
 let is_valid_name name =
   (not (String.equal name ""))
@@ -103,19 +112,6 @@ let runtime_toml_path ~base_path =
 ;;
 
 let now_iso () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
-
-(* [YYYYMMDDTHHMMSSZ], a stamp that is also a valid preset name segment. *)
-let compact_stamp () =
-  let tm = Unix.gmtime (Unix.gettimeofday ()) in
-  Printf.sprintf
-    "%04d%02d%02dT%02d%02d%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
-;;
 
 (* The filesystem boundary raises; a preset call answers with [Error]. *)
 let guard f =
@@ -181,6 +177,36 @@ let manifest_of_snapshot (s : snapshot) =
   }
 ;;
 
+let compare_defaults (s : snapshot) =
+  match s.default_revisions with
+  | None -> Defaults_unknown
+  | Some saved ->
+      let current = Prompt_registry.default_revisions () in
+      let keys = List.sort_uniq String.compare (List.map fst saved @ List.map fst current) in
+      let changes = List.filter_map (fun key ->
+        let before = List.assoc_opt key saved in
+        let after = List.assoc_opt key current in
+        if before = after then None else Some (key, before, after)) keys in
+      match changes with [] -> Defaults_match | _ -> Defaults_differ changes
+;;
+
+let default_comparison_to_json comparison : Yojson.Safe.t =
+  let status, changes = match comparison with
+    | Defaults_unknown -> "unknown", []
+    | Defaults_match -> "matches", []
+    | Defaults_differ changes -> "differs", changes in
+  let revision = function None -> `Null | Some value -> `String value in
+  `Assoc ["status", `String status;
+    "changes", `List (List.map (fun (key, saved, current) ->
+      `Assoc ["key", `String key; "saved_sha256", revision saved;
+              "current_sha256", revision current]) changes)]
+;;
+
+let default_revisions_json = function
+  | None -> `Null
+  | Some rows -> `Assoc (List.map (fun (key, hash) -> key, `String hash) rows)
+;;
+
 let manifest_to_json (m : manifest) : Yojson.Safe.t =
   `Assoc
     [ "schema_version", `Int schema_version
@@ -205,6 +231,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ; "name", `String s.name
     ; "description", `String s.description
     ; "created_at", `String s.created_at
+    ; "default_revisions", default_revisions_json s.default_revisions
     ; ( "prompt_overrides"
       , `List
           (List.map
@@ -239,6 +266,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
              (fun (l : lane) ->
                `Assoc
                  [ "id", `String l.id
+                 ; "enabled", `Bool l.enabled
                  ; "slots", strings l.slots
                  ; "cli_slots", strings l.cli_slots
                  ])
@@ -256,7 +284,24 @@ type stored_manifest =
   ; stored_description : string
   ; stored_created_at : string
   ; stored_keepers : string list
+  ; stored_default_revisions : (string * string) list option
   }
+
+let read_default_revisions fields =
+  match List.assoc_opt "default_revisions" fields with
+  | None | Some `Null -> Ok None
+  | Some (`Assoc rows) ->
+      let* reversed = List.fold_left (fun acc (key, value) ->
+        let* acc = acc in
+        match value with
+        | `String hash when String.length hash = 64
+            && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) hash ->
+            if List.mem_assoc key acc then Error ("duplicate default prompt key: " ^ key)
+            else Ok ((key, hash) :: acc)
+        | _ -> Error ("invalid default prompt SHA-256: " ^ key)) (Ok []) rows in
+      Ok (Some (List.rev reversed))
+  | Some _ -> Error "default_revisions must be an object or null"
+;;
 
 let stored_manifest_of_json (json : Yojson.Safe.t) =
   match json with
@@ -274,6 +319,7 @@ let stored_manifest_of_json (json : Yojson.Safe.t) =
       let* stored_description = string_field fields "description" in
       let* stored_created_at = string_field fields "created_at" in
       let* stored_keepers = string_list_field fields "keepers" in
+      let* stored_default_revisions = read_default_revisions fields in
       let* () =
         match
           List.find_opt (fun keeper -> not (is_valid_name keeper)) stored_keepers
@@ -281,7 +327,7 @@ let stored_manifest_of_json (json : Yojson.Safe.t) =
         | Some keeper -> Error ("manifest keeper name is not a file name: " ^ keeper)
         | None -> Ok ()
       in
-      Ok { stored_name; stored_description; stored_created_at; stored_keepers }
+      Ok { stored_name; stored_description; stored_created_at; stored_keepers; stored_default_revisions }
   | _ -> Error "manifest must be an object"
 ;;
 
@@ -293,7 +339,7 @@ let runtime_to_json ~assignments ~lanes : Yojson.Safe.t =
       , `Assoc
           (List.map
              (fun lane ->
-               lane.id, `Assoc [ "slots", strings lane.slots; "cli_slots", strings lane.cli_slots ])
+               lane.id, `Assoc [ "enabled", `Bool lane.enabled; "slots", strings lane.slots; "cli_slots", strings lane.cli_slots ])
              lanes) )
     ]
 ;;
@@ -324,9 +370,20 @@ let runtime_of_json (json : Yojson.Safe.t) =
             let* acc = acc in
             match value with
             | `Assoc lane_fields ->
+              (* Presets saved before lanes carried activity (v0.49.0 and
+                 earlier, same schema_version) have no [enabled]: every lane
+                 in them was live, and the runtime TOML reads an omitted
+                 [enabled] as true too. Absent means true; a present value
+                 that is not a boolean is still refused. *)
+              let* enabled =
+                match List.assoc_opt "enabled" lane_fields with
+                | Some (`Bool enabled) -> Ok enabled
+                | None -> Ok true
+                | Some _ -> Error ("lane " ^ id ^ " enabled must be a boolean")
+              in
               let* slots = string_list_field lane_fields "slots" in
               let* cli_slots = string_list_field lane_fields "cli_slots" in
-              Ok ({ id; slots; cli_slots } :: acc)
+              Ok ({ id; enabled; slots; cli_slots } :: acc)
             | _ -> Error ("lane " ^ id ^ " must be an object"))
           (Ok [])
           pairs
@@ -370,6 +427,7 @@ let report_to_json (r : restore_report) : Yojson.Safe.t =
     ; "prompt_overrides", part_to_json ~timing:"immediate" r.prompt_overrides_result
     ; "instructions", part_to_json ~timing:"keeper_restart" r.instructions_result
     ; "runtime", runtime
+    ; "default_prompts", default_comparison_to_json r.default_comparison
     ]
 ;;
 
@@ -407,6 +465,7 @@ let runtime_of_text text =
       List.map
         (fun (d : Runtime_schema.exact_output_lane_decl) ->
           { id = d.Runtime_schema.id
+          ; enabled = d.Runtime_schema.enabled
           ; slots = d.Runtime_schema.slot_ids
           ; cli_slots = d.Runtime_schema.cli_slot_ids
           })
@@ -435,6 +494,7 @@ let capture ~base_path ~name ~description =
         { name
         ; description
         ; created_at = now_iso ()
+        ; default_revisions = Some (Prompt_registry.default_revisions ())
           (* Everything the operator saved, not only what is in force. A
              snapshot taken while an override is refused has to carry it, or
              the autosave a restore takes for safety is empty in exactly the
@@ -460,53 +520,74 @@ let instruction_file dir keeper =
   Filename.concat (Filename.concat dir instructions_dir) (keeper ^ instructions_extension)
 ;;
 
-(* A re-save under the same name must not leave a previous keeper's file
-   behind, or [load] would hand it back as part of the preset. *)
-let clear_instruction_files dir =
-  let instructions = Filename.concat dir instructions_dir in
-  if Sys.file_exists instructions && Sys.is_directory instructions
-  then
-    Fs_compat.read_dir instructions
-    |> List.iter (fun file ->
-      if Filename.check_suffix file instructions_extension
-      then Sys.remove (Filename.concat instructions file))
+let remove_quietly dir =
+  match guard (fun () -> Ok (Fs_compat.remove_tree dir)) with
+  | Ok () | Error _ -> ()
 ;;
 
-(* The manifest goes last and the old one goes first, so a save that stops
-   midway leaves a directory without a manifest — unreadable to [load] and
-   listed under [unreadable] — never an old manifest over new files. *)
+(* Holders for presets being written, beside [presets/] so the list never
+   reads one and on the same file system so a holder's directory can be
+   renamed into [presets/]. *)
+let staging_dir ~base_path =
+  Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging"
+;;
+
+(* Every file of [s] into [dir], which does not exist yet. *)
+let write_preset_files dir (s : snapshot) =
+  let* () = mkdir_p (Filename.concat dir instructions_dir) in
+  let* () =
+    Override.save ~path:(Filename.concat dir overrides_file) s.prompt_overrides
+    |> Result.map_error Override.error_to_string
+  in
+  let* () =
+    Fs_compat.save_file_atomic
+      (Filename.concat dir runtime_file)
+      (Yojson.Safe.pretty_to_string
+         (runtime_to_json ~assignments:s.assignments ~lanes:s.lanes)
+       ^ "\n")
+  in
+  let* () =
+    List.fold_left
+      (fun acc (keeper, text) ->
+        let* () = acc in
+        Fs_compat.save_file_atomic (instruction_file dir keeper) text)
+      (Ok ())
+      s.instructions
+  in
+  Fs_compat.save_file_atomic
+    (Filename.concat dir manifest_file)
+    (let json = match manifest_to_json (manifest_of_snapshot s) with
+       | `Assoc fields -> `Assoc (("default_revisions", default_revisions_json s.default_revisions) :: fields)
+       | json -> json in
+     Yojson.Safe.pretty_to_string json ^ "\n")
+;;
+
+(* The preset is written whole into a fresh holder, then put in place in one
+   step: renamed in when the name is new, exchanged with the old directory
+   when it is not. A save that stops midway leaves the preset it was
+   replacing as it was, which matters most for the autosave, the one copy of
+   the state from before a restore. The holder goes afterwards, and with it
+   the directory that was replaced. *)
 let save ~base_path (s : snapshot) =
   if not (is_valid_name s.name)
   then Error ("invalid preset name: " ^ s.name)
   else
     guard (fun () ->
-    let dir = preset_dir ~base_path s.name in
-    let* () = mkdir_p (Filename.concat dir instructions_dir) in
-    let manifest = Filename.concat dir manifest_file in
-    if Sys.file_exists manifest then Sys.remove manifest;
-    clear_instruction_files dir;
-    let* () =
-      Override.save ~path:(Filename.concat dir overrides_file) s.prompt_overrides
-      |> Result.map_error Override.error_to_string
-    in
-    let* () =
-      Fs_compat.save_file_atomic
-        (Filename.concat dir runtime_file)
-        (Yojson.Safe.pretty_to_string
-           (runtime_to_json ~assignments:s.assignments ~lanes:s.lanes)
-         ^ "\n")
-    in
-    let* () =
-      List.fold_left
-        (fun acc (keeper, text) ->
-          let* () = acc in
-          Fs_compat.save_file_atomic (instruction_file dir keeper) text)
-        (Ok ())
-        s.instructions
-    in
-    Fs_compat.save_file_atomic
-      manifest
-      (Yojson.Safe.pretty_to_string (manifest_to_json (manifest_of_snapshot s)) ^ "\n"))
+      let target = preset_dir ~base_path s.name in
+      let* () = mkdir_p (presets_dir ~base_path) in
+      let* () = mkdir_p (staging_dir ~base_path) in
+      let holder = Filename.temp_dir ~temp_dir:(staging_dir ~base_path) (s.name ^ "-") "" in
+      let staged = Filename.concat holder s.name in
+      let published =
+        let* () = write_preset_files staged s in
+        guard (fun () ->
+          if Sys.file_exists target
+          then Fs_compat.exchange_paths staged target
+          else Fs_compat.rename_noreplace staged target;
+          Ok ())
+      in
+      remove_quietly holder;
+      published)
 ;;
 
 let read_manifest dir =
@@ -577,6 +658,7 @@ let load ~base_path name =
         { name = m.stored_name
         ; description = m.stored_description
         ; created_at = m.stored_created_at
+        ; default_revisions = m.stored_default_revisions
         ; prompt_overrides
         ; instructions
         ; assignments
@@ -618,6 +700,21 @@ let list ~base_path =
 let finish (r : part_result) = { applied = List.rev r.applied; skipped = List.rev r.skipped }
 
 let restore_prompt_overrides ~base_path (entries : Override.entry list) =
+  let before = List.map (fun key -> key, Prompt_registry.resolve_prompt key)
+    [Prompt_names.candle_appraiser_grade;Prompt_names.candle_appraiser_relation;
+     Prompt_names.candle_appraiser_weights] in
+  let notify_changed () =
+    (* Managed default files are outside the preset surface. Use their captured
+       values and committed in-memory overrides; release cleanup does no I/O. *)
+    let overrides = Prompt_registry.override_entries () in
+    if List.exists (fun (key, (resolution : Prompt_registry.prompt_resolution)) ->
+      let override_value = List.find_opt (fun (entry : Override.entry) -> entry.key = key) overrides
+        |> Option.map (fun entry -> entry.Override.value) in
+      let _, effective = Prompt_registry_types.resolve_source
+        ~override_value ~file_value:resolution.file_value in
+      effective <> resolution.effective) before
+    then Candle_payout_worker.wake () in
+  Eio_guard.protect ~finally:notify_changed (fun () ->
   let wanted key =
     List.exists (fun (e : Override.entry) -> String.equal e.Override.key key) entries
   in
@@ -640,7 +737,7 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
   (* Each entry keeps the binding it was captured with, so a restored
      override reads as "written against an older default" when that is what
      it is, instead of looking freshly authored against today's text. *)
-  List.fold_left
+  let result = List.fold_left
     (fun acc (e : Override.entry) ->
       match Prompt_registry.restore_persisted_entry ~base_path e with
       | Ok () -> { acc with applied = e.Override.key :: acc.applied }
@@ -649,7 +746,8 @@ let restore_prompt_overrides ~base_path (entries : Override.entry list) =
         { acc with skipped = (e.Override.key, message) :: acc.skipped })
     cleared
     entries
-  |> finish
+  |> finish in
+  result)
 ;;
 
 let restore_instructions ~base_path instructions =
@@ -682,7 +780,7 @@ let lanes_table_prefix = Runtime_toml_namespace.(path Runtime) "exact_output_lan
 
 let lane_holds ~current_lanes lane =
   match List.find_opt (fun current -> String.equal current.id lane.id) current_lanes with
-  | Some current -> current.slots = lane.slots && current.cli_slots = lane.cli_slots
+  | Some current -> current.enabled = lane.enabled && current.slots = lane.slots && current.cli_slots = lane.cli_slots
   | None -> false
 ;;
 
@@ -716,14 +814,18 @@ let runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes co
       then content
       else (
         let path = lanes_table_prefix ^ lane.id in
-        let content =
-          Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:lane.slots
-        in
-        Toml_line_editor.edit_table_multiline_array
-          content
-          ~path
-          ~key:"cli_slots"
-          ~values:lane.cli_slots))
+        let content = Toml_line_editor.edit_table_bool content ~path ~key:"enabled" ~value:lane.enabled in
+        match List.find_opt (fun current -> current.id = lane.id) current_lanes with
+        | Some current when current.slots = lane.slots && current.cli_slots = lane.cli_slots -> content
+        | Some _ | None ->
+          let content =
+            Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:lane.slots
+          in
+          Toml_line_editor.edit_table_multiline_array
+            content
+            ~path
+            ~key:"cli_slots"
+            ~values:lane.cli_slots))
     content
     lanes
 ;;
@@ -757,20 +859,12 @@ let restore_runtime ~base_path ~assignments ~lanes =
          | Error message -> Runtime_failed message))
 ;;
 
-(* The stamp has one-second resolution; a second restore inside that second
-   takes the next free suffix rather than overwriting the first autosave. *)
-let fresh_autosave_name ~base_path =
-  let stamp = autosave_prefix ^ compact_stamp () in
-  let rec pick n =
-    let candidate = if n = 0 then stamp else Printf.sprintf "%s-%d" stamp n in
-    if Sys.file_exists (preset_dir ~base_path candidate) then pick (n + 1) else candidate
-  in
-  pick 0
-;;
-
 let restore ~base_path name =
+  (* The target is read before the autosave is written, so restoring the
+     autosave itself applies what it held, not the state just captured. *)
   let* target = load ~base_path name in
-  let autosave = fresh_autosave_name ~base_path in
+  let default_comparison = compare_defaults target in
+  let autosave = autosave_name in
   let* current =
     capture ~base_path ~name:autosave ~description:("state before restoring " ^ name)
   in
@@ -780,7 +874,58 @@ let restore ~base_path name =
   let runtime_result =
     restore_runtime ~base_path ~assignments:target.assignments ~lanes:target.lanes
   in
-  Ok { restored = name; autosave; prompt_overrides_result; instructions_result; runtime_result }
+  Ok { restored = name; autosave; prompt_overrides_result; instructions_result; runtime_result; default_comparison }
+;;
+
+(* ── Delete ────────────────────────────────────────────────────────── *)
+
+type delete_error =
+  | Delete_invalid_name of string
+  | Delete_not_found of string
+  | Delete_failed of { name : string; reason : string }
+
+let unix_error_text error operation argument =
+  Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)
+;;
+
+(* The preset leaves [presets/] in one rename, into a fresh holder beside it,
+   and is removed from there. A save of the same name running alongside
+   either replaces it whole or finds it gone; it never loses files to a
+   delete still walking the old directory. A second delete of the same name
+   finds nothing to rename. No [load] first: an unreadable preset cannot be
+   restored, so removing it is the one thing the operator can still do with
+   it, and a rename moves a dangling symlink as readily as a directory. *)
+let delete ~base_path name =
+  if not (is_valid_name name)
+  then Error (Delete_invalid_name name)
+  else (
+    let holder =
+      guard (fun () ->
+        let* () = mkdir_p (staging_dir ~base_path) in
+        Ok (Filename.temp_dir ~temp_dir:(staging_dir ~base_path) (name ^ "-") ""))
+    in
+    match holder with
+    | Error reason -> Error (Delete_failed { name; reason })
+    | Ok holder ->
+      let moved =
+        match
+          Fs_compat.rename_noreplace (preset_dir ~base_path name) (Filename.concat holder name)
+        with
+        | () -> Ok ()
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Delete_not_found name)
+        | exception Unix.Unix_error (error, operation, argument) ->
+          Error (Delete_failed { name; reason = unix_error_text error operation argument })
+        | exception Sys_error reason -> Error (Delete_failed { name; reason })
+      in
+      remove_quietly holder;
+      moved)
+;;
+
+let delete_error_to_string = function
+  | Delete_invalid_name name -> "invalid preset name: " ^ name
+  | Delete_not_found name -> "no preset named " ^ name
+  | Delete_failed { name; reason } ->
+    Printf.sprintf "preset %s could not be removed: %s" name reason
 ;;
 
 let same_settings (left : snapshot) (right : snapshot) =

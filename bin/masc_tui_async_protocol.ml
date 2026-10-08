@@ -78,7 +78,7 @@ type preset_sink =
 (* The UI domain owns these refs. A posted tick is a mutation: closing its
    view invalidates presentation, never cancels or retries the request. Keep
    the pending request until its terminal mailbox result, even across reopen. *)
-type msx_poll_request = { poll_view : unit ref; poll_port : int }
+type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority }
 
 (* A DOS read changes nothing on the server. The current view owns one read;
    reopening may start another without waiting for an old view's HTTP timeout.
@@ -109,18 +109,34 @@ type currency_authority_request = {
   car_identity : Masc.Tui_decode.server_identity option;
 }
 
+(* What the resume preflight learned about the Keeper's owner before the queue
+   snapshot is read. *)
+type resume_confirmation =
+  | Owner_resumed
+  | Owner_already_active
+
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
   | Workspace_identity_unconfirmed of string
+  | Schedule_form_authority_refused of
+      { action : string; detail : string; workspace : workspace_input_identity option }
+  | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
+  | Keeper_queue_resume_confirmed of string * int * resume_confirmation
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
+  | Lane_application_loaded of Masc_tui_lane_application.ticket
+      * (Masc_tui_lane_addons.configuration, string) result
   | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
-  | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
+  | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool * string option
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request
-      * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
+      * (Masc_tui_msx_tick.response, string) result
+  | Msx_activity_loaded of msx_poll_request
+      * (Masc_tui_msx_tick.activity * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result, string) result
+  | Msx_live_loaded of machine_live_request
+      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
   | Dos_live_loaded of machine_live_request
       * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
@@ -152,6 +168,17 @@ type async_msg =
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
+  (* The confirm-queue read that rode a refresh was refused because the same
+     pass confirmed the workspace identity first ([Approval.Flow.invalidate]
+     runs inside [apply_server_identity_reading]). The surface that draws the
+     count re-reads it now, on the same ticket-generation terms every other
+     approval listing rides. *)
+  | Approvals_listing_superseded
+  | Approvals_summary_loaded of
+      Masc_tui_types.Snapshot_read.request
+      * Masc_tui_operator_projection.Listing_order.ticket
+      * Masc.Tui_decode.server_identity
+      * (approval_snapshot, string) result
   | Surface_composer_released
   | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
@@ -181,7 +208,7 @@ type async_msg =
       * (Masc_tui_keeper_chat_projection.response, Masc_tui_keeper_chat_projection.error) result
       * unit Eio.Promise.u
   | Keeper_chat_stream_deltas of
-      Masc_tui_keeper_chat_projection.request * (int option * Masc_tui_keeper_chat_live.delta) list
+      Masc_tui_keeper_chat_projection.request * Masc_tui_keeper_chat_live.observed_delta list
   | Keeper_chat_stream_unavailable of Masc_tui_keeper_chat_projection.request * string
   | Keeper_run_next_done of Masc_tui_keeper_chat_projection.request * (string, string) result
   | Keeper_observed_interrupt_done of
@@ -195,10 +222,16 @@ type async_msg =
       * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_copy_loaded of
       int * string * (Masc_tui_keeper_chat_history.decoded, string) result
-  | Keeper_chat_journal_loaded of
+  | Keeper_chat_operation_loaded of
       { keeper_name : string
       ; operation_id : string
+      ; operation_state : (Keeper_chat_operation.state, string) result
+      }
+  | Keeper_chat_journal_loaded of
+      { keeper_name : string
+      ; source : Masc_tui_keeper_chat_log.journal_source
       ; started_at : float
+      ; operation_state : (Keeper_chat_operation.state option, string) result
       ; journal :
           ( Masc.Keeper_chat_event_log.journaled_event list
           , Masc_tui_keeper_chat_log.events_error )
@@ -213,8 +246,8 @@ type async_msg =
         * Masc.Tui_decode.keeper_secret_projection list,
         string )
       result
-  | Standalone_lanes_loaded of
-      int * (Masc.Tui_decode.standalone_lanes_snapshot, string) result
+  | Lane_inventory_loaded of
+      int * (Masc.Tui_decode_lane_inventory.snapshot, string) result
   | Clients_loaded of
       int * (Masc.Tui_decode.clients_snapshot, string) result
   (* Keyed by the lane / run they answer for: an answer that lands after the
@@ -243,6 +276,8 @@ type async_msg =
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result
+  | Memory_input_loaded of string Masc_tui_fetched.request
+      * (Masc_tui_memory_usage.t, string) result
   (* Carries the request it answers: the browser can be closed or pointed at
      another keeper while a load is in flight, and a late answer for somebody
      else must be dropped, not filed under whoever is open. The answer is the
@@ -299,11 +334,12 @@ type async_msg =
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list
       * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option
-      * (unit, string) result
+      * (Masc_tui_runtime_config_receipt.t, string) result
   | Runtime_catalog_loaded of
       int * ( Masc.Tui_decode.runtime_option list
         * Masc.Tui_decode.runtime_resolved_lane list
-        * Masc.Tui_decode.runtime_assignment list,
+        * Masc.Tui_decode.runtime_assignment list
+        * string option,
         string )
       result
   | Runtime_assignment_set of
@@ -370,7 +406,7 @@ type async_msg =
   (* Its own message rather than a field on the stance one: the two come from
      different endpoints and one failing must not blank the other. *)
   | Keeper_gate_settings_loaded of
-      (((string * string) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
+      (((string * Masc.Tui_decode.gate_mode) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
       * Masc_tui_operator_projection.Listing_order.ticket
@@ -445,11 +481,16 @@ type async_msg =
       Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
+  | Exact_activity_read of Masc_tui_exact_activity.request * (Masc_tui_exact_activity.document, string) result
+  | Exact_activity_saved of Masc_tui_exact_activity.request * Masc_tui_exact_activity.write_result
+  | Browser_activity_read of Masc_tui_browser_activity.request * (Masc_tui_browser_activity.document, string) result
+  | Browser_activity_saved of Masc_tui_browser_activity.request * Masc_tui_browser_activity.write_result
+  | Machine_activity_read of Masc_tui_machine_activity.request * (Masc_tui_machine_activity.reading, string) result
+  | Machine_activity_saved of Masc_tui_machine_activity.request * Masc_tui_machine_activity.write_result
   | Runtime_config_view_loaded of
       int * string option
-      * (string * string list * Masc_tui_runtime_config_view.metadata, string) result
-      (* Read generation and captured runtime ID to edit; [None] is a source
-         refresh without a model-settings entry request. *)
+      * (Masc_tui_runtime_config_view.reading, string) result
+      (* Read generation and captured model-settings entry request. *)
   | Runtime_params_loaded of
       (Masc.Tui_decode.runtime_param_row list, string) result
   | Runtime_param_written of
@@ -476,6 +517,7 @@ type async_msg =
   | Preset_contents_shown of preset_sink * (Masc.Tui_decode.preset_detail, string) result
   | Preset_saved of preset_sink * (Masc.Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Masc.Tui_decode.preset_restore_report, string) result
+  | Preset_deleted of preset_sink * (string, string) result
   | Play_invites_listed of string option * (Masc.Tui_decode.play_invite_row list, string) result
   | Play_invite_issued of string option * Masc.Tui_decode.play_invite_issued play_mutation
   | Play_invite_revoked of string option * string * play_revoke

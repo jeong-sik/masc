@@ -17,21 +17,14 @@ type memory_state = Masc_tui_types.memory_state =
   | Memory_starving
   | Memory_read_error
 
-(** #39831: the kind of each row in the block under the selected keeper on the
-    Memory table, and which of them the default view draws. The rest wait
-    behind the [d] detail toggle, which draws every row. A lag that could not
-    be read ([Row_lag None]) is shown, never folded into zero. *)
+(** #39831: the Librarian clauses in the block under the selected keeper on
+    the Memory table, and whether the default view draws each one. A lag or a
+    failure count above zero is shown; a zero waits behind the [d] detail
+    toggle. A lag that could not be read ([Row_lag None]) is shown, never
+    folded into zero. *)
 type memory_row_kind =
-  | Row_state
-  | Row_last_saved
-  | Row_ledger
   | Row_lag of int option
   | Row_librarian_failures of int
-  | Row_vision_errors of int
-  | Row_stalled
-  | Row_cause
-  | Row_read_error
-  | Row_alert
 
 type memory_row_visibility =
   | Shown_by_default
@@ -68,7 +61,8 @@ val facts_title :
     goes further ({!Masc_tui_ansi.detail_heading}). *)
 
 val storage_size : int -> string
-(** Observed snapshot bytes rendered as B/KiB/MiB; never a model-token estimate. *)
+(** Observed rendered-knowledge bytes as B/KiB/MiB. Token mode separately
+    marks its conversion as an estimate. *)
 
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string

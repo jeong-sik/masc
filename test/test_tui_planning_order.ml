@@ -147,11 +147,23 @@ let test_filter_composes_with_sort () =
   check (list string) "filtered out rows never reach the sort"
     [ "executing-new"; "executing-old" ] actual
 
+let test_suspension_visibility_and_keys () =
+  let input = [goal "paused" (Goal_phase.Paused Goal_phase.Resume_verifying) 1;
+               goal "blocked" (Goal_phase.Blocked Goal_phase.Resume_executing) 1] in
+  check (list string) "suspended goals stay available for operator restore"
+    ["paused"; "blocked"]
+    (planning_visible_goals ~filter:Planning_filter_active ~sort:Planning_sort_phase_priority input |> ids);
+  List.iter (fun (key, action) ->
+    check bool ("key " ^ key) true (Masc_tui_render_prim.planning_action_of_key key = Some action))
+    ["p", Goal_phase.Public_action.Pause; "R", Goal_phase.Public_action.Resume;
+     "b", Goal_phase.Public_action.Block; "U", Goal_phase.Public_action.Unblock]
+
 let () =
   run "tui_planning_order"
     [ ( "planning"
       , [ test_case "phase, priority, stable recency" `Quick
             test_lifecycle_then_priority_then_server_recency
+        ; test_case "suspension visibility and restore keys" `Quick test_suspension_visibility_and_keys
         ; test_case "default filter is Active" `Quick
             test_default_filter_is_active
         ; test_case "filter cycles all/active/completed/dropped" `Quick

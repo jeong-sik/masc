@@ -1,0 +1,27 @@
+{
+  "checked_at": "2026-10-04T17:34:20.367096+00:00",
+  "base": "41680bd6a2592ef7c490d3ec6302daef9633955f",
+  "source_sha256": {
+    "lib/lane_addon/lane_addon_store.ml": "9848996d3b1205d0de7c1819b20bbf47da0109023cd0b4c4a3eeb00b04c7b936",
+    "test/test_lane_addon_worker.ml": "dde7a5c9f9b785130bcf6e7e93cee06aa9d7ab5ff6ad2c6ee63cae5934e4369d"
+  },
+  "binary_sha256": "b93f90248f755496ccd5cf202d430d2f902c1476c6e12f61d5756d5f297a4dcc",
+  "artifacts": {
+    "environment-build-refusal.log": "c4c161198ef511d8c3dbef001a0e7604a6ff81a3a9a1bc98ee55ae59f66f8e0c",
+    "red.log": "9020d740dff25ffbae8c0f2f7812c540d2863677e6b0d4802ca24df029a606d0",
+    "red-identities.txt": "6ae79eee01447755399d0fd64f8881c7bb0021fe84aed37c36da0724279fa09a",
+    "README.md": "3f6fb398a6153c0237c5022f23af6e4ad0406d4222801e5e7073eefc86111426",
+    "final-build.log": "d337f720fcba26533768d67938199f48dab8aecb20b43a0467fe946b845f6d23",
+    "classification-red-build.log": "d337f720fcba26533768d67938199f48dab8aecb20b43a0467fe946b845f6d23",
+    "red-build.log": "dd8530ae8396756878d7a1b725ec79c783ffe2ea5ea19d249f1da09e7d0242ff",
+    "classification-red.log": "e760af785c0608fdbb98f1ae2f2515ad5ac49b7ab2e1bb9989b9cecdbbbfcf9a",
+    "final-tests.log": "483a88dbd4f9ba8d2cf92d0d0ec145ec8fe82526c0a9b45d26c4d56ae0827af9"
+  },
+  "results": {
+    "original_red": 1,
+    "classification_red": 1,
+    "final_build": 0,
+    "final_tests": 29,
+    "final_exit": 0
+  }
+}

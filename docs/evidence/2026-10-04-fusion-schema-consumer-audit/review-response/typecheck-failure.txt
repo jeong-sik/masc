@@ -1,0 +1,4 @@
+File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fusion-schema-review-loop-20261004/test/test_keeper_structured_output_schema.ml", line 1:
+Error: The files /Users/dancer/me/workspace/yousleepwhen/masc/_build/default/lib/.masc.objs/byte/masc.cmi
+       and /Users/dancer/me/workspace/yousleepwhen/masc/_build/default/lib/operator/.masc_operator.objs/byte/operator_tool.cmi
+       make inconsistent assumptions over interface Masc

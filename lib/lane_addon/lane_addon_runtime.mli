@@ -58,12 +58,37 @@ val register_skill_export_handler :
     Keeper turn prerequisite. Bodies are not inserted into Keeper instructions. *)
 
 (** Reconcile a complete TOML declaration inventory with owned observers.
+    Returned declaration metadata includes the exact [source_revision] and a
+    typed [application] observation. Operator Inspect recomputes this observation
+    from live and retained owners without triggering reconciliation or cleanup.
+    Non-operator callers receive an Unknown application observation; new worker
+    identity/error details are operator-only.
     Malformed declarations and incomplete reads preserve the last applied
     configuration. Confirmed declaration removal detaches its owned observer.
     The directory is explicit for isolated feature tests. *)
 val reconcile_configuration : config:Workspace.config -> directory:string ->
   (Yojson.Safe.t, string) result
 val configuration_directory : Workspace.config -> string
+type configuration_owner = { id : string; source_path : string; revision : string }
+type inventory_presence = Live | Retained
+type inventory_instance = {
+  instance_id : string; incarnation : string; run_id : string;
+  package_id : string; title : string; package_revision : string;
+  configuration : configuration_owner option;
+  presence : inventory_presence; phase : Lane_addon_types.phase;
+}
+type inventory = {
+  owner_present : bool;
+  instances : inventory_instance list;
+  issues : (string * string) list;
+  complete : bool;
+}
+val inventory : config:Workspace.config -> inventory
+(** Operator-only metadata source; the HTTP caller must enforce CanAdmin.
+    Runs live reads on the existing owner domain and offloads retained file reads.
+    Does not create a manager/store, start workers, reconcile or clean resources.
+    [owner_present=false] means no manager has been observed in this process,
+    not that there are no retained bindings or declarations. *)
 val read_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
 val save_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
@@ -79,6 +104,11 @@ val start_configuration_service : config:Workspace.config -> sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock -> unit
 
 module For_testing : sig
+  val with_cleanup_writer :
+    (store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t option ->
+      (unit, string) result) -> (unit -> 'a) -> 'a
+  (** Terminal historical cleanup persistence. [None] removes a never-started
+      binding; [Some json] persists its final phase. Captured before offload. *)
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;
@@ -93,7 +123,7 @@ module For_testing : sig
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
-    recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
+    recover_stop : instance_id:string -> container_id:string option ->
       (unit, string) result;
     image_ready : package:Lane_addon_types.package -> (unit, string) result;
   }

@@ -242,11 +242,11 @@ pin-depends: [
   ]
   [
     "ocaml-dos.dev"
-    "git+https://github.com/jeong-sik/ocaml-dos.git#e570d41f8e10447b0a188c401a0b687fee8ab9c5"
+    "git+https://github.com/jeong-sik/ocaml-dos.git#a7b1ad660b2780e6b03c15db0ffbbd68af9eaa36"
   ]
   [
     "ocaml-msx.dev"
-    "git+https://github.com/jeong-sik/ocaml-msx.git#052f50b4bc57b54632dbd19b33a9acb64ef73072"
+    "git+https://github.com/jeong-sik/ocaml-msx.git#ab17a2bcd82a3c1cee44121d65e50ccb313e6f22"
   ]
   [
     "ocaml-protoc-plugin.6.2.0"

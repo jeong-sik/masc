@@ -87,7 +87,7 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
     goal_fsm: {
       state: 'executing',
       source: 'goal.phase',
-      next_actions: [],
+      next_actions: ['request_complete', 'drop', 'pause', 'block'],
       activity_observation: 'goal_metadata',
     },
     priority: 3,
@@ -272,7 +272,71 @@ describe('GoalTree', () => {
       expect(mocks.fetchDashboardGoalDetail.mock.calls.length).toBeGreaterThanOrEqual(2)
     })
     expect(screen.getByTestId('goal-lifecycle-action-status').textContent)
-      .toContain('requested completion')
+      .toContain('Request completion applied')
+  })
+
+  it('drops a Goal only with the reason the operator writes', async () => {
+    const goal = makeGoal('goal-drop', 'Goal to drop')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Drop' })).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Drop' }))
+    const reason = document.querySelector<HTMLTextAreaElement>('[data-goal-drop-reason] textarea')
+    expect(reason).not.toBeNull()
+    const submit = screen.getByRole('button', { name: 'Drop goal' }) as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    fireEvent.input(reason!, { target: { value: '   ' } })
+    expect(submit.disabled).toBe(true)
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(document.querySelector('[data-goal-drop-reason]')).toBeNull()
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!,
+      { target: { value: '  superseded by goal-next  ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    await waitFor(() => expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_transition', {
+      goal_id: 'goal-drop', action: 'drop', note: 'superseded by goal-next',
+      actor: { id: 'dashboard-test', display_name: 'dashboard-test' },
+    }))
+    await waitFor(() => expect(document.querySelector('[data-goal-drop-reason]')).toBeNull())
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['paused', 'resume', 'Resume', 'verifying'],
+    ['blocked', 'unblock', 'Unblock', 'awaiting_confirmation'],
+  ] as const)('restores a %s Goal using server actions', async (phase, action, label, restore) => {
+    const goal = {
+      ...makeGoal('goal-suspended', 'Suspended goal'), phase, resume_phase: restore,
+      goal_fsm: { state: phase, source: 'goal.phase', next_actions: [action, 'drop', 'reopen'], activity_observation: 'goal_metadata' },
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, phase_counts: { [phase]: 1 } },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByRole('button', { name: label })).toBeTruthy())
+    expect(document.querySelector('[data-goal-resume-phase]')?.textContent).toContain('재개 시')
+    expect(screen.queryByRole('button', { name: 'Request completion' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    await waitFor(() => expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_transition', {
+      goal_id: 'goal-suspended', action, actor: { id: 'dashboard-test', display_name: 'dashboard-test' },
+    }))
   })
 
   it('renders a verifying goal with phase label, filter chip, and summary count', async () => {

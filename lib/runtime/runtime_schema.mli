@@ -71,6 +71,7 @@ type capabilities =
 
 val connect_timeout_s_key : string
 val exact_body_timeout_s_key : string
+val admission_priority_run_limit_key : string
 
 type antigravity_effort =
   | Antigravity_low
@@ -96,7 +97,7 @@ type usage_read_shape =
   | Openrouter_key
   | Zai_quota_limit
   | Kimi_coding_usages
-  | Ollama_usage
+  | Ollama_balance
 [@@deriving show, eq]
 
 val all_usage_read_shapes : usage_read_shape list
@@ -158,6 +159,14 @@ type provider =
         this provider, including connection, response headers and the full
         response body. [None] declares no body deadline. This does not replace
         [connect_timeout_s] or ordinary Keeper per-call body deadlines. *)
+  ; admission_priority_run_limit : int option
+    (** [admission-priority-run-limit]: how many admission permits in a row
+        this provider account may hand to [Priority] requests (the judgment
+        lanes) while a [Standard] request waits for one. [None] keeps one
+        arrival-order queue. Declared on the provider because the permits are
+        counted per account. It reaches only the bindings that declare
+        [max-concurrent]; a provider where no binding can use it, or an
+        official-client provider, is refused at load. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Present exactly when [protocol = "antigravity-cli"]. *)
   ; usage_read : usage_read option
@@ -342,6 +351,10 @@ type lane_decl =
 
 type exact_output_lane_decl =
   { id : string
+  ; enabled : bool
+        (** Whether new work may acquire this lane. Omitting [enabled] in TOML
+            means true. False preserves its candidates and request settings;
+            already acquired immutable run snapshots are unaffected. *)
   ; slot_ids : string list
   ; cli_slot_ids : string list
         (** [cli_slots] — official-client runtime ids walked as one-shot
@@ -358,7 +371,7 @@ type exact_output_lane_decl =
   ; thinking : bool option
         (** [thinking] — [Some flag] sends [enable_thinking = flag] on every
             HTTP slot of the lane. [None] leaves each slot's catalog default
-            (the model's [thinking-support]). Every slot of the lane must be
+            (the model's [thinking-support]). Every slot of an enabled lane must be
             able to carry the setting; registry publication refuses the lane
             and names the slot otherwise ([Lane_thinking_not_encodable]). *)
   }
@@ -385,7 +398,8 @@ type typesafeai_destination =
     {!Keeper_board_attention_exact_flow}, which sends the post and the
     keeper's context) and [absorb_gate] (the librarian absorb gate,
     {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context
-    preservation and Skill applicability review are opt-in too. All reach the
+    preservation, Skill applicability and host shared-memory selection each
+    require independent opt-in. All reach the
     same destinations, so one [excluded_keepers] applies to every review: a
     keeper named there is never asked about, whichever gate asks. *)
 type typesafeai =
@@ -402,6 +416,9 @@ type typesafeai =
   ; skill_applicability : bool
   ; librarian_preflight : bool
       (** Opt-in JEV no-change judgment for Memory-only passes. *)
+  ; workspace_memory_selection_enabled : bool
+      (** Independent opt-in to send current input/task context and shared-memory
+          interpretations/source details for host retrieval. Defaults to false. *)
   ; excluded_keepers : string list
   }
 [@@deriving show, eq]
@@ -450,6 +467,10 @@ type config =
         Replaces {!Lsp_process_manager.command_of_language} for that language
         and no other. A key naming no language, or a value that is not a
         non-empty array of strings, is refused at load. *)
+  ; browser : Browser_configuration.t
+    (** Browser backend paths and per-lane activity from the same TOML snapshot. *)
+  ; machines : Machine_configuration.t
+    (** MSX and DOS activity from the same TOML snapshot. *)
   ; typesafeai : typesafeai
     (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
   ; egress_allowlists : Egress_allowlist.t list

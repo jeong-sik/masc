@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41145-parent-sync-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/lane-inventory.test.ts src/components/lane-inventory-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41145-parent-sync-20261004/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  7 passed (7)
+   Start at  00:12:28
+   Duration  2.22s (import 39%, transform 28%, environment 16%, setup 12%, tests 4%)
+
+    Isolate  2 workers spawned · ~261ms startup each (spawn + environment, per file)
+             at least ~261ms faster with isolate: false — reuses workers across files instead of one per file
+

@@ -113,8 +113,8 @@ describe('phaseFilterLabel', () => {
     expect(phaseFilterLabel('completed')).toBe('완료')
   })
 
-  it('returns 중단 for dropped', () => {
-    expect(phaseFilterLabel('dropped')).toBe('중단')
+  it('returns 포기 for dropped', () => {
+    expect(phaseFilterLabel('dropped')).toBe('포기')
   })
 
   it('returns 전체 for unknown', () => {

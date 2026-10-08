@@ -79,7 +79,10 @@ type t
 (** Optional host-owned model access. The subprocess sends standard MCP
     sampling requests; the host chooses credentials and model policy.
     Ordinary callback exceptions become protocol errors so the connection can
-    serve subsequent requests. Eio cancellation propagates to the caller. *)
+    serve subsequent requests. Eio cancellation propagates to the caller.
+
+    A reply frame larger than the connection's byte limit is replaced by the
+    transport with a short JSON-RPC error. *)
 type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
   (Mcp_protocol.Sampling.create_message_result, string) result
 

@@ -41,7 +41,7 @@ let text fields key = match List.assoc_opt key fields with
   | _ -> reject Invalid_request (key ^ " requires a non-blank string")
 let file_name name =
   if name <> Filename.basename name || String.contains name '\\' || String.contains name '\000'
-    || String.length name <= String.length ".toml" || not (Filename.check_suffix name ".toml")
+    || String.length name < String.length ".toml" || not (Filename.check_suffix name ".toml")
   then reject Invalid_request "file_name must be one direct-child .toml filename" else Ok name
 let read_request json = let* fields = fields ["source_path"] json in text fields "source_path"
 let write_request json =

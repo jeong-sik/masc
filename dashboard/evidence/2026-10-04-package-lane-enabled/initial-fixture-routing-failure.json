@@ -1,0 +1,11 @@
+{
+  "message": "TimeoutError: locator.waitFor: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('table', { name: 'TOML declarations' }).getByText('Off requested · worker cleanup not yet confirmed', { exact: true }) to be visible\u001b[22m\n",
+  "errors": [
+    "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+  ],
+  "unhandled": [
+    "/dashboard/src/api/lane-addons.ts"
+  ],
+  "writes": [],
+  "body": ""
+}

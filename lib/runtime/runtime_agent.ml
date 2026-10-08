@@ -115,6 +115,7 @@ type config =
   min_p : float option;
   on_run_complete : (bool -> unit) option;
   checkpoint_sink : Agent_core.Agent.checkpoint_sink option;
+  execution_store : Agent_core.Agent.execution_store option;
 }
 
 let default_config = Runtime_agent_context.default_config
@@ -1273,6 +1274,7 @@ let run_blocks_internal
                     Agent_core.Agent.run_stream_blocks
                       ~sw
                       ?clock
+                      ?execution_store:config.execution_store
                       ?on_yield
                       ?on_resume
                       ~input_metadata
@@ -1283,6 +1285,7 @@ let run_blocks_internal
                     Agent_core.Agent.run_blocks
                       ~sw
                       ?clock
+                      ?execution_store:config.execution_store
                       ?on_yield
                       ?on_resume
                       ~input_metadata
@@ -1307,6 +1310,7 @@ let run_blocks_internal
                     Agent_core.Agent.Advanced.continue
                       ~sw
                       ?clock
+                      ?execution_store:config.execution_store
                       ?on_yield
                       ?on_resume
                       ~api_strategy
@@ -1349,6 +1353,7 @@ let run_blocks_internal
                   Agent_core.Agent.Advanced.run_blocks
                     ~sw
                     ?clock
+                    ?execution_store:config.execution_store
                     ?on_yield
                     ?on_resume
                     ~input_metadata
@@ -1360,6 +1365,7 @@ let run_blocks_internal
                   Agent_core.Agent.Advanced.continue
                     ~sw
                     ?clock
+                    ?execution_store:config.execution_store
                     ?on_yield
                     ?on_resume
                     ~api_strategy

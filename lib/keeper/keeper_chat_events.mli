@@ -79,6 +79,14 @@ type continuation_checkpoint =
   ; request_id : string option
   }
 
+type native_tool =
+  { occurrence : tool_stream_occurrence
+  ; tool_call_id : string option
+  ; tool_call_name : string option
+  }
+(** An official client's built-in tool observation. Missing provider identity
+    stays absent. This is not a MASC tool execution receipt. *)
+
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
@@ -151,6 +159,10 @@ type keeper_chat_event =
       ; tool_call_id : string option
       }
       (** Provider argument streaming ended. This is not execution completion. *)
+  | Native_tool_start of native_tool
+  | Native_tool_end of native_tool
+      (** The provider reported the native step's end. No success/failure or
+          canonical execution result is implied by this observation. *)
   | Tool_approval_requested of
       { tool_call_id : string
       ; tool_call_name : string
@@ -308,8 +320,9 @@ val take_nonblocking : t -> keeper_chat_event option
 
 val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
 
-(** JSON for cumulative mid-stream counters: only reported fields appear,
-    so "not reported" stays distinguishable from 0. *)
+(** JSON for cumulative mid-stream counters and provider-reported charge:
+    only reported fields appear, so "not reported" stays distinguishable from 0.
+    Non-finite charges are omitted to keep live projection JSON valid. *)
 val delta_usage_to_json : Agent_core.Types.delta_usage -> Yojson.Safe.t
 
 (** The wire spelling of why the provider stopped writing, as

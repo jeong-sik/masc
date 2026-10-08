@@ -1,0 +1,43 @@
+{
+  "head": "85cbd60991dce63be1c143fe4c0f580237544d22",
+  "merge_parent": "e27cbe18757a6e49950d3ca2a9e19aafdf80f7c2",
+  "results": {
+    "initial_web": {
+      "passed": 144,
+      "failed": 3,
+      "exit": 1
+    },
+    "final_web": {
+      "passed": 147,
+      "suites": 7,
+      "exit": 0,
+      "handle": 61304
+    },
+    "tsc_and_eslint": {
+      "exit": 0,
+      "handle": 44040
+    }
+  },
+  "logs": {
+    "web-before.log": {
+      "source": "/tmp/pr41153-propagate-web.log",
+      "sha256": "6036fef12ad8e8ebe692b2ec0c2702cc18e10396d122b7bd3301157f89ad369c"
+    },
+    "web-final.log": {
+      "source": "/tmp/pr41153-propagate-web-fixed.log",
+      "sha256": "6dcc30d8bf08006584d69748edf5d465f4b50dd1e318959a8c2e4fa3daba35d7"
+    },
+    "tsc.log": {
+      "source": "/tmp/pr41153-propagate-tsc-fixed.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint.log": {
+      "source": "/tmp/pr41153-propagate-eslint-fixed.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "source_sha256": {
+    "dashboard/src/components/lane-addons-panel.ts": "d965bde686894a2e4d170828f1e706dbe55095bb45a9d34e3a620f748d6ce43c",
+    "dashboard/src/components/lane-addons-panel.test.ts": "c97f32f7f4cc4b040aec6668ee503e046fef7248c7b20e6603f6f40642478ed6"
+  }
+}

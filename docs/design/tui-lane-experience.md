@@ -34,7 +34,7 @@ UTC 관측 시각과 source clock은 다른 좌표다. source clock의 domain과
 
 ## 화면과 조작 계약
 
-메인 `Lanes`는 standalone Lane 목록과 실행 상세를 유지한다. `A`는 Add-ons를 연다.
+메인 `Lanes`는 모든 Lane family의 공통 목록을 읽고 각 행에서 기존 관리 화면으로 이어진다. Exact 행의 실행 상세·모델 편집은 유지한다. `A`는 Add-ons를 연다.
 Add-ons 첫 진입은 현재 설치 목록이다. 설치된 이름·할 수 있는 일·최근 결과를 읽고
 Enter로 선택한 항목을 연다. `h`는 현재 설치와 묶인 보존 이력을 전환한다.
 실행 중·실패한 worker와 보존된 이력을 구분하고 조작 대상을 정확한 instance에 묶는다.

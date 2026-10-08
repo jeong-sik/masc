@@ -90,7 +90,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     { c with context_handoff_needed = context_actions.handoff }
   | Operator_pause -> { c with operator_paused = true }
   | Operator_resume -> { c with operator_paused = false }
-  | Operator_stop _ -> { c with stop_requested = true }
   | Stop_requested -> { c with stop_requested = true }
   | Drain_complete -> { c with drain_complete = true }
   | Fiber_started ->
@@ -117,11 +116,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     }
   | Fiber_terminated _ -> { c with fiber_alive = false }
   | Supervisor_restart_attempt _ -> { c with restart_requested = true }
-  | Credential_archived ->
-    { c with
-      fiber_alive = false
-    ; credential_archived = true
-    }
   | Operator_clear_requested _ ->
     (* Last resort: context fully dropped by [masc_keeper_clear]. The
        context payload change is owned by the clear runtime; no lifecycle
@@ -146,13 +140,11 @@ let update_conditions (c : conditions) (ev : event) : conditions =
 let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action list =
   let lifecycle name detail = Publish_lifecycle { event_name = name; detail } in
   match new_phase with
-  | Draining -> [ Start_drain; lifecycle "draining" "" ]
+  | Draining -> [ lifecycle "draining" "" ]
   | Stopped ->
-    [ Cleanup_and_unregister
-    ; lifecycle
+    [ lifecycle
         "stopped"
         (match event with
-         | Operator_stop { remove_meta } -> Printf.sprintf "remove_meta=%b" remove_meta
          | Drain_complete -> "drain_complete"
          | Heartbeat_ok
          | Heartbeat_failed _
@@ -165,7 +157,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Fiber_started
          | Fiber_terminated _
          | Supervisor_restart_attempt _
-         | Credential_archived
          | Operator_clear_requested _ -> event_to_string event)
     ]
   | Failing -> [ lifecycle "failing" (event_to_string event) ]
@@ -179,13 +170,11 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
       | Turn_failed _
       | Context_measured _
       | Operator_resume
-      | Operator_stop _
       | Stop_requested
       | Drain_complete
       | Fiber_started
       | Fiber_terminated _
       | Supervisor_restart_attempt _
-      | Credential_archived
       | Operator_clear_requested _ ->
         (* These events should not normally trigger a Paused transition,
            but if they do, label generically rather than mis-attributing
@@ -222,13 +211,11 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Turn_succeeded
          | Turn_failed _
          | Context_measured _
-         | Operator_stop _
          | Operator_pause
          | Stop_requested
          | Drain_complete
          | Fiber_started
          | Supervisor_restart_attempt _
-         | Credential_archived
          | Operator_clear_requested _ ->
            (* These events should not normally trigger a Paused→Running
               transition; label generically via [event_to_string]. *)
@@ -313,13 +300,11 @@ let check_event_precondition (c : conditions) (ev : event)
   | Context_measured _
   | Operator_pause
   | Operator_resume
-  | Operator_stop _
   | Stop_requested
   | Drain_complete
   | Fiber_started
   | Fiber_terminated _
-  | Supervisor_restart_attempt _
-  | Credential_archived -> Ok ()
+  | Supervisor_restart_attempt _ -> Ok ()
 ;;
 
 (* ── apply_event ───────────────────────────────────────── *)

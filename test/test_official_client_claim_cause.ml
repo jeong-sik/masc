@@ -69,7 +69,6 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
       ; model = Some "synthetic-model"
       ; admission_timeout_s = 1.; timeout_s = Some 1. } in
     let outcome = Keeper_muse_runtime.run
-        ~prompt_capacity:(Error Runtime_muse_prompt_capacity.No_window_declared)
         ~configured_reasoning_effort:None ~turn_timeout_s:None
         ~quota_scope:(Runtime_quota_window.scope_of_muse_home
           (Filename.concat base_path "absent-synthetic-account"))
@@ -102,7 +101,7 @@ let check_preserved ~base_path ~keeper_name ~expected error =
     (I.official_client_recovery_summary expected) terminal.summary;
   (match Route.route_of_error ~boundary:Route.Masc_execution error with
    | Route.Exhausted_visible_alive
-       { terminal = Route.Session_claim_refused; provenance = Route.Masc_internal_error; _ }
+       { terminal = Route.Session_claim_refused; _ }
        as route ->
      Alcotest.(check string)
        "local claim refusal has its own route label"

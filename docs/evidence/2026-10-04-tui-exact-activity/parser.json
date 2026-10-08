@@ -1,0 +1,60 @@
+{
+  "compiler": "5.5.1",
+  "scope": "Syntax only; not full TUI typechecking or execution",
+  "files": [
+    {
+      "path": "bin/masc_tui.ml",
+      "exit": 0,
+      "stderr": "",
+      "sha256": "b120110fd38fbad5f9ab3aa24d7068a088831e70af0b23213f914cb3114765e1"
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.ml",
+      "exit": 0,
+      "stderr": "",
+      "sha256": "cace9e68db076cbbb256e4df502f01b0fa291ed3a290a9c0f2ba9993aa179b0b"
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.mli",
+      "exit": 0,
+      "stderr": "",
+      "sha256": "cace9e68db076cbbb256e4df502f01b0fa291ed3a290a9c0f2ba9993aa179b0b"
+    },
+    {
+      "path": "bin/masc_tui_exact_activity.ml",
+      "exit": 0,
+      "stderr": "",
+      "sha256": "9f1f17c508833fb275d08bbf727c2b35c0b9d78b0aa94c9b0be2d92d5e272b65"
+    },
+    {
+      "path": "bin/masc_tui_exact_activity.mli",
+      "exit": 0,
+      "stderr": "",
+      "sha256": "f2a3902ee370b3665d469384c346260dfbcb104f8a86d17e0283f03e20a851a1"
+    },
+    {
+      "path": "bin/masc_tui_keys.ml",
+      "exit": 0,
+      "stderr": "",
+      "sha256": "3546be29b012503670bab246945a2dcfd17599aa0654e84f470d79af0f342dfd"
+    },
+    {
+      "path": "bin/masc_tui_render.ml",
+      "exit": 0,
+      "stderr": "",
+      "sha256": "2eb9bf3a80e1001a14802fbac9d602281008c5692006422bb958d191a6e4c938"
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "exit": 0,
+      "stderr": "",
+      "sha256": "e11c07af59a5e720389bc99989a92917ab67d8f52ca38251e54902a286039334"
+    },
+    {
+      "path": "test/test_tui_exact_activity.ml",
+      "exit": 0,
+      "stderr": "",
+      "sha256": "8a4afdcc942924e083543a45eb6ac39277b582a6d521bd4e8c5a4440895027b8"
+    }
+  ]
+}

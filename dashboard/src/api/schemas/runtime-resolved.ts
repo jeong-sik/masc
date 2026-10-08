@@ -120,6 +120,7 @@ const RuntimeResolvedResponseSchema = object({
   generated_at_iso: optional(string()),
   source: optional(string()),
   config_path: nullable(string()),
+  default_route: nullable(string()),
   default_runtime: nullable(RuntimeResolutionSchema),
   runtimes: array(RuntimeResolutionSchema),
   lanes: array(RuntimeLaneSchema),

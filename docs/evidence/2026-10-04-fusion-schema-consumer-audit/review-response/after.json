@@ -1,0 +1,5 @@
+{
+  "real": "accepted",
+  "missing-type": "rejected",
+  "missing-closedness": "rejected"
+}

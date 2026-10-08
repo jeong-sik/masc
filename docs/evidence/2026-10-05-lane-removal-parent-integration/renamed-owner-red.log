@@ -1,0 +1,380 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41122-parent-sync-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-panel.test.ts '--testNamePattern=owned file renamed'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41122-parent-sync-20261004/dashboard
+
+ ❯ src/components/lane-addons-panel.test.ts (39 tests | 1 failed | 38 skipped) 5024ms
+   ❯ optional Lane Add-on surface (39)
+     × blocks removal for backend refusal: owned file renamed to another ID 5023ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > blocks removal for backend refusal: owned file renamed to another ID
+TestingLibraryElementError: Unable to find role="button" and name "Resolve TOML before removal"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"Lane Add-ons"[39m
+      [33mclass[39m=[32m"space-y-4 p-4"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"flex items-center justify-between gap-4"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mclass[39m=[32m"text-lg font-semibold"[39m
+          [36m>[39m
+            [0mLane Add-ons[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0mOptional observations and relationships. Keeper work continues independently.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [36m>[39m
+            [0mNew TOML[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [36m>[39m
+            [0mRefresh[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<figure[39m
+        [33maria-label[39m=[32m"Lane by time"[39m
+        [33mclass[39m=[32m"border border-[var(--border)] rounded p-3 overflow-x-auto"[39m
+      [36m>[39m
+        [36m<figcaption>[39m
+          [0mLane × wall time · Select an event to inspect its evidence. Drag empty plot space to set a slice window.[0m
+        [36m</figcaption>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm"[39m
+        [36m>[39m
+          [0mEach row is a declared or observed Lane. Dotted links are recorded relationships; spacing does not imply causation.[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm"[39m
+        [36m>[39m
+          [0m2026-09-10T18:13:20.000Z → 2026-09-10T18:13:20.000Z[0m
+        [36m</p>[39m
+        [36m<svg[39m
+          [33maria-label[39m=[32m"Parallel lanes with events and recorded relationships"[39m
+          [33mclass[39m=[32m"w-full min-w-[640px] touch-none"[39m
+          [33mrole[39m=[32m"group"[39m
+          [33mviewBox[39m=[32m"0 0 960 141"[39m
+        [36m>[39m
+          [36m<g>[39m
+            [36m<text[39m
+              [33maria-label[39m=[32m"instance-1/msx/frame"[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"12"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"36"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0minstance-1/msx/frame[0m
+              [36m</title>[39m
+              [0mmsx/frame · stance-1[0m
+            [36m</text>[39m
+            [36m<text[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"11"[39m
+              [33mopacity[39m=[32m"0.75"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"52"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0mUser supplied layer · run run-2 · instance-1[0m
+              [36m</title>[39m
+              [0mUser supplied layer · observing[0m
+            [36m</text>[39m
+            [36m<line[39m
+              [33mopacity[39m=[32m"0.25"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mx1[39m=[32m"260"[39m
+              [33mx2[39m=[32m"940"[39m
+              [33my1[39m=[32m"32"[39m
+              [33my2[39m=[32m"32"[39m
+            [36m/>[39m
+            [36m<text[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"12"[39m
+              [33mx[39m=[32m"272"[39m
+              [33my[39m=[32m"26"[39m
+            [36m>[39m
+              [0mNo observations in this view[0m
+            [36m</text>[39m
+          [36m</g>[39m
+          [36m<g>[39m
+            [36m<text[39m
+              [33maria-label[39m=[32m"unregistered-domain"[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"12"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"94"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0munregistered-domain[0m
+              [36m</title>[39m
+              [0munregistered-domain[0m
+            [36m</text>[39m
+            [36m<text[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"11"[39m
+              [33mopacity[39m=[32m"0.75"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"110"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0mLane unregistered-domain[0m
+              [36m</title>[39m
+              [0mRetained observation[0m
+            [36m</text>[39m
+            [36m<line[39m
+              [33mopacity[39m=[32m"0.25"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mx1[39m=[32m"260"[39m
+              [33mx2[39m=[32m"940"[39m
+              [33my1[39m=[32m"90"[39m
+              [33my2[39m=[32m"90"[39m
+            [36m/>[39m
+          [36m</g>[39m
+          [36m<circle[39m
+            [33maria-label[39m=[32m"Inspect Same target, different observed revision · external-evidence-1"[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mcx[39m=[32m"600"[39m
+            [33mcy[39m=[32m"90"[39m
+            [33mfill[39m=[32m"#d99c56"[39m
+            [33mr[39m=[32m"6"[39m
+            [33mrole[39m=[32m"button"[39m
+            [33mstroke[39m=[32m"transparent"[39m
+            [33mstroke-width[39m=[32m"3"[39m
+            [33mstyle[39m=[32m"cursor: pointer;"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<title>[39m
+              [0mSame target, different observed revision[0m
+              [0m · [0m
+              [0m2026-09-10T18:13:20.000Z[0m
+              [0m · frame 1234[0m
+            [36m</title>[39m
+          [36m</circle>[39m
+        [36m</svg>[39m
+        [36m<details>[39m
+          [36m<summary>[39m
+            [0mEvent list · [0m
+            [0m1[0m
+            [0m observations, including overlapping points[0m
+          [36m</summary>[39m
+          [36m<ul>[39m
+            [36m<li>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"underline text-left"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mInspect event: [0m
+                [0mSame target, different observed revision[0m
+                [0m · [0m
+                [0mexternal-evidence-...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"Lane Add-ons"[39m
+      [33mclass[39m=[32m"space-y-4 p-4"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"flex items-center justify-between gap-4"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mclass[39m=[32m"text-lg font-semibold"[39m
+          [36m>[39m
+            [0mLane Add-ons[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0mOptional observations and relationships. Keeper work continues independently.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [36m>[39m
+            [0mNew TOML[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [36m>[39m
+            [0mRefresh[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<figure[39m
+        [33maria-label[39m=[32m"Lane by time"[39m
+        [33mclass[39m=[32m"border border-[var(--border)] rounded p-3 overflow-x-auto"[39m
+      [36m>[39m
+        [36m<figcaption>[39m
+          [0mLane × wall time · Select an event to inspect its evidence. Drag empty plot space to set a slice window.[0m
+        [36m</figcaption>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm"[39m
+        [36m>[39m
+          [0mEach row is a declared or observed Lane. Dotted links are recorded relationships; spacing does not imply causation.[0m
+        [36m</p>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-sm"[39m
+        [36m>[39m
+          [0m2026-09-10T18:13:20.000Z → 2026-09-10T18:13:20.000Z[0m
+        [36m</p>[39m
+        [36m<svg[39m
+          [33maria-label[39m=[32m"Parallel lanes with events and recorded relationships"[39m
+          [33mclass[39m=[32m"w-full min-w-[640px] touch-none"[39m
+          [33mrole[39m=[32m"group"[39m
+          [33mviewBox[39m=[32m"0 0 960 141"[39m
+        [36m>[39m
+          [36m<g>[39m
+            [36m<text[39m
+              [33maria-label[39m=[32m"instance-1/msx/frame"[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"12"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"36"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0minstance-1/msx/frame[0m
+              [36m</title>[39m
+              [0mmsx/frame · stance-1[0m
+            [36m</text>[39m
+            [36m<text[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"11"[39m
+              [33mopacity[39m=[32m"0.75"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"52"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0mUser supplied layer · run run-2 · instance-1[0m
+              [36m</title>[39m
+              [0mUser supplied layer · observing[0m
+            [36m</text>[39m
+            [36m<line[39m
+              [33mopacity[39m=[32m"0.25"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mx1[39m=[32m"260"[39m
+              [33mx2[39m=[32m"940"[39m
+              [33my1[39m=[32m"32"[39m
+              [33my2[39m=[32m"32"[39m
+            [36m/>[39m
+            [36m<text[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"12"[39m
+              [33mx[39m=[32m"272"[39m
+              [33my[39m=[32m"26"[39m
+            [36m>[39m
+              [0mNo observations in this view[0m
+            [36m</text>[39m
+          [36m</g>[39m
+          [36m<g>[39m
+            [36m<text[39m
+              [33maria-label[39m=[32m"unregistered-domain"[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"12"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"94"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0munregistered-domain[0m
+              [36m</title>[39m
+              [0munregistered-domain[0m
+            [36m</text>[39m
+            [36m<text[39m
+              [33mfill[39m=[32m"currentColor"[39m
+              [33mfont-size[39m=[32m"11"[39m
+              [33mopacity[39m=[32m"0.75"[39m
+              [33mx[39m=[32m"0"[39m
+              [33my[39m=[32m"110"[39m
+            [36m>[39m
+              [36m<title>[39m
+                [0mLane unregistered-domain[0m
+              [36m</title>[39m
+              [0mRetained observation[0m
+            [36m</text>[39m
+            [36m<line[39m
+              [33mopacity[39m=[32m"0.25"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mx1[39m=[32m"260"[39m
+              [33mx2[39m=[32m"940"[39m
+              [33my1[39m=[32m"90"[39m
+              [33my2[39m=[32m"90"[39m
+            [36m/>[39m
+          [36m</g>[39m
+          [36m<circle[39m
+            [33maria-label[39m=[32m"Inspect Same target, different observed revision · external-evidence-1"[39m
+            [33maria-pressed[39m=[32m"false"[39m
+            [33mcx[39m=[32m"600"[39m
+            [33mcy[39m=[32m"90"[39m
+            [33mfill[39m=[32m"#d99c56"[39m
+            [33mr[39m=[32m"6"[39m
+            [33mrole[39m=[32m"button"[39m
+            [33mstroke[39m=[32m"transparent"[39m
+            [33mstroke-width[39m=[32m"3"[39m
+            [33mstyle[39m=[32m"cursor: pointer;"[39m
+            [33mtabindex[39m=[32m"0"[39m
+          [36m>[39m
+            [36m<title>[39m
+              [0mSame target, different observed revision[0m
+              [0m · [0m
+              [0m2026-09-10T18:13:20.000Z[0m
+              [0m · frame 1234[0m
+            [36m</title>[39m
+          [36m</circle>[39m
+        [36m</svg>[39m
+        [36m<details>[39m
+          [36m<summary>[39m
+            [0mEvent list · [0m
+            [0m1[0m
+            [0m observations, including overlapping points[0m
+          [36m</summary>[39m
+          [36m<ul>[39m
+            [36m<li>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"underline text-left"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mInspect event: [0m
+                [0mSame target, different observed revision[0m
+                [0m · [0m
+                [0mexternal-evidence-...
+ ❯ waitForWrapper node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/lane-addons-panel.test.ts:306:34
+    304|     }))
+    305|     const screen = render(html`<${LaneAddonsPanel} />`)
+    306|     const removal = await screen.findByRole('button', { name: 'Resolve…
+       |                                  ^
+    307|     expect((removal as HTMLButtonElement).disabled).toBe(true)
+    308|     fireEvent.click(removal)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 38 skipped (39)
+   Start at  02:36:28
+   Duration  5.67s (tests 90%, import 3%, environment 2%, transform 2%, setup 2%)
+
+ ELIFECYCLE  Test failed. See above for more details.

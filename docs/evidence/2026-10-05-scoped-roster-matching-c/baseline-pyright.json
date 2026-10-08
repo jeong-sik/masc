@@ -1,0 +1,4286 @@
+{
+    "version": "1.1.409",
+    "time": "1791132285277",
+    "generalDiagnostics": [
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__setitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 109,
+                    "character": 8
+                },
+                "end": {
+                    "line": 109,
+                    "character": 15
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 162,
+                    "character": 25
+                },
+                "end": {
+                    "line": 162,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 162,
+                    "character": 25
+                },
+                "end": {
+                    "line": 162,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 162,
+                    "character": 25
+                },
+                "end": {
+                    "line": 162,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 162,
+                    "character": 25
+                },
+                "end": {
+                    "line": 162,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 162,
+                    "character": 25
+                },
+                "end": {
+                    "line": 162,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 162,
+                    "character": 25
+                },
+                "end": {
+                    "line": 162,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 162,
+                    "character": 25
+                },
+                "end": {
+                    "line": 162,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 162,
+                    "character": 25
+                },
+                "end": {
+                    "line": 162,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 162,
+                    "character": 25
+                },
+                "end": {
+                    "line": 162,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"() -> RawHttpResponse\" cannot be assigned to parameter \"value\" of type \"HttpFixture\" in function \"__setitem__\"\n  Type \"() -> RawHttpResponse\" is not assignable to type \"HttpFixture\"\n    \"MethodType\" is not assignable to \"tuple[int, object]\"\n    \"MethodType\" is not assignable to \"RawHttpResponse\"\n    \"MethodType\" is not assignable to \"StreamingHttpResponse\"\n    \"MethodType\" is not assignable to \"DroppedHttpResponse\"\n    \"MethodType\" is not assignable to \"RequestHttpResponse\"\n    \"MethodType\" is not assignable to \"MethodHttpResponse\"\n    \"MethodType\" is not assignable to \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 166,
+                    "character": 4
+                },
+                "end": {
+                    "line": 166,
+                    "character": 23
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"() -> RawHttpResponse\" cannot be assigned to parameter \"value\" of type \"HttpFixture\" in function \"__setitem__\"\n  Type \"() -> RawHttpResponse\" is not assignable to type \"HttpFixture\"\n    \"MethodType\" is not assignable to \"tuple[int, object]\"\n    \"MethodType\" is not assignable to \"RawHttpResponse\"\n    \"MethodType\" is not assignable to \"StreamingHttpResponse\"\n    \"MethodType\" is not assignable to \"DroppedHttpResponse\"\n    \"MethodType\" is not assignable to \"RequestHttpResponse\"\n    \"MethodType\" is not assignable to \"MethodHttpResponse\"\n    \"MethodType\" is not assignable to \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 167,
+                    "character": 4
+                },
+                "end": {
+                    "line": 167,
+                    "character": 30
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"HttpFixture\" cannot be assigned to parameter \"response\" of type \"HttpResponse\" in function \"__init__\"\n  Type \"HttpFixture\" is not assignable to type \"HttpResponse\"\n    \"ConnectionHttpResponse\" is not assignable to \"tuple[int, object]\"",
+            "range": {
+                "start": {
+                    "line": 170,
+                    "character": 55
+                },
+                "end": {
+                    "line": 170,
+                    "character": 76
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"HttpFixture\" cannot be assigned to parameter \"subsequent_response\" of type \"HttpResponse | None\" in function \"__init__\"\n  Type \"HttpFixture\" is not assignable to type \"HttpResponse | None\"\n    Type \"ConnectionHttpResponse\" is not assignable to type \"HttpResponse | None\"\n      \"ConnectionHttpResponse\" is not assignable to \"tuple[int, object]\"\n      \"ConnectionHttpResponse\" is not assignable to \"None\"",
+            "range": {
+                "start": {
+                    "line": 171,
+                    "character": 28
+                },
+                "end": {
+                    "line": 171,
+                    "character": 49
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"metadata_path\" is possibly unbound",
+            "range": {
+                "start": {
+                    "line": 304,
+                    "character": 16
+                },
+                "end": {
+                    "line": 304,
+                    "character": 29
+                }
+            },
+            "rule": "reportPossiblyUnboundVariable"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"metadata_bytes\" is possibly unbound",
+            "range": {
+                "start": {
+                    "line": 304,
+                    "character": 42
+                },
+                "end": {
+                    "line": 304,
+                    "character": 56
+                }
+            },
+            "rule": "reportPossiblyUnboundVariable"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 324,
+                    "character": 15
+                },
+                "end": {
+                    "line": 324,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 324,
+                    "character": 15
+                },
+                "end": {
+                    "line": 324,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 324,
+                    "character": 15
+                },
+                "end": {
+                    "line": 324,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 324,
+                    "character": 15
+                },
+                "end": {
+                    "line": 324,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 324,
+                    "character": 15
+                },
+                "end": {
+                    "line": 324,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 324,
+                    "character": 15
+                },
+                "end": {
+                    "line": 324,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 324,
+                    "character": 15
+                },
+                "end": {
+                    "line": 324,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 324,
+                    "character": 15
+                },
+                "end": {
+                    "line": 324,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 324,
+                    "character": 15
+                },
+                "end": {
+                    "line": 324,
+                    "character": 36
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__setitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 336,
+                    "character": 12
+                },
+                "end": {
+                    "line": 336,
+                    "character": 19
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 346,
+                    "character": 38
+                },
+                "end": {
+                    "line": 346,
+                    "character": 45
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 358,
+                    "character": 4
+                },
+                "end": {
+                    "line": 360,
+                    "character": 62
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> tuple[Literal[200], dict[str, list[dict[str, object]]]])]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/board?sort_by=hot']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 358,
+                    "character": 20
+                },
+                "end": {
+                    "line": 360,
+                    "character": 61
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 410,
+                    "character": 25
+                },
+                "end": {
+                    "line": 410,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 410,
+                    "character": 25
+                },
+                "end": {
+                    "line": 410,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 410,
+                    "character": 25
+                },
+                "end": {
+                    "line": 410,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 410,
+                    "character": 25
+                },
+                "end": {
+                    "line": 410,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 410,
+                    "character": 25
+                },
+                "end": {
+                    "line": 410,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 410,
+                    "character": 25
+                },
+                "end": {
+                    "line": 410,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 410,
+                    "character": 25
+                },
+                "end": {
+                    "line": 410,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 410,
+                    "character": 25
+                },
+                "end": {
+                    "line": 410,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 410,
+                    "character": 25
+                },
+                "end": {
+                    "line": 410,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 433,
+                    "character": 4
+                },
+                "end": {
+                    "line": 435,
+                    "character": 47
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (tuple[Literal[504], dict[str, str]] | HttpResponse | tuple[Literal[503], dict[str, str]])) | (() -> tuple[Literal[200], dict[str, Unknown]])]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/chat/history']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/memory-journal?limit=20']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 433,
+                    "character": 20
+                },
+                "end": {
+                    "line": 435,
+                    "character": 46
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 493,
+                    "character": 25
+                },
+                "end": {
+                    "line": 493,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 493,
+                    "character": 25
+                },
+                "end": {
+                    "line": 493,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 493,
+                    "character": 25
+                },
+                "end": {
+                    "line": 493,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 493,
+                    "character": 25
+                },
+                "end": {
+                    "line": 493,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 493,
+                    "character": 25
+                },
+                "end": {
+                    "line": 493,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 493,
+                    "character": 25
+                },
+                "end": {
+                    "line": 493,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 493,
+                    "character": 25
+                },
+                "end": {
+                    "line": 493,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 493,
+                    "character": 25
+                },
+                "end": {
+                    "line": 493,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 493,
+                    "character": 25
+                },
+                "end": {
+                    "line": 493,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 503,
+                    "character": 4
+                },
+                "end": {
+                    "line": 505,
+                    "character": 47
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (tuple[Literal[504], dict[str, str]] | HttpResponse | tuple[Literal[503], dict[str, str]])) | (() -> tuple[Literal[200], dict[str, Unknown]])]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/chat/history']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/memory-journal?limit=20']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 503,
+                    "character": 20
+                },
+                "end": {
+                    "line": 505,
+                    "character": 46
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 581,
+                    "character": 25
+                },
+                "end": {
+                    "line": 581,
+                    "character": 31
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 581,
+                    "character": 25
+                },
+                "end": {
+                    "line": 581,
+                    "character": 31
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 581,
+                    "character": 25
+                },
+                "end": {
+                    "line": 581,
+                    "character": 31
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 581,
+                    "character": 25
+                },
+                "end": {
+                    "line": 581,
+                    "character": 31
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 581,
+                    "character": 25
+                },
+                "end": {
+                    "line": 581,
+                    "character": 31
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 581,
+                    "character": 25
+                },
+                "end": {
+                    "line": 581,
+                    "character": 31
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 581,
+                    "character": 25
+                },
+                "end": {
+                    "line": 581,
+                    "character": 31
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 581,
+                    "character": 25
+                },
+                "end": {
+                    "line": 581,
+                    "character": 31
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 581,
+                    "character": 25
+                },
+                "end": {
+                    "line": 581,
+                    "character": 31
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 582,
+                    "character": 24
+                },
+                "end": {
+                    "line": 582,
+                    "character": 67
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 582,
+                    "character": 24
+                },
+                "end": {
+                    "line": 582,
+                    "character": 67
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 582,
+                    "character": 24
+                },
+                "end": {
+                    "line": 582,
+                    "character": 67
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 582,
+                    "character": 24
+                },
+                "end": {
+                    "line": 582,
+                    "character": 67
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 582,
+                    "character": 24
+                },
+                "end": {
+                    "line": 582,
+                    "character": 67
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 582,
+                    "character": 24
+                },
+                "end": {
+                    "line": 582,
+                    "character": 67
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 582,
+                    "character": 24
+                },
+                "end": {
+                    "line": 582,
+                    "character": 67
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 582,
+                    "character": 24
+                },
+                "end": {
+                    "line": 582,
+                    "character": 67
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 582,
+                    "character": 24
+                },
+                "end": {
+                    "line": 582,
+                    "character": 67
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 589,
+                    "character": 8
+                },
+                "end": {
+                    "line": 589,
+                    "character": 15
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 601,
+                    "character": 4
+                },
+                "end": {
+                    "line": 603,
+                    "character": 106
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/dashboard/scheduled-automation']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/tools/masc_schedule_cancel']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 601,
+                    "character": 20
+                },
+                "end": {
+                    "line": 603,
+                    "character": 105
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 651,
+                    "character": 25
+                },
+                "end": {
+                    "line": 651,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 651,
+                    "character": 25
+                },
+                "end": {
+                    "line": 651,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 651,
+                    "character": 25
+                },
+                "end": {
+                    "line": 651,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 651,
+                    "character": 25
+                },
+                "end": {
+                    "line": 651,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 651,
+                    "character": 25
+                },
+                "end": {
+                    "line": 651,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 651,
+                    "character": 25
+                },
+                "end": {
+                    "line": 651,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 651,
+                    "character": 25
+                },
+                "end": {
+                    "line": 651,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 651,
+                    "character": 25
+                },
+                "end": {
+                    "line": 651,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 651,
+                    "character": 25
+                },
+                "end": {
+                    "line": 651,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 685,
+                    "character": 4
+                },
+                "end": {
+                    "line": 687,
+                    "character": 96
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | RequestHttpResponse | HeadersHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/mcp']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/mcp?sse_kind=observer']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 685,
+                    "character": 20
+                },
+                "end": {
+                    "line": 687,
+                    "character": 95
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 725,
+                    "character": 25
+                },
+                "end": {
+                    "line": 725,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 725,
+                    "character": 25
+                },
+                "end": {
+                    "line": 725,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 725,
+                    "character": 25
+                },
+                "end": {
+                    "line": 725,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 725,
+                    "character": 25
+                },
+                "end": {
+                    "line": 725,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 725,
+                    "character": 25
+                },
+                "end": {
+                    "line": 725,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 725,
+                    "character": 25
+                },
+                "end": {
+                    "line": 725,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 725,
+                    "character": 25
+                },
+                "end": {
+                    "line": 725,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 725,
+                    "character": 25
+                },
+                "end": {
+                    "line": 725,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 725,
+                    "character": 25
+                },
+                "end": {
+                    "line": 725,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 749,
+                    "character": 4
+                },
+                "end": {
+                    "line": 751,
+                    "character": 98
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> tuple[Literal[200], dict[str, list[dict[str, Unknown]]]]) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/oauth/attached-tools?keeper=alpha']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/identity-refresh']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 749,
+                    "character": 20
+                },
+                "end": {
+                    "line": 751,
+                    "character": 97
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 833,
+                    "character": 22
+                },
+                "end": {
+                    "line": 833,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 833,
+                    "character": 22
+                },
+                "end": {
+                    "line": 833,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 833,
+                    "character": 22
+                },
+                "end": {
+                    "line": 833,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 833,
+                    "character": 22
+                },
+                "end": {
+                    "line": 833,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 833,
+                    "character": 22
+                },
+                "end": {
+                    "line": 833,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 833,
+                    "character": 22
+                },
+                "end": {
+                    "line": 833,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 833,
+                    "character": 22
+                },
+                "end": {
+                    "line": 833,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 833,
+                    "character": 22
+                },
+                "end": {
+                    "line": 833,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 833,
+                    "character": 22
+                },
+                "end": {
+                    "line": 833,
+                    "character": 43
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 834,
+                    "character": 4
+                },
+                "end": {
+                    "line": 835,
+                    "character": 52
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], Unknown]) | (() -> RawHttpResponse)]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 834,
+                    "character": 20
+                },
+                "end": {
+                    "line": 835,
+                    "character": 51
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 869,
+                    "character": 25
+                },
+                "end": {
+                    "line": 869,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 869,
+                    "character": 25
+                },
+                "end": {
+                    "line": 869,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 869,
+                    "character": 25
+                },
+                "end": {
+                    "line": 869,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 869,
+                    "character": 25
+                },
+                "end": {
+                    "line": 869,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 869,
+                    "character": 25
+                },
+                "end": {
+                    "line": 869,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 869,
+                    "character": 25
+                },
+                "end": {
+                    "line": 869,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 869,
+                    "character": 25
+                },
+                "end": {
+                    "line": 869,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 869,
+                    "character": 25
+                },
+                "end": {
+                    "line": 869,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 869,
+                    "character": 25
+                },
+                "end": {
+                    "line": 869,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 870,
+                    "character": 4
+                },
+                "end": {
+                    "line": 872,
+                    "character": 106
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/config']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 870,
+                    "character": 20
+                },
+                "end": {
+                    "line": 872,
+                    "character": 105
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 914,
+                    "character": 25
+                },
+                "end": {
+                    "line": 914,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 914,
+                    "character": 25
+                },
+                "end": {
+                    "line": 914,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 914,
+                    "character": 25
+                },
+                "end": {
+                    "line": 914,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 914,
+                    "character": 25
+                },
+                "end": {
+                    "line": 914,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 914,
+                    "character": 25
+                },
+                "end": {
+                    "line": 914,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 914,
+                    "character": 25
+                },
+                "end": {
+                    "line": 914,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 914,
+                    "character": 25
+                },
+                "end": {
+                    "line": 914,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 914,
+                    "character": 25
+                },
+                "end": {
+                    "line": 914,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 914,
+                    "character": 25
+                },
+                "end": {
+                    "line": 914,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 916,
+                    "character": 4
+                },
+                "end": {
+                    "line": 916,
+                    "character": 47
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 916,
+                    "character": 4
+                },
+                "end": {
+                    "line": 916,
+                    "character": 47
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 916,
+                    "character": 4
+                },
+                "end": {
+                    "line": 916,
+                    "character": 47
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 916,
+                    "character": 4
+                },
+                "end": {
+                    "line": 916,
+                    "character": 47
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 916,
+                    "character": 4
+                },
+                "end": {
+                    "line": 916,
+                    "character": 47
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 916,
+                    "character": 4
+                },
+                "end": {
+                    "line": 916,
+                    "character": 47
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 916,
+                    "character": 4
+                },
+                "end": {
+                    "line": 916,
+                    "character": 47
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 916,
+                    "character": 4
+                },
+                "end": {
+                    "line": 916,
+                    "character": 47
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 916,
+                    "character": 4
+                },
+                "end": {
+                    "line": 916,
+                    "character": 47
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 916,
+                    "character": 4
+                },
+                "end": {
+                    "line": 916,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 917,
+                    "character": 4
+                },
+                "end": {
+                    "line": 918,
+                    "character": 52
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse)]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 917,
+                    "character": 20
+                },
+                "end": {
+                    "line": 918,
+                    "character": 51
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 958,
+                    "character": 25
+                },
+                "end": {
+                    "line": 958,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 958,
+                    "character": 25
+                },
+                "end": {
+                    "line": 958,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 958,
+                    "character": 25
+                },
+                "end": {
+                    "line": 958,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 958,
+                    "character": 25
+                },
+                "end": {
+                    "line": 958,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 958,
+                    "character": 25
+                },
+                "end": {
+                    "line": 958,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 958,
+                    "character": 25
+                },
+                "end": {
+                    "line": 958,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 958,
+                    "character": 25
+                },
+                "end": {
+                    "line": 958,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 958,
+                    "character": 25
+                },
+                "end": {
+                    "line": 958,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 958,
+                    "character": 25
+                },
+                "end": {
+                    "line": 958,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 963,
+                    "character": 4
+                },
+                "end": {
+                    "line": 964,
+                    "character": 52
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse)]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 963,
+                    "character": 20
+                },
+                "end": {
+                    "line": 964,
+                    "character": 51
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1018,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1018,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1018,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1018,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1018,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1018,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1018,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1018,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1018,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1018,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1018,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1018,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1018,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1018,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1018,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1018,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1018,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1018,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1046,
+                    "character": 8
+                },
+                "end": {
+                    "line": 1048,
+                    "character": 114
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (HttpFixture | tuple[Literal[503], dict[str, str]])) | ConnectionHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/asks']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/ask-answer']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1046,
+                    "character": 24
+                },
+                "end": {
+                    "line": 1048,
+                    "character": 113
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1135,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1135,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1135,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1135,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1135,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1135,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1135,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1135,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1135,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1135,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1135,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1135,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1135,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1135,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1135,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1135,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1135,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1135,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1146,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1148,
+                    "character": 95
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> tuple[Literal[200], dict[str, Unknown]]) | StreamingHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/github-identity']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/github-login']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1146,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1148,
+                    "character": 94
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1199,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1199,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1199,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1199,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1199,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1199,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1199,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1199,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1199,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1199,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1199,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1199,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1199,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1199,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1199,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1199,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1199,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1199,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"ConnectionHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1206,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1206,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"DroppedHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1206,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1206,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"HeadersHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1206,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1206,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"MethodHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1206,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1206,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"PathHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1206,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1206,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"RawHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1206,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1206,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"RequestHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1206,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1206,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"StreamingHttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1206,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1206,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"HttpResponse\" is not callable\n  Attribute \"__call__\" is unknown",
+            "range": {
+                "start": {
+                    "line": 1206,
+                    "character": 21
+                },
+                "end": {
+                    "line": 1206,
+                    "character": 38
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 1209,
+                    "character": 8
+                },
+                "end": {
+                    "line": 1209,
+                    "character": 15
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1220,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1222,
+                    "character": 96
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/gate/connectors']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/gate/connector/unbind']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1220,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1222,
+                    "character": 95
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1291,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1291,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1291,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1291,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1291,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1291,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1291,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1291,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1291,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1291,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1291,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1291,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1291,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1291,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1291,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1291,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1291,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1291,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1328,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1329,
+                    "character": 89
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> tuple[Literal[200], dict[str, Unknown]])]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/dashboard/tools?keeper=alpha']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/dashboard/tools']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1328,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1329,
+                    "character": 88
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1366,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1366,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1366,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1366,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1366,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1366,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1366,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1366,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1366,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1366,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1366,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1366,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1366,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1366,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1366,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1366,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1366,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1366,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1398,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1401,
+                    "character": 116
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (tuple[Literal[503], dict[str, str]] | tuple[Literal[200], dict[str, object]])) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/verification/requests?view=awaiting&limit=…']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/verification/verdict']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1398,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1401,
+                    "character": 115
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1459,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1459,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1459,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1459,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1459,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1459,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1459,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1459,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1459,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1459,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1459,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1459,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1459,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1459,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1459,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1459,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1459,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1459,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1491,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1495,
+                    "character": 96
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (tuple[Literal[504], dict[str, str]] | HttpResponse | tuple[Literal[503], dict[str, str]])) | (() -> tuple[Literal[200], dict[str, Unknown]]) | RequestHttpResponse | tuple[int, dict[str, str]]]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/chat/history']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/memory-journal?limit=20']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/mcp']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/chat/stream']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1491,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1495,
+                    "character": 95
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1580,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1580,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1580,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1580,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1580,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1580,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1580,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1580,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1580,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1580,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1580,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1580,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1580,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1580,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1580,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1580,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1580,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1580,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1616,
+                    "character": 8
+                },
+                "end": {
+                    "line": 1617,
+                    "character": 95
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/mcp']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1616,
+                    "character": 24
+                },
+                "end": {
+                    "line": 1617,
+                    "character": 94
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1658,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1658,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1658,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1658,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1658,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1658,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1658,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1658,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1658,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1658,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1658,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1658,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1658,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1658,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1658,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1658,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1658,
+                    "character": 25
+                },
+                "end": {
+                    "line": 1658,
+                    "character": 46
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 4
+                },
+                "end": {
+                    "line": 1678,
+                    "character": 86
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> RawHttpResponse) | (() -> (tuple[Literal[503], dict[str, str]] | tuple[Literal[200], dict[str, list[dict[str, Unknown]]]])) | RequestHttpResponse]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/runtime/params']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/runtime/params/set']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/runtime/params/clear']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1675,
+                    "character": 20
+                },
+                "end": {
+                    "line": 1678,
+                    "character": 85
+                }
+            },
+            "rule": "reportArgumentType"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1711,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1711,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1711,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1711,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1711,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1711,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1711,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1711,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1711,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1711,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1711,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1711,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1711,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1711,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1711,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1711,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1711,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1711,
+                    "character": 39
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"object\"",
+            "range": {
+                "start": {
+                    "line": 1711,
+                    "character": 18
+                },
+                "end": {
+                    "line": 1711,
+                    "character": 42
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RawHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1713,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1713,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"StreamingHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1713,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1713,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"DroppedHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1713,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1713,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"RequestHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1713,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1713,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"MethodHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1713,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1713,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"ConnectionHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1713,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1713,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"HeadersHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1713,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1713,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "\"__getitem__\" method not defined on type \"PathHttpResponse\"",
+            "range": {
+                "start": {
+                    "line": 1713,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1713,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Object of type \"() -> HttpResponse\" is not subscriptable",
+            "range": {
+                "start": {
+                    "line": 1713,
+                    "character": 29
+                },
+                "end": {
+                    "line": 1713,
+                    "character": 50
+                }
+            },
+            "rule": "reportIndexIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "No overloads for \"update\" match the provided arguments",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 8
+                },
+                "end": {
+                    "line": 1729,
+                    "character": 93
+                }
+            },
+            "rule": "reportCallIssue"
+        },
+        {
+            "file": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py",
+            "severity": "error",
+            "message": "Argument of type \"dict[str, (() -> tuple[Literal[200], object | Unknown]) | (() -> (tuple[Literal[504], dict[str, str]] | HttpResponse | tuple[Literal[503], dict[str, str]])) | (() -> tuple[Literal[200], dict[str, Unknown]]) | (() -> RawHttpResponse)]\" cannot be assigned to parameter \"m\" of type \"Iterable[tuple[str, HttpFixture]]\" in function \"update\"\n  \"Literal['/api/v1/gate/keepers?detailed=true']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/chat/history']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/api/v1/keepers/alpha/memory-journal?limit=20']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health']\" is not assignable to \"tuple[str, HttpFixture]\"\n  \"Literal['/health?full=1']\" is not assignable to \"tuple[str, HttpFixture]\"",
+            "range": {
+                "start": {
+                    "line": 1728,
+                    "character": 24
+                },
+                "end": {
+                    "line": 1729,
+                    "character": 92
+                }
+            },
+            "rule": "reportArgumentType"
+        }
+    ],
+    "summary": {
+        "filesAnalyzed": 1,
+        "errorCount": 267,
+        "warningCount": 0,
+        "informationCount": 0,
+        "timeInSec": 0.489
+    }
+}
+

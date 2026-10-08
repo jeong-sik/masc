@@ -1,0 +1,15 @@
+ASSERT visible save retains uncertain durability
+ASSERT warning is visible
+ASSERT refresh failure keeps durability warning
+ASSERT retry refreshes and does not save again
+File "test/test_tui_account_login.ml", line 429, character 2:
+FAIL retry refreshes and does not save again
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_tui_account_login.uncertain_durability_save in file "test/test_tui_account_login.ml", line 429, characters 2-103
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+

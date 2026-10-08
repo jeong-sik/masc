@@ -74,7 +74,13 @@ val edit_table_int : string -> path:string -> key:string -> value:int -> string
 val edit_table_bool : string -> path:string -> key:string -> value:bool -> string
 (** Set a typed boolean while retaining unrelated lines and comments. Bare
     [true]/[false], not a quoted string: a reader that expects a boolean
-    refuses ["true"]. *)
+    refuses ["true"]. When replacing an existing boolean, its trailing
+    comment and preceding whitespace are retained. *)
+
+val edit_root_bool : string -> key:string -> value:bool -> string
+(** Update a boolean in the root table, before any table header. Unrelated
+    bytes and the key's trailing comment are retained. The caller validates
+    the document and boolean type before editing and parses the result. *)
 
 type nested_edit_error = Invalid_document | Unreachable_table
 val edit_nested_bool :

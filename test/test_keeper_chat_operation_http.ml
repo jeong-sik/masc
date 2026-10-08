@@ -28,6 +28,9 @@ let test_dashboard_worker_permissions () =
     (Masc_domain.has_permission
        Masc_domain.Worker
        (Api.get_permission (Api.Chat_events { keeper_name = "alpha" })));
+  check bool "autonomous reasoning journal requires admin authority" true
+    (Api.get_permission (Api.Turn_events {keeper_name="alpha";raw_turn_ref="trace#1"})
+     = Masc_domain.CanAdmin);
   check bool
     "queued mutations use chat broadcast authority"
     true
@@ -48,6 +51,12 @@ let test_exact_routes () =
    | Some (Api.Chat_events { keeper_name }) ->
      check string "events keeper" "alpha" keeper_name
    | Some _ | None -> fail "chat events route did not match");
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1 in
+  (match Api.get_route ("/api/v1/keepers/alpha/turns/" ^ Uri.pct_encode (Ids.Turn_ref.to_string turn_ref) ^ "/events") with
+   | Some (Api.Turn_events {keeper_name;raw_turn_ref}) ->
+       check string "turn journal keeper" "alpha" keeper_name;
+       check string "turn journal exact identity" (Ids.Turn_ref.to_string turn_ref) raw_turn_ref
+   | Some _ | None -> fail "autonomous turn events route did not match");
   List.iter
     (fun (action, expected) ->
        match

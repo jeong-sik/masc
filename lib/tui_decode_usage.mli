@@ -98,9 +98,11 @@ val decode_provider_usage_windows :
     error, as is a reported account without windows or an unreported one with
     windows. *)
 
+(** Unplaced/unread turn rows and malformed rows can both understate totals.
+    Preserve the producer counts separately; neither is complete coverage. *)
 type keeper_usage_coverage =
   | Keeper_usage_complete
-  | Keeper_usage_partial of int
+  | Keeper_usage_partial of { malformed_rows : int; unread_turn_rows : int }
   | Keeper_usage_failed of string
 
 type keeper_usage_row = {
@@ -131,4 +133,5 @@ type keeper_usage_window =
 val decode_keeper_usage_window :
   Yojson.Safe.t -> (keeper_usage_window, string) result
 (** Decode the coverage-bearing [/api/v1/dashboard/keeper-costs] projection.
-    A null sum stays absent, and a loading placeholder never reads as zero. *)
+    A null sum stays absent, and a loading placeholder never reads as zero.
+    [generated_at] must fit Ptime's supported civil-time range before rendering. *)

@@ -486,7 +486,7 @@ let same_verdict_payload (stored : verdict) (incoming : verdict) =
      original commit time; every item of proof and provenance must still match. *)
   stored = { incoming with recorded_at = stored.recorded_at }
 
-let record_proof_verdict config ~goal_id (verdict : verdict) =
+let record_proof_verdict ?before_commit config ~goal_id (verdict : verdict) =
   update_record config ~goal_id (fun current ->
     match current.completion with
     | Proof_proven stored | Proof_refuted stored when same_verdict_payload stored verdict -> Ok current
@@ -495,6 +495,7 @@ let record_proof_verdict config ~goal_id (verdict : verdict) =
         && Goal_store.criterion_equal pending.criterion verdict.criterion ->
         (* Validate the typed write against the same strict persistence codec. *)
         let* _ = verdict_of_yojson (verdict_to_yojson verdict) in
+        let* () = match before_commit with None -> Ok () | Some step -> step () in
         let completion = match verdict.outcome with
           | Proven -> Proof_proven verdict | Refuted _ -> Proof_refuted verdict
         in Ok { current with completion }
@@ -511,3 +512,18 @@ let record_human_confirmation config ~goal_id verdict ~operator_id =
           {operator_id; confirmed_at = Masc_domain.now_iso ()})}
     | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _ ->
         Error "human confirmation does not match the current proven request")
+
+let bind_review config ~goal_id =
+  Result.map_error Goal_store.write_error_to_string @@
+  Goal_store.transact_goal config ~goal_id (fun goal ->
+    match goal.Goal_store.phase with
+    | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
+    | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
+      Error "goal is not awaiting verification"
+    | Goal_phase.Verifying ->
+      Result.bind (get_record_authoritative config ~goal_id)
+        (function
+          | Some { completion = Proof_pending pending; submitted_evidence; _ }
+            when Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
+            Ok (goal, (pending.request_id, pending.criterion, submitted_evidence))
+          | Some _ | None -> Error "goal has no pending proof for its current criterion"))

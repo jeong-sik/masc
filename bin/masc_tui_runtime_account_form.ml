@@ -37,12 +37,12 @@ type phase =
       ; saved_sign_in : sign_in
       }
 
-(* [declaration] is the file the form was opened on. It only supplies the
-   providers to choose from and the suggested id; what is saved is declared
-   against the file as the server holds it at submit, so a change made while
-   the form stood open is kept rather than written over. *)
+(* [declaration] supplies the providers and suggested id. The UI compares
+   [source_revision] with a fresh read before declaring and saving, so fields
+   chosen here cannot silently apply to a provider another writer changed. *)
 type t =
   { declaration : D.t
+  ; source_revision : string option
   ; home_dir : string option
   ; ring : ring
   ; field : field
@@ -60,7 +60,9 @@ type outcome =
 
 let field t = t.field
 
-let open_on ?home_dir text =
+let source_revision t = t.source_revision
+
+let open_on ?source_revision ?home_dir text =
   match D.parse text with
   | Error e -> Error (D.error_message e)
   | Ok declaration ->
@@ -69,6 +71,7 @@ let open_on ?home_dir text =
      | chosen :: after ->
        Ok
          { declaration
+         ; source_revision
          ; home_dir
          ; ring = { before = []; chosen; after }
          ; field = Base

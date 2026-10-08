@@ -1,0 +1,38 @@
+{
+  "parent": "2b2de24cac18a902d260277f98434860325ec14c",
+  "scope": "Focused component/session/AST checks and synthetic HTTP Chromium only",
+  "source_sha256": {
+    "dashboard/src/lib/browser-lane-activity.ts": "9b740d939379f9da7aa91e586786bbf85665f5ffdce5f2225f9c9377f5b2ceb8",
+    "dashboard/src/lib/browser-lane-activity-session.ts": "b7bf46f1432cd61d4e799a320be163c2892ec100ce3d1831112e8f19a5d22218",
+    "dashboard/src/lib/browser-lane-observation.ts": "2f7ae6c1a73dc359dc817784f07500c129dd5bb0d1504bfb611982ac8869af62",
+    "dashboard/src/components/browser-lane-activity-panel.ts": "cf931eff69013c5ce9e9070be2d8e6af76a5011140d02693afd6671844e23e94",
+    "dashboard/src/components/browser-lane-activity-panel.test.ts": "5c77c5c531a2762ad621bbb40d2332ab540da768427711d1f4933fdff498b735",
+    "dashboard/src/components/lane-inventory-panel.ts": "ddb98acbca0f460d9e52fab30eb7fc001308dd75863aafd7a0070bb812b8642c",
+    "dashboard/src/lib/runtime-toml-config.ts": "f598cf1497a9c87617aaea1e1778bc9bb1fb206769f4422dfd7fa8323a773ad9",
+    "dashboard/src/lib/runtime-toml-session.ts": "9fa9b55c176e59d07fa26ef25e78bd1f30fe49af00ad880031286a04c57169a4",
+    "dashboard/src/lib/runtime-toml-source-generation.ts": "e63c361ccbb572ec21d292bb91823555e2a2b06533507fed9219bea24187ee90",
+    "dashboard/src/lib/runtime-config-refresh.ts": "35b29d1e2de390cb6cc55b6c0a3f2fe5f93e219ba882a2afee69bf5ae4d72121",
+    "dashboard/src/api/dashboard-runtime.ts": "c859d5c3ba6bc64683bea4d24a77aa5e9146954f28c5fc12aea2b4c658dc9ab4",
+    "dashboard/src/api/lane-inventory.ts": "10ce95ec62565aef2f9c721edb85f5d5b0b76c98bf4a0425c726119c681720fe",
+    "dashboard/src/components/status.ts": "758343c89e03f1b288f340e139ff49cde9c9ebfa4520de154a03aa9265e36374",
+    "dashboard/src/components/runtime-toml-editor.ts": "90312941e55906ed15d5976ffc28e57e0eedd658c328f4305b3bbdf1691f18dd",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "5df5f710f86ac42540dbefa9554bdf9cfb875fbb7efff21fcbf0d6b01dcdd4af",
+    "dashboard/src/components/lane-inventory-panel.test.ts": "392071886b624ba34e2723f3f0dad046aa2e24ed9c4d8a6c349857a672e10efb",
+    "dashboard/package.json": "2c820c3d81db9d2c81263f91b15232d532dbad22302d84ec660fb0cba4d0f101",
+    "dashboard/pnpm-lock.yaml": "1a85e066a8baf940cf65df3cf18e76224684fcff6b47254b9c37d6647fd607a0"
+  },
+  "artifact_sha256": {
+    "dashboard/evidence/2026-10-05-web-browser-activity/README.md": "9af7e8b1e7ad91ee7f3be5f7cfb76def58c113e9987829ae660bca22b43c8c53",
+    "dashboard/evidence/2026-10-05-web-browser-activity/browser-fixture.mjs": "ca97ba4e0f42e55628fcb509e59fc1f2d374d2429be2d40f68ce77a0fb75967c",
+    "dashboard/evidence/2026-10-05-web-browser-activity/browser-initial-failure.json": "97f4a105b52c68e925aaea546da65fbed8023557e24d1bc640456e2a2702ea31",
+    "dashboard/evidence/2026-10-05-web-browser-activity/browser-mobile.png": "2d611a74d586c5e582421a60fa69d97c0c2c56dce075bee8e1028893bed97d90",
+    "dashboard/evidence/2026-10-05-web-browser-activity/browser-off-saved.png": "d25d7abe76d955a26a8beaa95619588cc7e6d5d98b7e3566f7bdc34e4bb9feb6",
+    "dashboard/evidence/2026-10-05-web-browser-activity/browser-result.json": "da10956a6205191ba12e3909b9daf3bce471815fc5094bfbd716c9e4c8458dff",
+    "dashboard/evidence/2026-10-05-web-browser-activity/browser.txt": "b457d54f7a59808d3efd92f6e0c8c2d54e0f062b47bd07904a849c62557aebb2",
+    "dashboard/evidence/2026-10-05-web-browser-activity/fixture.html": "76484506a4e2eb408f0631e72e52f9be520a7b4c39d9b2d374cdbff5fef1c049",
+    "dashboard/evidence/2026-10-05-web-browser-activity/fixture.ts": "7fae550945acc26e2e9c14909ba37aac9a381fd62618f523ed1220288410bcf1",
+    "dashboard/evidence/2026-10-05-web-browser-activity/lint.txt": "bef7f8fe39529c9c8f05986ec3052e79f780bfc0b0359f68cbd4ef11720112f5",
+    "dashboard/evidence/2026-10-05-web-browser-activity/tests.txt": "e1783e55dfbdf91926e66e3e56172cfafc077bc063d44275caa0b53fef45d568",
+    "dashboard/evidence/2026-10-05-web-browser-activity/typecheck.txt": "c485759816f805256ddaaa63c04cb232bbe6cd7aac66dc3c0f53d301aa2c6ef3"
+  }
+}

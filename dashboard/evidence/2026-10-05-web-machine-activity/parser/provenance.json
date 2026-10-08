@@ -1,0 +1,37 @@
+{
+  "scope": "actual machine activity helper; targeted 41 Vitest cases; adversarial cases import actual TS module in child processes",
+  "before_helper_sha256": "a77083a58897b2e14b47e184c374333e42c02cc1e0c474ebe9e022e6b5890bfe",
+  "sources": {
+    "src/lib/machine-lane-activity.ts": "320b564b28778fa13fccb61d38c38c48293718d78c31fae636ae6610eb00a829",
+    "src/lib/machine-lane-activity.test.ts": "e2c2666fc6e386edea8e2f91763d3c20e0c24ba17ff93228bfc845e50b81d5bd"
+  },
+  "artifacts": {
+    "before-source.txt": "a77083a58897b2e14b47e184c374333e42c02cc1e0c474ebe9e022e6b5890bfe",
+    "before-isolates.json": "8b41b366a294f0a69657c393e5c2d98c269e6aae27daf2521c020234c621024c",
+    "after-isolates.json": "d7cf402489bc8bb1656be4f476ef5b7c1899ed2027e06470b77e15b61249f7a0",
+    "before.txt": "983ba188f72051778ad508262c688f8efe1427bf97f543080de38255f3b0bcbe",
+    "after.txt": "f8dd4bece5bc319d99381f736f127cf14db14fb068e6bcf4c4009ea814078e85",
+    "lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "harness-url-failure.txt": "9dc84ea29d967f3dee8b1aecab69d7f3ff861c9299fb065403e0bd2347e617d8"
+  },
+  "commands": [
+    "./node_modules/.bin/vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/lib/machine-lane-activity.test.ts",
+    "./node_modules/.bin/eslint src/lib/machine-lane-activity.ts src/lib/machine-lane-activity.test.ts"
+  ],
+  "results": {
+    "before": "6 FAIL, 35 PASS; same final test source before helper repair",
+    "after": "41 PASS",
+    "lint": 0,
+    "initial_harness_failure": "9 failures loading HTTP import.meta URL in child; preserved separately, not product proof"
+  },
+  "raw_artifacts": {
+    "before-source.txt": "a77083a58897b2e14b47e184c374333e42c02cc1e0c474ebe9e022e6b5890bfe",
+    "before-isolates.json": "8b41b366a294f0a69657c393e5c2d98c269e6aae27daf2521c020234c621024c",
+    "after-isolates.json": "d7cf402489bc8bb1656be4f476ef5b7c1899ed2027e06470b77e15b61249f7a0",
+    "before.txt": "4e902084f90e7f038618cb024b9154bbc37547a06f856fa9ce4440d119475989",
+    "after.txt": "7d22fec9ae89f5813f1d398047a5bf1603018deb8cd891006a04ffc7cd4b23b3",
+    "lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "harness-url-failure.txt": "dff7ee675b76df1017596572204ec15aae3c6e65e1654359e5e638e42bf00e7e"
+  },
+  "normalization": "Only trailing whitespace and surplus final blank lines were stripped from committed .txt logs. raw_artifacts records original bytes; artifacts records committed bytes. before-source.txt is unchanged."
+}

@@ -14,6 +14,8 @@ let declaration : UI.declaration =
   ; applied = None
   ; instance_id = None
   ; issues = []
+  ; enabled = Some true
+  ; application = None
   ; origin = UI.Parsed_declaration
   }
 
@@ -55,7 +57,7 @@ let test_unapplied_declarations_are_not_active_workers () =
        declared=1; active=0; failed_workers=0; configuration_issues=1;
        complete=false; freshness=UI.Current });
   let unreadable = { broken with desired=None; installation_id=None;
-      issues=["Invalid TOML"; "Cannot resolve package"]; origin=UI.Issue_only } in
+      issues=["Invalid TOML"; "Cannot resolve package"]; enabled=None; origin=UI.Issue_only } in
   check bool "an issue-only path is not a parsed declaration" true
     (UI.installation_reading (view_of [unreadable]) = UI.Observed {
        declared=0; active=0; failed_workers=0; configuration_issues=2;

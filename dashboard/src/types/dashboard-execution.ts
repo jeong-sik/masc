@@ -623,6 +623,7 @@ export interface GoalKeeperTrustSummary {
 
 export interface GoalTreeStatusProjection {
   phase: string
+  resume_phase?: import("../api/goal-lifecycle").GoalResumePhase | null
   phase_color: string
   goal_fsm: GoalFsmProjection
   priority: number

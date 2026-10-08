@@ -9,7 +9,8 @@ type source =
   | Auto_trajectory of inference_identity
 
 type attempt_reading =
-  { lane_attempt_index : int
+  { routing_run_id : string
+  ; lane_attempt_index : int
   ; reading_index : int
   }
 
@@ -125,6 +126,7 @@ let usage_projection_to_string = function
   | Resolved_attempt_delta _ -> "resolved_attempt_delta"
 ;;
 
+let routing_run_id_field = "routing_run_id"
 let lane_attempt_index_field = "lane_attempt_index"
 let reading_index_field = "reading_index"
 
@@ -164,9 +166,10 @@ let usage_projection_of_fields fields source =
     (match source with
      | Auto_trajectory _ ->
        let* () = resolved_scope_null projection in
+       let* routing_run_id = required_string fields routing_run_id_field in
        let* lane_attempt_index = required_index fields lane_attempt_index_field in
        let* reading_index = required_index fields reading_index_field in
-       Ok (Resolved_attempt_delta { lane_attempt_index; reading_index })
+       Ok (Resolved_attempt_delta { routing_run_id; lane_attempt_index; reading_index })
      | Manual_cli ->
        invalid "usage_projection" "must be resolved_delta for manual_cli")
   | "raw_observation" ->
@@ -201,8 +204,12 @@ type inference_key =
       }
 
 let compare_attempt_reading left right =
-  let by_lane = Int.compare left.lane_attempt_index right.lane_attempt_index in
-  if by_lane <> 0 then by_lane else Int.compare left.reading_index right.reading_index
+  let by_run = String.compare left.routing_run_id right.routing_run_id in
+  if by_run <> 0
+  then by_run
+  else (
+    let by_lane = Int.compare left.lane_attempt_index right.lane_attempt_index in
+    if by_lane <> 0 then by_lane else Int.compare left.reading_index right.reading_index)
 ;;
 
 let compare_inference_key left right =
@@ -323,7 +330,8 @@ let to_json ?(extra_fields = []) row =
   let attempt_fields =
     match row.usage_projection with
     | Resolved_attempt_delta attempt ->
-      [ lane_attempt_index_field, `Int attempt.lane_attempt_index
+      [ routing_run_id_field, `String attempt.routing_run_id
+      ; lane_attempt_index_field, `Int attempt.lane_attempt_index
       ; reading_index_field, `Int attempt.reading_index
       ]
     | Raw_observation _ | Resolved_delta -> []

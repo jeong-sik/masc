@@ -1,0 +1,20 @@
+ Dashboard  Work  Keepers  ▸Usage  Board  Workspace  System
+
+   MASC Usage  15:14:08  HTTP [connected]                                       
+ ────────────────────────────────────────────────────────────────────────────── 
+   Plan    Trend    Keepers    v:next view                                      
+                                                                                
+     [unavailable · no comparison bar]                                          
+     Cost    unreported · 0 reported, 10 missing                                
+     [unavailable · no comparison bar]                                          
+     delta-failed                                                               
+     10 turns · unavailable: fixture read failure                               
+     Tokens  900000 · 10 reported, 0 missing                                    
+     [unavailable · no comparison bar]                                          
+     Cost    $900.0000 · 10 reported, 0 missing                                 
+     [unavailable · no comparison bar]                                          
+     epsilon-zero                                                               
+   [rows 23-32/39 · j/k to scroll]                                              
+
+  j/k:scroll  p:Usage / Telemetry  Esc:Dashboard  q:quit  …?
+ › to alpha   (i to write)                                                      

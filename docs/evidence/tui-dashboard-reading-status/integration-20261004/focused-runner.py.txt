@@ -1,0 +1,19 @@
+import os
+import traceback
+import test_tui_home_decision_cards_pty as cards
+import test_tui_home_decision_receipt_pty as receipt
+exe = os.path.abspath('_build/default/bin/masc_tui.exe')
+scenarios = [('failed_source', lambda: cards.failed_source_keeps_known_cards(exe)),
+             ('each_failed_source', lambda: cards.each_failed_source_keeps_other_cards(exe)),
+             ('receipt', lambda: receipt.accepted_but_pending(exe)),
+             ('receipt_held', lambda: receipt.accepted_but_pending(exe, followed_by_held=True))]
+failed=[]
+for name, run in scenarios:
+    try:
+        run()
+        print('FOCUSED_RESULT '+name+' PASS', flush=True)
+    except Exception:
+        traceback.print_exc()
+        failed.append(name)
+        print('FOCUSED_RESULT '+name+' FAIL', flush=True)
+raise SystemExit(bool(failed))

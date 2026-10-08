@@ -94,6 +94,7 @@ type capabilities =
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
 let exact_body_timeout_s_key = "exact-body-timeout-s"
+let admission_priority_run_limit_key = "admission-priority-run-limit"
 
 type antigravity_effort =
   | Antigravity_low
@@ -116,18 +117,18 @@ type usage_read_shape =
   | Openrouter_key
   | Zai_quota_limit
   | Kimi_coding_usages
-  | Ollama_usage
+  | Ollama_balance
 [@@deriving show, eq]
 
 let all_usage_read_shapes =
-  [ Openrouter_key; Zai_quota_limit; Kimi_coding_usages; Ollama_usage ]
+  [ Openrouter_key; Zai_quota_limit; Kimi_coding_usages; Ollama_balance ]
 ;;
 
 let usage_read_shape_to_string = function
   | Openrouter_key -> "openrouter-key"
   | Zai_quota_limit -> "zai-quota-limit"
   | Kimi_coding_usages -> "kimi-coding-usages"
-  | Ollama_usage -> "ollama-usage"
+  | Ollama_balance -> "ollama-balance"
 ;;
 
 type usage_read =
@@ -184,6 +185,14 @@ type provider =
         a target that reaches plan admission without one is refused there
         (Missing_deadline). This does not replace [connect_timeout_s] or
         ordinary Keeper per-call body deadlines. *)
+  ; admission_priority_run_limit : int option
+    (** [admission-priority-run-limit]: how many admission permits in a row
+        this provider account may hand to [Priority] requests (the judgment
+        lanes) while a [Standard] request waits for one. [None] keeps one
+        arrival-order queue. Declared on the provider because the permits are
+        counted per account. It reaches only the bindings that declare
+        [max-concurrent]; a provider where no binding can use it, or an
+        official-client provider, is refused at load. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)
@@ -413,6 +422,7 @@ type lane_decl =
 
 type exact_output_lane_decl =
   { id : string
+  ; enabled : bool
   ; slot_ids : string list
   ; cli_slot_ids : string list
   ; max_output_tokens : int option
@@ -446,7 +456,8 @@ type typesafeai_destination =
     {!Keeper_board_attention_exact_flow}, which sends the post and the
     keeper's context) and [absorb_gate] (the librarian absorb gate,
     {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context
-    preservation and Skill applicability review are opt-in too. All reach the
+    preservation, Skill applicability and host shared-memory selection each
+    require independent opt-in. All reach the
     same destinations, so one [excluded_keepers] applies to every review: a
     keeper named there is never asked about, whichever gate asks. *)
 type typesafeai =
@@ -462,6 +473,9 @@ type typesafeai =
   ; context_review : bool
   ; skill_applicability : bool
   ; librarian_preflight : bool
+  ; workspace_memory_selection_enabled : bool
+      (** Independent opt-in to send current input/task context and shared-memory
+          interpretations/source details for host retrieval. Defaults to false. *)
   ; excluded_keepers : string list
   }
 [@@deriving show, eq]
@@ -496,6 +510,7 @@ let default_typesafeai =
   ; context_review = false
   ; skill_applicability = false
   ; librarian_preflight = false
+  ; workspace_memory_selection_enabled = false
   ; excluded_keepers = []
   }
 ;;
@@ -541,6 +556,10 @@ type config =
         Replaces {!Lsp_process_manager.command_of_language} for that language
         and no other. A key naming no language, or a value that is not a
         non-empty array of strings, is refused at load. *)
+  ; browser : Browser_configuration.t
+    (** Browser backend paths and per-lane activity from the same TOML snapshot. *)
+  ; machines : Machine_configuration.t
+    (** MSX and DOS activity from the same TOML snapshot. *)
   ; typesafeai : typesafeai
     (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
   ; egress_allowlists : Egress_allowlist.t list

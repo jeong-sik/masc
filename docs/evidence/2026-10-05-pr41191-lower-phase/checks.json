@@ -1,0 +1,17 @@
+{
+  "head": "a6141d9787a4f7f7b48be6bb3c531cd8f655b178",
+  "source_sha256": {
+    "dashboard/src/components/settings-surface.test.ts": "0a5a1008c1c95a3474845f1f78cd3e82fe4e92f52dc64f731286e237b07af4e9"
+  },
+  "raw_logs_sha256": {
+    "red.log": "b9b43f439bec1981627ed7a38be886f338d7736c1815e2168ed013a1f63eca4b",
+    "green.log": "38b85d67904ce08a67148ba1cc63a69122574a6c9da331c45ab96b3a5558ceb7",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "tests": 63,
+  "suites": 1,
+  "tsc_exit": 0,
+  "eslint": "0",
+  "scope": "actual local owner suites with mocked HTTP; no native/browser/provider/full-suite/chain qualification"
+}

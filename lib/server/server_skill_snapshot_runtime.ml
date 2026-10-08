@@ -44,9 +44,10 @@ let application_slot workspace =
       slot)
 ;;
 
-let observation_input (observation : Runtime.config_observation) =
-  Skill_catalog_snapshot_service.Config_text
-    { path = observation.path; source_text = observation.source_text }
+let observation_input (observation : Runtime.config_observation)
+  : Skill_catalog_snapshot_service.config_observation
+  =
+  { path = observation.path; source_text = observation.source_text }
 ;;
 
 let refresh_from_observation ~base_path observation =

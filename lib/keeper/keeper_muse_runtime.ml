@@ -357,6 +357,29 @@ let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_us
   }
 ;;
 
+(* What the turn's newest request carried. The host's counted-once
+   [prompt_tokens] is that request's whole input under the provider's cache
+   convention; the raw [input_tokens] beside it may or may not include the
+   cached part, so it is never used here. The cache split is reported only
+   when the provider names both its reads and its writes. *)
+let request_context_of_call_usage (usage : Msp.token_usage)
+  : Runtime_observation.request_context option =
+  Option.map
+    (fun prompt ->
+       { Runtime_observation.input_tokens = prompt
+       ; cache =
+           (match usage.cache_read_tokens, usage.cache_write_tokens with
+            | Some read, Some write ->
+              Some
+                { Runtime_observation.cache_creation_input_tokens = write
+                ; cache_read_input_tokens = read
+                }
+            | Some _, None | None, Some _ | None, None -> None)
+       ; output_tokens = Some usage.output_tokens
+       })
+    usage.prompt_tokens
+;;
+
 (* The model a Keeper row names. [reported] is the model the host named: the
    one the turn's last reported call ran on ([session/tokenUsage]), and the
    session's model from [session/start] or [session/resume] before any call
@@ -414,30 +437,12 @@ let system_instructions_label () =
 let current_goal_label () = required_label (Antigravity_input_frame.current_goal_label ())
 let prompt_section_separator = Antigravity_input_frame.section_separator
 
-let measure_model_input_message_bytes (message : Agent_core.Types.message) =
-  String.length (Host.history_role_label message.role)
-  + String.length (Host.encode_history_message message)
-  + String.length prompt_section_separator
-;;
-
-let prompt_section_framing_reserved_bytes () =
-  String.length (system_instructions_label ())
-  + String.length (current_goal_label ())
-  + (2 * String.length prompt_section_separator)
-;;
-
-let reserved_prompt_bytes ~system_prompt ~goal =
-  String.length system_prompt
-  + String.length goal
-  + prompt_section_framing_reserved_bytes ()
-;;
-
 (* The carried front is a position in durable checkpoint history, so admit it
    before the source projection appends its bounded Gate replay reference.
-   The byte window runs last and charges every message that can reach the
-   host. Its observation maps back to the durable history, as on the
-   Antigravity lane. *)
-let bounded_history_projection ~capacity_bytes ~reserved_bytes
+   The range goes out as composed, as on Claude Code's first attempt, and
+   the host compacts its own input. The observation maps back to the durable
+   history, as on the Antigravity lane. *)
+let carried_history_projection
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
@@ -445,6 +450,9 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
   fun history_messages ->
   let* librarian_front = Host.read_librarian_front librarian_front history_messages in
   let carried_front_seed = Host.read_seed_once carried_front_seed in
+  (* Nothing cuts the range, so a working state a Librarian snapshot names
+     displaces none of its atoms and goes in front of it
+     ([Host.compose_librarian_range], RFC-0460). *)
   let compose librarian_front =
     let carried =
       Host.carried_start_range
@@ -456,12 +464,12 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
         ~turn_start
         history_messages
     in
-    Host.window_carried_range
-      ~measure_message_bytes:measure_model_input_message_bytes
-      ~capacity_bytes
-      ~reserved_bytes
-      ?source_projection
-      carried
+    let* sent =
+      match source_projection with
+      | None -> Ok carried.Host.messages
+      | Some project -> project carried.Host.messages
+    in
+    Ok { Host.carried; sent; atoms_kept = Host.carried_atoms carried }
   in
   let* windowed =
     Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
@@ -482,36 +490,6 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
             (Host.windowed_projection windowed)))
     on_model_input_window_observation;
   Ok windowed.Host.sent
-;;
-
-let capacity_bounded_model_input_projection ~capacity_bytes ~system_prompt ~goal
-    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
-    ~turn_start ~keeper_name ~runtime_id source_projection
-  =
-  let reserved_bytes = reserved_prompt_bytes ~system_prompt ~goal in
-  if reserved_bytes >= capacity_bytes
-  then
-    Error
-      (config_error
-         ~field:"prompt_ceiling_bytes"
-         (Printf.sprintf
-            "Muse Code fixed prompt sections measure %d bytes, at or above the prompt \
-             ceiling %d"
-            reserved_bytes
-            capacity_bytes))
-  else
-    Ok
-      (bounded_history_projection
-         ~capacity_bytes
-         ~reserved_bytes
-         ?on_model_input_window_observation
-         ?carried_front_seed
-         ?librarian_front
-         ?on_carried_front
-         ~turn_start
-         ~keeper_name
-         ~runtime_id
-         source_projection)
 ;;
 
 let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.prepared_turn) =
@@ -604,7 +582,7 @@ type mcp_blocks =
   | Streaming
 
 let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~raw_trace_run ~turn_count
-    ~on_native_action ~on_usage_report ~on_turn_started ~on_message_started ~position on_event =
+    ~on_native_action ~on_usage_report ~on_turn_started ~on_message_started ~position ~receipts on_event =
   let emit event = Option.iter (fun callback -> callback event) on_event in
   let next_tool_index = ref 1 in
   let tool_indexes = Hashtbl.create 8 in
@@ -628,7 +606,9 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
      finds nothing held. *)
   let rec release_mcp_blocks () =
     match !mcp_blocks with
-    | Streaming | Held [] -> mcp_blocks := Streaming
+    | Streaming | Held [] ->
+      mcp_blocks := Streaming;
+      Option.iter Keeper_official_client_tool_receipts.release receipts
     | Held held ->
       mcp_blocks := Held [];
       List.iter emit (List.rev held);
@@ -740,10 +720,8 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
             (shown string_of_int compaction.Msp.tokens_after)
         | Serve.Subscription_usage_observed usage ->
           Option.iter (fun scope ->
-            Option.iter (fun reset_ms ->
-              Runtime_quota_window.note_exhausted ~scope
-                ~resets_at:(float_of_int reset_ms /. 1000.))
-              (Msp.exhausted_subscription_reset_ms usage)) quota_scope
+            Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_changed usage)
+            quota_scope
         | Serve.Turn_terminal_received _ -> ()
         (* The usage this turn reports belongs to the model its calls ran
            on, when the host names it, rather than the session's selection. *)
@@ -778,6 +756,10 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
         Keeper_official_client_text_stream.tool_row text_stream;
         let index = !next_tool_index in
         incr next_tool_index;
+        Option.iter
+          (fun receipts ->
+             Keeper_official_client_tool_receipts.start receipts ~call_id ~block_index:index)
+          receipts;
         Hashtbl.replace tool_indexes call_id index;
         emit_mcp_block
           (Agent_core.Types.ContentBlockStart
@@ -789,6 +771,9 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
              }))
   ; on_tool_finished =
       (fun ~call_id ->
+        Option.iter
+          (fun receipts -> Keeper_official_client_tool_receipts.finish receipts ~call_id)
+          receipts;
         Option.iter
           (fun index ->
              Hashtbl.remove tool_indexes call_id;
@@ -809,13 +794,13 @@ let phase_name : Session_store.phase -> string = function
 
 let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
-    ~prompt_capacity ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
+    ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
     ~turn_start ~pre_tool_rejects ~base_path ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_transport_uncertain ~on_official_client_tool_boundary
-    ~on_official_client_result_handoff ~on_native_action ~on_usage_report
+    ~on_official_client_result_handoff ~on_native_action ~on_usage_report ~on_tool_execution
     ~(config : Serve.config) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -829,6 +814,21 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
   | Some env, Some clock ->
     (* DET-OK: a caller that installs no hooks runs the empty hook set. *)
     let hooks = Option.value hooks ~default:Agent_core.Hooks.empty in
+    (* The bridge can answer a call before [Turn_started] opens the message;
+       its receipt waits with its held block. *)
+    let receipts =
+      Option.map
+        (fun notify ->
+           Keeper_official_client_tool_receipts.create
+             ~delivery:Keeper_official_client_tool_receipts.Held_until_released
+             ~notify)
+        on_tool_execution
+    in
+    let hooks =
+      match receipts with
+      | Some receipts -> Keeper_official_client_tool_receipts.hooks receipts hooks
+      | None -> hooks
+    in
     let owner_epoch = Session_store.process_epoch () in
     let* stored_session =
       Session_store.load ~base_path ~keeper_name
@@ -1000,18 +1000,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
              "Muse Code turn carries goal images but the runtime does not accept image input")
       | [], (true | false) | _ :: _, true -> Ok ()
     in
-    (* The host rewrites an oversized input instead of refusing it, so a turn
-       without a ceiling is refused rather than sent. *)
-    let* capacity_bytes =
-      match prompt_capacity with
-      | Ok capacity_bytes -> Ok capacity_bytes
-      | Error error ->
-        Error
-          (config_error
-             ~field:"max_context"
-             ("Muse Code has no prompt ceiling: "
-              ^ Runtime_muse_prompt_capacity.error_to_string error))
-    in
     let reasoning_effort =
       Host.effective_reasoning_effort
         ~runtime_label
@@ -1035,11 +1023,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         in
         Ok { prepared with messages }
       else
-        let* capacity_projection =
-          capacity_bounded_model_input_projection
-            ~capacity_bytes
-            ~system_prompt:prepared.system_prompt
-            ~goal
+        let project =
+          carried_history_projection
             ?on_model_input_window_observation
             ?carried_front_seed
             ?librarian_front
@@ -1050,7 +1035,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             model_input_projection
         in
         let* messages =
-          try capacity_projection prepared.messages with
+          try project prepared.messages with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
             Error
@@ -1090,29 +1075,16 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let context_frontier = { context_frontier with held_context } in
     let* prompt = prompt_for_turn ?composed_context ~held ~is_resume ~goal prepared in
-    let* () =
-      if String.length prompt <= capacity_bytes
-      then Ok ()
-      else
-        Error
-          (config_error
-             ~field:"prompt_ceiling_bytes"
-             (Printf.sprintf
-                "Muse Code final prompt measures %d bytes, above the prompt ceiling %d"
-                (String.length prompt)
-                capacity_bytes))
-    in
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d goal_bytes=%d \
-       images=%d prompt_capacity_bytes=%d"
+       images=%d"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
       (String.length prepared.system_prompt)
       (String.length goal)
-      (List.length goal_images)
-      capacity_bytes;
+      (List.length goal_images);
     let client_config : Serve.config =
       { config with
         prepared_home = Some prepared_home
@@ -1285,6 +1257,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let stream =
       stream_projection
+        ~receipts
         ~quota_scope:(Some quota_scope)
         ~keeper_name
         ~runtime_id
@@ -1623,7 +1596,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             { Agent_core.Types.id = turn.turn_id
             ; model
             ; stop_reason = EndTurn
-            ; content = [ Text turn.text ]
+            ; content = (match turn.text with None -> [] | Some text -> [ Text text ])
             ; usage = Option.map api_usage_of_token_usage turn.usage
             ; telemetry =
                 Some
@@ -1673,6 +1646,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               ~attempt_details_source:provider_name
               ~agent_core_internal_runtime_allowed:false
               ~usage_scope
+              ?request_context:
+                (Option.bind turn.last_call_usage request_context_of_call_usage)
               ()
           in
           Ok
@@ -1733,7 +1708,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
 ;;
 
 let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
-    ?official_client_continuation ~runtime_id ~prompt_capacity ~configured_reasoning_effort
+    ?official_client_continuation ~runtime_id ~configured_reasoning_effort
     ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
     ?(loading_plan = Keeper_official_client_host.All_on_demand)
@@ -1743,7 +1718,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
-    ?on_native_action ?on_usage_report ~event_bus ~raw_trace ~on_event ~config () =
+    ?on_native_action ?on_usage_report ?on_tool_execution ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition = Atomic.make Keeper_provider_attempt_effect.No_effect_observed in
@@ -1771,7 +1746,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         ~required_native_posture
         ~official_client_continuation
         ~runtime_id
-        ~prompt_capacity ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
+        ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
         ~keeper_name
         ~on_model_input_window_observation
         ~carried_front_seed
@@ -1803,6 +1778,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         ~on_official_client_result_handoff
         ~on_native_action
         ~on_usage_report
+        ~on_tool_execution
         ~config)
   in
   { result
@@ -1812,7 +1788,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
 ;;
 
 module For_testing = struct
-  let test_projection ~turn_count ~position ~on_usage_report on_event =
+  let test_projection ?receipts ~turn_count ~position ~on_usage_report on_event =
     stream_projection ~quota_scope:None
       ~keeper_name:"test"
       ~runtime_id:"muse.test"
@@ -1824,6 +1800,7 @@ module For_testing = struct
       ~on_turn_started:(fun (_ : observed_turn) -> ())
       ~on_message_started:(fun () -> ())
       ~position
+      ~receipts
       on_event
   ;;
 
@@ -1862,11 +1839,12 @@ module For_testing = struct
         }
     | Mcp_tool_finished of { call_id : string }
 
-  let project_stream_inputs ~during inputs =
+  let project_stream_inputs ?receipts ~during inputs =
     let emitted = ref [] in
     let feed = ref (fun (_ : stream_input) -> ()) in
     let projection =
       test_projection
+        ?receipts
         ~turn_count:1
         ~position:Keeper_usage_resolution.Fresh
         ~on_usage_report:None
@@ -1897,7 +1875,5 @@ module For_testing = struct
     prompt_for_turn ~held:[] ~is_resume:false ~goal prepared
   ;;
 
-  let reserved_prompt_bytes = reserved_prompt_bytes
-  let measure_model_input_message_bytes = measure_model_input_message_bytes
   let native_posture_note = native_posture_note
 end

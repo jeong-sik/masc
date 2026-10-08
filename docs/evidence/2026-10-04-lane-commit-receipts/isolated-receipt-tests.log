@@ -1,0 +1,15 @@
+Testing `tui runtime config receipt'.
+This run has ID `24E3IG9B'.
+
+  [OK]          decode           0   lane notices preserve application and du...
+  [OK]          decode           1   valid receipt preserves typed outcomes.
+  [OK]          decode           2   causal mismatches are rejected.
+  [OK]          decode           3   Skill variants are closed and complete.
+  [OK]          decode           4   application evidence is required.
+  [OK]          decode           5   exact-output registry row and lock warni...
+  [OK]          decode           6   ok=false is rejected.
+  [OK]          preview          0   can_save decides and a refusal says why.
+  [OK]          preview          1   an answer without can_save is not a pass.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-receipt-check-2kjwjght/_build/_tests/tui runtime config receipt'.
+Test Successful in 0.002s. 9 tests run.

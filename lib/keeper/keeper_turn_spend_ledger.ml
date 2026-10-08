@@ -29,7 +29,8 @@ let write ~masc_root ~agent_name ~task_id ~trace_id ~keeper_turn_id resolved =
          ~cost_usd:(Keeper_usage_resolution.reported_cost_usd delta)
          ~usage_projection:
            (Cost_ledger.Resolved_attempt_delta
-              { lane_attempt_index = resolved.lane_attempt_index
+              { routing_run_id = resolved.routing_run_id
+              ; lane_attempt_index = resolved.lane_attempt_index
               ; reading_index = reading.reading_index
               })
          ~response_id:reading.response_id

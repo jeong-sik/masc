@@ -300,7 +300,6 @@ val run_named :
   ?transport:Masc_grpc_transport.t ->
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
-  ?yield_on_tool:bool ->
   ?checkpoint_sink:Agent_core.Agent.checkpoint_sink ->
   ?context_injector:Agent_core.Hooks.context_injector ->
   ?context:Agent_core.Context.t ->
@@ -308,6 +307,7 @@ val run_named :
   ?enable_thinking:bool ->
   ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
   ?agent_core_checkpoint:Agent_core.Checkpoint.t ->
+  ?native_binding:Keeper_direct_native_continuation.binding ->
   ?continue_from_checkpoint:bool ->
   ?trace_link:string * string ->
   ?event_bus:Agent_core.Event_bus.t ->
@@ -350,6 +350,7 @@ val run_named :
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->
+  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?on_runtime_attempt:(runtime_attempt -> unit) ->
   ?runtime_retry_deferral:runtime_retry_deferral ->
   ?checkpoint_progress:
@@ -373,7 +374,7 @@ val run_named :
 (** Run a single [Agent.run] call with MASC-driven runtime model fallback.
     MASC drives the runtime FSM directly: resolves runtime providers,
     resolves each candidate's model temperature before trying it with AGENT_CORE, and
-    uses [Runtime_fsm.decide] on failure.
+    asks [Runtime_attempt_fsm.should_try_next] on failure.
     The runtime loop runs inside a capacity-managed queue permit.
 
     [on_runtime_attempt_error] observes every typed candidate failure after

@@ -24,18 +24,9 @@ let approval_items (state : state) =
   @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
 
-(* Everything on the Approvals surface waiting on the operator: the three
-   approval row kinds plus the questions keepers have open. The surface
-   answers both -- that is why it fetches asks -- so its ring entry, badge
-   and alert colour must all count the same thing. One count here, not
-   three copies that can drift: with zero approvals and one open question
-   the entry still has to be reachable, or the question has nowhere to be
-   seen from. The badge number is therefore the SUM of approval rows and open
-   questions, not an approval count: a badge of 3 may be three approvals,
-   three questions, or a mix. *)
-(* The questions behind the count, so the three places that say how many there
-   are cannot count different things: this surface's title, the block heading
-   above the questions themselves, and the badge below. [None] is a reading
+(* The questions behind the count, so the two places that say how many there
+   are cannot count different things: this surface's title and the block
+   heading above the questions themselves. [None] is a reading
    that has not come back, which is not the same answer as a reading with no
    question in it -- the block draws nothing for the first and says so for the
    second. *)
@@ -70,9 +61,9 @@ let approvals_open_question_count (state : state) =
      said the store behind the list could not be read. The Gate snapshot sends
      [approval_queue: null] with [approval_queue_state] in this case.
 
-   Every place that has to know whether a list was read -- the strip entry,
-   the Dashboard approvals count, the Approvals title and the empty queue --
-   reads it from here, so none of them keeps its own list of fields. *)
+   Every place that has to know whether a list was read -- Home, the
+   Approvals title and the empty queue -- reads it from here, so none of them
+   keeps its own list of fields. *)
 type approval_not_read =
   | Approval_unread
   | Approval_failed of string
@@ -92,12 +83,20 @@ type approvals_reading =
 
 (* A failed confirm-queue read sets [approval_snapshot] to [None] in the same
    step as it sets [approvals_error], so a snapshot on screen is always the
-   last answer. *)
+   last answer.
+
+   A refresh that confirms the workspace identity withdraws the listing
+   generation in the same pass, so that pass's own answer is refused before
+   it can be drawn. A recovery read ticketed outside the bundle counts as
+   the read in flight: the surface is between two reads, not unread. *)
 let confirm_queue_reading (state : state) =
-  match (state.approval_snapshot, state.approvals_error) with
-  | Some _, _ -> List_read
-  | None, Some cause -> List_not_read (Approval_failed cause)
-  | None, None -> List_not_read Approval_unread
+  if Snapshot_read.in_flight state.approvals_summary_read then
+    List_not_read Approval_unread
+  else
+    match (state.approval_snapshot, state.approvals_error) with
+    | Some _, _ -> List_read
+    | None, Some cause -> List_not_read (Approval_failed cause)
+    | None, None -> List_not_read Approval_unread
 
 let kept_rows_reading ~observed ~error =
   match (observed, error) with
@@ -144,29 +143,21 @@ let approval_row_lists (reading : approvals_reading) =
   ; ("Gate queue", reading.gate_queue)
   ]
 
+(* Everything on the Approvals surface waiting on the operator: the three
+   approval row kinds plus the questions keepers have open. The surface
+   answers both -- that is why it fetches asks -- so its title counts the SUM:
+   a title of 3 may be three approvals, three questions, or a mix. *)
 let approvals_surface_pending (state : state) =
   List.length (approval_items state) + approvals_open_question_count state
 
 (* Whether every list the count is taken over was read. The count is a
-   reading of what is waiting only when all four came back.
-
-   The strip entry and the Dashboard approvals count both call this, so the
-   entry leaves the strip exactly when the count is drawn without "?".
-   An unreadable Gate store with every other list empty keeps the entry:
-   an entry that is gone reads as "nothing is waiting". *)
+   reading of what is waiting only when all four came back. Home settles its
+   first selection only on such a reading, so an unread list never reads as
+   "nothing is waiting". *)
 let approvals_reading_current (state : state) =
   let reading = approvals_reading state in
   List.for_all list_is_read
     (reading.questions :: List.map snd (approval_row_lists reading))
-
-(* The Dashboard approvals count. The "?" tail marks a count no source will
-   stand behind; it does not say which way the number is wrong, because a
-   dropped confirm queue leaves it short and a stale held-call or Gate list
-   can leave it long. The Approvals title says which list it was. *)
-let approvals_count_label (state : state) =
-  let on_screen = approvals_surface_pending state in
-  if approvals_reading_current state then string_of_int on_screen
-  else Printf.sprintf "%d?" on_screen
 
 (* One title clause per list that was not read, in the order the lists are
    drawn. A list with nothing read and nothing kept is "unread" whether or not
@@ -212,6 +203,3 @@ let approval_item_needs_person = function
       | Gate_human_required | Gate_blocked -> true
       | Gate_queued | Gate_judging -> false
 
-let approvals_human_pending (state : state) =
-  List.length (List.filter approval_item_needs_person (approval_items state))
-  + approvals_open_question_count state

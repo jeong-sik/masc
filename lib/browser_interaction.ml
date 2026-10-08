@@ -74,6 +74,12 @@ let parse = function
         let* point = geometry Browser_lane.Pointer.point_of_json "point" in
         let* x = integer "x" in let* y = integer "y" in
         Ok (Browser_lane.Scroll_at {point;viewport;x;y})
+      | Some (`String "hover_at") ->
+        let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"from";"to"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "hover_at requires expectedUrl" in
+        let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
+        let* point = geometry Browser_lane.Pointer.point_of_json "point" in
+        Ok (Browser_lane.Hover_at {point;viewport})
       | Some (`String ("click_at" | "drag" as action)) ->
         let* () = excludes (["selector"; "text"; "documentId"; "nodeId"; "x"; "y"] @
           if action = "click_at" then ["from"; "to"] else ["point"]) in
@@ -86,18 +92,19 @@ let parse = function
           let* from = geometry Browser_lane.Pointer.point_of_json "from" in
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           Ok (Browser_lane.Drag {from;to_;viewport})
-      | _ -> Error "action must be activate_tab, click, follow_link, fill, scroll, click_at, scroll_at or drag" in
+      | _ -> Error "action must be activate_tab, click, follow_link, fill, scroll, click_at, scroll_at, hover_at or drag" in
     Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
 let perform request =
-  let* target = Browser_lane.resolve_target request.route
-    |> Result.map_error Browser_lane.selection_error_code in
+  let verb = Browser_lane.Page_interact {tab_id=request.tab_id;
+    expected_url=request.expected_url; action=request.action} in
+  let* target = Browser_lane.resolve_target ~verb request.route
+    |> Result.map_error Browser_lane.selection_error_message in
   let* answer = Browser_lane.issue_for ~target
-    ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
-      expected_url=request.expected_url; action=request.action})
+    ~verb
     ~timeout_sec:20.
-    |> Result.map_error Browser_lane.selection_error_code in
+    |> Result.map_error Browser_lane.selection_error_message in
   Browser_surface.decode_answer ~lane:(Browser_lane.target_lane target) answer
 
 let script = {js|function interactInPage(args) {
@@ -164,7 +171,6 @@ let script = {js|function interactInPage(args) {
     location.assign(destination.href);
     return result;
   }
-  if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
   if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
     if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))

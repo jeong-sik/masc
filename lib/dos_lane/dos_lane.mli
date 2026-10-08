@@ -76,6 +76,8 @@ type observation = {
 type entry = { at_step : int; who : string; key_name : string }
 
 type error =
+  | Activity_disabled
+  | Activity_unobserved
   | No_machine  (** nothing loaded — [masc_dos_load] first *)
   | Invalid_request of string  (** the caller's arguments *)
   | Unreadable of string
@@ -99,6 +101,14 @@ type error =
           the one loaded is kept under [loaded]; nothing was pressed. *)
 
 val error_to_string : error -> string
+
+val install_activity_observer : (unit -> Machine_configuration.activity) option -> unit
+(** Install the published Runtime observer. [None] means unobserved, so new
+    execution is refused. Installation never changes the machine itself. *)
+val activity : unit -> Machine_configuration.activity
+(** Lock-free activity reading. New execution is admitted once at entry; already
+    admitted work finishes even if activity changes while it waits/runs.
+    Inspection, checkpoint saving, eject and controller release remain available. *)
 
 val max_steps_per_call : int
 (** 4,000,000 instructions. The core runs about 24 million a second on this
@@ -443,8 +453,8 @@ val lookup_autosave : dir:string -> autosave_lookup
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)
 
-val recent_activity : unit -> Lane_activity.entry list
-(** The last {!Lane_activity.cap} things a Keeper did to this Lane -- load,
+val recent_activity : unit -> Machine_action_feed.entry list
+(** The last {!Machine_action_feed.cap} things a Keeper did to this Lane -- load,
     step, press, click, type, save, restore, pass and eject, newest first --
     for a spectator, not for replay: unlike {!ledger} this is not scoped to
     the current machine. It spans a [load] or [restore] (one more line on the

@@ -1,0 +1,62 @@
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +615
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 615, reused 614, downloaded 0, added 463
+Progress: resolved 615, reused 614, downloaded 0, added 615, done
+
+dependencies:
++ @codemirror/lang-css 6.3.1
++ @codemirror/lang-go 6.0.1
++ @codemirror/lang-html 6.4.11
++ @codemirror/lang-javascript 6.2.5
++ @codemirror/lang-json 6.0.2
++ @codemirror/lang-markdown 6.5.0
++ @codemirror/lang-python 6.2.1
++ @codemirror/lang-rust 6.0.2
++ @codemirror/language 6.12.3
++ @codemirror/state 6.6.0
++ @codemirror/view 6.41.1
++ @formkit/auto-animate 0.9.0
++ @preact/signals 2.9.0
++ cytoscape 3.33.3
++ diff 9.0.0
++ dompurify 3.4.16
++ effect 3.22.1
++ htm 3.1.1
++ lucide-preact 1.14.0
++ marked 18.0.3
++ mermaid 11.16.1
++ preact 10.29.1
++ shiki 4.0.2
++ toml-eslint-parser 1.0.3
++ uuid 14.0.0
++ valibot 1.4.2
+
+devDependencies:
++ @eslint/js 9.39.4
++ @preact/preset-vite 2.10.5
++ @tailwindcss/vite 4.2.4
++ @testing-library/jest-dom 6.9.1
++ @testing-library/preact 3.2.4
++ @types/jest-axe 3.5.9
++ @types/node 22.19.17
++ culori 4.0.2
++ eslint 9.39.4
++ eslint-plugin-react-hooks 7.1.1
++ globals 17.6.0
++ happy-dom 20.9.0
++ jest-axe 9.0.0
++ jsdom 29.1.1
++ magic-string 0.30.21
++ playwright 1.61.1
++ postcss 8.5.23
++ rollup-plugin-visualizer 6.0.11
++ tailwindcss 4.2.4
++ tsx 4.23.12
++ typescript 6.0.3
++ typescript-eslint 8.59.2
++ vite 7.3.6
++ vitest 5.0.2
+
+Done in 2.4s using pnpm v10.31.0

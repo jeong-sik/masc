@@ -1,0 +1,229 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/settings-surface.test.ts -t 'provider failure=true'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard
+
+stderr | src/components/settings-surface.test.ts > SettingsSurface > refreshes mounted Settings after its editor unmounts during a save, provider failure=true
+[Settings] runtime settings refresh failed after editor save: Error: provider snapshot unavailable
+    at /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard/src/components/settings-surface.test.ts:2015:80
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at file:///Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard/node_modules/.pnpm/vitest@5.0.2_@types+node@22.19.17_happy-dom@20.9.0_jsdom@29.1.1_vite@7.3.6_@types+node@_728cb8059a3aa96a732dec546b6a7f89/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20
+
+ ❯ src/components/settings-surface.test.ts (58 tests | 1 failed | 57 skipped) 5067ms
+   ❯ SettingsSurface (47)
+     × refreshes mounted Settings after its editor unmounts during a save, provider failure=true 5066ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/settings-surface.test.ts > SettingsSurface > refreshes mounted Settings after its editor unmounts during a save, provider failure=true
+AssertionError: expected 'Operator설정계정계정AccountKeeper 운영런타임Runt…' to contain 'late-save-visible-model'
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<main[39m
+        [33mclass[39m=[32m"v2-shell-surface settings-surf ss-surface bg-surface-page text-text-primary"[39m
+        [33mdata-screen-label[39m=[32m"설정"[39m
+        [33mdata-testid[39m=[32m"settings-surface"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"set-shell"[39m
+        [36m>[39m
+          [36m<nav[39m
+            [33maria-label[39m=[32m"Settings categories"[39m
+            [33mclass[39m=[32m"set-nav"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"set-nav-h"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"eyebrow"[39m
+              [36m>[39m
+                [0mOperator[0m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"set-nav-title"[39m
+              [36m>[39m
+                [0m설정[0m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"set-nav-group"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"set-nav-glabel"[39m
+              [36m>[39m
+                [0m계정[0m
+              [36m</div>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-account"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m계정[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mAccount[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"set-nav-group"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"set-nav-glabel"[39m
+              [36m>[39m
+                [0mKeeper 운영[0m
+              [36m</div>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item on"[39m
+                [33mdata-active[39m=[32m"true"[39m
+                [33mdata-testid[39m=[32m"settings-nav-runtime"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m런타임[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mRuntime[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-routing"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m모델 라우팅[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mRouting[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-prompts"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m기본 프롬프트[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mPrompts[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-fusion"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m패널·심판 심의[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mFusion[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"set-nav-group"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"set-nav-glabel"[39m
+              [36m>[39m
+                [0m인프라 · 실행[0m
+              [36m</div>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-runtimes"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m런타임 관리[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mRuntimes[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-paths"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m경로 · Path[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mPaths[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"set-nav-group"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"set-nav-glabel"[39m
+             ...
+
+Expected: "late-save-visible-model"
+Received: "Operator설정계정계정AccountKeeper 운영런타임Runtime모델 라우팅Routing기본 프롬프트Prompts패널·심판 심의Fusion인프라 · 실행런타임 관리Runtimes경로 · PathPaths연결 · 통합MCP 서버MCP저장소Repositories관측 · 알림관측 · 시스템 로그Logs알림Notify표시Displaylive-backed = 직접 읽고 씀 · writer 없는 값은 read-only런타임runtime.toml + provider catalog이 화면을 뒷받침하는 것 2건 — 읽기 전용 안내live writeDefault runtimeGET /api/v1/dashboard/runtime-defaults + /api/v1/runtime/resolved + runtime provider catalogPATCH /api/v1/runtime/routing lane=defaultlive readRuntime catalog cardsGET /api/v1/providersread-only projection첫 대화 준비준비 상태 새로고침작업 공간: /fixture모델: 선택 필요현재 작업 공간에 선언된 HTTP 연결에 API 키를 적용합니다. CLI 로그인과 새 모델 추가는 아래 모델 연결 선택에서 진행하세요.연결 연결 선택API 키 비공개로 저장모델 연결 선택여러 모델을 선택하세요. 첫 모델을 imp 기본 모델로 사용하며, 다음 모델은 표시 순서대로 대체 연결이 됩니다.기존 연결새 모델 추가공급자 공급자 선택검증 후 선택 저장설정 재개저장한 모델 설정을 실행 중인 서버에 적용했습니다.모델 응답과 도구 검증 결과는 준비 상태에서 별도로 확인하세요.재개는 저장한 연결을 적용합니다. 실제 대화·도구·sandbox 검증을 실행하거나 통과로 표시하지 않습니다.runtime.toml현재 서버가 해석한 런타임 기본값과 provider 카탈로그입니다.런타임 관리 열기/cfg/runtime.toml3resolved runtimes2catalog entriesDefault runtime[runtime].default · 새 keeper 가 시작될 런타임 id (provider.model)rt-a · m1rt-b · m2rt-c · m3Default modelResolved model API namem1Default contextResolved context window128K ctxsource: overrideRuntime catalog (2)rt-aclouddefaultconfiguredproviderProvider Amodelm1context128K ctx✓ tools· thinking✓ streamingDiagnostics 1snapshot:source:runtime.toml · protocol:openai-http · models:1 · ctx:128000 · tools:on · thinking:off · streaming:ontransporthttps://runtime.example/v1rt-bcloudconfiguredproviderProvider Bmodelm2context128K ctx✓ tools✓ thinking✓ streamingDiagnostics 1snapshot:source:runtime.toml · protocol:openai-http · models:1 · ctx:128000 · tools:on · thinking:on · streaming:ontransporthttps://runtime.example/v1"
+
+ ❯ src/components/settings-surface.test.ts:2017:57
+    2015|       if (providerFailure) apiMock.fetchRuntimeProviders.mockRejectedV…
+    2016|       finish(committedRuntimeTomlConfigFixture({ ...config, source_tex…
+    2017|       await waitFor(() => expect(container.textContent).toContain('lat…
+       |                                                         ^
+    2018|       if (providerFailure) {
+    2019|         expect(container.querySelector('[data-testid="runtime-catalog-…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 57 skipped (58)
+   Start at  23:36:58
+   Duration  6.86s (tests 75%, transform 14%, import 8%, environment 2%, setup 1%)
+
+ ELIFECYCLE  Test failed. See above for more details.

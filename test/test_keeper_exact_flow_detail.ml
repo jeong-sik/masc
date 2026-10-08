@@ -172,6 +172,7 @@ let test_every_execution_cause_renders_distinctly () =
     ; Provider_response_refused { http_status = 400; refusal = Input_capacity; retry_after_s = None }
     ; Provider_response_refused { http_status = 400; refusal = Network_error; retry_after_s = None }
     ; Provider_response_refused { http_status = 408; refusal = Timeout; retry_after_s = None }
+    ; Output_limit_reached
     ; Incomplete_output
     ; Missing_output
     ; Ambiguous_output 3
@@ -197,7 +198,7 @@ let test_every_execution_cause_renders_distinctly () =
                  Http.ProviderFailure { kind = Http.Hard_quota { retry_after = None }; message = "" }
              ; dispatch = Generation_dispatch_started
              }))
-       (Exact_output.execution_error_cause_to_string Incomplete_output))
+       (Exact_output.execution_error_cause_to_string Output_limit_reached))
 ;;
 
 let require_ok label = function
@@ -250,7 +251,7 @@ let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
       ~messages:[ Agent_core.Types.user_msg "Return one JSON object." ]
       requirement
     |> require_ok "snapshot rejection flow"
-    |> Exact_output.start_flow
+    |> Exact_output.start_flow ~admission_class:Llm_provider.Admission_class.Standard
     |> require_ok "start rejection flow"
   in
   Eio_main.run @@ fun env ->

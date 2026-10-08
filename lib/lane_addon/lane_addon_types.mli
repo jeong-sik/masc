@@ -33,10 +33,18 @@ type resources = {
   memory_bytes : int64;
   pids : int;
   max_reply_bytes : int;
-  (** Bounds worker replies, acquired input, and serialized namespaced host
-      output separately. A worker reply that fits may still be refused when
-      host identity prefixes exceed the same observation envelope. *)
+  (** Declared once and read by several unrelated bounds: the size of a worker
+      message the host accepts, the combined input the host acquires for the
+      package, the namespaced observation the host retains, the model request
+      and result it stores, and the record it reads back. A worker reply that
+      fits may still be refused when host identity prefixes exceed the same
+      observation envelope. RFC-0471 narrows this to the worker message. *)
 }
+
+(** The one definition of a resource declaration the host can run. The manifest
+    reader, the retained binding reader and the Docker worker all use it, so a
+    declaration is refused where it is read rather than where it is installed. *)
+val check_resources : resources -> (unit, string) result
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type package = {

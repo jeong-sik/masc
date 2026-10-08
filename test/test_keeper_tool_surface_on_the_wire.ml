@@ -81,6 +81,67 @@ let test_a_mid_turn_widening_is_visible () =
       (List.mem "github_get_me" (names built)))
 ;;
 
+let test_request_context_references_require_callable_tools () =
+  let built = [tool "keeper_artifact_read"; tool "Read"] in
+  let surface ~enabled ~tool_choice ~schema_names =
+    Keeper_agent_tool_surface.for_request ~enabled ~tool_choice ~schema_names
+      ~checkpoint_owner:(Some Runtime_execution.Official_client)
+      ~agent_cell:(ref None) ~built |> names in
+  check (list string) "disabled surface offers no reader" []
+    (surface ~enabled:false ~tool_choice:None ~schema_names:["keeper_artifact_read"]);
+  check (list string) "explicit text-only request offers no reader" []
+    (surface ~enabled:true ~tool_choice:(Some Agent_core.Types.None_)
+       ~schema_names:["keeper_artifact_read"]);
+  check (list string) "filtered reader stays unavailable" ["Read"]
+    (surface ~enabled:true ~tool_choice:(Some Agent_core.Types.Auto) ~schema_names:["Read"]);
+  check (list string) "callable reader is offered" ["keeper_artifact_read"]
+    (surface ~enabled:true ~tool_choice:None ~schema_names:["keeper_artifact_read"])
+;;
+
+let test_failover_uses_current_owner_without_clearing_agent () =
+  let loader = tool "keeper_tool_search" in
+  let reader_name = "keeper_workspace_memory_read" in
+  with_agent ~tools:[tool "Read"; loader] (fun agent ->
+    let agent_cell = ref (Some agent) in
+    let built = [tool "Read"; loader; tool "keeper_memory_search"] in
+    let checkpoint_owner = ref (Some Runtime_execution.Masc_agent_core) in
+    let surface () = Keeper_agent_tool_surface.for_attempt
+        ~checkpoint_owner:!checkpoint_owner ~agent_cell ~built in
+    let request () =
+      let active = surface () in
+      let offered = Keeper_agent_tool_surface.for_request
+          ~checkpoint_owner:!checkpoint_owner ~enabled:true ~tool_choice:None
+          ~schema_names:(names active.tools) ~agent_cell ~built in
+      offered, Keeper_request_tool_access.create ~offered
+        ~deferred_names:[reader_name] ~loader_alive:active.loader_alive in
+    let _, access = request () in
+    check bool "Agent Core's live loader offers deferred recall" true
+      (Keeper_request_tool_access.route access ~name:reader_name = Discoverable);
+    Agent_core.Agent.extend_tools agent [tool reader_name];
+    let widened, access = request () in
+    check bool "same attempt observes dynamic widening" true
+      (List.mem reader_name (names widened));
+    check bool "loaded reader becomes directly callable" true
+      (Keeper_request_tool_access.route access ~name:reader_name = Direct);
+    checkpoint_owner := Some Runtime_execution.Official_client;
+    let official, access = request () in
+    check (list string) "official failover uses its built schemas, not the old agent"
+      (names built) (names official);
+    check bool "the old live loader cannot advertise recall in the official attempt" true
+      (Keeper_request_tool_access.route access ~name:reader_name = Unavailable);
+    check bool "official built tools survive the schema filter" true
+      (Keeper_request_tool_access.route access ~name:"keeper_memory_search" = Direct);
+    check bool "official attempt has no in-process deferred loader" false
+      (surface ()).loader_alive;
+    check bool "ownership selection leaves the previous agent intact" true
+      (match !agent_cell with Some retained -> retained == agent | None -> false);
+    checkpoint_owner := None;
+    check bool "an unowned stale cell does not promise a loader" false
+      (surface ()).loader_alive;
+    check (list string) "before dispatch only the built surface is known"
+      (names built) (names (surface ()).tools))
+;;
+
 let () =
   run
     "keeper tool surface on the wire"
@@ -89,6 +150,10 @@ let () =
             test_no_agent_reports_the_built_list
         ; test_case "agent surface wins over the built list" `Quick
             test_agent_surface_wins_over_the_built_list
+        ; test_case "context references require callable tools" `Quick
+            test_request_context_references_require_callable_tools
+        ; test_case "failover uses current owner with a retained agent cell" `Quick
+            test_failover_uses_current_owner_without_clearing_agent
         ; test_case "a mid-turn widening is visible" `Quick
             test_a_mid_turn_widening_is_visible
         ] )

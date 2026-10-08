@@ -422,7 +422,10 @@ let render_section_resources ~cols (state : state) =
   let task_lines = match state.task_flow with
     | None ->
       [ "    Task snapshot unavailable"
-      ; "    " ^ Option.value ~default:"Backlog has not been observed yet." state.tasks_error ]
+      ; "    "
+        ^ (match state.tasks_error with
+           | None -> "Backlog has not been observed yet."
+           | Some error -> Terminal_text.single_line error) ]
     | Some flow ->
       let current = flow.Task_flow.current in
       [ Printf.sprintf "    New tasks %d · Done %d · Cancelled %d"
@@ -444,7 +447,7 @@ let render_section_resources ~cols (state : state) =
            [ Printf.sprintf "    %d invalid timestamps excluded from time-window counts"
                flow.unparseable_timestamps ])
       @ (match state.tasks_error with None -> [] | Some error ->
-           [ "    Snapshot warning: " ^ error ])
+           [ "    Snapshot warning: " ^ Terminal_text.single_line error ])
   in
   (* One row per assignee, longest queue first. The list is capped so the two
      blocks below it stay on screen; the tail is reported as a count rather
@@ -674,7 +677,7 @@ let render_section_tools ~cols (state : state) : string list =
       let items =
         Hashtbl.fold
           (fun name count acc ->
-            { Chart.name; count; style = Some (Chart.Status Masc_tui_theme.Warn) } :: acc)
+            { Chart.name; count; style = Some Masc_tui_theme.Warn } :: acc)
           counts []
         |> List.sort (fun (a : Chart.bar_item) (b : Chart.bar_item) ->
                Int.compare b.count a.count)

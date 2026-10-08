@@ -190,14 +190,27 @@ type t =
     (** Per-endpoint bound on concurrent in-flight completion dispatches.
       [None] applies no bound. [Some n] admits at most [n] concurrent
       dispatches process-wide for this endpoint identity
-      [(kind, base_url, api-key identity)]; excess dispatches wait in FIFO
-      order (see {!Provider_admission}). Must be [>= 1] when declared;
+      [(kind, base_url, api-key identity)]; excess dispatches wait for a
+      permit (see {!Provider_admission}). Must be [>= 1] when declared;
       {!Complete.complete} rejects the request otherwise.
 
       The consumer declares the allowance its provider account grants; AGENT_CORE
       never selects one from provider kind, URL, model, or process
       environment.
       @since 0.216.0 *)
+  ; admission_priority_run_limit : int option
+    (** How many permits in a row this endpoint identity may hand to
+      [Priority] requests while a [Standard] request waits (see
+      {!Slot_scheduler.create}). [None] keeps one arrival-order queue for
+      every request. Like [max_concurrent_requests] it describes the
+      endpoint, so every config naming one endpoint identity must declare
+      the same value. Must be [>= 1] when declared, and declared only with
+      [max_concurrent_requests]: without it the endpoint has no queue to
+      order, and [Complete] rejects the config before dispatch. *)
+  ; admission_class : Admission_class.t
+    (** Which queue this request joins while the endpoint's permits are all
+      held. It only orders the queue when the endpoint declares
+      [admission_priority_run_limit]. *)
   }
 
 (** Default config for quick construction. Only [kind], [model_id],
@@ -242,6 +255,8 @@ val make
   -> ?previous_response_id:string
   -> ?connect_timeout_s:float
   -> ?max_concurrent_requests:int
+  -> ?admission_priority_run_limit:int
+  -> ?admission_class:Admission_class.t
   -> unit
   -> t
 

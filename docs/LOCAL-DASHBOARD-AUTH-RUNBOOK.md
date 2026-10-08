@@ -417,9 +417,19 @@ Expected:
 
 Use a low-risk keeper first.
 
-Raw runtime save:
+Raw runtime save requires the path and revision observed with the original source. Fetch
+with the same admin identity, keep these secret-bearing files local, then edit
+`edited-runtime.toml` before producing the guarded payload:
 
 ```bash
+curl -sS http://127.0.0.1:8935/api/v1/runtime/config/raw \
+  -H "Authorization: Bearer <raw-token>" \
+  -H "X-MASC-Agent: <admin-agent>" > current-config.json
+jq -r '.source_text' current-config.json > edited-runtime.toml
+# Edit edited-runtime.toml; keep current-config.json as the original save basis.
+jq --rawfile source edited-runtime.toml \
+  '{source_text: $source, expected_source_revision: .source_revision, expected_source_path: .path}' \
+  current-config.json > payload.json
 curl -sS -X POST http://127.0.0.1:8935/api/v1/runtime/config/raw \
   -H "Authorization: Bearer <raw-token>" \
   -H "X-MASC-Agent: <admin-agent>" \
@@ -427,13 +437,12 @@ curl -sS -X POST http://127.0.0.1:8935/api/v1/runtime/config/raw \
   -d @payload.json
 ```
 
-`payload.json`:
-
-```json
-{
-  "source_text": "[runtime]\ndefault = \"provider.model\"\n"
-}
-```
+A stale revision returns HTTP 409 with the current document and leaves the draft
+and configuration unchanged. Compare the returned source before explicitly
+adopting that revision or replacing the draft; do not automatically resend it.
+Preview remains text-only; raw save without `expected_source_revision` or
+`expected_source_path` is refused. Keep both values from the same original GET;
+a different file path also produces a conflict instead of authorizing a write.
 
 If the request is authenticated as `agent-code` or `agent-code-mcp-client` with `role=worker`,
 this route should fail with a `CanAdmin` error by design.

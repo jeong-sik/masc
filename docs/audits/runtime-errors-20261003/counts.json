@@ -1,0 +1,134 @@
+{
+  "captured_at_utc": "2026-10-03T03:18:33.343642+00:00",
+  "parsed_rows": 166970,
+  "malformed_rows": 0,
+  "counts": [
+    {
+      "date": "2026-10-02",
+      "family": "quota",
+      "log_lines": 4886
+    },
+    {
+      "date": "2026-10-02",
+      "family": "missing_fragments",
+      "log_lines": 60
+    },
+    {
+      "date": "2026-10-02",
+      "family": "dashboard_refresh",
+      "log_lines": 16
+    },
+    {
+      "date": "2026-10-02",
+      "family": "other",
+      "log_lines": 4172
+    },
+    {
+      "date": "2026-10-02",
+      "family": "upstream_refusal",
+      "log_lines": 134
+    },
+    {
+      "date": "2026-10-02",
+      "family": "missing_boundary",
+      "log_lines": 137
+    },
+    {
+      "date": "2026-10-02",
+      "family": "missing_marker",
+      "log_lines": 147
+    },
+    {
+      "date": "2026-10-02",
+      "family": "sandbox_shim",
+      "log_lines": 12
+    },
+    {
+      "date": "2026-10-02",
+      "family": "schema_drift",
+      "log_lines": 64
+    },
+    {
+      "date": "2026-10-02",
+      "family": "missing_trace",
+      "log_lines": 41
+    },
+    {
+      "date": "2026-10-02",
+      "family": "codex_routing",
+      "log_lines": 814
+    },
+    {
+      "date": "2026-10-02",
+      "family": "dns",
+      "log_lines": 278
+    },
+    {
+      "date": "2026-10-02",
+      "family": "provider_unknown_effect",
+      "log_lines": 5
+    },
+    {
+      "date": "2026-10-03",
+      "family": "dashboard_refresh",
+      "log_lines": 1
+    },
+    {
+      "date": "2026-10-03",
+      "family": "other",
+      "log_lines": 178
+    },
+    {
+      "date": "2026-10-03",
+      "family": "quota",
+      "log_lines": 71
+    },
+    {
+      "date": "2026-10-03",
+      "family": "schema_drift",
+      "log_lines": 5
+    },
+    {
+      "date": "2026-10-03",
+      "family": "missing_trace",
+      "log_lines": 3
+    },
+    {
+      "date": "2026-10-03",
+      "family": "missing_fragments",
+      "log_lines": 4
+    },
+    {
+      "date": "2026-10-03",
+      "family": "codex_routing",
+      "log_lines": 216
+    },
+    {
+      "date": "2026-10-03",
+      "family": "dns",
+      "log_lines": 44
+    },
+    {
+      "date": "2026-10-03",
+      "family": "provider_unknown_effect",
+      "log_lines": 2
+    },
+    {
+      "date": "2026-10-03",
+      "family": "upstream_refusal",
+      "log_lines": 12
+    }
+  ],
+  "sources": [
+    {
+      "path": "system_log_2026-10-02.jsonl",
+      "byte_cutoff_exclusive": 56027953,
+      "last_record_ts": "2026-10-02T23:59:54Z"
+    },
+    {
+      "path": "system_log_2026-10-03.jsonl",
+      "byte_cutoff_exclusive": 4227737,
+      "last_record_ts": "2026-10-03T03:18:31Z"
+    }
+  ]
+}

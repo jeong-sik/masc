@@ -6,13 +6,14 @@
     Codex app-server also answers [account/rateLimits/read] without a turn,
     four HTTP providers answer a usage endpoint without a model call, and
     the Antigravity CLI answers a print-mode [/usage] without a turn
-    ({!Runtime_provider_usage_read}).  This module decodes those reports at
+    ({!Runtime_provider_usage_read}).  Muse Code pushes [usage/changed]
+    during a session and answers [usage/read] ({!Runtime_muse_usage}).  This module decodes those reports at
     the wire and keeps the latest one per quota scope and window, with the
     time MASC heard it.
 
     It is an observation.  Routing, candidate ordering, admission and retry
-    do not read this table (an HTTP 403 usage read can separately rest its
-    scope through {!Runtime_provider_usage_read.read_after_account_refusal}
+    do not read this table (a usage read after an HTTP 403, or after a 429
+    that states no wait, can separately rest its scope through {!Runtime_provider_usage_read.read_after_account_refusal}
     on {!Runtime_quota_window}). Codex reads preserve the refusal observation
     because the rejected bucket is not attributed: codex-cli 0.156.0's protocol schema says clients must not
     infer recovery from percentages or reset times, so no availability is
@@ -48,22 +49,30 @@ type source =
   | Openrouter_key_read  (** OpenRouter [GET /api/v1/key]. *)
   | Zai_quota_limit_read  (** Z.AI [GET /api/monitor/usage/quota/limit]. *)
   | Kimi_coding_usages_read  (** Kimi [GET /coding/v1/usages]. *)
-  | Ollama_usage_read  (** Ollama [GET https://ollama.com/api/usage]. *)
+  | Ollama_balance_read  (** Ollama [GET https://ollama.com/api/balance]. *)
   | Antigravity_usage_read
       (** Antigravity [agy -p "/usage" --output-format json], no turn. *)
+  | Muse_subscription_usage
+      (** Muse Code's subscription windows, from [usage/changed] during a
+          session or a [usage/read] answer ({!Runtime_muse_usage}). Both
+          state the same two windows, so they are one source: a complete
+          report from either replaces the other's rows. *)
 
 (** What a window limits, set by each decoder from the provider's own
     shape, never from a label. *)
 type window_role =
   | Gates_model_calls
       (** Spending it refuses model calls on the account: Claude and Codex
-          windows, OpenRouter's credit limit, Z.AI's TOKENS_LIMIT, both Kimi
-          counts, Ollama's session and weekly usage, Antigravity's 5-hour and
-          weekly buckets. *)
+          windows, OpenRouter's API key credit limit, Z.AI's TOKENS_LIMIT, both Kimi
+          counts, Ollama's session and weekly allowance while its purchased
+          balance is zero, Antigravity's 5-hour and weekly buckets, Muse
+          Code's rolling and weekly windows. *)
   | Counts_other_use
       (** It counts something a model call does not need: Z.AI's
           TIME_LIMIT (MCP and tool calls), OpenRouter's free-model daily
-          requests, and uncapped credit usage totals. *)
+          requests, uncapped credit usage totals, and Ollama's session and
+          weekly allowance while its purchased balance pays for calls past
+          them. *)
   | Unclassified_limit
       (** A Z.AI limit type this decoder does not know. *)
 
@@ -111,6 +120,10 @@ type decode_error =
 val decode_error_to_string : decode_error -> string
 val source_to_string : source -> string
 
+val window_kind_of_minutes : int -> window_kind
+(** A window length stated in minutes: exactly 300 is {!Five_hour}, exactly
+    10080 is {!Seven_day}, any other length is {!Duration_minutes}. *)
+
 val window_role_to_string : window_role -> string
 (** The wire word for a role: ["gates_model_calls"], ["counts_other_use"]
     or ["unclassified_limit"]. *)
@@ -138,13 +151,14 @@ val decode_codex_rate_limits_read : Yojson.Safe.t -> (report, decode_error) resu
 
 val decode_openrouter_key : Yojson.Safe.t -> (report, decode_error) result
 (** OpenRouter [GET /api/v1/key].  A numeric [data.limit] above 0 gives one
-    {!Provider_label} window "credit limit" with {!Usd} use
+    {!Provider_label} window "API key credit limit" with {!Usd} use
     [limit - limit_remaining] and its cap, with [limit_remaining] within
     [0..limit]. With a null [limit], a reported [usage] gives an uncapped
-    "credit usage (all time)" window; absent usage gives no window. [limit_reset] is
+    "API key usage (all time)" window; absent usage gives no window. [limit_reset] is
     not read.  [data.free_model_daily_requests] gives "free model requests,
     daily" as [used / limit], with [used] within [0..limit].  Neither states
-    a reset time.
+    a reset time. These windows report API key spending, not account credits
+    or the account balance.
 
     Each HTTP decoder below refuses a report that states the same
     [(limit_id, kind)] twice ({!Duplicate_window}), and a value outside its
@@ -168,12 +182,17 @@ val decode_kimi_coding_usages : Yojson.Safe.t -> (report, decode_error) result
     "usage (provider resetTime)": it states no length, only its
     [resetTime].  [usages.*.used_ratio] is not read. *)
 
-val decode_ollama_usage : Yojson.Safe.t -> (report, decode_error) result
-(** Ollama [GET https://ollama.com/api/usage].  [limits] is required;
-    [limits.session.usage] is a {!Provider_label} "session" window and
-    [limits.weekly.usage] a {!Seven_day} window, each a {!Fraction} that
-    must be within [0..1].  No
-    reset time is stated. *)
+val decode_ollama_balance : Yojson.Safe.t -> (report, decode_error) result
+(** Ollama [GET https://ollama.com/api/balance], a legacy plan's answer.
+    [included] is required; [included.session] is a {!Provider_label}
+    "session" window and [included.weekly] a {!Seven_day} window, each a
+    {!Fraction} of [1 - remaining_percent / 100] with [remaining_percent]
+    within [0..100], and [resets_at] read as RFC 3339 when present.
+    [purchased.balance_usd] is required, 0 or more: above zero both windows
+    are {!Counts_other_use}, because Ollama pays a call past a spent window
+    from that balance; at zero they are {!Gates_model_calls}. A credit
+    plan's [included.balance_usd] is refused: its calls go on against
+    purchased credits, so no window alone says when a call is refused. *)
 
 val decode_antigravity_usage : Yojson.Safe.t -> (report, decode_error) result
 (** The whole JSON answer of [agy -p "/usage" --output-format json] (agy

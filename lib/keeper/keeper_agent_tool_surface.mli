@@ -52,12 +52,36 @@ val sync_current_task_id_for_agent_name :
     when the model loads one — so from the round after a load the built list is
     short by exactly the tools the model just asked for.
 
-    [agent_cell] fills the moment the Agent Core lane creates its agent. At a
-    request boundary [Some] therefore means that lane built the request and its
-    live set is the answer. [None] at the same boundary means an
-    official-client lane did, and those send [built] unchanged: they pin their
-    tool set at process spawn and cannot widen it. *)
+    This accessor is for callers that already know they are in the Agent Core
+    lane. The cell can survive failover to an official client; mixed-runtime
+    callers must use [for_attempt] with the current checkpoint owner. *)
 val on_the_wire :
   agent_cell:Agent_core.Agent.t option ref ->
   built:Agent_core.Tool.t list ->
   Agent_core.Tool.t list
+
+type attempt_surface =
+  { tools : Agent_core.Tool.t list
+  ; loader_alive : bool
+  }
+
+val for_attempt :
+  checkpoint_owner:Runtime_execution.checkpoint_owner option ->
+  agent_cell:Agent_core.Agent.t option ref ->
+  built:Agent_core.Tool.t list ->
+  attempt_surface
+(** Only the current Agent Core attempt may use the cell's live tools and
+    deferred loader. Official clients and pre-dispatch callers use the built
+    surface without a loader, even when an earlier attempt left an agent. *)
+
+val for_request :
+  checkpoint_owner:Runtime_execution.checkpoint_owner option ->
+  enabled:bool ->
+  tool_choice:Agent_core.Types.tool_choice option ->
+  schema_names:string list ->
+  agent_cell:Agent_core.Agent.t option ref ->
+  built:Agent_core.Tool.t list ->
+  Agent_core.Tool.t list
+(** Callable schemas for request-bound context references. Applies the active
+    surface switch, explicit no-tools choice and final schema filter to the
+    current attempt's live agent/official-client surface. *)

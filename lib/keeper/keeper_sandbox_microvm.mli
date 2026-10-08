@@ -339,9 +339,12 @@ val work_volume_trim_name : keeper_name:string -> string
 val apple_work_volume_trim_argv :
   keeper_name:string -> volume_name:string -> image:string -> string list
 (** [container run --rm] of [image] as root with every capability dropped
-    and [CAP_SYS_ADMIN] added back, no network, a read-only root, and
-    a fixed shell script as entrypoint, setting persistent ext4 discard and
-    trimming the work volume so the host gets back the blocks a guest freed.
+    and [CAP_SYS_ADMIN] and [CAP_DAC_OVERRIDE] added back (the latter so the
+    removal can unlink inside the keeper-owned tree), no network, a
+    read-only root, and
+    a fixed shell script as entrypoint, setting persistent ext4 discard,
+    removing the keeper's real build output ({!build_output_removal_script})
+    and trimming the work volume so the host gets back the blocks a guest freed.
     Subsequent mounts automatically discard freed blocks. Run only while no guest has the volume
     attached: a second ext4 mount of the same volume corrupts it. *)
 
@@ -454,8 +457,9 @@ val ensure_work_volume_for
     measurement). Apple's is a sparse virtio-blk image, so a guest
     [rm -rf _build] frees nothing on the host until the blocks are
     discarded. The disk accepts discard, but a keeper guest cannot issue it
-    (its capability set is empty); {!apple_work_volume_trim_argv} does it
-    for the work volume at boot. A keeper's [_build] on its own disposable volume, apart from
+    (its capability set is empty); {!apple_work_volume_trim_argv} trims the
+    work volume at boot and sets its ext4 discard default, so later deletes
+    there return their blocks. The build volume gets neither. A keeper's [_build] on its own disposable volume, apart from
     {!work_volume_guest_root} where the checkout lives, means that volume can
     be deleted and recreated -- zero data-loss risk, since it holds nothing
     but derived build output -- to reclaim that host space. *)
@@ -489,11 +493,13 @@ val build_link_target : playground_relative:string -> (string, string) result
     checkouts collide onto one build directory. *)
 
 val plan_build_link : target:string -> build_link_state -> build_link_plan
-(** Deciding is separate from acting so the refusal is testable. A real
-    [_build] is never deleted to install a link -- it holds output this
-    module did not create; the caller reports {!Link_refused_real_directory}
-    and the checkout keeps building on the unified work volume. Retargeting a
-    stale symlink is different: removing a symlink loses no data. *)
+(** Deciding is separate from acting so the refusal is testable. The scan
+    runs inside a live guest, where a build may be using a real [_build], so
+    the plan never deletes one; the caller reports
+    {!Link_refused_real_directory} and the checkout keeps building on the
+    unified work volume until the next boot's helper removes it
+    ({!build_output_removal_script}). Retargeting a stale symlink is
+    different: removing a symlink loses no data. *)
 
 val apple_build_volume_delete_argv : volume_name:string -> string list
 
@@ -539,6 +545,21 @@ val build_root_marker : string
 
 val build_output_dir_name : string
 
+val build_keep_marker : string
+(** [.masc-keep-build]: a checkout holding this file keeps its real
+    [_build] through a guest boot. *)
+
+val build_output_removal_script : keeper_root:string -> string
+(** The shell step {!apple_work_volume_trim_argv} runs before [fstrim]:
+    removes the real [_build] of every checkout under [keeper_root] that the
+    in-guest scan ({!build_scan_argv_for}) would refuse to link -- the same
+    depth and [dune-project] marker, the keeper root itself and [.git]
+    skipped. A symlinked [_build] is neither followed nor removed, and a
+    checkout holding {!build_keep_marker} keeps its output. Prints one line
+    per removal; a failed removal is printed and does not stop the script.
+    Runs only while no guest holds the volume, so no build can be using the
+    output. *)
+
 val build_scan_argv_for
   :  Keeper_microvm_backend.t
   -> container_name:string
@@ -576,8 +597,9 @@ val build_link_rows_of_scan : build_scan_row list -> build_link_row list
 
 val build_link_refusal_message : checkout:string -> string
 (** The message a caller reports for a row whose plan is
-    {!Link_refused_real_directory}: real build output this module did not
-    create, left in place rather than deleted. *)
+    {!Link_refused_real_directory}: a real [_build] the live guest keeps
+    until the next boot's helper removes it, unless the checkout holds
+    {!build_keep_marker}. *)
 
 val build_link_actions : build_link_row list -> (string * string) list
 (** The [(checkout, target)] pairs that actually need a guest command --

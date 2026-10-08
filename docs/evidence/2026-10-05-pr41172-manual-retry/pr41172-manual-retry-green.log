@@ -1,0 +1,407 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-retry-result-20261005/dashboard
+
+ ❯ src/components/exact-lane-activity-panel.test.ts (51 tests | 1 failed) 1129ms
+   ❯ Exact activity operator flow (42)
+     × settles only the resolved setup error after manual retry: refresh 30ms
+ ❯ src/components/settings-surface.test.ts (60 tests | 1 failed) 5303ms
+   ❯ SettingsSurface (49)
+     × refreshes mounted Settings after a save, provider failure=false activity=true 5014ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/exact-lane-activity-panel.test.ts > Exact activity operator flow > settles only the resolved setup error after manual retry: refresh
+TestingLibraryElementError: Found multiple elements with the text: /fixture refresh failed/
+
+Here are the matching elements:
+
+Ignored nodes: comments, script, style
+[36m<p[39m
+  [33mrole[39m=[32m"alert"[39m
+[36m>[39m
+  [0m설정 저장 후 목록 갱신 실패: fixture refresh failed[0m
+[36m</p>[39m
+
+Ignored nodes: comments, script, style
+[36m<p[39m
+  [33mrole[39m=[32m"alert"[39m
+[36m>[39m
+  [0m설정 저장 후 목록 갱신 실패: fixture refresh failed[0m
+[36m</p>[39m
+
+(If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden v2-monitoring-panel"[39m
+        [33mdata-section-card[39m=[32m"true"[39m
+        [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+        [33mdata-section-card-class-length[39m=[32m"19"[39m
+        [33mdata-section-card-content-state[39m=[32m"node"[39m
+        [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+        [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+        [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+        [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+        [33mdata-section-card-has-right-slot[39m=[32m"true"[39m
+        [33mdata-section-card-has-status[39m=[32m"false"[39m
+        [33mdata-section-card-has-test-id[39m=[32m"true"[39m
+        [33mdata-section-card-has-tone[39m=[32m"false"[39m
+        [33mdata-section-card-label-source[39m=[32m"label"[39m
+        [33mdata-section-card-label-state[39m=[32m"text"[39m
+        [33mdata-section-card-label-text-length[39m=[32m"12"[39m
+        [33mdata-section-card-status[39m=[32m""[39m
+        [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+        [33mdata-section-card-status-length[39m=[32m"0"[39m
+        [33mdata-section-card-tail-source[39m=[32m"right"[39m
+        [33mdata-section-card-test-id-length[39m=[32m"19"[39m
+        [33mdata-section-card-tone-length[39m=[32m"0"[39m
+        [33mdata-section-card-variant[39m=[32m"light"[39m
+        [33mdata-surface-card[39m=[32m"true"[39m
+        [33mdata-surface-card-class-length[39m=[32m"19"[39m
+        [33mdata-surface-card-content-state[39m=[32m"node"[39m
+        [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+        [33mdata-surface-card-has-test-id[39m=[32m"true"[39m
+        [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+        [33mdata-surface-card-test-id-length[39m=[32m"19"[39m
+        [33mdata-surface-card-tone[39m=[32m""[39m
+        [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+        [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+        [33mdata-surface-card-variant[39m=[32m"light"[39m
+        [33mdata-testid[39m=[32m"runtime-toml-editor"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+          [36m>[39m
+            [0mruntime.toml[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mdata-section-head-tail[39m=[32m"true"[39m
+            [33mstyle[39m=[32m"margin-left: auto; display: inline-flex; gap: 4px; align-items: center;"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"rt-status is-saved"[39m
+              [33mdata-testid[39m=[32m"runtime-toml-status"[39m
+            [36m>[39m
+              [0msaved[0m
+            [36m</span>[39m
+          [36m</span>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"p-6 flex flex-col gap-4"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"저장한 모델 설정 적용"[39m
+            [33mclass[39m=[32m"set-card"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"btn"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m설정 재개[0m
+            [36m</button>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"set-hint"[39m
+            [36m>[39m
+              [0m재개는 저장한 연결을 적용합니다. 실제 대화·도구·sandbox 검증을 실행하거나 통과로 표시하지 않습니다.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rt-shell"[39m
+          [36m>[39m
+            [36m<nav[39m
+              [33maria-label[39m=[32m"런타임 편집기 섹션"[39m
+              [33mclass[39m=[32m"rt-nav"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rt-nav-h"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"eyebrow"[39m
+                [36m>[39m
+                  [0mOperator[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rt-nav-title"[39m
+                [36m>[39m
+                  [0m런타임 편집기[0m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rt-nav-sub mono"[39m
+                [36m>[39m
+                  [0mconfig/runtime.toml[0m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"true"[39m
+                [33mclass[39m=[32m"rt-nav-item on"[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-routing"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m◷[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m라우팅[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"rt-nav-item "[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-lanes"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m⇄[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0mLane 후보[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"rt-nav-item "[39m
+                [33mdata-testid[39m=[32m"runtime-toml-nav-providers"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rt-nav-gl mono"[39m
+                [36m>[39m
+                  [0m◇[0m
+                [36m</span>[39m
+                [36m<span>[39m
+                  [0m프로바이더[0m
+                [36m...
+ ❯ Object.getElementError ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ getElementError ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:20:35
+ ❯ getMultipleElementsFoundError ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:23:10
+ ❯ ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:55:13
+ ❯ ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/exact-lane-activity-panel.test.ts:92:41
+     90|     if (kind === 'failed' || kind === 'authority') expect(view.getByTe…
+     91|     else await waitFor(() => expect(view.queryByText(/재개를 확인하지 못했습니다/)…
+     92|     if (kind === 'refresh') expect(view.getByText(/fixture refresh fai…
+       |                                         ^
+     93|     view.unmount()
+     94|     view = render(html`<${ExactLaneActivityPanel} lane=${lane} />`)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/settings-surface.test.ts > SettingsSurface > refreshes mounted Settings after a save, provider failure=false activity=true
+AssertionError: expected null not to be null
+
+Ignored nodes: comments, script, style
+[36m<html[39m
+  [33mdata-theme[39m=[32m"paper"[39m
+[36m>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<main[39m
+        [33mclass[39m=[32m"v2-shell-surface settings-surf ss-surface bg-surface-page text-text-primary"[39m
+        [33mdata-screen-label[39m=[32m"설정"[39m
+        [33mdata-testid[39m=[32m"settings-surface"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"set-shell"[39m
+        [36m>[39m
+          [36m<nav[39m
+            [33maria-label[39m=[32m"Settings categories"[39m
+            [33mclass[39m=[32m"set-nav"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"set-nav-h"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"eyebrow"[39m
+              [36m>[39m
+                [0mOperator[0m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"set-nav-title"[39m
+              [36m>[39m
+                [0m설정[0m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"set-nav-group"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"set-nav-glabel"[39m
+              [36m>[39m
+                [0m계정[0m
+              [36m</div>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-account"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m계정[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mAccount[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"set-nav-group"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"set-nav-glabel"[39m
+              [36m>[39m
+                [0mKeeper 운영[0m
+              [36m</div>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item on"[39m
+                [33mdata-active[39m=[32m"true"[39m
+                [33mdata-testid[39m=[32m"settings-nav-runtime"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m런타임[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mRuntime[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-routing"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m모델 라우팅[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mRouting[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-prompts"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m기본 프롬프트[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mPrompts[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-fusion"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m패널·심판 심의[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mFusion[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"set-nav-group"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"set-nav-glabel"[39m
+              [36m>[39m
+                [0m인프라 · 실행[0m
+              [36m</div>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-runtimes"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m런타임 관리[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mRuntimes[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"set-nav-item "[39m
+                [33mdata-active[39m=[32m"false"[39m
+                [33mdata-testid[39m=[32m"settings-nav-paths"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ko"[39m
+                [36m>[39m
+                  [0m경로 · Path[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"en mono"[39m
+                [36m>[39m
+                  [0mPaths[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"set-nav-group"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33...
+ ❯ src/components/settings-surface.test.ts:2107:75
+    2105|         const session = exactLaneActivitySessionFor(executionWorkspace…
+    2106|         await waitFor(() => expect(session.state.value.receipt).not.to…
+    2107|         await waitFor(() => expect(session.state.value.followupError).…
+       |                                                                           ^
+    2108|       }
+    2109|       await waitFor(() => expect(container.textContent).toContain('lat…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback ../../fix-pr41204-browser-parser-integration-20261005/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 2 passed (4)
+      Tests  2 failed | 196 passed (198)
+   Start at  06:26:35
+   Duration  11.27s (tests 72%, import 11%, transform 9%, environment 5%, setup 4%)
+
+    Isolate  4 workers spawned · ~228ms startup each (spawn + environment, per file)
+             at least ~685ms faster with isolate: false — reuses workers across files instead of one per file
+

@@ -82,7 +82,6 @@ let test_deferred_lane_authorizes_empty_intake () =
     true
     (Keeper_heartbeat_loop.should_run_turn_after_event_intake
        ~scheduled:scheduling.should_run_turn
-       ~consumed_stimulus_count:0
        ~event_queue_intake_error:None)
 ;;
 

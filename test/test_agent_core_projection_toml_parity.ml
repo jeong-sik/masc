@@ -134,7 +134,10 @@ let test_broadcast_projection () =
          (name ^ " description moved byte-for-byte")
          expected
          (string_field (member properties name) "description"))
-    [ "content", "Broadcast body text"
+    [ ( "content"
+      , "Broadcast body text Write readable prose with natural word spacing (including \
+         Korean) and paragraph breaks. Shorten sentences instead of removing spaces. \
+         Preserve quoted text, code, paths, and identifiers exactly." )
     ; ( "task_cache_subject_agent"
       , "Agent whose current-task cache was observed; supply together with \
          task_cache_task_id" )

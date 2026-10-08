@@ -31,6 +31,7 @@ let create_tool_observer_serialization () : tool_observer_serialization =
 type agent_setup =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   ; agent_cell : Agent_core.Agent.t option ref
@@ -41,6 +42,7 @@ type agent_setup =
   ; model_message : Keeper_gate_replay.model_message
   ; hooks : Agent_core.Hooks.hooks
   ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
+  ; on_memory_capacity_refusal : Keeper_memory_delivery_reprojection.t
   ; model_input_projection : Agent_core.Agent.model_input_projection
   ; stage_skill_delivery_on_wire :
       runtime_id:string ->
@@ -115,6 +117,7 @@ type ctx =
   ; skill_activation_context : Keeper_skill_activation_recorder.t
   ; tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   }
@@ -407,6 +410,38 @@ let skill_compositions_block ~compositions ~deferred ~on_the_wire =
   | lines -> Some (String.concat "\n" lines)
 ;;
 
+(* The source prepared before tool selection may contain an unavailable-reader
+   placeholder. Measure the request's projection only after its offered tools
+   are known. Defer publication until the caller finishes assembling the hook:
+   a failed projection/assembly must not publish that placeholder as a request.
+   These gauges describe prepared input, not successful provider delivery. *)
+let prepare_request_dynamic_context
+      ~meta ~turn_kind ~system_prompt ~user_message ~post_tool_round
+      ~dynamic_context ~dynamic_context_for_tools
+      ?(deferred_names = []) ?(loader_alive = false) ?host_recall
+      (tools : Agent_core.Tool.t list) =
+  let access = Keeper_request_tool_access.create ~offered:tools ~deferred_names ~loader_alive in
+  let dynamic_context =
+    match dynamic_context_for_tools with
+    | Some project when not post_tool_round -> project access
+    | Some _ | None -> dynamic_context
+  in
+  let dynamic_context =
+    match post_tool_round, Keeper_request_tool_access.route access
+        ~name:"keeper_workspace_memory_read", host_recall with
+    | false, Unavailable, Some recall -> dynamic_context ^ recall ~context:dynamic_context
+    | true, _, _ | false, (Direct | Discoverable), _ | false, Unavailable, None -> dynamic_context
+  in
+  let emit_metrics () =
+    match turn_kind with
+    | Turn_record.Autonomous when not post_tool_round ->
+      Keeper_unified_prompt.emit_prompt_metrics ~meta ~system_prompt
+        { world_state = dynamic_context; user_message }
+    | Autonomous | Direct -> ()
+  in
+  dynamic_context, emit_metrics
+;;
+
 let assemble_hooks
       ?preview
       ?observation_token
@@ -562,6 +597,11 @@ let assemble_hooks
              meta.name runtime_id official_turn tool_name (Printexc.to_string exn))
     in
     let active_tool_surface_enabled = ref false in
+    let active_checkpoint_owner = ref None in
+    let host_memory = ref None in
+    let on_memory_capacity_refusal ~refusal = match !host_memory with
+      | None -> Ok Keeper_memory_delivery_reprojection.Unchanged
+      | Some prepared -> Keeper_workspace_memory_host_recall.defer_for_capacity prepared ~refusal in
     let usage_attempt = ref None in
     let usage_report_of_attempt = ref None in
     let client_reported_in_attempt = ref false in
@@ -579,7 +619,9 @@ let assemble_hooks
           reading_name
     in
     let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
+      host_memory := None;
       active_tool_surface_enabled := attempt.tool_surface_enabled;
+      active_checkpoint_owner := Some attempt.checkpoint_owner;
       usage_attempt := Some (attempt.routing_run_id, attempt.runtime_id, attempt.lane_attempt_index);
       usage_report_of_attempt := Some attempt.usage_report;
       client_reported_in_attempt := false;
@@ -925,12 +967,12 @@ let assemble_hooks
                    prefix: that function answers [None] for a name that is not
                    a composition tool, so the choice is a declared fact rather
                    than a guess about spelling. *)
-                (* A deferred composition is built but not on the request:
-                   naming it as on this turn sent the model straight to a call
-                   Agent Core refuses. Without an agent nothing can have been
-                   loaded yet -- the loader refuses when the cell is empty
-                   ([Keeper_identity_tool_search.load]) -- so the declared
-                   deferral is the whole answer there. *)
+                (* Deferred compositions follow the current execution owner.
+                   A prior Agent Core cell can survive official-client
+                   failover; it cannot describe that client's tools or loader. *)
+                let attempt_surface = Keeper_agent_tool_surface.for_attempt
+                    ~checkpoint_owner:!active_checkpoint_owner
+                    ~agent_cell:turn_agent_cell ~built:built_tools in
                 Option.iter
                   (record_block Prompt_block_id.Skill_compositions)
                   (skill_compositions_block
@@ -944,36 +986,45 @@ let assemble_hooks
                           all_tool_names)
                      ~deferred:deferred_tool_names
                      ~on_the_wire:
-                       (match !turn_agent_cell with
-                        | Some agent ->
-                          Agent_core.Tool_set.names (Agent_core.Agent.tools agent)
-                        | None -> []));
+                       (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+                          attempt_surface.tools));
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn
                     ~current_tool_choice:current_params.tool_choice
                     ()
                 in
+                let offered_tools = Keeper_agent_tool_surface.for_request
+                    ~checkpoint_owner:!active_checkpoint_owner
+                    ~enabled:!active_tool_surface_enabled
+                    ~tool_choice:current_params.tool_choice ~schema_names:schema_filter
+                    ~agent_cell:turn_agent_cell ~built:built_tools in
                 let recall_tool_available name =
-                  !active_tool_surface_enabled
-                  && (match current_params.tool_choice with
-                      | Some Agent_core.Types.None_ -> false
-                      | None | Some (Agent_core.Types.Auto | Agent_core.Types.Any | Agent_core.Types.Tool _) -> true)
-                  && List.mem name schema_filter
-                  && List.exists (fun (tool : Agent_core.Tool.t) ->
-                       String.equal tool.schema.name name)
-                       (Keeper_agent_tool_surface.on_the_wire
-                          ~agent_cell:turn_agent_cell ~built:built_tools)
+                  List.exists (fun (tool : Agent_core.Tool.t) ->
+                    String.equal tool.schema.name name) offered_tools
                 in
-                let dynamic_context =
-                  match dynamic_context_for_tools with
-                  | Some project when not post_tool_round ->
-                    let offered = Keeper_agent_tool_surface.on_the_wire
-                        ~agent_cell:turn_agent_cell ~built:built_tools
-                      |> List.filter (fun (tool : Agent_core.Tool.t) ->
-                        List.mem tool.schema.name schema_filter) in
-                    project offered
-                  | Some _ | None -> dynamic_context in
+                let host_recall ~context =
+                    let purpose = `Assoc
+                      ["current_input",`String user_message;
+                       "request_context",`String context;
+                       "keeper_instructions",`String meta.instructions;
+                       "turn_ref",Ids.Turn_ref.to_yojson (Ids.Turn_ref.make
+                         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                         ~absolute_turn:ctx.keeper_turn_id)] in
+                    let prepared = match !host_memory with
+                      | Some prepared -> prepared
+                      | None ->
+                        let prepared = Keeper_workspace_memory_host_recall.prepare
+                            ~config ~keeper_id:meta.name ~purpose in
+                        host_memory := Some prepared;
+                        prepared in
+                    Keeper_workspace_memory_host_recall.render_prepared prepared in
+                let dynamic_context, emit_request_prompt_metrics =
+                  prepare_request_dynamic_context
+                    ~meta ~turn_kind ~system_prompt:turn_system_prompt ~user_message
+                    ~post_tool_round ~dynamic_context ~dynamic_context_for_tools
+                    ~deferred_names:ctx.deferred_tool_names
+                    ~loader_alive:attempt_surface.loader_alive ~host_recall offered_tools in
                 (if String.trim dynamic_context <> ""
                  then record_block Prompt_block_id.Dynamic_context dynamic_context);
                 (* The Librarian publishes this small index in its own lane.
@@ -1269,12 +1320,10 @@ let assemble_hooks
                   ~extra_system_context:ctx
                   ~user_message
                   ~history_messages:messages
-                  ~tools:
-                    (Keeper_agent_tool_surface.on_the_wire
-                       ~agent_cell:turn_agent_cell
-                       ~built:built_tools)
+                  ~tools:offered_tools
                   ();
                 Eio.Fiber.yield ();
+                emit_request_prompt_metrics ();
                 Agent_core.Hooks.AdjustParams
                   { current_params with
                     extra_system_context = ctx
@@ -1296,6 +1345,7 @@ let assemble_hooks
     Ok
       { tools = built_tools
       ; agent_core_tools = ctx.agent_core_tools
+      ; identity_tool_index = ctx.identity_tool_index
       ; on_demand_tool_names = ctx.on_demand_tool_names
       ; result_bounds = ctx.result_bounds
       ; agent_cell = ctx.agent_cell
@@ -1304,6 +1354,7 @@ let assemble_hooks
       ; model_message
       ; hooks
       ; on_runtime_attempt
+      ; on_memory_capacity_refusal
       ; model_input_projection
       ; stage_skill_delivery_on_wire
       ; observe_official_client_result_handoff

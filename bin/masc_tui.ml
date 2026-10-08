@@ -1593,7 +1593,8 @@ let workspace_enqueue state =
   let authority = state.workspace_authority in
   fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, message))
 
-let check_workspace_request ?schedule_form_action state ~mailbox ~authority ~identity ~host ~port () =
+let check_workspace_request ?schedule_form_action
+    ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
   if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
   else
     let reading = Masc_tui_loader.load_server_identity ~host ~port in
@@ -1602,7 +1603,7 @@ let check_workspace_request ?schedule_form_action state ~mailbox ~authority ~ide
     else begin
       let detail = "Workspace identity changed or is unavailable; request withdrawn" in
       let withdrawal = match schedule_form_action with
-        | None -> Workspace_identity_unconfirmed detail
+        | None -> Workspace_identity_unconfirmed { detail; reading; prior_contact }
         | Some action ->
           Schedule_form_authority_refused
             {action; detail; workspace = workspace_input_identity_of_server identity} in
@@ -10015,7 +10016,12 @@ let apply_overview_load state result =
         ~set_error:(fun value -> state.overview_error <- value)
         err
 
-let apply_approvals_load state = function
+let apply_approvals_load state result =
+  (* Recovery and refresh publications already share Listing_order tickets.
+     An admitted older refresh must not retire a newer recovery request;
+     late older answers are refused by apply_approval_observation instead.
+     Workspace withdrawal still invalidates the recovery's ownership. *)
+  match result with
   | Ok snapshot ->
       (* The cursor indexes the merged list; the operator rows sit after the
          keeper tool rows, so reconciliation by token happens in operator
@@ -10398,15 +10404,15 @@ let launch_approvals_summary_load state ~mailbox =
                          (request, listing_ticket, expected_workspace, result)))
                   (fun () ->
                     let ( let* ) = Result.bind in
-                    let* () =
-                      probe_expected_workspace ~host ~port expected_workspace
+                    let check_identity ?prior_contact () =
+                      check_workspace_request ?prior_contact state ~mailbox ~authority
+                        ~identity:(Some expected_workspace) ~host ~port ()
                     in
-                    let* () =
-                      if authority <> state.workspace_authority
-                      then Error "Workspace authority withdrawn"
-                      else Ok ()
-                    in
-                    Masc_tui_loader.load_approvals ~host ~port)
+                    let* () = check_identity () in
+                    let* snapshot = Masc_tui_loader.load_approvals ~host ~port in
+                    let* () = check_identity
+                      ~prior_contact:Masc_tui_server_lifecycle.Server_reached () in
+                    Ok snapshot)
 
 let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
@@ -13746,8 +13752,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Keeper_chat_done (_, _, _, acknowledge) ->
           ignore (Eio.Promise.try_resolve acknowledge ())
         | _ -> ())
-  | Workspace_identity_unconfirmed detail ->
+  | Workspace_identity_unconfirmed { detail; reading; prior_contact } ->
       apply_server_identity_reading state (Error detail);
+      state.connection_status <-
+        (match reading, prior_contact with
+         | Ok _, _ | Error _, Masc_tui_server_lifecycle.Server_reached ->
+             Masc_tui_types.Degraded
+         | Error _, (Masc_tui_server_lifecycle.Nothing_answered | Undecided) ->
+             Masc_tui_types.Disconnected);
       report_action state "error" detail
   | Schedule_form_authority_refused {action; detail; workspace} ->
       (* This receipt belongs to the guard's withdrawal, and is presented

@@ -720,6 +720,127 @@ def held_identity_boundary_journey(executable, *, boundary):
     home.assert_no_decision_posts(requests)
 
 
+def recovery_operator_boundary_journey(executable, *, foreign):
+    """Hold the independent boot recovery across identity/regular publication.
+
+    The second full refresh owns an older listing ticket before it blocks on
+    briefing. Recovery therefore owns the newer ticket even when the ordinary
+    refresh publishes first. In the foreign case the held briefing prevents
+    ordinary identity revalidation from masking the recovery's final probe.
+    """
+    fixtures = cards.fixtures_with_held([])
+    requests = []
+    lock = threading.Lock()
+    state = {"briefings": 0, "operators": 0, "foreign": False}
+    _fixtures, items, _new = h.approval_selection_http_fixtures()
+    # Home shows request IDs in a 12-cell slot, not the payload's reason.
+    recovery_label = b"foreign-row" if foreign else b"recovery-new"
+    regular_label = b"regular-old"
+
+    def operator_snapshot(label):
+        return h.approval_selection_snapshot([
+            dict(items[0], confirm_token=label.decode(),
+                 payload={"reason": label.decode()})
+        ])
+
+    held_briefing = h.GatedHttpResponse(fixtures[BRIEFING], hold_seconds=30.0)
+    held_recovery = h.GatedHttpResponse(operator_snapshot(recovery_label), hold_seconds=30.0)
+    regular_read = threading.Event()
+    recovery_probe = threading.Event()
+    briefing = fixtures[BRIEFING]
+
+    def read_briefing():
+        with lock:
+            state["briefings"] += 1
+            count = state["briefings"]
+        return held_briefing() if count == 2 else briefing
+
+    def read_operator():
+        with lock:
+            state["operators"] += 1
+            count = state["operators"]
+        if count == 1:
+            return h.approval_selection_snapshot([])
+        if count == 2:
+            response = held_recovery()
+            if foreign:
+                with lock:
+                    state["foreign"] = True
+            return response
+        regular_read.set()
+        return operator_snapshot(regular_label)
+
+    fixtures[BRIEFING] = read_briefing
+    fixtures[cards.OPERATOR_PATH] = read_operator
+
+    def prepare(base):
+        home.seed_goals(base)
+        local = Path(base).resolve()
+        replacement = local / "recovery-foreign-B"
+        (replacement / ".masc").mkdir(parents=True)
+
+        def health():
+            with lock:
+                switched = state["foreign"]
+                released = held_recovery.completed.is_set()
+            if released:
+                recovery_probe.set()
+            root = replacement if switched else local
+            return h.RawHttpResponse(200, json.dumps({
+                "status": "ok", "paths": {
+                    "cwd": str(root), "effective_base_path": str(root),
+                    "effective_masc_root": str(root / ".masc"),
+                    "effective_has_masc_dir": True,
+                },
+            }).encode(), content_type="application/json")
+
+        fixtures["/health"] = health
+        fixtures["/health?full=1"] = health
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            assert h.wait_for_fixture_event(process, fd, output,
+                held_briefing.requested, timeout=10), "revalidation did not reach briefing"
+            assert h.wait_for_fixture_event(process, fd, output,
+                held_recovery.requested, timeout=10), "independent recovery did not request operator"
+            if not foreign:
+                held_briefing.release.set()
+                assert h.wait_for_fixture_event(process, fd, output,
+                    regular_read, timeout=10), "regular refresh did not overtake recovery"
+                h.wait_for_output(process, fd, output, regular_label, start=0, timeout=10)
+                assert not held_recovery.completed.is_set(), "newer recovery completed too early"
+            held_recovery.release.set()
+            assert h.wait_for_fixture_event(process, fd, output,
+                held_recovery.completed, timeout=10), "recovery GET did not complete"
+            assert h.wait_for_fixture_event(process, fd, output,
+                recovery_probe, timeout=10), "recovery did not recheck identity after its GET"
+            h.drain_until_quiet(process, fd, output, cap=1)
+            shown = h.resize_and_wait(process, fd, output, rows=40, columns=161,
+                needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l")
+            visible = h.screen_text(shown)
+            if foreign:
+                assert recovery_label not in visible, ("foreign recovery row was admitted", visible)
+                assert b"workspace identity not read" in visible, visible
+                assert b"not fully read" in visible, visible
+                assert not regular_read.is_set(), "ordinary refresh masked the identity regression"
+            else:
+                assert recovery_label in visible, ("older refresh retired newer recovery", visible)
+                assert regular_label not in visible, ("older refresh remained after recovery", visible)
+            home.assert_no_decision_posts(requests)
+            os.write(fd, b"q")
+        finally:
+            held_recovery.release.set()
+            held_briefing.release.set()
+
+    h.run_terminal_scenario(executable,
+        description=("recovery operator refuses B after GET" if foreign
+                     else "older regular publication preserves newer recovery"),
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+        prepare_workspace=prepare, refresh=60.0)
+    home.assert_no_decision_posts(requests)
+
+
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     for unread in (False, True):
@@ -729,4 +850,6 @@ if __name__ == "__main__":
     goal_drop_arm_withdrawal_journey(executable)
     for boundary in ("before-read", "after-read", "decision"):
         held_identity_boundary_journey(executable, boundary=boundary)
-    print("Home scoped identity PTY: PASS (8 scenarios)")
+    for foreign in (True, False):
+        recovery_operator_boundary_journey(executable, foreign=foreign)
+    print("Home scoped identity PTY: PASS (10 scenarios)")

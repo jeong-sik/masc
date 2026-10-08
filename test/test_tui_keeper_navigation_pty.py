@@ -52,6 +52,13 @@ def run(executable, *, columns, no_color=False):
         h.send_and_wait(process, fd, output, RIGHT, HOME)
         assert b"KEEPERS" not in b"\n".join(screen(process, fd, output).values())
 
+        # Literal Tab and Kitty CSI-u Tab both dismiss the list. Returning
+        # must not advance the global surface ring or select a Keeper.
+        for tab in (b"\t", b"\x1b[9u"):
+            h.send_and_wait(process, fd, output, LEFT, b"KEEPERS")
+            h.send_and_wait(process, fd, output, tab, HOME)
+            assert b"KEEPERS" not in b"\n".join(screen(process, fd, output).values())
+
         h.send_and_wait(process, fd, output, LEFT, b"KEEPERS")
         h.send_and_wait(process, fd, output, b"\r", ALPHA)
         assert b"KEEPERS" not in b"\n".join(screen(process, fd, output).values())

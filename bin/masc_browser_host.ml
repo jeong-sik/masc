@@ -82,8 +82,8 @@ let () =
                   terminal may send its hangup twice, once from the kernel
                   and once from the shell, so a second one changes nothing. *)
                | Hangup -> if stderr_is_terminal then leave_terminal ()
-               (* Whoever sends SIGTERM again is not at a keyboard. *)
-               | Terminate -> ());
+               (* A second SIGTERM forces exit if graceful shutdown is stuck. *)
+               | Terminate -> Sys.set_signal number Sys.Signal_default);
               ignore (Atomic.compare_and_set asked None (Some signal) : bool);
               Eio.Condition.broadcast wake)) with
             (* Whoever started the host ignoring a signal decided that: nohup

@@ -75,9 +75,9 @@ from the list and keeps its `clientId` for the task.
 The host runs in the foreground until it is stopped with Ctrl-C or SIGTERM,
 or its terminal is closed (SIGHUP). It then finishes and answers a command in
 flight, tells the server, ends the BiDi session it asked for, and exits 0. A
-second Ctrl-C ends it at once and leaves the session in Firefox. A stop that
-comes before the WebSocket is up abandons the attempt. One that comes while
-the session request is unanswered waits for that answer, up to twenty
+second Ctrl-C or SIGTERM ends it at once, leaving the session in Firefox. A
+stop that comes before the WebSocket is up abandons the attempt. One that comes
+while the session request is unanswered waits for that answer, up to twenty
 seconds, and then ends the session.
 
 A host started ignoring one of these signals keeps ignoring it. Under
@@ -315,7 +315,7 @@ These do leave the session behind. A host started after them is refused
 with `session not created` and exits; quit that Firefox, start it with the
 same command and profile, then start the host.
 
-- The host was killed with SIGKILL or a second Ctrl-C, or crashed.
+- The host was killed with SIGKILL, a second Ctrl-C or SIGTERM, or crashed.
 - Firefox did not answer the session's end within two seconds, or its socket
   was already closed. The host logs `the BiDi session was not ended` with the
   reason. If the socket closed because Firefox quit, there is nothing to

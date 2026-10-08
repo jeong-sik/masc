@@ -763,8 +763,21 @@ def recovery_operator_boundary_journey(executable, *, foreign):
     held_briefing = h.GatedHttpResponse(fixtures[BRIEFING], hold_seconds=30.0)
     held_recovery = h.GatedHttpResponse(operator_snapshot(recovery_label), hold_seconds=30.0)
     regular_read = threading.Event()
+    regular_published = threading.Event()
     recovery_probe = threading.Event()
     briefing = fixtures[BRIEFING]
+    boot_held_label = b"boot-held"
+
+    def read_held():
+        # The full-refresh handler starts this read after applying its bundle.
+        # Await the first row below so that read has settled before releasing
+        # the older bundle; its next request then witnesses that publication.
+        if regular_read.is_set():
+            regular_published.set()
+        rows = [] if foreign else [cards.held("boot-held", "boot held call")]
+        return 200, {"pending": rows}
+
+    fixtures[cards.HELD_PATH] = read_held
 
     def read_briefing():
         with lock:
@@ -829,10 +842,14 @@ def recovery_operator_boundary_journey(executable, *, foreign):
             assert h.wait_for_fixture_event(process, fd, output,
                 held_recovery.requested, timeout=10), "independent recovery did not request operator"
             if not foreign:
+                h.wait_for_output(process, fd, output, boot_held_label, start=0, timeout=10)
                 held_briefing.release.set()
                 assert h.wait_for_fixture_event(process, fd, output,
                     regular_read, timeout=10), "regular refresh did not overtake recovery"
-                h.wait_for_output(process, fd, output, regular_label, start=0, timeout=10)
+                assert h.wait_for_fixture_event(process, fd, output,
+                    regular_published, timeout=10), "regular refresh did not publish before recovery"
+                # Home keeps the confirm queue unread while the newer recovery
+                # is pending, even though the older snapshot has been applied.
                 assert not held_recovery.completed.is_set(), "newer recovery completed too early"
             held_recovery.release.set()
             assert h.wait_for_fixture_event(process, fd, output,

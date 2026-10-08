@@ -1,0 +1,2 @@
+### CI
+- Add an explicitly dispatched native host proof for machine Add-on tool/context attachment and selective detach, using isolated synthetic media and no provider requests.

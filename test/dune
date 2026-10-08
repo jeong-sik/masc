@@ -180,7 +180,7 @@
  (deps ../config/prompts/workspace_memory_curator.md
        ../config/prompts/workspace_memory_briefing.md
        ../config/prompts/keeper.md)
- (libraries alcotest masc masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
+ (libraries alcotest masc masc.tool_types masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
 
 (test
  (name test_msx_vision)
@@ -2744,6 +2744,7 @@
 
 (include stanzas/test_keeper_fs_edit_containment.inc)
 
+(include stanzas/test_keeper_workspace_memory_selection.inc)
 (include stanzas/test_keeper_workspace_ops.inc)
 
 (include stanzas/test_keeper_identity_drift_counter.inc)

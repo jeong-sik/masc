@@ -35,7 +35,9 @@ let audio_extension media_type =
    exception continues. *)
 let transcribe_bytes ~deadline ~media_type ~bytes =
   match Filename.temp_file "keeper-media-" (audio_extension media_type) with
-  | exception Sys_error detail -> Error ("temp_file_failed: " ^ detail)
+  | exception Sys_error detail ->
+    Log.Keeper.warn "media reading: temp file failed: %s" detail;
+    Error "temp_file_failed"
   | path ->
     Fun.protect
       ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
@@ -44,7 +46,9 @@ let transcribe_bytes ~deadline ~media_type ~bytes =
           Out_channel.with_open_bin path (fun channel ->
             Out_channel.output_string channel bytes)
         with
-        | exception Sys_error detail -> Error ("temp_write_failed: " ^ detail)
+        | exception Sys_error detail ->
+          Log.Keeper.warn "media reading: temp write failed: %s" detail;
+          Error "temp_write_failed"
         | () ->
           (match Voice_bridge.transcribe_audio ~audio_file:path ~deadline () with
            | Error detail ->
@@ -52,12 +56,18 @@ let transcribe_bytes ~deadline ~media_type ~bytes =
                 word; anything else is an endpoint failure. *)
              if Monotonic_deadline.passed deadline
              then Error "budget_spent"
-             else Error ("stt_failed: " ^ detail)
+             else (
+               (* The free-text chain error goes to the operator log only; the
+                  model sees the closed reason. *)
+               Log.Keeper.warn "media reading: STT failed: %s" detail;
+               Error "stt_failed")
            | Ok json ->
              (match Json_util.get_string json "status", Json_util.get_string json "text" with
               | Some "transcribed", Some text when String.trim text <> "" -> Ok text
               | Some "transcribed", _ -> Error "empty_transcript"
-              | Some status, _ -> Error ("stt_status_" ^ status)
+              | Some status, _ ->
+                Log.Keeper.warn "media reading: STT answered status %s" status;
+                Error "stt_status_unexpected"
               | None, _ -> Error "stt_status_missing")))
 ;;
 
@@ -128,7 +138,7 @@ let media_type_segment media_type =
 let record_path ~base_path ~keeper_name ~kind ~media_type ~sha =
   Filename.concat
     (Filename.concat
-       (Filename.concat base_path "media-readings")
+       (Filename.concat (Common.masc_dir_from_base_path ~base_path) "media-readings")
        (safe_segment keeper_name))
     (Printf.sprintf "%s-%s-%s.json" (kind_to_string kind) sha (media_type_segment media_type))
 ;;
@@ -139,10 +149,15 @@ let load_reading ~base_path ~keeper_name ~kind ~media_type ~sha =
   | Some base_path ->
     let path = record_path ~base_path ~keeper_name ~kind ~media_type ~sha in
     (match In_channel.with_open_bin path In_channel.input_all with
-     | exception Sys_error _ -> None
+     | exception Sys_error _ when not (Sys.file_exists path) -> None
+     | exception Sys_error detail ->
+       Log.Keeper.warn "media reading: stored reading unreadable at %s: %s" path detail;
+       None
      | content ->
        (match Yojson.Safe.from_string content with
-        | exception Yojson.Json_error _ -> None
+        | exception Yojson.Json_error detail ->
+          Log.Keeper.warn "media reading: stored reading corrupt at %s: %s" path detail;
+          None
         | json ->
           let str key = Json_util.get_string json key in
           (match
@@ -178,7 +193,11 @@ let store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~text =
        Out_channel.with_open_bin temp (fun channel ->
          Out_channel.output_string channel (Yojson.Safe.to_string json));
        Sys.rename temp path
-     with Sys_error _ -> ())
+     with
+     | Sys_error detail ->
+       (* A reading that cannot be stored is read again on the next attempt;
+          say so instead of retrying silently. *)
+       Log.Keeper.warn "media reading: store failed for %s: %s" path detail)
 ;;
 
 (* --- projection ---------------------------------------------------------- *)

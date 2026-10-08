@@ -1335,6 +1335,24 @@ let test_h5_durable_reading_is_keyed_by_media_type () =
   Alcotest.(check bool) "the other type was not served the pdf reading" false
     (contains ~needle:"pdf-reading" (List.nth texts 0))
 
+(* H5 store location: readings live under the [.masc] directory of the base
+   path, beside the other runtime state, and leave no folder in the workspace
+   root. *)
+let test_h5_store_lives_under_masc_dir () =
+  let dir = h5_fresh_dir () in
+  let calls = ref 0 in
+  let _ =
+    h5_project_direct ~base_path:dir
+      ~deadline:(Monotonic_deadline.after ~seconds:30.)
+      ~read:(h5_reader_counting calls ~answer:(Ok "stored-reading"))
+      [ h5_doc_block ~media_type:"application/pdf" ]
+  in
+  Alcotest.(check int) "the reader ran once" 1 !calls;
+  Alcotest.(check bool) "the store is under .masc" true
+    (Sys.file_exists (Filename.concat (Filename.concat dir ".masc") "media-readings"));
+  Alcotest.(check bool) "no media-readings folder in the workspace root" false
+    (Sys.file_exists (Filename.concat dir "media-readings"))
+
 let synthetic_image () =
   Agent_core.Types.image_block
     ~media_type:"image/png"
@@ -6623,6 +6641,10 @@ let () =
             "H5 durable reading is keyed by media type"
             `Quick
             test_h5_durable_reading_is_keyed_by_media_type;
+          Alcotest.test_case
+            "H5 store lives under the .masc directory"
+            `Quick
+            test_h5_store_lives_under_masc_dir;
           Alcotest.test_case
             "media rows keep their fields in the public view"
             `Quick

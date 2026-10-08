@@ -183,9 +183,17 @@ type official_range_id =
   ; turns : (int * Ids.Turn_ref.t) list
   }
 
+type explicit_write_range_id =
+  { receipt_scope : string
+  ; after_sequence : int
+  ; through_sequence : int
+  ; input_sha256 : string
+  }
+
 type consumed_range =
   | Atom_range of durable_range_id
   | Official_range of official_range_id
+  | Explicit_write_range of explicit_write_range_id
 
 type durable_range_receipt =
   | Prepared of
@@ -344,11 +352,42 @@ let official_range_id_of_json = function
   | _ -> wire_here Expected_object
 ;;
 
-(* schema-compat: atom receipts retain their exact [range_id] wire shape.
-   Official receipts name a distinct, mutually exclusive identity field. *)
+let explicit_write_range_id_to_json (range : explicit_write_range_id) =
+  `Assoc [ "receipt_scope", `String range.receipt_scope
+         ; "after_sequence", `Int range.after_sequence
+         ; "through_sequence", `Int range.through_sequence
+         ; "input_sha256", `String range.input_sha256 ]
+;;
+
+let explicit_write_range_id_of_json = function
+  | `Assoc fields ->
+    let* () = exact_field_names_result
+      ["receipt_scope"; "after_sequence"; "through_sequence"; "input_sha256"] fields in
+    let* receipt_scope = wire_string_field "receipt_scope" fields in
+    let* after_sequence = wire_int_field "after_sequence" fields in
+    let* through_sequence = wire_int_field "through_sequence" fields in
+    let* input_sha256 = wire_string_field "input_sha256" fields in
+    let* () =
+      if String.trim receipt_scope = "" then wire_fail [Wire_field "receipt_scope"] Blank_string
+      else if receipt_scope <> String.trim receipt_scope then
+        wire_fail [Wire_field "receipt_scope"] (Unknown_token receipt_scope)
+      else Ok () in
+    let* () = if after_sequence < 0 then wire_fail [Wire_field "after_sequence"] Negative
+      else Ok () in
+    let* () = if through_sequence <= after_sequence then
+        wire_fail [Wire_field "through_sequence"] Not_ascending
+      else Ok () in
+    let+ () = if String_util.is_lowercase_sha256_hex input_sha256 then Ok ()
+      else wire_fail [Wire_field "input_sha256"] (Unknown_token input_sha256) in
+    {receipt_scope; after_sequence; through_sequence; input_sha256}
+  | _ -> wire_here Expected_object
+;;
+
+(* Each source kind names its own mutually exclusive receipt identity field. *)
 let consumed_range_field = function
   | Atom_range range -> "range_id", durable_range_id_to_json range
   | Official_range range -> "official_range_id", official_range_id_to_json range
+  | Explicit_write_range range -> "explicit_write_range_id", explicit_write_range_id_to_json range
 ;;
 
 let durable_range_receipt_to_json = function
@@ -377,13 +416,20 @@ let durable_range_receipt_of_json = function
         let* json = wire_json_field key fields in
         Result.map wrap (wire_at (Wire_field key) (parse json))
       in
-      match List.mem_assoc "range_id" fields, List.mem_assoc "official_range_id" fields with
-      | true, false -> decode "range_id" durable_range_id_of_json (fun range -> Atom_range range)
-      | false, true -> decode "official_range_id" official_range_id_of_json (fun range -> Official_range range)
-      | true, true -> wire_here (Field_set_mismatch
+      match List.mem_assoc "range_id" fields, List.mem_assoc "official_range_id" fields,
+            List.mem_assoc "explicit_write_range_id" fields with
+      | true, false, false -> decode "range_id" durable_range_id_of_json (fun range -> Atom_range range)
+      | false, true, false -> decode "official_range_id" official_range_id_of_json (fun range -> Official_range range)
+      | false, false, true -> decode "explicit_write_range_id" explicit_write_range_id_of_json
+          (fun range -> Explicit_write_range range)
+      | true, true, false -> wire_here (Field_set_mismatch
           { missing = []; unexpected = [ "official_range_id" ] })
-      | false, false -> wire_here (Field_set_mismatch
-          { missing = [ "range_id or official_range_id" ]; unexpected = [] })
+      | (true, false, true | false, true, true) -> wire_here (Field_set_mismatch
+          { missing = []; unexpected = [ "explicit_write_range_id" ] })
+      | true, true, true -> wire_here (Field_set_mismatch
+          { missing = []; unexpected = [ "official_range_id"; "explicit_write_range_id" ] })
+      | false, false, false -> wire_here (Field_set_mismatch
+          { missing = [ "range_id or official_range_id or explicit_write_range_id" ]; unexpected = [] })
     in
     let* state = wire_string_field "state" fields in
     let* snapshot_revision = wire_int_field "snapshot_revision" fields in
@@ -491,6 +537,7 @@ let receipt_range_id = function
 let range_key = function
   | Atom_range range -> range.receipt_scope, `Atom
   | Official_range range -> range.receipt_scope, `Official
+  | Explicit_write_range range -> range.receipt_scope, `Explicit_write
 ;;
 
 let upsert_durable_range_receipt receipts receipt =
@@ -2089,6 +2136,7 @@ let update_locked_with_output
       ?before_replace
       ?durable_range_id
       ?official_range_id
+      ?explicit_write_range_id
       ~equal_facts
       ~store_error
       ~keepers_dir
@@ -2106,6 +2154,14 @@ let update_locked_with_output
     | None -> Ok ()
     | Some range ->
       official_range_id_of_json (official_range_id_to_json range)
+      |> Result.map (fun _ -> ())
+      |> Result.map_error (fun error -> store_error (wire_error_to_string error))
+  in
+  let* () =
+    match explicit_write_range_id with
+    | None -> Ok ()
+    | Some range ->
+      explicit_write_range_id_of_json (explicit_write_range_id_to_json range)
       |> Result.map (fun _ -> ())
       |> Result.map_error (fun error -> store_error (wire_error_to_string error))
   in
@@ -2236,6 +2292,7 @@ let update_locked_with_output
          let ranges =
            Option.to_list (Option.map (fun range -> Atom_range range) durable_range_id)
            @ Option.to_list (Option.map (fun range -> Official_range range) official_range_id)
+           @ Option.to_list (Option.map (fun range -> Explicit_write_range range) explicit_write_range_id)
          in
          let receipts_for make =
            List.fold_left (fun receipts range_id ->
@@ -2546,13 +2603,19 @@ let committed_range ~keepers_dir ~keeper_id select =
 let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
   committed_range ~keepers_dir ~keeper_id (function
     | Atom_range range when String.equal range.receipt_scope receipt_scope -> Some range
-    | Atom_range _ | Official_range _ -> None)
+    | Atom_range _ | Official_range _ | Explicit_write_range _ -> None)
 ;;
 
 let committed_official_range ~keepers_dir ~keeper_id ~receipt_scope =
   committed_range ~keepers_dir ~keeper_id (function
     | Official_range range when String.equal range.receipt_scope receipt_scope -> Some range
-    | Atom_range _ | Official_range _ -> None)
+    | Atom_range _ | Official_range _ | Explicit_write_range _ -> None)
+;;
+
+let committed_explicit_write_range ~keepers_dir ~keeper_id ~receipt_scope =
+  committed_range ~keepers_dir ~keeper_id (function
+    | Explicit_write_range range when String.equal range.receipt_scope receipt_scope -> Some range
+    | Atom_range _ | Official_range _ | Explicit_write_range _ -> None)
 ;;
 
 let make_snapshot_from_maintained
@@ -2636,6 +2699,7 @@ let apply_disposition
       ?dropped_statements
       ?durable_range_id
       ?official_range_id
+      ?explicit_write_range_id
       ~absorbed
       ~revisions
       ~keepers_dir
@@ -2807,6 +2871,7 @@ let apply_disposition
     ?dropped_statements
     ?durable_range_id
     ?official_range_id
+    ?explicit_write_range_id
     ~before_replace:write_absorbed_rows
     ~equal_facts:Keep_stored
     ~store_error:Fun.id

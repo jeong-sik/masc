@@ -164,6 +164,19 @@ type official_range_id =
   ; turns : (int * Ids.Turn_ref.t) list
   }
 
+(** Ordered explicit-write candidates consumed by one Memory decision, not
+    conversation atoms. [receipt_scope] is nonblank and has no surrounding
+    whitespace; the consumer must bind it to its queue generation.
+    [after_sequence] is nonnegative and [through_sequence] is strictly larger.
+    [input_sha256] is the lowercase SHA-256 of the exact ordered input payloads.
+    The consumer owns sequence continuity and verification of that digest. *)
+type explicit_write_range_id =
+  { receipt_scope : string
+  ; after_sequence : int
+  ; through_sequence : int
+  ; input_sha256 : string
+  }
+
 (** Why a librarian pass produced no snapshot. The journal is the only place
     this reaches disk, so the set is closed here rather than at the call site:
     a new failure mode has to name itself before it can be recorded, and
@@ -377,6 +390,16 @@ val committed_official_range
 (** Same snapshot proof as [committed_durable_range], independently retained
     for official-client input in the shared receipt sidecar. *)
 
+val committed_explicit_write_range
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> receipt_scope:string
+  -> (explicit_write_range_id option, string) result
+(** Same snapshot proof, independently retained for explicit-write candidates.
+    Later retirement of an admitted fact does not erase the consumed range.
+    Consumers must consult this receipt before replaying candidates; the store
+    does not automatically suppress a repeated [apply_disposition] invocation. *)
+
 type disposition =
   { snapshot : t
         (** the current snapshot after the pass: the one written, or for an
@@ -411,6 +434,7 @@ val apply_disposition
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
   -> ?durable_range_id:durable_range_id
   -> ?official_range_id:official_range_id
+  -> ?explicit_write_range_id:explicit_write_range_id
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> revisions:Keeper_memory_os_types.revision list
   -> keepers_dir:string
@@ -444,10 +468,10 @@ val apply_disposition
     once under the store locks and must only update caller-owned in-memory
     state: no I/O, yielding or exceptions. It is not a scheduling callback.
 
-    [durable_range_id] and [official_range_id] join this disposition to the
-    atom and official-client ranges that produced it. When both are present,
-    both identities share the same snapshot revision and SHA-256. Each source
-    kind retains its latest receipt per runtime scope. The store writes a prepared transaction receipt
+    [durable_range_id], [official_range_id] and [explicit_write_range_id] join
+    this disposition to its atom, official-client and explicit-write inputs.
+    All supplied identities share the same snapshot revision and SHA-256. Each
+    source kind retains its latest receipt per scope. The store writes a prepared transaction receipt
     before replacing the snapshot and marks it committed afterwards. Recovery
     compares a prepared receipt with the exact snapshot SHA-256, so neither
     side of a process interruption is guessed. An [Unchanged] commit replaces

@@ -8,6 +8,15 @@ module Live = Masc_tui_keeper_chat_live
 module Log = Masc_tui_keeper_chat_log
 module T = Masc_tui_keeper_chat_transcript
 
+(* Malformed fixtures edit the public serialized payload, preserving the
+   producer's metadata without constructing its private event record. *)
+let wire_with_custom_value ?id event replace =
+  let json = match Ag_ui.event_to_json event with
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        key, if key = "value" then replace value else value) fields)
+    | _ -> fail "projected event must be an object" in
+  Sse_wire.format_event_yojson ?id json
+
 let start_message id = Agent_core.Types.MessageStart {id;model="fixture";usage=None}
 let tool_start ~native index id = Agent_core.Types.ContentBlockStart
   {index;content_type=(if native then Native.stream_content_type else "tool_use");
@@ -133,12 +142,7 @@ let test_strict_nested_wire_and_journal () =
     let _, projected = Server_keeper_chat_agui_projection.project ~timestamp:1000.
       ~redact_text:Fun.id Server_keeper_chat_agui_projection.initial event in
     let wire = match projected with
-      | Some event ->
-          let malformed = Ag_ui.make_event ~timestamp:event.timestamp
-            ~run_id:event.run_id ~custom_name:event.custom_name
-            ~custom_value:(Option.map (replace progress) event.custom_value)
-            ~thread_id:event.thread_id event.event_type in
-          Ag_ui.event_to_sse ~id:1 malformed
+      | Some event -> wire_with_custom_value ~id:1 event (replace progress)
       | None -> fail "missing progress" in
     check bool "malformed wire is unreadable, never a tool update" true
       (match Live.feed (Live.create ()) wire with
@@ -355,17 +359,14 @@ let test_native_occurrence_numeric_live_and_projection () =
       match event with
       | None -> fail "missing projected fixture event"
       | Some event ->
-          let event = match source with
+          let encoded = match source with
             | E.Native_tool_start _ | E.Native_tool_progress _ | E.Native_tool_end _ ->
-                let custom_value = Option.map (function
+                wire_with_custom_value event (function
                   | `Assoc fields -> `Assoc (("toolStreamScope",scope)::("toolCallBlockIndex",index)::
                       List.remove_assoc "toolStreamScope" (List.remove_assoc "toolCallBlockIndex" fields))
-                  | _ -> fail "native event must have an object payload") event.Ag_ui.custom_value in
-                Ag_ui.make_event ~timestamp:event.timestamp ~run_id:event.run_id
-                  ~custom_name:event.custom_name ~custom_value
-                  ~thread_id:event.thread_id event.event_type
-            | _ -> event in
-          state,wire ^ Ag_ui.event_to_sse event)
+                  | _ -> fail "native event must have an object payload")
+            | _ -> Ag_ui.event_to_sse event in
+          state,wire ^ encoded)
       (Server_keeper_chat_agui_projection.initial,acceptance) events in wire in
   List.iter (fun (scope,index,expected_scope,expected_index) ->
     let wire = wire scope index in

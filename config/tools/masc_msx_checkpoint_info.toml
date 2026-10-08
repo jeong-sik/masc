@@ -2,7 +2,7 @@ name = "masc_msx_checkpoint_info"
 description = """
 Read a checkpoint slot's metadata without restoring it.
 
-Read-only. Restoring replaces the shared machine every spectator watches, so asking what a slot holds must not restore. Returns the format version, saved-at time, the core digest that saved it, media names, the saved input edge count, the file's byte length and the SHA-256 of its bytes. `core_sha` is null for checkpoints saved before the field existed — an unknown core, not a wrong one."""
+Read-only. Restoring replaces the shared machine every spectator watches, so asking what a slot holds must not restore. Returns the format version, saved-at time, the core digest that saved it, media names, the saved input edge count, the file's byte length and the SHA-256 of its bytes. `core_sha` is null for checkpoints saved before the field existed — an unknown core, not a wrong one. `core_matches_current` is null for that unknown case, and a boolean only when the saved core can be compared."""
 additional_properties = false
 defer_loading = true
 

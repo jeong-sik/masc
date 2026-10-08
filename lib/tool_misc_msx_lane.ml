@@ -442,10 +442,9 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
                , match info.saved_at_unix with Some t -> `Float t | None -> `Null )
              ; ("core_sha", match info.core_sha with Some s -> `String s | None -> `Null)
              ; ( "core_matches_current"
-               , `Bool
-                   (match info.core_sha with
-                    | Some sha -> String.equal sha Msx_lane.core.source_digest
-                    | None -> false) )
+               , match info.core_sha with
+                 | Some sha -> `Bool (String.equal sha Msx_lane.core.source_digest)
+                 | None -> `Null )
              ; ( "cartridge"
                , match info.cartridge with Some c -> `String c | None -> `Null )
              ; ("disk", match info.disk with Some d -> `String d | None -> `Null)

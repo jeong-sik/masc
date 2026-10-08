@@ -1142,6 +1142,30 @@ let test_checkpoint_info_reads_without_restoring () =
     (match member "sha256" (Tool_result.data info) with
      | Some (`String s) -> s
      | _ -> "");
+  let legacy_path = Filename.concat (Filename.concat dir "saves") "legacy-slot.json" in
+  let legacy_payload =
+    match Yojson.Safe.from_string payload with
+    | `Assoc fields ->
+      Yojson.Safe.to_string (`Assoc (List.remove_assoc "core_sha" fields))
+    | _ -> fail "saved checkpoint is not an object" in
+  Out_channel.with_open_bin legacy_path (fun oc -> output_string oc legacy_payload);
+  let legacy = call "masc_msx_checkpoint_info" ["slot", `String "legacy-slot"] in
+  check bool "legacy checkpoint info completes" true (is_completed legacy);
+  check bool "legacy core identity is unknown" true
+    (match (member "core_sha" (Tool_result.data legacy), member "core_matches_current" (Tool_result.data legacy)) with
+     | Some `Null, Some `Null -> true
+     | _ -> false);
+  let expect_malformed label malformed =
+    Out_channel.with_open_bin path (fun oc -> output_string oc malformed);
+    let result = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
+    check bool (label ^ " is refused") true (rejected result);
+    check string (label ^ " preserves the machine") before_incarnation
+      (match Msx_lane.capture_with_identity () with
+       | Ok captured -> captured.incarnation
+       | Error e -> fail (Msx_lane.error_to_string e))
+  in
+  expect_malformed "missing envelope fields" "{}";
+  expect_malformed "wrong envelope field types" {|{"version":"broken","ledger":"broken"}|};
   Out_channel.with_open_bin path (fun oc -> output_string oc "{broken");
   let broken = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
   check bool "unparsable slot refused" true (rejected broken);

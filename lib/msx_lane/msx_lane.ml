@@ -994,39 +994,65 @@ let checkpoint_info ~path =
           Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
       match json with
       | Error e -> Error e
-      | Ok json -> (
-      (* Yojson.Safe.Util shadows [path] with its own JSON-pointer reader, so
-         the file name is captured before the [open]. *)
-      let file = path in
-      let open Yojson.Safe.Util in
-      try
-        let member_int name = try Some (member name json |> to_int) with Type_error _ -> None in
-        let member_string name =
-          match member name json with
-          | `String s -> Some s
-          | _ -> None in
-        let saved_at =
-          match Unix.stat file with
+    | Ok json ->
+      let invalid message = Error (Invalid_request ("invalid MSX checkpoint: " ^ message)) in
+      let fields =
+        match json with
+        | `Assoc fields -> Ok fields
+        | _ -> invalid "the envelope must be a JSON object" in
+      let ( let* ) = Result.bind in
+      let* fields = fields in
+      let find name = List.assoc_opt name fields in
+      let required_int name =
+        match find name with
+        | Some (`Int value) -> Ok value
+        | Some _ -> invalid (name ^ " must be an integer")
+        | None -> invalid (name ^ " is required") in
+      let required_string name =
+        match find name with
+        | Some (`String value) when value <> "" -> Ok value
+        | Some (`String _) -> invalid (name ^ " must not be empty")
+        | Some _ -> invalid (name ^ " must be a string")
+        | None -> invalid (name ^ " is required") in
+      let required_list name =
+        match find name with
+        | Some (`List values) -> Ok values
+        | Some _ -> invalid (name ^ " must be an array")
+        | None -> invalid (name ^ " is required") in
+      let optional_int name =
+        match find name with
+        | None | Some `Null -> Ok None
+        | Some (`Int value) -> Ok (Some value)
+        | Some _ -> invalid (name ^ " must be an integer or null") in
+      let optional_string name =
+        match find name with
+        | None | Some `Null -> Ok None
+        | Some (`String value) when value <> "" -> Ok (Some value)
+        | Some (`String _) -> invalid (name ^ " must not be empty")
+        | Some _ -> invalid (name ^ " must be a string or null") in
+      let* version = required_int "version" in
+      let* _machine = required_string "machine" in
+      let* ledger = required_list "ledger" in
+      if version <> 1
+      then invalid (Printf.sprintf "unsupported version %d" version)
+      else
+        let* frame = optional_int "frame" in
+        let* core_sha = optional_string "core_sha" in
+        let* cartridge = optional_string "cartridge" in
+        let* disk = optional_string "disk" in
+        let saved_at_unix =
+          match Unix.stat path with
           | exception _ -> None
           | stats -> Some stats.st_mtime in
-        let ledger_entries =
-          match member "ledger" json with
-          | `List items -> List.length items
-          | _ -> 0 in
         Ok
-          { version =
-              (match member_int "version" with Some v -> v | None -> 0)
-              (* The version a checkpoint without the field predates: v1 always
-                 wrote it. A missing envelope field is malformed, not ancient. *)
-          ; frame = member_int "frame"
-          ; saved_at_unix = saved_at
-          ; core_sha = member_string "core_sha"
-          ; cartridge = member_string "cartridge"
-          ; disk = member_string "disk"
-          ; ledger_entries
+          { version
+          ; frame
+          ; saved_at_unix
+          ; core_sha
+          ; cartridge
+          ; disk
+          ; ledger_entries = List.length ledger
           ; byte_length
           ; sha256
           }
-      with Type_error (message, _) ->
-        Error (Invalid_request ("invalid MSX checkpoint: " ^ message)))
 ;;

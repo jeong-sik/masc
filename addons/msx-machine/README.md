@@ -17,9 +17,10 @@ its build context, produced from `bin/masc_msx_addon_worker.exe`. The image uses
 See [state and media provisioning](../../docs/guides/machine-addon-state.md) for
 installation, BIOS/media paths, checkpoint restore and state identity.
 
-Worker behavior has focused remote CI coverage. The Docker image and persistent
-replacement remain unverified; prepare the native executable for the target
-architecture before building the image. See
+Native amd64/arm64 image verification includes stdio execution, PNG output and
+checkpoint restoration in a replacement worker using synthetic state; the
+[state guide](../../docs/guides/machine-addon-state.md) records the exact source
+and run. Actual games and installed-host reconciliation remain separate checks. See
 [tool ownership](../../docs/design/lane-addon-tool-exports.md) for integration
 status and SDK metadata limits. Public MCP version negotiation belongs to the
 host; the private worker negotiates the version supported by its installed SDK.

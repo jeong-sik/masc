@@ -1,10 +1,18 @@
 # MSX and DOS Add-on state
 
-This guide describes the source candidate. Focused remote tests exercise worker
-stdio behavior, but Docker images and volume replacement remain unverified.
+This guide describes the source candidate. [Image verification run 37834734266](https://github.com/jeong-sik/masc/actions/runs/37834734266)
+built MSX and DOS images for amd64 and arm64 at source
+`ad4dbc5c896521e771c2700f87f833864aa75e60`. Each native runner verified stdio
+discovery, caller-context execution, PNG output, checkpoint saving and restoration
+in a replacement worker sharing the same fresh volume. MSX used no game media;
+DOS used a generated COM program. This proves the worker/image path, not host
+installation reconciliation or actual game play.
+
 Each Dockerfile requires its target-architecture Linux worker executable in the
-build context. A successful loader check alone does not establish MCP or game
-behavior.
+build context. For isolated local play without Docker or an HTTP server, see the
+[native stdio driver](../../scripts/machines/README.md). Actual Sangokushi II/III
+play, original game save/load and ending presentation still require local
+screen-and-input verification.
 
 ## Install a persistent machine
 

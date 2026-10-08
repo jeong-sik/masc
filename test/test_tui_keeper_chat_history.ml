@@ -6,7 +6,7 @@ module Transcript = Masc_tui_keeper_chat_transcript
 let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface
     ?(speaker_authority = "owner") content =
   `Assoc
-    ([ "id", `String id
+    ([ "id", `String "row"
      ; "role", `String "user"
      ; "content", `String content
      ; "ts", `Float ts
@@ -30,7 +30,7 @@ let row ?(id = "row") ?(ts = 1.0) ~role ?kind ?tool_call_id ?execution_id ?tool_
     ?delivery_key ?transcript_slot ?turn_ref ?(speaker_authority = "owner")
     content =
   `Assoc
-    ([ "id", `String "row"
+    ([ "id", `String id
      ; "role", `String role
      ; "content", `String content
      ; "ts", `Float ts

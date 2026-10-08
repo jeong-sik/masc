@@ -57,7 +57,7 @@
 - recall block 의 Keeper 별 토큰 환산(rollout 2개 표본만 잼). 한국어 비중이 큰 Keeper 는 바이트당 토큰이 더 크다.
 - Agent Core 레인의 하루 stage save 횟수와 쓴 바이트(계측이 없다).
 - 09-29 이전 부팅의 시간대별 resume 크기(09-30 로그만 분석했고 09-30 00:00Z 앞 구간은 안 봤다).
-- Muse·Antigravity 의 capacity_bounded_model_input_projection 내부(읽지 않음). Codex 에서 더 작은 capacity 의 Agent Core 후보로 넘어가는 failover 는 코드 설계만 읽었고 라이브 사례는 찾지 못했다.
+- Codex 에서 더 작은 capacity 의 Agent Core 후보로 넘어가는 failover 는 코드 설계만 읽었고 라이브 사례는 찾지 못했다.
 - Codex Start 171건 중 supersede 와 짝이 안 맞는 약 74건의 사유(첫 턴, snapshot 변경, 계정 전환 등).
 - D2-01 의 continuity 실패 pass 하나하나가 정확히 모델 호출 하나인지(시각 짝맞춤은 pr-updater 89건 전부 성공했고 전체 1098건 매칭은 직전 run 기준이라 근사).
 
@@ -711,7 +711,6 @@
 작은 것들(P3)
 
 - 초 단위 상수가 흩어져 있어요: lib/config/masc_time_constants.ml(38개 모듈이 씀)가 있는데 seconds_per_day 를 따로 정의한 곳이 5곳(bin/masc_tui_board_quarantine.ml:162, bin/masc_tui_usage_trend.ml:20, bin/masc_tui_task_flow.ml:26,…
-- percent 계산을 손으로 두 번 써요: x / 100 * p + x mod 100 * p / 100 (lib/runtime/runtime_muse_prompt_capacity.ml:26-28, lib/keeper/keeper_turn_runtime_budget.ml:148).
 - claude_code_inline_result_bytes = 32_768 (lib/runtime/runtime_execution.ml:73)은 근거가 코드에 없어요. CHANGELOG 는 '그 lane 이 선언한 한도'라고만 해요.
 - server_board_list_http.ml:36-37 이 Server_utils.standard_limit(server_utils.ml:254)과 같은 50 / 1..200 을 다시 적어요. offset 상한 5000 은 조용히 잘려요(board_posts.jsonl 은 현재 1,880줄이라 아직 안 닿음).
 - browser 도구 timeout 이 두 곳에 따로 있어요: server_routes_http_browser_surface.ml:27,30,42 는 60초, tool_misc_browser_lane.ml:168,169 는 60.0, :173 은 10.0, :187 은 45.0.

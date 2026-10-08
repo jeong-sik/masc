@@ -55,7 +55,7 @@ def run(executable, no_color):
                 (row_id, row)
                 for row_id, row in rows.items()
                 if RUNTIME_ID.encode() in row
-                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
+                and b"quota exhausted" in _keyboard_harness.CSI_RE.sub(b"", row)
             )
             healthy_index, _ = next(
                 (row_id, row)
@@ -74,7 +74,7 @@ def run(executable, no_color):
                 row
                 for row in dimmed_off_rows.values()
                 if RUNTIME_ID.encode() in row
-                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
+                and b"quota exhausted" in _keyboard_harness.CSI_RE.sub(b"", row)
             )
             assert _keyboard_harness.CSI_RE.sub(b"", dimmed_off) == initial_text, dimmed_off
             if not no_color:
@@ -88,7 +88,7 @@ def run(executable, no_color):
                 (row_id, row)
                 for row_id, row in dimmed_on_rows.items()
                 if RUNTIME_ID.encode() in row
-                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
+                and b"quota exhausted" in _keyboard_harness.CSI_RE.sub(b"", row)
             )
             healthy_index, _ = next(
                 (row_id, row)
@@ -126,10 +126,10 @@ def run(executable, no_color):
                     assert LANE_ID in readable and RUNTIME_ID in readable, (columns, route_block)
                     assert "…" not in route_block, (columns, route_block)
                 suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
-                # The fixture has no account usage scope, so the folded row
-                # reports usage unknown; reachability remains in detail.
+                # The target is quota-exhausted; reachability remains visible
+                # in the same row's route/probe status.
                 candidate_rows = [row for row in visible.splitlines()
-                                  if suffix in row and "usage unknown" in row]
+                                  if suffix in row and "quota" in row]
                 assert len(candidate_rows) == 1, (columns, all_runtimes, visible)
                 cells = sum(0 if unicodedata.combining(char) else
                             2 if unicodedata.east_asian_width(char) in ("W", "F") else 1

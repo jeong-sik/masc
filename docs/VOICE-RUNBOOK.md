@@ -22,6 +22,31 @@ a Homebrew prefix, a model cache — stood in for the new machine.
 184. Nothing in the base system transcribes or records to a file masc can
 read: macOS dictation is not scriptable.
 
+### What speaks where there is no say
+
+Off a mac, speech out is espeak-ng, configured as an `espeak_ng` endpoint
+(kind `espeak_ng`, second in the wizard's speech-out list after `macos_say`).
+Measured 2026-10-07 with espeak-ng 1.52.0 (`brew install espeak-ng`):
+
+```
+espeak-ng --voices | wc -l          # 142 rows: header + 141 voices
+espeak-ng -v en -w out.wav "hello"  # 16-bit mono 22050 Hz WAVE
+```
+
+`-v` answers to the voice name, the Language column, and the
+parenthesised aliases (`en` through `(en 2)`, `zh` through `(zh 5)`), in any
+ASCII case, and masc's catalogue check matches all three. One trap: the
+VoiceName column shows spaces as underscores, but `-v` wants them back --
+`-v English_(America)` fails while `-v "English (America)"` speaks. Swept the
+same day across all 141 voices: every space-restored name spoke, 46
+underscore forms failed, and none spoke only with underscores. So the
+catalogue stores the restored name; stored verbatim, the wizard would offer
+rows that fail when chosen.
+
+Unlike say, espeak-ng refuses an unknown voice itself -- `-v NoSuchVoiceXYZ`
+exits 1 with `Error: The specified espeak-ng voice does not exist.` and
+writes no file -- so the check fails fast with the name before the clip does.
+
 ### What hearing needs
 
 ```

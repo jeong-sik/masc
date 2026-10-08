@@ -63,14 +63,14 @@ val run :
   config:Runtime_execution.antigravity_cli ->
   unit ->
   attempt_outcome
-(** [on_transmitted_model_input] fires once per turn, after the admission
-    window has cut the history and before the prompt is rendered. Required
+(** [on_transmitted_model_input] fires once per turn, after the carried
+    range is composed and before the prompt is rendered. Required
     rather than optional: a lane that reports nothing is what wrote every
     Antigravity turn's input attribution as zero (masc#32995).
 
     It reports [Whole_input_transmitted] only when the conversation starts,
     because only then does the rendered prompt carry the whole list. The
-    admission window and its observation likewise apply only to that fresh
+    carried range and its observation likewise apply only to that fresh
     input. A resumed conversation reports [Held_by_client_session]: the CLI
     re-sends just the new turn, so what the model reads is not this process's
     to measure.
@@ -80,8 +80,8 @@ val run :
     ({!Keeper_official_client_host.read_librarian_front}); a reader error
     refuses the request, as the same check refuses an Agent Core request.
     [on_carried_front] receives the front that history started from and its
-    bytes in the canonical encoding, before the declared window cuts it; the
-    caller records it where the Agent Core lane records its own request
+    bytes in the canonical encoding; the caller records it where the Agent
+    Core lane records its own request
     ({!Keeper_official_client_host.continuity_observation_input}). *)
 
 val eager_tool_names : Keeper_official_client_host.dynamic_tool list -> string list
@@ -137,11 +137,8 @@ module For_testing : sig
       [event] is being emitted, as another fiber would when emitting yields;
       they are fed before the emit returns. *)
 
-  val capacity_bounded_model_input_projection
-    :  prompt_ceiling_bytes:int option
-    -> system_prompt:string
-    -> goal:string
-    -> ?on_model_input_window_observation:
+  val carried_history_projection
+    :  ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
     -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
@@ -151,31 +148,11 @@ module For_testing : sig
     -> keeper_name:string
     -> runtime_id:string
     -> Agent_core.Agent.model_input_projection option
-    -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
-  (** Starts from the admitted carried front, runs the source projection, then
-      applies the declared byte window. A Librarian front's working state is
-      pinned, so the window cannot trim it; it goes only where it displaces
-      none of the range's atoms
-      ({!Keeper_official_client_host.compose_librarian_range}, RFC-0460), and
-      otherwise the Librarian position goes alone. A Gate replay reference is
-      charged to the provider-bound input without becoming a front in the
-      durable checkpoint vocabulary. Refuses an undeclared window:
-      Antigravity has no typed overflow response from which MASC could derive
-      a safe retry capacity. *)
-
-  val start_prompt_bytes :
-    system_prompt:string ->
-    goal:string ->
-    Agent_core.Types.message list ->
-    (int, string) result
-  (** Render through the production start-turn formatter and return the exact
-      transmitted prompt byte count. *)
-
-  val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
-
-  val measure_model_input_message_bytes : Agent_core.Types.message -> int
-  (** What the window charges one message, framing included. A test that has
-      to place a capacity inside one band -- the working state fits and the
-      newest atom does not -- measures with this rather than restating the
-      framing and drifting from it. *)
+    -> Agent_core.Agent.model_input_projection
+  (** Starts from the admitted carried front and runs the source projection;
+      the range goes out as composed. A Librarian front's
+      working state goes in front of the range
+      ({!Keeper_official_client_host.compose_librarian_range}, RFC-0460). A
+      Gate replay reference reaches the provider-bound input without becoming
+      a front in the durable checkpoint vocabulary. *)
 end

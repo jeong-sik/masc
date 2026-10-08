@@ -298,12 +298,12 @@ is-default = true
         ~late_approvals:(Keeper_late_approval.create ()) ~publish:(fun _ -> ())
         ~redact_text:Fun.id ~clock:env#clock ~keeper_name
         ~timeout_sec:Exact_output_fixture.fixture_wait_seconds in
-    let approval_gate = {gate with Keeper_tool_approval_gate.pre_tool_use=(fun event ->
+    let approval_gate = {gate with Keeper_tool_approval_gate.pre_tool_use=(fun ~identity_tool_index event ->
       (match event with
        | Agent_core.Hooks.PreToolUse {tool_name=name; _} when String.equal name tool_name -> record root "approval"
        | PreToolUse _ | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | PostToolUse _
        | PostToolUseFailure _ | OnToolError _ | OnError _ | OnStop _ -> ());
-      gate.pre_tool_use event)} in
+      gate.pre_tool_use ~identity_tool_index event)} in
     check bool "the real approval policy remains Auto" true
       (Keeper_tool_approval_mode.resolve (Keeper_tool_approval_mode.shared ()) ~keeper_name
        = Keeper_tool_approval_mode.Auto);

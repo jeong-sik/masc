@@ -467,30 +467,25 @@ def autonomous_turn_history_interaction() -> Interaction:
              "the unrecorded reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
-            # No lane word on the work lanes any more: the mark already says
-            # which lane the row is, so the badge is the glyph and its
-            # padding and nothing else. What pins the thinking row is its
-            # mark against the first words of the withheld-note body, with
-            # whatever padding the badge puts between -- never the mark
+            # The work lanes carry their labels again by default (#41661
+            # restored them): the badge is the mark plus the lane word, so a
+            # reader who has not memorised the glyphs can still read the lane
+            # (tui-chat-design). The thinking row is pinned as mark + THINKING;
+            # the block header row carries TOOLS, the quoted rail and the
+            # first call's status on one stripped row -- never the bare mark
             # alone, which the body's own " · " separators also carry.
-            (re.compile("\u00b7\\s+2 reasoning steps".encode()),
-             "the thinking lane"),
-            # The block header row carries the badge, the quoted rail and
-            # the first call's status on one stripped row, so the mark is
-            # pinned against them the way the thinking lane is pinned
-            # against its body -- never the bare mark alone.
-            (re.compile("\u25a0\\s+\u2502\\s+\u2717".encode()),
-             "the tool block mark"),
+            (re.compile("\u00b7\\s+THINKING".encode()),
+             "the thinking lane label"),
+            (re.compile("\u25a0\\s+TOOLS\\s+\u2502\\s+\u2717".encode()),
+             "the tool block header with its first call"),
         ):
             if find_needle(plain_pane, needle) < 0:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
-        # The lane words are gone for good: a revert that puts TOOLS or
-        # THINKING back on a badge must fail here, not pass silently.
-        for word in (b"TOOLS", b"THINKING"):
-            if word in plain_pane:
-                raise AssertionError(f"the lane word {word} is back: {pane!r}")
+        # These pins are the revert guard the old word ban used to be: a
+        # renderer that drops TOOLS or THINKING from the badges fails here
+        # again, not silently.
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 

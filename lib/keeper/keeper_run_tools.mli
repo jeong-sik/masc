@@ -66,6 +66,7 @@ type agent_setup =
     (** See {!Keeper_tools_agent_core.tool_bundle}: the Agent Core lane
         sends this instead, with attached-service schemas behind a
         listing. *)
+  ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
       (** {!Keeper_tools_agent_core.tool_bundle.result_bounds}. *)

@@ -4359,9 +4359,14 @@ let launch_browser_lane state ~mailbox operation =
         read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
         refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending) } in
+      (* The picker that asks for the list again shows nothing of the read
+         before it. Every other request leaves what the last discovery said. *)
       state.browser_lane <- Some (match operation with
         | Discover Choose_client -> Browser_lane_view.withdraw_discovery launched
-        | _ -> launched);
+        | Discover Read_after_discovery | Read | Read_refresh | Open_session | Close_session | Goto _
+        | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _
+        | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
+        | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> launched);
       let host = server_peer_host and port = state.port in
       let perform () =
         (* The mailbox is the effect boundary. Cancellation still belongs to

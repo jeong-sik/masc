@@ -9764,3 +9764,8 @@
  (name test_h3_working_state_meaning)
  (modules test_h3_working_state_meaning)
  (libraries masc_test_deps))
+
+(test
+ (name test_lane_addon_tool_result)
+ (modules test_lane_addon_tool_result)
+ (libraries alcotest masc.lane_addon_tool_result masc.tool_types mcp_protocol yojson))

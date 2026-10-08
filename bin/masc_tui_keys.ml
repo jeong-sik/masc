@@ -1347,7 +1347,8 @@ let code_notes_bindings =
   ]
 
 let code_history_bindings =
-  [ b Act "d" "recorded diff" ~help:"expand or collapse the selected Keeper call's recorded text; failed calls show attempted text"
+  [ b Act "t" "Task" ~help:"inspect the Task named by the selected Keeper record; Esc returns to this history position"
+  ; b Act "d" "recorded diff" ~help:"expand or collapse the selected Keeper call's recorded text; failed calls show attempted text"
   ; b Meta "r" "refresh"
   ; b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"

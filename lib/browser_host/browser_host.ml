@@ -258,7 +258,8 @@ type result_undelivered =
   | Not_acknowledged
   | Issuer_moved
   | Token_unreadable of string
-  | Unreached_as_host_ended of http_error
+  | Refused_on_resend of http_error
+  | Unacknowledged_as_host_ended of http_error
   | Browser_left_first
   | Stopped_first
 
@@ -276,8 +277,11 @@ let result_undelivered_message = function
   | Not_acknowledged -> "the server answered the result without an acknowledgement"
   | Issuer_moved -> "the server that issued the request stopped answering and another answers"
   | Token_unreadable detail -> detail
-  | Unreached_as_host_ended error ->
-      "the host was ending and its one attempt did not reach the server (" ^ http_error_message error ^ ")"
+  | Refused_on_resend error ->
+      "the server answered the re-sent result with " ^ http_error_message error
+      ^ "; it may have taken an earlier attempt"
+  | Unacknowledged_as_host_ended error ->
+      "the host was ending and its one attempt was not acknowledged (" ^ http_error_message error ^ ")"
   | Browser_left_first -> "the browser connection ended before the server acknowledged the result"
   | Stopped_first -> "the host was stopped before the server acknowledged the result"
 
@@ -309,7 +313,7 @@ let post ~clock ~client ~server ~config ~info ~token path json =
           with
           (* cohttp-eio reports as [Failure] a peer that closed the connection
              before a response head, one that sent something that is not a
-             head, and a request it could not send. In each there is no
+             head, and a host name it could not resolve. In each there is no
              answer from the server, which a status or a body would be. *)
           | exception Failure _ -> Error No_response
           | response, body ->
@@ -442,16 +446,21 @@ let deliver link payload =
             | Unreached -> Unreached error))
 
 (* A result that may not have reached the server is sent again until it is
-   delivered or the server answers it. *)
-let rec publish link payload =
+   delivered or the server answers it. The server takes a result once: when
+   an earlier attempt did arrive and only its answer was lost, the attempt
+   after it is refused, and the host cannot tell that from a request the
+   server gave up on. A restarted server has no memory of the request, so
+   there the result is lost whichever attempt arrives. *)
+let rec publish ?(resent = false) link payload =
   match deliver link payload with
   | Delivered -> Ok ()
+  | Undelivered (Refused_by_server error) when resent -> Error (Refused_on_resend error)
   | Undelivered why -> Error why
   | Unreached error ->
       Log.Transport.warn "browser-host: result delivery failed: %s" (http_error_message error);
       Eio.Time.sleep link.clock reconnect_delay_sec;
       (match follow_workspace link with
-       | Unchanged -> publish link payload
+       | Unchanged -> publish ~resent:true link payload
        (* The server that issued the request no longer answers and another
           does; polling there registers the lane again. *)
        | Moved -> Error Issuer_moved)
@@ -462,7 +471,7 @@ let publish_once link payload =
   match deliver link payload with
   | Delivered -> Ok ()
   | Undelivered why -> Error why
-  | Unreached error -> Error (Unreached_as_host_ended error)
+  | Unreached error -> Error (Unacknowledged_as_host_ended error)
 
 let record_delivery = function
   | Ok () -> ()
@@ -566,9 +575,10 @@ type leaving = Browser_gone of string | Stop_asked of string
    waits for work, when a command's outcome is unknown, when the server
    refuses its registration, and when [stop] says the operator asked.
 
-   However it ends, it ends the BiDi session it created. Firefox keeps a
-   session whose socket closed and takes one at a time, so a host that left
-   its session behind could only be attached again after restarting that
+   On each of those ways out, and when an exception raised while it serves
+   leaves it, it ends the BiDi session it asked for. Firefox keeps a session
+   whose socket closed and takes one at a time, so a host that left its
+   session behind could only be attached again after restarting that
    Firefox. *)
 let run_bidi env config url ~stop =
   let clock = Eio.Stdenv.clock env in
@@ -578,131 +588,152 @@ let run_bidi env config url ~stop =
   Eio.Fiber.fork_daemon ~sw:stop_sw (fun () ->
     Eio.Promise.resolve set_stopping (stop ());
     `Stop_daemon);
-  (* Set once this host has asked Firefox for a session. Until then a stop
-     has nothing to end and simply abandons the attempt to connect. *)
-  let session_asked = ref false in
+  let stopped_unattached asked =
+    Log.Transport.info "browser-host: stopped by %s before it was attached" asked;
+    Ok ()
+  in
+  (* Set once the BiDi connection is up and nobody had asked to stop. Until
+     then a stop abandons the attempt to connect: no session was asked for.
+     From then on the serving fiber sees the stop itself and leaves in
+     order. *)
+  let attached = ref false in
+  let serve_link ~ended peer link =
+    Eio.Switch.run (fun sw ->
+      Eio.Switch.on_release sw (fun () -> disconnect link);
+      let leaving () =
+        match Eio.Promise.peek ended, Eio.Promise.peek stopping with
+        | Some reason, (Some _ | None) -> Some (Browser_gone reason)
+        | None, Some asked -> Some (Stop_asked asked)
+        | None, None -> None
+      in
+      (* A wait on the server lasts only while Firefox is attached and nobody
+         asked the host to stop, and [grace_sec] past that. What the server
+         handed over as the wait ended stands. *)
+      let while_serving ?(grace_sec = 0.) wait =
+        match leaving () with
+        | Some leaving -> Error leaving
+        | None ->
+            Watched_work.run
+              ~watcher:(fun () ->
+                let leaving =
+                  Eio.Fiber.first
+                    (fun () -> Browser_gone (Eio.Promise.await ended))
+                    (fun () -> Stop_asked (Eio.Promise.await stopping))
+                in
+                Eio.Time.sleep clock grace_sec;
+                Error leaving)
+              (fun () -> Ok (wait ()))
+      in
+      let left = function
+        | Browser_gone reason -> Error ("BiDi connection ended: " ^ reason)
+        | Stop_asked asked ->
+            Log.Transport.info "browser-host: stopped by %s" asked;
+            Ok ()
+      in
+      let answer id = function
+        | Ok data -> `Assoc [ "id", `String id; "ok", `Bool true; "data", data ]
+        | Error (Masc.Browser_bidi_peer.Before_effect message) ->
+            `Assoc
+              [ "id", `String id; "ok", `Bool false; "error", `String message
+              ; "effectPhase", `String "not_started" ]
+        | Error (Masc.Browser_bidi_peer.Outcome_unknown message) -> failure id message
+      in
+      (* A result is sent again for as long as the host is serving. When it
+         leaves, an attempt already in flight gets a moment for the server's
+         acknowledgement, so a result the server is taking is not reported
+         lost; one cut short is recorded like any other undelivered one. *)
+      let publish_while_serving payload =
+        match while_serving ~grace_sec:leaving_window_sec (fun () -> publish link payload) with
+        | Ok delivery -> record_delivery delivery; Ok ()
+        | Error leaving ->
+            record_delivery
+              (Error (match leaving with
+                 | Browser_gone _ -> Browser_left_first
+                 | Stop_asked _ -> Stopped_first));
+            Error leaving
+      in
+      (* An answer the host owes while it is serving, and its last one when
+         it is leaving: that one is offered once, because no later poll could
+         carry another attempt. *)
+      let publish_answer payload =
+        match leaving () with
+        | Some leaving -> record_delivery (publish_once link payload); Error leaving
+        | None -> publish_while_serving payload
+      in
+      let rec serve () =
+        match while_serving (fun () -> next_command link) with
+        | Error leaving -> left leaving
+        | Ok (Error refused) -> Error refused
+        | Ok (Ok Empty) -> serve ()
+        | Ok (Ok (Reject id)) ->
+            (match publish_answer (failure id "unsupported BiDi verb") with
+             | Ok () -> serve ()
+             | Error leaving -> left leaving)
+        | Ok (Ok (Forward command)) ->
+            let result =
+              match
+                within ~clock extension_timeout_sec (fun () ->
+                  Masc.Browser_bidi_peer.dispatch peer ~verb:command.verb command.args)
+              with
+              | Some result -> result
+              | None -> Error (Masc.Browser_bidi_peer.Outcome_unknown "BiDi command deadline exceeded")
+            in
+            let payload = answer command.id result in
+            (match result with
+             (* Any unknown outcome ends this client, preventing pointer
+                replay or a next gesture while a previous button may remain
+                pressed. *)
+             | Error (Masc.Browser_bidi_peer.Outcome_unknown _) ->
+                 record_delivery (publish_once link payload);
+                 Error "BiDi client stopped after an unknown command outcome"
+             | Ok _ | Error (Masc.Browser_bidi_peer.Before_effect _) ->
+                 (match publish_answer payload with
+                  | Ok () -> serve ()
+                  | Error leaving -> left leaving))
+      in
+      serve ())
+  in
   let serving () =
     Masc.Browser_bidi_peer.with_connection ~env ~timeout:extension_timeout_sec ~url (fun ~ended peer ->
-      session_asked := true;
-      let end_session () =
-        match Masc.Browser_bidi_peer.end_session peer with
-        | Ok () -> ()
-        | Error detail ->
-            Log.Transport.warn
-              "browser-host: the BiDi session was not ended (%s); if that Firefox is still running, \
-               restart it before attaching again" detail
-      in
-      let served =
-        let* version =
-          match within ~clock extension_timeout_sec (fun () -> Masc.Browser_bidi_peer.metadata peer) with
-          | Some version -> version
-          | None -> Error "BiDi metadata deadline exceeded" in
-        let info =
-          { browser = "firefox"; version; engine_version = version; transport = Browser_lane.Webdriver_bidi } in
-        let link = { clock; client; config; info; server = config.server } in
-        Eio.Switch.run (fun sw ->
-          Eio.Switch.on_release sw (fun () -> disconnect link);
-          let leaving () =
-            match Eio.Promise.peek ended, Eio.Promise.peek stopping with
-            | Some reason, (Some _ | None) -> Some (Browser_gone reason)
-            | None, Some asked -> Some (Stop_asked asked)
-            | None, None -> None
+      match Eio.Promise.peek stopping with
+      | Some asked -> stopped_unattached asked
+      | None ->
+          attached := true;
+          let session_left = ref false in
+          let served =
+            Eio.Switch.run (fun session_sw ->
+              (* Registered before the session is asked for, so every way out
+                 of this scope ends it, an exception raised in it included.
+                 The server is told first: that hook is the inner one. A
+                 cancellation from outside has taken the connection's fibers
+                 down by the time this runs; the session is then reported as
+                 not ended. *)
+              Eio.Switch.on_release session_sw (fun () ->
+                match Masc.Browser_bidi_peer.end_session peer with
+                | Ok () -> ()
+                | Error detail ->
+                    session_left := true;
+                    Log.Transport.warn
+                      "browser-host: the BiDi session was not ended (%s); if that Firefox is still \
+                       running, restart it before attaching again" detail);
+              let* version =
+                match within ~clock extension_timeout_sec (fun () -> Masc.Browser_bidi_peer.metadata peer) with
+                | Some version -> version
+                | None -> Error "BiDi metadata deadline exceeded" in
+              let info =
+                { browser = "firefox"; version; engine_version = version
+                ; transport = Browser_lane.Webdriver_bidi } in
+              serve_link ~ended peer { clock; client; config; info; server = config.server })
           in
-          (* A wait on the server lasts only while Firefox is attached and
-             nobody asked the host to stop, and [grace_sec] past that. What
-             the server handed over as the wait ended stands. *)
-          let while_serving ?(grace_sec = 0.) wait =
-            match leaving () with
-            | Some leaving -> Error leaving
-            | None ->
-                Watched_work.run
-                  ~watcher:(fun () ->
-                    let leaving =
-                      Eio.Fiber.first
-                        (fun () -> Browser_gone (Eio.Promise.await ended))
-                        (fun () -> Stop_asked (Eio.Promise.await stopping))
-                    in
-                    Eio.Time.sleep clock grace_sec;
-                    Error leaving)
-                  (fun () -> Ok (wait ()))
-          in
-          let left = function
-            | Browser_gone reason -> Error ("BiDi connection ended: " ^ reason)
-            | Stop_asked asked ->
-                Log.Transport.info "browser-host: stopped by %s" asked;
-                Ok ()
-          in
-          let answer id = function
-            | Ok data -> `Assoc [ "id", `String id; "ok", `Bool true; "data", data ]
-            | Error (Masc.Browser_bidi_peer.Before_effect message) ->
-                `Assoc
-                  [ "id", `String id; "ok", `Bool false; "error", `String message
-                  ; "effectPhase", `String "not_started" ]
-            | Error (Masc.Browser_bidi_peer.Outcome_unknown message) -> failure id message
-          in
-          (* A result is sent again for as long as the host is serving. When
-             it leaves, an attempt already in flight gets a moment for the
-             server's acknowledgement, so a result the server is taking is not
-             reported lost; one cut short is recorded like any other
-             undelivered one. *)
-          let publish_while_serving payload =
-            match while_serving ~grace_sec:leaving_window_sec (fun () -> publish link payload) with
-            | Ok delivery -> record_delivery delivery; Ok ()
-            | Error leaving ->
-                record_delivery
-                  (Error (match leaving with
-                     | Browser_gone _ -> Browser_left_first
-                     | Stop_asked _ -> Stopped_first));
-                Error leaving
-          in
-          let rec serve () =
-            match while_serving (fun () -> next_command link) with
-            | Error leaving -> left leaving
-            | Ok (Error refused) -> Error refused
-            | Ok (Ok Empty) -> serve ()
-            | Ok (Ok (Reject id)) ->
-                (match publish_while_serving (failure id "unsupported BiDi verb") with
-                 | Ok () -> serve ()
-                 | Error leaving -> left leaving)
-            | Ok (Ok (Forward command)) ->
-                let result =
-                  match
-                    within ~clock extension_timeout_sec (fun () ->
-                      Masc.Browser_bidi_peer.dispatch peer ~verb:command.verb command.args)
-                  with
-                  | Some result -> result
-                  | None -> Error (Masc.Browser_bidi_peer.Outcome_unknown "BiDi command deadline exceeded")
-                in
-                let payload = answer command.id result in
-                (match result, leaving () with
-                 (* Any unknown outcome ends this client, preventing pointer
-                    replay or a next gesture while a previous button may remain
-                    pressed. *)
-                 | Error (Masc.Browser_bidi_peer.Outcome_unknown _), (Some _ | None) ->
-                     record_delivery (publish_once link payload);
-                     Error "BiDi client stopped after an unknown command outcome"
-                 (* The host is leaving and this was its last command. The
-                    answer is offered once; no later poll could carry another
-                    attempt. *)
-                 | (Ok _ | Error (Masc.Browser_bidi_peer.Before_effect _)), Some leaving ->
-                     record_delivery (publish_once link payload);
-                     left leaving
-                 | (Ok _ | Error (Masc.Browser_bidi_peer.Before_effect _)), None ->
-                     (match publish_while_serving payload with
-                      | Ok () -> serve ()
-                      | Error leaving -> left leaving))
-          in
-          serve ())
-      in
-      end_session ();
-      served)
+          (* [Ok ()] says the host left in order and the same Firefox takes
+             the next one. A stop that left its session behind is not that. *)
+          (match served, !session_left with
+           | Ok (), true -> Error "stopped with its BiDi session left in Firefox"
+           | Ok (), false | Error _, (true | false) -> served))
   in
   Eio.Fiber.first serving (fun () ->
     let asked = Eio.Promise.await stopping in
-    if !session_asked then Eio.Fiber.await_cancel ()
-    else (
-      Log.Transport.info "browser-host: stopped by %s before it was attached" asked;
-      Ok ()))
+    if !attached then Eio.Fiber.await_cancel () else stopped_unattached asked)
 
 module For_testing = struct
   let within = within

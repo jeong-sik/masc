@@ -1,14 +1,17 @@
 open Alcotest
 module Peer = Masc.Browser_bidi_peer
 let obj xs = `Assoc xs
+(* A peer for a case that asks for no session. *)
+let peer_of command =
+  Peer.create ~command ~session_end:(fun () -> fail "this case has no session to end")
 let script_value json = obj ["type",`String "success";"result",obj ["type",`String "string";"value",`String (Yojson.Safe.to_string json)]]
 let test_context_identity () =
   let contexts=ref ["a";"b"] in
   let command method_ _ = match method_ with
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List (List.map (fun c->obj ["context",`String c;"url",`String "https://same.example/"]) !contexts)])
     | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://same.example/";"title",`String "same";"active",`Bool true]))
-    | _ -> Error "unexpected test command" in
-  let peer=Peer.create ~command () in
+    | _ -> Error (Peer.Rejected "unexpected test command") in
+  let peer=peer_of command in
   let ids () = match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
     | Ok (`List rows) -> List.map (fun row->Yojson.Safe.Util.(row |> member "id" |> to_int)) rows
     | _ -> fail "tabs failed" in
@@ -28,7 +31,7 @@ let test_document_source () =
       ran:=Yojson.Safe.Util.(args |> member "functionDeclaration" |> to_string) :: !ran;
       Ok (script_value page)
     | other -> failf "unexpected document command: %s" other in
-  let peer=Peer.create ~command () in
+  let peer=peer_of command in
   match Peer.dispatch peer ~verb:Peer.Page_read (obj ["tabId",`Int 1;"includeHtml",`Bool true]) with
   | Ok data ->
     let open Yojson.Safe.Util in
@@ -58,7 +61,7 @@ let test_document_still_loading () =
         ran:=Yojson.Safe.Util.(params |> member "functionDeclaration" |> to_string) :: !ran;
         Ok (script_value (obj ["documentLoading",`Bool true]))
       | other -> failf "unexpected document command: %s" other in
-    let peer=Peer.create ~command () in
+    let peer=peer_of command in
     (match Peer.dispatch peer ~verb args with
      | Error (Peer.Before_effect detail) ->
        check string (name ^ ": the refusal says to read again")
@@ -83,7 +86,7 @@ let test_answer_too_large_for_the_socket () =
         ran:=Yojson.Safe.Util.(params |> member "functionDeclaration" |> to_string) :: !ran;
         Ok (obj ["type",`String "success";"result",obj ["type",`String "number";"value",`Int measured]])
       | other -> failf "unexpected command: %s" other in
-    let peer=Peer.create ~command () in
+    let peer=peer_of command in
     (match Peer.dispatch peer ~verb args with
      | Error (Peer.Before_effect detail) ->
        check string (name ^ ": the refusal names the size and the bound")
@@ -116,7 +119,7 @@ let test_element_inventory () =
             args |> member "functionDeclaration" |> to_string) :: !ran;
       Ok (script_value inventory)
     | other -> failf "unexpected inventory command: %s" other in
-  let peer=Peer.create ~command () in
+  let peer=peer_of command in
   match Peer.dispatch peer ~verb:Peer.Page_elements (obj ["tabId",`Int 2]) with
   | Ok data ->
     let open Yojson.Safe.Util in
@@ -136,8 +139,8 @@ let test_pointer_validation () =
     calls:=method_::!calls;
     match method_ with
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
-    | _ -> Error "unexpected effect dispatch" in
-  let peer=Peer.create ~command () in
+    | _ -> Error (Peer.Rejected "unexpected effect dispatch") in
+  let peer=peer_of command in
   let viewport=obj ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
     "scrollX",`Int 0;"scrollY",`Int 0] in
   let point=obj ["x",`Float 0.5;"y",`Float 0.5] in
@@ -174,6 +177,14 @@ let test_held_open_completion outcome () =
           ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port) (fun ~ended:_ _->outcome) in
         check (result unit string) "callback result preserved" outcome actual;
         check bool "socket EOF without any extra protocol write" true (Eio.Promise.await eof))))
+(* The window a scripted case gives the connection to attach and answer, and
+   the bound on the whole case. *)
+let scripted_timeout_sec = 1.
+let scripted_case_deadline_sec = 2.
+(* A session case may wait out one unanswered command and one unanswered
+   session.end. *)
+let scripted_session_deadline_sec =
+  scripted_timeout_sec +. Peer.session_end_window_sec +. scripted_case_deadline_sec
 (* Firefox going away is told to whoever holds the connection, also when no
    command is in flight: a host waiting for work has to learn that the
    browser it serves is gone. *)
@@ -183,7 +194,9 @@ let test_a_closed_socket_ends_the_connection () =
       let clock=Eio.Stdenv.clock env in
       let listener=Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:1
         (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
-      let port=match Eio.Net.listening_addr listener with `Tcp (_,port)->port|_->fail "TCP expected" in
+      let port=match Eio.Net.listening_addr listener with
+        | `Tcp (_,port)->port
+        | `Unix _->fail "TCP expected" in
       let close,close_u=Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun ()->Eio.Switch.run (fun peer_sw ->
         let flow,_=Eio.Net.accept ~sw:peer_sw listener in
@@ -191,8 +204,8 @@ let test_a_closed_socket_ends_the_connection () =
         let key=match Ws_direct_eio.Handshake.request_key head with Ok key->key|Error e->fail e in
         Eio.Flow.copy_string (Ws_direct_eio.Handshake.server_response ~key) flow;
         Eio.Promise.await close));
-      Eio.Time.with_timeout_exn clock 2. (fun ()->
-        let actual=Peer.with_connection ~env ~timeout:1.
+      Eio.Time.with_timeout_exn clock scripted_case_deadline_sec (fun ()->
+        let actual=Peer.with_connection ~env ~timeout:scripted_timeout_sec
           ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port)
           (fun ~ended _->
             check bool "attached and idle: not ended" true (Eio.Promise.peek ended=None);
@@ -230,15 +243,17 @@ let with_scripted_firefox script use =
       let clock=Eio.Stdenv.clock env in
       let listener=Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:1
         (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
-      let port=match Eio.Net.listening_addr listener with `Tcp (_,port)->port|_->fail "TCP expected" in
+      let port=match Eio.Net.listening_addr listener with
+        | `Tcp (_,port)->port
+        | `Unix _->fail "TCP expected" in
       Eio.Fiber.fork ~sw (fun ()->Eio.Switch.run (fun peer_sw ->
         let flow,_=Eio.Net.accept ~sw:peer_sw listener in
         let head=Ws_direct_eio.Driver.read_head ~clock flow in
         let key=match Ws_direct_eio.Handshake.request_key head with Ok key->key|Error e->fail e in
         Eio.Flow.copy_string (Ws_direct_eio.Handshake.server_response ~key) flow;
         script flow));
-      Eio.Time.with_timeout_exn clock 5. (fun ()->
-        Peer.with_connection ~env ~timeout:0.2
+      Eio.Time.with_timeout_exn clock scripted_session_deadline_sec (fun ()->
+        Peer.with_connection ~env ~timeout:scripted_timeout_sec
           ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port) use)))
 let session_created request =
   reply_to request (obj ["sessionId",`String "scripted";"capabilities",
@@ -303,6 +318,78 @@ let test_a_session_that_cannot_be_ended_is_an_error () =
       | Ok () -> Ok ()
       | Error detail -> Error detail) in
   check (result unit string) "no answer in the window" (Error "no answer to session.end in time") unanswered
+(* A session.end waiting for its answer on a connection this side already
+   stopped trusting is told when the socket closes, instead of waiting out its
+   window. *)
+let test_a_socket_closing_under_session_end_is_told_at_once () =
+  let outcome=with_scripted_firefox (fun flow ->
+      send_server_message flow (session_created (read_client_message flow));
+      ignore (read_client_message flow : Yojson.Safe.t);
+      (* Returning after session.end arrived closes the socket under it. *)
+      ignore (read_client_message flow : Yojson.Safe.t))
+    (fun ~ended:_ peer ->
+      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
+       | Error (Peer.Before_effect _) -> ()
+       | Error (Peer.Outcome_unknown detail) -> fail detail
+       | Ok _ -> fail "an unanswered command produced an answer");
+      Peer.end_session peer) in
+  check (result unit string) "the socket's end, not the window's" (Error "BiDi EOF") outcome
+(* Firefox may hold a session from the moment it is asked for one. An answer
+   that never came leaves one to end; Firefox's own refusal leaves none. *)
+let test_a_session_nobody_confirmed_is_ended () =
+  let seen=ref [] in
+  let unanswered=with_scripted_firefox (fun flow ->
+      let asked=read_client_message flow in
+      seen:=method_of asked :: !seen;
+      let ending=read_client_message flow in
+      seen:=method_of ending :: !seen;
+      send_server_message flow (reply_to ending (obj [])))
+    (fun ~ended:_ peer ->
+      check (result string string) "no answer to session.new"
+        (Error "BiDi transport deadline exceeded") (Peer.metadata peer);
+      Peer.end_session peer) in
+  check (result unit string) "the session is ended all the same" (Ok ()) unanswered;
+  check (list string) "what Firefox was sent, in order" ["session.new";"session.end"] (List.rev !seen)
+let test_a_refused_session_leaves_none_to_end () =
+  let seen=ref [] in
+  let refused=with_scripted_firefox (fun flow ->
+      let asked=read_client_message flow in
+      seen:=method_of asked :: !seen;
+      send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" asked;
+        "error",`String "session not created";"message",`String "Maximum number of active sessions"]);
+      (* Anything further would be read here; the client leaving ends it. *)
+      match read_client_message flow with
+      | further -> seen:=method_of further :: !seen
+      | exception End_of_file -> ())
+    (fun ~ended peer ->
+      check (result string string) "Firefox's refusal is the error"
+        (Error "BiDi command rejected: session not created") (Peer.metadata peer);
+      check bool "and the connection is not ended by it" true (Eio.Promise.peek ended=None);
+      Peer.end_session peer) in
+  check (result unit string) "nothing to end" (Ok ()) refused;
+  check (list string) "Firefox was sent nothing after its refusal" ["session.new"] (List.rev !seen)
+(* The two ways a session request ends without an answer that no socket
+   scripts: the caller gave up on it, and a browser that is not Firefox. *)
+let test_a_session_is_there_to_end_once_asked_for () =
+  Eio_main.run (fun _ ->
+    let ended=ref 0 in
+    let asking answer=Peer.create ~session_end:(fun () -> incr ended; Ok ())
+      ~command:(fun method_ _ -> match method_ with
+        | "session.new" -> answer ()
+        | other -> failf "unexpected command: %s" other) in
+    let abandoned=asking (fun () -> Eio.Fiber.await_cancel ()) in
+    Eio.Fiber.first (fun () -> ignore (Peer.metadata abandoned : (string,string) result)) (fun () -> ());
+    check (result unit string) "a request the caller gave up on" (Ok ()) (Peer.end_session abandoned);
+    check int "is ended" 1 !ended;
+    check (result unit string) "once" (Ok ()) (Peer.end_session abandoned);
+    check int "and not again" 1 !ended;
+    let other_browser=asking (fun () -> Ok (obj ["sessionId",`String "scripted";"capabilities",
+      obj ["browserName",`String "chromium";"browserVersion",`String "1"]])) in
+    check (result string string) "a browser that is not Firefox is turned down"
+      (Error "BiDi peer must be Firefox") (Peer.metadata other_browser);
+    check (result unit string) "with the session it created" (Ok ()) (Peer.end_session other_browser);
+    check int "ended" 2 !ended)
 (* A peer that refuses the WebSocket upgrade. ws-direct raises [Failure] for
    the refused handshake; the connection returns it as its error rather than
    letting it out of [with_connection], where the native host would end on an
@@ -351,7 +438,7 @@ let test_hover_without_click () =
         check int "observed vertical position" 300 (move |> member "y" |> to_int);
         hovered := true; Ok `Null
       | _ -> fail ("unexpected hover command: " ^ method_) in
-    let peer = Peer.create ~command () in
+    let peer = peer_of command in
     check bool "fixture starts unhovered" false !hovered;
     match Peer.dispatch peer ~verb:Peer.Page_interact (obj ["tabId",`Int 2;
       "action",`String "hover_at";"expectedUrl",`String "https://example.test/";
@@ -403,7 +490,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | "browsingContext.captureScreenshot" -> Ok (obj ["data",`String "png"])
       | "input.performActions" | "input.releaseActions" -> Ok `Null
       | other -> failf "unexpected protocol command: %s" other in
-    let peer = Peer.create ~command () in
+    let peer = peer_of command in
     List.iter (fun capability ->
       let name = Lane.live_capability_to_wire capability in
       let asked = verb_asking_for capability in
@@ -436,7 +523,12 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
     test_case "a closed socket ends the connection for its holder" `Quick test_a_closed_socket_ends_the_connection;
     test_case "the session is ended after a command got no reply" `Quick
       test_the_session_is_ended_after_a_command_got_no_reply;
-    test_case "a session that cannot be ended is an error" `Quick test_a_session_that_cannot_be_ended_is_an_error];
+    test_case "a session that cannot be ended is an error" `Quick test_a_session_that_cannot_be_ended_is_an_error;
+    test_case "a socket closing under session.end is told at once" `Quick
+      test_a_socket_closing_under_session_end_is_told_at_once;
+    test_case "a session nobody confirmed is ended" `Quick test_a_session_nobody_confirmed_is_ended;
+    test_case "a refused session leaves none to end" `Quick test_a_refused_session_leaves_none_to_end;
+    test_case "a session is there to end once asked for" `Quick test_a_session_is_there_to_end_once_asked_for];
   "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "document source is the shared document helper" `Quick test_document_source;
     test_case "a document still loading is not answered for" `Quick test_document_still_loading;

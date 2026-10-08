@@ -3,17 +3,23 @@
 type failure = Before_effect of string | Outcome_unknown of string
 (** Native host verbs, decoded once from the MASC poll wire. *)
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
+(** Why a command has no result. [Rejected] is the browser's own error
+    answer, with its code. [Unanswered] is no readable answer: the connection
+    ended, the reply did not come in time, or it was not a BiDi result. *)
+type refusal = Rejected of string | Unanswered of string
 type t
-(** [session_end] ends the session over its own path; without it the session
-    is ended through [command]. *)
+(** [command] carries one BiDi command; [session_end] ends the session. They
+    are separate because the session is also ended on a connection that
+    carries no further command. *)
 val create
-  :  ?session_end:(unit -> (unit, string) result)
-  -> command:(string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result)
-  -> unit
+  :  session_end:(unit -> (unit, string) result)
+  -> command:(string -> Yojson.Safe.t -> (Yojson.Safe.t, refusal) result)
   -> t
-(** Creates the BiDi session and answers the browser's version. *)
+(** Asks the browser for a BiDi session and answers the browser's version. *)
 val metadata : t -> (string, string) result
-(** Ends the session {!metadata} created; [Ok ()] when there is none. Firefox
+(** Ends the session {!metadata} asked for; [Ok ()] when there is none to
+    end. There is one to end from the moment it is asked for, also when no
+    answer came, and none once the browser rejected the request. Firefox
     keeps a session whose socket closed and takes one at a time, so a session
     left behind refuses every later connection until that Firefox is
     restarted. Ending it closes no tab and leaves the browser running. Under

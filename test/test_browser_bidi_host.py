@@ -345,6 +345,22 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert other["ok"] and other["data"] == before["data"]
             assert len({row[0] for row in metadata}) == 1 and all(row[1] for row in metadata)
             assert all(row[2] == "webdriver_bidi" for row in metadata), metadata
+            # Firefox takes one session. A host started while this one is
+            # attached is refused, leaves no session of its own to end, and
+            # takes nothing from the first.
+            with (evidence / "rival.log").open("wb") as rival_log:
+                rival = subprocess.Popen(host_argv, stdin=subprocess.DEVNULL, stdout=rival_log, stderr=rival_log)
+                try:
+                    rival_exit = rival.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    rival.kill()
+                    rival.wait(timeout=5)
+                    raise AssertionError(f"a second host was not refused; see {evidence / 'rival.log'}")
+            rival_said = (evidence / "rival.log").read_text(errors="replace")
+            assert rival_exit == 1, rival_said
+            assert "BiDi command rejected: session not created" in rival_said, rival_said
+            assert "was not ended" not in rival_said, rival_said
+            assert call("tabs.list", {})["ok"], "the attached host lost its session to a refused one"
             # A host that is stopped ends the BiDi session it created, so
             # this same Firefox, not restarted, takes the next host. Its tabs
             # are the ones the first host saw.

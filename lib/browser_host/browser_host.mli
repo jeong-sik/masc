@@ -95,15 +95,22 @@ val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
     - a command's outcome is unknown. That answer too is offered once;
     - the server refuses the client's registration.
 
-    It returns [Ok ()] when [stop ()] returns: [stop] blocks until the
-    operator asked the host to stop and answers what asked. A command in
-    flight is finished and answered first.
+    [stop] blocks until the operator asked the host to stop and answers what
+    asked. From then on the host takes no further command: one in flight is
+    finished and its answer offered once, the server is told, and the host
+    returns [Ok ()]. Asked before the BiDi connection is up, it abandons the
+    attempt and returns [Ok ()].
 
-    However it returns, it first ends the BiDi session it created, so the
-    same Firefox takes the next host. Firefox keeps a session whose socket
-    closed and takes one session at a time; ending it closes no tab and
-    leaves the browser running. A session that could not be ended is logged
-    with what the operator does about it. *)
+    On each of these ways out, and when an exception raised while it serves
+    leaves it, the host first ends the BiDi session it asked for, so the same
+    Firefox takes the next host. Firefox keeps a session whose socket closed
+    and takes one session at a time; ending it closes no tab and leaves the
+    browser running. A session that could not be ended is logged with what
+    the operator does about it, and a stop that left one returns an error
+    instead of [Ok ()]. That includes a host cancelled from outside: its
+    connection is taken down before the session can be ended over it. A
+    result that stayed undelivered is logged and does not change what the
+    host returns. *)
 val run_bidi
   :  Eio_unix.Stdenv.base
   -> config

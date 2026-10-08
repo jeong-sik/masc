@@ -72,14 +72,28 @@ two browsers. A request that names no `clientId` is then refused as
 `ambiguous_browser_clients`; a Keeper picks the `webdriver_bidi` connection
 from the list and keeps its `clientId` for the task.
 
-The host runs in the foreground until it is stopped with Ctrl-C or SIGTERM.
-It then finishes and answers a command in flight, tells the server, and ends
-the BiDi session it created. A stop that comes while it is still connecting
-abandons the attempt. Restarting the MASC server does not end it. A poll the server did not answer is asked again after
+The host runs in the foreground until it is stopped with Ctrl-C or SIGTERM,
+or its terminal is closed (SIGHUP). It then finishes and answers a command in
+flight, tells the server, ends the BiDi session it asked for, and exits 0. A
+second Ctrl-C ends it at once and leaves the session in Firefox. A stop that
+comes while it is still connecting abandons the attempt.
+
+Exit status 0 says the host stopped as asked and the same Firefox takes the
+next one. A host that was stopped and could not end its session exits 1, as
+does one that ends by itself. A result the server did not acknowledge is
+logged and does not change the status.
+
+Restarting the MASC server does not end it. A poll the server did not answer is asked again after
 five seconds, at the port the workspace's `connection.toml` names once that
 port answers, and a result that may not have arrived is sent again before the
 next poll. The restarted server sees the same client ID, and Firefox is not
 asked for a new session.
+
+Sending a result again delivers it only when the first attempt was never
+handled. The server takes a result once, so when the first attempt arrived
+and only its answer was lost, the second is refused and the host logs that.
+A restarted server does not know requests the earlier process issued; a
+result for one of those is lost whichever attempt arrives.
 
 It ends by itself in three cases, and says which in its own log output:
 
@@ -92,21 +106,24 @@ It ends by itself in three cases, and says which in its own log output:
 
 The reason is not reported to the server.
 
-Attaching again is the host command alone. However the host ends, it first
-ends the BiDi session it created; Firefox keeps running with its tabs and
-takes the next host, which registers as a new client. Without that step the
+Attaching again is the host command alone. A host that is stopped, or ends
+by itself, first ends the BiDi session it asked for; Firefox keeps running
+with its tabs and takes the next host, which registers as a new client. Without that step the
 session would stay in Firefox after the host is gone, and Firefox takes one
 session at a time (RFC browser-live-one-connection, section 2.4).
 
-Two cases do leave the session behind. A host started after them is refused
+These do leave the session behind. A host started after them is refused
 with `session not created` and exits; quit that Firefox, start it with the
 same command and profile, then start the host.
 
-- The host was killed with SIGKILL, or crashed.
+- The host was killed with SIGKILL or a second Ctrl-C, or crashed.
 - Firefox did not answer the session's end within two seconds, or its socket
   was already closed. The host logs `the BiDi session was not ended` with the
   reason. If the socket closed because Firefox quit, there is nothing to
   restart.
+
+A host refused with `session not created` asked for a session and got none,
+so it leaves none: stopping it changes nothing in Firefox.
 
 Measured on Firefox 157.0.1 on 2026-10-08: a host stopped with SIGTERM was
 followed by a second host on the same Firefox, and a host stopped with

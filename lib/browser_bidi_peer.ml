@@ -6,28 +6,35 @@ let obj xs = `Assoc xs
 let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
 type failure = Before_effect of string | Outcome_unknown of string
+type refusal = Rejected of string | Unanswered of string
+let refusal_message = function
+  | Rejected code -> "BiDi command rejected: " ^ code
+  | Unanswered why -> why
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
-type t = { command : string -> Yojson.Safe.t -> (Yojson.Safe.t,string) result;
-  session_end : unit -> (unit,string) result; mutable session_open : bool;
+type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
+  session_end : unit -> (unit,string) result; mutable session_may_exist : bool;
   mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option }
-let create ?session_end ~command () =
-  let session_end = match session_end with
-    | Some session_end -> session_end
-    | None -> fun () -> Result.map ignore (command "session.end" (obj [])) in
-  {command;session_end;session_open=false;contexts=[];next_tab=0;version=None}
+let create ~session_end ~command =
+  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;version=None}
+let command t method_ params = Result.map_error refusal_message (t.ask method_ params)
 (* Firefox keeps a session whose socket closed and takes one session at a
    time, so one left behind refuses every later connection until that Firefox
    is restarted. Ending it closes no tab and leaves the browser running. *)
 let end_session t =
-  if not t.session_open then Ok ()
-  else let* () = t.session_end () in t.session_open <- false; Ok ()
+  if not t.session_may_exist then Ok ()
+  else let* () = t.session_end () in t.session_may_exist <- false; Ok ()
 let metadata t =
-  let* result = t.command "session.new" (obj ["capabilities",obj []]) in
-  t.session_open <- true;
-  let* caps = required "capabilities" result in
-  let* name = string "browserName" caps in
-  if name <> "firefox" then Error "BiDi peer must be Firefox"
-  else let* version=string "browserVersion" caps in t.version<-Some version;Ok version
+  (* Firefox may hold a session from the moment it is asked for one, whether
+     or not its answer arrives. Only its own refusal says there is none. *)
+  t.session_may_exist <- true;
+  match t.ask "session.new" (obj ["capabilities",obj []]) with
+  | Error (Rejected _ as refused) -> t.session_may_exist <- false; Error (refusal_message refused)
+  | Error (Unanswered _ as unanswered) -> Error (refusal_message unanswered)
+  | Ok result ->
+    let* caps = required "capabilities" result in
+    let* name = string "browserName" caps in
+    if name <> "firefox" then Error "BiDi peer must be Firefox"
+    else let* version=string "browserVersion" caps in t.version<-Some version;Ok version
 (* The socket takes one message of at most this many bytes; a larger one ends
    the connection, and with it this client. *)
 let reply_limit_bytes = 8 * 1024 * 1024
@@ -47,7 +54,7 @@ let evaluate t context body args =
     ^ "\nconst answer = JSON.stringify((function(){" ^ body ^ "}).call(null,args));"
     ^ Printf.sprintf "\nreturn typeof answer === 'string' && answer.length > %d ? answer.length : answer; }"
         script_answer_limit_units in
-  let* result = t.command "script.callFunction" (obj [
+  let* result = command t "script.callFunction" (obj [
     "functionDeclaration",str declaration;"target",obj ["context",str context];
     "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str (Yojson.Safe.to_string args)]]]) in
   (* Arguments cross the protocol as a JSON string, decoded by the fixed body. *)
@@ -76,7 +83,7 @@ let parsed_document t context body args =
   then Error "the document is still loading; read it again"
   else Ok answer
 let tree t =
-  let* result = t.command "browsingContext.getTree" (obj []) in
+  let* result = command t "browsingContext.getTree" (obj []) in
   match field "contexts" result with
   | Some (`List rows) ->
     let rec collect acc = function
@@ -140,8 +147,8 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
     (match motion with
     | Hover_pointer | Wheel_pointer _ -> ()
     | Click_pointer | Drag_pointer _ -> Eio.Switch.on_release sw (fun ()->
-      released:=Result.map (fun _->()) (t.command "input.releaseActions" (obj ["context",str context]))));
-    t.command "input.performActions" (obj ["context",str context;"actions",`List [source]])) in
+      released:=Result.map (fun _->()) (command t "input.releaseActions" (obj ["context",str context]))));
+    command t "input.performActions" (obj ["context",str context;"actions",`List [source]])) in
   let* _=unknown applied in
   let* ()=unknown !released in
   let* after = unknown (page t context) in
@@ -173,7 +180,7 @@ let dispatch t ~verb args =
         let* p=scene t context (obj (("mode",str "read")::fields)) in with_tab id p))
   | Page_capture -> on_tab (fun context id -> pre (
         let* p=page t context in let* viewport=scene t context (obj ["mode",str "viewport"]) in
-        let* png=t.command "browsingContext.captureScreenshot" (obj ["context",str context]) in
+        let* png=command t "browsingContext.captureScreenshot" (obj ["context",str context]) in
         let* after=page t context in let* after_viewport=scene t context (obj ["mode",str "viewport"]) in
         let* url=string "url" p in let* after_url=string "url" after in
         if url<>after_url || viewport<>after_viewport then Error "viewport_changed_during_capture" else
@@ -217,7 +224,7 @@ let with_connection ~env ~timeout ~url use =
       if !broken=None then (
         broken:=Some reason;
         Eio.Promise.resolve set_ended reason);
-      Hashtbl.iter (fun _ resolve->Eio.Promise.resolve resolve (Error reason)) pending;
+      Hashtbl.iter (fun _ resolve->Eio.Promise.resolve resolve (Error (Unanswered reason))) pending;
       Hashtbl.clear pending in
     (* The socket itself is gone; nothing more can be sent. *)
     let closed reason = if !shut=None then shut:=Some reason; disconnect reason in
@@ -238,9 +245,11 @@ let with_connection ~env ~timeout ~url use =
           | exception Yojson.Json_error _->disconnect "invalid BiDi JSON"
           | json -> match field "type" json,field "id" json with
             | Some (`String "event"),_->()
-            | Some (`String "success"),Some (`Int id)->settle id (required "result" json)
+            | Some (`String "success"),Some (`Int id)->
+              settle id (Result.map_error (fun detail->Unanswered detail) (required "result" json))
             | Some (`String "error"),Some (`Int id)->
-              settle id (let* code=string "error" json in Error ("BiDi command rejected: " ^ code))
+              settle id (match string "error" json with
+                | Ok code->Error (Rejected code) | Error detail->Error (Unanswered detail))
             | _->disconnect "invalid BiDi response envelope") in
       let builder _=Endpoint.handlers ~on_message
         ~on_close:(fun ~code:_ ~reason:_->closed "BiDi peer closed")
@@ -264,24 +273,29 @@ let with_connection ~env ~timeout ~url use =
           ~watcher:(fun ()->Eio.Time.sleep clock window; Error `Deadline_exceeded)
           (fun ()->Ok (Eio.Promise.await reply)) in
       let command method_ params =
-        match !broken with Some e->Error e|None->
+        match !broken with Some e->Error (Unanswered e)|None->
           (* The connection is ended only for a command that got no reply. *)
           (match exchange ~window:timeout method_ params with
            | Ok reply->reply
            | Error `Deadline_exceeded->
              disconnect "BiDi transport deadline exceeded";
-             Error "BiDi transport deadline exceeded") in
+             Error (Unanswered "BiDi transport deadline exceeded")
+           (* The caller gave up on a command already written. Its reply is
+              unknown, so nothing more is written behind it. *)
+           | exception (Eio.Cancel.Cancelled _ as cancelled)->
+             disconnect "BiDi command cancelled";
+             raise cancelled) in
       (* Ending the session is not a page command. It is sent on a connection
          this side stopped trusting too, for as long as the socket is open: a
          page whose script hung is not a browser that is gone. *)
       let session_end () =
         match !shut with Some reason->Error reason|None->
           (match exchange ~window:session_end_window_sec "session.end" (obj []) with
-           | Ok reply->Result.map ignore reply
+           | Ok reply->Result.map ignore reply |> Result.map_error refusal_message
            | Error `Deadline_exceeded->Error "no answer to session.end in time") in
       (* The host owns the whole command deadline. A cancelled command ends this
          connection instead of admitting another write behind an unknown one. *)
-      Ok (create ~session_end ~command ()) in
+      Ok (create ~session_end ~command) in
     try
       (* A connection established as the deadline passed is the connection. *)
       let peer=match

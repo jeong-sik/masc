@@ -6,8 +6,16 @@
 
 ### Upgrade notes
 
+- Update the server and TUI together to use the shared Goal model and actor-based activity display. No compatibility reader or automatic migration is provided. (#39975)
+
 - Each Muse account's managed configuration is replaced once on first use after the upgrade, carrying its sign-in, so no new sign-in is needed; Muse Keepers start one fresh host session because the account revision changes, and a Gate a Muse Keeper left open across the upgrade is not resumed, as with any release that changes the tool surface (#41349).
 
+
+
+### Fresh state required
+
+- Prepare `goals.json` and `goals.json.last-good` without `owner`, `notified_refuted_key`, and `notified_overdue_key`, preserving the remaining Goal data. The closed decoder rejects those fields; a rejected row makes the entire store unavailable. (#39975)
+- If `<base-path>/.masc/keeper_chat/<sanitized-keeper-name>.jsonl` contains a row whose `delivery_key.kind` is `goal_notification`, remove that row's `delivery_key` and `transcript_slot` together while preserving its message body and other fields. Otherwise the unsupported identity blocks strict append-once delivery, including unrelated chat deliveries. Prepare data with writers stopped, backups, and atomic replacement; this change performs no data cleanup. (#39975)
 
 ### Added
 
@@ -109,6 +117,38 @@ The native execution entries below describe successive changes included together
 ### Internal
 
 - Align the Keeper chat projection, transcript and Runtime key table tests with the native tool events, the eight outcomes and the per-reading `e` key; the key sheet lists `e` once as "model settings / add candidate" (#41912).
+
+
+### Remaining included candidate changes
+
+The complete record includes the remaining change fragments already present in this candidate. Their actionable changes are listed below; detailed fixes and internal changes are retained in the linked complete record.
+
+### Added
+
+- `/api/v1/runtime/resolved` carries each runtime's `failed_attempt` (time, failure kind and the Keeper that recorded it), and the TUI runtime detail draws it as "Last failure". The lane walk already put such a runtime behind the candidates that answered; the projection dropped the fact, so the reason a lane skipped its head was not visible (#41479).
+
+- Store complete and resumable World Curator briefings so Keepers can reuse shared semantic context across source changes and interrupted synthesis (#41592).
+
+- Browser `hover_at` moves a trusted pointer without clicking on an attached live Firefox BiDi tab or the automation lane, guarded by the observed URL and viewport. Extension-only live connections explain the required BiDi attachment before sending input (#41620).
+
+- Live-client discovery identifies the host transport so callers can select the BiDi connection when the same Firefox also has an extension connection (#41620).
+
+### Changed
+
+- Goal creation requires a non-blank title and refuses a due date already past
+  its 23:59:59 UTC deadline; existing Goal dates remain editable (#41399).
+
+- Glossary size RFC: `docs/rfc/RFC-glossary-one-line-index-and-domain-files.md` proposes restructuring `docs/spec/00-glossary.md` (298KB, 236 entries) into a one-line index plus per-domain files, with growth evidence and open questions; no code changes (#41449).
+
+- Deliver a reusable World Curator synthesis to Keeper turns, replacing fixed-byte claim prefixes while preserving completed shared context during refresh failures and exposing source freshness (#41596).
+
+- When `merge-guard.sh` / `approve-guard.sh --merge-check` refuses because no approval is bound to the head and complete diff, the refusal now lists for each non-author approval which test failed (author association, first-line verdict, footer prefix, `reviewed base` / `diff sha256` tail, a stale diff hash, or the `review-scope` stamp) and prints the exact footer line to copy. The same script now makes the admission decision, so the decision and the reasons come from one place (#41614).
+
+- Print rejected-review details before a structured-verdict refusal, and diagnose scope stamps independently of malformed footers only when admission fails. Successful admission reuses each fetched review and does not fetch rejected reviews again for diagnostics (#41614).
+
+- Open Keeper chat without timestamps, turn time ranges or hourly separators; Ctrl-F restores short or full clock metadata (#41699).
+
+- Hash continuity snapshot prefixes one checkpoint message at a time, preserving their identity without building a whole-history JSON string (#41734).
 
 ## [0.49.0] - 2026-10-04
 

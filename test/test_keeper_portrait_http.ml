@@ -313,7 +313,7 @@ let rec remove_tree path =
   | _ -> Unix.unlink path
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
-let with_router f =
+let with_router ?(install_owners = false) f =
   let base_path = Filename.temp_dir "keeper-portrait-http" "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect
@@ -331,6 +331,14 @@ let with_router f =
       let meta = require_ok Fun.id
         (Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String keeper ])) in
       require_ok Fun.id (Keeper_meta_store.replace_snapshot config meta);
+      if install_owners then begin
+        ignore (require_ok Keeper_owner_registry.install_error_to_string
+          (Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
+             ~on_turn_slot_released:None config));
+        ignore (Keeper_registry.For_testing.register ~base_path:config.base_path keeper meta);
+        Eio.Switch.on_release sw (fun () ->
+          Keeper_registry.For_testing.unregister ~base_path:config.base_path keeper)
+      end;
       let router = Server_routes_http_routes_dashboard.add_routes ~sw
         ~clock:(Eio.Stdenv.clock env) (Http.Router.create ())
         |> Server_routes_http_routes_channel_gate.add_routes ~sw
@@ -339,7 +347,7 @@ let with_router f =
 
 type reply = { status : int; headers : (string * string) list; body : string }
 
-let get ~router ?if_none_match ?token path =
+let request ~router ?if_none_match ?token ~meth ~body path =
   let output = Buffer.create 4096 in
   let trust_policy = require_ok Server_request_authority.trust_policy_error_to_string
     (Server_request_authority.make_trust_policy
@@ -355,9 +363,10 @@ let get ~router ?if_none_match ?token path =
       fail "fixture request did not pass HTTP authority admission") in
   let optional name = Option.fold ~none:"" ~some:(fun value -> name ^ ": " ^ value ^ "\r\n") in
   let raw_request =
-    Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n%s%sContent-Length: 0\r\n\r\n" path
+    Printf.sprintf "%s %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n%s%sContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" meth path
       (optional "If-None-Match" if_none_match)
-      (optional "Authorization" (Option.map (fun token -> "Bearer " ^ token) token)) in
+      (optional "Authorization" (Option.map (fun token -> "Bearer " ^ token) token))
+      (String.length body) body in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw_request) raw_request in
   ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
   let rec drain () = match Httpun.Server_connection.next_write_operation connection with
@@ -384,6 +393,12 @@ let get ~router ?if_none_match ?token path =
             String.trim (String.sub line (at + 1) (String.length line - at - 1))))
     (List.tl lines) in
   { status; headers; body = String.sub raw (stop + 4) (String.length raw - stop - 4) }
+
+let get ~router ?if_none_match ?token path =
+  request ~router ?if_none_match ?token ~meth:"GET" ~body:"" path
+
+let post ~router ~token path body =
+  request ~router ~token ~meth:"POST" ~body:(Yojson.Safe.to_string body) path
 
 let header reply name =
   match List.assoc_opt name reply.headers with
@@ -569,12 +584,25 @@ let test_router_strict_auth_needs_a_read_token () =
     let off = get ~router ~token:reader items in
     let expected_workspace = Server_base_path_diagnostics.detect
       ~effective_base_path:config.Workspace.base_path ~effective_masc_root:(Workspace.masc_dir config) () in
-    let roster_bound workspace = "/api/v1/gate/keepers?detailed=true&expected_workspace="
-      ^ Uri.pct_encode ~component:`Query_value workspace in
-    check int "roster refuses changed workspace before dispatch" 409
-      (get ~router ~token:reader (roster_bound (expected_workspace.effective_base_path ^ "/other"))).status;
+    let roster_bound base root = "/api/v1/gate/keepers?detailed=true&expected_workspace="
+      ^ Uri.pct_encode ~component:`Query_value base
+      ^ "&expected_masc_root=" ^ Uri.pct_encode ~component:`Query_value root in
+    let base = expected_workspace.effective_base_path
+    and root = expected_workspace.effective_masc_root in
+    check int "roster admits both matching paths" 200
+      (get ~router ~token:reader (roster_bound base root)).status;
+    check int "roster refuses changed base before dispatch" 409
+      (get ~router ~token:reader (roster_bound (base ^ "/other") root)).status;
+    check int "same base with a different MASC root is refused" 409
+      (get ~router ~token:reader (roster_bound base (root ^ "/clusters/other"))).status;
     check int "roster refuses blank workspace authority" 400
-      (get ~router ~token:reader (roster_bound " ")).status;
+      (get ~router ~token:reader (roster_bound " " root)).status;
+    check int "roster refuses incomplete workspace identity" 400
+      (get ~router ~token:reader ("/api/v1/gate/keepers?expected_workspace="
+        ^ Uri.pct_encode ~component:`Query_value base)).status;
+    check int "roster refuses duplicate identity components" 400
+      (get ~router ~token:reader (roster_bound base root ^ "&expected_masc_root="
+        ^ Uri.pct_encode ~component:`Query_value root)).status;
     let bound suffix = items ^ "?expected_workspace=" ^ Uri.pct_encode ~component:`Query_value suffix in
     check int "matching health workspace binding admits the current account" 200
       (get ~router ~token:reader (bound expected_workspace.effective_base_path)).status;
@@ -628,6 +656,85 @@ let test_router_leaves_keeper_metadata_untouched () =
     check int "a file that does not decode is still present" 200
       (get ~router (path ~size:"64" unreadable)).status;
     check bool "and is not rewritten" true (garbled_before = file_state garbled))
+
+let test_directives_bind_full_workspace_before_effects () =
+  with_router ~install_owners:true (fun ~config router ->
+    Auth.save_auth_config config.Workspace.base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let token = token_for config ~agent_name:"directive-operator" Masc_domain.Admin in
+    Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1") @@ fun () ->
+    let foreign_base = Filename.temp_dir "aaa-foreign-directive-workspace" "" in
+    let foreign_meta = require_ok Fun.id
+      (Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String keeper])) in
+    let foreign = Keeper_registry.For_testing.register ~base_path:foreign_base keeper foreign_meta in
+    Fun.protect ~finally:(fun () ->
+      Keeper_registry.For_testing.unregister ~base_path:foreign_base keeper;
+      remove_tree foreign_base) (fun () ->
+    let base = Unix.realpath config.base_path
+    and root = Unix.realpath (Workspace.masc_dir config) in
+    let expected base root = `Assoc ["base_path", `String base; "masc_root", `String root] in
+    let single = "/api/v1/keepers/" ^ keeper ^ "/directive"
+    and bulk = "/api/v1/keepers_bulk/directive" in
+    let body ~bulk action fields = `Assoc
+      (["action", `String action]
+       @ (if bulk then
+           if action = "resume" then ["targets", `List [`Assoc
+             ["name", `String keeper; "operator_operation_id", `String "workspace-bound-resume"]]]
+           else ["names", `List [`String keeper]]
+          else if action = "resume" then ["operator_operation_id", `String "workspace-bound-resume"]
+          else []) @ fields) in
+    let meta_path = Keeper_types_profile.keeper_meta_path config keeper in
+    let before = file_state meta_path in
+    (* These requests must be refused before owner messages, durable pause,
+       resume receipts, or a partial bulk mutation can happen. *)
+    let before_files = Sys.readdir (Filename.dirname meta_path) |> Array.to_list |> List.sort String.compare in
+    List.iter (fun (url, is_bulk) ->
+      check int "non-object directive request refused" 400
+        (post ~router ~token url (`List [])).status;
+      List.iter (fun action ->
+        List.iter (fun (label, status, fields) ->
+          let response = post ~router ~token url (body ~bulk:is_bulk action fields) in
+          check int (label ^ " " ^ url ^ " " ^ action) status response.status;
+          check bool "workspace refusal leaves metadata unchanged" true
+            (before = file_state meta_path))
+          [ "changed root", 409, ["expected_workspace", expected base (root ^ "/clusters/other")]
+          ; "changed base", 409, ["expected_workspace", expected (base ^ "/other") root]
+          ; "partial identity", 400, ["expected_workspace", `Assoc ["base_path", `String base]]
+          ; "duplicate identity", 400, ["expected_workspace", expected base root; "expected_workspace", expected base root]
+          ; "non-object identity", 400, ["expected_workspace", `Null] ])
+        ["pause"; "resume"; "wakeup"])
+      [single, false; bulk, true];
+    check (list string) "workspace refusals create no Keeper files" before_files
+      (Sys.readdir (Filename.dirname meta_path) |> Array.to_list |> List.sort String.compare);
+    check bool "refused directives never wake a same-name foreign lane" false
+      (Atomic.get foreign.fiber_wakeup);
+    (* The matching pair still reaches the existing pause/resume owner path. *)
+    let matching = ["expected_workspace", expected base root] in
+    check int "matching pause applies" 200
+      (post ~router ~token single (body ~bulk:false "pause" matching)).status;
+    let paused () =
+      match require_ok Fun.id (Keeper_meta_store.read_meta config keeper) with
+      | Some meta -> meta.paused
+      | None -> fail "fixture Keeper disappeared" in
+    check bool "owner was paused" true (paused ());
+    let foreign_paused = match Keeper_registry.get ~base_path:foreign_base keeper with
+      | Some entry -> entry.meta.paused | None -> fail "foreign Keeper disappeared" in
+    check bool "same-name foreign lane was not paused" false foreign_paused;
+    check int "matching bulk resume applies" 200
+      (post ~router ~token bulk (body ~bulk:true "resume" matching)).status;
+    check bool "owner resumed" false (paused ());
+    let local = match Keeper_registry.get ~base_path:config.base_path keeper with
+      | Some entry -> entry | None -> fail "local Keeper registry entry disappeared" in
+    List.iter (fun (url, is_bulk) ->
+      Atomic.set local.fiber_wakeup false;
+      Atomic.set foreign.fiber_wakeup false;
+      check int "matching wakeup applies" 200
+        (post ~router ~token url (body ~bulk:is_bulk "wakeup" matching)).status;
+      check bool "wake signal reaches the requested workspace" true
+        (Atomic.get local.fiber_wakeup);
+      check bool "same-name foreign lane is never signalled" false
+        (Atomic.get foreign.fiber_wakeup))
+      [single, false; bulk, true]))
 
 let test_purchase_equip_and_remote_portrait () =
   with_router (fun ~config router ->
@@ -967,7 +1074,8 @@ let () =
       ; test_case "400 and 404" `Quick test_router_refusals
       ; test_case "Gate operator revisions bypass shared metadata cache" `Quick test_gate_account_revision_uses_current_candle_reading
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token
-      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched ]
+      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched
+      ; test_case "directives bind full workspace before effects" `Quick test_directives_bind_full_workspace_before_effects ]
     (* The shared-ledger fixture case runs once under "router-ledger-export"; do not duplicate it here. *)
     (* A suite of its own for the remote TUI consumer: it selects by suite
        name, so a fixture case inserted into "router" can no longer silently

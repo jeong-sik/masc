@@ -58,7 +58,7 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
     (Lane.issue_for ~target:pinned ~verb:Lane.Tabs_list ~timeout_sec:0.1
      = Error (Lane.Selected_client_disconnected old.client_id));
   check bool "retired native identity cannot re-register" true
-    (Lane.take_command ~client_info:old ~window_sec:0.001 = Error "client_disconnected"))
+    (Lane.take_command ~client_info:old ~window_sec:0.001 = Error Lane.Client_retired))
 let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->
   let info = connect Lane.Firefox in
   let pinned = target info.client_id in

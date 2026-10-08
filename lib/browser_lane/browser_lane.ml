@@ -554,14 +554,28 @@ let resolve_target ~verb route =
             (List.map (fun client -> client.info.client_id) several
              |> List.sort (fun left right ->
                   String.compare (client_id_to_string left) (client_id_to_string right)))))
+(* Why the lane turns a poll's client away. [Client_retired]: the lane ended
+   this connection, after [lane_connected_window_sec] without a poll or on the
+   client's own disconnect, and its ID is never served again; a client that
+   is still there registers under a new one. [Client_identity_changed]: the
+   ID is connected as another browser or transport, and asking again gets
+   the same answer. *)
+type registration_refusal = Client_retired | Client_identity_changed
+let registration_refusal_to_wire = function
+  | Client_retired -> "client_disconnected"
+  | Client_identity_changed -> "client_identity_changed"
+let registration_refusal_of_wire = function
+  | "client_disconnected" -> Some Client_retired
+  | "client_identity_changed" -> Some Client_identity_changed
+  | _ -> None
 let register info =
   Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
     prune_unlocked ();
     let key = client_id_to_string info.client_id in
-    if Hashtbl.mem retired_clients key then Error "client_disconnected"
+    if Hashtbl.mem retired_clients key then Error Client_retired
     else match Hashtbl.find_opt clients key with
-    | Some client when client.closed -> Error "client_disconnected"
-    | Some client when not (same_info client.info info) -> Error "client_identity_changed"
+    | Some client when client.closed -> Error Client_retired
+    | Some client when not (same_info client.info info) -> Error Client_identity_changed
     | Some client ->
       client.connected_until <- Monotonic_deadline.after ~seconds:lane_connected_window_sec;
       Ok client

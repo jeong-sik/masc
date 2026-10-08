@@ -50,8 +50,8 @@ let load ~path =
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
           let names = List.map fst fields in
           if List.length names <> List.length (List.sort_uniq String.compare names)
-             || List.exists (fun key -> key <> "skills" && key <> "actions" && key <> "outputs") names
-          then Error "world accepts skills, actions and outputs tables" else Ok fields
+             || List.exists (fun key -> key <> "skills" && key <> "actions" && key <> "outputs" && key <> "tools" && key <> "state") names
+          then Error "world accepts skills, actions, outputs, tools and state tables" else Ok fields
       | Some _ -> Error "world must be a table" in
     let nested_text section key = match List.assoc_opt section world with
       | None -> Ok None
@@ -65,6 +65,32 @@ let load ~path =
       | Some value -> Skill_resource_path.of_string value |> Result.map Option.some
           |> Result.map_error (fun error -> "world.skills.directory: " ^ Skill_resource_path.error_to_string error) in
     let* action_tool = nested_text "actions" "tool" in
+    let* tool_fields = match List.assoc_opt "tools" world with
+      | None -> Ok []
+      | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields)
+        when List.for_all (fun (key,_) -> List.mem key ["export";"invocation"]) fields
+          && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields
+      | Some _ -> Error "world.tools accepts export and invocation only" in
+    let* tool_invocation = match List.assoc_opt "invocation" tool_fields with
+      | None | Some (Otoml.TomlString "direct") -> Ok Direct
+      | Some (Otoml.TomlString "host_context") -> Ok Host_context
+      | Some _ -> Error "world.tools.invocation requires direct or host_context" in
+    let* exported_tools = match List.assoc_opt "export" tool_fields with
+      | None when tool_fields = [] -> Ok []
+      | Some (Otoml.TomlArray values) ->
+          let* names = List.fold_left (fun result value ->
+            let* names = result in match value with
+            | Otoml.TomlString name -> Ok (name :: names)
+            | _ -> Error "world.tools.export requires tool names") (Ok []) values in
+          validate_exported_tools ~action_tool names
+      | _ -> Error "world.tools requires an export array" in
+    let* state_storage = match List.assoc_opt "state" world with
+      | None -> Ok Ephemeral
+      | Some (Otoml.TomlTable [("mode", Otoml.TomlString "persistent")]
+             | Otoml.TomlInlineTable [("mode", Otoml.TomlString "persistent")]) -> Ok Persistent
+      | Some (Otoml.TomlTable [("mode", Otoml.TomlString "ephemeral")]
+             | Otoml.TomlInlineTable [("mode", Otoml.TomlString "ephemeral")]) -> Ok Ephemeral
+      | Some _ -> Error "world.state requires only mode = persistent or ephemeral" in
     let* outputs = output_ports world in
     let* interface = match Otoml.find_opt document Fun.id ["interface"] with
       | None -> Ok []
@@ -124,7 +150,7 @@ let load ~path =
       match check_resources resources with
       | Error detail -> Error detail
       | Ok () -> Ok { id; revision; title; contributions = List.rev contributions; image; command;
-          directory = Filename.dirname path; skills_directory; action_tool; outputs; refresh_policy; model_access; binding_schema; presentation;
+          directory = Filename.dirname path; skills_directory; action_tool; state_storage; tool_invocation; exported_tools; outputs; refresh_policy; model_access; binding_schema; presentation;
           resources }
   in
   try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with

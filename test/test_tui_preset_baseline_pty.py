@@ -75,6 +75,10 @@ def run(executable, output_dir):
         restore_requests = [json.loads(body) for path, body in requests if path == "/api/v1/presets/restore"]
         assert restore_requests == [{"name": "baseline-demo"}], restore_requests
         capture("restore-wide", output, 120, 42)
+        restore_text = (output_dir / "restore-wide.txt").read_text()
+        for label in ("restored preset baseline-demo", "기본 프롬프트 · 차이 3건",
+                      "변경 · keeper", "추가 · judge", "없음 · retired"):
+            assert label in restore_text, (label, restore_text)
         h.resize_and_wait(process, fd, output, rows=24, columns=60,
                           needle=b"baseline-demo", final_cursor=b"\x1b[?25l")
         h.send_and_wait(process, fd, output, b"\x1b[H", b"Selected:")
@@ -82,7 +86,8 @@ def run(executable, output_dir):
         capture("detail-narrow", output, 60, 24)
         h.press_and_settle(process, fd, output, b"\x1b[6~")
         capture("changes-narrow", output, 60, 24)
-        narrow_text = (output_dir / "changes-narrow.txt").read_text()
+        narrow_text = ((output_dir / "detail-narrow.txt").read_text()
+                       + (output_dir / "changes-narrow.txt").read_text())
         for label in ("변경 · keeper", "추가 · judge", "없음 · retired"):
             assert label in narrow_text, (label, narrow_text)
         os.write(fd, b"q")

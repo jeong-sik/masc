@@ -2096,7 +2096,11 @@ let test_exact_operation_ending_keeps_unjournaled_rows () =
     let log = settled_log ~request_id:"cut" [Live.Run_started; Live.Text "half"] in
     Log.observe_operation_state log.tl_log (Some terminal);
     Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
-    let expected = List.map (fun (row : Tui_types.msg_entry) -> row.me_text) state.msg_loaded in
+    (* A turn draws its rows by phase (input, progress, tool, output), so the
+       Gate row precedes the tool row it approved whatever the load order. *)
+    let expected =
+      Tui_types.order_chat_turn_rows state.msg_loaded
+      |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text) in
     let verify log =
       state.msg_settled_logs <- [log];
       check bool "record-only terminal closes progress" true
@@ -3542,8 +3546,10 @@ let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
     let count needle text = List.length (Astring.String.cuts ~sep:needle text) - 1 in
     let verify marker_count markers =
       let rendered = screen () in
+      (* The request line spells "checkpoint-skills", so the Skill name is
+         counted behind its row separator, not as a bare substring. *)
       check int "one Skill per observed or unmatched durable invocation" marker_count
-        (count "checkpoint-skill" rendered);
+        (count "\xc2\xb7 checkpoint-skill" rendered);
       List.iter (fun marker -> check int (marker ^ " appears once") 1 (count marker rendered))
         ("EARLIER_PROGRESS" :: "FINAL_HISTORY_REPLY" :: markers) in
     install [first; final];

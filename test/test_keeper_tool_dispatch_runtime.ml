@@ -9057,7 +9057,7 @@ let test_native_filesystem_approval_preserves_producer_boundary () =
       (match Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual with
        | Ok _ -> () | Error detail -> fail detail);
       let invoke name input =
-        (match Masc.Keeper_tool_approval_policy.verdict_for ~composition_plan_index:None
+        (match Masc.Keeper_tool_approval_policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None
            ~tool_name:name ~input with
          | Masc.Keeper_tool_approval_policy.Run _ -> ()
          | Masc.Keeper_tool_approval_policy.Ask _ -> fail "duplicate native approval intercepted filesystem call");

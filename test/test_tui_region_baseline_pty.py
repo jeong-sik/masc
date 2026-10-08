@@ -119,6 +119,17 @@ def roster_divider_controls():
         else:
             raise AssertionError(f"a roster band ending in {name} passed as a roster band")
 
+    # A band with an internal blank row whose divider is missing must be
+    # refused, even though the row carries no other content.
+    internal_blank = band()
+    internal_blank[7] = (" " * (right - left)).encode("utf-8")
+    try:
+        region.measure_pane(internal_blank, left=left, right=right)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("a roster band with an internal blank row missing its divider passed as a roster band")
+
     framed = region.measure_pane(screen({
         3: "┌" + "─" * (right - left - 2) + "┐",
         4: " alice",

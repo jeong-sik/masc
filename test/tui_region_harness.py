@@ -300,6 +300,17 @@ def measure_pane(rows: dict[int, bytes], *, left: int, right: int) -> dict[str, 
         below = [row for row in portrait_rows if row > min(roster_rows)]
         raise AssertionError(f"the pane in cells {left}-{right} draws portrait rows "
                              f"inside or below the roster block: {below}")
+    # Every row within the roster block -- from its first row to its
+    # last, including rows that would otherwise appear blank -- must end
+    # at the divider cell. If a rendering regression drops the divider on
+    # an internal blank row, the row drops out of [drawn], which would
+    # otherwise let the broken divider pass undetected.
+    for row in range(roster_rows[0], roster_rows[-1] + 1):
+        edge = cells(rows[row], divider, divider + 1)
+        if edge != ROSTER_DIVIDER:
+            raise AssertionError(f"the pane in cells {left}-{right} stops ending its rows "
+                                 f"at the divider cell {divider} on row {row}: "
+                                 f"{cells(rows[row], left, right)!r}")
     band = [row for row in roster_rows if is_rule(cells(rows[row], left, divider))]
     if len(band) != 1:
         raise AssertionError(f"the pane in cells {left}-{right} holds {len(band)} rule rows, "

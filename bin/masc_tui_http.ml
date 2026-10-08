@@ -684,16 +684,15 @@ let post_setup_json ~host ~port ~path ~body =
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
-(* A change from the terminal names the workspace it read; the server refuses
-   it when it has been swapped onto the same port since. The field is required
-   so a new MSX change cannot be sent unbound. *)
-let msx_body ~(expected_workspace : Masc.Tui_decode.server_identity) fields =
-  Yojson.Safe.to_string
-    (`Assoc
-       (("expected_workspace", `Assoc
-           [ ("base_path", `String (Masc_tui_types.canonical_path expected_workspace.sid_base_path))
-           ; ("masc_root", `String (Masc_tui_types.canonical_path expected_workspace.sid_masc_root)) ])
-        :: fields))
+(* Shared mutation envelope: the server compares canonical workspace paths. *)
+let expected_workspace_field (identity : Masc.Tui_decode.server_identity) =
+  "expected_workspace", `Assoc
+    [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
+    ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
+
+let msx_write_body ~expected_workspace fields =
+  Yojson.Safe.to_string (`Assoc (expected_workspace_field expected_workspace :: fields))
+;;
 
 (* Press one or more keys on the shared MSX machine (RFC-0439 §3.3). Returns
    the new frame number on success, or an error string; the caller re-fetches
@@ -701,7 +700,7 @@ let msx_body ~(expected_workspace : Masc.Tui_decode.server_identity) fields =
 let post_msx_press ~expected_workspace ~(host : string) ~(port : int) ~(keys : string list) :
     (int, string) result =
   let body =
-    msx_body ~expected_workspace [ ("keys", `List (List.map (fun k -> `String k) keys)) ]
+    msx_write_body ~expected_workspace ["keys", `List (List.map (fun k -> `String k) keys)]
   in
   match post_json ~host ~port ~path:msx_press_path ~body with
   | Error e -> Error e
@@ -731,7 +730,7 @@ let fetch_msx_carts ~(host : string) ~(port : int) : string list =
    operator bearer, like a press. *)
 let post_msx_load ~expected_workspace ~(host : string) ~(port : int) ~(cart : string) :
     (unit, string) result =
-  let body = msx_body ~expected_workspace [ ("cart", `String cart) ] in
+  let body = msx_write_body ~expected_workspace ["cart", `String cart] in
   match post_json ~host ~port ~path:msx_load_path ~body with
   | Error e -> Error e
   | Ok json -> (
@@ -743,7 +742,7 @@ let post_msx_load ~expected_workspace ~(host : string) ~(port : int) ~(cart : st
 ;;
 
 let post_msx_change_disk ~expected_workspace ~host ~port ~disk =
-  let body = msx_body ~expected_workspace ["disk", `String disk] in
+  let body = msx_write_body ~expected_workspace ["disk", `String disk] in
   match post_json ~host ~port ~path:"/api/v1/msx/disk" ~body with
   | Error e -> Error e
   | Ok json ->
@@ -756,7 +755,7 @@ let post_msx_change_disk ~expected_workspace ~host ~port ~disk =
 
 let post_msx_checkpoint ~expected_workspace ~host ~port ~restore ~slot =
   let path = if restore then "/api/v1/msx/restore" else "/api/v1/msx/save" in
-  let body = msx_body ~expected_workspace ["slot", `String slot] in
+  let body = msx_write_body ~expected_workspace ["slot", `String slot] in
   match post_json ~host ~port ~path ~body with
   | Error e -> Error e
   | Ok json ->
@@ -778,10 +777,12 @@ let post_msx_checkpoint ~expected_workspace ~host ~port ~restore ~slot =
    Only validated pixels are retained; every tick supplies fresh metadata. *)
 let msx_tick_cache = Masc_tui_msx_tick.create ()
 
-let tick_msx ~(host : string) ~(port : int) :
+let tick_msx ~expected_workspace ~(host : string) ~(port : int) :
     (Masc_tui_msx_tick.response, string) result =
   let headers = auth_headers () in
   let request ~body =
+    let fields = Yojson.Safe.Util.to_assoc (Yojson.Safe.from_string body) in
+    let body = msx_write_body ~expected_workspace fields in
     match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers
         ~host ~port ~path:msx_tick_path ~body with
     | Error _ as error -> error
@@ -2269,11 +2270,6 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     stamps the author from the HTTP auth resolver, so the payload carries
     text only. The response is the tools envelope [{ok, message}]; interpreting
     it stays with the caller. *)
-let expected_workspace_field (identity : Masc.Tui_decode.server_identity) =
-  "expected_workspace", `Assoc
-    [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
-    ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
-
 let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : string)
     ~(body : string) ?hearth () : (Yojson.Safe.t, string) result =
   let hearth_field =

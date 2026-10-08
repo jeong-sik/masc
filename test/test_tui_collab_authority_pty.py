@@ -389,6 +389,112 @@ def run_tick_probe_view_withdrawal(executable):
             '/api/v1/msx/tick': h.RequestHttpResponse(tick)})
 
 
+def run_machine_post_workspace_swap(executable, operation, *, alias_identity=False):
+    """Health admits A; the actual POST reaches B and must carry A's binding."""
+    current, observed, prepare, health = workspace_fixture()
+    requests = []
+    first_tick = threading.Event()
+    release_tick = threading.Event()
+    refused = threading.Event()
+    effects = []
+    foreign_reads = []
+    rgb = base64.b64encode(b'\xff\x00\x00').decode()
+    endpoint = '/api/v1/msx/' + operation
+
+    def bound_health():
+        if alias_identity and current['phase'] == 'a':
+            observed['a'].set()
+            _, payload = h.fleet_safety_fixture()
+            payload['paths'] = {'effective_base_path': current['base'] + '/.',
+                'effective_masc_root': current['base'] + '/.masc/.'}
+            return h.RawHttpResponse(200, json.dumps(payload).encode(), content_type='application/json')
+        return health()
+
+    def live(path):
+        if current['phase'] == 'b':
+            foreign_reads.append(path)
+        return 200, {'state': 'changed', 'source_kind': 'msx_capture', 'change_count': 1,
+            'incarnation': current['phase'], 'frame_number': 1,
+            'screen': {'format': 'rgb8', 'width': 1, 'height': 1, 'rgb_base64': rgb}}
+
+    def reject(body):
+        payload = json.loads(body)
+        expected = {'base_path': current['base'], 'masc_root': str(Path(current['base'], '.masc'))}
+        assert payload['expected_workspace'] == expected, payload
+        current['phase'] = 'b'  # Replacement happens after the successful health answer.
+        actual = {'base_path': str(Path(current['base'], 'other-workspace')),
+                  'masc_root': str(Path(current['base'], 'other-workspace', '.masc'))}
+        if payload['expected_workspace'] == actual:
+            effects.append(operation)
+        refused.set()
+        return 409, {'ok': False, 'code': 'workspace_precondition_failed',
+                     'message': 'workspace precondition failed'}
+
+    def tick(body):
+        if operation == 'tick':
+            return reject(body)
+        payload = json.loads(body)
+        assert payload['expected_workspace'] == {'base_path': current['base'],
+            'masc_root': str(Path(current['base'], '.masc'))}, payload
+        first_tick.set()
+        assert release_tick.wait(8), 'admitted original tick was not released'
+        return 200, {'loaded': True, 'number': 2, 'change_count': 2,
+            'incarnation': 'a', 'width': 1, 'height': 1, 'mode': 'SCREEN2',
+            'cartridge': 'game.rom', 'disk': None, 'players': [], 'pixels': {
+                'kind': 'inline', 'revision': 'a' * 64, 'width': 1, 'height': 1,
+                'rgb_base64': rgb}}
+
+    def interact(process, master, _slave, output, _base):
+        def key(value, needle):
+            return press(process, master, output, value, needle)
+        try:
+            key(b':go Collab\r', '› guest'.encode())
+            if operation == 'load':
+                key(b'g', b'pick a game')
+                key(b'jjjj', b'game.rom')
+            else:
+                key(b'm', b'frame 1 ')
+                key(b'\x1b[15~', b'Controlling')
+                if operation != 'tick':
+                    assert h.wait_for_fixture_event(process, master, output, first_tick, timeout=8)
+                if operation == 'disk':
+                    key(b'\x1b[19~', b'change disk')
+                    key(b'j', b'game.dsk')
+            if operation != 'tick':
+                key({'press': b'1', 'save': b'\x1b[17~', 'restore': b'\x1b[18~',
+                     'load': b'\r', 'disk': b'\r'}[operation], b'workspace precondition failed')
+            assert h.wait_for_fixture_event(process, master, output, refused, timeout=8)
+            assert effects == [], effects
+            assert sum(path == endpoint for path, _ in requests) == 1, requests
+            # In particular, a refused F6/F7 must not read B's frame and replace
+            # the retained A evidence while its original poll is still held.
+            assert foreign_reads == [], foreign_reads
+            if operation == 'tick':
+                assert h.wait_for_fixture_event(process, master, output, observed['b'], timeout=8)
+                h.wait_for_output(process, master, output, b'MASC Dashboard', timeout=8)
+                assert sum(path == endpoint for path, _ in requests) == 1, requests
+            else:
+                if operation == 'disk':
+                    key(b'\x1b', b'frame 1 ')
+                key(b'\x1b', b'MASC Collab')
+                key(b'\x1b', b'MASC Dashboard')
+            os.write(master, b'q')
+        finally:
+            release_tick.set()
+
+    fixtures = {'/health': bound_health, '/health?full=1': bound_health,
+        '/api/v1/play/invites': (200, {'invites': [row()]}),
+        '/api/v1/lane-addons/live': h.PathHttpResponse(live),
+        '/api/v1/msx/carts': (200, {'carts': ['game.dsk' if operation == 'disk' else 'game.rom']}),
+        '/api/v1/msx/tick': h.RequestHttpResponse(tick)}
+    if operation != 'tick':
+        fixtures[endpoint] = h.RequestHttpResponse(reject)
+    h.run_terminal_scenario(executable,
+        description='MSX actual POST workspace binding refuses replacement ' + operation + (' with canonical alias' if alias_identity else ''),
+        interact=interact, prepare_workspace=prepare, refresh=60.0, terminal_cols=200,
+        http_requests=requests, http_fixtures=fixtures)
+
+
 if __name__ == '__main__':
     run_unknown(sys.argv[1], 'issue')
     run_unknown(sys.argv[1], 'revoke')
@@ -398,4 +504,7 @@ if __name__ == '__main__':
     for operation in ('tick', 'f5', 'key', 'save', 'restore', 'load', 'disk'):
         run_machine_pre_refresh_swap(sys.argv[1], operation)
     run_tick_probe_view_withdrawal(sys.argv[1])
+    for operation in ('press', 'save', 'restore', 'load', 'disk', 'tick'):
+        run_machine_post_workspace_swap(sys.argv[1], operation)
+    run_machine_post_workspace_swap(sys.argv[1], 'save', alias_identity=True)
     print('tui Collab authority: PASS')

@@ -7,6 +7,10 @@ open Alcotest
 module Lane = Msx_lane
 module Route = Server_routes_http_routes_msx
 
+let unwatched_config =
+  lazy (Masc.Workspace.default_config (Filename.temp_dir "msx-press-route-" ""))
+;;
+
 let member name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
@@ -93,7 +97,7 @@ let test_retained_tick () =
         in
         Executor_pool_ref.For_testing.with_pool pool (fun () ->
           let first_status, first =
-            Route.tick_response
+            Route.tick_response ~config:(Lazy.force unwatched_config)
               ~body:{|{"frames":1,"pixel_response":"retained"}|}
           in
           check bool "first tick succeeds" true (first_status = `OK);
@@ -115,7 +119,7 @@ let test_retained_tick () =
           assert_pixels_kind "inline" first;
           let before = frame_number first in
           let status, next =
-            Route.tick_response ~body:(retained_request first)
+            Route.tick_response ~config:(Lazy.force unwatched_config) ~body:(retained_request first)
           in
           check bool "retained tick succeeds" true (status = `OK);
           assert_pixels_kind "retained" next;
@@ -147,7 +151,7 @@ let test_retained_tick () =
                ~step_frames:1
                ~sequence:false);
           let _, after_press =
-            Route.tick_response ~body:(retained_request next)
+            Route.tick_response ~config:(Lazy.force unwatched_config) ~body:(retained_request next)
           in
           assert_pixels_kind "retained" after_press;
           check
@@ -162,7 +166,7 @@ let test_retained_tick () =
              | _ -> false);
           ignore (Lane.eject ());
           let status, empty =
-            Route.tick_response ~body:(retained_request next)
+            Route.tick_response ~config:(Lazy.force unwatched_config) ~body:(retained_request next)
           in
           check
             bool
@@ -182,7 +186,7 @@ let test_tick_validation_precedes_mutation () =
     Executor_pool_ref.For_testing.with_pool_option None (fun () ->
       List.iter
         (fun body ->
-          let status, response = Route.tick_response ~body in
+          let status, response = Route.tick_response ~config:(Lazy.force unwatched_config) ~body in
           check bool "invalid tick is a bad request" true (status = `Bad_request);
           check
             bool
@@ -213,7 +217,7 @@ let test_tick_validation_precedes_mutation () =
         ; {|{"pixel_response":"retained","pixel_response":"retained"}|}
         ; {|{"pixel_response":"retained","known_pixels":{"revision":"bad","width":1,"height":1}}|}
         ];
-      let status, _ = Route.tick_response ~body:"{}" in
+      let status, _ = Route.tick_response ~config:(Lazy.force unwatched_config) ~body:"{}" in
       check
         bool
         "missing executor cannot fall back to inline mutation"
@@ -240,7 +244,7 @@ let test_tick_worker_advances_and_returns_frame () =
           List.iter
             (fun (body, frames) ->
               let before = current_frame_number () in
-              let status, response = Route.tick_response ~body in
+              let status, response = Route.tick_response ~config:(Lazy.force unwatched_config) ~body in
               check
                 bool
                 "accepted tick succeeds through executor"
@@ -335,10 +339,6 @@ let test_checkpoint_route () =
             "storage failure preserves machine"
             before
             (current_frame_number ())))))
-;;
-
-let unwatched_config =
-  lazy (Masc.Workspace.default_config (Filename.temp_dir "msx-press-route-" ""))
 ;;
 
 let ledger_whos () = List.map (fun (e : Lane.entry) -> e.who) (Lane.ledger ())
@@ -598,7 +598,7 @@ let test_activity_read_and_route_refusals () =
         Msx_lane.install_activity_observer (Some (fun () -> activity));
         check (option string) "read reports activity independently of the loaded frame" (Some wire)
           (match member "activity" (Route.activity_json ()) with Some (`String value) -> Some value | _ -> None);
-        let status,body = Route.tick_response ~body:"{}" in
+        let status,body = Route.tick_response ~config:(Lazy.force unwatched_config) ~body:"{}" in
         check bool "known activity refusal is HTTP 409" true (status=`Conflict);
         check bool "closed refusal code" true (body=`Assoc ["ok",`Bool false;"code",`String code]);
         let press_status,press_body =
@@ -613,7 +613,7 @@ let test_activity_read_and_route_refusals () =
         [Machine_configuration.Disabled,"off","activity_disabled";
          Machine_configuration.Unobserved,"unobserved","activity_unobserved"];
       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-      let status,body = Route.tick_response ~body:{|{"frames":1}|} in
+      let status,body = Route.tick_response ~config:(Lazy.force unwatched_config) ~body:{|{"frames":1}|} in
       check bool "reactivation admits a new tick" true (status=`OK);
       check int "new tick advances exactly once" (before+1) (frame_number body)))))
 
@@ -640,6 +640,88 @@ let test_activity_route_read_authority () =
         check int "activity GET does not advance machine" before (current_frame_number ());
         check int "activity endpoint has no write handler" 405
           (status_of_response (dispatch_request ~method_:"POST" ~path:"/api/v1/msx/activity" ~state ~authorization:(Some token) ~body:"{}")))))
+
+let test_msx_routes_bind_workspace_before_effects () =
+  with_tick_machine (fun () ->
+    let base_a = Filename.temp_dir "msx-origin-a" "" in
+    let base_b = Filename.temp_dir "msx-handler-b" "" in
+    Fun.protect ~finally:(fun () -> remove_tree base_a; remove_tree base_b) (fun () ->
+      let config_a = Masc.Workspace.default_config base_a in
+      Fs_compat.mkdir_p (Masc.Workspace.masc_root_dir config_a);
+      Auth.save_auth_config base_b
+        { Masc_domain.default_auth_config with enabled = true; require_token = true };
+      let token = match Auth.create_token base_b ~agent_name:"bound-tui" ~role:Masc_domain.Admin with
+        | Ok (token, _) -> token
+        | Error error -> fail (Masc_domain.masc_error_to_string error) in
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path:base_b in
+      let config_b = Masc.Mcp_server.workspace_config state in
+      let expected config = `Assoc
+        ["base_path", `String (Unix.realpath config.Masc.Workspace.base_path);
+         "masc_root", `String (Unix.realpath (Masc.Workspace.masc_root_dir config))] in
+      let mutations =
+        ["press", ["keys", `List [`String "space"]];
+         "load", ["cart", `String "game.rom"];
+         "save", ["slot", `String "quick"];
+         "restore", ["slot", `String "quick"];
+         "disk", ["disk", `String "game.dsk"];
+         "tick", ["frames", `Int 1; "pixel_response", `String "retained"]] in
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+        Executor_pool_ref.For_testing.with_pool pool (fun () ->
+          let before_frame = current_frame_number () in
+          let before_ledger = Lane.ledger () in
+          let before_publication = Lane.current_publication () in
+          let assert_no_effect () =
+            check int "refusal never advances B machine" before_frame (current_frame_number ());
+            check bool "refusal never writes key ledger" true (Lane.ledger () = before_ledger);
+            check bool "refusal preserves machine publication" true (Lane.current_publication () = before_publication);
+            check bool "refusal creates no B MSX storage" false
+              (Sys.file_exists (Filename.concat (Masc.Workspace.masc_root_dir config_b) "msx")) in
+          List.iter (fun (route, fields) ->
+            let post bindings = dispatch_request ~method_:"POST" ~path:("/api/v1/msx/" ^ route)
+              ~state ~authorization:(Some token)
+              ~body:(Yojson.Safe.to_string (`Assoc (bindings @ fields))) in
+            (* The client observed A, but the request is handled by B. *)
+            check int (route ^ " rejects captured A workspace") 409
+              (status_of_response (post ["expected_workspace", expected config_a]));
+            assert_no_effect ();
+            let wrong_root = `Assoc ["base_path", `String (Unix.realpath base_b);
+              "masc_root", `String (Unix.realpath (Masc.Workspace.masc_root_dir config_a))] in
+            check int (route ^ " binds both workspace coordinates") 409
+              (status_of_response (post ["expected_workspace", wrong_root]));
+            assert_no_effect ();
+            check int (route ^ " rejects malformed binding") 400
+              (status_of_response (post ["expected_workspace", `Null]));
+            check int (route ^ " rejects duplicate binding") 400
+              (status_of_response (post ["expected_workspace", expected config_b;
+                "expected_workspace", expected config_b]));
+            assert_no_effect ()) mutations;
+          (* The terminal tells a changed workspace from an activity refusal by
+             this body; a malformed binding is a 400 that names no code. *)
+          let bound_tick expected_workspace = Route.tick_response ~config:config_b
+            ~body:(Yojson.Safe.to_string (`Assoc ["expected_workspace", expected_workspace])) in
+          check bool "a failed precondition names its code beside the message" true
+            (bound_tick (expected config_a)
+             = (`Conflict, `Assoc ["code", `String "workspace_precondition_failed";
+                  "ok", `Bool false; "message", `String "workspace precondition failed"]));
+          check bool "a malformed binding names no code" true
+            (bound_tick `Null
+             = (`Bad_request, `Assoc ["ok", `Bool false;
+                  "message", `String "invalid expected_workspace precondition"]));
+          assert_no_effect ();
+          let accepted = dispatch_press ~state ~authorization:(Some token)
+            ~body:(Yojson.Safe.to_string (`Assoc
+              ["expected_workspace", expected config_b; "keys", `List [`String "space"]])) in
+          check int "matching binding admits actor press" 200 (status_of_response accepted);
+          check bool "matching write names admitted actor" true (List.mem "bound-tui" (ledger_whos ()));
+          let before_tick = current_frame_number () in
+          let status, response = Route.tick_response ~config:config_b
+            ~body:(Yojson.Safe.to_string (`Assoc
+              ["expected_workspace", expected config_b; "frames", `Int 1;
+               "pixel_response", `String "retained"])) in
+          check bool "validated envelope is removed before strict tick decoder" true (status = `OK);
+          check int "matching bound tick advances once" (before_tick + 1) (frame_number response))))))
+;;
 
 let test_press_route_names_the_resolved_actor () =
   with_tick_machine (fun () ->
@@ -774,17 +856,17 @@ let test_encoded_pixel_snapshot () =
           in
           Executor_pool_ref.For_testing.with_pool pool (fun () ->
             let status, first_tick =
-              Route.tick_response
+              Route.tick_response ~config:(Lazy.force unwatched_config)
                 ~body:{|{"frames":2,"pixel_response":"retained"}|}
             in
             check bool "real guest tick succeeds" true (status = `OK);
             assert_pixels_kind "inline" first_tick;
             let _, same_pixels =
-              Route.tick_response ~body:(retained_request ~frames:2 first_tick)
+              Route.tick_response ~config:(Lazy.force unwatched_config) ~body:(retained_request ~frames:2 first_tick)
             in
             assert_pixels_kind "retained" same_pixels;
             let _, changed_pixels =
-              Route.tick_response ~body:(retained_request same_pixels)
+              Route.tick_response ~config:(Lazy.force unwatched_config) ~body:(retained_request same_pixels)
             in
             assert_pixels_kind "inline" changed_pixels;
             let pixel_fields = pixels_object changed_pixels in
@@ -803,7 +885,7 @@ let test_encoded_pixel_snapshot () =
               true
               (List.assoc "revision" pixel_fields
               = `String Digestif.SHA256.(to_hex (digest_string rgb)));
-            let status, full_tick = Route.tick_response ~body:"{}" in
+            let status, full_tick = Route.tick_response ~config:(Lazy.force unwatched_config) ~body:"{}" in
             check bool "full frame tick succeeds" true (status = `OK);
             (match Lane.frame () with
              | Some frame ->
@@ -983,7 +1065,9 @@ let () =
             test_press_defaults_and_identity
         ] )
     ; ( "press_route"
-      , [ test_case
+      , [ test_case "every MSX route refuses foreign workspace with zero effects" `Quick
+            test_msx_routes_bind_workspace_before_effects
+        ; test_case
             "the ledger names the actor the resolver returned"
             `Quick
             test_press_route_names_the_resolved_actor

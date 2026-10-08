@@ -1,6 +1,8 @@
 (** Server_routes_http_routes_msx — the workspace MSX machine HTTP routes.
 
     Registers MSX control and manipulation routes (RFC-0439 §3.7, RFC #38695).
+    Every mutation validates an optional [expected_workspace] binding before
+    effects; the TUI supplies its captured identity on every write.
     Machine spectating is handled via
     [GET /api/v1/lane-addons/live?source_kind=msx_capture]. *)
 
@@ -17,7 +19,8 @@ val press_default_step_frames : int
 val press_response :
   config:Workspace.config -> who:string -> body:string ->
   [ `OK | `Conflict | `Bad_request | `Internal_server_error ] * Yojson.Safe.t
-(** Authenticated press body handling under [who], the actor the route's
+(** [expected_workspace], when present, is validated against [config] before
+    any machine effect. Authenticated press body handling under [who], the actor the route's
     [with_tool_actor_auth] resolved. [keys] must be an array of strings naming
     at least one key; [hold_frames] and [frames] must be positive integers and
     [sequence] a boolean when present, each defaulting when absent. A field of
@@ -52,9 +55,10 @@ val msx_tick_default_frames : int
 (** Frames a [POST /api/v1/msx/tick] advances when the body names none. *)
 
 val tick_response :
-  body:string ->
+  config:Workspace.config -> body:string ->
   [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
-(** Authenticated tick body handling. An optional integer [frames] controls
+(** Authenticated tick body handling. [expected_workspace], when present, is
+    validated against [config] before any executor submission. An optional integer [frames] controls
     advancement. [pixel_response="retained"] requests an inline/retained pixel
     response; optional [known_pixels={revision,width,height}] advertises the
     client's exact retained pixels. Duplicate and unknown fields are refused before

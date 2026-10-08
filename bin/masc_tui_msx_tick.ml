@@ -1,7 +1,7 @@
 type reference = { revision : string; width : int; height : int }
 type pixels = { reference : reference; rgb : string }
 type scope = { host : string; port : int; headers : (string * string) list }
-type refusal = Off | Activity_unobserved
+type refusal = Off | Activity_unobserved | Workspace_changed
 type activity = Enabled | Refused of refusal
 type response = Advanced of Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option
   | Not_started of refusal
@@ -11,12 +11,14 @@ let policy_after_tick = function
   | Ok (Not_started refusal) -> Observing refusal
   | Error _ -> Outcome_unknown
 let policy_after_activity policy result = match policy,result with
-  | Observing _, Ok Enabled -> Advancing
+  | Observing Workspace_changed, _ -> policy
+  | Observing (Off | Activity_unobserved), Ok Enabled -> Advancing
   | Observing _, Ok (Refused refusal) -> Observing refusal
   | Observing _, Error _ | Advancing, _ | Outcome_unknown, _ -> policy
 let refusal_notice = function
   | Off -> "MSX is off; watching the retained screen until activity is enabled."
   | Activity_unobserved -> "MSX activity is unavailable; watching the retained screen until configuration is observed."
+  | Workspace_changed -> "MSX workspace changed; the write was refused and the retained screen is unchanged."
 let decode_activity = function
   | `Assoc fields ->
       (match List.sort (fun (a,_) (b,_) -> String.compare a b) fields with
@@ -134,10 +136,15 @@ let decode_frame previous json =
 
 let decode previous (status,json) =
   match status,json with
-  | 409, `Assoc fields when List.length fields = 2 && List.assoc_opt "ok" fields = Some (`Bool false) ->
-      (match List.assoc_opt "code" fields with
-       | Some (`String "activity_disabled") -> Ok (Not_started Off,previous)
-       | Some (`String "activity_unobserved") -> Ok (Not_started Activity_unobserved,previous)
+  | 409, `Assoc fields ->
+      (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
+       | ["code", `String "activity_disabled"; "ok", `Bool false] ->
+           Ok (Not_started Off, previous)
+       | ["code", `String "activity_unobserved"; "ok", `Bool false] ->
+           Ok (Not_started Activity_unobserved, previous)
+       | ["code", `String "workspace_precondition_failed";
+          "message", `String _; "ok", `Bool false] ->
+           Ok (Not_started Workspace_changed, previous)
        | _ -> Error "MSX tick: unknown refusal")
   | 200, _ -> Result.map (fun (frame,pixels,mark) -> Advanced (frame,mark),pixels) (decode_frame previous json)
   | _ -> Error "MSX tick: unexpected response status"

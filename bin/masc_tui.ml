@@ -2699,6 +2699,7 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
   | Poll_ready Advancing ->
       let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority } in
       msx_pending_poll := Poll_pending request;
+      let expected_workspace = state.server_identity in
       let check = capture_workspace_check state ~mailbox in
       let run () =
         let admission =
@@ -2722,7 +2723,11 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
         | Error detail -> enqueue_async mailbox (Msx_tick_withdrawn (request, detail))
         | Ok () ->
           let frame =
-            try Masc_tui_http.tick_msx ~host:server_peer_host ~port:request.poll_port with
+            try match expected_workspace with
+            | None -> Error "MSX workspace identity is unavailable"
+            | Some expected_workspace ->
+                Masc_tui_http.tick_msx ~expected_workspace ~host:server_peer_host ~port:request.poll_port
+            with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn -> Error (Printexc.to_string exn)
           in

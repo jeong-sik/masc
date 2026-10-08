@@ -19,6 +19,36 @@ let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
 
+(* The body of a refused MSX write: [{ok:false, message}], with [code] first
+   when the caller names one. The caller names it, not the HTTP status: 409 is
+   also the activity gate's answer, under its own codes. *)
+let write_error_json ?code message : Yojson.Safe.t =
+  let fields = ["ok", `Bool false; "message", `String message] in
+  `Assoc (match code with
+    | Some code -> ("code", `String code) :: fields
+    | None -> fields)
+;;
+
+(* Request-owned workspace admission precedes every MSX effect. The shared
+   validator strips the binding so strict operation decoders retain their
+   existing field contracts. The handler uses this same captured config. A
+   refusal is the finished answer; only the failed precondition carries the
+   [code] the terminal reads to tell a changed workspace from the activity
+   refusals. *)
+let decode_write_body ~config ~body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error message ->
+      Error (`Bad_request, write_error_json ("invalid JSON: " ^ message))
+  | args -> match Workspace.validate_expected_workspace ~config args with
+      | Ok args -> Ok args
+      | Error Workspace.Invalid_workspace_precondition ->
+          Error (`Bad_request, write_error_json "invalid expected_workspace precondition")
+      | Error Workspace.Workspace_precondition_failed ->
+          Error (`Conflict,
+                 write_error_json ~code:"workspace_precondition_failed"
+                   "workspace precondition failed")
+;;
+
 (* Frames a press holds its keys down, and the frames the call advances in
    all, when the body names neither (RFC-0439 §3.3): a tap. *)
 let press_default_hold_frames = 5
@@ -114,28 +144,13 @@ let parse_keys names =
         | Error message -> Error message))
     (Ok []) names
 
-(* A change from the terminal names the workspace it read. A server swapped
-   onto the same port after that read answers 409 and applies nothing; a body
-   without the field (a keeper's tool, a script) is not bound to one. The field
-   is removed before the body reaches the strict per-route decoders. *)
-let admit_expected_workspace ~(config : Workspace.config) args =
-  match Workspace.validate_expected_workspace ~config args with
-  | Ok args -> Ok args
-  | Error Workspace.Invalid_workspace_precondition ->
-    Error (`Bad_request, "invalid expected_workspace precondition")
-  | Error Workspace.Workspace_precondition_failed ->
-    Error (`Conflict, "workspace precondition failed")
-
 (* The press body decoded and applied under [who], the identity the route's
    actor auth resolved. The route test drives it with its own workspace. *)
 let press_response ~config ~who ~body =
-  let error status message = status, press_result_json ~ok:false ~message None in
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error message -> error `Bad_request ("invalid JSON: " ^ message)
-  | json -> (
-    match admit_expected_workspace ~config json with
-    | Error (status, message) -> error status message
-    | Ok json ->
+  let error status message = status, write_error_json message in
+  match decode_write_body ~config ~body with
+  | Error refusal -> refusal
+  | Ok json -> (
     let ( let* ) = Result.bind in
     let decoded =
       let* names = string_list_field "keys" json in
@@ -168,8 +183,9 @@ let press_response ~config ~who ~body =
         error `Internal_server_error (Msx_lane.error_to_string e)))
 ;;
 
-let handle_press ~config ~who request reqd =
+let handle_press ~state ~who request reqd =
   Http.Request.read_body_async reqd (fun body ->
+      let config = Mcp_server.workspace_config state in
       let status, json = press_response ~config ~who ~body in
       respond_json_value_with_cors ~status request reqd json)
 ;;
@@ -208,13 +224,9 @@ let load_result_json ~ok ~message : Yojson.Safe.t =
    route only turns its tool result into an HTTP answer; the TUI re-fetches the
    frame to start spectating. Body: {cart:"name"}. *)
 let load_response ~(config : Workspace.config) ~agent_name ~body =
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error message ->
-    `Bad_request, load_result_json ~ok:false ~message:("invalid JSON: " ^ message)
-  | args ->
-    match admit_expected_workspace ~config args with
-    | Error (status, message) -> status, load_result_json ~ok:false ~message
-    | Ok args ->
+  match decode_write_body ~config ~body with
+  | Error refusal -> refusal
+  | Ok args ->
     let result =
       (* Tool_timing.start is the one tool-start stamp Tool_misc.dispatch
          also uses; it reads Time_compat.now, the clock accessor the
@@ -228,8 +240,9 @@ let load_response ~(config : Workspace.config) ~agent_name ~body =
     status, load_result_json ~ok ~message:(Tool_result.message result)
 ;;
 
-let handle_load ~(config : Workspace.config) ~agent_name request reqd =
+let handle_load ~state ~agent_name request reqd =
   Http.Request.read_body_async reqd (fun body ->
+      let config = Mcp_server.workspace_config state in
       let status, json = load_response ~config ~agent_name ~body in
       respond_json_value_with_cors ~status request reqd json)
 ;;
@@ -295,9 +308,8 @@ let decode_pixel_reference = function
        | _ -> Error "known_pixels requires a SHA256 revision and positive width/height")
   | _ -> Error "known_pixels requires exactly revision, width and height"
 
-let decode_tick body =
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error _ -> Error "tick body must be valid JSON"
+let decode_tick json =
+  match json with
   | `Assoc fields ->
       let ( let* ) = Result.bind in
       let names = List.map fst fields in
@@ -364,12 +376,14 @@ let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
                 "frames_ago", `Int (frame.number - last)])
           (recent_players_of ~now:frame.number entries))] @ pixel_fields)
 
-let tick_response ~body =
+let tick_response ~config ~body =
   let error status message =
-    status, `Assoc [ "ok", `Bool false; "message", `String message ]
+    status, write_error_json message
   in
-  match decode_tick body with
-  | Error detail -> error `Bad_request detail
+  let decoded = Result.bind (decode_write_body ~config ~body) (fun args ->
+    Result.map_error (error `Bad_request) (decode_tick args)) in
+  match decoded with
+  | Error refusal -> refusal
   | Ok (frames, pixel_response) ->
     (* This is a mutation: the best-effort executor adapter can replay failed
        work inline. Strict submission never retries or falls back to the HTTP
@@ -401,9 +415,10 @@ let tick_response ~body =
    flows even when no keeper is pressing a key. Body: {frames:N}, clamped to
    1..max_frames_per_call; the answer is the advanced frame, so one call both
    steps and reads. A write, gated like press. *)
-let handle_tick request reqd =
+let handle_tick ~state request reqd =
   Http.Request.read_body_async reqd (fun body ->
-      let status, json = tick_response ~body in
+      let config = Mcp_server.workspace_config state in
+      let status, json = tick_response ~config ~body in
       Http.Response.json_value_on_cpu ~status ~request
         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
 ;;
@@ -413,13 +428,10 @@ let activity_json () = `Assoc ["schema",`String "masc.msx-activity/v1";
 
 let checkpoint_response ~(config : Workspace.config) ~restore ~body =
   let base_path = config.base_path in
-  let error status message = status, load_result_json ~ok:false ~message in
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error message -> error `Bad_request message
-  | args ->
-    match admit_expected_workspace ~config args with
-    | Error (status, message) -> error status message
-    | Ok args ->
+  let error status message = status, write_error_json message in
+  match decode_write_body ~config ~body with
+  | Error refusal -> refusal
+  | Ok args ->
     (match Tool_misc_msx_lane.checkpoint_slot args with
      | Error message -> error `Bad_request message
      | Ok _ ->
@@ -448,15 +460,11 @@ let checkpoint_response ~(config : Workspace.config) ~restore ~body =
          error `Internal_server_error "MSX checkpoint failed; inspect the current state before retrying")
 ;;
 
-let handle_change_disk ~(config : Workspace.config) request reqd =
-  Http.Request.read_body_async reqd (fun body ->
-    let error status message = status, load_result_json ~ok:false ~message in
-    let status, json = match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error message -> error `Bad_request message
-      | args -> (
-        match admit_expected_workspace ~config args with
-        | Error (status, message) -> error status message
-        | Ok args ->
+let change_disk_response ~(config : Workspace.config) ~body =
+    let error status message = status, write_error_json message in
+    match decode_write_body ~config ~body with
+      | Error refusal -> refusal
+      | Ok args -> (
         match Executor_pool_ref.submit_strict (fun () ->
           let result = Tool_misc_msx_lane.handle_change_disk ~tool_name:"masc_msx_change_disk"
               ~start_time:(Tool_timing.start ()) ~base_path:config.base_path args in
@@ -477,12 +485,19 @@ let handle_change_disk ~(config : Workspace.config) request reqd =
           error `Internal_server_error "MSX disk change failed; inspect the current state before retrying"
         | Error (Executor_pool_ref.Submission_failed _ as failure) ->
           Log.Http.error "MSX disk change: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
-          error `Internal_server_error "MSX disk change failed; inspect the current state before retrying") in
+          error `Internal_server_error "MSX disk change failed; inspect the current state before retrying")
+;;
+
+let handle_change_disk ~state request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+    let config = Mcp_server.workspace_config state in
+    let status, json = change_disk_response ~config ~body in
     respond_json_value_with_cors ~status request reqd json)
 ;;
 
-let handle_checkpoint ~config ~restore request reqd =
+let handle_checkpoint ~state ~restore request reqd =
   Http.Request.read_body_async reqd (fun body ->
+    let config = Mcp_server.workspace_config state in
     let status, json = checkpoint_response ~config ~restore ~body in
     respond_json_value_with_cors ~status request reqd json)
 ;;
@@ -503,32 +518,32 @@ let add_routes router =
   |> Http.Router.post "/api/v1/msx/press" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_msx_press"
          (fun state who _req reqd ->
-           handle_press ~config:(Mcp_server.workspace_config state) ~who request reqd)
+           handle_press ~state ~who request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/load" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_msx_load"
          (fun state agent_name _req reqd ->
-           handle_load ~config:(Mcp_server.workspace_config state) ~agent_name request reqd)
+           handle_load ~state ~agent_name request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/save" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_save"
          (fun state _req reqd ->
-           handle_checkpoint ~config:(Mcp_server.workspace_config state) ~restore:false
+           handle_checkpoint ~state ~restore:false
              request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/restore" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_restore"
          (fun state _req reqd ->
-           handle_checkpoint ~config:(Mcp_server.workspace_config state) ~restore:true
+           handle_checkpoint ~state ~restore:true
              request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/disk" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_change_disk"
          (fun state _req reqd ->
-           handle_change_disk ~config:(Mcp_server.workspace_config state) request reqd)
+           handle_change_disk ~state request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_step"
-         (fun _state _req reqd -> handle_tick request reqd)
+         (fun state _req reqd -> handle_tick ~state request reqd)
          request reqd)
 ;;

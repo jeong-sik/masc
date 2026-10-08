@@ -997,9 +997,16 @@ let default_revisions () =
   in
   keys
   |> List.filter_map (fun key ->
+       (* Baseline hashes are informational. A registered file can become
+          unreadable after registration; omit only that default, without
+          aborting capture or the restore's pre-autosave comparison. *)
+       let body =
+         try file_value_of_key key with
+         | Sys_error _ | Unix.Unix_error _ -> None
+       in
        Option.map
          (fun body -> key, Prompt_override_persistence.default_revision ~body)
-         (file_value_of_key key))
+         body)
   |> List.sort Stdlib.compare
 
 (** JSON export of all prompts for API *)

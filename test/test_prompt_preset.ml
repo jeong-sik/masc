@@ -767,6 +767,56 @@ let test_default_baseline_survives_drift_and_restore () =
        | Preset.Defaults_unknown | Preset.Defaults_match -> false))
 ;;
 
+let test_unreadable_default_does_not_block_preset_operations () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let unreadable_key = "test.unreadable" in
+    let prompts_dir = Filename.concat base_path "prompts" in
+    let path = Filename.concat prompts_dir (unreadable_key ^ ".md") in
+    write_file path "---\ndescription: becomes unreadable\ncategory: test\n---\nAuxiliary default.\n";
+    Prompt_registry.set_markdown_dir prompts_dir;
+    set_override ~base_path "Saved override.";
+    let saved = or_fail (Preset.capture ~base_path ~name:"baseline" ~description:"") in
+    or_fail (Preset.save ~base_path saved);
+    let hash = match saved.default_revisions with
+      | Some rows -> List.assoc unreadable_key rows
+      | None -> Alcotest.fail "baseline must include readable auxiliary default" in
+    (* A socket behind the registered path reliably refuses ordinary file
+       reads regardless of permission privileges. A short temporary leaf keeps
+       its bind address independent of the longer preset fixture directory. *)
+    Sys.remove path;
+    let socket_path = Filename.temp_file "p" ".sock" in
+    Sys.remove socket_path;
+    let socket = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+    Fun.protect ~finally:(fun () ->
+      Unix.close socket;
+      ignore (Fs_compat.unlink_if_exists path);
+      ignore (Fs_compat.unlink_if_exists socket_path)) (fun () ->
+      Unix.bind socket (Unix.ADDR_UNIX socket_path);
+      Unix.symlink socket_path path;
+      let captured = or_fail (Preset.capture ~base_path ~name:"unreadable" ~description:"") in
+      (match captured.default_revisions with
+       | Some rows ->
+           Alcotest.(check (option string)) "unreadable default alone is omitted" None
+             (List.assoc_opt unreadable_key rows);
+           Alcotest.(check bool) "healthy default still has its revision" true
+             (List.mem_assoc prompt_key rows)
+       | None -> Alcotest.fail "read error must not discard healthy baselines");
+      or_fail (Preset.save ~base_path captured);
+      let expected = Preset.Defaults_differ [unreadable_key, Some hash, None] in
+      Alcotest.(check bool) "comparison reports unreadable default without throwing" true
+        (Preset.compare_defaults saved = expected);
+      set_override ~base_path "Current override.";
+      let report = or_fail (Preset.restore ~base_path "baseline") in
+      Alcotest.(check bool) "restore reports informational baseline difference" true
+        (report.default_comparison = expected);
+      Alcotest.(check string) "healthy override is restored" "Saved override."
+        (Prompt_registry.resolve_prompt prompt_key).effective;
+      let autosave = or_fail (Preset.load ~base_path report.autosave) in
+      Alcotest.(check string) "autosave retained the pre-restore override" "Current override."
+        (List.assoc prompt_key (List.map (fun (entry : Override.entry) -> entry.key, entry.value)
+          autosave.prompt_overrides))))
+;;
+
 let test_default_baseline_missing_or_invalid () =
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
     let saved = or_fail (Preset.capture ~base_path ~name:"baseline" ~description:"") in
@@ -793,6 +843,8 @@ let () =
     "Prompt_preset"
     [ ( "presets"
       , [ Alcotest.test_case "default baseline survives drift and restore" `Quick test_default_baseline_survives_drift_and_restore
+        ; Alcotest.test_case "unreadable baseline cannot block preset capture or restore" `Quick
+            test_unreadable_default_does_not_block_preset_operations
         ; Alcotest.test_case "missing baseline is unknown; corrupt hashes are refused" `Quick test_default_baseline_missing_or_invalid
         ; Alcotest.test_case "legacy lane activity loads; mistyped activity is refused" `Quick test_saved_lane_activity_shape
         ; Alcotest.test_case "activity restore and autosave roundtrip" `Quick test_restore_preserves_lane_activity_and_autosave

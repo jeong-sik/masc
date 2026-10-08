@@ -27,6 +27,7 @@ let delta_usage_partial : Agent_core.Types.delta_usage =
   ; output_tokens = None
   ; cache_creation_input_tokens = Some 1
   ; cache_read_input_tokens = None
+  ; cost_usd = None
   }
 
 let protocol_error_full : E.stream_protocol_error =
@@ -175,7 +176,19 @@ let test_codec_round_trip_all_constructors () =
            (Printf.sprintf "constructor %d round-trips" i)
            (Yojson.Safe.to_string encoded)
            (Yojson.Safe.to_string (L.keeper_chat_event_to_json decoded)))
-    all_events
+    all_events;
+  List.iter (fun charge ->
+    let event = E.Agent_core_stream_message_delta
+      { stop_reason = None;
+        usage = Some { delta_usage_partial with cost_usd = Some charge } } in
+    let encoded = L.keeper_chat_event_to_json event in
+    let amount = Yojson.Safe.Util.(encoded |> member "usage" |> member "cost_usd" |> to_float) in
+    Alcotest.(check (float 1e-9)) "live/durable delta encoder reports the charge" charge amount;
+    match L.keeper_chat_event_of_json encoded with
+    | Ok (E.Agent_core_stream_message_delta {usage=Some usage; _}) ->
+        Alcotest.(check (option (float 1e-9))) "delta charge and authoritative zero round-trip"
+          (Some charge) usage.cost_usd
+    | Ok _ | Error _ -> Alcotest.fail "charged delta must decode") [0.001; 0.0]
 
 let test_envelope_round_trip () =
   let entry : L.journaled_event =
@@ -329,6 +342,43 @@ let test_journal_skips_non_finite_floats () =
             ; message_text = "x"
             ; duration_sec = Some Float.nan
             });
+       List.iteri
+         (fun i charge ->
+            let event = E.Agent_core_stream_message_delta
+                { stop_reason = Some Agent_core.Types.EndTurn
+                ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
+            (match L.append_result journal ~seq:(4 + i) ~ts:1_762_300_001.0 event with
+             | Error _ -> ()
+             | Ok () -> Alcotest.fail "non-finite delta charge was journaled");
+            (* The live projection bypasses the durable append guard. Its
+               shared serializer must still produce valid JSON and retain
+               the other reported counters. *)
+            let _, projected = Projection.project ~timestamp:1_762_300_001.0
+                ~redact_text:Fun.id ~redact_json:Fun.id Projection.initial event in
+            let json = match projected with
+              | Some event -> Ag_ui.event_to_json event
+              | None -> Alcotest.fail "usage delta did not project" in
+            let wire = Yojson.Safe.to_string json in
+            let decoded = Yojson.Safe.from_string wire in
+            let usage = Yojson.Safe.Util.(decoded |> member "value" |> member "usage") in
+            Alcotest.(check int) "live counters retained" 10
+              Yojson.Safe.Util.(usage |> member "input_tokens" |> to_int);
+            Alcotest.(check bool) "invalid live charge omitted" true
+              Yojson.Safe.Util.(usage |> member "cost_usd" = `Null))
+         [ Float.nan; Float.infinity; Float.neg_infinity ];
+       List.iter (fun charge ->
+           let event = E.Agent_core_stream_message_delta
+               { stop_reason = None
+               ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
+           let _, projected = Projection.project ~timestamp:1_762_300_001.0
+               ~redact_text:Fun.id ~redact_json:Fun.id Projection.initial event in
+           let json = match projected with
+             | Some event -> Ag_ui.event_to_json event
+             | None -> Alcotest.fail "finite usage delta did not project" in
+           let decoded = Yojson.Safe.from_string (Yojson.Safe.to_string json) in
+           Alcotest.(check (float 0.0)) "finite live charge retained" charge
+             Yojson.Safe.Util.(decoded |> member "value" |> member "usage"
+               |> member "cost_usd" |> to_float)) [ 0.; 0.001 ];
        let journaled = read_ok (L.read_journal journal) in
        Alcotest.(check int) "only the valid line was journaled" 1 (List.length journaled);
        Alcotest.(check int) "seq of the surviving line" 2 (List.nth journaled 0).seq)

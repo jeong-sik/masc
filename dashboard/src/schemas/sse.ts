@@ -392,7 +392,8 @@ function validateUsage(value: unknown): SafeParseResult<true> {
 
 // KEEPER_STREAM_MESSAGE_DELTA usage carries cumulative counters and emits
 // only the ones the wire actually reported, so every field is optional and
-// there is no total_tokens or cost_usd. Requiring the full set here silently
+// there is no total_tokens. Provider-reported cost_usd is optional too.
+// Requiring the full set here silently
 // dropped every classic (output-only) delta once the producer stopped
 // zero-filling unreported counters.
 function validateDeltaUsage(value: unknown): SafeParseResult<true> {
@@ -401,6 +402,7 @@ function validateDeltaUsage(value: unknown): SafeParseResult<true> {
     'output_tokens',
     'cache_creation_input_tokens',
     'cache_read_input_tokens',
+    'cost_usd',
   ])
   if (!result.success) return result
   for (const field of [
@@ -413,7 +415,11 @@ function validateDeltaUsage(value: unknown): SafeParseResult<true> {
     const valid = requiredInteger(result.data, field)
     if (!valid.success) return valid
   }
-  return ok(true)
+  return result.data.cost_usd === undefined
+    || (typeof result.data.cost_usd === 'number' && Number.isFinite(result.data.cost_usd)
+      && result.data.cost_usd >= 0)
+    ? ok(true)
+    : fail('ag_ui_event.value.usage.cost_usd', 'Expected finite nonnegative cost_usd')
 }
 
 function validateKeeperCustomPayload(

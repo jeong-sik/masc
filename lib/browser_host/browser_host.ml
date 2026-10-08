@@ -233,8 +233,29 @@ let endpoint server path =
   Uri.with_path server
     (Env_config_core.strip_trailing_slashes (Uri.path server) ^ "/browser-lane/" ^ path)
 
-type http_error = Http_status of int | Transport_failed | No_response | Response_invalid | Response_too_large | Request_timed_out
-type poll_error = Invalid_client | Poll_unanswered of http_error | Poll_failed of string
+(* [Lane_refused] is a status whose body names the lane's reason for it. *)
+type http_error =
+  | Http_status of int
+  | Lane_refused of int * string
+  | Transport_failed
+  | No_response
+  | Response_invalid
+  | Response_too_large
+  | Request_timed_out
+type poll_error =
+  | Client_retired
+  | Client_rejected of string option
+  | Poll_unanswered of http_error
+  | Poll_failed of string
+(* How a poll ended the client's registration instead of answering it.
+   [Retired]: the server ended this client ID, which it does after two
+   minutes without a poll, and serves it no more. An earlier poll under the
+   ID was sent, so the server may have registered it then, whether or not
+   its answer arrived. [Retired_on_first_poll]: the same answer to the first
+   poll the ID ever sent, which is not an ID that fell silent; another new ID
+   would be told the same. [Rejected]: a refusal that asking again would only
+   repeat, with the lane's code for it when the answer carried one. *)
+type registration_refusal = Retired | Retired_on_first_poll | Rejected of string option
 type destination_change = Unchanged | Moved
 (* Whether an address answers this workspace's lane: a ping that holds the
    lane token and registers no client. *)
@@ -248,7 +269,7 @@ type lane_answer = Answers | Silent
 type reach = Reached | Unreached
 
 let reach = function
-  | Http_status _ | Response_invalid | Response_too_large -> Reached
+  | Http_status _ | Lane_refused _ | Response_invalid | Response_too_large -> Reached
   | Transport_failed | No_response | Request_timed_out -> Unreached
 
 (* Why a result stayed undelivered. Each is recorded once; none is sent
@@ -265,6 +286,7 @@ type result_undelivered =
 
 let http_error_message = function
   | Http_status status -> Printf.sprintf "HTTP %d" status
+  | Lane_refused (status, code) -> Printf.sprintf "HTTP %d, %s" status code
   | Transport_failed -> "HTTP transport failed"
   | No_response -> "the connection gave no HTTP response"
   | Response_invalid -> "invalid HTTP response"
@@ -296,7 +318,29 @@ let within ~clock seconds step =
       None)
     (fun () -> Some (step ()))
 
-let post ~clock ~client ~server ~config ~info ~token path json =
+(* The lane names a refusal in a small JSON body: {"ok":false,"error":CODE},
+   sent with the status. *)
+let refusal_body_limit = 4096
+let refusal_code_limit = 64
+let refusal_body_window_sec = 1.
+
+(* A code is lower-case letters, digits and underscores. Anything else in
+   that field is prose or data, which this host's diagnostics do not carry. *)
+let refusal_code body =
+  match Eio.Buf_read.take_all (Eio.Buf_read.of_flow body ~max_size:refusal_body_limit) |> parse_json with
+  | Ok (`Assoc fields) ->
+      (match List.assoc_opt "error" fields with
+       | Some (`String code)
+         when code <> "" && String.length code <= refusal_code_limit
+              && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) code ->
+           Some code
+       | Some _ | None -> None)
+  | Ok _ | Error _ -> None
+  (* The status is the server's answer already. A body that cannot be read
+     takes nothing from it. *)
+  | exception (Eio.Buf_read.Buffer_limit_exceeded | Eio.Io _ | End_of_file) -> None
+
+let post ~clock ~client ~server ~client_id ~info ~token path json =
   match
     within ~clock http_timeout_sec (fun () ->
       try
@@ -305,7 +349,7 @@ let post ~clock ~client ~server ~config ~info ~token path json =
             Cohttp_eio.Client.post client ~sw
               ~headers:(Cohttp.Header.of_list
                 [ "Content-Type", "application/json"; "x-lane", Browser_lane.Lane_name.(to_wire Live); "x-lane-token", token;
-                  "x-browser-client-id", config.client_id; "x-browser-name", info.browser;
+                  "x-browser-client-id", client_id; "x-browser-name", info.browser;
                   "x-browser-version", info.version; "x-browser-engine-version", info.engine_version;
                   "x-browser-transport", Browser_lane.live_transport_to_string info.transport ])
               ~body:(Cohttp_eio.Body.of_string (Yojson.Safe.to_string json))
@@ -318,7 +362,12 @@ let post ~clock ~client ~server ~config ~info ~token path json =
           | exception Failure _ -> Error No_response
           | response, body ->
             let status = Cohttp.Response.status response |> Cohttp.Code.code_of_status in
-            if status <> 200 then Error (Http_status status)
+            if status <> 200 then
+              (* The status is the answer. A body that does not follow it
+                 promptly leaves it the status it was. *)
+              Error (match within ~clock refusal_body_window_sec (fun () -> refusal_code body) with
+                | Some (Some code) -> Lane_refused (status, code)
+                | Some None | None -> Http_status status)
             else
               let body = Eio.Buf_read.of_flow body ~max_size:(command_frame_limit + 1) in
               parse_json (Eio.Buf_read.take_all body)
@@ -381,10 +430,18 @@ type link =
   ; config : config
   ; info : browser_info
   ; mutable server : Uri.t
+  (* Who the host polls as. [polled] says a poll under this ID has been
+     sent. The server registers an ID when its poll arrives, before it
+     answers, so from then on it may know the ID. *)
+  ; mutable client_id : string
+  ; mutable polled : bool
   }
 
+let new_link ~clock ~client ~config ~info =
+  { clock; client; config; info; server = config.server; client_id = config.client_id; polled = false }
+
 let ask link ~server ~token path json =
-  post ~clock:link.clock ~client:link.client ~server ~config:link.config ~info:link.info ~token path json
+  post ~clock:link.clock ~client:link.client ~server ~client_id:link.client_id ~info:link.info ~token path json
 
 let ask_lane link origin =
   match read_token link.config.token_file with
@@ -479,24 +536,38 @@ let record_delivery = function
       Log.Transport.warn "browser-host: result not delivered: %s"
         (result_undelivered_message undelivered)
 
+let registration_refusal_message = function
+  | Retired -> "native client registration rejected (the server had ended this connection)"
+  | Retired_on_first_poll ->
+      "native client registration rejected (the server calls a client ID ended on its first poll)"
+  | Rejected (Some code) -> "native client registration rejected (" ^ code ^ ")"
+  | Rejected None -> "native client registration rejected"
+
 (* What the server asks for next. A poll that got no answer, or an answer
    this host cannot read, is asked again after a pause: nothing has been sent
    to the browser, so asking again repeats no effect. Only a registration the
    server refuses is an error. *)
 let rec next_command link =
+  let first_poll = not link.polled in
+  link.polled <- true;
   let asked =
     let* token =
       read_token link.config.token_file |> Result.map_error (fun detail -> Poll_failed detail) in
     let* response =
       ask link ~server:link.server ~token "poll" (`Assoc [])
       |> Result.map_error (function
-        | Http_status 400 -> Invalid_client
+        | Lane_refused (400, code) ->
+            (match Browser_lane.registration_refusal_of_wire code with
+             | Some Browser_lane.Client_retired -> Client_retired
+             | Some Browser_lane.Client_identity_changed | None -> Client_rejected (Some code))
+        | Http_status 400 -> Client_rejected None
         | error -> Poll_unanswered error) in
     decode_poll response |> Result.map_error (fun detail -> Poll_failed detail)
   in
   match asked with
   | Ok next -> Ok next
-  | Error Invalid_client -> Error "native client registration rejected"
+  | Error Client_retired -> Error (if first_poll then Retired_on_first_poll else Retired)
+  | Error (Client_rejected code) -> Error (Rejected code)
   | Error (Poll_unanswered error) ->
       Log.Transport.warn "browser-host: poll failed: %s" (http_error_message error);
       Eio.Time.sleep link.clock reconnect_delay_sec;
@@ -536,10 +607,12 @@ let run env config =
     | Write_timed_out -> Error "browser metadata frame write timed out"
     | Replied reply ->
       let* info = browser_info reply in
-      let link = { clock; client; config; info; server = config.server } in
+      let link = new_link ~clock ~client ~config ~info in
       registered := Some link;
       let rec serve () =
-        let* next = next_command link in
+        (* The extension starts another host, which has a new client ID, when
+           this one ends; so every refusal ends it. *)
+        let* next = next_command link |> Result.map_error registration_refusal_message in
         match next with
         | Empty -> serve ()
         | Reject id ->
@@ -573,7 +646,8 @@ type leaving = Browser_gone of string | Stop_asked of string
    names, exactly as the extension host does: restarting the server does not
    end this host. It ends when the BiDi connection has ended, also while it
    waits for work, when a command's outcome is unknown, when the server
-   refuses its registration, and when [stop] says the operator asked.
+   refuses its registration for a reason asking again would not change, and
+   when [stop] says the operator asked.
 
    On each of those ways out, and when an exception raised while it serves
    leaves it, it ends the BiDi session it asked for. Firefox keeps a session
@@ -659,7 +733,17 @@ let run_bidi env config url ~stop =
       let rec serve () =
         match while_serving (fun () -> next_command link) with
         | Error leaving -> left leaving
-        | Ok (Error refused) -> Error refused
+        | Ok (Error (Rejected _ | Retired_on_first_poll as refusal)) ->
+            Error (registration_refusal_message refusal)
+        | Ok (Error Retired) ->
+            (* Nothing starts another BiDi host, so this one registers again.
+               A poll is sent only while no command is in hand. *)
+            link.client_id <- Random_id.uuid_v7 ();
+            link.polled <- false;
+            Log.Transport.info
+              "browser-host: the server had ended this connection; registering again as client %s"
+              link.client_id;
+            serve ()
         | Ok (Ok Empty) -> serve ()
         | Ok (Ok (Reject id)) ->
             (match publish_answer (failure id "unsupported BiDi verb") with
@@ -719,7 +803,7 @@ let run_bidi env config url ~stop =
               let info =
                 { browser = "firefox"; version; engine_version = version
                 ; transport = Browser_lane.Webdriver_bidi } in
-              serve_link ~ended peer { clock; client; config; info; server = config.server })
+              serve_link ~ended peer (new_link ~clock ~client ~config ~info))
           in
           (* [Ok ()] says the host left in order and the same Firefox takes
              the next one. A stop that left its session behind is not that. *)

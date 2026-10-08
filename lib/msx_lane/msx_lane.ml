@@ -1019,6 +1019,15 @@ let checkpoint_info ~path =
         | Some (`List values) -> Ok values
         | Some _ -> invalid (name ^ " must be an array")
         | None -> invalid (name ^ " is required") in
+      let valid_ledger_entry = function
+        | `Assoc entry ->
+          (match List.assoc_opt "frame" entry, List.assoc_opt "who" entry,
+                 List.assoc_opt "key" entry, List.assoc_opt "edge" entry with
+           | Some (`Int frame), Some (`String who), Some (`String key),
+             Some (`String ("down" | "up")) ->
+             frame >= 0 && who <> "" && key <> ""
+           | _ -> false)
+        | _ -> false in
       let optional_int name =
         match find name with
         | None | Some `Null -> Ok None
@@ -1031,9 +1040,17 @@ let checkpoint_info ~path =
         | Some (`String _) -> invalid (name ^ " must not be empty")
         | Some _ -> invalid (name ^ " must be a string or null") in
       let* version = required_int "version" in
-      let* _machine = required_string "machine" in
+      let* machine = required_string "machine" in
       let* ledger = required_list "ledger" in
-      if version <> 1
+      let machine_is_encoded =
+        match Base64.decode machine with
+        | Ok bytes -> bytes <> ""
+        | Error _ -> false in
+      if not machine_is_encoded
+      then invalid "machine must be nonempty base64"
+      else if not (List.for_all valid_ledger_entry ledger)
+      then invalid "ledger contains a malformed entry"
+      else if version <> 1
       then invalid (Printf.sprintf "unsupported version %d" version)
       else
         let* frame = optional_int "frame" in

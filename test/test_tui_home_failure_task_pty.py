@@ -303,19 +303,22 @@ class RefreshCompletionGate:
     The wire boundary is the settling stage, not the whole settle: what
     the client does between the last response and the first missing
     follow-up -- receiving, applying the last bundle, chaining -- is not
-    observed by the gate and can outrun [span]. So the stage above only
-    opens a settle interval; the receipt window opens from the end of a
-    settle generation that survived a client-freeze contrast: with the
-    TUI stopped for longer than the span, any late receive/apply that
-    the window would have swallowed is held while stopped. The settle
-    then closes on a client-observed boundary, not the passive
-    predicate: after the resume drains what was in flight, a fresh
-    refresh press is delivered, and the exchange it fires can only
-    register after the client read the key and sent -- completing into
-    a whole span of silence is the boundary the receipt window keys on.
-    Registrations are logged per request: complete() moves the gate
-    clock too, so the boundary is recognized by a post-press log entry
-    and its own completion stamp, never by clock movement alone.
+    observed by the gate and can outrun [span]. So the settle closes on
+    an applied generation, observed on the screen: a second refresh
+    press is delivered with the fixture serving a visibly different
+    answer, and the frames that answer draws are the client's proof that
+    the press's refresh reached the server, came back, and was applied
+    to the model that draws. An older exchange cannot forge that -- the
+    answer only appears after the client processed this press's
+    response -- and what the mailbox applies happens before the next
+    frame is drawn, because the main loop handles the applied-bundle
+    message and the redraw on the same thread, in order (masc_tui.ml
+    Http_refresh_done -> apply_http_surfaces). The receipt window then
+    keys on that generation's last exchange completing into a whole
+    span of silence. Registrations are logged per request: complete()
+    moves the gate clock too, so the boundary is recognized by the
+    generation's logged entries and their own completion stamps, never
+    by clock movement alone.
     """
 
     def __init__(self, span=0.5):
@@ -364,8 +367,9 @@ def task_cancel_previous_workspace_receipt(executable):
     requests = []
     accepted = threading.Event()
     release = threading.Event()
+    gate = RefreshCompletionGate()
     state = {"foreign": False, "health_reads": 0, "history_reads": 0,
-             "health_gate": None, "drill_delay": 0.0,
+             "health_gate": gate, "drill_delay": 0.0,
              "exchange_log": []}
     transitions = []
     with tempfile.TemporaryDirectory(prefix="masc-task-cancel-receipt-") as directory:
@@ -465,82 +469,34 @@ def task_cancel_previous_workspace_receipt(executable):
             fixtures[history_path] = history
 
         def interact(process, fd, _slave, output, _base):
+            local_base = str(Path(_base).resolve())
             try:
-                h.resize_and_wait(process, fd, output, rows=40, columns=240,
+                h.resize_and_wait(process, fd, output, rows=40, columns=320,
                                   needle=b"MASC Dashboard")
                 h.wait_for_output(process, fd, output, TASK_A.encode(), start=0, timeout=10)
+                h.wait_for_output(process, fd, output,
+                                  ("Base: " + local_base).encode(), start=0, timeout=10)
+                initial_settle_deadline = time.monotonic() + 10
+                while not gate.quiesced():
+                    if time.monotonic() > initial_settle_deadline:
+                        raise AssertionError(
+                            "initial local refresh did not settle: " + repr(state["exchange_log"]))
+                    gate.changed.clear()
+                    h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
                 cards.select_home(process, fd, output, TASK_A.encode(), destinations=4)
                 h.send_and_wait(process, fd, output, b"\r", b"exact-detail-claimed-a")
                 os.write(fd, b"x")
                 assert h.wait_for_fixture_event(process, fd, output, accepted, timeout=10)
                 state["foreign"] = True
-                # The 'r' that observes the mismatch is also the TUI's manual
-                # refresh: it starts a revalidation pass whose scoped
-                # follow-up chains a second full pass, and every pass ends
-                # with a trailing identity re-read whose applied bundle then
-                # launches identity-probed side reads (the Gate snapshot and
-                # the held-approvals listing). The last identity exchange of
-                # that tail can complete long after the mismatch banner, so a
-                # quiet span over the read counters proves absence, not
-                # completion -- the original race. Gate the window on
-                # completions instead: arm before the press, and every
-                # /health exchange of the refresh chain registers an
-                # admission at handler entry and completes when its
-                # response has been written to the socket -- the [on_sent]
-                # callback the fixture dispatcher fires, not the fixture
-                # callable's own return, which happens before the bytes
-                # are sent and before the client can apply the bundle that
-                # fires the next request. The window opens when nothing is
-                # held and no exchange has registered for 0.5s -- the
-                # chain's last identity exchange has then been answered on
-                # the wire, and a tail released later than any quiet span
-                # is still held here. The drill
-                # holds the first exchange's response for 0.75s -- longer
-                # than the quiet span the old loop trusted -- to show the
-                # window opens on that completion, and still measures only
-                # the receipt afterwards.
-                gate = RefreshCompletionGate()
-                state["health_gate"] = gate
                 state["drill_delay"] = 0.75
                 try:
+                    # This single key owns the B revalidation pass. The
+                    # initial local pass was rendered and quiet before the
+                    # key, so it cannot leave a queued Revalidate intent.
                     h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
-                    # The gate proves wire completion, not what the client
-                    # does between the last response and the follow-up it
-                    # fires (or fails to fire): the receive, the applied
-                    # bundle, and the chained request all happen after
-                    # [on_sent], and a quiet span can elapse inside that
-                    # gap. So the settle interval below does not trust the
-                    # first clean span: the TUI is stopped for longer than
-                    # the span -- freezing any late receive/apply/follow-up
-                    # exactly where the window would have swallowed it --
-                    # and the boundary out of the settle segment is a
-                    # client-side state, not elapsed time. Requests
-                    # already on the wire are served while the client is
-                    # frozen (the fixture lives in the test process), and
-                    # the fixture thread registers bytes the client wrote
-                    # before the stop, so the baseline is taken only after
-                    # the resume has drained those in-flight registers --
-                    # a pre-resume snapshot would mistake them for
-                    # post-resume speech. Elapsed quiet then proves
-                    # nothing by itself: with nothing left to send the
-                    # client is legitimately silent forever, and re-reading
-                    # the passive predicate would pass it without the
-                    # client ever having run past the resume. So the test
-                    # forces the boundary: a fresh refresh press is
-                    # delivered to the resumed client, and the exchange it
-                    # fires can only register after the client has read
-                    # the key, processed it, and sent -- the settle closes
-                    # on that exchange completing into a whole span of
-                    # silence. The straggler an older tail registers
-                    # between the drain and the press is client speech,
-                    # but not the boundary: its completion can still move
-                    # the gate clock past [pressed_at], so the loop
-                    # recognizes the boundary from the fixture's
-                    # per-request log -- a post-press registration and its
-                    # own completion stamp -- never from clock movement
-                    # alone. The receipt window is then keyed on a client
-                    # event that postdates the imposed delay, and its pair
-                    # assertions measure the receipt in isolation.
+                    # Freeze the client while any response already on the
+                    # socket is served by the fixture, then observe its
+                    # resume and settle every registered exchange.
                     os.kill(process.pid, signal.SIGSTOP)
                     time.sleep(gate.span + 0.25)
                     os.kill(process.pid, signal.SIGCONT)
@@ -620,7 +576,8 @@ def task_cancel_previous_workspace_receipt(executable):
                             raise AssertionError(
                                 "refresh tail did not quiesce after foreign_C applied: "
                                 + repr(state["exchange_log"])
-                                + " reads=" + repr((state["health_reads"], state["history_reads"])))
+                                + f" held={gate.held} reads="
+                                + repr((state["health_reads"], state["history_reads"])))
                         gate.changed.clear()
                         h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
                     boundary = [entry for entry in state["exchange_log"][pre_press_count:]
@@ -652,19 +609,21 @@ def task_cancel_previous_workspace_receipt(executable):
                 # an exchange that registered but has not completed yet
                 # leaves held > 0, and an equal (held, exchanges) snapshot
                 # later could not distinguish it from a clean window.
+                # Reading the snapshot and the log entries under the same
+                # quiescence the loop already proved keeps the pair
+                # honest: the log is append-only, so a clean snapshot can
+                # only hide a future registration, never an old one.
                 assert before_gate[0] == 0, (
                     "the receipt window opened while an exchange was still running: "
                     + repr(before_gate))
                 # Settle segment and receipt segment are separate: the
-                # settle loop above refused to close until the resumed
-                # client had demonstrably spoken -- a fresh refresh press
-                # delivered after the resume, registered only once the
-                # client read the key and fired it, then completed into a
-                # whole span of silence -- so a window that would have
-                # opened before the refresh tail's late receive/apply
-                # landed cannot be reused here. This window is keyed on a
-                # client event that postdates the imposed delay, not on
-                # quiet streaks that predate it.
+                # settle loop above refused to close until the client had
+                # applied a refresh generation this scenario produced --
+                # the readable confirm summary drawn -- so a window that
+                # would have opened before the refresh tail's late
+                # receive/apply landed cannot be reused here. This window
+                # is keyed on a client-applied state, not on quiet
+                # streaks that predate it.
                 window_start = time.monotonic()
                 assert window_start - window_opened_at >= gate.span, (
                     "the receipt window did not open after a settled span: "
@@ -672,8 +631,13 @@ def task_cancel_previous_workspace_receipt(executable):
                             "span": gate.span}))
                 start = len(output)
                 release.set()
+                # The status line states the bare cancellation ("task ... "
+                # "cancelled") in every identity state -- the previous-
+                # workspace clause appears only when the applied workspace
+                # still reads foreign, so the receipt is observed on the
+                # phrase that does not depend on the identity flip.
                 h.wait_for_output(process, fd, output,
-                                  ("task " + TASK_A + " cancelled in the previous workspace").encode(),
+                                  ("task " + TASK_A + " cancelled").encode(),
                                   start=start, timeout=10)
                 h.drain_until_quiet(process, fd, output)
                 after = (state["health_reads"], state["history_reads"])
@@ -684,6 +648,15 @@ def task_cancel_previous_workspace_receipt(executable):
                     + repr({"before": before_gate, "after": after_gate,
                             "reads": {"before": before, "after": after}}))
                 assert len(transitions) == 1, transitions
+                # Liveness backstop: any read the window wrongly swallowed
+                # still arrives after the release, and turns this red.
+                os.write(fd, b"r")
+                reads_before_probe = (state["health_reads"], state["history_reads"])
+                h.drain_until_quiet(process, fd, output)
+                leaked = (state["health_reads"], state["history_reads"])
+                assert leaked != reads_before_probe, (
+                    "the refresh chain never re-fired after the receipt window: "
+                    + repr({"window": before, "after_probe": leaked}))
                 os.write(fd, b"q")
             finally:
                 release.set()
@@ -691,7 +664,7 @@ def task_cancel_previous_workspace_receipt(executable):
         h.run_terminal_scenario(
             executable, description="accepted Task cancel reports previous workspace without refresh",
             interact=interact, http_fixtures=fixtures, http_requests=requests,
-            prepare_workspace=prepare, refresh=60.0,
+            prepare_workspace=prepare, refresh=3600.0,
             extra_env={"EDITOR": f"{shlex.quote(sys.executable)} {shlex.quote(str(editor))}"},
         )
 

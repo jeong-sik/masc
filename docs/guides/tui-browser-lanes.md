@@ -49,7 +49,7 @@ and the two serve different work
 TUI reads that table in four places:
 
 - The connection row under the status: `Live Firefox · WebExtension: no hover,
-  drag`, or `Live Firefox · BiDi: no HTML, elements, tab switch`.
+  drag`, or `Live Firefox · BiDi: no tab switch`.
 - The row under the picker, for the highlighted connection: `WebExtension: no
   hover, drag · BiDi serves them`.
 - The screenshot footer: `drag: move` when the connection the screenshot came

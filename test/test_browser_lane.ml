@@ -131,8 +131,8 @@ let test_transport_table () =
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
     Lane.[Trusted_hover; Trusted_drag] (unserved Lane.Web_extension);
-  check (list capability) "the BiDi peer has no document source, element inventory or tab activation"
-    Lane.[Document_source; Element_inventory; Tab_activation] (unserved Lane.Webdriver_bidi);
+  check (list capability) "the BiDi peer has no tab activation"
+    Lane.[Tab_activation] (unserved Lane.Webdriver_bidi);
   List.iter (fun capability ->
     check bool (Lane.live_capability_to_wire capability ^ " is reachable on some connection") true
       (Lane.live_transports_serving capability <> []);
@@ -170,11 +170,16 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
         check int (name ^ " queued no command") 0 (Eio.Stream.length client.commands)
       end) Lane.all_of_live_capability)
     [extension; bidi];
+  (* The optional document read asks the same table. Both transports serve
+     it, so on BiDi it reaches that connection's queue. *)
   let bidi_target = target bidi.client_id in
-  check bool "the optional document read is refused on BiDi the same way" true
-    (Lane.issue_document_if_idle ~target:bidi_target ~tab_id:2 ~timeout_sec:1.
-       = Error (Lane.Transport_unsupported
-           {client_id=bidi.client_id; transport=Webdriver_bidi; capability=Document_source})))
+  let document = Eio.Fiber.fork_promise ~sw (fun () ->
+    Lane.issue_document_if_idle ~target:bidi_target ~tab_id:2 ~timeout_sec:1.) in
+  let command = take bidi in
+  check bool "the optional document read reaches the BiDi connection" true
+    (command.verb_json = Lane.verb_json (Lane.Page_document {tab_id=2}));
+  ignore (Lane.deliver_result ~client_id:bidi.client_id ~id:command.id ~payload:(payload "document"));
+  answered document "document")
 
 let test_unsupported_message_names_the_serving_transport () =
   let client_id = (info Lane.Firefox).client_id in

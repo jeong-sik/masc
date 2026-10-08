@@ -334,19 +334,18 @@ let live_transport_of_string = function
    The extension acts through DOM calls inside the page, so it has no pointer
    the browser treats as the operator's: it cannot hover or drag, and its
    point click is the element's own [click()]. The BiDi peer sends pointer
-   and wheel input through the browser. It does not implement the
-   source-document read, the element inventory or tab activation
-   (Browser_bidi_peer.dispatch); test_browser_bidi_peer holds this table to
-   what that peer does. *)
+   and wheel input through the browser. It does not implement tab activation
+   (Browser_bidi_peer.dispatch): BiDi's own activation also takes window
+   focus. test_browser_bidi_peer holds this table to what that peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
   | ( (Web_extension | Webdriver_bidi)
-    , ( Tab_listing | Text_read | Viewport_capture | Scene_read | Dom_interaction | Point_click
-      | Point_scroll ) ) -> true
-  | Web_extension, (Document_source | Element_inventory | Tab_activation) -> true
+    , ( Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture
+      | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
+  | Web_extension, Tab_activation -> true
   | Web_extension, (Trusted_hover | Trusted_drag) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag) -> true
-  | Webdriver_bidi, (Document_source | Element_inventory | Tab_activation) -> false
+  | Webdriver_bidi, Tab_activation -> false
 ;;
 
 let live_transports_serving capability =

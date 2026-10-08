@@ -449,7 +449,8 @@ let test_a_short_espeak_row_is_dropped () =
   Alcotest.(check int) "nothing to choose, nothing offered" 0
     (List.length (Bridge.espeak_catalogue_of_output "Pty Language\n 5  ko\n"))
 
-(* espeak-ng's -v answers to the name, the language and the aliases alike.
+(* espeak-ng's -v answers to the name, the language and the aliases alike,
+   including '+<variant>' suffixes (or '+<variant>' alone for default voice).
    Unlike say it refuses an unknown voice itself -- measured 2026-10-07, -v
    NoSuchVoiceXYZ exited 1 -- so this check fails fast with the name before
    the clip does. *)
@@ -464,7 +465,16 @@ let test_an_espeak_voice_is_looked_up_as_espeak_reads_names () =
   Alcotest.(check bool) "a name in another ASCII case" true (lookup "korean");
   Alcotest.(check bool) "with space around it" true (lookup " ko ");
   Alcotest.(check bool) "the underscore form -v refuses" false (lookup "English_(America)");
-  Alcotest.(check bool) "a name nothing prints" false (lookup "NoSuchVoice")
+  Alcotest.(check bool) "a name nothing prints" false (lookup "NoSuchVoice");
+  Alcotest.(check bool) "a language with a variant" true (lookup "en+f3");
+  Alcotest.(check bool) "a name with a variant" true (lookup "English (America)+m3");
+  Alcotest.(check bool) "in another ASCII case with variant" true (lookup "korean+f2");
+  Alcotest.(check bool) "only variant applies to default voice" true (lookup "+f3");
+  Alcotest.(check bool) "multiple chained variants" true (lookup "en+f3+whisper");
+  Alcotest.(check bool) "unknown voice with variant is refused" false (lookup "NoSuchVoice+f3");
+  Alcotest.(check bool) "trailing plus with no variant is refused" false (lookup "en+");
+  Alcotest.(check bool) "bare plus is refused" false (lookup "+");
+  Alcotest.(check bool) "underscore name with variant is refused" false (lookup "English_(America)+f3")
 
 (* Where a clip is stored, and how a reader finds it again. The token in the
    URL says nothing about the container -- the endpoint that spoke decided

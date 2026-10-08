@@ -278,20 +278,28 @@ let check_say_voice endpoint ~voice =
 ;;
 
 (* Whether espeak-ng answers to this selection. Its -v accepts the voice name
-   with its spaces, the Language column, and the parenthesised aliases -- a
-   bare "en" speaks English through the (en 2) alias, and "zh" reaches
+   with its spaces, the Language column, the parenthesised aliases, and any of
+   these followed by a "+<variant>" suffix (or "+<variant>" alone for the
+   default voice; upstream docs/voices.md and voices.c ExtractVoiceVariantName).
+   A bare "en" speaks English through the (en 2) alias, and "zh" reaches
    Mandarin through (zh 5) -- so a selection matching any of the three,
    ignoring ASCII case, is installed. The case-folding is measured, not
    assumed: -v korean, -v KOREAN, -v "english (america)" and -v EN all spoke
    on 2026-10-07 with 1.52.0.
+
+   The catalogue lists base voices, not every base+variant combination. When
+   a variant suffix is present, validation splits at '+' and checks that the
+   base voice is installed (or empty, defaulting) and the variant suffix is
+   non-empty; the synthesis probe or speak invocation then lets espeak-ng
+   load the variant itself.
 
    Unlike say, espeak-ng refuses an unknown voice itself: measured the same
    day, -v NoSuchVoiceXYZ exited 1 with "Error: The specified espeak-ng voice
    does not exist." and wrote no file. This check still runs first so the
    refusal names the voice that was asked for and points at the list it can
    be picked from, rather than surfacing only as a failed clip. *)
-let espeak_voice_in_catalogue voices ~voice =
-  let wanted = String.lowercase_ascii (String.trim voice) in
+let espeak_base_voice_in_catalogue voices ~base_voice =
+  let wanted = String.lowercase_ascii (String.trim base_voice) in
   let matches listed = String.equal (String.lowercase_ascii listed) wanted in
   List.exists
     (fun (listed : catalogue_voice) ->
@@ -299,6 +307,25 @@ let espeak_voice_in_catalogue voices ~voice =
       || Option.value ~default:false (Option.map matches listed.voice_language)
       || List.exists matches listed.voice_aliases)
     voices
+;;
+
+let espeak_voice_in_catalogue voices ~voice =
+  let voice = String.trim voice in
+  match String.index_opt voice '+' with
+  | None -> espeak_base_voice_in_catalogue voices ~base_voice:voice
+  | Some idx ->
+    let base = String.sub voice 0 idx |> String.trim in
+    let variant = String.sub voice (idx + 1) (String.length voice - idx - 1) |> String.trim in
+    let variant_parts = String.split_on_char '+' variant in
+    let valid_variants =
+      variant_parts <> []
+      && List.for_all (fun v -> String.length (String.trim v) > 0) variant_parts
+    in
+    if not valid_variants
+    then false
+    else if String.equal base ""
+    then true
+    else espeak_base_voice_in_catalogue voices ~base_voice:base
 ;;
 
 let check_espeak_voice endpoint ~voice =
@@ -317,8 +344,7 @@ let check_espeak_voice endpoint ~voice =
       else
         Error
           (Printf.sprintf
-             "espeak-ng has no voice named \"%s\", and would speak in another one without \
-              failing; espeak-ng --voices prints the %d it has"
+             "espeak-ng has no voice named \"%s\"; espeak-ng --voices prints the %d it has"
              voice (List.length voices)))
 ;;
 

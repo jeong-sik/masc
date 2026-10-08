@@ -58,11 +58,12 @@ val check_say_voice : Voice_config.endpoint -> voice:string -> (unit, string) re
 val espeak_catalogue_of_output : string -> catalogue_voice list
 
 (** Whether an espeak-ng catalogue answers to [voice]. espeak-ng's [-v]
-    accepts the voice name with its spaces, the Language column, and the
-    parenthesised aliases, so a match on any of the three, ignoring ASCII
-    case, is installed. Unlike say, espeak-ng refuses an unknown voice itself;
-    this check still runs first so the refusal names the voice asked for and
-    points at the list it can be picked from. *)
+    accepts the voice name with its spaces, the Language column, the
+    parenthesised aliases, and any of these followed by a [+<variant>] suffix
+    (or [+<variant>] alone for the default voice), so a match on any of them,
+    ignoring ASCII case, is installed. Unlike say, espeak-ng refuses an unknown
+    voice itself; this check still runs first so the refusal names the voice
+    asked for and points at the list it can be picked from. *)
 val espeak_voice_in_catalogue : catalogue_voice list -> voice:string -> bool
 
 (** Ask an espeak-ng endpoint for its catalogue and look [voice] up in it. A

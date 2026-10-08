@@ -435,7 +435,10 @@
       "kind": "production",
       "status": "partial: ignored fallback cwd repaired through foreground directory acquisition; typed backend cwd refusal and direct owner call; remaining process/capture/pipeline responsibilities pending semantic review",
       "current_lines": 2054,
-      "validation_artifact": "process-fallback-cwd/README.md"
+      "validation_artifact": "process-fallback-cwd/README.md",
+      "prs": [
+        42003
+      ]
     },
     {
       "path": "lib/runtime/runtime.ml",

@@ -506,7 +506,7 @@ let dropped_match_to_json (row : Keeper_memory_os_current.archived_fact) =
 ;;
 
 let dropped_guidance =
-  "Historical removed claims, not current facts. Check the removal reason and original evidence before using or explicitly writing a current claim. Search never restores a fact. The best-effort removal journal may be incomplete."
+  "Historical removed claims, not current facts. Check the removal reason and original evidence before using or explicitly writing a current claim. Search never restores a fact. Pending removal finalization is a read failure until a writer recovers it; older journal gaps may remain."
 ;;
 
 type history_search =

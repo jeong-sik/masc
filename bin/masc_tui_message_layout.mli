@@ -289,11 +289,11 @@ type origin_display =
   | Origin_row  (** The origin keeps a row of its own, above the body. *)
   | Origin_inline
       (** The origin folds into the body's left margin, clock included. *)
-  | Origin_bare  (** The same margin without the clock. *)
-(** Where a message's origin is drawn. [Origin_inline] is the chat default
-    (see [Masc_tui_types.create_state]); its clock is drawn only on the rows
-    where the minute moved. [Origin_bare] drops that clock, and [Origin_row]
-    gives each turn a heading row with the speaker and the full timestamp. Folding headings into the
+  | Origin_bare  (** The same margin without clocks, spans or time separators. *)
+(** Where a message's origin is drawn. [Origin_bare] is the chat default
+    (see [Masc_tui_types.create_state]). [Origin_inline] draws a short clock
+    only where the minute moved. [Origin_row] gives each turn a heading row
+    with the speaker and the full timestamp. Folding headings into the
     gutter hands their rows back to the conversation: eight speakers taking
     turns otherwise spend eight rows of a forty-row pane on headings.
 

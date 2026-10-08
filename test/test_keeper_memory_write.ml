@@ -3611,6 +3611,10 @@ let test_dropped_originals_are_historical_and_searchable () =
   let retired = fact "canary deployment needs rollback assets" in
   let current = fact "current unrelated preference" in
   replace_current_facts ~keepers_dir ~keeper_id:meta.name [retired;current];
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
+  Fs_compat.invalidate_cached_writer journal;
+  Sys.remove journal;
+  Unix.mkdir journal 0o700;
   let retract reason =
     match Current.retract_fact ~keepers_dir ~keeper_id:meta.name ~now:3.
         ~source:{kind=Current.Explicit_retract;trace_id="drop"}
@@ -3622,6 +3626,19 @@ let test_dropped_originals_are_historical_and_searchable () =
       ~args:(`Assoc ["query",`String "canary deployment";
                     "source",`String source;"limit",`Int 10])
     |> Yojson.Safe.from_string in
+  Alcotest.(check string) "pending archive is an explicit search failure"
+    "dropped_read_failed" (string_field "error_kind" (search "dropped"));
+  let partial = search "all" in
+  Alcotest.(check bool) "pending archive does not report a clean miss" false
+    (Yojson.Safe.Util.member "no_match" partial = `Bool true);
+  Alcotest.(check bool) "pending archive is exposed in all search" true
+    (Yojson.Safe.Util.member "dropped_store_unavailable" partial <> `Null);
+  Unix.rmdir journal;
+  Alcotest.(check string) "missing journal cannot hide pending archive evidence"
+    "dropped_read_failed" (string_field "error_kind" (search "dropped"));
+  (match Current.upsert_fact ~keepers_dir ~keeper_id:meta.name ~now:3.5
+      ~source:{kind=Current.Explicit_write;trace_id="resume"} current with
+   | Ok _ -> () | Error _ -> Alcotest.fail "pending archive recovery failed");
   Alcotest.(check (list string)) "default current corpus has no retired body"
     [] (match_texts (search "current"));
   let result = search "dropped" in
@@ -3647,7 +3664,6 @@ let test_dropped_originals_are_historical_and_searchable () =
   let row = Yojson.Safe.Util.(member "matches" result |> to_list |> List.hd) in
   Alcotest.(check string) "latest reason is authoritative history" "new removal reason"
     (string_field "reason" row);
-  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
   let out = open_out_gen [Open_wronly;Open_append;Open_binary] 0o600 journal in
   Fun.protect ~finally:(fun () -> close_out out) (fun () -> output_string out "{broken}\n");
   Alcotest.(check string) "broken archive is a read failure" "dropped_read_failed"

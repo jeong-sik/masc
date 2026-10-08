@@ -40,6 +40,7 @@ type dashboard_purge_artifact =
   | Keeper_working_context_recall_artifact
   | Keeper_working_context_artifact
   | Keeper_memory_journal_artifact
+  | Keeper_memory_journal_lock_artifact
   | Keeper_memory_absorbed_artifact
   | Keeper_memory_events_artifact
   | Keeper_turn_boundaries_artifact

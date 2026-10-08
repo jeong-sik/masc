@@ -31,6 +31,17 @@ let test_validate_content_too_long () =
   | Error (Gate_protocol.Content_too_long 101) -> ()
   | _ -> fail "expected Content_too_long"
 
+let test_validate_counts_preserved_whitespace () =
+  let content = "  확인\n\n" in
+  let bytes = String.length content in
+  (match Gate_protocol.validate ~max_content_length:bytes (make_msg ~content ()) with
+   | Ok () -> ()
+   | Error _ -> fail "exact byte limit should accept the original message");
+  match Gate_protocol.validate ~max_content_length:(bytes - 1) (make_msg ~content ()) with
+  | Error (Gate_protocol.Content_too_long length) ->
+      check int "reports all original bytes" bytes length
+  | Ok () | Error _ -> fail "padding must count toward the content limit"
+
 let test_validate_empty_keeper_name () =
   match Gate_protocol.validate ~max_content_length:4000 (make_msg ~keeper_name:"" ()) with
   | Error Gate_protocol.Empty_keeper_name -> ()
@@ -308,6 +319,7 @@ let () =
           test_case "accepts valid" `Quick test_validate_ok;
           test_case "rejects empty content" `Quick test_validate_empty_content;
           test_case "rejects too-long content" `Quick test_validate_content_too_long;
+          test_case "counts preserved whitespace bytes" `Quick test_validate_counts_preserved_whitespace;
           test_case "rejects empty keeper" `Quick test_validate_empty_keeper_name;
           test_case "rejects empty user_id" `Quick test_validate_empty_user_id;
           test_case "rejects empty idempotency_key" `Quick test_validate_empty_idempotency_key;

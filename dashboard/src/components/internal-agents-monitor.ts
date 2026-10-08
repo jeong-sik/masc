@@ -480,7 +480,7 @@ function ExactPayload({ side, availability, value }: {
   return html`
     <div data-exact-payload=${side} data-payload-state=${availability?.state ?? 'pending'}>
       ${availability?.state === 'available'
-        ? html`<${JsonViewerCard} title=${title} data=${value} expandAll=${true} />`
+        ? html`<${JsonViewerCard} title=${title} data=${value} />`
         : html`<div class="ia-evi">
             <div class="ia-k">${title}</div>
             ${availability === null

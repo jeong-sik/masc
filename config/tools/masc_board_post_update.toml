@@ -29,19 +29,19 @@ Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs
 [[params]]
 name = "body"
 type = "string"
-description = "Alias for content; body wins if both are sent."
+description = "Alias for content; body wins if both are sent. Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[params]]
 name = "content"
 type = "string"
-description = "Full replacement post body."
+description = "Full replacement post body. Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[params]]
 name = "title"
 type = "string"
 description = """
 Optional new title. When omitted, the title is re-derived \
-from the new body."""
+from the new body. Write readable prose with natural word spacing (including Korean). Shorten the title instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."""
 
 [[params]]
 name = "author"

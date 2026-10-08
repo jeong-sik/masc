@@ -1327,7 +1327,8 @@ let test_api_diagnostic_preserves_terminal_error_detail () =
     match run_fixture path with
     | Error
         (Runtime_claude_code.Turn_failed_with_observation
-           { detail; tool_effect_attempted = false; response_emitted = false }) ->
+           { detail; api_error_status = Some 400
+           ; tool_effect_attempted = false; response_emitted = false }) ->
       check
         string
         "terminal detail retained"

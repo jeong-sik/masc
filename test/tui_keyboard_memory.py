@@ -585,15 +585,8 @@ def memory_journal_timeline_interaction(
             b"m",
             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
         )
-        # This scenario verifies the complete timestamp axis. Chat itself now
-        # rests in the clock-free reading layout, so opt into full metadata.
-        #
-        # One press, not two. The header names only the two densities away
-        # from the resting one: Origin_bare draws "metadata:off", Origin_row
-        # draws "metadata:full", and Origin_inline -- the default this pane
-        # opens in -- draws nothing, because a label saying you are where you
-        # started is not news. So "metadata:inline" is not a string this
-        # header can produce, and waiting for it starved.
+        # This scenario verifies timestamps, so opt into both clock levels.
+        send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
         send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
         # At rest the journal draws only its one-line summary: the header
         # with source, revision, and counts. The change fence under it is a

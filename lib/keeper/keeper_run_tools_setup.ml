@@ -354,6 +354,7 @@ let seed_tool_calls_from_ledger
      a seed that cannot be written degrades like one that cannot be read
      instead of failing the turn. *)
   match (try Ok (Keeper_tool_call_log.flush_now ()) with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn -> Error (Printexc.to_string exn)) with
   | Error detail ->
     Log.Keeper.warn

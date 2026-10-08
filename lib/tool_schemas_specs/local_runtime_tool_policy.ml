@@ -4,10 +4,6 @@ type operation =
   | Verify
   | Ollama_probe
 
-type model_exposure =
-  | Keeper_callable
-  | Operator_diagnostic
-
 type t =
   { required_permission : permission
   ; read_only : bool
@@ -17,11 +13,6 @@ type t =
 let operation_id = function
   | Verify -> "verify"
   | Ollama_probe -> "ollama_probe"
-;;
-
-let model_exposure = function
-  | Verify -> Operator_diagnostic
-  | Ollama_probe -> Operator_diagnostic
 ;;
 
 let execution_policy = function

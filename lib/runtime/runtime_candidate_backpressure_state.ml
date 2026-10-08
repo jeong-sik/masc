@@ -7,7 +7,22 @@ type attempt_failure =
   | Network_transient
   | Provider_timeout
 
+let attempt_failure_to_wire_name = function
+  | Server_error -> "server_error"
+  | Provider_capacity -> "provider_capacity"
+  | Network_transient -> "network_transient"
+  | Provider_timeout -> "provider_timeout"
+
+let attempt_failure_of_wire_name = function
+  | "server_error" -> Some Server_error
+  | "provider_capacity" -> Some Provider_capacity
+  | "network_transient" -> Some Network_transient
+  | "provider_timeout" -> Some Provider_timeout
+  | _ -> None
+
 type recorder = Keeper_recorder of { keeper_name : string }
+
+let recorder_keeper_name (Keeper_recorder { keeper_name }) = keeper_name
 
 let keeper_recorder ~keeper_name = Keeper_recorder { keeper_name }
 

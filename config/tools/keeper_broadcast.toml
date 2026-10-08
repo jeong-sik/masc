@@ -16,7 +16,7 @@ defer_loading = true
 name = "content"
 type = "string"
 required = true
-description = "Broadcast body text"
+description = "Broadcast body text Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 min_length = 1
 
 [[params]]

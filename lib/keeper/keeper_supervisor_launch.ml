@@ -605,7 +605,7 @@ let launch_supervised_fiber
       Keeper_metrics.(to_string SupervisorCleanupFailures)
       ~labels:
         [ "keeper", meta.name
-        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Fiber_start_rejected))
+        ; "site", "fiber_start_rejected"
         ]
       ();
     ignore

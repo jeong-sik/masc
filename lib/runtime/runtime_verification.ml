@@ -611,7 +611,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
         (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~account_home:execution.account_home
            ~quota_scope:(Runtime_instance.quota_scope_of_runtime runtime) ~config
-           ~prompt_capacity:(Runtime_instance.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
+           ~reasoning_effort ~tool ~prompt with
          | Ok result ->
            (* Every call the host reported for the verification turn must have
               run on the configured model. One on another model fails, and so

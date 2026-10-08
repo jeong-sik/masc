@@ -5889,6 +5889,7 @@ type state = {
   mutable gate_error: string option;
   mutable gate_snapshot_observed: bool;
   mutable gate_snapshot_read: Snapshot_read.t;
+  mutable gate_receipt_refresh_pending: bool;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
@@ -9220,6 +9221,7 @@ let create_state
   gate_error = None;
   gate_snapshot_observed = false;
   gate_snapshot_read = Snapshot_read.idle;
+  gate_receipt_refresh_pending = false;
   keeper_yolo_names = [];
   keeper_tool_modes_observed = false;
   keeper_tool_modes_error = None;

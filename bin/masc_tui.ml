@@ -2761,6 +2761,14 @@ let launch_keeper_turns_load state ~mailbox =
   end
   end
 
+(* Mutation receipts belong to the last confirmed workspace even while its
+   health cannot be read. A named replacement never inherits those receipts. *)
+let retains_receipt_workspace state expected_workspace =
+  match state.workspace_identity with
+  | Workspace_identity_match | Workspace_identity_match_unconfirmed _ ->
+      Option.exists (same_server_workspace expected_workspace) state.server_identity
+  | Workspace_identity_unread | Workspace_identity_mismatch _ -> false
+
 let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
@@ -11081,6 +11089,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_tool_approvals <- [];
   state.keeper_tool_approvals_error <- None;
   state.keeper_tool_approvals_observed <- false;
+  state.gate_receipt_refresh_pending <- false;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.gate_pending <- [];
   state.gate_modes <- None;
@@ -12360,9 +12369,15 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
        the bundle has no tick of its own to recover it. *)
     launch_surface_reads state ~mailbox state.view;
     refresh_acting_pane_changes state ~mailbox;
+    if state.gate_receipt_refresh_pending then
+      launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
     (* Retained nested readers own their selection independently of the list
        underneath. Reissue their observations without resetting navigation. *)
     (match state.view with
+     | Changes ->
+         Option.iter (fun path ->
+           launch_git_diff_load state ~mailbox ~keeper:state.changes_keeper ~path)
+           state.changes_tree_diff_path
      | Fusion ->
          (match state.fusion_launch with
           | Some (Fusion_launch_reading_presets _) ->
@@ -16559,6 +16574,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        state.gate_snapshot_read <- read;
        if state.workspace_identity = Workspace_identity_match
           && Option.exists (same_server_workspace expected_workspace) state.server_identity then
+       begin
+       state.gate_receipt_refresh_pending <- false;
        match result with
        | Ok snapshot ->
            state.gate_pending <- snapshot.Tui_decode.gs_pending;
@@ -16574,7 +16591,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Error detail ->
            state.gate_pending <- [];
            state.gate_snapshot_observed <- false;
-           state.gate_error <- Some detail)
+           state.gate_error <- Some detail
+       end)
   | Gate_approval_resolved (approval_id, approve, expected_workspace, result, generation) ->
       (* Release the single-action slot [launch_gate_resolve] took, whatever the
          outcome, so the header stops drawing [submitting] and the next decision
@@ -16585,8 +16603,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       state.approval_flow <- flow;
       if owns_action then (match result with
-       | Ok () when state.workspace_identity = Workspace_identity_match
-                    && Option.exists (same_server_workspace expected_workspace) state.server_identity ->
+       | Ok () when retains_receipt_workspace state expected_workspace ->
            report_action state "system"
              (Printf.sprintf "Gate %s %s"
                 (if approve then "approved" else "rejected")
@@ -16601,6 +16618,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1);
+           state.gate_receipt_refresh_pending <- true;
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Ok () -> ()
        | Error detail ->
@@ -16613,10 +16631,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       state.approval_flow <- flow;
       if owns_action then (match result with
-       | Ok () when state.workspace_identity = Workspace_identity_match
-                    && Option.exists (same_server_workspace expected_workspace) state.server_identity ->
+       | Ok () when retains_receipt_workspace state expected_workspace ->
            report_action state "system"
              (Printf.sprintf "Auto Judge retry started for %s" approval_id);
+           state.gate_receipt_refresh_pending <- true;
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Ok () -> ()
        | Error detail ->
@@ -17622,13 +17640,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              | None ->
                  state.changes_cursor <- 0;
                  state.changes_scroll <- 0;
-                 state.changes_diff_scroll <- 0);
+                 if Option.is_none state.changes_tree_diff_path then
+                   state.changes_diff_scroll <- 0);
             state.changes_diff_row <- kept_row;
-            refresh_recorded_diff_bounds state
-              ~reset:(Option.is_some state.changes_tree_diff_path || Option.is_none kept_row);
-            state.changes_tree_diff <- None;
-            state.changes_tree_diff_error <- None;
-            state.changes_tree_diff_path <- None
+            (* The tree diff owns its path independently of recorded rows.
+               A refreshed list cannot close or reset that retained reader. *)
+            if Option.is_none state.changes_tree_diff_path then
+              refresh_recorded_diff_bounds state ~reset:(Option.is_none kept_row)
         | Error detail -> state.changes_error <- Some detail)
   | Git_diff_loaded (path, result) ->
       (* An answer for a file the view has since left is not this view's

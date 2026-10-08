@@ -135,6 +135,60 @@ let test_haiku_5_5_row_reaches_the_wire () =
       (Option.is_none (Llm_provider.Pricing.pricing_for_model_opt model_id)))
 ;;
 
+(* Every entry point reaches the shared Anthropic serializer: ordinary and
+   streaming inspection, plus the explicit-policy artifact used by exact
+   generation/counting. Rejection preserves the caller's history. *)
+let test_haiku_prefill_admission () =
+  let module P = Llm_provider in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Haiku prefill" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let user = P.Types.make_message ~role:User [ Text "hello" ] in
+    let assistant = P.Types.make_message ~role:Assistant [ Text "Continue:" ] in
+    let expected_refusal =
+      "Backend_anthropic.build_request: model \"claude-haiku-5-5\" does not accept a final assistant prefill; end messages with a user turn" in
+    let prefill = [user; assistant] in
+    let continued = prefill @ [user] in
+    let config ?enable_thinking ?(response_format = P.Types.Off)
+        ?(kind = P.Provider_config.Anthropic)
+        ?(model_id = "claude-haiku-5-5") () =
+      P.Provider_config.make ~kind ~model_id
+        ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+        ?enable_thinking ~response_format () in
+    List.iter (fun enable_thinking ->
+      List.iter (fun response_format ->
+      let config = config ?enable_thinking ~response_format () in
+      List.iter (fun stream ->
+        check bool "prefill rejected before ordinary/streaming request is emitted" true
+          (match P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill () with
+           | Error (P.Http_client.AcceptRejected {reason}) -> String.equal reason expected_refusal
+           | Ok _ | Error _ -> false);
+        check bool "user-ending history with previous assistant remains accepted" true
+          (Result.is_ok
+            (P.Complete.inspect_serialized_request ~stream ~config ~messages:continued ())))
+        [false; true];
+      check bool "exact shared serializer artifact rejects the same prefill" true
+        (match P.Backend_anthropic.build_request_artifact_with_thinking_control
+          ~stream:false ~anthropic_thinking_control:(Some Capabilities.Anthropic_adaptive_default)
+          ~config ~messages:prefill () with
+         | _ -> false
+         | exception Invalid_argument reason -> String.equal reason expected_refusal);
+      check bool "counting cannot admit a refused completion" true
+        (match P.Backend_anthropic.build_count_tokens_request ~config ~messages:prefill () with
+         | _ -> false
+         | exception Invalid_argument reason -> String.equal reason expected_refusal)) [P.Types.Off; JsonMode]) [None; Some false];
+    List.iter (fun config ->
+      List.iter (fun stream ->
+        check bool "other model and Kimi continuation behavior is preserved" true
+          (Result.is_ok
+            (P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill ())))
+        [false; true])
+      [config ~model_id:"claude-haiku-4-5" ();
+       config ~kind:P.Provider_config.Kimi ~model_id:"kimi-k2" ()];
+    check (list string) "refusal never rewrites assistant content" ["Continue:"]
+      (List.filter_map (function P.Types.Text text -> Some text | _ -> None) assistant.content))
+;;
+
 let test_subscription_models_resolve_their_own_rows () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"subscription model rows"
@@ -1057,6 +1111,7 @@ let () =
             "Haiku 5.5 row reaches the wire"
             `Quick
             test_haiku_5_5_row_reaches_the_wire
+        ; test_case "Haiku final assistant admission" `Quick test_haiku_prefill_admission
         ; test_case
             "subscription models admit their reasoning efforts"
             `Quick

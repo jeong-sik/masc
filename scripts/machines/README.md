@@ -4,6 +4,9 @@ Run an independently built `masc-msx-addon-worker` or `masc-dos-addon-worker`
 without an HTTP server or Docker. This is a single-player host for a separate
 worker process; it does not attach tools to a running MASC server.
 
+For game-specific prompts and verified local examples, see
+[Sangokushi II (MSX) and III (DOS)](SANGOKUSHI.md).
+
 Use a separate workspace populated with **copies** of your local media:
 
 - MSX: `.masc/msx/bios/` and `.masc/msx/carts/`.

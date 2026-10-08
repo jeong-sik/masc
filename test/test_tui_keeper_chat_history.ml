@@ -6,7 +6,7 @@ module Transcript = Masc_tui_keeper_chat_transcript
 let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface
     ?(speaker_authority = "owner") content =
   `Assoc
-    ([ "id", `String "row"
+    ([ "id", `String id
      ; "role", `String "user"
      ; "content", `String content
      ; "ts", `Float ts
@@ -26,7 +26,7 @@ let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface
    normally see. [owner] is the operator's own, which is what these cases are
    about; the one row that lacks it falls to unresolved, which is the case
    below. *)
-let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?execution_id ?tool_call_name
+let row ?(id = "row") ?(ts = 1.0) ~role ?kind ?tool_call_id ?execution_id ?tool_call_name
     ?delivery_key ?transcript_slot ?turn_ref ?(speaker_authority = "owner")
     content =
   `Assoc
@@ -697,14 +697,14 @@ let test_delivery_keys_do_not_invent_turn_ownership () =
     `Assoc ["kind",`String "approval_lifecycle";"approval_id",`String "shared-id"]] in
   List.iter (fun key ->
     let decoded = decode (`List [
-      row ~role:"user" ~delivery_key:key
+      row ~id:"context-row" ~role:"user" ~delivery_key:key
         ~transcript_slot:(transcript_slot "accepted_user") "delivered context";
-      row ~role:"tool" ~delivery_key:key ~turn_ref:"trace-1#54"
+      row ~id:"tool-row" ~role:"tool" ~delivery_key:key ~turn_ref:"trace-1#54"
         ~transcript_slot:(tool_transcript_slot "approval-exec" 0)
         ~tool_call_name:"Read" "{}";
-      row ~role:"assistant" ~delivery_key:key ~turn_ref:"trace-1#54"
+      row ~id:"assistant-row" ~role:"assistant" ~delivery_key:key ~turn_ref:"trace-1#54"
         ~transcript_slot:(transcript_slot "terminal_assistant") "done";
-      row ~role:"user" ~delivery_key:(operation_key "shared-id")
+      row ~id:"operator-row" ~role:"user" ~delivery_key:(operation_key "shared-id")
         ~transcript_slot:(transcript_slot "accepted_user") "operator request"])
     in
     check (list (option string)) "delivery alone is unowned; explicit turn wins for nonoperations"

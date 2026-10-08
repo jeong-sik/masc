@@ -111,15 +111,6 @@ module For_testing : sig
     -> tool_calls:tool_call_detail list
     -> string list
 
-  val normalize_response_text_for_finalization
-    :  runtime_id:string
-    -> initial_messages:Agent_core.Types.message list
-    -> run_result:Runtime_agent.run_result
-    -> text:string
-    -> tool_names:string list
-    -> unit
-    -> (string, Agent_core.Error.t) result
-
   (** AGENT_CORE raw-trace sink for keeper turns: a fresh per-turn file under
       [Keeper_types_support.keeper_raw_trace_dir]. The dispatch section passes
       it into [Keeper_turn_driver.run_named] so

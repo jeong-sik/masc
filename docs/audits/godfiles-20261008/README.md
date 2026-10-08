@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Fourteen production candidates received
-bounded changes; their other responsibilities remain pending. The other 61
+is not a defect verdict or a new build gate. Fifteen production candidates received
+bounded changes; their other responsibilities remain pending. The other 60
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -96,6 +96,10 @@ The Core check requires an approved leader-selected candidate under the current
 execution protocol; no selection receipt or approval is fabricated here.
 
 ## Next work
+
+Pure Keeper completion policy and response normalization, removal of the ignored
+history argument, and direct adapter-consumer checks are recorded in
+[turn-response-contract/README.md](turn-response-contract/README.md).
 
 Continue semantic review of every pending production candidate in
 `inventory.json`, then relevant tests/tooling. Start with `lib/tui_decode.ml`,

@@ -245,7 +245,9 @@
       "path": "lib/keeper/keeper_agent_run.ml",
       "baseline_lines": 2649,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: pure completion policy and response normalization moved to a direct owner; ignored history argument and testing forwarders removed; remaining orchestration responsibilities pending semantic review",
+      "current_lines": 2575,
+      "validation_artifact": "turn-response-contract/README.md"
     },
     {
       "path": "lib/keeper/keeper_approval_queue.ml",
@@ -747,7 +749,9 @@
       "path": "test/test_keeper_claude_code_runtime.ml",
       "baseline_lines": 3974,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: response-normalization consumer calls canonical owner; existing quiet-completion adapter scenario verified; remaining fixture and lifecycle responsibilities pending semantic review",
+      "current_lines": 3974,
+      "validation_artifact": "turn-response-contract/README.md"
     },
     {
       "path": "test/test_keeper_event_queue.ml",
@@ -795,7 +799,9 @@
       "path": "test/test_keeper_muse_runtime.ml",
       "baseline_lines": 2684,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: response-normalization consumer calls canonical owner; existing quiet-completion adapter scenario verified; remaining fixture and lifecycle responsibilities pending semantic review",
+      "current_lines": 2687,
+      "validation_artifact": "turn-response-contract/README.md"
     },
     {
       "path": "test/test_keeper_mutex_coverage.ml",

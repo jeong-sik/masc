@@ -14,11 +14,14 @@ The operator does both steps. Nothing in MASC starts this Firefox or this host.
    kept for this.
 
    ```sh
+   FIREFOX=/Applications/Firefox.app/Contents/MacOS/firefox
    PROFILE="$HOME/.masc/keeper-firefox-profile"
    mkdir -p "$PROFILE"
-   /Applications/Firefox.app/Contents/MacOS/firefox \
-     --no-remote --profile "$PROFILE" --remote-debugging-port 9222
+   "$FIREFOX" --no-remote --profile "$PROFILE" --remote-debugging-port 9222
    ```
+
+   `FIREFOX` is the Firefox executable. The path above is the macOS one, the
+   only platform this was run on. On Linux it is the `firefox` on the `PATH`.
 
    This is a second Firefox beside the one in everyday use, which keeps
    running without the flag. Log in there once, only to the sites a Keeper
@@ -31,8 +34,14 @@ The operator does both steps. Nothing in MASC starts this Firefox or this host.
 2. Run the host for the workspace the MASC server serves.
 
    ```sh
+   BASE_PATH="$HOME/masc-workspace"
    masc-browser-host --base-path "$BASE_PATH" --bidi-url ws://127.0.0.1:9222/session
    ```
+
+   `BASE_PATH` is the directory that holds that workspace's `.masc`; the path
+   above is an example. Set it before the command: an empty `--base-path` is
+   taken as the current directory, not as "use the default". Leaving the
+   option out uses `MASC_BASE_PATH`.
 
    The browser lane has to be installed for that workspace first:
    `connectors/browser/install-host.sh` writes the lane token the host and the
@@ -51,9 +60,16 @@ from the list and keeps its `clientId` for the task.
 
 The host runs in the foreground until it is stopped. It also ends by itself
 when a command's outcome is unknown, or when a poll or a result does not reach
-the server, so restarting the MASC server ends it. It does not retry; start it
-again. The reason goes to the host's own log output and is not reported to
-the server.
+the server, so restarting the MASC server ends it. It does not retry. The
+reason goes to the host's own log output and is not reported to the server.
+
+Attaching again takes both steps, Firefox first. The host does not end the
+BiDi session it created, the session stays in Firefox after the host is gone,
+and Firefox takes one session at a time. A host started against the same
+Firefox is refused with `session not created` and exits. Quit that Firefox,
+start it with the same command and profile, then start the host. Measured on
+Firefox 157.0.1 on 2026-10-08, after a host stopped with SIGTERM and with
+SIGKILL (RFC browser-live-one-connection, section 2.4).
 
 The peer attaches only to a browser that reports itself as `firefox`. Zen has
 not been tried.

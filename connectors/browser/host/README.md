@@ -91,7 +91,7 @@ The same executable attaches to a Firefox started with
 `--remote-debugging-port` when it is run with `--bidi-url`. Firefox does not
 start it in that mode; the operator does. A BiDi connection serves the trusted
 pointer work the extension cannot (`hover_at`, `drag`). The steps, what the
-port exposes and when the host ends are in
+port exposes, when the host ends and what attaching again takes are in
 [Attached Firefox BiDi peer](../../../docs/design/browser-bidi-live-host.md#attaching-a-connection).
 
 ## Connecting an ordinary Firefox / Zen profile

@@ -200,7 +200,8 @@ jobs:
             echo "LDFLAGS=-L$openssl_prefix/lib"
           } >> "$GITHUB_ENV"
       - uses: ./.github/actions/pin-ocaml-deps
-      - uses: ./.github/actions/install-ocaml-deps
+      - name: Install worker build dependencies
+        run: opam install ./masc.opam --deps-only --locked --yes
       - name: Build local worker executables and record dependencies
         run: |
           opam exec -- dune build bin/masc_msx_addon_worker.exe bin/masc_dos_addon_worker.exe

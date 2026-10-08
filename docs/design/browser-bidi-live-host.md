@@ -10,18 +10,23 @@ change preferences, or obtain application tokens.
 
 The operator does both steps. Nothing in MASC starts this Firefox or this host.
 
-1. Start Firefox with its Remote Agent on a loopback port.
+1. Start a Firefox with its Remote Agent on a loopback port, on a profile
+   kept for this.
 
    ```sh
-   /Applications/Firefox.app/Contents/MacOS/firefox --remote-debugging-port 9222
+   PROFILE="$HOME/.masc/keeper-firefox-profile"
+   mkdir -p "$PROFILE"
+   /Applications/Firefox.app/Contents/MacOS/firefox \
+     --no-remote --profile "$PROFILE" --remote-debugging-port 9222
    ```
 
-   The command-line flag is the only way to enable the Remote Agent, so a
-   Firefox that is already running without it has to be quit first. Any local
-   process can connect to that port, drive the browser and read its cookies;
-   there is no authentication. A profile that is logged in only where a Keeper
-   works (`--profile <directory>`) limits what the port exposes to those
-   sites, at the cost of logging in there once.
+   This is a second Firefox beside the one in everyday use, which keeps
+   running without the flag. Log in there once, only to the sites a Keeper
+   works on. Any local process can connect to that port, drive that browser
+   and read its cookies; there is no authentication. The dedicated profile is
+   what keeps that to those sites (RFC browser-live-one-connection, decision
+   1). The command-line flag is the only way to enable the Remote Agent, so it
+   cannot be turned on in a Firefox that is already running.
 
 2. Run the host for the workspace the MASC server serves.
 
@@ -38,6 +43,11 @@ The operator does both steps. Nothing in MASC starts this Firefox or this host.
 The connection is attached when the TUI's Browser Lane picker (`b`) lists a
 `Firefox · BiDi` row, and `/api/v1/dashboard/browser-lane/clients` reports a
 client with `transport: "webdriver_bidi"`.
+
+If the everyday Firefox also has the extension connected, the live lane has
+two browsers. A request that names no `clientId` is then refused as
+`ambiguous_browser_clients`; a Keeper picks the `webdriver_bidi` connection
+from the list and keeps its `clientId` for the task.
 
 The host runs in the foreground until it is stopped. It also ends by itself
 when a command's outcome is unknown, or when a poll or a result does not reach

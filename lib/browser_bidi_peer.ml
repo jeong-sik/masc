@@ -16,23 +16,53 @@ let metadata t =
   let* name = string "browserName" caps in
   if name <> "firefox" then Error "BiDi peer must be Firefox"
   else let* version=string "browserVersion" caps in t.version<-Some version;Ok version
+(* The socket takes one message of at most this many bytes; a larger one ends
+   the connection, and with it this client. *)
+let reply_limit_bytes = 8 * 1024 * 1024
+(* A page script's answer crosses the socket as a JSON string inside the BiDi
+   envelope, where one UTF-16 unit of the answer is at most three bytes: an
+   escaped quote or backslash is two, a BMP character three, and
+   JSON.stringify has already spelled control characters and lone surrogates
+   in ASCII. An answer of at most a quarter of the limit in units therefore
+   fits with room left for the envelope. A longer one is refused in the page,
+   which answers with its length as a number instead of the string. *)
+let script_answer_limit_units = reply_limit_bytes / 4
+let answer_too_large units =
+  Printf.sprintf "page_answer_exceeds_bidi_reply_limit: %d UTF-16 units, at most %d cross this connection"
+    units script_answer_limit_units
 let evaluate t context body args =
   let declaration = "function(args) { " ^ Browser_scene_script.runtime
-    ^ "\nreturn JSON.stringify((function(){" ^ body ^ "}).call(null,args)); }" in
+    ^ "\nconst answer = JSON.stringify((function(){" ^ body ^ "}).call(null,args));"
+    ^ Printf.sprintf "\nreturn typeof answer === 'string' && answer.length > %d ? answer.length : answer; }"
+        script_answer_limit_units in
   let* result = t.command "script.callFunction" (obj [
     "functionDeclaration",str declaration;"target",obj ["context",str context];
     "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str (Yojson.Safe.to_string args)]]]) in
   (* Arguments cross the protocol as a JSON string, decoded by the fixed body. *)
   match field "type" result with
   | Some (`String "success") ->
-    let* value = required "result" result in let* encoded = string "value" value in
-    (try Ok (Yojson.Safe.from_string encoded) with Yojson.Json_error _ -> Error "invalid BiDi script JSON")
+    let* value = required "result" result in
+    (match field "type" value, field "value" value with
+     | Some (`String "string"), Some (`String encoded) ->
+       (try Ok (Yojson.Safe.from_string encoded) with Yojson.Json_error _ -> Error "invalid BiDi script JSON")
+     | Some (`String "number"), Some (`Int units) -> Error (answer_too_large units)
+     | _ -> Error "invalid BiDi script result")
   | Some (`String "exception") -> Error "Firefox rejected the fixed page script"
   | _ -> Error "invalid BiDi script result"
 let script t context body args = evaluate t context ("arguments[0]=JSON.parse(arguments[0]);\n" ^ body) args
 let scene t context args = script t context "return browserScene(arguments[0]);" args
 let page t context = script t context
   "return {url:location.href,title:document.title,text:document.body?.innerText ?? '',active:document.visibilityState==='visible',scrollX,scrollY};" (obj [])
+(* A read that answers for the whole document. The extension runs its reads
+   once the parser is done; nothing waits for the parser here, so a document
+   still being parsed is refused instead of answered with the part that
+   exists so far. *)
+let parsed_document t context body args =
+  let* answer = script t context
+    ("if (document.readyState === 'loading') return {documentLoading:true};\n" ^ body) args in
+  if Option.is_some (field "documentLoading" answer)
+  then Error "the document is still loading; read it again"
+  else Ok answer
 let tree t =
   let* result = t.command "browsingContext.getTree" (obj []) in
   match field "contexts" result with
@@ -63,16 +93,9 @@ let read t context args =
     | Some (`Int n) when n > 0 && n <= 100000 -> Ok n | _ -> Error "invalid maxChars" in
   match field "includeHtml" args with
   (* The automation lane's document helper: it drops HTML over 1 MiB and says
-     so, instead of returning a cut document. The extension runs it once the
-     parser is done; nothing waits for the parser here, and a half-parsed
-     document must not be recorded as the complete one. *)
+     so, instead of returning a cut document. *)
   | Some (`Bool true) ->
-    let* page = script t context
-      ("if (document.readyState === 'loading') return {documentLoading:true};\n"
-       ^ Browser_lane.Document.runtime ^ "\nreturn browserDocument();") (obj []) in
-    if Option.is_some (field "documentLoading" page)
-    then Error "the document is still loading; read it again"
-    else Ok page
+    parsed_document t context (Browser_lane.Document.runtime ^ "\nreturn browserDocument();") (obj [])
   | None | Some (`Bool false) -> script t context
       "const chars=Array.from(document.body?.innerText??''); const cap=arguments[0].cap; return {url:location.href,title:document.title,text:chars.slice(0,cap).join(''),chars:chars.length,truncated:chars.length>cap};" (obj ["cap",`Int cap])
   | _ -> Error "invalid includeHtml"
@@ -132,7 +155,7 @@ let dispatch t ~verb args =
   | Page_elements -> on_tab (fun context id -> pre (
         (* The inventory the automation lane reads, so its selectors mean the
            same thing to the DOM interactions below. *)
-        let* p=script t context Browser_page_script.elements (obj []) in with_tab id p))
+        let* p=parsed_document t context Browser_page_script.elements (obj []) in with_tab id p))
   | Page_read -> on_tab (fun context id -> pre (let* p=read t context args in with_tab id p))
   | Page_scene -> on_tab (fun context id -> pre (let* fields=match args with `Assoc xs->Ok xs|_->Error "invalid scene arguments" in
         let* p=scene t context (obj (("mode",str "read")::fields)) in with_tab id p))
@@ -206,7 +229,7 @@ let with_connection ~env ~timeout ~url use =
          error, not an exception for the native host, which catches [Eio.Io]
          alone and would exit without a log line. *)
       let* wsd=match Ws_direct_eio.Client.connect ~sw ~clock ~host:authority ~resource
-          ~max_message:(8*1024*1024) flow builder with
+          ~max_message:reply_limit_bytes flow builder with
         | wsd->Ok wsd
         | exception Failure detail->Error ("BiDi connection: " ^ detail) in
       let command method_ params =

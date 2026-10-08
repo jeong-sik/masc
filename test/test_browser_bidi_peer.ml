@@ -42,18 +42,63 @@ let test_document_source () =
      | _ -> fail "the document read ran other than one script")
   | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail) ->
     failf "the peer refused a document-source read: %s" detail
-(* A document the parser has not finished is not returned as its source. *)
+(* The two reads that answer for the whole document, its source and its
+   element inventory. *)
+let whole_document_reads =
+  ["the document source", Peer.Page_read, obj ["tabId",`Int 1;"includeHtml",`Bool true];
+   "the element inventory", Peer.Page_elements, obj ["tabId",`Int 1]]
+(* A document the parser has not finished is not answered for: neither its
+   source nor an inventory that would call the part parsed so far complete. *)
 let test_document_still_loading () =
-  let command method_ _ = match method_ with
-    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
-    | "script.callFunction" -> Ok (script_value (obj ["documentLoading",`Bool true]))
-    | other -> failf "unexpected document command: %s" other in
-  let peer=Peer.create ~command in
-  match Peer.dispatch peer ~verb:Peer.Page_read (obj ["tabId",`Int 1;"includeHtml",`Bool true]) with
-  | Error (Peer.Before_effect detail) ->
-    check string "the refusal says to read again" "the document is still loading; read it again" detail
-  | Error (Peer.Outcome_unknown detail) -> failf "a read was reported as an unknown outcome: %s" detail
-  | Ok _ -> fail "a document still loading was returned as its source"
+  List.iter (fun (name, verb, args) ->
+    let ran=ref [] in
+    let command method_ params = match method_ with
+      | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+      | "script.callFunction" ->
+        ran:=Yojson.Safe.Util.(params |> member "functionDeclaration" |> to_string) :: !ran;
+        Ok (script_value (obj ["documentLoading",`Bool true]))
+      | other -> failf "unexpected document command: %s" other in
+    let peer=Peer.create ~command in
+    (match Peer.dispatch peer ~verb args with
+     | Error (Peer.Before_effect detail) ->
+       check string (name ^ ": the refusal says to read again")
+         "the document is still loading; read it again" detail
+     | Error (Peer.Outcome_unknown detail) -> failf "%s was reported as an unknown outcome: %s" name detail
+     | Ok _ -> failf "%s was answered for a document still loading" name);
+    match !ran with
+    | [declaration] ->
+      check bool (name ^ ": the page is asked whether its parser is done") true
+        (String_util.contains_substring declaration "document.readyState === 'loading'")
+    | _ -> failf "%s ran other than one script" name) whole_document_reads
+(* An answer too long for one socket message is refused in the page, which
+   sends its length as a number. The peer reports that before any effect
+   rather than receiving a message that would end the connection. *)
+let test_answer_too_large_for_the_socket () =
+  let measured = Peer.script_answer_limit_units + 1 in
+  List.iter (fun (name, verb, args) ->
+    let ran=ref [] in
+    let command method_ params = match method_ with
+      | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+      | "script.callFunction" ->
+        ran:=Yojson.Safe.Util.(params |> member "functionDeclaration" |> to_string) :: !ran;
+        Ok (obj ["type",`String "success";"result",obj ["type",`String "number";"value",`Int measured]])
+      | other -> failf "unexpected command: %s" other in
+    let peer=Peer.create ~command in
+    (match Peer.dispatch peer ~verb args with
+     | Error (Peer.Before_effect detail) ->
+       check string (name ^ ": the refusal names the size and the bound")
+         (Printf.sprintf "page_answer_exceeds_bidi_reply_limit: %d UTF-16 units, at most %d cross this connection"
+            measured Peer.script_answer_limit_units) detail
+     | Error (Peer.Outcome_unknown detail) -> failf "%s was reported as an unknown outcome: %s" name detail
+     | Ok _ -> failf "%s accepted a length as its answer" name);
+    match !ran with
+    | [declaration] ->
+      check bool (name ^ ": the page measures its answer against the bound") true
+        (String_util.contains_substring declaration
+           (Printf.sprintf "answer.length > %d ? answer.length : answer" Peer.script_answer_limit_units))
+    | _ -> failf "%s ran other than one script" name) whole_document_reads;
+  check bool "three bytes a unit, plus the envelope, fit one message" true
+    (Peer.script_answer_limit_units * 3 < Peer.reply_limit_bytes)
 (* The inventory is the automation lane's own page script, run in the tab the
    request names and returned with that tab's ID. *)
 let test_element_inventory () =
@@ -261,5 +306,6 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error];
   "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "document source is the shared document helper" `Quick test_document_source;
-    test_case "a document still loading is not its source" `Quick test_document_still_loading; test_case "parsed pointer boundary" `Quick test_pointer_validation;
+    test_case "a document still loading is not answered for" `Quick test_document_still_loading;
+    test_case "an answer too large for the socket is refused in the page" `Quick test_answer_too_large_for_the_socket; test_case "parsed pointer boundary" `Quick test_pointer_validation;
     test_case "the peer serves what the lane table says" `Quick test_peer_serves_what_the_lane_table_says]]

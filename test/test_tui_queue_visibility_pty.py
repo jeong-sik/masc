@@ -32,6 +32,7 @@ class AcceptedQueueReconnectFixture:
         self.attempts = []
         self.lock = threading.Lock()
         self.acceptance = None
+        self.recorded_run_start = None
         self.server_execution_id = None
         self.fixtures["/api/v1/keepers/turns"] = self.turns
 
@@ -66,6 +67,8 @@ class AcceptedQueueReconnectFixture:
                     with self.queue.lock:
                         self.queue.turn_token = "1ed48ab9-11a3-49e2-af82-31f6029ca2d3"
                         self.server_execution_id = request["request_id"]
+                    execution = _keyboard_chat.keeper_chat_succeeded_response(body)
+                    self.recorded_run_start = execution.body.split(b"\n\n")[1]
                     yield self.acceptance
                     if not self.disconnect.wait(timeout=30):
                         raise AssertionError("accepted stream was never disconnected")
@@ -82,12 +85,9 @@ class AcceptedQueueReconnectFixture:
             self.reconnect_requested.set()
             if not self.release_run_start.wait(timeout=30):
                 raise AssertionError("reconnect run-start gate was never released")
-            response = _keyboard_chat.keeper_chat_succeeded_response(body)
-            blocks = [block for block in response.body.split(b"\n\n") if block]
-
             def run_then_terminal():
-                if self.acceptance is None:
-                    raise AssertionError("reconnect preceded the initial acceptance")
+                if self.acceptance is None or self.recorded_run_start is None:
+                    raise AssertionError("reconnect preceded the recorded acceptance/start")
                 with self.queue.lock:
                     if request["request_id"] not in self.queue.started_requests:
                         raise AssertionError("reconnect cannot start an execution while paused")
@@ -96,10 +96,12 @@ class AcceptedQueueReconnectFixture:
                 # A re-subscription repeats acceptance, then exposes only
                 # RUN_STARTED. No reply or terminal event can explain the
                 # ensuing reduction in the pending count.
-                yield self.acceptance + blocks[1] + b"\n\n"
+                yield self.acceptance + self.recorded_run_start + b"\n\n"
                 if not self.release_terminal.wait(timeout=30):
                     raise AssertionError("reconnect terminal gate was never released")
                 self.terminal_sent.set()
+                response = _keyboard_chat.keeper_chat_succeeded_response(body)
+                blocks = [block for block in response.body.split(b"\n\n") if block]
                 yield b"\n\n".join(blocks[2:]) + b"\n\n"
                 with self.queue.admitted:
                     self.queue.finished_requests.add(request["request_id"])

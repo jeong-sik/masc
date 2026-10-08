@@ -376,11 +376,21 @@ let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
                 "frames_ago", `Int (frame.number - last)])
           (recent_players_of ~now:frame.number entries))] @ pixel_fields)
 
-let tick_response ~config ~body =
+(* With [config] the body may name the workspace the terminal read, and a
+   different one is refused before the tick decoder or the machine runs, with
+   the answer every MSX write gives. Without [config] the body is not bound to
+   a workspace. Either way the tick decoder sees the body without the field. *)
+let tick_response_in (config : Workspace.config option) body =
   let error status message =
     status, write_error_json message
   in
-  let decoded = Result.bind (decode_write_body ~config ~body) (fun args ->
+  let args = match config with
+    | Some config -> decode_write_body ~config ~body
+    | None ->
+      (match Yojson.Safe.from_string body with
+       | exception Yojson.Json_error _ -> Error (error `Bad_request "tick body must be valid JSON")
+       | json -> Ok json) in
+  let decoded = Result.bind args (fun args ->
     Result.map_error (error `Bad_request) (decode_tick args)) in
   match decoded with
   | Error refusal -> refusal
@@ -410,6 +420,11 @@ let tick_response ~config ~body =
       error `Internal_server_error "MSX tick failed; read the current frame before retrying"
 ;;
 
+let tick_response ~body = tick_response_in None body
+
+let tick_response_bound ~config ~body = tick_response_in (Some config) body
+
+
 (* The realtime driver (RFC-0439 §3.2, poll-cadence tick). The spectating TUI
    posts this a few times a second to advance the shared machine, so a game
    flows even when no keeper is pressing a key. Body: {frames:N}, clamped to
@@ -418,7 +433,7 @@ let tick_response ~config ~body =
 let handle_tick ~state request reqd =
   Http.Request.read_body_async reqd (fun body ->
       let config = Mcp_server.workspace_config state in
-      let status, json = tick_response ~config ~body in
+      let status, json = tick_response_bound ~config ~body in
       Http.Response.json_value_on_cpu ~status ~request
         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
 ;;

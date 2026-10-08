@@ -149,7 +149,7 @@ let decode previous (status,json) =
   | 200, _ -> Result.map (fun (frame,pixels,mark) -> Advanced (frame,mark),pixels) (decode_frame previous json)
   | _ -> Error "MSX tick: unexpected response status"
 
-let fetch t ~host ~port ~headers ~request =
+let fetch ?(body_fields = []) t ~host ~port ~headers ~request =
   let scope = { host; port; headers } and token = ref () in
   let previous = Mutex.protect t.mutex (fun () ->
     if not (Option.fold ~none:false ~some:(same_scope scope) t.scope) then
@@ -158,7 +158,7 @@ let fetch t ~host ~port ~headers ~request =
     t.request_token <- token;
     t.pixels) in
   let body = Yojson.Safe.to_string (`Assoc
-    (["pixel_response", `String "retained"] @
+    (body_fields @ ["pixel_response", `String "retained"] @
      match previous with None -> [] | Some pixels -> ["known_pixels", reference_json pixels.reference])) in
   let result = Result.bind (request ~body) (decode previous) in
   Mutex.protect t.mutex (fun () ->

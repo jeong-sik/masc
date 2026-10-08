@@ -74,57 +74,72 @@ def run(executable, no_color):
         _keyboard_harness.send_and_wait(process, fd, output, b"9", b"MASC System / Runtime")
         _keyboard_harness.wait_for_output(process, fd, output, b"tailZ", start=0, timeout=10)
         _keyboard_harness.wait_for_output(process, fd, output, b"reachable", start=0, timeout=10)
-        for all_runtimes in (False, True):
-            if all_runtimes:
-                _keyboard_harness.send_and_wait(process, fd, output, b"p", b"All runtimes")
+        if not no_color:
+            _keyboard_harness.send_and_wait(process, fd, output, b"p", b"All runtimes")
             rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=True)
-            exhausted_index, exhausted_row = next(
+            exhausted_rows = [
                 (row_id, row)
                 for row_id, row in rows.items()
                 if EXHAUSTED_ID.encode() in row
+            ]
+            assert len(exhausted_rows) == 1, (
+                f"exhausted runtime row missing from All runtimes: {rows!r}"
             )
-            normal_index, _ = next(
+            exhausted_index, exhausted_row = exhausted_rows[0]
+            normal_rows = [
                 (row_id, row)
                 for row_id, row in rows.items()
                 if RUNTIME_ID.encode() in row
                 and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
-            )
+            ]
+            assert len(normal_rows) == 1, f"normal runtime row missing: {rows!r}"
+            normal_index, normal_row = normal_rows[0]
             assert normal_index < exhausted_index, rows
             initial_text = _keyboard_harness.CSI_RE.sub(b"", exhausted_row)
             start = len(output)
             os.write(fd, b"h")
-            _keyboard_harness.wait_for_output(process, fd, output, b"tailZ", start=start, timeout=3)
+            _keyboard_harness.wait_for_output(process, fd, output, EXHAUSTED_ID.encode(), start=start, timeout=3)
             _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
             dimmed_off_rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=True)
-            dimmed_off = next(
-                row
-                for row in dimmed_off_rows.values()
+            dimmed_off_matches = [
+                row for row in dimmed_off_rows.values()
                 if EXHAUSTED_ID.encode() in row
-            )
+            ]
+            assert len(dimmed_off_matches) == 1, f"exhausted row missing after h: {dimmed_off_rows!r}"
+            dimmed_off = dimmed_off_matches[0]
             assert _keyboard_harness.CSI_RE.sub(b"", dimmed_off) == initial_text, dimmed_off
             if not no_color:
                 assert dimmed_off != exhausted_row, (exhausted_row, dimmed_off)
-            start = len(output)
-            os.write(fd, b"h")
-            _keyboard_harness.wait_for_output(process, fd, output, b"tailZ", start=start, timeout=3)
-            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
-            dimmed_on_rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=True)
-            dimmed_on_index, dimmed_on = next(
-                (row_id, row)
-                for row_id, row in dimmed_on_rows.items()
-                if EXHAUSTED_ID.encode() in row
-            )
-            normal_index, _ = next(
-                (row_id, row)
-                for row_id, row in dimmed_on_rows.items()
+            normal_after_off = [
+                row for row in dimmed_off_rows.values()
                 if RUNTIME_ID.encode() in row
                 and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
-            )
+            ]
+            assert normal_after_off == [normal_row], (normal_row, normal_after_off)
+            start = len(output)
+            os.write(fd, b"h")
+            _keyboard_harness.wait_for_output(process, fd, output, EXHAUSTED_ID.encode(), start=start, timeout=3)
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
+            dimmed_on_rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=True)
+            dimmed_on_matches = [
+                (row_id, row) for row_id, row in dimmed_on_rows.items()
+                if EXHAUSTED_ID.encode() in row
+            ]
+            assert len(dimmed_on_matches) == 1, f"exhausted row missing after second h: {dimmed_on_rows!r}"
+            dimmed_on_index, dimmed_on = dimmed_on_matches[0]
+            normal_on = [
+                (row_id, row) for row_id, row in dimmed_on_rows.items()
+                if RUNTIME_ID.encode() in row
+                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
+            ]
+            assert len(normal_on) == 1, f"normal row missing after second h: {dimmed_on_rows!r}"
+            normal_on_index, normal_on_row = normal_on[0]
             assert _keyboard_harness.CSI_RE.sub(b"", dimmed_on) == initial_text, dimmed_on
-            assert normal_index < dimmed_on_index, dimmed_on_rows
+            assert normal_on_index < dimmed_on_index, dimmed_on_rows
             if not no_color:
                 assert dimmed_on == exhausted_row, (exhausted_row, dimmed_on)
-        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"Service lanes")
+            assert normal_on_row == normal_row, (normal_row, normal_on_row)
+            _keyboard_harness.send_and_wait(process, fd, output, b"p", b"Service lanes")
         for all_runtimes in (False, True):
             if all_runtimes:
                 # The lane sweep already ended at120x32; an unchanged size

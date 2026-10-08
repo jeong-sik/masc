@@ -238,26 +238,50 @@ does next:
   `state` and `message` only, to pass on to the operator. An answer that
   offers a connection in `servingClients` has no `bidiHost`.
 
+Each of the three reads the record first and asks the server for its
+connections once, after that. What an answer says of the host and the
+connections it lists are of that one list.
+
 The paragraph says what comes before the next host. That follows what became
-of the last one's session:
+of the last one's session. Once a host has run, the host command in the
+paragraph names the address that host was given, and the Firefox flag names
+that address's port:
 
 | The last host | Before the next one |
 |---|---|
-| ended, session `none` | Nothing: the host command alone, while that Firefox still runs. |
-| ended, session `left` | Restart that Firefox. |
+| ended, session `none`, after it was attached | Nothing: the host command, while that Firefox still runs. |
+| ended, session `none`, before Firefox gave it a session | Check that a Firefox answers at that address, then the host command. |
+| ended, session `left` | Restart the Firefox at that address. |
 | ended, session `unknown` | Start that Firefox again, restarting it if it still runs. |
-| ended, session `refused` | Stop the other host attached to that Firefox or, when none is, restart that Firefox. |
+| ended, session `refused` | Stop a host still attached to that Firefox, then the host command. When that host is refused too with none attached, restart that Firefox first. |
 | died | Run the host. When Firefox refuses it a session, restart that Firefox and run it again. |
 
 When the workspace has no launcher, or one that is not as an installation
-wrote it, the paragraph says to install the lane first.
+wrote it, the paragraph says to install the lane first. A paragraph of a
+running host, and of a record that cannot be read while a host holds the
+lock, names no command: there is none to run.
+
+A path and an address in a command are written as one shell word each, in
+single quotes. The reason for ending is the host's own words: it is set in
+double quotes, and a double quote in it is written `\"`.
 
 A host can run and be attached while the answering server does not list its
-client. Then hover and drag are refused on that server, and the paragraph
-names what makes the two differ: the host polls another server (an exported
-`MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT` in its shell), it has not polled
-for 120 seconds and the server ended its connection, or the server started
-moments ago.
+client:
+
+- The server lists no BiDi connection. Hover and drag are refused on that
+  server, and the paragraph names what makes the two differ: the host polls
+  another server (an exported `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT` in
+  its shell), it has not polled for 120 seconds and the server ended its
+  connection, or the server started moments ago.
+- The server lists another BiDi connection. That connection is this host's
+  when it registered again under a new ID that it could not write to its
+  record; otherwise it is another host's. The paragraph says both and does
+  not say that hover and drag are refused.
+
+The record can also say that no host runs while the server lists a BiDi
+connection: a host that died stays listed until 120 seconds pass without a
+poll, and a host started for another workspace can poll this server. The
+paragraph says so beside what the record says.
 
 Attaching again is the host command alone. A host that is stopped, or ends
 by itself, first ends the BiDi session it asked for; Firefox keeps running

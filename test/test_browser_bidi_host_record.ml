@@ -6,7 +6,7 @@
 open Alcotest
 module Record = Masc.Browser_bidi_host_record
 module Peer = Masc.Browser_bidi_peer
-module Launcher = Masc.Browser_lane_launcher
+module Status = Masc.Browser_bidi_host_status
 
 (* What masc doctor says of the BiDi host for this workspace, and how it
    rates it. The doctor is another process than the host, as this one is. *)
@@ -363,10 +363,8 @@ let test_a_reader_follows_a_host_from_start_to_death () =
         (String_util.contains_substring message (Printf.sprintf "(pid %d) is attached to" pid));
       check bool "without a server it does not claim the host polls one" true
         (String_util.contains_substring message "not observed here"));
-     check bool "the launcher observation carries the same state" true
-       (match
-          (Launcher.observe ~base_path:base ~server:(fun () -> Launcher.Not_serving)).bidi_host
-        with
+     check bool "the observation every reader answers from carries the same state" true
+       (match (Status.observe ~base_path:base).record with
         | Record.Running _ -> true
         | Record.Never_started | Record.Ended _ | Record.Died _ | Record.Unreadable _ -> false);
      (* Asking needs no leave to write the lock file. *)

@@ -15,7 +15,7 @@ let state () =
 
 let running ?(keeper_name = "alpha") lane : Decode.keeper_turn_row =
   { ktr_chat_control_token = None; ktr_keeper_name = keeper_name
-  ; ktr_state = Keeper_turn_running { lane; started_at_unix = 1.; interrupt_token = "fixture-token"; preview = None }
+  ; ktr_state = Keeper_turn_running { lane; started_at_unix = 1.; interrupt_token = "fixture-token"; turn_ref = None; preview = None }
   }
 
 let live ?(keeper_name = "alpha") ?(request_id = "request-1") state admission =
@@ -69,7 +69,9 @@ let test_the_band_does_not_repeat_the_admission () =
            [ "Your message"; "Your request"; "queued at the server" ])
     | rows -> fail (String.concat " | " (texts rows)))
     [ None, ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 awaiting receipt"]
-    ; Some Live.Running, []; Some Live.Settled, []
+    ; Some Live.Running,
+        ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"]
+    ; Some Live.Settled, []
     ; Some Live.Queued,
         ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"] ]
 
@@ -502,10 +504,102 @@ let test_compact_failure_keeps_exact_cause () =
           && Astring.String.is_infix ~affix:"exact stream failure cause" text) rows)) [false; true])
     [Tui.Tools_compact; Tui.Tools_results]
 
+let test_compact_progress_follows_working_execution () =
+  let state = state () in
+  state.msg_tool_visibility <- Tui.Tools_compact;
+  let active = inflight ~request_id:"active-execution" ~at:1. () in
+  Tui.turn_log_add ~now:2. active.log ~seq:(Some 0) Live.Run_started;
+  Tui.turn_log_add ~now:3. active.log ~seq:(Some 1)
+    (Live.Thinking "Consider the observed state");
+  let pending = inflight ~request_id:"new-pending-input" ~at:4. () in
+  Tui.turn_log_add ~now:4. pending.log ~seq:(Some 0)
+    (Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None});
+  state.msg_inflight <- [pending; active];
+  state.msg_live <- Some pending.log;
+  let progress ~now =
+    match Tui.keeper_message_status_log state with
+    | None -> fail "working execution disappeared behind pending input"
+    | Some source ->
+        check string "status belongs to the execution producing events"
+          "active-execution" (Tui.turn_log_execution_id source);
+        Tui.keeper_message_visible_status_rows state source.tl_transcript ~now
+        |> List.filter_map (fun (kind, text) ->
+            match kind with
+            | Masc_tui_keeper_chat_transcript.Progress -> Some text
+            | Answer_needed | Attention | Approval _ -> None)
+        |> String.concat "\n"
+  in
+  List.iter (fun folded ->
+    state.msg_turn_folded <- folded;
+    check bool "reasoning remains visible in compact progress" true
+      (Astring.String.is_infix ~affix:"reasoning" (progress ~now:3.5))) [false; true];
+  let occurrence : Live.tool_occurrence =
+    {stream_scope=0; block_index=1; provider_message_id=None;
+     tool_call_id=Some "observed-tool"} in
+  Tui.turn_log_add ~now:5. active.log ~seq:(Some 2)
+    (Live.Tool_started {occurrence; tool_name="Inspect_state"});
+  check bool "the running tool is named without expanding tool details" true
+    (Astring.String.is_infix ~affix:"Inspect_state" (progress ~now:5.5));
+  check (list string) "the new input remains pending beside actual progress"
+    ["new-pending-input"]
+    (Tui.keeper_message_waiting_requests state ~keeper_name:"alpha"
+     |> List.map (fun (request, _) -> request.Chat.request_id));
+  (* Reopening the pane follows a held journal, with no locally owned stream. *)
+  Masc_tui_keeper_chat_log.commit active.log.tl_log;
+  state.msg_settled_logs <- [active.log];
+  state.msg_inflight <- [];
+  state.msg_live <- None;
+  Masc_tui_keeper_chat_log.observe_operation_state active.log.tl_log
+    (Some (Keeper_chat_operation.Running { started_at = 1. }));
+  check bool "an observed journal keeps the same compact tool progress" true
+    (Astring.String.is_infix ~affix:"Inspect_state" (progress ~now:6.))
+
+let test_historical_open_journal_cannot_own_progress () =
+  let module Log = Masc_tui_keeper_chat_log in
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  let state = state () in
+  let old = inflight ~request_id:"yesterday" ~at:1. () in
+  Tui.turn_log_add ~now:2. old.log ~seq:(Some 0) Live.Run_started;
+  Tui.turn_log_add ~now:3. old.log ~seq:(Some 1) (Live.Text "retained partial output");
+  Log.commit old.log.tl_log;
+  state.msg_settled_logs <- [old.log];
+  check bool "an unclosed historical stream alone is not current progress" true
+    (Option.is_none (Tui.keeper_message_status_log state));
+  let current = inflight ~request_id:"today" ~at:100. () in
+  Tui.turn_log_add ~now:101. current.log ~seq:(Some 0) Live.Run_started;
+  state.msg_inflight <- [current];
+  state.msg_live <- Some current.log;
+  check (option string) "current input owns progress before historical reconciliation"
+    (Some "today") (Option.map Tui.turn_log_request_id (Tui.keeper_message_status_log state));
+  List.iter (fun terminal ->
+    let log = Log.create ~keeper_name:"alpha" ~request_id:"yesterday" ~started_at:1. in
+    ignore (Log.add ~at:2. log ~seq:(Some 0) Live.Run_started);
+    ignore (Log.add ~at:3. log ~seq:(Some 1) (Live.Text "retained partial output"));
+    Log.observe_operation_state log (Some terminal);
+    Log.observe_operation_state log (Some (Keeper_chat_operation.Running {started_at=1.}));
+    check bool "terminal facts cannot regress on a delayed open observation" true
+      (Option.exists Keeper_chat_operation.is_terminal (Log.operation_state log));
+    let transcript = Transcript.of_log ~now:100. log in
+    check bool "terminal operation closes an incomplete stream" true
+      (match Transcript.phase transcript with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false);
+    check bool "partial output survives reconciliation" true
+      (List.exists (fun (item : Transcript.drawn_item) ->
+        match item.drawn with Drawn_text text -> text = "retained partial output" | _ -> false)
+        (Transcript.drawn transcript));
+    check int "no invented journal sequence" 1
+      (match Log.resume_position log with After_seq seq -> seq | Whole_turn -> -1))
+    [ Keeper_chat_operation.Failed {completed_at=4.; failure={kind=Turn_cancelled;
+        detail="owner stopped the turn"; outcome_ref=None}}
+    ; Cancelled {completed_at=4.}
+    ; Succeeded {completed_at=4.; outcome_ref="recorded-result"} ]
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
-      [ test_case "compact exact failure cause" `Quick test_compact_failure_keeps_exact_cause
+      [ test_case "historical open journal cannot own progress" `Quick test_historical_open_journal_cannot_own_progress
+      ; test_case "compact exact failure cause" `Quick test_compact_failure_keeps_exact_cause
+      ; test_case "compact progress follows working execution" `Quick
+          test_compact_progress_follows_working_execution
       ; test_case "priority control receipt ordering" `Quick test_priority_control_receipt_ordering
       ; test_case "foreign stop command remains complete" `Quick test_foreign_stop_command_remains_complete
       ; test_case "uncovered execution failures remain visible" `Quick test_compact_keeps_uncovered_execution_problems

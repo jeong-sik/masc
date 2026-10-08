@@ -12,18 +12,25 @@ type entry =
         (** Journal position of the frame that carried the delta. [None] for
             frames that never went through the bus (the acceptance event, the
             settle-time run_error); such entries are never deduplicated. *)
+  ; at : float option (** Observed event time; journal reads preserve [ts]. *)
   ; attempt : int  (** 0-based runtime attempt this entry belongs to. *)
   ; delta : Masc_tui_keeper_chat_live.delta
   }
 
 type t
 
+type journal_source = Operation of string | Autonomous_turn of Ids.Turn_ref.t
+
+val source_key : journal_source -> string
+(** Stable local display/cache key; never an inferred operation ID. *)
+val source : t -> journal_source
+val create_for_source : keeper_name:string -> source:journal_source -> started_at:float -> t
 val create : keeper_name:string -> request_id:string -> started_at:float -> t
 val keeper_name : t -> string
 val request_id : t -> string
 val started_at : t -> float
 
-val add : t -> seq:int option -> Masc_tui_keeper_chat_live.delta -> bool
+val add : ?at:float -> t -> seq:int option -> Masc_tui_keeper_chat_live.delta -> bool
 (** Appends unless [seq] is [Some n] and an entry with seq [n] is already
     held; returns whether it was added. A [Runtime_attempt_started] delta
     advances the attempt before it is stored, so it is the first entry of the
@@ -74,8 +81,19 @@ val committed : t -> bool
 val revision : t -> int
 (** Bumped by every mutation; the memo key for anything derived from the log. *)
 
+val operation_state : t -> Keeper_chat_operation.state option
+val observe_operation_state : t -> Keeper_chat_operation.state option -> unit
+(** Exact operation read, separate from journal events and their replay cursor.
+    [None] means the operation read is unavailable. A terminal observation is
+    retained across later reads. Autonomous journals have no operation state. *)
+
+val decode_operation_state :
+  operation_id:string -> Yojson.Safe.t -> (Keeper_chat_operation.state, string) result
+(** Decode the operation API's state only after checking its schema and exact
+    operation identity. Unknown states and malformed terminal facts fail. *)
+
 type events_page =
-  { operation_id : string
+  { source : journal_source
   ; events : Masc.Keeper_chat_event_log.journaled_event list
   ; has_more : bool
   ; next_since_seq : Masc.Keeper_chat_event_log.replay_position
@@ -89,8 +107,14 @@ type events_page =
   }
 
 val decode_events_page : Yojson.Safe.t -> (events_page, string) result
-(** Strict decode of a [masc.keeper_chat_events.v2] body: the schema tag must
-    match and every element must decode as a journal line. *)
+(** Strict decode of [masc.keeper_chat_events.v2] or
+    [masc.keeper_turn_events.v1]. Source identity is typed by schema and every
+    element must decode as a journal line. *)
+
+val journal_path :
+  encode_value:(string -> string) -> keeper_name:string -> source:journal_source ->
+  since_seq:Masc.Keeper_chat_event_log.replay_position ->
+  since_offset:Masc.Keeper_chat_event_log.page_start -> limit:int -> string
 
 (** Why a v2 events request did not return a page. The codes are the
     endpoint's ([unknown_operation] 404, [journal_pruned] 410,
@@ -104,6 +128,8 @@ type events_error =
           whether retention removed it or an append never created it, only
           that there is nothing to reload, now or later. The v1 rows are all
           there is. *)
+  | Journal_missing
+      (** No autonomous journal was recorded for this turn. *)
   | Journal_unavailable of string
       (** The journal exists and could not be read now; the server's message. *)
   | Cursor_refused of
@@ -165,3 +191,13 @@ val read_whole_journal :
     while both cursors advance past the ones asked from. The first error ends
     the read; a page that claims more without advancing is
     {!Events_undecodable}, naming the positions, never a shorter [Ok]. *)
+
+val read_with_operation_state :
+  read_operation:(unit -> (Keeper_chat_operation.state option, string) result) ->
+  read_journal:(unit -> (Masc.Keeper_chat_event_log.journaled_event list, events_error) result) ->
+  (Keeper_chat_operation.state option, string) result
+  * (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
+(** Read operation state before its journal. Recheck queued and running observations after reading the journal. If the
+    state advanced, read the journal again; retain a successful first journal
+    if that second fetch fails. An unavailable operation recheck retains the
+    first successful observation. A journal failure does not discard the state. *)

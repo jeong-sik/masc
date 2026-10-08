@@ -36,7 +36,6 @@ type status =
   | Success
   | Error of { transient : bool }
   | Cancelled of { reason : string }
-  | Timeout
 
 (** Telemetry sample for a single AGENT_CORE LLM call.
 
@@ -160,7 +159,7 @@ type summary = {
   cache_hit_ratio : float;  (** In [\[0.0, 1.0\]]. *)
   total_cost_usd : float;  (** Sum across the window. *)
   error_ratio : float;
-      (** [(Error \/ Timeout) / sample_count] — Cancelled is excluded. *)
+      (** [Error / sample_count] — Cancelled is excluded. *)
   cancelled_count : int;  (** Explicit cancellation count. *)
 }
 

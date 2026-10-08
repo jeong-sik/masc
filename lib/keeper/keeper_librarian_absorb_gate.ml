@@ -631,6 +631,13 @@ type evaluation =
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
   }
 
+let validate_evaluation_answer (evaluation : evaluation) =
+  match evaluation.result with
+  | Error failure -> Error (Typesafeai_client.failure_to_string failure)
+  | Ok evaluated ->
+    Result.map (fun _ -> ()) (decode evaluation.questions evaluated.response)
+;;
+
 type run_result =
   | Skipped of
       { reason : skip_reason
@@ -982,6 +989,19 @@ let run
           log names exactly what was sent (the Board gate keeps the same
           value as provenance). *)
        let evaluations = ref [] in
+       (* Every terminal callback writes its payload before it takes the
+          registry's protected lock, so a cancellation arriving in between
+          would leave the run Running. All three settle through here. *)
+       let settle callback = Eio.Cancel.protect callback in
+       let abort_evaluation evaluation_id disposition =
+         settle (fun () ->
+           Option.iter
+             (fun abort ->
+                Option.iter
+                  (fun id -> abort ~evaluation_id:id disposition)
+                  evaluation_id)
+             on_evaluation_aborted)
+       in
        let evaluate direction ~state ~questions =
          let evaluation_id =
            Option.map
@@ -991,31 +1011,34 @@ let run
          let result =
            try Typesafeai_client.evaluate ?clock ~destinations:armed ~state ~questions () with
            | Eio.Cancel.Cancelled _ as exn ->
-             Option.iter
-               (fun abort ->
-                  Option.iter
-                    (fun id -> abort ~evaluation_id:id `Cancelled)
-                    evaluation_id)
-               on_evaluation_aborted;
-             raise exn
+             let backtrace = Printexc.get_raw_backtrace () in
+             abort_evaluation evaluation_id `Cancelled;
+             Printexc.raise_with_backtrace exn backtrace
            | exn ->
-             Option.iter
-               (fun abort ->
-                  Option.iter
-                    (fun id -> abort ~evaluation_id:id (`Failed (Printexc.to_string exn)))
-                    evaluation_id)
-               on_evaluation_aborted;
-             raise exn
+             let backtrace = Printexc.get_raw_backtrace () in
+             abort_evaluation evaluation_id (`Failed (Printexc.to_string exn));
+             (* [protect] does not look for a cancellation that arrived while
+                the row settled. Without this the caller would see the
+                provider's exception and treat the turn as an ordinary
+                failure instead of a cancelled one. *)
+             Eio.Fiber.check ();
+             Printexc.raise_with_backtrace exn backtrace
          in
          let evaluation = { direction; destinations; state; questions; result } in
          evaluations := evaluation :: !evaluations;
          Option.iter
            (fun finish ->
               Option.iter
-                (fun id -> finish ~evaluation_id:id evaluation)
+                (fun id -> settle (fun () -> finish ~evaluation_id:id evaluation))
                 evaluation_id)
            after_evaluate;
+         (* The observer keeps the completed evaluation for the parent run, so
+            it runs before the cancellation check below. *)
          publish (Incomplete (List.rev !evaluations));
+         (* [protect] does not look for a cancellation that arrived while it
+            ran. Look now, so a cancelled turn stops at this evaluation
+            instead of carrying its answer into the next step. *)
+         Eio.Fiber.check ();
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
          |> Result.map_error Typesafeai_client.failure_to_string
        in

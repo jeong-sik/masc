@@ -690,15 +690,6 @@ type mcp_call_error =
       }
   | Malformed_body of string
 
-type effect_disposition =
-  | Proven_pre_effect
-  | Remote_effect_unresolved
-
-let mcp_call_effect_disposition = function
-  | Timed_out _ | Connection_failed _ | Http_status _ | Malformed_body _ ->
-    Remote_effect_unresolved
-;;
-
 let mcp_call_error_to_string = function
   | Timed_out seconds -> Printf.sprintf "Request timeout after %.1fs" seconds
   | Connection_failed detail -> Printf.sprintf "Connection error: %s" detail
@@ -1084,11 +1075,10 @@ let attempt_tts_endpoint
           ~arguments:args
       with
       | Error error ->
-        (match mcp_call_effect_disposition error with
-         | Proven_pre_effect ->
-           Error (`Proven_pre_effect (mcp_call_error_to_string error))
-         | Remote_effect_unresolved ->
-           Error (`Outcome_unknown (mcp_call_error_to_string error)))
+        (* A failed voice MCP call does not prove the remote side did not
+           play: a timeout or a dropped connection can come after playback
+           started. So no MCP failure authorizes endpoint failover. *)
+        Error (`Outcome_unknown (mcp_call_error_to_string error))
       | Ok json ->
         (match extract_mcp_result json with
          | Error error -> Error (`Outcome_unknown error)

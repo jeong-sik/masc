@@ -366,8 +366,7 @@ let text_with_files ~text ~files =
   match file_lines files with
   | [] -> text
   | lines ->
-    let body = String.trim text in
-    String.concat "\n" (if body = "" then lines else body :: lines)
+    String.concat "\n" (if String.trim text = "" then lines else text :: lines)
 ;;
 
 let text_mentions_bot ~bot_user_id text =

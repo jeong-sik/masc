@@ -7,14 +7,10 @@ type executor =
 
 type backend =
   | Ocaml_runtime
-  | Host_process
   | Sandbox_process
 
 type sandbox =
   | No_sandbox
-  | Host_sandbox_roots
-  | Turn_sandbox
-  | Docker_profile
   | Backend_selected
 
 type keeper_model_projection =
@@ -202,15 +198,11 @@ let executor_to_string = function
 
 let backend_to_string = function
   | Ocaml_runtime -> "ocaml_runtime"
-  | Host_process -> "host_process"
   | Sandbox_process -> "sandbox_process"
 ;;
 
 let sandbox_to_string = function
   | No_sandbox -> "none"
-  | Host_sandbox_roots -> "host_sandbox_roots"
-  | Turn_sandbox -> "turn_sandbox"
-  | Docker_profile -> "docker_profile"
   | Backend_selected -> "backend_selected"
 ;;
 
@@ -2440,20 +2432,19 @@ let masc_library_descriptors =
 let masc_local_runtime_descriptor
       (definition : Tool_schemas_local_runtime.definition) =
   let schema = definition.schema in
-  let keeper_model_projection =
-    match Tool_schemas_local_runtime.keeper_model_exposure definition.operation with
-    | Tool_schemas_local_runtime.Keeper_callable -> Internal_name
-    | Tool_schemas_local_runtime.Operator_diagnostic -> Operator_only
-  in
   let execution_policy =
     Tool_schemas_local_runtime.execution_policy definition.operation
   in
   let policy =
     policy ~readonly:execution_policy.read_only ()
   in
+  (* Operator diagnostics: registered in the catalog, never in the Keeper
+     model's per-turn tool list. Both operations can load a model and need
+     Admin. The metadata-only dashboard runtime probe has its own
+     [CanReadState] route and does not reuse these tool identities. *)
   in_process_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection
+    ~keeper_model_projection:Operator_only
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
     ~id:
@@ -2955,10 +2946,8 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_task_descriptor "set_goal" "masc_task_set_goal"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_plan_* current-task trio (3 entries).
-     The five plan-document tools (init/update/get + note_add/deliver)
-     were retired with their planning/<task_id> store; only the
-     current-task session pointer remains. ── *)
+  (* ── RFC-0182 §3.1 — masc_plan_* current-task trio (3 entries): the
+     session pointer to the Keeper's current task. ── *)
   ; masc_plan_descriptor ~keeper_model_projection:Operator_only
        "set_task" "masc_plan_set_task"
        ~readonly:false

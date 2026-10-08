@@ -12,18 +12,18 @@ include Board_core_persist
 let ( let* ) = Result.bind
 
 
-let get_post store ~post_id : (post, board_error) Result.t =
+let read_post store ~post_id : (post, board_read_error) Result.t =
   maybe_sweep store;
-  match Post_id.of_string post_id with
+  match Post_id.of_string_for_read post_id with
   | Error e -> Error e
   | Ok pid ->
     with_lock store (fun () ->
       match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
       | Some post -> Ok post
-      | None -> Error (Post_not_found post_id))
+      | None -> Error (Read_post_not_found post_id))
 ;;
 
-(* RFC-0233 §7 guard #2: exact O(1) index lookups, mirroring [get_post] by
+(* RFC-0233 §7 guard #2: exact O(1) index lookups, mirroring [read_post] by
    primary key. The index is keyed on the full join string (turn_ref =
    "trace#turn", or the fusion run_id) — never a meta_json substring or a
    time-window heuristic. A miss returns [None] (no scan, no false positive). *)
@@ -69,22 +69,23 @@ let compare_comments_oldest_first (a : comment) (b : comment) =
 ;;
 
 (* Reads post + comments under a single critical section. The previous
-   two-call sequence (get_post then get_comments) acquired
+   two-call sequence (read_post then read_comments) acquired
    [store.mutex] twice with [maybe_sweep] dispatching to the flusher
    actor between releases. That race window surfaces as
    [Mutex.lock: Resource deadlock avoided] under contended
    repeated agent board-read traffic. Coalescing
    keeps the read atomic, removes one [maybe_sweep] dispatch, and
    eliminates the inter-call lock churn. *)
-let get_post_and_comments store ~post_id : (post * comment list, board_error) Result.t =
+let read_post_and_comments store ~post_id
+  : (post * comment list, board_read_error) Result.t =
   maybe_sweep store;
-  match Post_id.of_string post_id with
+  match Post_id.of_string_for_read post_id with
   | Error e -> Error e
   | Ok pid ->
     with_lock store (fun () ->
       let post_key = Post_id.to_string pid in
       match Hashtbl.find_opt store.posts post_key with
-      | None -> Error (Post_not_found post_id)
+      | None -> Error (Read_post_not_found post_id)
       | Some post ->
         let comment_ids =
           Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[]
@@ -392,9 +393,9 @@ let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () =
   |> Result.map (fun creation -> creation.comment)
 ;;
 
-let get_comments store ~post_id : (comment list, board_error) Result.t =
+let read_comments store ~post_id : (comment list, board_read_error) Result.t =
   maybe_sweep store;
-  match Post_id.of_string post_id with
+  match Post_id.of_string_for_read post_id with
   | Error e -> Error e
   | Ok pid ->
     with_lock store (fun () ->

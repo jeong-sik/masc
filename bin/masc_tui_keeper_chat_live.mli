@@ -88,6 +88,9 @@ type delta =
           least one of the two is present. *)
   | Text of string  (** Assistant text to append. *)
   | Thinking of string  (** Reasoning text to append. *)
+  | Native_tool_started of
+      { occurrence : tool_occurrence; tool_name : string option }
+  | Native_tool_ended of { occurrence : tool_occurrence }
   | Tool_started of
       { occurrence : tool_occurrence
       ; tool_name : string
@@ -170,7 +173,10 @@ type t
 
 val create : unit -> t
 
-val feed : t -> string -> (int option * delta) list
+type observed_delta = { seq : int option; at : float option; delta : delta }
+(** Server event timestamp in epoch seconds, or [None] when not provided. *)
+
+val feed : t -> string -> observed_delta list
 (** [feed t chunk] adds [chunk] to what has been read and returns the deltas
     completed by it, in stream order, each with the journal seq of the frame
     that carried it: the value of the frame's [id:] line, or [None] for a

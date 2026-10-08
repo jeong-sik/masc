@@ -2,6 +2,12 @@ open Alcotest
 
 module Live = Masc_tui_keeper_chat_live
 
+(* Most fixtures compare stream content and sequence only; timestamp parity is
+   exercised separately through the observed-delta API. *)
+let feed decoder chunk =
+  Live.feed decoder chunk
+  |> List.map (fun (item : Live.observed_delta) -> item.seq, item.delta)
+
 (* The live decoder takes bytes, not lines, so the property that matters is
    that it does not care where the chunks were cut. Every test that asserts a
    delta sequence therefore asserts it for a whole-body feed and for a
@@ -30,6 +36,11 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" stop_reason)
   | Live.Text text -> Printf.sprintf "text(%s)" text
   | Live.Thinking text -> Printf.sprintf "thinking(%s)" text
+  | Live.Native_tool_started { occurrence; tool_name } ->
+      Printf.sprintf "native_tool_started(%d/%d,%s)" occurrence.stream_scope
+        occurrence.block_index (Option.value ~default:"unnamed" tool_name)
+  | Live.Native_tool_ended { occurrence } ->
+      Printf.sprintf "native_tool_ended(%d/%d)" occurrence.stream_scope occurrence.block_index
   | Live.Tool_started { occurrence; tool_name } ->
       Printf.sprintf "tool_started(%d/%d,%s)" occurrence.stream_scope
         occurrence.block_index tool_name
@@ -184,11 +195,11 @@ let accepted ?(operation_id = "op-1") ~state ~queued_count () =
 
 let feed_whole body =
   let decoder = Live.create () in
-  List.map snd (Live.feed decoder body)
+  List.map snd (feed decoder body)
 
 let feed_whole_tagged body =
   let decoder = Live.create () in
-  Live.feed decoder body
+  feed decoder body
 
 (* Split [body] into [size]-byte chunks and concatenate what each feed
    returns. *)
@@ -200,7 +211,7 @@ let feed_in_chunks ~size body =
     else
       let take = min size (length - offset) in
       let chunk = String.sub body offset take in
-      loop (offset + take) (List.rev_append (Live.feed decoder chunk) acc)
+      loop (offset + take) (List.rev_append (feed decoder chunk) acc)
   in
   List.map snd (loop 0 [])
 
@@ -212,7 +223,7 @@ let feed_in_chunks_tagged ~size body =
     else
       let take = min size (length - offset) in
       let chunk = String.sub body offset take in
-      loop (offset + take) (List.rev_append (Live.feed decoder chunk) acc)
+      loop (offset + take) (List.rev_append (feed decoder chunk) acc)
   in
   loop 0 []
 
@@ -243,10 +254,10 @@ let test_partial_line_emits_nothing_until_it_ends () =
   let head = String.sub body 0 split_at in
   let tail = String.sub body split_at (String.length body - split_at) in
   check (list delta) "an unfinished line yields no delta" []
-    (List.map snd (Live.feed decoder head));
+    (List.map snd (feed decoder head));
   check (list delta) "the delta arrives when the line ends"
     [ Live.Text "hello" ]
-    (List.map snd (Live.feed decoder tail))
+    (List.map snd (feed decoder tail))
 
 (* ── Journal seq on the frame ─────────────────────────────────────── *)
 
@@ -257,13 +268,58 @@ let test_a_frame_id_tags_its_deltas () =
     [ (Some 7, Live.Text "hello") ]
     (feed_whole_tagged (with_id 7 (sse (text_content "hello"))))
 
+let test_frame_timestamps_keep_server_epoch_seconds () =
+  let published_at = 1791363124.206972 in
+  let frame seq timestamp text =
+    with_id seq
+      (sse
+         (`Assoc
+            ([ "type", `String "TEXT_MESSAGE_CONTENT"
+             ; "runId", `String run_id
+             ; "messageId", `String message_id
+             ; "delta", `String text
+             ]
+             @ Option.fold ~none:[]
+                 ~some:(fun value -> [ "timestamp", value ]) timestamp)))
+  in
+  let body =
+    frame 7 (Some (`Float published_at)) "fractional"
+    ^ frame 8 (Some (`Int 1791363125)) "integer"
+    ^ frame 9 None "untimed"
+  in
+  let expected =
+    [ ((Some 7, Some published_at), Live.Text "fractional")
+    ; ((Some 8, Some 1791363125.), Live.Text "integer")
+    ; ((Some 9, None), Live.Text "untimed")
+    ]
+  in
+  List.iter
+    (fun size ->
+      let decoder = Live.create () in
+      let rec read offset =
+        if offset >= String.length body then []
+        else
+          let length = min size (String.length body - offset) in
+          let observed = Live.feed decoder (String.sub body offset length) in
+          observed @ read (offset + length)
+      in
+      let actual =
+        read 0
+        |> List.map (fun (item : Live.observed_delta) ->
+               ((item.seq, item.at), item.delta))
+      in
+      check (list (pair (pair (option int) (option (float 0.000001))) delta))
+        (Printf.sprintf "server time survives %d-byte chunks" size)
+        expected actual)
+    [ 1; 17; String.length body ]
+
 let test_an_id_held_across_a_chunk_boundary () =
   let decoder = Live.create () in
   check (list tagged) "the id line alone yields nothing" []
-    (Live.feed decoder "id: 7\n");
+    (feed decoder "id: 7\n");
   check (list tagged) "the data line that follows carries it"
     [ (Some 7, Live.Text "hello") ]
-    (Live.feed decoder (sse (text_content "hello")))
+    (feed decoder (sse (text_content "hello")))
 
 (* A stream cut right after an [id:] line leaves that decoder armed with the
    seq and half a frame buffered. The reconnect opens a fresh decoder, so the
@@ -273,14 +329,14 @@ let test_an_id_held_across_a_chunk_boundary () =
 let test_a_fresh_decoder_starts_without_a_seq () =
   let cut = Live.create () in
   check (list tagged) "the cut stream ends armed" []
-    (Live.feed cut "id: 9\ndata: {\"type\":\"TEXT_MESSAGE_CON");
+    (feed cut "id: 9\ndata: {\"type\":\"TEXT_MESSAGE_CON");
   let fresh = Live.create () in
   check (list tagged) "the new stream's acceptance carries no seq"
     [ (None, Live.Accepted { admission = Live.Running; queue_length = 0; interactive = None }) ]
-    (Live.feed fresh (sse (accepted ~state:"Running" ~queued_count:0 ())));
+    (feed fresh (sse (accepted ~state:"Running" ~queued_count:0 ())));
   check (list tagged) "the cut decoder's seq never reaches the new stream"
     [ (Some 10, Live.Text "b") ]
-    (Live.feed fresh (with_id 10 (sse (text_content "b"))))
+    (feed fresh (with_id 10 (sse (text_content "b"))))
 
 let test_an_id_less_frame_does_not_inherit_the_previous_seq () =
   let body =
@@ -802,6 +858,8 @@ let () =
         ; test_case "undrawn events stay silent" `Quick
             test_events_this_view_does_not_draw_are_silent
         ; test_case "a frame id tags its deltas" `Quick test_a_frame_id_tags_its_deltas
+        ; test_case "frame timestamps keep server epoch seconds" `Quick
+            test_frame_timestamps_keep_server_epoch_seconds
         ; test_case "an id held across a chunk boundary" `Quick
             test_an_id_held_across_a_chunk_boundary
         ; test_case "a fresh decoder starts without a seq" `Quick

@@ -1,8 +1,5 @@
-(** Entry-action dispatch observability helpers (RFC-0002).
-
-    Extracted from keeper_registry.ml (lines 1507-1555) as part of the
-    godfile decomp campaign. Pure side-effect helpers; no registry state is
-    read or written. *)
+(** Entry-action observability (RFC-0002): the lifecycle log line the
+    registry writes on phase entry. No registry state is read or written. *)
 
 let execute_observability
       ~(name : string)
@@ -31,23 +28,5 @@ let execute_observability
          event_name
          detail);
     let (_ignore_ts : float) = ts_unix in
-    ()
-  | Start_drain
-  | Cleanup_and_unregister -> ()
-;;
-
-let followup_event_of_action
-      ~(phase : Keeper_state_machine.phase)
-      (action : Keeper_state_machine.entry_action)
-  : Keeper_state_machine.event option
-  =
-  let _ = phase, action in
-  None
-;;
-
-let record_dispatch_rejection event =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string LifecycleDispatchRejections)
-    ~labels:[ "event", Keeper_state_machine.event_to_string event ]
     ()
 ;;

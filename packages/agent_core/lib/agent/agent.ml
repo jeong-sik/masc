@@ -51,6 +51,12 @@ type execution_terminal_disposition = Agent_execution_runner.terminal_dispositio
   ; recovery : execution_recovery_action
   }
 
+type execution_terminal_evidence =
+  { disposition : execution_terminal_disposition
+  ; has_tool_attempts : bool
+  ; settled_tool_results : Types.content_block list
+  }
+
 module Execution_projection = Agent_execution_projection
 
 let create_execution_runtime = Agent_execution_runner.create_runtime
@@ -64,6 +70,18 @@ let open_execution_projection ~runtime ~dir locator =
     ~dir
     ~locator_run_id:(Agent_execution_runner.locator_run_id locator)
     ()
+;;
+
+let read_execution_terminal projection =
+  Execution_projection.terminal_recovery projection
+  |> Result.map (Option.map (fun (terminal, (evidence : Execution_agent_scope.recovery_evidence)) ->
+    let outcome = match terminal with
+      | Execution_event.Succeeded -> Terminal_succeeded
+      | Execution_event.Failed _ -> Terminal_failed
+      | Execution_event.Cancelled _ -> Terminal_cancelled in
+    {disposition={outcome; recovery=evidence.recovery};
+     has_tool_attempts=evidence.has_tool_attempts;
+     settled_tool_results=evidence.settled_tool_results}))
 ;;
 
 let project_detailed_error result =

@@ -662,11 +662,10 @@ let test_masc_dashboard_schema () =
   | None -> Alcotest.fail "masc_dashboard not found"
   | Some _ -> ()
 
-(* The enum the model reads and the vocabulary Dashboard accepts sit on
-   opposite sides of the cut that keeps the descriptor generator out of its own
-   consumer, and they used to be spelled separately (#27069). A scope in one
-   and not the other either hides it from the model or advertises one the
-   runtime refuses. *)
+(* The enum the model reads is declared in the tool TOML; the vocabulary
+   Dashboard accepts is declared in OCaml (#27069). A scope in one and not the
+   other either hides it from the model or advertises one the runtime
+   refuses. *)
 let test_masc_dashboard_scope_enum_matches_the_runtime () =
   match find_registered_tool "masc_dashboard" with
   | None -> Alcotest.fail "masc_dashboard not found"

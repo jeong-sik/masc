@@ -687,7 +687,7 @@ let test_caption_keeps_its_text_above_the_files () =
   in
   match String.split_on_char '\n' body with
   | [ first; second; third ] ->
-      Alcotest.(check string) "caption first" "see this" first;
+      Alcotest.(check string) "caption first" "  see this  " first;
       Alcotest.(check bool) "then a" true (contains_substring second "a.png");
       Alcotest.(check bool) "then b" true (contains_substring third "b.png")
   | other ->
@@ -699,6 +699,15 @@ let test_text_only_message_is_untouched () =
     "unchanged"
     "just words"
     (S.content_with_attachments ~content:"just words" ~attachments:[])
+
+let test_attachment_caption_keeps_paragraphs () =
+  let content = "    첫 줄\n    둘째 줄  \n\n" in
+  let attachments = [ file ~name:"notes.txt" ~size:0 "https://cdn.example/notes.txt" ] in
+  let suffix = "[file] notes.txt https://cdn.example/notes.txt" in
+  check string "caption and file boundary" (content ^ "\n" ^ suffix)
+    (S.content_with_attachments ~content ~attachments);
+  check string "whitespace-only caption stays absent" suffix
+    (S.content_with_attachments ~content:" \n\t " ~attachments)
 
 (* RFC-0223 P1 — author display name extraction. *)
 
@@ -2581,6 +2590,8 @@ let () =
             test_caption_less_photo_is_not_a_blank_message
         ; test_case "caption keeps its text above the files" `Quick
             test_caption_keeps_its_text_above_the_files
+        ; test_case "attachment caption keeps whitespace and paragraphs" `Quick
+            test_attachment_caption_keeps_paragraphs
         ; test_case "text-only message is untouched" `Quick
             test_text_only_message_is_untouched
         ; test_case "attachments decode" `Quick test_decodes_attachments

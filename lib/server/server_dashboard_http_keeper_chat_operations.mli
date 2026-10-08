@@ -10,6 +10,9 @@ type get_route =
       (** [GET /api/v1/keepers/:name/chat/events?operation_id=&since_seq=&since_offset=&limit=]
           (RFC-0412 §3.2, v2): one operation's journal as written, paged over
           seq and byte offset, reasoning included. *)
+  | Turn_events of { keeper_name : string; raw_turn_ref : string }
+      (** [GET /api/v1/keepers/:name/turns/:turn_ref/events], same cursors,
+          keyed by the durable autonomous turn reference. *)
 
 type mutation =
   | Edit
@@ -78,6 +81,13 @@ val chat_events_page :
     decoded; a corrupt one among them is 503 [journal_corrupt]. Exposed so the
     wire contract is tested without an HTTP listener. *)
 
+val turn_events_page :
+  turn_ref:Ids.Turn_ref.t ->
+  since_seq:Keeper_chat_event_log.replay_position ->
+  redact_json:(Yojson.Safe.t -> Yojson.Safe.t) ->
+  Keeper_chat_event_log.page -> Yojson.Safe.t
+(** [masc.keeper_turn_events.v1], with [turn_ref] instead of [operation_id]. *)
+
 val get_route : string -> get_route option
 val mutation_route : string -> mutation_route option
 
@@ -107,7 +117,7 @@ module For_testing : sig
       page from the journal's complete rows, without redaction. The failure
       is the response status and its [error] code. The handler composes the
       same two functions over the rows it read, so a cursor this answers on
-      cannot be dropped between the query and the page. *)
+    cannot be dropped between the query and the page. *)
 
   val no_journal_for_settled_operation_message : operation_id:string -> string
   (** The 410 message for {!No_journal_for_settled_operation}: names the

@@ -2094,7 +2094,7 @@ let test_probe_schema_declares_the_bounds_it_enforces () =
      ranges (#25006). A caller that cannot read those ranges off the schema
      learns them from a rejection instead, one wasted round trip per knob,
      and nothing in the type system ties the two together. *)
-  (* Not [tool_schema_for]: the probe is an Operator_diagnostic, so it is
+  (* Not [tool_schema_for]: the probe is an operator diagnostic, so it is
      registered but withheld from the keeper model projection that
      [surface_tools] is. Read it where it is declared. *)
   let schema =

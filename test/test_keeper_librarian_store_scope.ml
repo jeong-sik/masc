@@ -144,6 +144,7 @@ let test_purge_preserves_other_cluster () =
 let test_purge_stops_the_running_librarian_unit_first () =
   with_clusters @@ fun a _b ->
   let module Lane = Masc.Keeper_memory_lane in
+  let module Current = Masc.Keeper_memory_os_current in
   Lane.For_testing.reset ();
   Fun.protect ~finally:Lane.For_testing.reset @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -152,29 +153,50 @@ let test_purge_stops_the_running_librarian_unit_first () =
     (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:a.base_path));
   store_boundary a "trace-a";
   write_progress a "trace-a";
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:a.base_path in
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
+  let journal_lock = Fs_compat.private_jsonl_lock_path journal in
+  let append_failure trace_id =
+    Current.append_librarian_failure ~keepers_dir ~keeper_id:keeper_name
+      ~now:1.0 ~trace_id ~kind:Current.Exact_execution_failure
+      ~detail:"fixture failure" ~snapshot_present:false in
   let started, resolve_started = Eio.Promise.create () in
   let never, _never_resolver = Eio.Promise.create () in
   let cancelled = ref false in
+  let journal_survived_until_cancel = ref false in
   (match Lane.submit ~base_path:a.base_path ~keeper_name (fun () ->
+     append_failure "trace-before";
      Eio.Promise.resolve resolve_started ();
      try Eio.Promise.await never with
      | Eio.Cancel.Cancelled _ as exn ->
        cancelled := true;
+       journal_survived_until_cancel := Sys.file_exists journal && Sys.file_exists journal_lock;
        raise exn) with
    | Lane.Submitted -> ()
    | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
      fail "the parked Librarian unit was not submitted");
   Eio.Promise.await started;
+  check bool "ordinary append retains its stable lock" true (Sys.file_exists journal_lock);
   (match Server_dashboard_http_delete_actions.For_testing.purge_keeper_artifacts
     a ~keeper_name ~remove_configuration:false
     { Masc.Keeper_shutdown_types.requested_name = keeper_name } with
    | Ok () -> ()
    | Error detail -> failf "artifact purge: %s" detail);
   check bool "the unit was cancelled before the files went" true !cancelled;
+  check bool "journal and lock remain until the writer is cancelled" true
+    !journal_survived_until_cancel;
+  check bool "quiesced purge removes the journal" false (Sys.file_exists journal);
+  check bool "quiesced purge removes its stable sibling" false (Sys.file_exists journal_lock);
   check (option int) "nothing is left running on the lane" (Some 0)
     (Lane.For_testing.pending ~base_path:a.base_path ~keeper_name);
   check bool "no progress after the purge" true (read_progress a = None);
-  check bool "no boundaries after the purge" true (read_boundaries a = [])
+  check bool "no boundaries after the purge" true (read_boundaries a = []);
+  append_failure "trace-after";
+  check bool "a same-name successor recreates the lock" true (Sys.file_exists journal_lock);
+  match Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:10 with
+  | [Ok (Current.Journal_failed entry)] ->
+    check string "successor sees only its own journal entry" "trace-after" entry.trace_id
+  | _ -> fail "successor journal did not contain exactly its new failure"
 ;;
 
 (* Memory events are keyed by claim-hash memory ids, so a same-name keeper

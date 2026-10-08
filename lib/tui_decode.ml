@@ -1724,6 +1724,18 @@ type runtime_context_source =
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
+(* Why a runtime's last attempt failed without answering. A name this build
+   does not know is kept as the server wrote it. *)
+type runtime_attempt_failure =
+  | Attempt_failure of Runtime_candidate_backpressure.attempt_failure
+  | Unrecognised_attempt_failure of string
+
+type runtime_failed_attempt = {
+  rfa_noted_at : float;
+  rfa_failure : runtime_attempt_failure;
+  rfa_recorded_by : string;
+}
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
@@ -1743,6 +1755,7 @@ type runtime_option = {
   ro_quota_scope_id : string option;
   ro_rate_limited : bool;
   ro_rate_limit_resets_at : float option;
+  ro_failed_attempt : runtime_failed_attempt option;
 }
 
 type runtime_resolved_lane = {
@@ -1989,6 +2002,22 @@ let decode_runtime_option ~usage ~default_id json =
   in
   let* ro_rate_limited = required_bool_field json "rate_limited" in
   let* ro_rate_limit_resets_at = optional_float_field json "rate_limit_resets_at" in
+  let* ro_failed_attempt =
+    match Json_util.assoc_member_opt "failed_attempt" json with
+    | None -> missing_field "failed_attempt"
+    | Some `Null -> Ok None
+    | Some (`Assoc _ as attempt) ->
+        let* rfa_noted_at = Json_util.require_float attempt "noted_at" in
+        let* failure = required_string_field attempt "failure" in
+        let* rfa_recorded_by = required_string_field attempt "recorded_by" in
+        let rfa_failure =
+          match Runtime_candidate_backpressure.attempt_failure_of_wire_name failure with
+          | Some failure -> Attempt_failure failure
+          | None -> Unrecognised_attempt_failure failure
+        in
+        Ok (Some { rfa_noted_at; rfa_failure; rfa_recorded_by })
+    | Some _ -> Error "runtime failed_attempt must be an object or null"
+  in
   let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
   Ok
     { ro_id
@@ -2009,6 +2038,7 @@ let decode_runtime_option ~usage ~default_id json =
     ; ro_quota_scope_id
     ; ro_rate_limited
     ; ro_rate_limit_resets_at
+    ; ro_failed_attempt
     }
 
 let decode_runtime_default_member json =
@@ -4457,6 +4487,7 @@ type keeper_turn_state =
       lane : keeper_turn_lane;
       started_at_unix : float;
       interrupt_token : string;
+      turn_ref : Ids.Turn_ref.t option;
       preview : keeper_turn_preview option;
     }
   | Keeper_turn_unavailable of string
@@ -4503,6 +4534,15 @@ let decode_keeper_turn_row json =
             | None -> Error "turn is missing required field 'started_at_unix'"
           in
           let* interrupt_token = required_string_field turn_json "interrupt_token" in
+          let* turn_ref =
+            match Json_util.assoc_member_opt "turn_ref" turn_json with
+            | None | Some `Null -> Ok None
+            | Some (`String raw) ->
+                (match Ids.Turn_ref.of_string raw with
+                 | Some value -> Ok (Some value)
+                 | None -> Error "turn_ref must identify a durable Keeper turn")
+            | Some _ -> Error "turn_ref must be text or null"
+          in
           let* preview =
             match Json_util.assoc_member_opt "preview" turn_json with
             | None | Some `Null -> Ok None
@@ -4531,7 +4571,7 @@ let decode_keeper_turn_row json =
             {
               ktr_keeper_name;
               ktr_chat_control_token;
-              ktr_state = Keeper_turn_running { lane; started_at_unix; preview; interrupt_token };
+              ktr_state = Keeper_turn_running { lane; started_at_unix; preview; interrupt_token; turn_ref };
             }
       | Some other ->
           Error

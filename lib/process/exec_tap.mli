@@ -1,6 +1,6 @@
 (** Exec tap — RFC v5 Phase T0 observational shim.
 
-    Records each Process_eio / Unix.* exec invocation as a JSONL line
+    Records each Process_eio exec invocation as a JSONL line
     when enabled.  No-op (identity passthrough) when disabled.  Default OFF.
 
     Purpose: empirical inventory of LLM-generated exec patterns for the
@@ -13,17 +13,13 @@
 
     @since RFC v5 T0 *)
 
-(** Source of an exec call.  Report generator uses this to distinguish
-    Process_eio wrappers from direct Unix.* callsites. *)
+(** The [Process_eio] wrapper that ran the exec.  The report generator
+    counts records per kind. *)
 type call_kind =
   | Process_eio_run_argv
   | Process_eio_run_argv_with_stdin
   | Process_eio_run_argv_with_stdin_and_status
   | Process_eio_run_argv_with_status
-  | Unix_create_process
-  | Unix_create_process_env
-  | Unix_open_process_args_in
-  | Unix_open_process_args_full
 
 (** {1 Control} *)
 

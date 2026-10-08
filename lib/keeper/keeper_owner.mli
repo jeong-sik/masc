@@ -253,10 +253,8 @@ val start
     The callback runs on the Owner fiber. It must not block, and an exception
     it raises is contained rather than propagated — a lost wake degrades to the
     listener's own cadence. This does not change admission order: the chat lane
-    still receives the freed slot first — except when the autonomous lane has
-    been refused {e autonomous_deferral_debt_cap} consecutive releases (see
-    {!autonomous_deferral_debt_cap}); then the freed slot is left open for the
-    autonomous lane. *)
+    receives the freed slot first while it has claimable work. The autonomous
+    lane retains its release notification until no chat claims the slot. *)
 
 val projection : t -> Keeper_owner_reducer.projection
 (** Lock-free immutable snapshot. *)
@@ -287,16 +285,6 @@ val shutdown_operation_id : t -> Keeper_shutdown_types.Operation_id.t option
 val autonomous_block_kind : autonomous_block -> string
 val autonomous_block_to_string : autonomous_block -> string
 val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
-
-val autonomous_deferral_debt_cap : int
-(** How many consecutive releases the autonomous lane may lose to a chat turn
-    before admission stops handing the freed slot to the queued chat first.
-    RFC-0373 direction 2: a deferral becomes deferral debt, and the debt
-    changes the next admission decision instead of only the log. The count
-    covers chat-turn holders only — a maintenance or autonomous holder is not
-    the queue that starves the lane — and resets to zero the moment an
-    autonomous turn is admitted. The price of the cap is bounded: a chat turn
-    can wait out at most this many forfeited releases. *)
 
 val run_autonomous_if_idle
   :  t
@@ -371,13 +359,22 @@ val await_newer_original_operation
     stops running, the store cannot be read or the owner closes. Cancellation
     unregisters the condition waiter; no timer or polling loop is installed. *)
 
-(** The running operations {!start} settled as [Interrupted_by_restart], as
-    they were read before settlement. The registry leaves a failure row in the
-    transcript for each; the owner has no transcript of its own. *)
+(** Durable [Failed Interrupted_by_restart] records, including batch members
+    and earlier starts. The registry retries their idempotent journal and
+    transcript projections; the owner has no transcript of its own. *)
 val restart_interrupted_operations : t -> Chat_operation.t list
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
+val direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_native_call.state, error) result
+val bind_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (unit, error) result
+val checkpoint_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t -> (unit, error) result
+val terminal_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, error) result
+val acknowledge_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> (unit, error) result
 val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Chat_operation.t, error) result
 val resume_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t ->

@@ -310,8 +310,7 @@ let parse_user_input_block json =
       exact_object_fields ~field:"user_blocks text block" ~allowed:[ "type"; "text" ] json
     in
     let* text = required_string ~field:"user_blocks text block" "text" fields in
-    let text = String.trim text in
-    if text = "" then Error "user_blocks text block requires non-empty text"
+    if String.trim text = "" then Error "user_blocks text block requires non-empty text"
     else Ok (User_text text)
   | "image" -> parse_user_image_block json
   | "document" ->
@@ -371,11 +370,9 @@ let fallback_message ~attachments blocks =
     blocks
     |> List.filter_map (function
       | User_text text ->
-          let text = String.trim text in
-          if text = "" then None else Some text
+          if String.trim text = "" then None else Some text
       | User_image _ | User_document _ | User_audio _ -> None)
     |> String.concat "\n\n"
-    |> String.trim
   in
   if text <> "" then
     text
@@ -657,9 +654,8 @@ let to_agent_core_blocks ~attachments blocks =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | User_text text :: rest ->
-        let text = String.trim text in
         let acc =
-          if text = "" then acc else Agent_core.Types.Text text :: acc
+          if String.trim text = "" then acc else Agent_core.Types.Text text :: acc
         in
         loop acc rest
     | User_image (Attached media) :: rest -> (

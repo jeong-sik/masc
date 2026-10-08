@@ -161,10 +161,6 @@ let ensure_keeper_credentials config ~agent_names =
   |> Result.join
 ;;
 
-type credential_status =
-  | Credential_present of agent_credential
-  | Credential_missing
-
 (* ============================================ *)
 (* Authorization                                *)
 (* ============================================ *)

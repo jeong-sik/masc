@@ -1534,7 +1534,7 @@ let test_oversized_hour_group_counts_its_deferred_rail () =
   | _ -> fail "the deferred hour rail was not reachable in scrollback"
 ;;
 
-let test_compact_origin_modes_keep_and_reach_the_hour_rail () =
+let test_clock_modes_control_the_hour_rail () =
   let newest =
     entry ~timeline_bucket:(timeline_bucket 19) Layout.Keeper "keeper.one"
       "turn-19" "latest body"
@@ -1556,7 +1556,15 @@ let test_compact_origin_modes_keep_and_reach_the_hour_rail () =
       with
       | [ { Layout.kind = Layout.Metadata (Layout.Timeline_break _); _ } ] -> ()
       | _ -> fail (name ^ " made a cramped hour rail unreachable by scrolling"))
-    [ "inline", Layout.Origin_inline; "bare", Layout.Origin_bare ]
+    [ "inline", Layout.Origin_inline ];
+  let newest = { newest with Layout.span_clock = Some "19:00→19:01";
+      turn_rail = Layout.Rail_opens } in
+  let bare = Layout.visible_rows ~origin:Layout.Origin_bare
+      ~inner_width:60 ~height:10 [newest] in
+  check (list string) "bare mode keeps only the message body"
+    ["  latest body"] (List.map (fun (row : Layout.row) -> row.text) bare);
+  check int "bare mode reserves no clock or hour rows" 1
+    (Layout.total_rows ~origin:Layout.Origin_bare ~inner_width:60 [newest])
 ;;
 
 let test_repeated_dst_hour_has_distinct_rails () =
@@ -3057,8 +3065,8 @@ let () =
             `Quick test_tiny_viewport_keeps_message_over_hour_rail
         ; test_case "oversized hour groups count their deferred rail" `Quick
             test_oversized_hour_group_counts_its_deferred_rail
-        ; test_case "compact origin modes keep and reach the hour rail" `Quick
-            test_compact_origin_modes_keep_and_reach_the_hour_rail
+        ; test_case "clock modes control the hour rail" `Quick
+            test_clock_modes_control_the_hour_rail
         ; test_case "DST fallback hours remain visibly distinct" `Quick
             test_repeated_dst_hour_has_distinct_rails
         ; test_case "a load failure keeps its address at eighty columns"

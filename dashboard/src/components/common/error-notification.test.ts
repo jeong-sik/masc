@@ -166,8 +166,8 @@ describe('error-notification', () => {
 
   describe('wire fields', () => {
     it('keeps the raw error_code verbatim', () => {
-      fail({ agentName: 'k', error: 'boom', errorCode: 'stale_termination_storm' })
-      expect(errors.value[0]!.errorCode).toBe('stale_termination_storm')
+      fail({ agentName: 'k', error: 'boom', errorCode: 'provider_runtime_error' })
+      expect(errors.value[0]!.errorCode).toBe('provider_runtime_error')
     })
 
     it('keeps a provider code that no closed vocabulary contains', () => {

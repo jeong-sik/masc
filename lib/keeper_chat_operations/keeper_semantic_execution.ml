@@ -194,6 +194,7 @@ type t =
   ; current_sources : source_member list
   ; frame : Snapshot.t
   ; phase : phase
+  ; native_call : Keeper_native_call.state
   ; created_at : float
   ; updated_at : float
   }
@@ -237,7 +238,9 @@ let gate_binding_references (binding : gate_binding) =
   (match binding.preparation.source with
    | Prepared_agent_core {reference; _} -> [reference] | Prepared_official_client _ -> [])
   @ (match binding.unconfirmed_wait with Some waiting -> gate_wait_references waiting | None -> [])
-let checkpoint_references execution = match execution.phase with
+let checkpoint_references execution =
+  Keeper_native_call.checkpoint_references execution.native_call @
+  match execution.phase with
   | Preparing | Ready | Running | Settled _ -> []
   | Resuming_runtime_retry retry -> [retry.checkpoint]
   | Resuming_gate (waiting, _) -> gate_wait_references waiting
@@ -294,7 +297,7 @@ let create ~id ~input ~sources ~now =
     let* input, input_sha256 = canonical_input input |> Result.map_error (fun detail -> Invalid_record detail) in
     let* frame = Snapshot.admit Snapshot.empty (Snapshot.Fresh id)
       |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error)) in
-    Ok { id; revision = 0L; input = Some input; input_sha256; gate_obligations=[]; sources; current_sources = sources; frame; phase = Preparing; created_at = now; updated_at = now }
+    Ok { id; revision = 0L; input = Some input; input_sha256; gate_obligations=[]; sources; current_sources = sources; frame; phase = Preparing; native_call = Keeper_native_call.No_native_call; created_at = now; updated_at = now }
 
 let same_admission left right =
   Scope_id.equal left.id right.id && left.sources = right.sources
@@ -307,6 +310,48 @@ let recovery_origin = function
   | Suspended checkpoint -> Some (Checkpointed checkpoint)
   | Recovering recovery -> Some recovery.origin
   | Settled _ -> None
+
+let validate_native_call ~id ~input_sha256 ~phase native_call =
+  let open Keeper_native_call in
+  match native_call with
+  | No_native_call -> Ok ()
+  | Active call | Terminal_unacknowledged (call, _) ->
+    if Option.is_none (Scope_id.direct_operation_id id) then Error "native call requires a direct operation"
+    else if call.operation_digest <> input_sha256 then Error "native call operation digest changed"
+    else match phase, native_call with
+      | (Preparing | Ready | Suspended _), _ -> Error "native call has no running or terminal execution"
+      | (Recovering _ | Settled _), Active _ -> Error "inactive execution retains an active native call"
+      | (Running | Resuming_runtime_retry _ | Resuming_gate _), _ -> Ok ()
+      | (Recovering _ | Settled _), (No_native_call | Terminal_unacknowledged _) -> Ok ()
+
+let update_native_call ~now ~expected ~replacement current =
+  let open Keeper_native_call in
+  let invalid detail = Error (Invalid_transition detail) in
+  if not (valid_time now) then invalid "invalid native call update time"
+  else if not (equal_state expected current.native_call) then invalid "native call source changed"
+  else
+    let* () = validate_native_call ~id:current.id ~input_sha256:current.input_sha256
+        ~phase:current.phase replacement |> Result.map_error (fun detail -> Invalid_transition detail) in
+    let* () = match current.phase with
+      | Running | Resuming_runtime_retry _ | Resuming_gate _ -> Ok ()
+      | Preparing | Ready | Suspended _ | Recovering _ | Settled _ -> invalid "native call update requires running execution" in
+    let* () = match expected, replacement with
+      | No_native_call, Active _ -> Ok ()
+      | Terminal_unacknowledged (_, disposition), (Active _ | No_native_call) ->
+        (match disposition.Agent_core.Agent.recovery with
+         | Agent_core.Agent.Retire -> Ok ()
+         | Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown ->
+           invalid "native call transition is not admitted")
+      | Active before, Active after ->
+        let* advanced = advance before ~observed:before.checkpoint ~checkpoint:after.checkpoint
+          |> Result.map_error (fun detail -> Invalid_transition detail) in
+        if equal advanced after then Ok () else invalid "native call identity changed"
+      | Active before, Terminal_unacknowledged (after, _) when equal before after -> Ok ()
+      | _, _ when equal_state expected replacement -> Ok ()
+      | (No_native_call | Active _ | Terminal_unacknowledged _), _ -> invalid "native call transition is not admitted" in
+    if equal_state expected replacement then Ok current
+    else if current.revision = Int64.max_int then Error Revision_exhausted
+    else Ok {current with native_call=replacement; revision=Int64.succ current.revision; updated_at=now}
 
 let apply ~now action current =
   if not (valid_time now) then Error (Invalid_transition "invalid transition time")
@@ -463,6 +508,42 @@ let apply ~now action current =
                 (match current.phase with
                  | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Suspended _ -> unchanged (Settled terminal)
                  | Settled _ -> reject ())) in
+    let* native_call = match current.native_call with
+      | Keeper_native_call.No_native_call -> Ok Keeper_native_call.No_native_call
+      | Keeper_native_call.Active _ ->
+        (match action with
+         | Settle (Completed | Cancelled | Failed _) ->
+           Error (Invalid_transition "active native call has no terminal disposition")
+         | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+         | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
+         | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
+         | Suspend_gate_reconciliation _ | Suspend_gate _ | Reconcile_gate_binding _
+         | Resolve_gate _ | Resume_gate _ | Discharge_gate _ ->
+           if phase <> current.phase then
+             Error (Invalid_transition "active native call cannot change execution phase")
+           else Ok current.native_call)
+      | Keeper_native_call.Terminal_unacknowledged (_, disposition) ->
+        (match disposition.Agent_core.Agent.recovery with
+         | Agent_core.Agent.Retire ->
+           (match action with
+            | Suspend _ | Suspend_official_checkpoint _ | Suspend_runtime_retry _
+            | Suspend_gate _ | Suspend_gate_reconciliation _ ->
+              (* Retirement commits together with the accepted continuation. *)
+              Ok Keeper_native_call.No_native_call
+            | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+            | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
+            | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+            | Settle (Completed | Cancelled | Failed _) -> Ok current.native_call)
+         | Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown ->
+           (match action with
+            | Settle Completed -> Error (Invalid_transition "unknown native effect cannot complete")
+            | Suspend _ | Suspend_official_checkpoint _ | Suspend_runtime_retry _
+            | Suspend_gate _ | Suspend_gate_reconciliation _ ->
+              Error (Invalid_transition "unknown native effect cannot resume through another continuation")
+            | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+            | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
+            | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+            | Settle (Cancelled | Failed _) -> Ok current.native_call)) in
     let gate_obligations = match action with
       | Suspend_gate_reconciliation (binding, _) -> binding.obligations
       | Suspend_gate waiting | Reconcile_gate_binding (_, waiting) -> waiting.obligations
@@ -473,13 +554,14 @@ let apply ~now action current =
       | Require_reconciliation _ | Suspend _ | Suspend_runtime_retry _
       | Resume_runtime_retry _ | Update_runtime_retry_wait _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
     if phase = current.phase && gate_obligations = current.gate_obligations
+       && Keeper_native_call.equal_state native_call current.native_call
     then Ok current
     else if current.revision = Int64.max_int then Error Revision_exhausted
     else
       let input = match phase with
         | Settled _ -> None
         | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Recovering _ -> current.input in
-      Ok { current with revision = Int64.succ current.revision; phase; input; gate_obligations; updated_at = now }
+      Ok { current with revision = Int64.succ current.revision; phase; input; gate_obligations; native_call; updated_at = now }
 
 let source_to_json source =
   `Assoc [ "post_id", `String source.post_id
@@ -573,6 +655,9 @@ let to_json execution =
          ; "phase", phase_json execution.phase
          ; "created_at", `Float execution.created_at
          ; "updated_at", `Float execution.updated_at ]
+          @ (match execution.native_call with Keeper_native_call.No_native_call -> []
+             | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ ->
+               ["native_call", Keeper_native_call.state_to_json execution.native_call])
           @ (if execution.gate_obligations = [] then []
              else ["gate_obligations", `List (List.map gate_obligation_json execution.gate_obligations)]))
 
@@ -822,6 +907,13 @@ let phase_of_json json =
 
 let of_json json =
   let decode () =
+    let native_call_json, json = match json with
+      | `Assoc fields ->
+        (match List.assoc_opt "native_call" fields with
+         | None -> `Null, json
+         | Some value -> value, `Assoc (List.remove_assoc "native_call" fields))
+      | _ -> `Null, json in
+    let* native_call = Keeper_native_call.state_of_json native_call_json in
     let json = match json with
       | `Assoc fields when not (List.mem_assoc "gate_obligations" fields) ->
         `Assoc (("gate_obligations", `List []) :: fields)
@@ -872,6 +964,7 @@ let of_json json =
           | Unconfirmed_sources | Confirmed_undispatched); _} -> Ok () in
     let* input_sha256 = string "input_sha256" fields in
     let* () = if canonical_sha input_sha256 then Ok () else Error "invalid admitted input digest" in
+    let* () = validate_native_call ~id ~input_sha256 ~phase native_call in
     let* input = match field "input" fields with
       | `Null -> Ok None
       | value ->
@@ -903,5 +996,5 @@ let of_json json =
       else Error "execution phase, revision and initial frame are incoherent" in
     let* created_at = time "created_at" fields in
     let* updated_at = time "updated_at" fields in
-    Ok { id; revision; input; input_sha256; gate_obligations; sources; current_sources; frame; phase; created_at; updated_at }
+    Ok { id; revision; input; input_sha256; gate_obligations; sources; current_sources; frame; phase; native_call; created_at; updated_at }
   in decode () |> Result.map_error (fun detail -> Invalid_record detail)

@@ -81,6 +81,22 @@ let test_a_mid_turn_widening_is_visible () =
       (List.mem "github_get_me" (names built)))
 ;;
 
+let test_request_context_references_require_callable_tools () =
+  let built = [tool "keeper_artifact_read"; tool "Read"] in
+  let surface ~enabled ~tool_choice ~schema_names =
+    Keeper_agent_tool_surface.for_request ~enabled ~tool_choice ~schema_names
+      ~agent_cell:(ref None) ~built |> names in
+  check (list string) "disabled surface offers no reader" []
+    (surface ~enabled:false ~tool_choice:None ~schema_names:["keeper_artifact_read"]);
+  check (list string) "explicit text-only request offers no reader" []
+    (surface ~enabled:true ~tool_choice:(Some Agent_core.Types.None_)
+       ~schema_names:["keeper_artifact_read"]);
+  check (list string) "filtered reader stays unavailable" ["Read"]
+    (surface ~enabled:true ~tool_choice:(Some Agent_core.Types.Auto) ~schema_names:["Read"]);
+  check (list string) "callable reader is offered" ["keeper_artifact_read"]
+    (surface ~enabled:true ~tool_choice:None ~schema_names:["keeper_artifact_read"])
+;;
+
 let () =
   run
     "keeper tool surface on the wire"
@@ -89,6 +105,8 @@ let () =
             test_no_agent_reports_the_built_list
         ; test_case "agent surface wins over the built list" `Quick
             test_agent_surface_wins_over_the_built_list
+        ; test_case "context references require callable tools" `Quick
+            test_request_context_references_require_callable_tools
         ; test_case "a mid-turn widening is visible" `Quick
             test_a_mid_turn_widening_is_visible
         ] )

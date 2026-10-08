@@ -1448,26 +1448,34 @@ let format_workspace_memory_observation = function
   | Workspace_memory_ledger.Unavailable _ ->
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_unavailable [] ^ "\n\n")
   | Workspace_memory_ledger.Available descriptor ->
-    let claims_digest, digest_note = match descriptor.claims_digest with
-      | [] -> "None yet.", "The ledger holds no shared claims yet."
-      | lines ->
-        let shown = List.length lines in
-        String.concat "\n" lines,
-        if descriptor.claims_digest_truncated then
-          Printf.sprintf
-            "Opening line of each shared claim — the digest shows the first %d of %d claims in id order, not a relevance selection:"
-            shown descriptor.claim_count
-        else
-          Printf.sprintf
-            "Opening line of each of the %d shared claims:"
-            descriptor.claim_count in
+    let briefing, briefing_status = match descriptor.briefing with
+      | Error _ -> "", render_fragment Prompt_names.keeper_context_workspace_memory_briefing_unavailable []
+      | Ok Workspace_memory_briefing.Missing ->
+        "", render_fragment Prompt_names.keeper_context_workspace_memory_briefing_pending []
+      | Ok (Workspace_memory_briefing.Current summary) ->
+        summary.text, render_fragment Prompt_names.keeper_context_workspace_memory_briefing_current []
+      | Ok (Workspace_memory_briefing.Stale summary) ->
+        summary.text, render_fragment Prompt_names.keeper_context_workspace_memory_briefing_stale [] in
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_available
       [ "ledger_sha256", descriptor.ledger_sha256;
         "claim_count", string_of_int descriptor.claim_count;
         "conflict_count", string_of_int descriptor.conflict_count;
         "classified_count", string_of_int descriptor.classified_count;
-        "claims_digest", claims_digest;
-        "digest_note", digest_note ] ^ "\n\n")
+        "briefing", briefing;
+        "briefing_status", briefing_status ] ^ "\n\n")
+
+let format_recent_work = function
+  | Keeper_recent_work.Absent -> None
+  | Evidence evidence ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work
+            [ "evidence", evidence ] ^ "\n\n")
+  | Preview evidence ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work_preview
+            [ "evidence", evidence ] ^ "\n\n")
+  | Unavailable detail ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work
+            [ "evidence", Yojson.Safe.to_string (`Assoc ["unavailable", `String detail]) ] ^ "\n\n")
+;;
 
 let build_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
@@ -1479,6 +1487,7 @@ let build_prompt_internal
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
+    ?(recent_work = Keeper_recent_work.Absent)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
   =
@@ -2078,6 +2087,7 @@ let build_prompt_internal
        outcomes are shown: the rejections are what the keeper must not repeat,
        the successes are what it must not redo. *)
     | Keeper_context_layers.Own_recent_actions -> own_recent_actions_section
+    | Keeper_context_layers.Recent_work -> format_recent_work recent_work
     | Keeper_context_layers.Fleet_messages ->
       if observation.fleet_messages <> [] then (
         let ubuf = Buffer.create 256 in
@@ -2173,6 +2183,7 @@ let build_prompt
       ?workspace_memory
       ?lane_updates
       ?repository_freshness
+      ?recent_work
       ~observation
       ()
   =
@@ -2185,6 +2196,7 @@ let build_prompt
     ?workspace_memory
     ?lane_updates
     ?repository_freshness
+    ?recent_work
     ~observation
     ()
 ;;
@@ -2196,6 +2208,7 @@ let build_prompt_preview
       ?workspace_memory
       ?lane_updates
       ?repository_freshness
+      ?recent_work
       ~observation
       ()
   =
@@ -2207,6 +2220,7 @@ let build_prompt_preview
     ?workspace_memory
     ?lane_updates
     ?repository_freshness
+    ?recent_work
     ~observation
     ()
 ;;

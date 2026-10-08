@@ -174,6 +174,46 @@ let test_rate_limit_lifecycle_reaches_the_tui () =
   assert_state "success clears a stated wait before expiry" false None (project ~now:0.)
 ;;
 
+(* The failed attempt the lane walk orders by reaches the runtime detail, with
+   the Keeper that saw it, and an answer takes it away again. *)
+let test_failed_attempt_reaches_the_tui () =
+  with_runtimes @@ fun () ->
+  let runtime =
+    match Runtime.get_runtime_by_id "usage_claude.sonnet" with
+    | Some runtime -> runtime
+    | None -> fail "fixture runtime missing"
+  in
+  let candidate = runtime.Runtime_instance.candidate_backpressure in
+  let project () =
+    let json =
+      Server_dashboard_runtime_resolved_json.build_at ~now:0.
+        ~generated_at_iso:"2026-10-07T00:00:00Z"
+        ~config:(Workspace.default_config (Filename.get_temp_dir_name ()))
+    in
+    match Tui_decode.decode_runtime_resolved json with
+    | Error detail -> fail detail
+    | Ok (rows, _) ->
+      (List.find (fun (row : Tui_decode.runtime_option) -> String.equal row.ro_id runtime.id) rows)
+        .Tui_decode.ro_failed_attempt
+  in
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  check bool "clear before any failure" true (Option.is_none (project ()));
+  Runtime_candidate_backpressure.note_failed_attempt ~candidate
+    ~failure:Runtime_candidate_backpressure.Provider_timeout
+    ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"alpha");
+  (match project () with
+   | Some
+       { Tui_decode.rfa_failure =
+           Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout
+       ; rfa_recorded_by = "alpha"
+       ; _
+       } -> ()
+   | Some _ -> fail "the failed attempt lost its kind or its recorder"
+   | None -> fail "the failed attempt did not reach the resolved document");
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  check bool "an answer clears it" true (Option.is_none (project ()))
+;;
+
 let test_reports_reach_the_resolved_document () =
   with_runtimes @@ fun () ->
   let claude_scope = scope_of "usage_claude.sonnet" in
@@ -1322,6 +1362,8 @@ let () =
     [ ( "resolved"
       , [ test_case "rate-limit lifecycle reaches the TUI" `Quick
             test_rate_limit_lifecycle_reaches_the_tui
+        ; test_case "failed attempt reaches the TUI" `Quick
+            test_failed_attempt_reaches_the_tui
         ; test_case "reports reach the resolved document" `Quick
             test_reports_reach_the_resolved_document
         ; test_case "malformed window is a typed error" `Quick

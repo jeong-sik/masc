@@ -6,6 +6,13 @@
 
 open Alcotest
 module Live = Masc_tui_keeper_chat_live
+
+(* Most fixtures compare stream content and sequence only; timestamp parity is
+   exercised separately through the observed-delta API. *)
+let feed decoder chunk =
+  Live.feed decoder chunk
+  |> List.map (fun (item : Live.observed_delta) -> item.seq, item.delta)
+
 module Log = Masc_tui_keeper_chat_log
 module E = Masc.Keeper_chat_events
 module Journal = Masc.Keeper_chat_event_log
@@ -46,6 +53,11 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" stop_reason)
   | Live.Text text -> "text(" ^ text ^ ")"
   | Live.Thinking text -> "thinking(" ^ text ^ ")"
+  | Live.Native_tool_started { occurrence; tool_name } ->
+      Printf.sprintf "native_tool_started(%s,%s)" (occurrence_to_string occurrence)
+        (Option.value ~default:"unnamed" tool_name)
+  | Live.Native_tool_ended { occurrence } ->
+      Printf.sprintf "native_tool_ended(%s)" (occurrence_to_string occurrence)
   | Live.Tool_started { occurrence; tool_name } ->
       Printf.sprintf "tool_started(%s,%s)" (occurrence_to_string occurrence) tool_name
   | Live.Tool_args { occurrence; fragment = Live.Args_delta delta } ->
@@ -141,6 +153,84 @@ let page_json ?(schema = "masc.keeper_chat_events.v2") ?(next_since_offset = `In
     ; "next_since_offset", next_since_offset
     ]
 
+let test_operation_and_journal_read_order () =
+  let open Keeper_chat_operation in
+  List.iter (fun next ->
+    let calls = ref [] and states = ref [Queued; next] in
+    let read_operation () =
+      calls := !calls @ ["operation"];
+      match !states with
+      | value :: rest -> states := rest; Ok (Some value)
+      | [] -> fail "unexpected operation reread" in
+    let read_journal () = calls := !calls @ ["journal"]; Ok [] in
+    let observed, _ = Log.read_with_operation_state ~read_operation ~read_journal in
+    check bool "claim between reads is observed" true (observed = Ok (Some next));
+    check (list string) "journal follows the newest operation observation"
+      ["operation";"journal";"operation";"journal"] !calls)
+    [Running {started_at=2.}; Succeeded {completed_at=3.;outcome_ref="result"}];
+  List.iter (fun initial ->
+    let terminal = Succeeded {completed_at=3.;outcome_ref="result"} in
+    let states = ref [initial; terminal] in
+    let first = [line 0 1.0 (E.Text_delta "retained partial output")] in
+    let journals = ref [Ok first; Error Log.Journal_pruned] in
+    let read_operation () = match !states with
+      | x :: xs -> states := xs; Ok (Some x)
+      | [] -> fail "unexpected extra operation read" in
+    let read_journal () = match !journals with
+      | x :: xs -> journals := xs; x
+      | [] -> fail "unexpected extra journal read" in
+    let observed, journal = Log.read_with_operation_state ~read_operation ~read_journal in
+    check bool "operation settling during the journal read is observed" true (observed = Ok (Some terminal));
+    check bool "failed terminal reread preserves the first successful journal" true (journal = Ok first);
+    check int "the terminal journal was retried" 0 (List.length !journals))
+    [Queued; Running {started_at=2.}];
+  let terminal = Failed {completed_at=3.;failure={kind=Interrupted_by_restart;
+    detail="server restarted";outcome_ref=None}} in
+  let observed, journal = Log.read_with_operation_state
+    ~read_operation:(fun () -> Ok (Some terminal))
+    ~read_journal:(fun () -> Error Log.Journal_pruned) in
+  check bool "journal absence cannot erase the exact failure" true
+    (observed = Ok (Some terminal) && journal = Error Log.Journal_pruned)
+
+let test_failed_operation_recheck_keeps_the_working_observation () =
+  let open Keeper_chat_operation in
+  List.iter (fun refreshed ->
+    List.iter (fun initial ->
+      let states = ref [Ok (Some initial); refreshed] in
+      let first = [line 0 1.0 (E.Text_delta "retained working output")] in
+      let reads = ref 0 in
+      let read_operation () = match !states with
+        | x :: xs -> states := xs; x
+        | [] -> fail "unexpected operation read" in
+      let read_journal () = incr reads; Ok first in
+      let observed, journal = Log.read_with_operation_state ~read_operation ~read_journal in
+      check bool "failed refresh cannot erase the exact earlier observation" true
+        (observed = Ok (Some initial));
+      check bool "working output survives the failed refresh" true (journal = Ok first);
+      check int "unavailable recheck does not refetch a successful journal" 1 !reads)
+      [Queued; Running {started_at=2.}])
+    [Error "operation endpoint temporarily unavailable"; Ok None]
+
+let test_decode_exact_operation_state () =
+  let body fields = `Assoc (["schema", `String "masc.keeper_chat_operation.v1";
+    "operation_id", `String "exact"] @ fields) in
+  let failed = ["state", `String "Failed"; "completed_at", `Float 4.;
+    "failure_kind", `String "Turn_cancelled"; "failure_detail", `String "stopped"] in
+  (match Log.decode_operation_state ~operation_id:"exact" (body failed) with
+   | Ok (Keeper_chat_operation.Failed {completed_at; failure}) ->
+       check (float 0.) "completion time" 4. completed_at;
+       check string "failure reason" "stopped" failure.detail
+   | _ -> fail "exact failed operation was not decoded");
+  List.iter (fun json ->
+    check bool "malformed or mismatched authority cannot settle a journal" true
+      (Result.is_error (Log.decode_operation_state ~operation_id:"exact" json)))
+    [ `Null; `Bool false; `List []; `String "not an operation"
+    ; body ["state", `String "surprise"]
+    ; body ["state", `String "Cancelled"; "completed_at", `Float nan]
+    ; body ["state", `String "Failed"; "completed_at", `Float 4.]
+    ; `Assoc ["schema", `String "masc.keeper_chat_operation.v1";
+        "operation_id", `String "another"; "state", `String "Queued"] ]
+
 let test_decode_events_page () =
   let lines =
     [ line 0 1.0 (E.Run_started { run_id = "r"; thread_id = "keeper:keeper.one" })
@@ -153,7 +243,7 @@ let test_decode_events_page () =
           ~next_since_seq:(Journal.After_seq 1) lines)
    with
    | Ok page ->
-       check string "operation id" "tui-req-1" page.operation_id;
+       check string "operation id" "tui-req-1" (Log.source_key page.source);
        check int "two events" 2 (List.length page.events);
        check bool "has_more" true page.has_more;
        check position "cursor" (Journal.After_seq 1) page.next_since_seq;
@@ -377,12 +467,69 @@ let wire_tagged_deltas events =
       events
   in
   let decoder = Live.create () in
-  Live.feed decoder body
+  feed decoder body
 
 let journal_tagged_deltas events =
   List.filter_map
     (fun (seq, event) -> Option.map (fun d -> (Some seq, d)) (Log.delta_of_journaled event))
     events
+
+let test_wire_timestamps_match_journal_and_survive_reconnect () =
+  let started_at = 1791363124.206972 in
+  let text_at = 1791363124.709321 in
+  let lines =
+    [ line 0 started_at
+        (E.Run_started { run_id = "run-timed"; thread_id = "keeper:keeper.one" })
+    ; line 1 (started_at +. 0.1)
+        (E.Text_message_start { message_id = "message-timed"; role = E.Assistant })
+    ; line 2 text_at (E.Text_delta "timed reply")
+    ]
+  in
+  let _, body =
+    List.fold_left
+      (fun (projection, body) (event : Journal.journaled_event) ->
+        let projection, projected =
+          Projection.project ~timestamp:event.ts ~redact_text:Fun.id
+            ~redact_json:Fun.id projection event.event
+        in
+        ( projection
+        , body
+          ^ Option.fold ~none:""
+              ~some:(Ag_ui.event_to_sse ~id:event.seq) projected ))
+      (Projection.initial, "") lines
+  in
+  let from_wire = log () in
+  let receive () =
+    Live.feed (Live.create ()) body
+    |> List.map (fun (item : Live.observed_delta) ->
+           Log.add ?at:item.at from_wire ~seq:item.seq item.delta)
+  in
+  check (list bool) "the first stream contributes two visible events"
+    [ true; true ] (receive ());
+  let from_journal = log () in
+  ignore (Log.add_journaled from_journal lines);
+  let entries log =
+    Log.entries log
+    |> List.map (fun (entry : Log.entry) ->
+           ((entry.seq, entry.at), entry.delta))
+  in
+  let observed = list (pair (pair (option int) (option (float 0.000001))) delta) in
+  let expected =
+    [ ((Some 0, Some started_at), Live.Run_started)
+    ; ((Some 2, Some text_at), Live.Text "timed reply")
+    ]
+  in
+  check observed "wire keeps the producer's fractional epoch seconds"
+    expected (entries from_wire);
+  check observed "journal replay uses identical event times"
+    expected (entries from_journal);
+  let revision = Log.revision from_wire in
+  check (list bool) "a reconnected stream contributes no repeated events"
+    [ false; false ] (receive ());
+  check observed "reconnect preserves the original event times"
+    expected (entries from_wire);
+  check int "duplicate replay does not revise the log"
+    revision (Log.revision from_wire)
 
 let events_error =
   testable (Fmt.of_to_string Log.events_error_to_string) ( = )
@@ -489,7 +636,7 @@ let test_read_whole_journal_pages_until_the_position_stops_moving () =
   in
   let page ~events ~has_more ~next_since_seq ~next_since_offset =
     Ok
-      { Log.operation_id = "op"
+      { Log.source = Log.Operation "op"
       ; events
       ; has_more
       ; next_since_seq
@@ -651,7 +798,7 @@ let test_golden_journal_equals_wire_in_chunks () =
         else
           let take = min size (length - offset) in
           loop (offset + take)
-            (List.rev_append (Live.feed decoder (String.sub body offset take)) acc)
+            (List.rev_append (feed decoder (String.sub body offset take)) acc)
       in
       check (list tagged) (Printf.sprintf "%d-byte chunks" size) whole (loop 0 []))
     [ 1; 5; 13 ]
@@ -744,7 +891,11 @@ let () =
             test_a_blank_reason_is_not_a_reason
         ] )
     ; ( "v2 page"
-      , [ test_case "decode events page" `Quick test_decode_events_page
+      , [ test_case "failed operation recheck retains observed state" `Quick
+            test_failed_operation_recheck_keeps_the_working_observation
+        ; test_case "operation and journal observation order" `Quick test_operation_and_journal_read_order
+        ; test_case "decode exact operation state" `Quick test_decode_exact_operation_state
+        ; test_case "decode events page" `Quick test_decode_events_page
         ; test_case "add_journaled holds undrawn positions" `Quick
             test_add_journaled_holds_undrawn_positions
         ; test_case "decode events error by code" `Quick
@@ -758,6 +909,8 @@ let () =
         ] )
     ; ( "golden"
       , [ test_case "journal equals wire" `Quick test_golden_journal_equals_wire
+        ; test_case "wire timestamps match journal and survive reconnect" `Quick
+            test_wire_timestamps_match_journal_and_survive_reconnect
         ; test_case "journal equals wire in chunks" `Quick
             test_golden_journal_equals_wire_in_chunks
         ; test_case "a journal page fills the log like the wire does" `Quick

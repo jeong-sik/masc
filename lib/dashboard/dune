@@ -12,7 +12,6 @@
   masc.keeper_portrait
   masc.masc_process
   masc.watched_work
-  masc.tool_schemas_specs
   yojson
   otoml
   base64

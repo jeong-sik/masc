@@ -16,13 +16,10 @@
 let string_opt_json = Json_util.string_opt_to_json
 let int_opt_json = Json_util.int_opt_to_json
 
-(* The rate limit this process holds for [rt], and the moment the provider's
-   own Retry-After ends it when that is still ahead of [now]. *)
-let runtime_rate_limit ~now (rt : Runtime_instance.t) : bool * float option =
-  match
-    Runtime_candidate_backpressure.candidate_backpressure ~now
-      ~candidate:rt.candidate_backpressure
-  with
+(* The rate limit this process holds for a runtime, and the moment the
+   provider's own Retry-After ends it when that is still ahead of [now]. *)
+let runtime_rate_limit ~now observed : bool * float option =
+  match observed with
   | Some
       { Runtime_candidate_backpressure.rate_limit =
           Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after })
@@ -36,6 +33,27 @@ let runtime_rate_limit ~now (rt : Runtime_instance.t) : bool * float option =
     true, resets_at
   | Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = _ } | None ->
     false, None
+;;
+
+(* The last attempt on a runtime that failed without answering. The lane walk
+   reads it to try this runtime after the candidates that answered, except in
+   the walk of the Keeper that recorded it (RFC-0458 §3.4); only an answer
+   clears it. *)
+let runtime_failed_attempt_json observed : Yojson.Safe.t =
+  match observed with
+  | Some
+      { Runtime_candidate_backpressure.failed_attempt =
+          Some
+            (Runtime_candidate_backpressure.Failed_attempt
+               { noted_at; failure; recorded_by })
+      ; rate_limit = _
+      } ->
+    `Assoc
+      [ "noted_at", `Float noted_at
+      ; "failure", `String (Runtime_candidate_backpressure.attempt_failure_to_wire_name failure)
+      ; "recorded_by", `String (Runtime_candidate_backpressure.recorder_keeper_name recorded_by)
+      ]
+  | Some { Runtime_candidate_backpressure.failed_attempt = None; rate_limit = _ } | None -> `Null
 ;;
 
 let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson.Safe.t =
@@ -66,7 +84,11 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
      process's own observation of a 429 on this runtime. The provider's stated
      Retry-After deadline or a successful answer clears it. A limit without a
      stated wait stays until success and has no [rate_limit_resets_at]. *)
-  let rate_limited, rate_limit_resets_at = runtime_rate_limit ~now rt in
+  let observed =
+    Runtime_candidate_backpressure.candidate_backpressure ~now
+      ~candidate:rt.candidate_backpressure
+  in
+  let rate_limited, rate_limit_resets_at = runtime_rate_limit ~now observed in
   `Assoc
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
@@ -111,6 +133,7 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
     ; "rate_limited", `Bool rate_limited
     ; ( "rate_limit_resets_at"
       , match rate_limit_resets_at with Some t -> `Float t | None -> `Null )
+    ; "failed_attempt", runtime_failed_attempt_json observed
     ]
 ;;
 

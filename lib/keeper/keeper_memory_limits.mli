@@ -18,6 +18,11 @@ val current : Keeper_memory_os_types.fact list -> t
 
 val exceeded : t -> bool
 
+val excess_reduced : before:t -> after:t -> bool
+(** Compare occupied-category excess and the sum of per-category item excess
+    separately. At least one must fall and neither may rise. Both reports must
+    use the same operator limits; a settings change is not cleanup progress. *)
+
 val to_json : t -> Yojson.Safe.t
 (** Includes every occupied category and its excess, total occupied category
     count, and category excess. Limits are advisory during the initial rollout. *)

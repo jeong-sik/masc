@@ -12,7 +12,8 @@ let fresh () =
   Transcript.create ~keeper_name:"keeper.one" ~request_id:"req-1"
     ~started_at:origin
 
-let rows ?(now = origin) t = Transcript.status_rows ~now t
+let rows ?(show_timing = true) ?(now = origin) t =
+  Transcript.status_rows ~show_timing ~now t
 
 let feed ?(now = origin) t deltas =
   List.iter (Transcript.apply ~now t) deltas
@@ -69,8 +70,10 @@ let phase = testable (Fmt.of_to_string phase_to_string) ( = )
 
 let outcome_to_string : Transcript.tool_outcome -> string = function
   | Transcript.Started -> "started"
+  | Transcript.Native_running -> "native_running"
   | Transcript.Awaiting_result -> "awaiting_result"
   | Transcript.Returned -> "returned"
+  | Transcript.Native_ended -> "native_ended"
   | Transcript.Failed -> "failed"
   | Transcript.Never_returned -> "never_returned"
   | Transcript.Outcome_unrecorded -> "outcome_unrecorded"
@@ -396,6 +399,7 @@ let drawn_to_string (item : Transcript.drawn_item) =
   | Transcript.Drawn_text text -> "text:" ^ text
   | Transcript.Drawn_reply text -> "reply:" ^ text
   | Transcript.Drawn_status text -> "status:" ^ text
+  | Transcript.Drawn_error text -> "error:" ^ text
 ;;
 
 let drawn t = List.map drawn_to_string (Transcript.drawn t)
@@ -624,11 +628,15 @@ let test_run_failure_and_finish_set_the_phase () =
   check phase "a failed run says so"
     (Transcript.Stream_failed "provider 429")
     (Transcript.phase failed);
+  check (list string) "a failure before any output remains in the transcript"
+    [ "error:provider 429" ] (drawn failed);
   check string "failure progress carries the cause without another error label"
     "provider 429 \xc2\xb7 0s"
     (List.assoc Transcript.Progress (rows failed));
   let missing = fresh () in
   feed missing [ Live.Run_started; Live.Run_failed { message = " " } ];
+  check (list string) "a missing failure cause remains visible"
+    [ "error:cause not reported" ] (drawn missing);
   check string "a missing cause is explicit" "cause not reported \xc2\xb7 0s"
     (List.assoc Transcript.Progress (rows missing));
   let missing_on_runtime = fresh () in
@@ -645,6 +653,24 @@ let test_run_failure_and_finish_set_the_phase () =
   feed finished [ Live.Run_started; Live.Run_finished ];
   check phase "a finished run says so" Transcript.Stream_ended
     (Transcript.phase finished)
+
+let test_failure_after_recorded_reply_preserves_both () =
+  List.iter (fun (outcome, expected_reply) ->
+    let t = fresh () in
+    feed t [ Live.Run_started; control_reply outcome; Live.Run_finished ];
+    feed ~now:(origin +. 12.) t [ Live.Run_failed {message="resumed operation failed"} ];
+    check (list string) "the prior reply and later terminal failure both remain"
+      [expected_reply; "error:resumed operation failed"] (drawn t);
+    match List.rev (Transcript.drawn t) with
+    | { Transcript.drawn = Drawn_error _; at; segment; _ } :: _ ->
+        check (option (float 0.001)) "failure retains its later observation time"
+          (Some (origin +. 12.)) at;
+        check int "failure belongs to its original segment" 0 segment
+    | _ -> fail "terminal failure disappeared from the drawn timeline")
+    [ Masc.Keeper_turn_outcome.Visible_reply, "reply:recorded but not chunked"
+    ; Masc.Keeper_turn_outcome.Continuation_checkpoint,
+      "status:Continuation checkpoint recorded (turn trace-1#3)" ]
+;;
 
 let test_terminal_turn_marks_only_unresolved_tools () =
   List.iter
@@ -869,6 +895,11 @@ let test_progress_row_carries_the_turn_age () =
        check bool "a turn that has not started yet still reports its age" true
          (contains ~needle:"12s" text)
    | got -> failf "expected a progress row, got %d rows" (List.length got));
+  (match rows ~show_timing:false ~now:(origin +. 12.) t with
+   | (Transcript.Progress, text) :: _ ->
+       check string "hiding timing keeps the admission fact"
+         "sent; not accepted yet" text
+   | got -> failf "expected admission progress, got %d rows" (List.length got));
   feed t [ Live.Run_started ];
   (match rows ~now:(origin +. 90.) t with
    | (Transcript.Progress, text) :: _ ->
@@ -1320,11 +1351,9 @@ let test_runtime_failover_visibility_and_error_attribution () =
   check (option string) "current runtime is claude" (Some "claude-3-7-sonnet")
     (Transcript.current_runtime_id t);
   feed t [ Live.Text "streaming token" ];
-  (* A token names the phase, not the fact of streaming: the row's first
-     clause is what the model side is doing, then the runtime it is doing
-     it on. *)
-  check bool "a text token puts the model in the answering phase" true
-    (contains ~needle:"answering \xc2\xb7 [claude-3-7-sonnet]" (progress_text t));
+  (* A text token identifies answer streaming and the serving runtime. *)
+  check bool "a text token identifies answer streaming" true
+    (contains ~needle:"STREAMING · answering · [claude-3-7-sonnet]" (progress_text t));
   feed t
     [ Live.Runtime_attempt_started
         { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
@@ -1390,7 +1419,8 @@ let test_the_row_names_the_model_phase_between_tool_calls () =
     (contains ~needle:"model started, nothing back for 4s" (progress_text ~now:(origin +. 5.) t));
   feed ~now:(origin +. 6.) t [ Live.Thinking "let me" ];
   let at_7 = progress_text ~now:(origin +. 7.) t in
-  check bool "a thinking delta is the reasoning phase" true (contains ~needle:"reasoning" at_7);
+  check bool "a thinking delta identifies the reasoning phase" true
+    (contains ~needle:"THINKING · reasoning" at_7);
   check bool "a pause under the threshold states no silence" false
     (contains ~needle:"nothing back" at_7);
   check bool "a stalled reasoning phase states how long" true
@@ -2691,7 +2721,11 @@ let test_checkpoint_wait_keeps_the_request_live () =
     turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace-1#3"}; Live.Run_finished];
   check bool "checkpoint waits for continuation" true (Transcript.awaiting_continuation t);
   check (option (float 0.)) "checkpoint does not settle request" None (Transcript.settled_at t);
+  check int "an idle continuation reserves no status row even days later" 0
+    (List.length (rows ~now:(origin +. 172_800.) t));
   feed t [Live.Run_started];
+  check bool "the next segment restores progress" true
+    (List.exists (fun (kind, _) -> kind = Transcript.Progress) (rows t));
   check phase "continued segment is working" Transcript.Working (Transcript.phase t);
   check bool "new segment no longer waits" false (Transcript.awaiting_continuation t);
   feed t [tool_started ~block_index:0 "after" "read_file"; tool_ended ~block_index:0 "after";
@@ -2750,9 +2784,61 @@ let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
         (String.length (String.trim meaning) > 0))
     Transcript.legend
 
+let test_event_times_survive_log_replay_and_continuation () =
+  let log = Log.create ~keeper_name:"keeper.one" ~request_id:"timed" ~started_at:100. in
+  let put at delta = ignore (Log.add ~at log ~seq:None delta) in
+  put 101. Live.Run_started;
+  put 110. (Live.Text "First segment.");
+  put 115. (Live.Reply_details {reply="";
+    turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"});
+  put 116. Live.Run_finished;
+  let checkpoint = Transcript.of_log ~now:999. log |> Transcript.drawn in
+  check (list (option (float 0.001))) "checkpoint uses its event time"
+    [Some 110.; Some 115.] (List.map (fun (item : Transcript.drawn_item) -> item.at) checkpoint);
+  put 140. Live.Run_started;
+  put 141. (Live.Runtime_attempt_started {runtime_id=Some "codex"; attempt_index=Some 0});
+  (* This continuation supplies a canonical answer without a text delta.
+     It cannot replace the first segment's text. *)
+  put 150. (Live.Reply_details {reply="Second segment.";
+    turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="trace#2"});
+  put 151. Live.Run_finished;
+  let replayed = Transcript.of_log ~now:999. log |> Transcript.drawn in
+  check (list (option (float 0.001))) "server times survive refolding"
+    [Some 110.; Some 150.] (List.map (fun (item : Transcript.drawn_item) -> item.at) replayed);
+  check (list string) "new canonical reply preserves earlier segment"
+    ["First segment."; "Second segment."]
+    (List.filter_map (fun (item : Transcript.drawn_item) -> match item.drawn with
+      | Drawn_text text | Drawn_reply text -> Some text | _ -> None) replayed);
+  check bool "continuation is not a superseded runtime attempt" true
+    (List.for_all (fun (item : Transcript.drawn_item) -> item.superseded=None) replayed)
+;;
+
+let test_native_tools_are_observations_without_execution_receipts () =
+  let t = fresh () in
+  let occurrence = occurrence ~block_index:7 "native-7" in
+  feed t [Live.Run_started; Live.Native_tool_started {occurrence;tool_name=Some "Read"}];
+  let call () = match Transcript.tool_calls t with
+    | [call] -> call | calls -> failf "expected one native step, got %d" (List.length calls) in
+  check tool_outcome "provider step runs; arguments are not inferred" Transcript.Native_running (call ()).outcome;
+  feed t [Live.Native_tool_started {occurrence;tool_name=Some "Read"};
+          Live.Native_tool_ended {occurrence}; Live.Native_tool_ended {occurrence}];
+  check tool_outcome "provider end is not a result receipt" Transcript.Native_ended (call ()).outcome;
+  check (option string) "no invented physical execution" None (call ()).execution_id;
+  feed t [Live.Tool_result {occurrence; execution_id="wrong-authority"}];
+  check (option string) "MASC receipt cannot attach to native observation" None (call ()).execution_id;
+  check bool "mixed-authority event is reported" true (Option.is_some (Transcript.unreadable t));
+  let rows = Transcript.project_tool_block Transcript.Compact
+      (Transcript.tool_block (Transcript.tool_calls t)) in
+  check tool_outcome "collapsed tools retain native outcome" Transcript.Native_ended
+    (Option.get rows.summary_outcome)
+;;
+
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "content"
+    [ ( "event timeline"
+      , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
+         test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts] )
+    ; ( "content"
       , [ test_case "the legend names every mark and phrase the rows draw" `Quick
             test_the_legend_names_every_mark_and_phrase_the_rows_draw
         ; test_case "checkpoint keeps original request live" `Quick test_checkpoint_wait_keeps_the_request_live
@@ -2940,6 +3026,8 @@ let () =
     ; ( "phase"
       , [ test_case "failure and finish are distinct" `Quick
             test_run_failure_and_finish_set_the_phase
+        ; test_case "failure after recorded reply preserves both" `Quick
+            test_failure_after_recorded_reply_preserves_both
         ; test_case "terminal turns settle only unresolved tool projections" `Quick
             test_terminal_turn_marks_only_unresolved_tools
         ; test_case "superseded tools keep attempt identity" `Quick

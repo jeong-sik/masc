@@ -785,6 +785,232 @@ let test_output_value_outside_enum_is_refused_when_its_node_runs () =
        fail "the output-bound source was not refused by its enum at run time")
 ;;
 
+let lane_status_data =
+  `Assoc
+    [ "profile", `String "docker"
+    ; "lane", `Null
+    ; "endpoint", `Null
+    ; "probe", `Null
+    ; "last_dispatch", `Null
+    ; "operator_action", `Null
+    ]
+;;
+
+let board_stats_data =
+  `Assoc
+    [ "post_count", `Int 0
+    ; "comment_count", `Int 0
+    ; "expired_pending", `Int 0
+    ; "last_sweep", `Float 0.0
+    ; "backend", `String "test"
+    ]
+;;
+
+let tools_list_data = `Assoc [ "tools", `List [] ]
+
+let make_node ~tool_name ~after ~input name =
+  Plan.node ~id:(node_id name) ~tool_name ~after:(List.map node_id after) ~input ()
+;;
+
+let empty_input = Plan.Json_template.literal (`Assoc [])
+
+(* H4-S1: c depends only on a; b is an unrelated branch held on a promise.
+   The wave must start c once a settles, before b is released. *)
+let ready_wave_fixture () =
+  let producer = canonical_descriptor "keeper_lane_status" in
+  let parallel = canonical_descriptor "masc_board_stats" in
+  let final = canonical_descriptor "keeper_tools_list" in
+  let nodes =
+    [ make_node ~tool_name:"keeper_lane_status" ~after:[] ~input:empty_input "producer"
+    ; make_node ~tool_name:"masc_board_stats" ~after:[ "producer" ] ~input:empty_input "a"
+    ; make_node ~tool_name:"masc_board_stats" ~after:[ "producer" ] ~input:empty_input "b"
+    ; make_node ~tool_name:"keeper_tools_list" ~after:[ "a" ] ~input:empty_input "c"
+    ]
+  in
+  match Plan.create ~descriptors:[ producer; parallel; final ] nodes with
+  | Ok plan -> plan
+  | Error _ -> fail "valid ready-wave fixture plan was rejected"
+;;
+
+let test_ready_wave_starts_dependent_before_unrelated_release () =
+  Eio_main.run @@ fun _env ->
+  let plan = ready_wave_fixture () in
+  let events = ref [] in
+  let log event = events := !events @ [ event ] in
+  let release_b, resolve_release_b = Eio.Promise.create () in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    match node_name node with
+    | "b" ->
+      Eio.Promise.await release_b;
+      log "b-done";
+      Executor.dispatch_result
+        (completed ~tool_name:node.Plan.tool_name ~data:board_stats_data)
+    | "c" ->
+      log "c-started";
+      Eio.Promise.resolve resolve_release_b ();
+      Executor.dispatch_result
+        (completed ~tool_name:node.Plan.tool_name ~data:tools_list_data)
+    | "producer" ->
+      Executor.dispatch_result
+        (completed ~tool_name:node.Plan.tool_name ~data:lane_status_data)
+    | "a" ->
+      Executor.dispatch_result
+        (completed ~tool_name:node.Plan.tool_name ~data:board_stats_data)
+    | name -> failf "unexpected dispatched node: %s" name
+  in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+  | Error _ -> fail "ready-wave plan did not complete"
+  | Ok results ->
+    check
+      (list string)
+      "settled plan order"
+      [ "producer"; "a"; "b"; "c" ]
+      (List.map (fun result -> Plan.Node_id.to_string result.Executor.node_id) results);
+    check
+      (list string)
+      "dependent starts before the unrelated branch is released"
+      [ "c-started"; "b-done" ]
+      !events
+;;
+
+(* H4-S2: under Continue_independent, a failure in b blocks only b's
+   descendant d while the independent a -> c branch settles. *)
+let independent_branch_fixture () =
+  let producer = canonical_descriptor "keeper_lane_status" in
+  let parallel = canonical_descriptor "masc_board_stats" in
+  let final = canonical_descriptor "keeper_tools_list" in
+  let nodes =
+    [ make_node ~tool_name:"keeper_lane_status" ~after:[] ~input:empty_input "producer"
+    ; make_node ~tool_name:"masc_board_stats" ~after:[ "producer" ] ~input:empty_input "a"
+    ; make_node ~tool_name:"masc_board_stats" ~after:[ "producer" ] ~input:empty_input "b"
+    ; make_node ~tool_name:"keeper_tools_list" ~after:[ "a" ] ~input:empty_input "c"
+    ; make_node ~tool_name:"keeper_tools_list" ~after:[ "b" ] ~input:empty_input "d"
+    ]
+  in
+  match
+    Plan.create
+      ~descriptors:[ producer; parallel; final ]
+      ~branch_failure_policy:Plan.Continue_independent
+      nodes
+  with
+  | Ok plan -> plan
+  | Error _ -> fail "valid independent-branch fixture plan was rejected"
+;;
+
+let test_continue_independent_preserves_unrelated_branch () =
+  Eio_main.run @@ fun _env ->
+  let plan = independent_branch_fixture () in
+  let called = ref [] in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    let name = node_name node in
+    called := !called @ [ name ];
+    if String.equal name "b"
+    then
+      Executor.dispatch_result
+        ~failure_effect_disposition:Tool_result.Proven_pre_effect
+        (Tool_result.make_err
+           ~tool_name:name
+           ~class_:Tool_result.Workflow_rejection
+           ~start_time:(Tool_timing.start ())
+           "b rejected")
+    else (
+      let data =
+        match name with
+        | "producer" -> lane_status_data
+        | "c" -> tools_list_data
+        | _ -> board_stats_data
+      in
+      Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data))
+  in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+  | Ok _ -> fail "failed branch did not fail the plan"
+  | Error failure ->
+    check
+      (list string)
+      "failed branch descendant was not dispatched"
+      [ "a"; "b"; "c"; "producer" ]
+      (List.sort String.compare !called);
+    check
+      (list string)
+      "independent branch remains settled"
+      [ "producer"; "a"; "b"; "c" ]
+      (List.map (fun result -> Plan.Node_id.to_string result.Executor.node_id) failure.settled);
+    (match failure.cause with
+     | Executor.Tool_did_not_complete result ->
+       check string "lowest planned cause" "b" (Plan.Node_id.to_string result.node_id)
+     | Executor.Plan_execution_failed _
+     | Executor.Node_observation_failed _
+     | Executor.Outer_completion_mismatch _ ->
+       fail "branch failure became a plan error")
+;;
+
+(* H4-S3: serial nodes run alone in static schedule order even when an
+   unrelated concurrent node is still running. *)
+let serial_order_fixture () =
+  let producer = canonical_descriptor "keeper_lane_status" in
+  let parallel = canonical_descriptor "masc_board_stats" in
+  let serial = canonical_descriptor "BrowserSession" in
+  let session_input =
+    Plan.Json_template.literal (`Assoc [ "action", `String "status" ])
+  in
+  let nodes =
+    [ make_node ~tool_name:"keeper_lane_status" ~after:[] ~input:empty_input "producer"
+    ; make_node ~tool_name:"masc_board_stats" ~after:[ "producer" ] ~input:empty_input "w"
+    ; make_node ~tool_name:"BrowserSession" ~after:[ "producer" ] ~input:session_input "s1"
+    ; make_node ~tool_name:"BrowserSession" ~after:[ "producer" ] ~input:session_input "s2"
+    ]
+  in
+  match Plan.create ~descriptors:[ producer; parallel; serial ] nodes with
+  | Ok plan -> plan
+  | Error _ -> fail "valid serial-order fixture plan was rejected"
+;;
+
+let test_serial_nodes_run_alone_in_schedule_order () =
+  Eio_main.run @@ fun _env ->
+  let plan = serial_order_fixture () in
+  let active = Atomic.make 0 in
+  let max_active = Atomic.make 0 in
+  let entered = ref [] in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    let name = node_name node in
+    entered := !entered @ [ name ];
+    let current = Atomic.fetch_and_add active 1 + 1 in
+    let rec raise_max () =
+      let observed = Atomic.get max_active in
+      if current > observed
+      then (
+        if Atomic.compare_and_set max_active observed current
+        then ()
+        else raise_max ())
+      else ()
+    in
+    raise_max ();
+    for _ = 1 to 20 do
+      Eio.Fiber.yield ()
+    done;
+    ignore (Atomic.fetch_and_add active (-1));
+    let data =
+      match name with
+      | "producer" -> lane_status_data
+      | "s1" | "s2" -> `Assoc []
+      | _ -> board_stats_data
+    in
+    Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data)
+  in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+  | Error _ -> fail "serial-order plan did not complete"
+  | Ok _ ->
+    let rec index_of position name = function
+      | [] -> failf "node %s was never dispatched" name
+      | entry :: _ when String.equal entry name -> position
+      | _ :: rest -> index_of (position + 1) name rest
+    in
+    let index = index_of 0 in
+    check bool "producer dispatches first" true (index "producer" !entered = 0);
+    check bool "serial nodes keep schedule order" true (index "s1" !entered < index "s2" !entered);
+    check int "no two nodes ever overlapped" 1 (Atomic.get max_active)
+;;
+
 let () =
   run
     "keeper_tool_plan_executor"
@@ -826,6 +1052,18 @@ let () =
             "outer completion owns terminal boundary"
             `Quick
             test_outer_completion_owns_terminal_boundary
+        ; test_case
+            "ready wave starts dependent before unrelated release"
+            `Quick
+            test_ready_wave_starts_dependent_before_unrelated_release
+        ; test_case
+            "continue independent preserves unrelated branch"
+            `Quick
+            test_continue_independent_preserves_unrelated_branch
+        ; test_case
+            "serial nodes run alone in schedule order"
+            `Quick
+            test_serial_nodes_run_alone_in_schedule_order
         ] )
     ; ( "node input validation"
       , [ test_case

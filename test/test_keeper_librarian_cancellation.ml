@@ -88,7 +88,7 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
         incr judgments;
         if stage = Second_judgment && !judgments = 2 then block ())
       (Fixture.Reply
-        {|{"model":"completed-jev","answers":{"s0_0":{"type":"noul","noul":0.875}}}|}) in
+        {|{"model":"completed-jev","answers":{"s0_0":{"type":"choice","choice":"mergeable","confidence":0.875,"probabilities":{"mergeable":0.875,"different_context":0.025,"loses_knowledge":0.05,"uncertain":0.05}}}}|}) in
   let resolver = Fixture.resolver_snapshot ~source:"cancel-fixture"
     [ { Fixture.id = "cancel-librarian-fixture"; base_url = librarian.base_url } ] in
   (match Runtime_exact_output_registry.publish
@@ -244,7 +244,7 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
      Alcotest.(check string) "the completed reply retains its actual model" "completed-jev"
        (member "model" evaluation |> string);
      check_json "the completed raw probability survives durable replay"
-       (`Assoc [ "s0_0", `Float 0.875 ]) (member "answers" evaluation);
+       (`Assoc [ "s0_0", `String "mergeable" ]) (member "answers" evaluation);
      let sent = Fixture.request_bodies jev |> List.hd |> Yojson.Safe.from_string in
      let request = member "request" evaluation in
      let asked = match member "destinations" request |> Yojson.Safe.Util.to_list with

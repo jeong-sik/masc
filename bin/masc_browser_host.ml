@@ -83,7 +83,9 @@ let () =
                   and once from the shell, so a second one changes nothing. *)
                | Hangup -> if stderr_is_terminal then leave_terminal ()
                (* A second SIGTERM forces exit if graceful shutdown is stuck. *)
-               | Terminate -> Sys.set_signal number Sys.Signal_default);
+               | Terminate ->
+                 if Atomic.get asked = None then Sys.set_signal number Sys.Signal_default
+                 else Unix._exit (128 + number));
               ignore (Atomic.compare_and_set asked None (Some signal) : bool);
               Eio.Condition.broadcast wake)) with
             (* Whoever started the host ignoring a signal decided that: nohup

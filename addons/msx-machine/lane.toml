@@ -1,0 +1,30 @@
+id = "msx-machine"
+revision = "0.1.0"
+title = "MSX machine"
+contributions = ["observe"]
+image = "masc-lane-msx-machine:0.1.0"
+command = ["/usr/local/bin/masc-msx-addon-worker", "--base-path", "/state"]
+
+[world.skills]
+directory = "skills"
+
+[world.state]
+mode = "persistent"
+
+[world.tools]
+invocation = "host_context"
+export = [
+  "masc_msx_load", "masc_msx_eject", "masc_msx_save", "masc_msx_restore",
+  "masc_msx_change_disk", "masc_msx_screen", "masc_msx_meta",
+  "masc_msx_checkpoint_info", "masc_msx_press", "masc_msx_step",
+  "masc_msx_step_until_change", "masc_msx_peek", "masc_msx_ram_diff"
+]
+
+[world.outputs.screen]
+lanes = ["msx/screen"]
+
+[resources]
+cpus = 1.0
+memory_bytes = 536870912
+pids = 32
+max_reply_bytes = 4194304

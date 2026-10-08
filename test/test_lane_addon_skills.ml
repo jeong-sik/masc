@@ -48,10 +48,10 @@ let bundled_files = [
   "skills/msx-observation-rows/references/observations.md";
   "skills/msx-observation-rows/scripts/summarize.py";
 ]
-let fixture_package_source =
+let fixture_package_source package_name =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> Filename.concat root "addons/msx-observer"
-  | None -> Filename.concat (Filename.dirname Sys.executable_name) "../addons/msx-observer"
+  | Some root -> Filename.concat root ("addons/" ^ package_name)
+  | None -> Filename.concat (Filename.dirname Sys.executable_name) ("../addons/" ^ package_name)
 
 type fixture = {
   config : Workspace.config;
@@ -152,7 +152,9 @@ let detach clock fixture =
   ignore (reconcile fixture);
   await clock (fun () -> absent (snapshot fixture) "msx-observation-rows")
 
-let with_fixture ?(runtime_text=base_config) f =
+let with_fixture ?(runtime_text=base_config) ?(package_name="msx-observer")
+    ?(package_files=bundled_files)
+    ?(sources="[{source_id = \"machine\", kind = \"msx_capture\"}]") f =
   let root = Filename.temp_dir "lane-skill-workflow-" "" in
   Fun.protect ~finally:(fun () -> remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -161,17 +163,17 @@ let with_fixture ?(runtime_text=base_config) f =
     let runtime_config = Filename.concat config_root "runtime.toml" in
     write runtime_config runtime_text;
     write (Filename.concat root "skills/ordinary-guide/SKILL.md") (document "ordinary-guide" ordinary_body);
-    let package = Filename.concat root "packages/msx-observer" in
+    let package = Filename.concat root ("packages/" ^ package_name) in
     List.iter (fun relative -> write (Filename.concat package relative)
-      (read (Filename.concat fixture_package_source relative))) bundled_files;
+      (read (Filename.concat (fixture_package_source package_name) relative))) package_files;
     let declaration = Filename.concat declarations "msx.toml" in
     write declaration (Printf.sprintf {|id = "msx-installation"
 run_id = "existing-machine"
 manifest_path = %S
 [binding]
 machine_id = "workspace-msx"
-sources = [{source_id = "machine", kind = "msx_capture"}]
-|} (Filename.concat package "lane.toml"));
+sources = %s
+|} (Filename.concat package "lane.toml") sources);
     with_environment "MASC_CONFIG_DIR" config_root (fun () ->
       with_environment "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" "true" (fun () ->
         Eio_main.run (fun env ->
@@ -354,8 +356,36 @@ let test_failed_observation_and_manual_sources_remain_exported () =
     ignore (dispatch fixture Lane.Detach ["instance_id", `String manual]);
     await clock (fun () -> instance fixture manual |> member "phase" |> json_string "kind" = "detached"))
 
+let test_machine_package_skills_follow_attachment () =
+  List.iter (fun (package_name, names) ->
+    let package_files = "lane.toml" :: List.map (fun name -> "skills/" ^ name ^ "/SKILL.md") names in
+    with_fixture ~package_name ~package_files ~sources:"[]" (fun clock fixture ->
+      List.iter (fun name -> check bool "machine skill absent before attachment" true
+        (absent (snapshot fixture) name)) names;
+      ignore (reconcile fixture);
+      await_observer clock fixture;
+      let published = snapshot fixture in
+      let reader = tool fixture in
+      List.iter (fun name ->
+        let entry = skill published name in
+        checked_read reader ("read-" ^ name)
+          (Skill_reference.to_yojson (Snapshot.entry_reference entry)) entry.document.body) names;
+      let catalog, diagnostics = Catalog.of_snapshot published in
+      check int "package instructions parse without diagnostics" 0 (List.length diagnostics);
+      List.iter (fun name ->
+        let entry = List.find (fun (entry : Catalog.skill) -> entry.name=name) (Catalog.skills catalog) in
+        check bool "image instructions do not require a static composition" true
+          (match entry.surface with Catalog.Instruction -> true | Catalog.Composition _ -> false)) names;
+      detach clock fixture;
+      List.iter (fun name -> check bool "detachment withdraws machine instructions" true
+        (absent (snapshot fixture) name)) names;
+      check bool "ordinary instructions survive machine detachment" false
+        (absent (snapshot fixture) "ordinary-guide")))
+    ["msx-machine", ["msx-observe";"msx-play"]; "dos-machine", ["dos-play"]]
+
 let () = run "Lane package Skill workflow"
   ["declaration to existing reader", [
+    test_case "machine package instructions follow attachment" `Quick test_machine_package_skills_follow_attachment;
     test_case "disabled cleanup withdraws discovery until replacement" `Quick test_disabled_cleanup_withdraws_skill_until_replacement;
     test_case "non-stopping failures and manual sources remain available" `Quick test_failed_observation_and_manual_sources_remain_exported;
     test_case "catalog, exact body/resource bytes and existing controls" `Quick test_declaration_catalog_and_resources;

@@ -6,6 +6,17 @@
 
 모델에게 나가는 문장은 코드에 박지 않는다. 제목·행 틀·상태 라벨까지 전부 `config/prompts` 에 있고, 운영자가 재정의할 수 있다.
 
+## 프리셋의 기본 프롬프트 기준
+
+프리셋은 override, Keeper 지시문, 런타임 배정을 저장한다. 저장할 때 등록된 기본
+프롬프트 본문과 fragment 슬롯의 SHA-256도 `manifest.json`의 `default_revisions`에
+기록한다. override가 없는 프롬프트도 포함하며 Markdown frontmatter는 해시에서 제외한다.
+기본 Markdown 본문 자체는 프리셋으로 저장하거나 복원하지 않는다.
+
+상세 조회와 복원 결과의 `default_prompts`는 저장 당시와 현재 기본값의 일치 여부와
+변경·추가·누락된 키를 보여 준다. TUI Config의 프리셋 상세와 복원 결과에도 표시한다.
+기준 정보가 없으면 `unknown`으로 표시한다. 이 비교는 관측 정보이며 복원을 막지 않는다.
+
 ## 자리는 셋뿐이다
 
 모델 호출 하나는 **system prompt · user message · tool result** 로 나뉜다. 파일 10개는 이 셋 중 어디에 붙느냐로 갈린다.

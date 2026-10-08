@@ -163,8 +163,14 @@ let server_workspace_matches ~expected reading =
 let workspace_identity_of_paths ~local_base_path (identity : Tui_decode.server_identity) =
   let local_base_path = canonical_path local_base_path in
   let server_base_path = canonical_path identity.sid_base_path in
+  (* The server reports its cluster-aware masc root ([<base>/.masc] for the
+     default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
+     the local one with the same function from the same cluster selection:
+     a plain [<base>/.masc] calls every healthy non-default-cluster server
+     a mismatch, and every Keeper message is refused. *)
   let local_masc_root = canonical_path
-    (Filename.concat local_base_path Common.masc_dirname) in
+    (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
+       ~cluster_name:(Env_config_core.cluster_name ())) in
   let server_masc_root = canonical_path identity.sid_masc_root in
   if String.equal local_base_path ""
   then Workspace_identity_unread
@@ -3683,9 +3689,21 @@ module Browser_lane_view = struct
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
     scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+  (* A pointer gesture that was not sent, because the connection the
+     screenshot came from does not serve it. [serving_listed] is whether a
+     listed connection does. *)
+  type unserved_gesture = {
+    asked : Browser_lane.live_transport;
+    capability : Browser_lane.live_capability;
+    serving_listed : bool;
+  }
   (* [clients] is what the last discovery answered, and [None] until one has:
      a discovery that failed leaves no list rather than an empty one, so the
-     picker cannot tell an operator there is no browser when it could not ask. *)
+     picker cannot tell an operator there is no browser when it could not ask.
+
+     [unserved_gesture] is not a [load]: nothing was requested, so the read
+     and its badge stay what they were, and a background refresh does not
+     erase it. The operator's next input withdraws it. *)
   type t = {
     clients : client list option; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
@@ -3696,6 +3714,7 @@ module Browser_lane_view = struct
     read_view : read_view;
     refresh_pending : int option;
     read_continuation : read_continuation;
+    unserved_gesture : unserved_gesture option;
   }
 
   let source_name = Browser_lane.Lane_name.to_wire
@@ -3716,14 +3735,14 @@ module Browser_lane_view = struct
       source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
-      read_continuation = No_read_continuation }
+      read_continuation = No_read_continuation; unserved_gesture = None }
   let switch_source source _t = { (create ()) with source }
   let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; scene_scope = None;
     scene_guard = None; scene_delta = None; read_view = Text_view }
   let after_action t =
     { t with reading = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; selected_tab = None; scroll = 0; load = Idle;
-      read_continuation = No_read_continuation }
+      read_continuation = No_read_continuation; unserved_gesture = None }
   let defer_read t = { t with read_continuation = Deferred_read }
   let pending_read t = match t.read_continuation with
     | No_read_continuation -> None | Deferred_read -> Some Read
@@ -3771,14 +3790,152 @@ module Browser_lane_view = struct
     | Connected_browser client -> t.source = Live && t.selected_client = Some client
     | Stagehand_browser -> t.source = Stagehand
     | Automation_browser -> t.source = Automation
+  let transport_label = function
+    | Browser_lane.Web_extension -> "WebExtension"
+    | Browser_lane.Webdriver_bidi -> "BiDi"
+  let transport_names transports = String.concat " or " (List.map transport_label transports)
+  (* The operator's word for a piece of live work. They are short because a
+     connection's whole list has to fit one 80-column row beside its name. *)
+  let capability_word : Browser_lane.live_capability -> string = function
+    | Tab_listing -> "tab list"
+    | Text_read -> "text"
+    | Document_source -> "HTML"
+    | Element_inventory -> "elements"
+    | Viewport_capture -> "screenshot"
+    | Scene_read -> "scene"
+    | Dom_interaction -> "click/fill"
+    | Point_click -> "point click"
+    | Point_scroll -> "point scroll"
+    | Trusted_hover -> "hover"
+    | Trusted_drag -> "drag"
+    | Tab_activation -> "tab switch"
+  (* What a live connection of this transport leaves out, read from the lane's
+     table, and the transports that serve all of it. *)
+  let transport_lacks transport =
+    List.filter (fun capability -> not (Browser_lane.live_transport_serves transport capability))
+      Browser_lane.all_of_live_capability
+  let transports_serving_all capabilities =
+    List.filter (fun transport ->
+      List.for_all (Browser_lane.live_transport_serves transport) capabilities)
+      Browser_lane.all_of_live_transport
+  (* "WebExtension: no hover, drag". Every row that says what a connection
+     leaves out says it through here: the connection row, the picker's detail
+     row, a refused gesture and a refused Keeper call. *)
+  let lacking_clause transport capabilities =
+    transport_label transport ^ ": no "
+    ^ String.concat ", " (List.map capability_word capabilities)
+  let served_elsewhere capabilities =
+    match transports_serving_all capabilities with
+    | [] -> None
+    | serving ->
+        let them = match capabilities with [_] -> "it" | [] | _ :: _ :: _ -> "them" in
+        Some (transport_names serving ^ " serves " ^ them)
+  (* Where attaching a connection of one of these transports is written. *)
+  let transport_setup_row transports =
+    "Setup: " ^ String.concat " or " (List.map Browser_lane.live_transport_setup_doc transports)
+  let connection_name (client : client) =
+    browser_name client.browser ^ " · " ^ transport_label client.transport
+  (* The title names the connection; the connection row adds what it leaves
+     out. *)
+  let connection_label t = match t.source, t.selected_client with
+    | Live, Some client -> Some (connection_name client)
+    | Live, None | Automation, _ | Stagehand, _ -> browser_label t
+  let connection_summary t = match t.source, t.selected_client with
+    | Live, Some client ->
+        (match transport_lacks client.transport with
+         | [] -> Some (connection_name client)
+         | lacking ->
+             Some (browser_name client.browser ^ " · "
+                   ^ lacking_clause client.transport lacking))
+    | Live, None | Automation, _ | Stagehand, _ -> browser_label t
+  (* The Live connection row. It fits 80 columns up to the picker key; the
+     lane keys after that are in the footer too. *)
+  let live_connection_row t =
+    (match connection_summary t with
+     | Some connection -> "  Live " ^ connection
+     | None -> "  Live")
+    ^ " • b:choose browser • a:automation • c:stagehand"
   let browser_choice_label = function
     | Connected_browser client ->
-        let transport = match client.transport with
-          | Browser_lane.Web_extension -> "WebExtension"
-          | Browser_lane.Webdriver_bidi -> "BiDi" in
-        browser_name client.browser ^ " · " ^ transport ^ " · existing login · " ^ client.client_id
+        connection_name client ^ " · existing login · " ^ client.client_id
     | Stagehand_browser -> "Stagehand Chromium · sentence actions · separate login"
     | Automation_browser -> "Independent Firefox/Zen · automation · separate login"
+  (* The row under the picker for the highlighted choice. A live connection
+     says what its transport leaves out and which transport serves that; the
+     server's own browsers are described by their row. *)
+  let browser_choice_detail = function
+    | Stagehand_browser | Automation_browser -> None
+    | Connected_browser client ->
+        (match transport_lacks client.transport with
+         | [] -> None
+         | lacking ->
+             Some (lacking_clause client.transport lacking
+                   ^ (match served_elsewhere lacking with
+                      | Some clause -> " · " ^ clause
+                      | None -> "")))
+  (* Whether the connection a screenshot came from takes a drag. A live
+     screenshot names its client, and the answer is the lane table's for that
+     client's transport. It is unknown when the view no longer holds that
+     client: the footer then says so instead of naming a rule. *)
+  type drag_support = Drag_served | Drag_needs of Browser_lane.live_transport list | Drag_unknown
+  let screenshot_client t (shot : screenshot) =
+    List.find_opt (fun (client : client) -> Some client.client_id = shot.client_id)
+      (Option.to_list t.selected_client @ listed_clients t)
+  let screenshot_drag_support t (shot : screenshot) =
+    match shot.source with
+    | Automation | Stagehand -> Drag_served
+    | Live ->
+        (match screenshot_client t shot with
+         | None -> Drag_unknown
+         | Some client ->
+             if Browser_lane.live_transport_serves client.transport Browser_lane.Trusted_drag
+             then Drag_served
+             else Drag_needs (Browser_lane.live_transports_serving Browser_lane.Trusted_drag))
+  let screenshot_drag_hint t shot =
+    match screenshot_drag_support t shot with
+    | Drag_served -> "drag: move"
+    | Drag_needs transports -> "drag: needs a " ^ transport_names transports ^ " connection"
+    | Drag_unknown -> "drag: connection not listed"
+  (* What becomes of a pointer gesture on a screenshot. Every gesture -- a
+     click, a drag, a wheel notch, a scroll key -- is decided here, so none
+     reaches a connection that does not serve it. A request in flight consumes
+     the gesture. A connection the view no longer holds is left to the server
+     to answer. *)
+  type pointer_decision =
+    | Pointer_consumed
+    | Pointer_unserved of unserved_gesture
+    | Pointer_send of operation
+  let pointer_decision t (shot : screenshot) action =
+    let send = Pointer_send (Viewport_pointer {tab_id = shot.tab_id; expected_url = shot.url; action}) in
+    if busy t then Pointer_consumed
+    else match shot.source, screenshot_client t shot with
+      | (Automation | Stagehand), _ | Live, None -> send
+      | Live, Some client ->
+          let capability = Browser_lane.live_capability_of_interaction action in
+          if Browser_lane.live_transport_serves client.transport capability then send
+          else
+            let serving_listed =
+              List.exists (fun (other : client) ->
+                Browser_lane.live_transport_serves other.transport capability)
+                (listed_clients t) in
+            Pointer_unserved {asked = client.transport; capability; serving_listed}
+  let refuse_gesture unserved t = {t with unserved_gesture = Some unserved}
+  let withdraw_unserved_gesture t = match t.unserved_gesture with
+    | None -> t
+    | Some _ -> {t with unserved_gesture = None}
+  (* The rows a refused gesture draws: what was not sent and why, then the
+     operator's next step. With a serving connection listed the step is the
+     picker and fits the same row; with none listed it is where attaching one
+     is written, on a row of its own. Each row fits 80 columns. *)
+  let unserved_gesture_rows (unserved : unserved_gesture) =
+    let cause = "Not sent · " ^ lacking_clause unserved.asked [unserved.capability] in
+    match Browser_lane.live_transports_serving unserved.capability with
+    | [] -> [cause]
+    | serving when unserved.serving_listed ->
+        [cause ^ " · " ^ transport_names serving ^ " serves it · b:choose browser"]
+    | serving ->
+        [cause ^ " · no " ^ transport_names serving ^ " connection is listed";
+         transport_setup_row serving]
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -3822,7 +3979,7 @@ module Browser_lane_view = struct
   let choose_client client t =
     { t with source = Live; selected_client = Some client; selected_tab = None;
       reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
-      scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
+      scroll = 0; load = Idle; client_picker = None; read_view = Text_view; unserved_gesture = None }
   let choose_browser choice t =
     if browser_choice_selected t choice then { t with client_picker = None }
     else match choice with

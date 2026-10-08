@@ -68,6 +68,47 @@ let test_workspace_identity_mismatch_keeps_both_paths () =
     Alcotest.(check string) "server path" "/workspace/server" server_base_path
   | _ -> Alcotest.fail "different workspaces were not blocked"
 
+(* A non-default cluster's server reports [<base>/.masc/clusters/<name>] as
+   its root. The TUI started with the same MASC_CLUSTER_NAME must call that
+   the same workspace; comparing against a plain [<base>/.masc] refused every
+   Keeper message on a healthy connection. The server's root is computed the
+   way the server computes it. *)
+let with_cluster_name value f =
+  let key = "MASC_CLUSTER_NAME" in
+  let previous = Sys.getenv_opt key in
+  let set = function
+    | Some v -> Unix.putenv key v
+    | None -> Unix.unsetenv key
+  in
+  set value;
+  Fun.protect ~finally:(fun () -> set previous) f
+
+let test_workspace_identity_follows_the_cluster_selection () =
+  let base = "/workspace/local" in
+  let server_root cluster_name =
+    Workspace_utils.masc_root_dir_from ~base_path:base ~cluster_name
+  in
+  let classify masc_root =
+    Masc_tui_types.workspace_identity_of_refresh ~local_base_path:base
+      (Ok { (identity base) with Tui_decode.sid_masc_root = masc_root })
+  in
+  let is_match = function
+    | Masc_tui_types.Workspace_identity_match -> true
+    | Masc_tui_types.Workspace_identity_match_unconfirmed _
+    | Masc_tui_types.Workspace_identity_mismatch _
+    | Masc_tui_types.Workspace_identity_unread -> false
+  in
+  with_cluster_name (Some "team-a") (fun () ->
+    Alcotest.(check bool) "the cluster's own root is this workspace" true
+      (is_match (classify (server_root "team-a")));
+    Alcotest.(check bool) "the default root is another store" false
+      (is_match (classify (server_root "default"))));
+  with_cluster_name None (fun () ->
+    Alcotest.(check bool) "without a cluster the default root is this workspace" true
+      (is_match (classify (server_root "default")));
+    Alcotest.(check bool) "and a cluster root is another store" false
+      (is_match (classify (server_root "team-a"))))
+
 let test_broadcast_retry_scope_follows_verified_workspace () =
   let scope reading = Masc_tui_types.broadcast_workspace_scope
     ~local_base_path:"/workspace/local" reading in
@@ -695,6 +736,8 @@ let () =
             test_failed_probe_is_unread_not_stale
         ; Alcotest.test_case "canonical aliases match" `Quick
             test_workspace_identity_matches_canonical_paths
+        ; Alcotest.test_case "workspace identity follows the cluster selection" `Quick
+            test_workspace_identity_follows_the_cluster_selection
         ; Alcotest.test_case "mismatch preserves both paths" `Quick
             test_workspace_identity_mismatch_keeps_both_paths
         ; Alcotest.test_case "Broadcast retry uses verified workspace store" `Quick

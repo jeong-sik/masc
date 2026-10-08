@@ -108,6 +108,15 @@ screen publication. It is still not an observed termination screen or a human
 unification victory; the copied checkpoint and temporary base path were kept
 outside the operator's live `.masc` tree.
 
+The merged core was also checked to termination without the per-call Tool
+cadence: a replay restored the same post-setup checkpoint, sent the same
+space-edge input through the MSX keyboard matrix at a ten-frame probe cadence,
+and reached frame 3,000,000, PC `0x49a6`, with the rendered `301年 1月` KOEI
+copyright termination screen. This is a current-core all-AI observer ending,
+not a human unification victory. The accelerated replay is kept separate from
+the MASC Tool-path evidence above because its cadence is a diagnostic probe,
+not the production `masc_msx_press` frame budget.
+
 Campaign acceptance still requires readable interactive menus, starting a
 scenario, taking turns, completing a battle, saving progress, restarting and
 restoring that progress, and an observed ending. Record source/binary identity,

@@ -18,7 +18,7 @@ def run(executable):
     resume_reasoning = threading.Event()
     stop_reasoning = threading.Event()
     content_gates = {stage: threading.Event() for stage in (
-        "overlap", "thinking-ended", "text-ended", "native-start",
+        "late-runtime-name", "repeated-runtime-name", "overlap", "thinking-ended", "text-ended", "native-start",
         "native-progress", "native-heartbeat-decreased", "native-end")}
 
     def stream(body):
@@ -53,6 +53,14 @@ def run(executable):
                         prefix.append(("data: " + json.dumps(value)).encode())
                 yield (b"\n\n".join(prefix) + b"\n\n"
                        + activity(0, 0, "text", "observed"))
+                content_gate("late-runtime-name")
+                yield event("KEEPER_RUNTIME_ATTEMPT_STARTED", {
+                    "runtime_id": "observed-runtime", "attempt_index": 0})
+                yield event("KEEPER_STREAM_MESSAGE_DELTA", {"usage": {"output_tokens": 1}})
+                content_gate("repeated-runtime-name")
+                yield event("KEEPER_RUNTIME_ATTEMPT_STARTED", {
+                    "runtime_id": "observed-runtime", "attempt_index": 0})
+                yield event("KEEPER_STREAM_MESSAGE_DELTA", {"usage": {"output_tokens": 2}})
                 content_gate("overlap")
                 yield (event("KEEPER_THINKING_DELTA", {"index": 1, "delta": "checking alongside the answer"})
                        + activity(0, 1, "thinking", "observed"))
@@ -145,6 +153,17 @@ def run(executable):
             h.send_and_wait(process, fd, output, b"phase-check", h.composer_showing(b"phase-check"))
             os.write(fd, b"\r")
             observe("answering", b"STREAMING")
+            content_gates["late-runtime-name"].set()
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"out 1" in h.screen_text(bytes(output)), timeout=5), "late metadata counter did not arrive"
+            observe("late-runtime-name", b"STREAMING", (b"model content ended",))
+            content_gates["repeated-runtime-name"].set()
+            # The following usage report is the ordered processing witness.
+            # An unchanged status by itself cannot prove the preceding runtime
+            # metadata was consumed by the TUI.
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"out 2" in h.screen_text(bytes(output)), timeout=5), "repeat metadata counter did not arrive"
+            observe("repeated-runtime-name", b"STREAMING", (b"model content ended",))
             start = len(output)
             content_gates["overlap"].set()
             observe("content-overlap", b"THINKING", (b"model content ended", b"model response ended"), start=start)

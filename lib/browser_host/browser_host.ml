@@ -296,9 +296,9 @@ let within ~clock seconds step =
       None)
     (fun () -> Some (step ()))
 
-let post ~clock ~client ~server ~config ~info ~token path json =
+let post ?(timeout_sec = http_timeout_sec) ~clock ~client ~server ~config ~info ~token path json =
   match
-    within ~clock http_timeout_sec (fun () ->
+    within ~clock timeout_sec (fun () ->
       try
         Eio.Switch.run (fun sw ->
           match
@@ -383,8 +383,8 @@ type link =
   ; mutable server : Uri.t
   }
 
-let ask link ~server ~token path json =
-  post ~clock:link.clock ~client:link.client ~server ~config:link.config ~info:link.info ~token path json
+let ask ?(timeout_sec = http_timeout_sec) link ~server ~token path json =
+  post ~timeout_sec ~clock:link.clock ~client:link.client ~server ~config:link.config ~info:link.info ~token path json
 
 let ask_lane link origin =
   match read_token link.config.token_file with
@@ -429,11 +429,11 @@ let follow_workspace link =
 (* One attempt to hand a result to the server. *)
 type delivery = Delivered | Undelivered of result_undelivered | Unreached of http_error
 
-let deliver link payload =
+let deliver ?(timeout_sec = http_timeout_sec) link payload =
   match read_token link.config.token_file with
   | Error detail -> Undelivered (Token_unreadable detail)
   | Ok token ->
-      (match ask link ~server:link.server ~token "result" payload with
+      (match ask ~timeout_sec link ~server:link.server ~token "result" payload with
        | Ok (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) -> Delivered
        | Ok _ -> Undelivered Not_acknowledged
        | Error error ->
@@ -468,7 +468,7 @@ let rec publish ?(resent = false) link payload =
 (* The last result of a host that is ending is offered once: no later poll
    exists for another attempt to come before. *)
 let publish_once link payload =
-  match deliver link payload with
+  match deliver ~timeout_sec:leaving_window_sec link payload with
   | Delivered -> Ok ()
   | Undelivered why -> Error why
   | Unreached error -> Error (Unacknowledged_as_host_ended error)

@@ -575,11 +575,18 @@ class BidiHostLink(unittest.TestCase):
     def test_a_command_firefox_left_under_is_answered_before_the_host_ends(self):
         self.attach(fixed=True)
         self.firefox.state.leave_on = "browsingContext.getTree"
+        self.lane.state.hold_ack.set()
         answer = self.call(self.lane)
         self.assertFalse(answer["ok"])
         self.assertEqual(answer.get("effectPhase"), "not_started")
         self.assertEqual(answer["error"], "BiDi EOF")
-        self.assert_ends("BiDi connection ended: BiDi EOF")
+        self.assertTrue(self.lane.state.result_received.wait(EXIT_WAIT_SEC), self.host_log())
+        try:
+            # The last answer is offered once and cannot hold shutdown for the
+            # normal 55-second HTTP deadline when this server never replies.
+            self.assert_ends("BiDi connection ended: BiDi EOF")
+        finally:
+            self.lane.state.release_ack.set()
         self.assertEqual(len(self.lane.state.result_posts), 1, "answered once")
 
     def test_a_refused_registration_ends_the_host(self):

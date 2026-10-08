@@ -547,11 +547,22 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
 
    The same decode validates the spectator's activity feed: a malformed
    feed is a failed read, not a successful empty activity list. *)
-let fetch_machine_live ~(host : string) ~(port : int)
+let fetch_machine_live ?expected_workspace ~(host : string) ~(port : int)
     (source : Masc.Machine_lane.t) ~(since : Masc_tui_machine_live.mark option) :
     (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result =
+  (* With [expected_workspace] the server answers 409 unless it is that
+     workspace, so a read after a change cannot return another server's picture. *)
+  let bound_path =
+    let path = Masc_tui_machine_live.path source ~since in
+    match expected_workspace with
+    | None -> path
+    | Some (expected : Masc.Tui_decode.server_identity) ->
+        let canonical value = Uri.pct_encode ~component:`Query_value (Masc_tui_types.canonical_path value) in
+        Printf.sprintf "%s&expected_base_path=%s&expected_masc_root=%s" path
+          (canonical expected.sid_base_path) (canonical expected.sid_masc_root)
+  in
   let result =
-    match http_get ~host ~port ~path:(Masc_tui_machine_live.path source ~since) with
+    match http_get ~host ~port ~path:bound_path with
     | Error _ as error -> error
     | Ok (status_code, body) ->
         Eio_guard.run_in_systhread ~label:"tui-machine-live-decode" (fun () ->

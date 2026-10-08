@@ -1487,7 +1487,9 @@ let prepare_next_ready
     List.filter
       (fun (partition : Partition.t) ->
          match partition.state with
-         | Partition.Ready -> true
+         | Partition.Ready ->
+             not (Keeper_board_attention_admission.blocked ~base_path
+                    ~candidate_id:partition.candidate_id)
          | Partition.Running _
          | Partition.Completed _
          | Partition.Settled _
@@ -1500,7 +1502,7 @@ let prepare_next_ready
       | Needs_lane candidate -> Either.Right (partition, candidate))
   in
   let selected (partition : Partition.t) prepared =
-    Ok (Some (partition.partition_id, partition.generation, prepared))
+    Ok (Some (partition.partition_id, partition.generation, partition.candidate_id, prepared))
   in
   match ready with
   | partition :: _, _ -> selected partition None
@@ -1911,7 +1913,7 @@ let process_next_with_claim_ready_exact_current
   in
   match selected with
   | None -> Ok Idle
-  | Some (partition_id, generation, prepared) ->
+  | Some (partition_id, generation, candidate_id, prepared) ->
     let rec claim_selected attempts_remaining =
       let* claimed =
         claim_ready_exact
@@ -1934,7 +1936,11 @@ let process_next_with_claim_ready_exact_current
         then claim_selected (attempts_remaining - 1)
         else Ok (Contended { keeper_name; partition_id; generation })
     in
-    claim_selected 3
+    (match Keeper_board_attention_admission.acquire_singleton ~base_path ~candidate_id with
+     | None -> Ok (Rescan_later { keeper_name; partition_id; generation })
+     | Some token ->
+         Fun.protect ~finally:(fun () -> Keeper_board_attention_admission.release token)
+           (fun () -> claim_selected 3))
 ;;
 
 let process_next_with_claim_ready_exact

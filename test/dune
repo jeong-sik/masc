@@ -60,16 +60,26 @@
  (modules test_typesafeai_destinations)
  (libraries alcotest masc masc_test_deps eio_main))
 
+; What the Lanes screen reads for one Librarian run. The three Librarian
+; runtime suites pass each run they record through it.
+(library
+ (name librarian_run_tui_reading)
+ (wrapped false)
+ (modules librarian_run_tui_reading)
+ (libraries alcotest masc masc_test_deps))
+
 (test
  (name test_keeper_librarian_absorb_gate)
  (modules test_keeper_librarian_absorb_gate)
  (deps fixtures/librarian_statements_golden.json)
- (libraries alcotest masc masc_test_deps exact_output_fixture eio_main mtime.clock.os))
+ (libraries alcotest masc masc_test_deps exact_output_fixture
+  librarian_run_tui_reading eio_main mtime.clock.os))
 
 (test
  (name test_keeper_librarian_cancellation)
  (modules test_keeper_librarian_cancellation)
- (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+ (libraries alcotest masc masc_test_deps exact_output_fixture
+  librarian_run_tui_reading eio_main))
 
 ; The reference cut (scripts/librarian/statements.py, the scorer of issue
 ; #37079) must still write the golden the OCaml test above reads.
@@ -6471,7 +6481,6 @@
 (include stanzas/test_tui_runtime_account_form_pty.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
-(include stanzas/test_tui_librarian_absorb_gate.inc)
 (include stanzas/test_tui_skill_create.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
@@ -8536,9 +8545,8 @@
 (test
  (name test_keeper_librarian_context_review)
  (modules test_keeper_librarian_context_review)
- (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
-
-(include stanzas/test_tui_librarian_context_review.inc)
+ (libraries alcotest masc masc_test_deps exact_output_fixture
+  librarian_run_tui_reading eio_main))
 
 (include stanzas/test_keeper_continuity_request_view.inc)
 

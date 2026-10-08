@@ -1153,7 +1153,8 @@ let test_only_a_continuity_pass_reads_the_working_state () =
        | Error error ->
          failf "%s: the Memory answer was refused: %s" label
            (Librarian.parse_error_to_string error))
-    [ "blank", `String ""; "non-text", `Int 5; "null", `Null ];
+    [ "blank", `String ""; "non-text", `Int 5; "null", `Null
+    ; "the answer object as text", `String {|{"working_state": "s"}|} ];
   List.iter
     (fun (label, answer) ->
        match Librarian.continuity_working_state_of_json_result answer with
@@ -1170,6 +1171,47 @@ let test_only_a_continuity_pass_reads_the_working_state () =
   | Ok text -> check string "a continuity pass keeps its state" "s" text
   | Error error ->
     failf "a nonblank working state was refused: %s" (Librarian.parse_error_to_string error)
+;;
+
+(* The answer object written a second time, inside its own field, is refused
+   by both continuity readers. Prose that names the field, an object cut
+   short, and an object without the field stay working states. *)
+let test_the_answer_object_is_not_a_working_state () =
+  let encoded = {|{"working_state": "Await publication approval."}|} in
+  let single text = `Assoc [ Librarian.wire_field_working_state, `String text ] in
+  let readers =
+    [ "continuity-only answer", Librarian.working_state_of_json_result
+    ; "Memory answer with continuity", Librarian.continuity_working_state_of_json_result
+    ]
+  in
+  List.iter
+    (fun (reader, read) ->
+       List.iter
+         (fun (label, text) ->
+            match read (single text) with
+            | Error (Librarian.Working_state_invalid _) -> ()
+            | Error error ->
+              failf "%s, %s: wrong refusal: %s" reader label
+                (Librarian.parse_error_to_string error)
+            | Ok kept -> failf "%s, %s: accepted %S" reader label kept)
+         [ "the answer object", encoded
+         ; "the answer object with Memory members", {|{"new_claims": [], "working_state": "s"}|}
+         ; "the answer object after whitespace", "\n " ^ encoded
+         ];
+       List.iter
+         (fun text ->
+            match read (single text) with
+            | Ok kept -> check string (reader ^ ": prose kept") text kept
+            | Error error ->
+              failf "%s: prose %S refused: %s" reader text
+                (Librarian.parse_error_to_string error))
+         [ {|The field "working_state" holds the next step.|}
+         ; {|{"working_state": "cut short|}
+         ; {|{"task": "publish"}|}
+         ])
+    readers;
+  check bool "the fault names the shape" true
+    (Librarian.working_state_fault encoded = Some Librarian.Answer_object_as_working_state)
 ;;
 
 let test_dropped_statements_validate () =
@@ -2282,6 +2324,8 @@ let () =
             test_a_working_context_slip_keeps_the_memory_decision
         ; test_case "only a continuity pass reads the working state" `Quick
             test_only_a_continuity_pass_reads_the_working_state
+        ; test_case "the answer object is not a working state" `Quick
+            test_the_answer_object_is_not_a_working_state
         ; test_case "dropped statements validate" `Quick
             test_dropped_statements_validate
         ; test_case "strict JSON boundary" `Quick test_strict_json_boundary

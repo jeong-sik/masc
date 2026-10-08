@@ -149,6 +149,35 @@ let test_exact_codec () =
   check bool "strict codec keeps the pair" true (decoded = snapshot)
 ;;
 
+(* The answer object written a second time, inside its own field, is not a
+   working state: a capture refuses it and a load reads the file as invalid.
+   Prose that names the field, an object cut short, and an object without the
+   field stay working states. *)
+let test_answer_object_is_not_a_working_state () =
+  let encoded = {|{"working_state": "Await publication approval."}|} in
+  let refused label = function
+    | Error (S.Invalid_snapshot _) -> ()
+    | Error error -> failf "%s: wrong refusal: %s" label (S.error_to_string error)
+    | Ok _ -> failf "%s: accepted" label
+  in
+  refused "capture" (S.capture ~trace_id ~lines ~messages:history ~working_state:encoded);
+  let fields = match S.to_json (capture ()) with `Assoc fields -> fields | _ -> fail "object" in
+  let with_state text = `Assoc (List.map (fun (key, value) ->
+    key, if key = "working_state" then `String text else value) fields) in
+  refused "load" (S.of_json (with_state encoded));
+  refused "load, with Memory members"
+    (S.of_json (with_state {|{"new_claims": [], "working_state": "s"}|}));
+  refused "load, blank" (S.of_json (with_state " "));
+  List.iter (fun text ->
+    match S.of_json (with_state text) with
+    | Ok (decoded : S.t) -> check string "prose kept" text decoded.working_state
+    | Error error -> failf "prose %S refused: %s" text (S.error_to_string error))
+    [ {|The field "working_state" holds the next step.|}
+    ; {|{"working_state": "cut short|}
+    ; {|{"task": "publish"}|}
+    ]
+;;
+
 let test_file_pair () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -267,5 +296,6 @@ let () = run "offline continuity snapshot"
             test_case "checkpoint array digest and restore" `Quick test_digest_matches_checkpoint_array;
             test_case "restart witness required" `Quick test_capture_requires_witness;
             test_case "strict codec" `Quick test_exact_codec;
+            test_case "answer object is not a working state" `Quick test_answer_object_is_not_a_working_state;
             test_case "catch-up target codec" `Quick test_catch_up_target_codec;
             test_case "atomic file pair" `Quick test_file_pair]]

@@ -202,13 +202,30 @@ val selection_of_json_result
   -> Yojson.Safe.t
   -> (selection, parse_error) result
 
-(** The continuity-only answer: an object with exactly a nonblank
-    [working_state]. Any other field, a Memory field included, is refused. *)
+(** Why a text cannot be a working state. *)
+type working_state_fault =
+  | Blank_working_state
+  | Answer_object_as_working_state
+      (** The text parses as a JSON object that has a [working_state] member:
+          the answer written a second time, inside its own field. *)
+
+(** The one rule for a working state's text, asked by the answer parsers
+    below and by {!Librarian_continuity_snapshot} for what it saves and
+    loads. A working state is prose; text that does not parse as JSON is
+    prose here. *)
+val working_state_fault : string -> working_state_fault option
+
+val working_state_fault_to_string : working_state_fault -> string
+
+(** The continuity-only answer: an object with exactly a [working_state]
+    that passes {!working_state_fault}. Any other field, a Memory field
+    included, is refused. *)
 val working_state_of_json_result : Yojson.Safe.t -> (string, parse_error) result
 
-(** The working state a Memory answer with continuity writes: its nonblank
-    [working_state]. A Memory pass without continuity never reads that field,
-    so a slip in it cannot refuse the Memory decision. *)
+(** The working state a Memory answer with continuity writes: its
+    [working_state], which must pass {!working_state_fault}. A Memory pass
+    without continuity never reads that field, so a slip in it cannot refuse
+    the Memory decision. *)
 val continuity_working_state_of_json_result
   :  Yojson.Safe.t
   -> (string, parse_error) result

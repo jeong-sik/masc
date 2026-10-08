@@ -69,13 +69,14 @@ let validate (snapshot : t) =
   then Error (Invalid_snapshot "ending turn belongs to another trace")
   else if not (valid_sha256 snapshot.covering_last_atom_digest && valid_sha256 snapshot.last_atom_digest && valid_sha256 snapshot.prefix_sha256)
   then Error (Invalid_snapshot "digests must be canonical SHA256")
-  else if String.trim snapshot.working_state = ""
-  then Error (Invalid_snapshot "blank working_state")
   else
-    match snapshot.catch_up_end_atom with
-    | Some target when target <= snapshot.end_atom ->
-      Error (Invalid_snapshot "catch-up target is not past the snapshot's end")
-    | Some _ | None -> Ok snapshot
+    match Keeper_librarian.working_state_fault snapshot.working_state with
+    | Some fault -> Error (Invalid_snapshot (Keeper_librarian.working_state_fault_to_string fault))
+    | None ->
+      (match snapshot.catch_up_end_atom with
+       | Some target when target <= snapshot.end_atom ->
+         Error (Invalid_snapshot "catch-up target is not past the snapshot's end")
+       | Some _ | None -> Ok snapshot)
 ;;
 
 let to_json (snapshot : t) =

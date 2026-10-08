@@ -867,23 +867,52 @@ let single_field_of_json_result ~field json =
     Error Top_level_not_object
 ;;
 
-let nonblank_working_state = function
-  | `String text when String.trim text <> "" -> Ok text
-  | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null ->
-    Error (Working_state_invalid "working_state must be nonblank text")
+(* A working state is prose for the next turn. An answer the model encoded
+   twice arrives with the answer object itself, {"working_state": ...}, as the
+   field's text. Saved, that text is the previous state the next pass reads,
+   and the next pass answers in the same shape. Text that does not parse as
+   JSON is prose here, an object cut short included. *)
+type working_state_fault =
+  | Blank_working_state
+  | Answer_object_as_working_state
+
+let working_state_fault text =
+  if String.trim text = ""
+  then Some Blank_working_state
+  else (
+    match Yojson.Safe.from_string text with
+    | `Assoc fields when List.mem_assoc wire_field_working_state fields ->
+      Some Answer_object_as_working_state
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+    | exception Yojson.Json_error _ -> None)
+;;
+
+let working_state_fault_to_string = function
+  | Blank_working_state -> "working_state must be nonblank text"
+  | Answer_object_as_working_state ->
+    "working_state must be prose, not the answer object written as text"
+;;
+
+let prose_working_state = function
+  | `String text ->
+    (match working_state_fault text with
+     | None -> Ok text
+     | Some fault -> Error (Working_state_invalid (working_state_fault_to_string fault)))
+  | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null ->
+    Error (Working_state_invalid (working_state_fault_to_string Blank_working_state))
 ;;
 
 let working_state_of_json_result json =
   Result.bind
     (single_field_of_json_result ~field:wire_field_working_state json)
-    nonblank_working_state
+    prose_working_state
 ;;
 
 let continuity_working_state_of_json_result = function
   | `Assoc fields ->
     (match List.assoc_opt wire_field_working_state fields with
      | None -> Error (Working_state_invalid "continuity requires a nonblank working_state")
-     | Some value -> nonblank_working_state value)
+     | Some value -> prose_working_state value)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error Top_level_not_object
 ;;

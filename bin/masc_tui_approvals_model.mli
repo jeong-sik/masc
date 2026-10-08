@@ -34,6 +34,7 @@ val approvals_open_questions : Masc_tui_types.state -> Masc.Tui_decode_asks.ask_
 val approvals_open_question_count : Masc_tui_types.state -> int
 val approvals_questions_reading : Masc_tui_types.state -> approval_list_reading
 val approvals_reading : Masc_tui_types.state -> approvals_reading
+val confirm_queue_reading : Masc_tui_types.state -> approval_list_reading
 val approvals_surface_pending : Masc_tui_types.state -> int
 val approvals_reading_current : Masc_tui_types.state -> bool
 val approval_list_note : name:string -> approval_list_reading -> string

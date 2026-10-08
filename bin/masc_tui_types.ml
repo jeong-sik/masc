@@ -18,6 +18,8 @@ module Snapshot_read : sig
   val invalidate : t -> t
   (** Retire a pending owner without reusing its request number. *)
   val settle : t -> request -> t option
+  (** Whether a request is on the wire for this source right now. *)
+  val in_flight : t -> bool
 end = struct
   type request = int
   type t = { next : int; pending : request option }
@@ -38,6 +40,8 @@ end = struct
     match state.pending with
     | Some pending when pending = request -> Some { state with pending = None }
     | Some _ | None -> None
+
+  let in_flight state = Option.is_some state.pending
 end
 
 (** TUI shared types — split from masc_tui.ml (#3808) *)
@@ -5734,6 +5738,10 @@ type state = {
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
   mutable approvals_error: string option;
+  (* Ticket for the confirm-queue read outside the refresh bundle. The count
+     on Home draws from [approval_snapshot] alone, so a refused refresh answer
+     needs a read of its own to recover the count before the next cadence. *)
+  mutable approvals_summary_read: Snapshot_read.t;
   (* Questions Keepers put to a human, drawn beside the approvals. [None]
      means nothing has been read yet, which is not the same as a fleet with
      no open questions. *)
@@ -8824,6 +8832,7 @@ let create_state
   transport_error = None;
   approval_snapshot = None;
   approvals_error = None;
+  approvals_summary_read = Snapshot_read.idle;
   asks_snapshot = None;
   asks_error = None;
   ask_answer_mode = Ask_browsing;

@@ -1740,8 +1740,7 @@
   test_managed_assets_sync_from_binary
   test_system_error_class
   test_set_util
-  test_board_core_payload
-  test_delegate_completion_projection)
+  test_board_core_payload)
  (modules
   test_keeper_turn_interrupt
   test_runtime_params
@@ -1889,8 +1888,7 @@
   test_managed_assets_sync_from_binary
   test_system_error_class
   test_set_util
- test_board_core_payload
- test_delegate_completion_projection)
+ test_board_core_payload)
  (libraries
   masc.toml_line_editor
   masc.browser_lane

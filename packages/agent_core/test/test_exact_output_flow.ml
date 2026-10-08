@@ -419,6 +419,7 @@ let with_server
       ?(first_response_headers = [])
       ?first_stalled_response
       ?(abort_completion = false)
+      ?(on_post : int -> unit = fun _ -> ())
       ~response
       f
   =
@@ -434,6 +435,7 @@ let with_server
     let handler _conn _request body =
       ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
       let post_index = Atomic.fetch_and_add completion_posts 1 in
+      on_post post_index;
       if abort_completion then raise Exit;
       Option.iter (Eio.Time.sleep clock) response_delay_s;
       match first_stalled_response, post_index with
@@ -5327,8 +5329,19 @@ let test_concurrent_duplicate_flow_does_not_double_dispatch () =
 ;;
 
 let test_cancellation_terminalizes_outer_attempt () =
+  let cancel_ctx = Atomic.make None in
   let (timed_out, replay, evidence), posts =
     with_server ~response_delay_s:0.1 ~response:(openai_response {|{"name":"accepted"}|})
+      ~on_post:(fun index ->
+        (* Fire the 10ms-equivalent cancel only after the server has received
+           the request, so the test always exercises "cancel after dispatch",
+           including on loaded runners (see release RC run 37712997337). The
+           1.0s guard timer is never reached on a healthy run and still
+           breaks a hung client. *)
+        if index = 0 then
+          match Atomic.get cancel_ctx with
+          | Some ctx -> Eio.Cancel.cancel ctx Eio.Time.Timeout
+          | None -> ())
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog [ catalog_entry ~id:"cancel-flow" ~base_url ~native:true ~json:true () ]
     @@ fun snapshot ->
@@ -5336,11 +5349,15 @@ let test_cancellation_terminalizes_outer_attempt () =
     let timed_out =
       try
         ignore
-          (Eio.Time.with_timeout_exn clock 0.01 (fun () -> execute_ok ~net ~clock flow)
-           : (EO.flow_success, _ EO.flow_execution_error) result);
+          (Eio.Cancel.sub (fun ctx ->
+               Atomic.set cancel_ctx (Some ctx);
+               Eio.Fiber.first
+                 (fun () -> Eio.Time.sleep clock 1.0; raise Eio.Time.Timeout)
+                 (fun () -> execute_ok ~net ~clock flow))
+            : (EO.flow_success, _ EO.flow_execution_error) result);
         false
       with
-      | Eio.Time.Timeout -> true
+      | Eio.Cancel.Cancelled Eio.Time.Timeout -> true
     in
     let replay = execute_ok ~net ~clock flow in
     timed_out, replay, EO.flow_attempt_evidence flow

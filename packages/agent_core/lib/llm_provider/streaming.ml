@@ -160,6 +160,7 @@ let parse_sse_event event_type data_str =
                ; output_tokens = Some output_tokens
                ; cache_creation_input_tokens
                ; cache_read_input_tokens
+               ; cost_usd = None
                })
          in
          Some (MessageDelta { stop_reason; usage })
@@ -693,26 +694,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                let chunk_model = Cli_common_json.member_str "model" json in
                (* [usage] is top-level, not under a choice, so it is read even
                   for the final [choices=[]] usage chunk. *)
-               let chunk_usage =
-                 let usage = json |> member "usage" in
-                 if usage = `Null
-                 then None
-                 else (
-                   let cached =
-                     let details = usage |> member "prompt_tokens_details" in
-                     if details = `Null
-                     then 0
-                     else Cli_common_json.member_int "cached_tokens" details
-                   in
-                   Some
-                     { input_tokens = Cli_common_json.member_int "prompt_tokens" usage
-                     ; output_tokens =
-                         Cli_common_json.member_int "completion_tokens" usage
-                     ; cache_creation_input_tokens = 0
-                     ; cache_read_input_tokens = cached
-                     ; cost_usd = None
-                     })
-               in
+               let chunk_usage = Backend_openai_parse.usage_of_openai_json json in
                (* llama-server attaches a top-level [timings] object to the
                   final chunk (the one with [finish_reason]) without opt-in;
                   [cache_n] is the prompt-token count reused from the slot KV

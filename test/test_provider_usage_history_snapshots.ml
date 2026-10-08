@@ -41,7 +41,7 @@ let removed_cap_and_empty_snapshot () = fixture (fun config scope day ->
   let rows = points config (day +. 21.) in
   check int "prior day plus current uncapped report" 2 (List.length rows);
   check bool "spent cap is absent from current day" false
-    (List.exists (fun row -> observed row >= day && kind row = "provider:credit limit") rows);
+    (List.exists (fun row -> observed row >= day && kind row = "provider:API key credit limit") rows);
   let current = List.find (fun row -> observed row >= day) rows in
   check string "uncapped USD survives the history boundary" "usd"
     Yojson.Safe.Util.(current |> member "unit" |> to_string);

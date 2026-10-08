@@ -105,6 +105,7 @@ let delta_usage_of_json json =
           json |> member "cache_creation_input_tokens" |> to_int_option
       ; cache_read_input_tokens =
           json |> member "cache_read_input_tokens" |> to_int_option
+      ; cost_usd = json |> member "cost_usd" |> to_float_option
       }
   with
   | Type_error (message, _) -> Error ("delta_usage: " ^ message)

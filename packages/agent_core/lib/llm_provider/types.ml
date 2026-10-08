@@ -1443,6 +1443,8 @@ type delta_usage =
   ; output_tokens : int option
   ; cache_creation_input_tokens : int option
   ; cache_read_input_tokens : int option
+  ; cost_usd : float option [@default None]
+    (** Optional provider-reported cumulative charge; zero is authoritative. *)
   }
 [@@deriving show, yojson]
 
@@ -1460,6 +1462,7 @@ let delta_usage_of_api_usage (u : api_usage) : delta_usage =
   ; output_tokens = Some u.output_tokens
   ; cache_creation_input_tokens = Some u.cache_creation_input_tokens
   ; cache_read_input_tokens = Some u.cache_read_input_tokens
+  ; cost_usd = u.cost_usd
   }
 ;;
 

@@ -247,6 +247,7 @@ let test_acc_message_delta_with_usage () =
       ; output_tokens = Some 200
       ; cache_creation_input_tokens = Some 30
       ; cache_read_input_tokens = Some 15
+      ; cost_usd = None
       }
   in
   Streaming.accumulate_event acc (MessageDelta { stop_reason = Some EndTurn; usage });
@@ -267,6 +268,7 @@ let test_acc_message_delta_with_zero_cache () =
       ; output_tokens = Some 100
       ; cache_creation_input_tokens = Some 0
       ; cache_read_input_tokens = Some 0
+      ; cost_usd = None
       }
   in
   Streaming.accumulate_event acc (MessageDelta { stop_reason = Some EndTurn; usage });
@@ -606,6 +608,7 @@ let test_full_anthropic_sequence () =
               ; output_tokens = Some 30
               ; cache_creation_input_tokens = None
               ; cache_read_input_tokens = None
+              ; cost_usd = None
               }
         }
     ; MessageStop
@@ -667,6 +670,7 @@ let test_full_tool_use_sequence () =
               ; output_tokens = Some 45
               ; cache_creation_input_tokens = None
               ; cache_read_input_tokens = None
+              ; cost_usd = None
               }
         }
     ; MessageStop
@@ -794,6 +798,7 @@ let test_acc_message_delta_cache_update_nonzero () =
              ; output_tokens = Some 100
              ; cache_creation_input_tokens = Some 20
              ; cache_read_input_tokens = Some 15
+             ; cost_usd = None
              }
        });
   let resp = finalize_ok acc in

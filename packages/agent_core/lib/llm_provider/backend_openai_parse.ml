@@ -229,7 +229,15 @@ let usage_of_openai_json json =
           |> Option.value ~default:0
       ; cache_creation_input_tokens = 0
       ; cache_read_input_tokens = cached_tokens
-      ; cost_usd = None
+      ; cost_usd =
+          (let cost = match member "cost" usage with
+             | `Float amount -> Some amount
+             | `Int amount -> Some (float_of_int amount)
+             | `Intlit amount -> float_of_string_opt amount
+             | `Null | `Bool _ | `String _ | `List _ | `Assoc _ -> None in
+           match cost with
+           | Some amount when Float.is_finite amount && amount >= 0.0 -> Some amount
+           | Some _ | None -> None)
       })
 ;;
 

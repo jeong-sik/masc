@@ -1364,6 +1364,68 @@ let test_tool_schema_rejects_invalid_current_shape () =
                 ])))
 ;;
 
+(* Provider account charges must survive both full responses and the final
+   usage-only SSE chunk, through event projection and final accumulation. *)
+let test_reported_openai_cost_reaches_sync_and_stream_usage () =
+  let cases =
+    [ Some (`Float 0.0123), Some 0.0123
+    ; Some (`Int 0), Some 0.0
+    ; Some (`Int 2), Some 2.0
+    ; Some (`Intlit "100000000000000000000"), Some 1e20
+    ; Some (`Float (-1.0)), None
+    ; Some (`String "0.0123"), None
+    ; Some `Null, None
+    ; None, None ] in
+  let usage_fields cost =
+    [ "prompt_tokens", `Int 12; "completion_tokens", `Int 4;
+      "prompt_tokens_details", `Assoc ["cached_tokens", `Int 3] ]
+    @ (match cost with None -> [] | Some value -> ["cost", value]) in
+  List.iter (fun (cost, expected) ->
+    let usage = `Assoc (usage_fields cost) in
+    let response = `Assoc
+      [ "id", `String "cost-proof"; "model", `String "gpt-4o-mini";
+        "choices", `List [`Assoc ["message", `Assoc ["role", `String "assistant";
+          "content", `String "ok"]; "finish_reason", `String "stop"]];
+        "usage", usage ] in
+    let sync = match Parse.parse_openai_response_result_json response with
+      | Ok response -> Option.get response.usage
+      | Error _ -> Alcotest.fail "actual synchronous response must parse" in
+    Alcotest.(check (option (float 1e-9))) "sync retains the reported charge" expected sync.cost_usd;
+    let state = Streaming.create_openai_stream_state () in
+    let acc = Complete_stream_acc.create_stream_acc () in
+    let feed raw =
+      let parsed = Streaming.parse_openai_sse_chunk
+          ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning raw in
+      let events, _ = Streaming.openai_sse_parse_result_to_events state parsed in
+      List.iter (Complete_stream_acc.accumulate_event acc) events in
+    feed {|{"id":"cost-proof","model":"gpt-4o-mini","choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}|};
+    feed (Yojson.Safe.to_string (`Assoc ["id", `String "cost-proof";
+      "model", `String "gpt-4o-mini"; "choices", `List []; "usage", usage]));
+    (* A later usage delta omitting cost must not erase a reported charge. *)
+    feed (Yojson.Safe.to_string (`Assoc ["id", `String "cost-proof";
+      "model", `String "gpt-4o-mini"; "choices", `List [];
+      "usage", `Assoc (usage_fields None)]));
+    feed "[DONE]";
+    let streamed = match Complete_stream_acc.finalize_stream_acc acc with
+      | Ok response -> Option.get response.usage
+      | Error _ -> Alcotest.fail "actual SSE event accumulation must complete" in
+    Alcotest.(check (option (float 1e-9))) "stream retains the same charge" expected streamed.cost_usd;
+    check_int "shared streaming usage parser keeps cached tokens" 3 streamed.cache_read_input_tokens;
+    (match expected with
+     | None -> ()
+     | Some _ ->
+       let priced = Pricing.annotate_usage_cost ~model_id:"gpt-4o-mini" streamed in
+       Alcotest.(check (option (float 1e-9))) "catalog pricing cannot overwrite reported cost or zero"
+         expected priced.cost_usd)) cases;
+  List.iter (fun cost ->
+    let usage = Option.get (Parse.usage_of_openai_json
+      (`Assoc ["usage", `Assoc ["cost", `Float cost]])) in
+    Alcotest.(check (option (float 0.))) "nonfinite charge remains unknown" None usage.cost_usd)
+    [Float.nan; Float.infinity; Float.neg_infinity];
+  check_bool "missing usage remains absent" true
+    (Option.is_none (Parse.usage_of_openai_json (`Assoc [])))
+;;
+
 let test_usage_openai_fallbacks () =
   let usage =
     Parse.usage_of_openai_json
@@ -3073,6 +3135,8 @@ let () =
             test_parse_error_finish_is_a_provider_error
         ; Alcotest.test_case "a top-level error declares its status" `Quick
             test_parse_top_level_error_declares_status
+        ; Alcotest.test_case "reported cost survives sync and stream accounting" `Quick
+            test_reported_openai_cost_reaches_sync_and_stream_usage
         ; Alcotest.test_case "usage fallbacks" `Quick test_usage_openai_fallbacks
         ; Alcotest.test_case
             "text list reasoning and reported telemetry"

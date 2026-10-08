@@ -352,7 +352,8 @@ class ReportCliTest(unittest.TestCase):
             "unjudged": [],
             "unjudgeable": [],
             "requests": 0,
-            "conveyed_boundary": 0.5,
+            "judgment_unit": "contextual_source_memory",
+            "reverse_copy_boundary": 0.5,
             "copy_checks": [],
             "evaluations": [],
         }
@@ -369,6 +370,40 @@ class ReportCliTest(unittest.TestCase):
                 invalid = copy.deepcopy(manifest)
                 invalid["pairs"][0]["baseline"]["run"]["output"][field] = bad
                 self.assertEqual(self.execute(invalid).returncode, 1)
+
+    def test_contextual_absorption_source_evidence(self) -> None:
+        for location, decision, accepted in (
+            ("conveyed", "mergeable", True),
+            ("left", "different_context", True),
+            ("left", "loses_knowledge", True),
+            ("left", "uncertain", True),
+            ("left", "mergeable", False),
+            ("conveyed", "uncertain", False),
+            ("conveyed", "unknown", False),
+            ("left", None, False),
+        ):
+            with self.subTest(location=location, decision=decision):
+                manifest = fixture()
+                gate = {
+                    "status": "judged",
+                    "judgment_unit": "contextual_source_memory",
+                    "reverse_copy_boundary": 0.5,
+                    "requests": 1,
+                    "applied_absorptions": [],
+                    "left": [],
+                    "conveyed": [],
+                    "unjudged": [],
+                    "unjudgeable": [],
+                    "copy_checks": [],
+                    "evaluations": [],
+                }
+                verdict = {"memory_id": "source", "into": "proposal"}
+                if decision is not None:
+                    verdict["decision"] = decision
+                gate[location] = [verdict]
+                manifest["pairs"][0]["baseline"]["run"]["output"]["absorb_gate"] = gate
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
 
     def test_completion_before_matches_frozen_count(self) -> None:
         for current, present, before, accepted in (
@@ -436,7 +471,8 @@ class ReportCliTest(unittest.TestCase):
             "conveyed": [],
             "unjudged": [],
             "unjudgeable": [],
-            "conveyed_boundary": 0.5,
+            "judgment_unit": "contextual_source_memory",
+            "reverse_copy_boundary": 0.5,
             "copy_checks": [],
             "evaluations": [],
         }

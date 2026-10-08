@@ -21,9 +21,9 @@
       "log": "after.log"
     },
     {
-      "command": "_build/default/test/test_process_eio_coverage.exe test fallback '2-14,16-19'",
+      "command": "_build/default/test/test_process_eio_coverage.exe test '^fallback$' '2-14,16-19'",
       "exit_code": 0,
-      "executed_cases": 18,
+      "executed_cases": 17,
       "log": "owner.log"
     },
     {
@@ -34,8 +34,8 @@
     }
   ],
   "unique_cases": 27,
-  "total_executions": 28,
-  "executable_sha256": "45c864f443c53f1d0c202a987b2712274dc55f478c2ef74ff570300f6d9f7a30",
+  "total_executions": 27,
+  "executable_sha256": "6d166d7efbb4f0c753aa4d019f1ad1e56db76c57a21244b2b59c0d74824792ef",
   "intermediate_builds": [
     {
       "log": "red-build.log",
@@ -57,5 +57,55 @@
       "exit_code": 1,
       "reason": "fault-manager abstract tag corrected through Eio Make_mgr"
     }
-  ]
+  ],
+  "pre_review_validation": {
+    "build": {
+      "command": "opam exec -- dune build --root . -j 4 test/test_process_eio_coverage.exe",
+      "exit_code": 0,
+      "log": "build.log"
+    },
+    "tests": [
+      {
+        "command": "_build/default/test/test_process_eio_coverage.exe test 'fallback cwd'",
+        "exit_code": 0,
+        "executed_cases": 3,
+        "log": "after.log"
+      },
+      {
+        "command": "_build/default/test/test_process_eio_coverage.exe test fallback '2-14,16-19'",
+        "exit_code": 0,
+        "executed_cases": 18,
+        "log": "owner.log"
+      },
+      {
+        "command": "_build/default/test/test_process_eio_coverage.exe test cancellation-propagation '0-4,8-9'",
+        "exit_code": 0,
+        "executed_cases": 7,
+        "log": "eio.log"
+      }
+    ],
+    "unique_cases": 27,
+    "total_executions": 28,
+    "executable_sha256": "45c864f443c53f1d0c202a987b2712274dc55f478c2ef74ff570300f6d9f7a30",
+    "logs_prefix": "pre-review-"
+  },
+  "review_reproduction": {
+    "command": "_build/default/test/test_process_eio_coverage.exe test 'fallback cwd' 1",
+    "exit_code": 1,
+    "failed_cases": 1,
+    "log": "review-before.log",
+    "scope": "NUL cwd allowed echo execution on frozen pre-review production source; Linux permission finding is source-only",
+    "build": {
+      "exit_code": 0,
+      "log": "review-red-build.log"
+    }
+  },
+  "permission_fixture": {
+    "effective_uid": 502,
+    "mode": "000",
+    "native_errno": "EACCES",
+    "assertion_executed": true,
+    "platform": "macOS",
+    "linux_runtime_verified": false
+  }
 }

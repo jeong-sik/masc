@@ -1,9 +1,9 @@
 Testing `Process_eio coverage'.
-This run has ID `6SUBIIQ6'.
+This run has ID `3T8P5GSL'.
 
-  [OK]          fallback cwd                      0   each execution path use...
-  [OK]          fallback cwd                      1   unavailable directory r...
-  [OK]          fallback cwd                      2   bind fallback keeps ini...
+  [SKIP]        fallback cwd                      0   each execution path use...
+> [FAIL]        fallback cwd                      1   unavailable directory r...
+  [SKIP]        fallback cwd                      2   bind fallback keeps ini...
   [SKIP]        fallback                          0   retry-on-bind-eaddrinuse.
   [SKIP]        fallback                          1   retry-on-cancelled-bind...
   [SKIP]        fallback                          2   argv-fallback-preserves...
@@ -59,5 +59,25 @@ This run has ID `6SUBIIQ6'.
   [SKIP]        timeout-grace                     1   run_argv_with_stdin_and...
   [SKIP]        timeout-grace                     2   parent-cancel-during-th...
 
-Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/6SUBIIQ6'.
-Test Successful in 0.221s. 3 tests run.
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        fallback cwd                      1   unavailable director...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT refusal names requested directory
+ASSERT refusal preserves directory errno
+ASSERT refusal names requested directory
+ASSERT refusal preserves directory errno
+ASSERT invalid cwd allowed execution: "must not execute\n"
+FAIL invalid cwd allowed execution: "must not execute\n"
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Dune__exe__Test_process_eio_coverage.test_fallback_unavailable_cwd_refuses_befor in file "test/test_process_eio_coverage.ml", lines 687-690, characters 2-43
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/Process_eio coverage/fallback cwd.001.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/Process_eio coverage'.
+1 failure! in 0.007s. 1 test run.

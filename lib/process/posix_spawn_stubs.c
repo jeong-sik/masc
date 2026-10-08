@@ -258,6 +258,7 @@ CAMLprim value masc_posix_spawnp(value executable, value argv, value env,
 CAMLprim value masc_open_process_directory(value v_path)
 {
   CAMLparam1(v_path);
+  caml_unix_check_path(v_path, "open process cwd");
   char *path = caml_stat_strdup(String_val(v_path));
   /* Directory traversal needs search permission, not read/list permission. */
 #if defined(O_PATH)
@@ -271,6 +272,21 @@ CAMLprim value masc_open_process_directory(value v_path)
   int fd;
   do { fd = open(path, flags); } while (fd < 0 && errno == EINTR);
   int error = errno;
+#if defined(O_PATH)
+  /* O_PATH does not check the final directory's search permission. Check
+     the acquired directory with the credentials the child will inherit.
+     fchdir still enforces permission if it changes after this check. */
+  if (fd >= 0) {
+    int rc;
+    do { rc = faccessat(fd, ".", X_OK, AT_EACCESS); }
+    while (rc < 0 && errno == EINTR);
+    if (rc < 0) {
+      error = errno;
+      close(fd);
+      fd = -1;
+    }
+  }
+#endif
   caml_leave_blocking_section();
   caml_stat_free(path);
   if (fd < 0) {

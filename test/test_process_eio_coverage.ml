@@ -675,16 +675,25 @@ let test_fallback_cwd_applies_to_each_execution_path () =
 
 let test_fallback_unavailable_cwd_refuses_before_execution () =
   with_fallback_cwd_fixture @@ fun ~first ~second:_ ~ordinary_file ->
-  List.iter
-    (fun (cwd, expected_error) ->
+  let check_refusal (cwd, expected_error) =
       match Process_eio.run_argv_with_status_split_or_refusal ~cwd
           [ "/bin/echo"; "must not execute" ] with
       | Error (Process_eio.Cwd_unavailable { cwd = reported; error = Native_cwd_error error }) ->
         check string "refusal names requested directory" cwd reported;
         check bool "refusal preserves directory errno" true (error = expected_error)
       | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
-      | Ok (_, stdout, _) -> failf "invalid cwd allowed execution: %S" stdout)
-    [ Filename.concat first "missing", Unix.ENOENT; ordinary_file, Unix.ENOTDIR ];
+      | Ok (_, stdout, _) -> failf "invalid cwd allowed execution: %S" stdout
+  in
+  List.iter check_refusal
+    [ Filename.concat first "missing", Unix.ENOENT;
+      ordinary_file, Unix.ENOTDIR;
+      first ^ "\000/missing", Unix.ENOENT ];
+  (* A privileged process can enter mode 000 directories. Only assert denial
+     when this fixture runs without that privilege. *)
+  if Unix.geteuid () <> 0 then (
+    Unix.chmod first 0o000;
+    check_refusal (first, Unix.EACCES);
+    Unix.chmod first 0o700);
   match Process_eio.run_argv_with_status_split_or_refusal ~cwd:first [ missing_program ] with
   | Error (Process_eio.Executable_not_found named) ->
     check string "valid cwd preserves executable refusal" missing_program named

@@ -3,8 +3,8 @@
   "lib/process/process_eio.mli": "7166e2528aa4bad7aa7ebf402184e23f26164472e288c334438b198a8a7680d0",
   "lib/process/unix_foreground_process.ml": "33fc56961b1314a6a2a7e432852f2f4ddfdf86fbdd983f63b4d7a0b7816d330d",
   "lib/process/unix_foreground_process.mli": "65579f573ad9609e835c04a4ce23ca46e607ada0492cf057146da7d57d3794ff",
-  "lib/process/posix_spawn_stubs.c": "2befbe5f24e1c8f28daa6db6fa7efac581ae709b7ca494c7d8aece6c07a83c7d",
-  "test/test_process_eio_coverage.ml": "7f910a7d05a0d09b019bea245f7441ab114c6911e87954854af7be4bd75d7c81",
+  "lib/process/posix_spawn_stubs.c": "b6cd92091c7ee43aaaa4497f442adb0adc7d2638437942aa1bdfea78993d68cb",
+  "test/test_process_eio_coverage.ml": "07e33f928a2330f0d34ad6073246fe472e8edf4a364afd86c6ad0e52a507dbe7",
   "lib/process/posix_spawn_process_mgr.ml": "ac7eae9cf5c25954e78f2bb04c5326de9815cfa32fecb1dd64d4606592f1b925",
   "lib/process/process_eio_stderr.ml": "926712afc86da7c1fa04ca58e33efedb97dd68e924afa155f21fde72cdd91165",
   "lib/process/dune": "abf4ab5cc9baede5d81d83277e4d9e10d63a3f176b8185ab385ce815036efe87"

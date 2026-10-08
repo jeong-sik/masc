@@ -10,8 +10,8 @@ the parent's directory; even a missing or non-directory cwd allowed execution.
 source. Public documentation acknowledged the asymmetry, but a requested working
 directory has concrete execution semantics and should be enforced on fallback.
 
-The synchronous foreground owner now opens the requested directory for search
-permission, supplies its descriptor to the existing posix_spawnp child actions,
+The synchronous foreground owner validates the complete requested path and opens
+the directory, supplies its descriptor to the existing posix_spawnp child actions,
 and closes the parent's descriptor on success and failure. No process-global
 chdir is used. A directory-open failure retains its errno and cwd and becomes
 `Cwd_unavailable`; executable lookup failures remain `Executable_not_found`.
@@ -20,6 +20,16 @@ lookup path accepts the acquired directory descriptor. Both retain group setup,
 FD closure and the existing libc lookup semantics. Platform-specific directory
 open flags use O_SEARCH on macOS and O_PATH on glibc Linux; Linux execution is
 not claimed by the local macOS checks.
+
+Independent review found two acquisition defects in the first published repair.
+The NUL-containing cwd was truncated before opening, directly reproduced as an
+unexpected echo execution in [review-before.log](review-before.log). The stub now
+uses OCaml's standard path check before copying the string. Linux O_PATH also
+does not check final-directory search permission: the acquired FD now receives
+a descriptor-relative X_OK check using effective credentials, and closes on
+denial before spawning. See [open(2)](https://man7.org/linux/man-pages/man2/open.2.html)
+and [access(2)](https://man7.org/linux/man-pages/man2/faccessat.2.html).
+Child fchdir still enforces permission if it changes after acquisition.
 
 For an initialized runtime, fallback resolves relative/default cwd through the
 same Eio path rule and opens the directory through the capability before native
@@ -35,17 +45,20 @@ Eio error. The existing cancellation cleanup/reraise branch remains in place.
 | Changed boundary | Direct consumer / scenario | Final result |
 | --- | --- | --- |
 | Acquired cwd descriptor and native spawn | Status/typed/relative/stdin/streaming/pipeline runners; distinct stage cwd; search-only directory and unchanged parent cwd | New case 0 passed |
-| Directory-open refusal | Missing/non-directory cwd, exact native errno, valid-cwd executable refusal | New case 1 passed |
+| Directory-open refusal | Missing/non-directory/NUL cwd, exact native errno, mode 000 denied for effective UID 502, valid-cwd executable refusal | New case 1 passed |
 | Initialized Eio-to-Unix fallback | Real Eio manager with only pipe creation faulted at bind; default/relative cwd and denied capability | New case 2 passed |
 | Foreground ownership and refusal | Existing fallback cases 2-14 and 16-19, including descendants, unrelated sibling, exit status and exceptional cleanup | 17 existing cases passed |
 | Shared C Eio branch and existing execution paths | Existing cancellation-propagation cases 0-4 and 8-9: cancellation, native cwd, stdin/streaming | 7 existing cases passed |
 
 [checks.json](checks.json) records exact commands, terminal results and executable
-identity. Final focused build succeeded. Twenty-seven unique cases passed; the
-fallback selection regex additionally matched new case 2, so the raw logs record
-28 executions and that repeated case is excluded from the unique count. Skipped
-cases are not counted. The initial red check contains two failures; the third
+identity. Final focused build succeeded. Twenty-seven unique cases passed in
+27 executions. The earlier pre-review selection executed new case 2 twice;
+its 28 executions and earlier executable identity are retained separately.
+Skipped cases are not counted. The initial red check contains two failures; the third
 bind-fallback scenario and exact errno assertions were added before final checking.
+The strengthened refusal case directly verifies NUL and permission denial on
+macOS. Root runs omit the mode 000 denial assertion and must not claim that proof.
+The Linux search-permission fix has independent source evidence, not runtime proof.
 
 Intermediate builds are labeled separately: one compiler failure caught a duplicate
 cancellation branch, and another caught the test manager's abstract platform tag.

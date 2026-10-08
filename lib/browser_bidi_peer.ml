@@ -240,6 +240,18 @@ let session_end_window_sec = 2.
 module Endpoint = Ws_direct_core.Endpoint
 module Message = Ws_direct_core.Connection.Message
 exception Peer_finished of (unit, string) result
+
+(* Handshake errors come from a peer that has not established the protocol.
+   Keep their bytes printable before they reach either the host log or record. *)
+let printable_peer_detail detail =
+  let buffer = Buffer.create (String.length detail) in
+  String.iter (fun ch ->
+    let byte = Char.code ch in
+    if byte < 0x20 || byte > 0x7e || ch = '%' || ch = '\\' then
+      Buffer.add_string buffer (Printf.sprintf "%%%02X" byte)
+    else Buffer.add_char buffer ch) detail;
+  Buffer.contents buffer
+
 let with_connection ~env ~timeout ~url use =
   let* host,port,resource=Browser_bidi_downloads.endpoint url in
   try Eio.Switch.run (fun sw ->
@@ -290,7 +302,7 @@ let with_connection ~env ~timeout ~url use =
       let* wsd=match Ws_direct_eio.Client.connect ~sw ~clock ~host:authority ~resource
           ~max_message:reply_limit_bytes flow builder with
         | wsd->Ok wsd
-        | exception Failure detail->Error ("BiDi connection: " ^ detail) in
+        | exception Failure detail->Error ("BiDi connection: " ^ printable_peer_detail detail) in
       (* One command and its reply. A reply that arrived as the window
          closed is the reply. *)
       let exchange ~window method_ params =

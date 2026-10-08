@@ -6577,6 +6577,7 @@ type state = {
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: (int * string) option;
   mutable msg_copy_generation: int;
+  mutable msg_copy_pending: (int * string * unit ref) option;
   (* The newest row [msg_scroll] counts back from, by causal row identity, while the
      operator is reading back. Counting from whatever is newest right now made
      the count mean something different every time a reply landed: the new rows
@@ -9589,6 +9590,7 @@ let create_state
   msg_history_load_generation = 0;
   msg_history_inflight = None;
   msg_copy_generation = 0;
+  msg_copy_pending = None;
   msg_scroll = 0;
   msg_scroll_pin = None;
   msg_older_cursor = None;

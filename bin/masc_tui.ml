@@ -6570,11 +6570,25 @@ let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
 (* Copy reads the stored reply again, before the display layer scrubs control
    bytes or wraps lines. A separate read leaves the visible history cache and
    its pagination untouched. *)
+let settle_retired_chat_copy state =
+  match state.msg_copy_pending with
+  | Some (generation, keeper_name, reading) when reading != state.workspace_read_authority ->
+      state.msg_copy_pending <- None;
+      if generation = state.msg_copy_generation
+         && state.msg_target_keeper_name = Some keeper_name then
+        report_action state "error"
+          "/copy was interrupted by workspace reconnection; retry after reconnecting"
+  | Some _ | None -> ()
+
 let launch_keeper_chat_copy state ~mailbox ~keeper_name =
-  if server_authority_ready state then begin
+  if not (server_authority_ready state) then
+    report_action state "error"
+      "/copy cannot read chat history while workspace identity is unconfirmed; retry after reconnecting"
+  else begin
   let enqueue_async = workspace_enqueue state in
   state.msg_copy_generation <- state.msg_copy_generation + 1;
   let generation = state.msg_copy_generation in
+  state.msg_copy_pending <- Some (generation, keeper_name, state.workspace_read_authority);
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
@@ -11042,6 +11056,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.lane_addons_cached <- Masc_tui_lane_addons.initial;
   state.lane_nested_read_resume <- None;
   state.sent_image_read <- None;
+  state.msg_copy_pending <- None;
   reset_verification_rows state;
   state.verification <- None;
   state.verification_error <- None;
@@ -11500,6 +11515,7 @@ let apply_server_identity_reading state reading =
     state.workspace_identity <- unconfirmed;
     suspend_workspace_readings state;
     settle_retired_sent_image state;
+    settle_retired_chat_copy state;
     (match !msx_pending_poll with
      | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
      | Poll_ready _ | Poll_pending _ -> ())
@@ -12385,6 +12401,7 @@ let read_authority state =
 let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~(before : read_authority) =
   settle_retired_sent_image state;
+  settle_retired_chat_copy state;
   resume_task_followups state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup;
   let workspace_moved = before.read_workspace <> state.workspace_authority in
@@ -16921,6 +16938,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       end
   | Keeper_chat_copy_loaded (generation, _, _) when generation <> state.msg_copy_generation -> ()
   | Keeper_chat_copy_loaded (_, keeper_name, result) ->
+      state.msg_copy_pending <- None;
       let notice = chat_notice state ~keeper_name:(Some keeper_name) in
       (match result with
        | Error detail ->

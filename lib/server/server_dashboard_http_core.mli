@@ -8,7 +8,7 @@
 
 (** {1 Re-exported sub-modules} *)
 
-include module type of Server_dashboard_http_cache
+include module type of struct include Server_dashboard_http_cache end
 include module type of Dashboard_http_helpers
 include module type of Dashboard_http_keeper
 

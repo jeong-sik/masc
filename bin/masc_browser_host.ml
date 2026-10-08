@@ -85,7 +85,7 @@ let () =
                (* A second SIGTERM forces exit if graceful shutdown is stuck. *)
                | Terminate ->
                  if Atomic.get asked = None then Sys.set_signal number Sys.Signal_default
-                 else Unix._exit (128 + number));
+                 else Unix._exit (128 + Sys.signal_to_int number));
               ignore (Atomic.compare_and_set asked None (Some signal) : bool);
               Eio.Condition.broadcast wake)) with
             (* Whoever started the host ignoring a signal decided that: nohup

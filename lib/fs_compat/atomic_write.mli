@@ -116,67 +116,11 @@ val open_atomic_temp_file : temp_dir:string -> unit -> string * out_channel
 
 type atomic_replace_recovery_target
 type atomic_replace_recovery_target_error
-type publication_recovery_reconciliation_report = Capability_recovery_reconciler.report
 
 type publication_recovery_record_area =
   | Publication_recovery_active
   | Publication_recovery_owned
   | Publication_recovery_forensic
-
-type publication_recovery_source_state =
-  | Publication_recovery_prepared_source
-  | Publication_recovery_bound_source
-
-type publication_recovery_prepared_outcome_kind =
-  | Publication_recovery_prepared_unmaterialized
-  | Publication_recovery_prepared_allowed_root_mismatch
-  | Publication_recovery_prepared_parent_mismatch
-  | Publication_recovery_prepared_unbound_stage_preserved
-
-type publication_recovery_bound_outcome_kind =
-  | Publication_recovery_bound_stage_absent
-  | Publication_recovery_bound_allowed_root_mismatch
-  | Publication_recovery_bound_parent_mismatch
-  | Publication_recovery_bound_stage_mismatch
-  | Publication_recovery_bound_stage_preserved
-
-type publication_recovery_reconciliation_row_kind =
-  | Publication_recovery_unexpected_lane_entry
-  | Publication_recovery_missing_lane_entry
-  | Publication_recovery_lane_entry_unavailable
-  | Publication_recovery_area_inventory_unavailable
-  | Publication_recovery_source_transition_capabilities_unavailable
-  | Publication_recovery_prepared_reconciled of
-      publication_recovery_prepared_outcome_kind
-  | Publication_recovery_bound_reconciled of
-      publication_recovery_bound_outcome_kind
-  | Publication_recovery_existing_forensic_record of
-      publication_recovery_source_state
-  | Publication_recovery_conflicting_source_records
-  | Publication_recovery_invalid_record_name
-  | Publication_recovery_unexpected_record_kind
-  | Publication_recovery_missing_record_entry
-  | Publication_recovery_record_entry_unavailable
-  | Publication_recovery_corrupt_record_preserved
-  | Publication_recovery_record_observation_failed
-  | Publication_recovery_record_transition_failed
-  | Publication_recovery_record_scope_release_failed
-  | Publication_recovery_owner_store_release_failed
-  | Publication_recovery_owner_store_unavailable
-  | Publication_recovery_owner_inventory_unavailable
-
-(** Typed, order-preserving projection of report rows for callers that need to
-    branch without parsing diagnostics. Corrupt raw payloads remain only in the
-    forensic-file SSOT; reports retain their byte count and SHA-256 identity.
-    Exact identities, exceptions, and transition errors remain retained by the
-    opaque report and its lane-block evidence. *)
-val publication_recovery_reconciliation_report_row_kinds
-  :  publication_recovery_reconciliation_report
-  -> publication_recovery_reconciliation_row_kind list
-
-val publication_recovery_reconciliation_report_to_string
-  :  publication_recovery_reconciliation_report
-  -> string
 
 (** Build the immutable recovery locator projection used by
     [replace_capability_file]. The allowed-root identity is caller-certified;

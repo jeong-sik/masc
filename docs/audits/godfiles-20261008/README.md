@@ -27,6 +27,7 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41962](https://github.com/jeong-sik/masc/pull/41962) | Pure schedule snapshot/wake readers separated from HTTP/store effects; private parser helpers | `masc_tui_loader.ml` |
 | [#41963](https://github.com/jeong-sik/masc/pull/41963) | Attempt checkpoint projection and validated sink boundary owned separately; unused result copy and testing forwarders removed | `keeper_turn_driver.ml/.mli` |
 | [#41969](https://github.com/jeong-sik/masc/pull/41969) | Blocking orphan inventory/preservation owned separately; pure writer/sweep filename grammar shared; existing public API bound directly | `atomic_write.ml`, `fs_compat.ml` |
+| [#41972](https://github.com/jeong-sik/masc/pull/41972) | Duplicate recovery report types/projections removed; existing consumer reads canonical rich rows and exact operation identities | `atomic_write.ml/.mli`, publication reconciliation tests |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -64,6 +65,8 @@ Attempt checkpoint ownership and selected existing scenarios are recorded in
 [attempt-checkpoint/README.md](attempt-checkpoint/README.md).
 Atomic orphan ownership and its existing isolated filesystem checks are recorded
 in [atomic-orphan-owner/README.md](atomic-orphan-owner/README.md).
+Canonical publication report consumption and removal of duplicate types/projections
+are recorded in [publication-report-types/README.md](publication-report-types/README.md).
 
 `validation.log` records successful OCaml 5.5.1 parse-only checks on the changed
 source/interface files, combined diff whitespace checking, and validation of

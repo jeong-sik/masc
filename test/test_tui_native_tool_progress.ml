@@ -302,7 +302,30 @@ let test_held_content_reserves_its_index_before_native_headers () =
         [F.events direct; journal];
       Stream.finish stream Stream.Cancelled))) [false;true]
 
+let test_progress_numeric_wire_boundary () =
+  let decode kind field wire = Native.progress_of_json
+      (`Assoc ["kind",`String kind;field,Yojson.Safe.from_string wire]) in
+  List.iter (fun (wire,expected) ->
+    (match decode "output_observed" "byte_count" wire with
+     | Ok (Native.Output_observed {byte_count}) -> check int "exact byte count" expected byte_count
+     | Ok _ | Error _ -> fail ("safe byte count rejected: " ^ wire));
+    (match decode "heartbeat_reported" "elapsed_seconds" wire with
+     | Ok (Native.Heartbeat_reported {elapsed_seconds}) -> check int "exact provider seconds" expected elapsed_seconds
+     | Ok _ | Error _ -> fail ("safe provider seconds rejected: " ^ wire)))
+    ["1",1;"1.0",1;"1e0",1;"9007199254740991",9_007_199_254_740_991;
+     "9007199254740991.0",9_007_199_254_740_991];
+  check bool "zero is not an output byte observation" true
+    (Result.is_error (decode "output_observed" "byte_count" "0.0"));
+  check bool "zero provider seconds is valid" true
+    (decode "heartbeat_reported" "elapsed_seconds" "-0.0" = Ok (Native.Heartbeat_reported {elapsed_seconds=0}));
+  List.iter (fun wire -> List.iter (fun (kind,field) ->
+    check bool (field ^ " rejects " ^ wire) true (Result.is_error (decode kind field wire)))
+    ["output_observed","byte_count";"heartbeat_reported","elapsed_seconds"])
+    ["-1";"0.5";"9007199254740992";"9007199254740992.0";
+     "9007199254740993";"9223372036854775808";"1e309";"\"1\"";"null"]
+
 let () = run "native tool progress" ["contract",[
+  test_case "progress JSON safe-integer boundary" `Quick test_progress_numeric_wire_boundary;
   test_case "same deltas count twice, same journal seq once" `Quick test_replayed_sequence_and_model_signal;
   test_case "exact current active native scope" `Quick test_exact_active_scope_only;
      test_case "heartbeat provider time and model noninterference" `Quick test_heartbeat_reported_time_is_not_local_elapsed;

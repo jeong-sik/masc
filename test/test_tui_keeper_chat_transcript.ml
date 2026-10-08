@@ -2877,6 +2877,44 @@ let test_native_tools_are_observations_without_execution_receipts () =
     (Option.get rows.summary_outcome)
 ;;
 
+let test_native_details_retain_provider_elapsed_with_other_observations () =
+  let open Runtime_native_tools in
+  List.iter (fun (label, observations) ->
+    let t = fresh () in
+    let native = occurrence ~block_index:7 "native-mixed" in
+    feed t [Live.Run_started; Live.Text "authored answer";
+      Live.Native_tool_started {occurrence=native;tool_name=Some "Read"}];
+    List.iter (fun progress -> feed ~now:(origin +. 12.) t
+      [Live.Native_tool_progress {occurrence=native;progress}])
+      (Heartbeat_reported {elapsed_seconds=30} :: observations
+       @ [Heartbeat_reported {elapsed_seconds=3}]);
+    let check_details () =
+      let details = Transcript.tool_calls t |> Transcript.tool_block |> full_tool_rows in
+      let text = String.concat "\n" details in
+      check bool (label ^ ": provider elapsed is an independent detail") true
+        (contains ~needle:"provider elapsed 3s" text);
+      check bool (label ^ ": latest report replaces the prior report") false
+        (contains ~needle:"provider elapsed 30s" text);
+      check bool (label ^ ": local observation elapsed is separate") true
+        (contains ~needle:"updated +12s" text);
+      List.iter (function
+        | Message_reported _ -> check bool (label ^ ": message retained") true (contains ~needle:"busy" text)
+        | Output_observed _ -> check bool (label ^ ": bytes retained") true (contains ~needle:"13 bytes observed" text)
+        | Heartbeat_reported _ -> ()) observations;
+      check string (label ^ ": metadata never becomes speech") "authored answer" (Transcript.text t);
+      match Transcript.tool_calls t with
+      | [call] -> check (option string) (label ^ ": no execution receipt") None call.execution_id
+      | _ -> fail "expected exactly one native observation" in
+    check_details ();
+    feed ~now:(origin +. 15.) t
+      [Live.Native_tool_ended {occurrence=native;completion=end_observed}];
+    check_details ())
+    ["heartbeat", [];
+     "message", [Message_reported {message="busy"}];
+     "output", [Output_observed {byte_count=13}];
+     "message and output", [Message_reported {message="busy"};Output_observed {byte_count=13}]]
+;;
+
 let test_response_boundaries_preserve_origins () =
   let speech t = Transcript.drawn t |> List.filter_map (fun (item:Transcript.drawn_item) ->
     match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) in
@@ -3029,7 +3067,8 @@ let () =
     [ ( "response boundaries", [test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "response end retains turn and tool lifecycle" `Quick test_response_stop_preserves_pending_work; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
-         test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts] )
+         test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;
+         test_case "native detail retains independent provider elapsed" `Quick test_native_details_retain_provider_elapsed_with_other_observations] )
     ; ( "content"
       , [ test_case "the legend names every mark and phrase the rows draw" `Quick
             test_the_legend_names_every_mark_and_phrase_the_rows_draw

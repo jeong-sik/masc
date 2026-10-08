@@ -70,10 +70,10 @@ let custom_event_name_to_string = function
   | Native_tool_end -> "KEEPER_NATIVE_TOOL_END"
   | Native_tool_progress -> "KEEPER_NATIVE_TOOL_PROGRESS"
 
-let custom ~timestamp ~redact_json state name value =
+let custom ~timestamp state name value =
   Ag_ui.make_event ~timestamp ~thread_id:state.thread_id ~run_id:state.run_id
     ~custom_name:(Some (custom_event_name_to_string name))
-    ~custom_value:(Some (redact_json value)) Ag_ui.Custom
+    ~custom_value:(Some value) Ag_ui.Custom
 
 let reply_details_to_json ~redact_text
     (event : Keeper_chat_events.reply_details) =
@@ -90,7 +90,7 @@ let continuation_checkpoint_to_json ~redact_text
      @ json_opt "request_id"
          (Option.map (fun value -> `String value) event.request_id))
 
-let native_tool_to_json ?progress ?completion (tool : Keeper_chat_events.native_tool) =
+let native_tool_to_json ~redact_text ?progress ?completion (tool : Keeper_chat_events.native_tool) =
   `Assoc
     ([ "toolStreamScope", `Int tool.occurrence.stream_scope
      ; "toolCallBlockIndex", `Int tool.occurrence.block_index
@@ -101,10 +101,12 @@ let native_tool_to_json ?progress ?completion (tool : Keeper_chat_events.native_
          (Option.map (fun value -> `String value) tool.tool_call_id)
      @ json_opt "toolCallName"
          (Option.map (fun value -> `String value) tool.tool_call_name)
-     @ json_opt "completion" (Option.map Runtime_native_tools.completion_to_json completion)
-     @ json_opt "progress" (Option.map Runtime_native_tools.progress_to_json progress))
+     @ json_opt "completion" (Option.map (fun completion -> Runtime_native_tools.completion_to_json
+             (Runtime_native_tools.redact_completion redact_text completion)) completion)
+     @ json_opt "progress" (Option.map (fun progress -> Runtime_native_tools.progress_to_json
+             (Runtime_native_tools.redact_progress redact_text progress)) progress))
 
-let project ~timestamp ~redact_text ~redact_json state event =
+let project ~timestamp ~redact_text state event =
   let open Keeper_chat_events in
   match event with
   | Run_started { run_id; thread_id } ->
@@ -138,9 +140,9 @@ let project ~timestamp ~redact_text ~redact_json state event =
       let value =
         `Assoc [ "target", Keeper_surface_post.delivery_target_to_yojson target ]
       in
-      state, Some (custom ~timestamp ~redact_json state External_effect_completed value)
+      state, Some (custom ~timestamp state External_effect_completed value)
   | Agent_core_stream_connected ->
-      state, Some (custom ~timestamp ~redact_json state Connected `Null)
+      state, Some (custom ~timestamp state Connected `Null)
   | Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
       let value =
         match runtime_id with
@@ -152,7 +154,7 @@ let project ~timestamp ~redact_text ~redact_json state event =
                @ json_opt "attempt_index"
                    (Option.map (fun i -> `Int i) attempt_index))
       in
-      state, Some (custom ~timestamp ~redact_json state Runtime_attempt_started value)
+      state, Some (custom ~timestamp state Runtime_attempt_started value)
   | Agent_core_stream_message_start { provider_message_id; model; usage } ->
       let value =
         `Assoc
@@ -161,7 +163,7 @@ let project ~timestamp ~redact_text ~redact_json state event =
            ]
            @ json_opt "usage" (Option.map api_usage_to_json usage))
       in
-      state, Some (custom ~timestamp ~redact_json state Stream_message_start value)
+      state, Some (custom ~timestamp state Stream_message_start value)
   | Agent_core_stream_message_delta { stop_reason; usage } ->
       let value =
         `Assoc
@@ -172,11 +174,11 @@ let project ~timestamp ~redact_text ~redact_json state event =
                 stop_reason)
            @ json_opt "usage" (Option.map delta_usage_to_json usage))
       in
-      state, Some (custom ~timestamp ~redact_json state Stream_message_delta value)
+      state, Some (custom ~timestamp state Stream_message_delta value)
   | Agent_core_stream_message_stop ->
-      state, Some (custom ~timestamp ~redact_json state Stream_message_stop `Null)
+      state, Some (custom ~timestamp state Stream_message_stop `Null)
   | Agent_core_stream_ping ->
-      state, Some (custom ~timestamp ~redact_json state Stream_ping `Null)
+      state, Some (custom ~timestamp state Stream_ping `Null)
   | Agent_core_content_block_start
       { index; content_type; tool_call_id; tool_call_name } ->
       let value =
@@ -189,24 +191,24 @@ let project ~timestamp ~redact_text ~redact_json state event =
            @ json_opt "tool_call_name"
                (Option.map (fun value -> `String value) tool_call_name))
       in
-      state, Some (custom ~timestamp ~redact_json state Content_block_start value)
+      state, Some (custom ~timestamp state Content_block_start value)
   | Model_content_activity activity ->
-      state, Some (custom ~timestamp ~redact_json state Model_content_activity
+      state, Some (custom ~timestamp state Model_content_activity
                      (model_content_activity_to_json activity))
   | Agent_core_content_block_stop { index } ->
-      state, Some (custom ~timestamp ~redact_json state Content_block_stop
+      state, Some (custom ~timestamp state Content_block_stop
                      (`Assoc [ "index", `Int index ]))
   | Agent_core_thinking_delta { index; delta } ->
-      state, Some (custom ~timestamp ~redact_json state Thinking_delta
-                     (`Assoc [ "index", `Int index; "delta", `String delta ]))
+      state, Some (custom ~timestamp state Thinking_delta
+                     (`Assoc [ "index", `Int index; "delta", `String (redact_text delta) ]))
   | Agent_core_thinking_signature_delta { index; signature_bytes } ->
-      state, Some (custom ~timestamp ~redact_json state Thinking_signature_delta
+      state, Some (custom ~timestamp state Thinking_signature_delta
                      (`Assoc
                         [ "index", `Int index
                         ; "signature_bytes", `Int signature_bytes
                         ]))
   | Agent_core_media_delta { index; media_type; source_type; media_ref } ->
-      state, Some (custom ~timestamp ~redact_json state Media_delta
+      state, Some (custom ~timestamp state Media_delta
                      (`Assoc
                         [ "index", `Int index
                         ; "media_type", `String media_type
@@ -214,29 +216,30 @@ let project ~timestamp ~redact_text ~redact_json state event =
                           , `String
                               (Agent_core.Types.media_source_kind_to_string
                                  source_type) )
-                        ; "media_ref", `String media_ref
+                        ; "media_ref", `String (redact_text media_ref)
                         ]))
   | Agent_core_stream_protocol_error error ->
-      state, Some (custom ~timestamp ~redact_json state Stream_protocol_error
-                     (stream_protocol_error_to_json error))
+      state, Some (custom ~timestamp state Stream_protocol_error
+                     (stream_protocol_error_to_json
+                        { error with reason = Option.map redact_text error.reason }))
   | Reply_details event ->
-      state, Some (custom ~timestamp ~redact_json state Reply_details
+      state, Some (custom ~timestamp state Reply_details
                      (reply_details_to_json ~redact_text event))
   | Batch_bound {operation_id; execution_id} ->
-      state, Some (custom ~timestamp ~redact_json state Batch_bound
+      state, Some (custom ~timestamp state Batch_bound
         (`Assoc ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string operation_id);
           "execution_id", `String (Keeper_chat_operation.Operation_id.to_string execution_id)]))
   | Continuation_checkpoint event ->
-      state, Some (custom ~timestamp ~redact_json state Continuation_checkpoint
+      state, Some (custom ~timestamp state Continuation_checkpoint
                      (continuation_checkpoint_to_json ~redact_text event))
   | Native_tool_start tool ->
-      state, Some (custom ~timestamp ~redact_json state Native_tool_start (native_tool_to_json tool))
+      state, Some (custom ~timestamp state Native_tool_start (native_tool_to_json ~redact_text tool))
   | Native_tool_progress (tool, progress) ->
-      state, Some (custom ~timestamp ~redact_json state Native_tool_progress
-        (native_tool_to_json ~progress tool))
+      state, Some (custom ~timestamp state Native_tool_progress
+        (native_tool_to_json ~redact_text ~progress tool))
   | Native_tool_end (tool, completion) ->
-      let value = native_tool_to_json ~completion tool in
-      state, Some (custom ~timestamp ~redact_json state Native_tool_end value)
+      let value = native_tool_to_json ~redact_text ~completion tool in
+      state, Some (custom ~timestamp state Native_tool_end value)
   | Tool_call_start { occurrence; tool_call_id; tool_call_name } ->
       ( state
       , Some
@@ -277,18 +280,18 @@ let project ~timestamp ~redact_text ~redact_json state event =
   | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
       ( state
       , Some
-          (custom ~timestamp ~redact_json state Tool_approval_requested
+          (custom ~timestamp state Tool_approval_requested
              (`Assoc
                 [ ("tool_call_id", `String tool_call_id)
                 ; ("tool_call_name", `String tool_call_name)
-                ; ("args", `String args)
-                ; ("question", `String question)
-                ; ("because", `String because)
+                ; ("args", `String (redact_text args))
+                ; ("question", `String (redact_text question))
+                ; ("because", `String (redact_text because))
                 ])) )
   | Tool_approval_settled { tool_call_id; outcome } ->
       ( state
       , Some
-          (custom ~timestamp ~redact_json state Tool_approval_settled
+          (custom ~timestamp state Tool_approval_settled
              (`Assoc
                 [ "tool_call_id", `String tool_call_id
                 ; "outcome", `String outcome
@@ -296,7 +299,7 @@ let project ~timestamp ~redact_text ~redact_json state event =
   | Tool_result_ready { occurrence; tool_call_id; execution_id } ->
       ( state
       , Some
-          (custom ~timestamp ~redact_json state Tool_result_ready
+          (custom ~timestamp state Tool_result_ready
              (`Assoc
                 ([ "toolStreamScope", `Int occurrence.stream_scope
                  ; "toolCallBlockIndex", `Int occurrence.block_index

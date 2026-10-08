@@ -519,8 +519,11 @@ let model_content_activity_of_json json =
     else
       let ( let* ) = Result.bind in
       let index key = match List.assoc_opt key fields with
-        | Some (`Int value) when value >= 0 -> Ok value
-        | _ -> error (key ^ " must be a nonnegative integer") in
+        | Some json ->
+            (match Runtime_json_integer.of_json json with
+             | Ok value when value >= 0 -> Ok value
+             | Ok _ | Error _ -> error (key ^ " must be a nonnegative safe integer"))
+        | None -> error (key ^ " must be a nonnegative safe integer") in
       let* content_generation = index "generation" in
       let* stream_scope = index "stream_scope" in
       let* block_index = index "block_index" in

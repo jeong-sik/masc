@@ -71,6 +71,8 @@ type progress =
   | Heartbeat_reported of { elapsed_seconds : int }
 
 val progress_to_json : progress -> Yojson.Safe.t
+(** Numeric progress fields use {!Runtime_json_integer.of_json}: byte counts
+    are positive and heartbeat seconds are nonnegative JSON safe integers. *)
 val progress_of_json : Yojson.Safe.t -> (progress, string) result
 val redact_progress : (string -> string) -> progress -> progress
 (** Progress is provider observation, not output content or a completion.
@@ -82,7 +84,9 @@ val end_observed : completion
 val completion_to_json : completion -> Yojson.Safe.t
 val completion_of_json : Yojson.Safe.t -> (completion, string) result
 (** Strict closed-object decoder: duplicate fields and fields outside the
-    selected outcome variant are errors, including contradictory reports. *)
+    selected outcome variant are errors, including contradictory reports.
+    A non-null exit code uses {!Runtime_json_integer.of_json}; negative safe
+    integers remain valid provider facts. *)
 val redact_completion : (string -> string) -> completion -> completion
 val observe_exact_action :
   official_turn:int ->

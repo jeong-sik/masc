@@ -189,8 +189,36 @@ let test_strict_shared_codec () =
     check bool "journal rejects same malformed metadata" true
       (Result.is_error (J.keeper_chat_event_of_json (`Assoc ["type",`String "model_content_activity";"activity",json])))) malformed
 
+let test_activity_numeric_wire_boundary () =
+  let valid = E.model_content_activity_to_json (activity E.Content_observed) in
+  let with_field field wire = match valid with
+    | `Assoc fields -> `Assoc ((field,Yojson.Safe.from_string wire)::List.remove_assoc field fields)
+    | _ -> fail "activity must encode as an object" in
+  List.iter (fun field ->
+    List.iter (fun (wire,expected) ->
+      let json = with_field field wire in
+      let decoded = match E.model_content_activity_of_json json with
+        | Ok value -> value | Error detail -> fail detail in
+      let actual = match field with
+        | "generation" -> decoded.content_generation
+        | "stream_scope" -> decoded.content_scope
+        | _ -> decoded.content_index in
+      check int "same exact activity identity across numeric spellings" expected actual;
+      check bool "live custom decoder admits the same numeric value" true
+        (Result.is_ok (P.validate_custom_value ~name:"KEEPER_MODEL_CONTENT_ACTIVITY" json)))
+      ["0",0;"-0.0",0;"1e0",1;"9007199254740991",9_007_199_254_740_991;
+       "9007199254740991.0",9_007_199_254_740_991];
+    List.iter (fun wire ->
+      let json = with_field field wire in
+      check bool "unsafe activity identity is rejected" true (Result.is_error (E.model_content_activity_of_json json));
+      check bool "journal cannot admit an identity the browser cannot represent" true
+        (Result.is_error (J.keeper_chat_event_of_json (`Assoc ["type",`String "model_content_activity";"activity",json]))))
+      ["-1";"0.5";"9007199254740992";"9007199254740993";"1e309";"\"1\""])
+    ["generation";"stream_scope";"block_index"]
+
 let () = run "model content activity"
-  ["boundaries", [test_case "overlap uses event order" `Quick test_overlap_uses_event_order;
+  ["boundaries", [test_case "activity JSON safe-integer boundary" `Quick test_activity_numeric_wire_boundary;
+    test_case "overlap uses event order" `Quick test_overlap_uses_event_order;
     test_case "scope, response, retry, legacy and late stop" `Quick test_scope_retry_and_fallback;
     test_case "production bridge through SSE and durable replay" `Quick test_bridge_live_and_journal;
     test_case "stop reason closes content only" `Quick test_stop_reason_closes_content_without_turn_completion;

@@ -58,7 +58,7 @@ let snapshots t =
     | Ok decoded -> decoded | Error detail -> fail detail) events in
   let _, wire = List.fold_left (fun (state, wire) (line : Journal.journaled_event) ->
     let state, projected = Projection.project ~timestamp:line.ts
-      ~redact_text:Fun.id ~redact_json:Fun.id state line.event in
+      ~redact_text:Fun.id state line.event in
     state, wire ^ Option.fold ~none:"" ~some:(Ag_ui.event_to_sse ~id:line.seq) projected)
     (Projection.initial, "") lines in
   let live = Log.create ~keeper_name:"fixture" ~request_id:"native-outcome" ~started_at:1000.

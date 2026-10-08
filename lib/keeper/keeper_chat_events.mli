@@ -363,7 +363,9 @@ val stream_protocol_error_to_json : stream_protocol_error -> Yojson.Safe.t
     message ids are optional correlation only. Observed requires a nonempty
     accepted payload; Ended closes only that occurrence, not the response,
     tool, or Keeper turn. The strict shared codec rejects duplicate/unknown
-    keys, invalid indices and unknown channels/states. *)
+    keys, invalid indices and unknown channels/states. Generation, scope and
+    index are nonnegative JSON safe integers via {!Runtime_json_integer.of_json},
+    so browser and server consumers share the same exact numeric identity. *)
 val model_content_activity_to_json : model_content_activity -> Yojson.Safe.t
 val model_content_activity_of_json : Yojson.Safe.t -> (model_content_activity, string) result
 

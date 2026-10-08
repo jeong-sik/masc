@@ -89,10 +89,12 @@ let test_absent_and_malformed_metadata () =
   let decode_wire replacement =
     let module Projection = Server_keeper_chat_agui_projection in
     let _, event = Projection.project ~timestamp:1000. ~redact_text:Fun.id
-      ~redact_json:(replace_completion replacement) Projection.initial ended in
+      Projection.initial ended in
     match event with
     | None -> fail "native end was not projected"
-    | Some event -> Live.feed (Live.create ()) (Ag_ui.event_to_sse ~id:1 event)
+    | Some event ->
+        let event = { event with Ag_ui.custom_value = Option.map (replace_completion replacement) event.custom_value } in
+        Live.feed (Live.create ()) (Ag_ui.event_to_sse ~id:1 event)
         |> List.map (fun (observed : Live.observed_delta) -> observed.delta) in
   let old = `Assoc (List.remove_assoc "completion" fields) in
   check bool "end without result metadata remains unknown" true
@@ -134,7 +136,26 @@ let test_http_execution_receipt_is_unchanged () =
   check (option string) "canonical execution identity retained" (Some "execution-1") (call ()).execution_id;
   check bool "native report is absent" true ((call ()).native_completion=None)
 
+let test_completion_numeric_wire_boundary () =
+  let decode wire = Native.completion_of_json (`Assoc [
+      "kind",`String "completion_reported";"exit_code",Yojson.Safe.from_string wire]) in
+  List.iter (fun (wire,expected) ->
+    match decode wire with
+    | Ok {outcome=Native.Completion_reported;exit_code=Some exit_code} ->
+        check int "exact signed provider exit code" expected exit_code
+    | Ok _ | Error _ -> fail ("safe exit code rejected: " ^ wire))
+    ["0",0;"-1.0",-1;"1e0",1;
+     "9007199254740991",9_007_199_254_740_991;
+     "-9007199254740991.0",-9_007_199_254_740_991];
+  check bool "missing provider exit status remains null" true
+    (decode "null" = Ok {Native.outcome=Completion_reported;exit_code=None});
+  List.iter (fun wire -> check bool ("unsafe exit code rejected: " ^ wire) true
+      (Result.is_error (decode wire)))
+    ["9007199254740992";"-9007199254740992";"9007199254740993";
+     "-9223372036854775808";"1e309";"-0.5";"\"1\""]
+
 let () = run "native tool outcomes" ["contract", [
+  test_case "completion JSON safe-integer boundary" `Quick test_completion_numeric_wire_boundary;
   test_case "compact retains reported nonzero exit" `Quick test_compact_keeps_reported_error_visible;
   test_case "unknown end and duplicate stop" `Quick test_unknown_end_and_duplicate_stop;
   test_case "wrong identities cannot close native/MASC tool" `Quick test_wrong_identity_cannot_close_or_commit_tool;

@@ -51,7 +51,7 @@ let live_frames () =
            Projection.project
              ~timestamp:entry.ts
              ~redact_text:Fun.id
-             ~redact_json:Fun.id
+
              projection
              entry.event
          in
@@ -65,7 +65,7 @@ let live_frames () =
   List.rev rev
 
 let replay since_seq =
-  Replay.replay ~redact_text:Fun.id ~redact_json:Fun.id ~since_seq journaled
+  Replay.replay ~redact_text:Fun.id ~since_seq journaled
 
 let after seq = L.After_seq seq
 
@@ -114,7 +114,7 @@ let test_projection_state_before_the_cut_is_kept () =
   let from_cut_only =
     Replay.replay
       ~redact_text:Fun.id
-      ~redact_json:Fun.id
+
       ~since_seq:L.Whole_turn
       (List.filter (fun (entry : L.journaled_event) -> entry.seq > 4) journaled)
     |> List.map frame

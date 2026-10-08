@@ -1,0 +1,35 @@
+# Keeper chat wire boundaries
+
+`Keeper_chat_events` owns normalized events. `Keeper_chat_event_log` encodes the
+journal, and `Server_keeper_chat_agui_projection` produces AG-UI for live delivery
+and replay. Projection preserves protocol field names, closed enums and exact
+correlation identities. Secret redaction applies to human content leaves through
+typed serializers; arbitrary tool argument JSON retains its separate recursive
+key/value redaction boundary. Do not apply that arbitrary JSON redactor to a
+serialized protocol envelope.
+
+`Runtime_json_integer.of_json` defines the numeric decoding boundary for native
+progress, native completion, model content identity, and journal occurrence/sequence.
+JSON numeric values must be integral and exactly representable by both OCaml int
+and ECMAScript Number: the intersection with `[-(2^53-1), 2^53-1]`.
+`1`, `1.0` and `1e0` represent the same value. This is numeric representation,
+not a limit on runtime work. Domain codecs retain positive byte counts,
+nonnegative elapsed seconds/indices, and signed exit codes. Dashboard uses
+`Number.isSafeInteger` for the corresponding fields.
+
+Journal envelopes reject duplicate or unknown fields and non-finite timestamps.
+Event discriminants reject duplicate top-level fields. Native events and their
+occurrences reject unknown fields and present malformed identities, preserving
+the distinction between absent provider identity and corrupt metadata.
+
+Provider elapsed seconds describe a report, independently of local observation
+time. TUI Tools details preserve elapsed, message and output-byte observations
+together, including a decreasing provider elapsed report. Native end, provider
+response stop, model content end and Keeper turn completion remain separate facts.
+None of these metadata belong in authored conversation text.
+
+`test_tui_model_response_phase_pty.py` drives a real TUI under a controlled SSE
+fixture and records full original ANSI frames. Screenshot replay must retain
+source SHA, executable hash, terminal dimensions and the original ANSI; compare
+xterm cells to the recorded PTY before accepting a screenshot. Fixture evidence
+does not establish behavior of installed or live-provider binaries.

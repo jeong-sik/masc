@@ -680,7 +680,18 @@ let native_progress_summary (activity : tool_activity) =
 
 let native_progress_details (activity : tool_activity) =
   match native_progress_summary activity, activity.native_progress with
-  | Some summary, Some {output_bytes=Some count; _} -> Some (Printf.sprintf "%s · %d bytes observed" summary count)
+  | Some summary, Some progress ->
+      let bytes = Option.fold ~none:[]
+          ~some:(fun count -> [Printf.sprintf "%d bytes observed" count]) progress.output_bytes in
+      (* Heartbeat-only summaries already name the provider report. When a
+         message or output takes that summary slot, retain the independent
+         provider elapsed fact in the expanded detail as well. *)
+      let provider_elapsed = match progress.provider_elapsed_seconds,
+          progress.message, progress.output_bytes with
+        | Some seconds, Some _, _
+        | Some seconds, None, Some _ -> [Printf.sprintf "provider elapsed %ds" seconds]
+        | None, _, _ | Some _, None, None -> [] in
+      Some (String.concat " · " (summary :: bytes @ provider_elapsed))
   | summary, _ -> summary
 
 let native_needs_attention (activity : tool_activity) =

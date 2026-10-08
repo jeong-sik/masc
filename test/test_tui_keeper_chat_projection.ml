@@ -1232,7 +1232,7 @@ let test_batch_member_events_pass_request_bound_stream_decode () =
     ; Events.Run_finished {run_id="keeper-operation-run-batch-owner"} ] in
   let _, projected = List.fold_left (fun (state, rows) event ->
     let member_event = Masc.Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event in
-    let state, frame = Projection.project ~timestamp:1. ~redact_text:Fun.id ~redact_json:Fun.id state member_event in
+    let state, frame = Projection.project ~timestamp:1. ~redact_text:Fun.id state member_event in
     state, match frame with None -> rows | Some frame -> Ag_ui.event_to_json frame :: rows)
     (Projection.initial, []) events in
   match decode (acceptance () :: List.rev projected) with

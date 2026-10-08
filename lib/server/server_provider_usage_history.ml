@@ -127,6 +127,14 @@ let decode json =
   let* scope_id = string "scope_id" json in
   let* source = string "source" json in
   let* kind = string "kind" json in
+  (* OpenRouter renamed the display label; retain the same history series.
+     Restrict the alias to its source so another provider's label is untouched. *)
+  let kind =
+    if String.equal source (Usage.source_to_string Usage.Openrouter_key_read)
+       && String.equal kind "provider:credit limit"
+    then "provider:API key credit limit"
+    else kind
+  in
   let* limit_id = optional_string "limit_id" json in
   let* utilization = utilization_of_json json in
   let* observed_at = number "observed_at" json in

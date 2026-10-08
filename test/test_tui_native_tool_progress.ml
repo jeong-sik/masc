@@ -8,6 +8,15 @@ module Live = Masc_tui_keeper_chat_live
 module Log = Masc_tui_keeper_chat_log
 module T = Masc_tui_keeper_chat_transcript
 
+(* Malformed fixtures edit the public serialized payload, preserving the
+   producer's metadata without constructing its private event record. *)
+let wire_with_custom_value ?id event replace =
+  let json = match Ag_ui.event_to_json event with
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        key, if key = "value" then replace value else value) fields)
+    | _ -> fail "projected event must be an object" in
+  Sse_wire.format_event_yojson ?id json
+
 let start_message id = Agent_core.Types.MessageStart {id;model="fixture";usage=None}
 let tool_start ~native index id = Agent_core.Types.ContentBlockStart
   {index;content_type=(if native then Native.stream_content_type else "tool_use");
@@ -131,8 +140,10 @@ let test_strict_nested_wire_and_journal () =
       (Result.is_error (Journal.keeper_chat_event_of_json
         (replace progress (Journal.keeper_chat_event_to_json event))));
     let _, projected = Server_keeper_chat_agui_projection.project ~timestamp:1000.
-      ~redact_text:Fun.id ~redact_json:(replace progress) Server_keeper_chat_agui_projection.initial event in
-    let wire = match projected with Some event -> Ag_ui.event_to_sse ~id:1 event | None -> fail "missing progress" in
+      ~redact_text:Fun.id Server_keeper_chat_agui_projection.initial event in
+    let wire = match projected with
+      | Some event -> wire_with_custom_value ~id:1 event (replace progress)
+      | None -> fail "missing progress" in
     check bool "malformed wire is unreadable, never a tool update" true
       (match Live.feed (Live.create ()) wire with
        | [{delta=Live.Undecodable _;_}] -> true | _ -> false))
@@ -302,7 +313,96 @@ let test_held_content_reserves_its_index_before_native_headers () =
         [F.events direct; journal];
       Stream.finish stream Stream.Cancelled))) [false;true]
 
+let test_progress_numeric_wire_boundary () =
+  let decode kind field wire = Native.progress_of_json
+      (`Assoc ["kind",`String kind;field,Yojson.Safe.from_string wire]) in
+  List.iter (fun (wire,expected) ->
+    (match decode "output_observed" "byte_count" wire with
+     | Ok (Native.Output_observed {byte_count}) -> check int "exact byte count" expected byte_count
+     | Ok _ | Error _ -> fail ("safe byte count rejected: " ^ wire));
+    (match decode "heartbeat_reported" "elapsed_seconds" wire with
+     | Ok (Native.Heartbeat_reported {elapsed_seconds}) -> check int "exact provider seconds" expected elapsed_seconds
+     | Ok _ | Error _ -> fail ("safe provider seconds rejected: " ^ wire)))
+    ["1",1;"1.0",1;"1e0",1;"9007199254740991",9_007_199_254_740_991;
+     "9007199254740991.0",9_007_199_254_740_991];
+  check bool "zero is not an output byte observation" true
+    (Result.is_error (decode "output_observed" "byte_count" "0.0"));
+  check bool "zero provider seconds is valid" true
+    (decode "heartbeat_reported" "elapsed_seconds" "-0.0" = Ok (Native.Heartbeat_reported {elapsed_seconds=0}));
+  List.iter (fun wire -> List.iter (fun (kind,field) ->
+    check bool (field ^ " rejects " ^ wire) true (Result.is_error (decode kind field wire)))
+    ["output_observed","byte_count";"heartbeat_reported","elapsed_seconds"])
+    ["-1";"0.5";"9007199254740992";"9007199254740992.0";
+     "9007199254740993";"9223372036854775808";"1e309";"\"1\"";"null"]
+
+let test_native_occurrence_numeric_live_and_projection () =
+  let module Projection = Masc_tui_keeper_chat_projection in
+  let request = Projection.create_request ~keeper_name:"fixture" ~message:"numeric" () in
+  let run_id = "keeper-operation-run-" ^ request.request_id in
+  let acceptance = "data: " ^ Yojson.Safe.to_string (`Assoc [
+      "type",`String "CUSTOM";"threadId",`String "default";"timestamp",`Float 1000.;
+      "name",`String "KEEPER_CHAT_OPERATION_ACCEPTED";"value",`Assoc [
+        "operation_id",`String request.request_id;"state",`String "Running";"queued_count",`Int 0]]) ^ "\n\n" in
+  let native : E.native_tool = {occurrence={stream_scope=1;block_index=2;provider_message_id=None};
+      tool_call_id=Some "native-numeric";tool_call_name=Some "Read"} in
+  let events = [E.Run_started {run_id;thread_id="keeper:fixture"};
+      E.Text_message_start {message_id="keeper-operation-message-" ^ request.request_id;role=E.Assistant};
+      E.Text_delta "body"; E.Native_tool_start native;
+      E.Native_tool_progress (native,output 1); E.Native_tool_end (native,Native.end_observed);
+      E.Reply_details {reply="body";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+        turn_ref=Ids.Turn_ref.make ~trace_id:"numeric-wire" ~absolute_turn:1};
+      E.Text_message_end; E.Run_finished {run_id}] in
+  let wire scope index =
+    let _,wire = List.fold_left (fun (state,wire) source ->
+      let state,event = Server_keeper_chat_agui_projection.project ~timestamp:1000.
+          ~redact_text:Fun.id state source in
+      match event with
+      | None -> fail "missing projected fixture event"
+      | Some event ->
+          let encoded = match source with
+            | E.Native_tool_start _ | E.Native_tool_progress _ | E.Native_tool_end _ ->
+                wire_with_custom_value event (function
+                  | `Assoc fields -> `Assoc (("toolStreamScope",scope)::("toolCallBlockIndex",index)::
+                      List.remove_assoc "toolStreamScope" (List.remove_assoc "toolCallBlockIndex" fields))
+                  | _ -> fail "native event must have an object payload")
+            | _ -> Ag_ui.event_to_sse event in
+          state,wire ^ encoded)
+      (Server_keeper_chat_agui_projection.initial,acceptance) events in wire in
+  List.iter (fun (scope,index,expected_scope,expected_index) ->
+    let wire = wire scope index in
+    (match Projection.decode_response ~request wire with
+     | Ok (Projection.Turn_completed {reply="body";_}) -> ()
+     | Ok _ -> fail "numeric occurrence lost terminal reply"
+     | Error error -> fail (Projection.stream_error_to_string error));
+    let deltas = Live.feed (Live.create ()) wire in
+    check bool "live feed accepts the same occurrence numeric values" false
+      (List.exists (fun (item:Live.observed_delta) -> match item.delta with Live.Undecodable _ -> true | _ -> false) deltas);
+    let identities = List.filter_map (fun (item:Live.observed_delta) -> match item.delta with
+      | Live.Native_tool_started {occurrence;_}
+      | Live.Native_tool_progress {occurrence;_}
+      | Live.Native_tool_ended {occurrence;_} -> Some (occurrence.stream_scope,occurrence.block_index)
+      | _ -> None) deltas in
+    check (list (pair int int)) "start, progress and end retain one exact numeric occurrence"
+      [expected_scope,expected_index;expected_scope,expected_index;expected_scope,expected_index] identities)
+    [`Float 1.,`Float 2.,1,2;
+     Yojson.Safe.from_string "1e0",Yojson.Safe.from_string "2e0",1,2;
+     `Int 9_007_199_254_740_991,`Float 9_007_199_254_740_991.,9_007_199_254_740_991,9_007_199_254_740_991];
+  List.iter (fun invalid -> List.iter (fun (scope,index) ->
+    let wire = wire scope index in
+    check bool "strict response rejects unsafe or nonintegral native identity" true
+      (Result.is_error (Projection.decode_response ~request wire));
+    let deltas = Live.feed (Live.create ()) wire in
+    check int "each native event is unreadable" 3
+      (List.length (List.filter (fun (item:Live.observed_delta) -> match item.delta with Live.Undecodable _ -> true | _ -> false) deltas));
+    check bool "invalid occurrence never reaches native activity" false
+      (List.exists (fun (item:Live.observed_delta) -> match item.delta with
+        | Live.Native_tool_started _ | Live.Native_tool_progress _ | Live.Native_tool_ended _ -> true
+        | _ -> false) deltas)) [invalid,`Int 2;`Int 1,invalid])
+    [`Int 9_007_199_254_740_992;`Float 9_007_199_254_740_992.;`Float 1.5;`Int (-1);`String "1"]
+
 let () = run "native tool progress" ["contract",[
+  test_case "native occurrence numeric parity through actual wire consumers" `Quick test_native_occurrence_numeric_live_and_projection;
+  test_case "progress JSON safe-integer boundary" `Quick test_progress_numeric_wire_boundary;
   test_case "same deltas count twice, same journal seq once" `Quick test_replayed_sequence_and_model_signal;
   test_case "exact current active native scope" `Quick test_exact_active_scope_only;
      test_case "heartbeat provider time and model noninterference" `Quick test_heartbeat_reported_time_is_not_local_elapsed;

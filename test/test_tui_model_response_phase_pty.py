@@ -1,5 +1,8 @@
 """Actual TUI with controlled SSE: content, response and turn ends stay distinct."""
+import base64
+import hashlib
 import json
+from pathlib import Path
 import os
 import sys
 import threading
@@ -15,7 +18,8 @@ def run(executable):
     resume_reasoning = threading.Event()
     stop_reasoning = threading.Event()
     content_gates = {stage: threading.Event() for stage in (
-        "overlap", "thinking-ended", "text-ended", "native-start", "native-end")}
+        "overlap", "thinking-ended", "text-ended", "native-start",
+        "native-progress", "native-heartbeat-decreased", "native-end")}
 
     def stream(body):
         request = json.loads(body)
@@ -62,6 +66,15 @@ def run(executable):
                           "toolCallId": "native-phase-read", "toolCallName": "Read"}
                 content_gate("native-start")
                 yield event("KEEPER_NATIVE_TOOL_START", native)
+                content_gate("native-progress")
+                for progress in (
+                        {"kind": "message_reported", "message": "busy"},
+                        {"kind": "output_observed", "byte_count": 13},
+                        {"kind": "heartbeat_reported", "elapsed_seconds": 30}):
+                    yield event("KEEPER_NATIVE_TOOL_PROGRESS", {**native, "progress": progress})
+                content_gate("native-heartbeat-decreased")
+                yield event("KEEPER_NATIVE_TOOL_PROGRESS", {**native, "progress": {
+                    "kind": "heartbeat_reported", "elapsed_seconds": 3}})
                 content_gate("native-end")
                 yield event("KEEPER_NATIVE_TOOL_END", native)
                 assert stop_answer.wait(timeout=15), "answer stop was not released"
@@ -94,8 +107,38 @@ def run(executable):
             assert expected in progress, (label, progress)
             assert not any(word in progress for word in absent), (label, progress)
             assert any(b"reply-phase-check" in row for row in rows), "response body disappeared"
-            print("MODEL_PHASE_FRAME=" + json.dumps({"stage": label,
-                  "screen": h.screen_text(bytes(output)).decode("utf-8", errors="replace")}), flush=True)
+            # Capture original ANSI bytes from a complete redraw. Screenshot
+            # replay checks xterm cells against this independently recorded PTY.
+            frame = h.resize_and_wait(process, fd, output, rows=30, columns=121,
+                needle=expected, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
+            frame = h.resize_and_wait(process, fd, output, rows=30, columns=120,
+                needle=expected, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
+            cells = h.screen_rows(frame)
+            print("STUDIO_CAPTURE=" + json.dumps({
+                "suite": "test_tui_model_response_phase_pty", "name": label,
+                "rows": 30, "columns": 120, "provenance": "fixture PTY",
+                "frame_b64": base64.b64encode(frame).decode(),
+                "screen": b"\n".join(cells.get(row, b"") for row in range(1, 31)).decode(errors="replace")}), flush=True)
+            return list(cells.values())
+
+        def observe_native_progress(label, seconds):
+            reported = f"provider elapsed {seconds}s".encode()
+            # Retained rendering may write only changed cells (30s -> 3s).
+            # Wait for the reconstructed current screen, not a repeated prefix.
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: reported in h.screen_text(bytes(output)), timeout=5), (label, bytes(output))
+            rows = observe(label, b"native running", (b"STREAMING", b"THINKING"))
+            screen = b"\n".join(rows)
+            assert reported in screen, (label, screen)
+            assert b"13 bytes observed" in screen and b"busy" in screen, (label, screen)
+            assert b"TOOLS" in screen, (label, screen)
+            # The authored response remains its own unchanged physical row;
+            # provider metadata belongs to the independently rendered tool.
+            body_rows = [row for row in rows if b"reply-phase-check" in row]
+            assert body_rows and all(row.rstrip().endswith(b"reply-phase-check") for row in body_rows), body_rows
+            assert all(b"provider elapsed" not in row and b"bytes observed" not in row for row in body_rows), body_rows
+            if seconds == 3:
+                assert b"provider elapsed 30s" not in screen, (label, screen)
 
         try:
             chat.open_atomic_chat(process, fd, output)
@@ -114,6 +157,11 @@ def run(executable):
             start = len(output)
             content_gates["native-start"].set()
             observe("native-after-content", b"native running", (b"STREAMING", b"THINKING", b"model response ended"), start=start)
+            h.send_and_wait(process, fd, output, b"\x04\x04", b"tools:full")
+            content_gates["native-progress"].set()
+            observe_native_progress("native-mixed-progress", 30)
+            content_gates["native-heartbeat-decreased"].set()
+            observe_native_progress("native-provider-elapsed-decreased", 3)
             start = len(output)
             content_gates["native-end"].set()
             observe("native-ended", b"model content ended", (b"native running", b"STREAMING", b"THINKING", b"model response ended"), start=start)
@@ -143,9 +191,10 @@ def run(executable):
 
     h.run_terminal_scenario(executable,
         description="Content identities and provider response stop preserve the open Keeper turn",
-        interact=interact, http_fixtures=fixture.fixtures, refresh=0.2)
+        interact=interact, http_fixtures=fixture.fixtures, refresh=0.2, terminal_cols=140)
 
 
 if __name__ == "__main__":
+    print("STUDIO_BINARY_SHA256=" + hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest(), flush=True)
     run(sys.argv[1])
     print("TUI model response phase PTY: PASS")

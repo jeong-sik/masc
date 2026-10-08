@@ -122,11 +122,11 @@ let served_page ?(start = L.first_row) ~since_seq ~limit rows =
   | Error failure -> fail ("page refused: " ^ L.page_failure_to_string failure)
 ;;
 
-let page ?(redact_json = Fun.id) ?start ~since_seq ~limit () =
+let page ?(redact_text = Fun.id) ?start ~since_seq ~limit () =
   Api.chat_events_page
     ~operation_id:"kmsg-events"
     ~since_seq
-    ~redact_json
+    ~redact_text
     (served_page ?start ~since_seq ~limit rows)
 ;;
 
@@ -299,7 +299,7 @@ let test_chat_events_page_walks_by_seq () =
        (Api.chat_events_page
           ~operation_id:"kmsg-events"
           ~since_seq:L.Whole_turn
-          ~redact_json:Fun.id
+          ~redact_text:Fun.id
           (L.empty_page L.first_row))
      = `Null);
   check int
@@ -310,7 +310,7 @@ let test_chat_events_page_walks_by_seq () =
        (Api.chat_events_page
           ~operation_id:"kmsg-events"
           ~since_seq:L.Whole_turn
-          ~redact_json:Fun.id
+          ~redact_text:Fun.id
           (L.empty_page L.first_row)))
 ;;
 
@@ -498,7 +498,7 @@ let test_an_empty_page_hands_back_a_pair_it_accepts () =
     Api.chat_events_page
       ~operation_id:"kmsg-events"
       ~since_seq:(L.After_seq held)
-      ~redact_json:Fun.id
+      ~redact_text:Fun.id
       (served_page
          ~start:(at_offset (int_field "next_since_offset" empty))
          ~since_seq:(L.After_seq held)
@@ -611,17 +611,14 @@ let test_chat_events_are_the_journal_lines () =
 
 (* The served lines pass through the caller's redaction; the journal line
    itself is untouched. *)
-let rec mask_private = function
-  | `String text when Astring.String.is_infix ~affix:"private" text -> `String "[REDACTED]"
-  | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key, mask_private value) fields)
-  | `List values -> `List (List.map mask_private values)
-  | (`String _ | `Int _ | `Float _ | `Bool _ | `Null | `Intlit _) as scalar -> scalar
+let mask_private text =
+  if Astring.String.is_infix ~affix:"private" text then "[REDACTED]" else text
 ;;
 
 let test_chat_events_are_redacted_per_line () =
   let body =
     page
-      ~redact_json:mask_private
+      ~redact_text:mask_private
       ~since_seq:L.Whole_turn
       ~limit:Keeper_chat_event_log.page_default_limit
       ()
@@ -712,6 +709,66 @@ let rec rm_rf path =
       Unix.rmdir path
     end
     else Sys.remove path
+;;
+
+let test_http_journal_redacts_content_without_rewriting_native_identity () =
+  let base_path = temp_base "keeper-http-redaction" in
+  Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
+    let keeper_name = "alpha" in
+    let call_id = "native-call-secret-ownership" in
+    let provider_id = "provider-message-secret-id" in
+    let secrets = ["heartbeat_reported"; "elapsed_seconds"; call_id; provider_id] in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out (String.concat "\n" secrets));
+    let snapshot = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+    let redact_text = Keeper_secret_redaction.redact_text snapshot in
+    List.iter (fun secret -> check string "fixture captures the exact collision" "[REDACTED]"
+      (redact_text secret)) secrets;
+    let body = "payload " ^ String.concat " / " secrets in
+    let redacted_body = "payload [REDACTED] / [REDACTED] / [REDACTED] / [REDACTED]" in
+    let native : E.native_tool =
+      {occurrence={stream_scope=2;block_index=7;provider_message_id=Some provider_id};
+       tool_call_id=Some call_id;tool_call_name=Some "Read"} in
+    let entries = [E.Native_tool_start native;
+      E.Native_tool_progress (native,Runtime_native_tools.Heartbeat_reported {elapsed_seconds=30});
+      E.Text_delta body;
+      E.Agent_core_thinking_delta {index=0;delta=body};
+      E.Native_tool_progress (native,Runtime_native_tools.Message_reported {message=body});
+      E.Native_tool_end (native,Runtime_native_tools.end_observed)]
+      |> List.mapi (fun seq event -> {L.seq;ts=1_762_300_000. +. float_of_int seq;event}) in
+    let rows = rows_of entries in
+    let page = served_page ~since_seq:L.Whole_turn ~limit:L.page_default_limit rows in
+    let turn_ref = Ids.Turn_ref.make ~trace_id:provider_id ~absolute_turn:1 in
+    List.iter (fun (label,serve) ->
+      let response = serve page in
+      let served = match field "events" response with
+        | `List values -> List.map (fun value -> match L.journaled_event_of_json value with
+          | Ok entry -> entry | Error error -> fail (label ^ ": " ^ error)) values
+        | _ -> fail "events is not a list" in
+      List.iter2 (fun (before:L.journaled_event) (after:L.journaled_event) ->
+        check int (label ^ ": sequence unchanged") before.seq after.seq;
+        check (float 0.) (label ^ ": publish time unchanged") before.ts after.ts) entries served;
+      let check_native observed =
+        check bool (label ^ ": literal call and provider identities unchanged") true (observed=native) in
+      (match List.map (fun (entry:L.journaled_event) -> entry.event) served with
+       | [E.Native_tool_start start;
+          E.Native_tool_progress (progress,Runtime_native_tools.Heartbeat_reported {elapsed_seconds});
+          E.Text_delta text; E.Agent_core_thinking_delta {index=0;delta=thinking};
+          E.Native_tool_progress (message,Runtime_native_tools.Message_reported {message=reported});
+          E.Native_tool_end (ended,completion)] ->
+           List.iter check_native [start;progress;message;ended];
+           check int (label ^ ": heartbeat remains decodable") 30 elapsed_seconds;
+           List.iter (fun content -> check string (label ^ ": content still redacted") redacted_body content)
+             [text;thinking;reported];
+           check bool (label ^ ": no success or receipt inference") true
+             (completion=Runtime_native_tools.end_observed)
+       | _ -> fail (label ^ ": typed event structure changed"));
+      check int (label ^ ": cursor follows original source bytes") (String.length rows)
+        (int_field "next_since_offset" response))
+      ["operation", Api.chat_events_page ~operation_id:call_id ~since_seq:L.Whole_turn ~redact_text;
+       "autonomous", Api.turn_events_page ~turn_ref ~since_seq:L.Whole_turn ~redact_text];
+    check string "serving leaves original durable content untouched" rows (rows_of entries))
 ;;
 
 let test_chat_events_route_needs_admin_through_the_authorizer () =
@@ -859,6 +916,10 @@ let () =
             "events are redacted per line"
             `Quick
             test_chat_events_are_redacted_per_line
+        ; test_case
+            "HTTP journal preserves native identity while redacting content"
+            `Quick
+            test_http_journal_redacts_content_without_rewriting_native_identity
         ; test_case
             "missing journal is classified by the row"
             `Quick

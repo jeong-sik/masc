@@ -261,6 +261,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_msx_peek", read_state_tool);
     ("masc_msx_ram_diff", read_state_tool);
     ("masc_dos_screen", play_machine_read_tool);
+    ("masc_dos_meta", read_state_tool);
     ("masc_dos_peek", read_state_tool);
     ("masc_dos_load", mutating_tool);
     ("masc_dos_pass", play_machine_tool);

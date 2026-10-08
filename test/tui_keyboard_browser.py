@@ -641,10 +641,15 @@ def run_browser_unserved_gesture_regression(executable: str, *, bidi_listed: boo
         return 200, {"ok":True,"data":{}}
 
     listing = {"clients": connected}
+    # Exercise the unsent-gesture renderer with server-controlled line/terminal
+    # controls. Producer escaping is not the reader's authority boundary.
+    unsafe_reason = "bad\n\x1b[2Jend"
+    safe_ended_row = "BiDi host: ended 2026-10-03T04:01:00Z · bad\\x0A\\x1B[2Jend".encode()
     if not bidi_listed:
         # No BiDi connection, and the last BiDi host left its session behind.
+        ending = {**BIDI_HOST_STOPPED, "reason": unsafe_reason}
         listing["bidiHost"] = bidi_host_report("ended", bidi_host_record(
-            client=bidi, ended=BIDI_HOST_STOPPED))
+            client=bidi, ended=ending))
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":listing})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
@@ -724,8 +729,11 @@ def run_browser_unserved_gesture_regression(executable: str, *, bidi_listed: boo
             # where attaching one is written.
             require(after_refresh,
                 "Not sent · WebExtension: no drag · no BiDi connection is listed".encode(),
-                BIDI_HOST_ENDED_ROW, BIDI_HOST_SESSION_ROW,
+                safe_ended_row, BIDI_HOST_SESSION_ROW,
                 b"Setup: docs/design/browser-bidi-live-host.md")
+            if unsafe_reason.encode() in bytes(output[start:]):
+                raise AssertionError("host controls reached the terminal in an unsent-gesture row")
+            require(after_refresh, extension_row, b"READ AFTER THE REFUSAL")
         if b"HTTP failed" in after_refresh:
             raise AssertionError(f"a gesture that was never sent reads as a failed read: {after_refresh!r}")
         assert len(actions) == 1, f"the unserved drag reached the lane: {actions!r}"

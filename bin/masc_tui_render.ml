@@ -9118,7 +9118,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               c.push_styled ~style:(Theme.recede ()) ("  " ^ Terminal_text.single_line row))
             (bidi_host_rows view.bidi_host)
       | None ->
-      List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ row))
+      List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ Terminal_text.single_line row))
         (browser_lane_unserved_gesture_rows view);
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with

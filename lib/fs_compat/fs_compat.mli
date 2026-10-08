@@ -809,9 +809,9 @@ val atomic_orphan_cleanup_failure_to_string
 (** No-follow orphan cleanup, bounded by the named staging inventory: it
     scans exactly [base_path]. Every failed mutation or unexpected
     orphan-shaped entry is returned in the typed report. The caller must own
-    stable directory identities and quiesce the matching temp namespace; see
-    {!Atomic_write.cleanup_atomic_orphans} for the OCaml 5.4 dirfd
-    limitation. *)
+    stable directory identities and quiesce the matching temp namespace.
+    Portable [Unix] operations validate inode identity before mutation but
+    cannot make replacement of intermediate path components atomic. *)
 val cleanup_atomic_orphans
   :  ownership_root:string
   -> base_path:string

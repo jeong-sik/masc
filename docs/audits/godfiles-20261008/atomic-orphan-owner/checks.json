@@ -1,0 +1,24 @@
+{
+  "base_sha": "727c56a8759f71c747d3107667a468e13199869e",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 test/test_fs_atomic_orphan_sweep_10130.exe test/test_fs_compat.exe",
+    "exit_code": 0
+  },
+  "tests": [
+    {
+      "command": "_build/default/test/test_fs_atomic_orphan_sweep_10130.exe",
+      "exit_code": 0,
+      "executed": 11
+    },
+    {
+      "command": "_build/default/test/test_fs_compat.exe test save_file_atomic",
+      "exit_code": 0,
+      "executed": 14
+    }
+  ],
+  "executables": {
+    "_build/default/test/test_fs_atomic_orphan_sweep_10130.exe": "77a2d2e5bd0b2a7db445dc38c5a60eaee3091d99d60a4444773a55eb1524f71d",
+    "_build/default/test/test_fs_compat.exe": "eeebe3dc10f67d2198b08473ba2b67492a8c14b23c5d99cecb39b598a3fc0ae6"
+  },
+  "scope": "focused compilation and existing isolated temporary-directory scenarios; skipped groups are not counted; no full suite, live recovery, or deployment"
+}

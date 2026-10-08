@@ -1,4 +1,4 @@
-(** Atomic replacement with process-restart sync and orphan recovery.
+(** Atomic replacement with process-restart sync.
 
     The strict contract is
     [tmp → Unix.fsync(tmp) → rename → Unix.fsync(parent dir)]. Successful
@@ -6,15 +6,11 @@
     process-restart recovery. It does not claim hardware/power-loss
     persistence and does not use Darwin [F_FULLFSYNC].
 
-    Crash recovery is provided by [cleanup_atomic_orphans], a boot-time sweep
-    for canonical [.atomic_*.tmp] files left behind when the owning process was
-    SIGKILL'd after creating its temp file.
-
     The [save_file] primitive is injected so this module stays free of
     [Fs_compat]'s Eio bridge; it must be a blocking writer, because the
     replacement runs as one blocking job (a system thread inside Eio) from
-    temp-file creation to the parent directory fsync. Recovery uses only
-    typed [Unix] operations and returns every failure to the caller. *)
+    temp-file creation to the parent directory fsync. Orphan inventory and
+    preservation are owned separately by [Atomic_orphan_cleanup]. *)
 
 (** [save_file_atomic ~save_file path content] writes [content] to
     a temp file in [path]'s directory, fsyncs the tmp, renames it
@@ -577,79 +573,3 @@ module Capability_write_for_testing : sig
     -> _ Eio.Path.t
     -> (unit, capability_directory_sync_error) result
 end
-
-(** [true] iff [name] matches the canonical [.atomic_*.tmp] shape produced by
-    this module. Exposed so recovery sweeps do not re-derive the filename
-    contract — #10205 finding 2. *)
-val is_atomic_orphan_name : string -> bool
-
-type atomic_orphan_cleanup_operation =
-  | Inspect_cleanup_root
-  | Read_cleanup_directory
-  | Inspect_orphan
-  | Create_recovery_directory
-  | Sync_recovery_parent
-  | Link_preserved_orphan
-  | Verify_preserved_orphan
-  | Sync_preserved_orphan
-  | Sync_recovery_directory
-  | Delete_empty_orphan
-  | Delete_preserved_source
-  | Sync_source_directory
-  | Close_cleanup_descriptor
-
-type atomic_orphan_cleanup_cause =
-  | Unix_failure of Unix.error * string * string
-  | Sys_failure of string
-  | Unexpected_file_kind of Unix.file_kind
-  | Outside_ownership_root of { ownership_root : string }
-  | Identity_changed
-  | Other_failure of exn
-
-type atomic_orphan_cleanup_failure =
-  { operation : atomic_orphan_cleanup_operation
-  ; path : string
-  ; cause : atomic_orphan_cleanup_cause
-  }
-
-type atomic_orphan_cleanup_report =
-  { inspected : int
-  ; deleted : int
-  ; preserved : int
-  ; failures : atomic_orphan_cleanup_failure list
-  }
-
-val atomic_orphan_cleanup_failure_to_string
-  :  atomic_orphan_cleanup_failure
-  -> string
-
-(** #10130: no-follow boot-time cleanup for canonical [.atomic_*.tmp] orphans.
-
-    The sweep scans exactly [base_path]; symbolic links are never followed.
-
-    [ownership_root] is the canonical process-owned ancestor of [base_path].
-    Every existing component from that root through [base_path] is inspected
-    with [lstat] and must be a real directory. A symbolic-link ancestor, a
-    non-directory component, or a lexical path outside [ownership_root]
-    produces a typed failure before the inventory is read.
-
-    The caller must keep the scanned directory identity process-owned and
-    stable, and must ensure no writer creates a matching atomic-temp name
-    concurrently. Unrelated entries may change. OCaml 5.4's portable [Unix]
-    API has no dirfd-relative [openat]/[unlinkat] operations, so the
-    implementation validates inode identity immediately before each mutation
-    but cannot make concurrent replacement of an intermediate path component
-    atomic. Server startup and the dedicated Keeper staging lifecycle provide
-    this ownership boundary.
-
-    Zero-byte regular files are unlinked. Non-empty regular files are
-    preserved without overwrite under [<base_path>/.recovered/root/]. The
-    preservation path uses a hard-link-then-unlink protocol and fsyncs both
-    directory sides. Orphan-shaped non-regular entries and every
-    filesystem failure remain in [report.failures]; cancellation is re-raised.
-    A missing [base_path] is an empty inventory, not a failure. *)
-val cleanup_atomic_orphans
-  :  ownership_root:string
-  -> base_path:string
-  -> unit
-  -> atomic_orphan_cleanup_report

@@ -265,6 +265,114 @@ def reopen_existing_without_login(binary, *, scroll_results=False):
                             interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
+def saved_activation_recovery(binary, *, detached=False, already_admitted=False):
+    """Hold actual POST responses across applied identity loss, not probe counts."""
+    h = _keyboard_harness
+    requests = []
+    unconfirmed = threading.Event()
+    save_started, release_save = threading.Event(), threading.Event()
+    activation_started, release_activation = threading.Event(), threading.Event()
+    activation_answered = threading.Event()
+    inventory_after_activation = threading.Event()
+    activation_calls = []
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+
+    def inventory():
+        if activation_answered.is_set():
+            inventory_after_activation.set()
+        return 200, {"setup_revision": "fixture-revision", "default_runtime_selection": [],
+            "runtimes": [], "account_emails": [], "integrations": [
+                {"id": "codex_hA", "display_name": "Recovery account",
+                 "protocol": "codex-app-server", "origin": "runtime_config"}]}
+
+    fixtures["/api/v1/setup/inventory"] = inventory
+    fixtures["/api/v1/setup/accounts/select"] = (200, {"account_ref": ACCOUNT, "account_selected": True})
+    fixtures["/api/v1/setup/models"] = (200, {"models": [
+        {"id": "new-model", "label": "Recovery model", "context": 32768, "tools": True, "bound": False}]})
+
+    def save(_body):
+        save_started.set()
+        assert release_save.wait(30), "held Save was not released"
+        return 200, {"configured": True, "readiness": "verified",
+            "commit": {"durability": "durable", "warnings": []},
+            "runtime_id": "new-runtime", "runtime_ids": ["new-runtime"]}
+
+    def activate(body):
+        activation_calls.append(json.loads(body))
+        activation_started.set()
+        assert release_activation.wait(30), "held activation was not released"
+        activation_answered.set()
+        return 200, {"runtime_ready": True, "exact_output_authority_available": True,
+                     "model_setup": {"status": "available"}}
+
+    fixtures["/api/v1/setup/connections"] = h.RequestHttpResponse(save)
+    fixtures["/api/v1/runtime/setup/resume"] = h.RequestHttpResponse(activate)
+
+    def prepare(base):
+        root = str(Path(base).resolve())
+        def health():
+            if unconfirmed.is_set():
+                return h.RawHttpResponse(503, b'{"error":"activation identity unavailable"}',
+                                         content_type="application/json")
+            return h.RawHttpResponse(200, json.dumps({"status": "ok", "paths": {
+                "cwd": root, "effective_base_path": root, "effective_masc_root": root + "/.masc",
+                "effective_has_masc_dir": True}}).encode(), content_type="application/json")
+        fixtures["/health"] = health
+        fixtures["/health?full=1"] = health
+
+    def interact(process, fd, _slave, output, _base):
+        def wait_event(event, label):
+            assert h.wait_for_fixture_state(process, fd, output, event.is_set, timeout=10), label
+        try:
+            h.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
+            h.send_and_wait(process, fd, output, b"/login codex\r", "> + 새 계정".encode())
+            h.send_and_wait(process, fd, output, b"j", b"> Recovery account")
+            h.send_and_wait(process, fd, output, b"\r", b"Recovery model")
+            if already_admitted:
+                release_save.set()
+            os.write(fd, b"\r")
+            wait_event(save_started, "Save POST did not start")
+            if already_admitted:
+                wait_event(activation_started, "activation POST did not start")
+            start = len(output)
+            unconfirmed.set()
+            h.wait_for_output(process, fd, output, b"workspace identity unconfirmed", start=start, timeout=10)
+            if already_admitted:
+                release_activation.set()
+                h.wait_for_output(process, fd, output, "런타임에 활성화했습니다".encode(), start=start, timeout=10)
+            else:
+                release_save.set()
+                h.wait_for_output(process, fd, output, b"waiting for workspace reconfirmation", start=start, timeout=10)
+                assert activation_calls == [], "activation POST escaped unconfirmed admission"
+                if detached:
+                    h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
+            unconfirmed.clear()
+            wait_event(activation_started, "known-unsent activation did not resume")
+            release_activation.set()
+            wait_event(inventory_after_activation, "activation follow-up inventory did not recover")
+            h.drain_until_quiet(process, fd, output)
+            assert activation_calls == [{}], "activation was replayed after admission"
+            assert sum(path == "/api/v1/setup/connections" for path, _ in requests) == 1
+            if detached:
+                h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+                os.write(fd, b"q")
+            else:
+                h.wait_for_output(process, fd, output, "런타임에 활성화했습니다".encode(), start=0, timeout=10)
+                leave_login_and_arm_quit(process, fd, output)
+        finally:
+            release_save.set()
+            release_activation.set()
+
+    h.run_terminal_scenario(binary,
+        description=f"saved account activation recovery detached={detached} admitted={already_admitted}",
+        interact=interact, prepare_workspace=prepare, refresh=1.0,
+        http_fixtures=fixtures, http_requests=requests)
+
+
 def retry_before_started(binary):
     supplied = threading.Event()
     ready = threading.Event()
@@ -345,4 +453,7 @@ if __name__ == "__main__":
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", multi_models=True)
     reopen_existing_without_login(str(Path(sys.argv[1]).resolve()))
     reopen_existing_without_login(str(Path(sys.argv[1]).resolve()), scroll_results=True)
-    print("tui account login: PASS (11 scenarios)")
+    saved_activation_recovery(str(Path(sys.argv[1]).resolve()))
+    saved_activation_recovery(str(Path(sys.argv[1]).resolve()), detached=True)
+    saved_activation_recovery(str(Path(sys.argv[1]).resolve()), already_admitted=True)
+    print("tui account login: PASS (14 scenarios)")

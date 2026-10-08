@@ -15,6 +15,7 @@ val refusal_notice : refusal -> string
 val decode_activity : Yojson.Safe.t -> (activity, string) result
 
 val fetch :
+  ?body_fields:(string * Yojson.Safe.t) list ->
   t -> host:string -> port:int -> headers:(string * string) list ->
   request:(body:string -> (int * Yojson.Safe.t, string) result) ->
   (response, string) result
@@ -24,4 +25,5 @@ val fetch :
     and establish that no execution started. Other errors clear the cache and
     never retry the mutation. Network and decoding do not hold the cache lock.
     A loaded reply must also carry the mark captured with its pixels. A late
-    request cannot publish over a newer request's cache. *)
+    request cannot publish over a newer request's cache. [body_fields] are
+    added to the request body, ahead of the pixel fields, on every call. *)

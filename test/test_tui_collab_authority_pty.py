@@ -257,10 +257,158 @@ def run_control_boundary(executable):
           '/api/v1/msx/tick': h.RequestHttpResponse(tick)})
 
 
+def run_machine_pre_refresh_swap(executable, operation):
+    """A cached A grant cannot send a machine write to B before periodic health."""
+    current, observed, prepare, health = workspace_fixture()
+    rgb = base64.b64encode(b'\xff\x00\x00\x00\x00\xff').decode()
+    first_tick = threading.Event()
+    release_tick = threading.Event()
+    tick_recorded = threading.Event()
+
+    class RecordedRequests(list):
+        def append(self, request):
+            super().append(request)
+            if request[0] == '/api/v1/msx/tick':
+                tick_recorded.set()
+
+    requests = RecordedRequests()
+
+    def live(path):
+        source = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)['source_kind'][0]
+        answer = {'state': 'changed', 'source_kind': source, 'change_count': 1,
+                  'incarnation': current['phase'], 'screen': {'format': 'rgb8', 'width': 2,
+                  'height': 1, 'rgb_base64': rgb}}
+        if source == 'msx_capture': answer['frame_number'] = 1
+        else: answer['activity'] = []
+        return 200, answer
+
+    def tick(_body):
+        first_tick.set()
+        if operation == 'tick':
+            # The first A write is already admitted; its completed frame arms
+            # the next automatic tick, while the cached authority still says A.
+            current['phase'] = 'b'
+        else:
+            assert release_tick.wait(8), 'fixture tick was not released'
+        return 200, {'loaded': True, 'number': 9000, 'change_count': 9000,
+            'incarnation': 'a', 'width': 2, 'height': 1, 'mode': 'SCREEN2',
+            'cartridge': 'game.rom', 'disk': None, 'players': [], 'pixels': {
+                'kind': 'inline', 'revision': 'a' * 64, 'width': 2, 'height': 1,
+                'rgb_base64': rgb}}
+
+    def interact(process, master, _slave, output, _base):
+        def key(value, needle):
+            return press(process, master, output, value, needle)
+
+        try:
+            key(b':go Collab\r', '› guest'.encode())
+            if operation == 'load':
+                key(b'g', b'pick a game')
+                key(b'jjjj', b'game.rom')
+            else:
+                key(b'm', b'frame 1 ')
+                if operation != 'f5':
+                    key(b'\x1b[15~', b'Controlling')
+                    assert h.wait_for_fixture_event(process, master, output, first_tick, timeout=8)
+                    if operation == 'disk':
+                        key(b'\x1b[19~', b'change disk')
+                        key(b'j', b'game.dsk')
+            if operation == 'tick':
+                # The response callback runs before the harness records it.
+                # Other operations intentionally keep their first tick blocked.
+                assert h.wait_for_fixture_event(
+                    process, master, output, tick_recorded, timeout=8)
+            before = len(requests)
+            start = len(output)
+            if operation != 'tick':
+                current['phase'] = 'b'
+                command = {'f5': b'\x1b[15~', 'key': b'1', 'save': b'\x1b[17~',
+                           'restore': b'\x1b[18~', 'load': b'\r', 'disk': b'\r'}[operation]
+                os.write(master, command)
+            assert h.wait_for_fixture_event(process, master, output, observed['b'], timeout=8)
+            h.wait_for_output(process, master, output, b'MASC Dashboard', start=start, timeout=8)
+            assert not any(path.startswith('/api/v1/msx/') for path, _ in requests[before:]), requests[before:]
+            if operation == 'tick':
+                assert sum(path == '/api/v1/msx/tick' for path, _ in requests) == 1, requests
+            # The outstanding A tick may now finish. Its frame cannot reopen
+            # the withdrawn view or restore its control grant.
+            release_tick.set()
+            key(b':go Collab\r', '› guest'.encode())
+            assert b'Controlling' not in h.screen_text(bytes(output))
+            key(b'\x1b', b'MASC Dashboard')
+            os.write(master, b'q')
+        finally:
+            release_tick.set()
+
+    h.run_terminal_scenario(executable,
+        description='pre-refresh workspace replacement refuses MSX ' + operation,
+        interact=interact, prepare_workspace=prepare, refresh=60.0, terminal_cols=200,
+        http_requests=requests, http_fixtures={'/health': health, '/health?full=1': health,
+            '/api/v1/play/invites': (200, {'invites': [row()]}),
+            '/api/v1/lane-addons/live': h.PathHttpResponse(live),
+            '/api/v1/msx/carts': (200, {'carts': ['game.dsk' if operation == 'disk' else 'game.rom']}),
+            '/api/v1/msx/tick': h.RequestHttpResponse(tick)})
+
+
+def run_tick_probe_view_withdrawal(executable):
+    """A tick's delayed identity answer cannot authorize an abandoned control view."""
+    current, _observed, prepare, health = workspace_fixture()
+    requests = []
+    gate = h.GatedHttpResponse((200, {}), hold_seconds=30)
+    armed = threading.Event()
+    rgb = base64.b64encode(b'\xff\x00\x00').decode()
+
+    def checked_health():
+        if armed.is_set():
+            armed.clear()
+            gate()
+        return health()
+
+    def live(_path):
+        return 200, {'state': 'changed', 'source_kind': 'msx_capture', 'change_count': 1,
+            'incarnation': 'a', 'frame_number': 1,
+            'screen': {'format': 'rgb8', 'width': 1, 'height': 1, 'rgb_base64': rgb}}
+
+    def tick(_body):
+        armed.set()
+        return 200, {'loaded': True, 'number': 2, 'change_count': 2,
+            'incarnation': 'a', 'width': 1, 'height': 1, 'mode': 'SCREEN2',
+            'cartridge': 'game.rom', 'disk': None, 'players': [], 'pixels': {
+                'kind': 'inline', 'revision': 'b' * 64, 'width': 1, 'height': 1,
+                'rgb_base64': rgb}}
+
+    def interact(process, master, _slave, output, _base):
+        try:
+            press(process, master, output, b':go Collab\r', '› guest'.encode())
+            press(process, master, output, b'm', b'frame 1 ')
+            press(process, master, output, b'\x1b[15~', b'Controlling')
+            assert h.wait_for_fixture_event(process, master, output, gate.requested, timeout=8)
+            press(process, master, output, b'\x1b[15~', b'Watching only')
+            boundary = len(requests)
+            gate.release.set()
+            press(process, master, output, b'\x1b', b'MASC Collab')
+            assert not any(path == '/api/v1/msx/tick' for path, _ in requests[boundary:]), requests[boundary:]
+            press(process, master, output, b'\x1b', b'MASC Dashboard')
+            os.write(master, b'q')
+        finally:
+            gate.release.set()
+
+    h.run_terminal_scenario(executable,
+        description='MSX tick probe answer cannot restore a withdrawn control view',
+        interact=interact, prepare_workspace=prepare, refresh=60.0, terminal_cols=200,
+        http_requests=requests, http_fixtures={'/health': checked_health, '/health?full=1': checked_health,
+            '/api/v1/play/invites': (200, {'invites': [row()]}),
+            '/api/v1/lane-addons/live': h.PathHttpResponse(live),
+            '/api/v1/msx/tick': h.RequestHttpResponse(tick)})
+
+
 if __name__ == '__main__':
     run_unknown(sys.argv[1], 'issue')
     run_unknown(sys.argv[1], 'revoke')
     run_pre_dispatch_failure(sys.argv[1], 'issue')
     run_pre_dispatch_failure(sys.argv[1], 'revoke')
     run_control_boundary(sys.argv[1])
+    for operation in ('tick', 'f5', 'key', 'save', 'restore', 'load', 'disk'):
+        run_machine_pre_refresh_swap(sys.argv[1], operation)
+    run_tick_probe_view_withdrawal(sys.argv[1])
     print('tui Collab authority: PASS')

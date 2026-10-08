@@ -2718,6 +2718,7 @@ let apply_disposition
       ?durable_range_id
       ?official_range_id
       ?explicit_write_range_id
+      ?(required_memory_ids = [])
       ~absorbed
       ~revisions
       ~keepers_dir
@@ -2924,8 +2925,11 @@ let apply_disposition
            ([], ids_of kept)
            plan.claims_accepted
        in
-       let+ next = make_snapshot ~previous ~now ~source ~facts:(kept @ List.rev added) () in
-       next, ())
+       let* next = make_snapshot ~previous ~now ~source ~facts:(kept @ List.rev added) () in
+       let actual = ids_of next.facts in
+       match List.find_opt (fun identity -> not (Set_util.StringSet.mem identity actual)) required_memory_ids with
+       | Some identity -> Error ("explicit admission destination is not current: " ^ identity)
+       | None -> Ok (next, ()))
   |> Result.map (fun (snapshot, commit, ()) -> disposition_of snapshot commit)
 ;;
 

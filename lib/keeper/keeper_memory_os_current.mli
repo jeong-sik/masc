@@ -436,6 +436,7 @@ val apply_disposition
   -> ?durable_range_id:durable_range_id
   -> ?official_range_id:official_range_id
   -> ?explicit_write_range_id:explicit_write_range_id
+  -> ?required_memory_ids:string list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> revisions:Keeper_memory_os_types.revision list
   -> keepers_dir:string
@@ -485,6 +486,10 @@ val apply_disposition
     building the disposition. A stale duplicate cannot resurrect a retired
     fact. A conflict is an error, not a successful no-op; the consumer can reread
     the authoritative receipt before acknowledging already-consumed input.
+
+    [required_memory_ids] names the destinations promised by an explicit
+    admission decision. Every destination must survive the actual locked
+    disposition and support maintenance, or the entire commit is refused.
 
     An [absorbed] fact that is still current leaves the snapshot too, and its
     row is appended to {!Keeper_memory_absorbed} under the lock, after the next

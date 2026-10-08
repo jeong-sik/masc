@@ -116,6 +116,10 @@ val fit_continuity :
 
 val run_best_effort
   :  ?write_scope:write_scope
+  -> ?admission:Keeper_memory_admission_queue.batch
+       (** Explicit candidates use a separate strict judgment envelope. Any
+           deferred candidate leaves the entire batch pending. This mode is
+           valid only with [Memory_maintenance] and no conversation ranges. *)
   -> ?continuity:Keeper_librarian_continuity.prepared
   -> ?on_memory_committed:(unit -> unit)
        (** Synchronous observation at the snapshot commit. Must only update

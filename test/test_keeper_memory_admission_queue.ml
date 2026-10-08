@@ -74,9 +74,29 @@ let test_corruption_is_not_empty () = with_store (fun keepers_dir ->
    | Error _ -> () | Ok _ -> fail "corruption overwritten");
   check (option string) "rejected bytes preserved" (Some "{broken") (Fs_compat.load_file_opt path))
 
+let test_removed_destination_cannot_consume () = with_store (fun keepers_dir ->
+  let destination = fact "existing representation" in
+  let initial = Current.replace ~keepers_dir ~keeper_id:"keeper" ~expected_revision:None
+    ~now:100. ~source:{kind=Current.Librarian; trace_id="seed"} ~facts:[destination] () |> require in
+  ignore (append keepers_dir "one" "same event observed again");
+  let selected = Queue.range_id (batch keepers_dir) in
+  (* The model selected this destination from the earlier snapshot. *)
+  ignore (Current.replace ~keepers_dir ~keeper_id:"keeper"
+    ~expected_revision:(Some initial.revision) ~now:200.
+    ~source:{kind=Current.Librarian; trace_id="retire"} ~facts:[] () |> require);
+  (match Current.apply_disposition ~explicit_write_range_id:selected
+     ~required_memory_ids:[Types.memory_id destination] ~absorbed:[] ~revisions:[]
+     ~keepers_dir ~keeper_id:"keeper" ~now:300.
+     ~source:{kind=Current.Librarian; trace_id="admission"} ~new_claims:[] () with
+   | Error _ -> () | Ok _ -> fail "a missing destination authorized consumption");
+  acknowledge keepers_dir;
+  check int "candidate remains pending for a fresh judgment" 1
+    (List.length (Queue.candidates (batch keepers_dir))))
+
 let () = run "durable explicit admission queue"
   ["storage boundaries", [
     test_case "pending is distinct from current Memory" `Quick test_pending_is_not_current;
     test_case "commit then retirement recovers without losing new tail" `Quick test_recovery_preserves_new_tail;
     test_case "input digest mismatch retains candidates" `Quick test_wrong_digest_keeps_candidates;
+    test_case "retired destination refuses consumption" `Quick test_removed_destination_cannot_consume;
     test_case "corruption cannot reset pending input" `Quick test_corruption_is_not_empty]]

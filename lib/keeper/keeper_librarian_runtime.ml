@@ -732,6 +732,7 @@ type continuity_answer =
 type accepted =
   { selection : Keeper_librarian.selection
   ; continuity_answer : continuity_answer
+  ; required_memory_ids : string list
   }
 
 (* A continuity pass must produce both Memory disposition and its saved
@@ -743,10 +744,10 @@ let validate_selection ?continuity selected_input output =
   let open Result.Syntax in
   let* selection = Keeper_librarian.selection_of_json_result selected_input output in
   match continuity with
-  | None -> Ok { selection; continuity_answer = Memory_only }
+  | None -> Ok { selection; continuity_answer = Memory_only; required_memory_ids = [] }
   | Some prepared ->
     let+ working_state = Keeper_librarian.continuity_working_state_of_json_result output in
-    { selection; continuity_answer = Continuity { prepared; working_state } }
+    { selection; continuity_answer = Continuity { prepared; working_state }; required_memory_ids = [] }
 ;;
 
 (* The accepted answer of each pass. A context-only answer carries no
@@ -754,6 +755,7 @@ let validate_selection ?continuity selected_input output =
    for. *)
 type answer =
   | Memory_answer of accepted
+  | Admission_deferred_answer
   | Continuity_state_answer of
       { prepared : Keeper_librarian_continuity.prepared
       ; working_state : string
@@ -771,6 +773,25 @@ let validate_answer pass selected_input output =
   | Working_context_pass ->
     Keeper_librarian.working_contexts_of_json_result selected_input output
     |> Result.map (fun pockets -> Working_context_answer pockets)
+;;
+
+let validate_admission_answer batch selected_input output =
+  let open Result.Syntax in
+  let module Judgment = Keeper_memory_admission_judgment in
+  let invalid detail = Keeper_librarian.Admission_invalid detail in
+  let* memory, judgments = Judgment.unwrap ~batch output |> Result.map_error invalid in
+  let* accepted = validate_selection selected_input memory in
+  let* () = Judgment.verify ~facts:accepted.selection.facts judgments |> Result.map_error invalid in
+  if not (Judgment.settled judgments) then Ok Admission_deferred_answer
+  else
+    let claims = List.filter_map (fun (judgment : Judgment.judgment) ->
+      match judgment.outcome with
+      | Incorporated claim | Already_represented claim -> Some claim
+      | Not_durable | Deferred -> None) judgments in
+    let required_memory_ids = List.filter_map (fun (fact : Keeper_memory_os_types.fact) ->
+      if List.mem fact.claim claims then Some (Keeper_memory_os_types.memory_id fact) else None)
+      accepted.selection.facts in
+    Ok (Memory_answer {accepted with required_memory_ids})
 ;;
 
 let try_cli_slots
@@ -1185,6 +1206,7 @@ let commit_continuity ~commit ~observe =
 
 let run_best_effort
       ?(write_scope = Context_and_memory)
+      ?admission
       ?continuity
       ?(on_memory_committed = fun () -> ())
       ?(on_cli_input_limit = fun _ -> ())
@@ -1201,6 +1223,13 @@ let run_best_effort
       (inp : Keeper_librarian.input)
   =
   let trace_id = input_trace_id inp in
+  let admission_mode_valid = match admission, write_scope, continuity, durable_range_id, official_range_id with
+    | None, _, _, _, _ | Some _, Memory_maintenance, None, None, None -> true
+    | Some _, _, _, _, _ -> false in
+  if not admission_mode_valid then
+    on_not_committed {detail = "explicit admission requires a standalone Memory maintenance pass";
+                      walk_shows_size = false}
+  else
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
@@ -1235,6 +1264,20 @@ let run_best_effort
         let prompt_variables, prompt_material =
           resolve_librarian_prompt pass prompt_input
         in
+        let prompt_material = match admission with
+          | None -> prompt_material
+          | Some batch -> Result.map (fun (material : librarian_prompt_material) ->
+              {material with rendered = material.rendered ^ "\n\n" ^
+                Keeper_memory_admission_judgment.prompt_suffix ~batch}) prompt_material in
+        let validate = match admission with
+          | None -> validate_answer pass prompt_input
+          | Some batch -> validate_admission_answer batch prompt_input in
+        let requirement = match admission with
+          | None -> output_requirement_of_pass pass
+          | Some _ -> Exact_output.make_output_requirement
+              ~schema:(Keeper_memory_admission_judgment.output_schema
+                ~memory_schema:Keeper_structured_output_schema.librarian_current_output_schema)
+              ~minimum_guarantee:Exact_output.Json_syntax in
         Exact_lane_run_registry.register_running
           registry
           ~run_id
@@ -1435,8 +1478,8 @@ let run_best_effort
                let execute_full () =
                  full_lane_entered := true;
                  execute_answer ~selected_slots ~cli_slots
-                   ~requirement:(output_requirement_of_pass pass)
-                   ~validate:(validate_answer pass prompt_input)
+                   ~requirement
+                   ~validate
                    ?cli_runner ~clock ~net ~base_path ~keeper_id
                    ~messages:[ message Agent_core.Types.User prompt ] ()
                  |> Result.map (fun (accepted, source) -> (accepted, Some source)) in
@@ -1444,7 +1487,7 @@ let run_best_effort
                  let output = `Assoc
                    [ "new_claims", `List []; "dropped", `List []
                    ; "working_contexts", `List []; "working_state", `Null ] in
-                 match validate_answer pass prompt_input output with
+                 match validate output with
                  | Ok answer ->
                    full_llm_skipped := true;
                    Ok ((answer, output), None)
@@ -1541,6 +1584,10 @@ let run_best_effort
                    Continuity_not_committed reason)
              in
              match answer with
+             | Admission_deferred_answer ->
+               let detail = "explicit admission remains pending: Librarian deferred at least one candidate" in
+               on_not_committed {detail; walk_shows_size = false};
+               Ok (`Admission_deferred (exact_output, selected_slot))
              | Working_context_answer proposed ->
                organize_working_context proposed;
                Ok (`Context_organized (exact_output, selected_slot))
@@ -1550,7 +1597,7 @@ let run_best_effort
                   Ok (`Context_organized (exact_output, selected_slot))
                 | Continuity_not_committed reason ->
                   Ok (`Continuity_not_committed (reason, exact_output, selected_slot)))
-             | Memory_answer { selection; continuity_answer } ->
+             | Memory_answer { selection; continuity_answer; required_memory_ids } ->
              (* A continuity range owns no pending input; only a Memory pass
                 without one organizes the working context. An organization the
                 answer left out or got wrong is skipped for this pass and
@@ -1607,7 +1654,14 @@ let run_best_effort
                 applied (RFC-0463 section 2.8). *)
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
-                 ~new_observations:(Keeper_librarian.observations_for_absorption prompt_input)
+                 ~new_observations:(Keeper_librarian.observations_for_absorption prompt_input
+                   @ (match admission with
+                      | None -> []
+                      | Some batch -> List.map (fun (row : Keeper_memory_admission_queue.candidate) ->
+                          `Assoc ["observation_kind", `String "pending_explicit_memory_candidate";
+                                  "request_id", `String row.request_id; "sequence", `Int row.sequence;
+                                  "proposal", Keeper_memory_os_types.fact_to_json row.fact])
+                          (Keeper_memory_admission_queue.candidates batch)))
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)
                  ~before_evaluate:register_absorb_evaluation
                  ~after_evaluate:complete_absorb_evaluation
@@ -1648,6 +1702,8 @@ let run_best_effort
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
                  ?official_range_id
+                 ?explicit_write_range_id:(Option.map Keeper_memory_admission_queue.range_id admission)
+                 ~required_memory_ids
                  ~absorbed:applied_absorbed
                  ~revisions:selection.revisions
                ~keepers_dir
@@ -1702,6 +1758,11 @@ let run_best_effort
              `Memory_committed (disposition, exact_output, selected_slot, absorb_gate)
            in
            match result with
+           | Ok (`Admission_deferred (exact_output, selected_slot)) ->
+             complete ~selected_slot Exact_lane_run_registry.Succeeded
+               (`Assoc ["memory_write", `String "pending_explicit_admission";
+                        "exact_output", exact_output]);
+             Eio.Fiber.check ()
            | Ok (`Context_organized (exact_output, selected_slot)) ->
              complete ~selected_slot Exact_lane_run_registry.Succeeded
                (`Assoc [ "memory_write", `String "skipped_context_only"

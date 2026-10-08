@@ -180,6 +180,7 @@ type parse_error =
   | Top_level_not_object
   | Working_context_invalid of string
   | Working_state_invalid of string
+  | Admission_invalid of string
   | Unexpected_field of string
   | Duplicate_field of string
   | Missing_required_fields

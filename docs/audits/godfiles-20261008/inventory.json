@@ -278,7 +278,12 @@
       "path": "lib/keeper/keeper_board_attention_partition.ml",
       "baseline_lines": 2123,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: private canonical data and pure strict wire/ledger framing separated; public private/opaque API and entropy effect boundary preserved; indexed-view/cache/storage/transition responsibilities pending semantic review",
+      "current_lines": 1329,
+      "prs": [
+        42036
+      ],
+      "validation_artifact": "board-partition-wire/README.md"
     },
     {
       "path": "lib/keeper/keeper_board_attention_worker.ml",

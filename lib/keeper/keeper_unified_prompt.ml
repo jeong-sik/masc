@@ -702,16 +702,19 @@ let board_event_note_fields = function
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Completion_authority_rejected _
   | Keeper_world_observation.Task_outcome _
-  | Keeper_world_observation.Task_cancelled _
-  | Keeper_world_observation.Delegate_completed (Keeper_event_queue.Delegate_replied reply) ->
-    (* [reply_full] restates the original reply exactly when the row's
-       preview cut at [delegate_reply_preview_max_len]: the tail is where
-       exact export objects and code fences live, and this note is the
-       row's only lossless copy. The cut test compares the trimmed bytes
-       the preview measured, so a padded short reply stays note-free and
-       an uncropped reply is never rendered twice. [Delegate_no_reply] and
-       [Delegate_failed] keep no note: their content is short by
-       construction and the row already carries it whole. *)
+  | Keeper_world_observation.Task_cancelled _ ->
+    (* No side fact: the row is its own complete account. *)
+    []
+  (* [reply_full] restates the original reply exactly when the row's
+     preview cut at [delegate_reply_preview_max_len]: the tail is where
+     exact export objects and code fences live, and this note is the
+     row's only lossless copy. The cut test compares the trimmed bytes
+     the preview measured, so a padded short reply stays note-free and
+     an uncropped reply is never rendered twice. [Delegate_no_reply] and
+     [Delegate_failed] keep no note: their content is short by
+     construction and the row already carries it whole. *)
+  | Keeper_world_observation.Delegate_completed
+      (Keeper_event_queue.Delegate_replied reply) ->
     if
       String.length (String.trim reply)
       > Keeper_world_observation.delegate_reply_preview_max_len

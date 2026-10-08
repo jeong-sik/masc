@@ -25,7 +25,7 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
-  | Delegate_completed _
+  | Delegate_completed of Keeper_event_queue.delegate_terminal
   | Ask_answered_row of { answered_by : Keeper_input_speaker.person }
       (** A human answered a question this Keeper asked. Like
           {!Composition_completed} the row carries the answer itself: the

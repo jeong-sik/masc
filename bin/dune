@@ -2492,7 +2492,7 @@
  (modules masc_msx_addon_worker)
  (public_name masc-msx-addon-worker)
  (package masc)
- (libraries masc.msx_worker masc.msx_lane masc.machine_configuration mcp_protocol.eio eio_main))
+ (libraries masc.msx_worker masc.msx_lane masc.machine_configuration mcp_protocol.eio eio eio_main))
 
 (executable
  (name masc_dos_addon_worker)

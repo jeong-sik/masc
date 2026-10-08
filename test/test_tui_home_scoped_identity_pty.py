@@ -122,6 +122,12 @@ def scoped_identity_journey(executable, *, unread):
         changed = [(path, response) for path, switched, response in readings if switched]
         health_reads = [response for path, response in changed if path == "/health"]
         assert health_reads, "Home scoped delta never re-read compact /health"
+        paths = [path for path, _ in changed]
+        # A refused probe may omit decision reads, but any decision that is
+        # requested still needs the identity probe to have preceded it.
+        for decision_path in (cards.OPERATOR_PATH, h.KEEPER_ASKS_PATH):
+            if decision_path in paths:
+                assert paths.index("/health") < paths.index(decision_path), changed
         for response in health_reads:
             assert response.status == (503 if unread else 200)
         if not unread:

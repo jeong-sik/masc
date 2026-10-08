@@ -74,6 +74,7 @@ module For_testing : sig
     width:int -> string -> string list
   val fold_thinking_entry : Masc_tui_types.state -> chat_cols:int ->
     Message_layout.entry -> Message_layout.entry
+  val thinking_height_cache : chat_markdown_identity Masc_tui_markdown_render_cache.t
   val chat_markdown_cache : chat_markdown_identity Masc_tui_markdown_render_cache.t
   val chat_markdown_theme_revision : int
 end

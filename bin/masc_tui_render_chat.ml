@@ -241,7 +241,7 @@ let cached_chat_markdown ~link_previews_mode ~theme =
    Markdown colours. *)
 (* How many reasoning lines a folded block stands for. The count is the
    non-blank lines, matching what the unfolded block draws. *)
-let folded_thinking_summary ~render body =
+let folded_thinking_summary ~source_height ~summary_height body =
   let lines =
     String.split_on_char '\n' body
     |> List.filter (fun line -> String.trim line <> "")
@@ -254,25 +254,48 @@ let folded_thinking_summary ~render body =
         count (if count = 1 then "line" else "lines") in
       (* Formatting syntax is not visible width, and the summary can wrap
          too. Folding is useful only when it actually saves terminal rows. *)
-      if List.length (render summary) < List.length (render body)
+      if summary_height summary < source_height ()
       then summary
       else body
 
 
+let thinking_height_cache = Markdown_cache.create ~capacity:chat_markdown_cache_capacity
+
 let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry) =
   if entry.style = Message_layout.Thinking && state.msg_reasoning_visibility = Reasoning_folded then
     let context = Chat_theme.body_context (Chat_theme.snapshot ()) entry.style in
-    (* Raw Markdown includes trailing blank rows that the transcript trims.
-       Compare both bodies through that same layout, without adding previews
-       or modifying the growing draw cache. *)
-    let render body =
-      Message_layout.rows_of_entry
-        ~markdown:(fun ~(entry : Message_layout.entry) ~width ->
-          chat_markdown ~context ~width entry.body)
-        ~origin:state.msg_origin_display
-        ~inner_width:(max 1 (framed_inner_width chat_cols)) ~previous:None
-        {entry with body} in
-    { entry with body = folded_thinking_summary ~render entry.body }
+    let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
+      ~inner_width:(max 1 (framed_inner_width chat_cols)) entry in
+    (* Both bodies share this entry's heading, span clock and gutter, so only
+       their trimmed Markdown body heights decide whether folding saves rows.
+       Measurement owns raw-source counts separately from the drawn summary. *)
+    let trimmed_height rows =
+      let rec trim = function
+        | row :: rest when String.trim row = "" -> trim rest
+        | rows -> Int.max 1 (List.length rows) in
+      trim (List.rev rows) in
+    let source_height () =
+      match entry.markdown_source with
+      | Message_layout.Markdown_growing { keeper_name; request_id; entry_index } ->
+        Markdown_cache.measure_growing thinking_height_cache
+          ~theme_revision:chat_markdown_theme_revision
+          ~palette_generation:context.palette_generation ~width
+          ~renderer:(chat_markdown_streaming ~context)
+          ~identity:{ cmi_style=entry.style; cmi_keeper_name=keeper_name;
+            cmi_request_id=request_id; cmi_observed_at=None; cmi_entry_index=entry_index }
+          ~text:entry.body
+      | Message_layout.Markdown_stable { keeper_name; request_id; observed_at; entry_index } ->
+        Markdown_cache.render thinking_height_cache
+          ~theme_revision:chat_markdown_theme_revision
+          ~palette_generation:context.palette_generation ~width
+          ~renderer:(chat_markdown ~context)
+          ~identity:{ cmi_style=entry.style; cmi_keeper_name=keeper_name;
+            cmi_request_id=request_id; cmi_observed_at=Some observed_at; cmi_entry_index=entry_index }
+          ~text:entry.body |> trimmed_height
+      | Message_layout.Markdown_streaming ->
+        chat_markdown ~context ~width entry.body |> trimmed_height in
+    let summary_height body = chat_markdown ~context ~width body |> trimmed_height in
+    { entry with body = folded_thinking_summary ~source_height ~summary_height entry.body }
   else entry
 
 let tool_projection_mode (state : state) =
@@ -3902,6 +3925,7 @@ module For_testing = struct
   }
   let chat_markdown = chat_markdown
   let fold_thinking_entry = fold_thinking_entry
+  let thinking_height_cache = thinking_height_cache
   let chat_markdown_cache = chat_markdown_cache
   let chat_markdown_theme_revision = chat_markdown_theme_revision
 end

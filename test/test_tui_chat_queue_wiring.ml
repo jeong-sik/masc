@@ -3216,6 +3216,48 @@ let test_thinking_measurement_keeps_the_growing_draw_cache () =
   check (list string) "the next draw reuses the retained summary" drawn retained
 ;;
 
+let test_fold_measurement_retains_raw_source_height () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let module Cache = Masc_tui_markdown_render_cache in
+  let module Markdown = Masc_tui_markdown in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+  state.msg_history <- [chat_entry ~request_id:"raw-height-owner"
+    ~role:Tui_types.Message_thinking ~text:"alpha\nbeta\ngamma" ~at:1. ()];
+  let initial = match Render.keeper_message_layout_entries state
+      ~keeper_name:"alpha" ~chat_cols:80 with
+    | [entry] -> entry | _ -> fail "expected one thought" in
+  let initial = {initial with Layout.markdown_source=Layout.Markdown_growing
+    {keeper_name="alpha"; request_id="raw-height-owner"; entry_index=0}} in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+  let folded = Render.For_testing.fold_thinking_entry state ~chat_cols:80 initial in
+  let width = Layout.entry_body_cells ~origin:state.msg_origin_display
+    ~inner_width:(Masc_tui_ansi.framed_inner_width 80) initial in
+  let theme = Masc_tui_ansi.Chat_theme.snapshot () in
+  ignore (Render.cached_chat_markdown ~link_previews_mode:`Off ~theme ~entry:folded ~width);
+  let context = Masc_tui_ansi.Chat_theme.body_context theme Layout.Thinking in
+  let identity : Render.For_testing.chat_markdown_identity =
+    {cmi_style=Layout.Thinking; cmi_keeper_name="alpha"; cmi_request_id="raw-height-owner";
+     cmi_observed_at=None; cmi_entry_index=0} in
+  let parsed = ref [] in
+  let text = initial.body ^ " delta" in
+  ignore (Cache.measure_growing Render.For_testing.thinking_height_cache
+    ~theme_revision:Render.For_testing.chat_markdown_theme_revision
+    ~palette_generation:context.palette_generation ~width ~identity ~text
+    ~renderer:(fun ~width text ->
+      parsed := text :: !parsed;
+      Markdown.render_streaming ~palette:Markdown.plain_palette ~width text));
+  check (list string) "a drawn fold leaves the raw-source mutable boundary intact"
+    ["gamma delta"] (List.rev !parsed);
+  let next = Render.For_testing.fold_thinking_entry state ~chat_cols:80
+    {initial with Layout.body=text} in
+  check string "the incremental source still chooses the same physical fold" folded.body next.body;
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+  check string "unfolding preserves every source byte" text
+    (Render.For_testing.fold_thinking_entry state ~chat_cols:80 {initial with Layout.body=text}).body
+;;
+
 let test_folded_single_line_reasoning_stays_compact () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -5400,6 +5442,8 @@ let () =
             test_thinking_previews_do_not_trigger_folding
         ; test_case "folding only reduces rendered thought height" `Quick
             test_thinking_folds_only_when_it_saves_rows
+        ; test_case "fold measurement retains raw height separately from the summary" `Quick
+            test_fold_measurement_retains_raw_source_height
         ; test_case "fold measurement preserves the growing draw cache" `Quick
             test_thinking_measurement_keeps_the_growing_draw_cache
         ; test_case "long single-line reasoning folds in history and journal" `Quick

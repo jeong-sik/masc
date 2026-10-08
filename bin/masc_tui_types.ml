@@ -5315,6 +5315,7 @@ type state = {
      this workspace and is cleared when workspace authority is withdrawn. *)
   mutable account_login_detached: Masc_tui_account_login.t list;
   mutable account_login_readings: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
+  mutable account_login_activation_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.saved) list;
   mutable account_login_read_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
@@ -8985,6 +8986,7 @@ let create_state
   account_login_detached = [];
   account_login_readings = [];
   account_login_read_resume = [];
+  account_login_activation_resume = [];
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;

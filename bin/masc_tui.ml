@@ -3480,7 +3480,14 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     end
     else begin
       view.input_pending <- false;
-      view.notice <- "Workspace identity is unconfirmed; account action was not sent."
+      (match action with
+       | Login.Activate_saved saved ->
+           (* This follow-up has not entered start_job or issued a POST. *)
+           state.account_login_activation_resume <- (view, view.generation, saved)
+             :: List.filter (fun (pending, _, _) -> pending != view)
+                  state.account_login_activation_resume;
+           view.notice <- "Saved configuration is waiting for workspace reconfirmation before activation."
+       | _ -> view.notice <- "Workspace identity is unconfirmed; account action was not sent.")
     end
   end
   else begin
@@ -3498,6 +3505,9 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   let generation = view.generation in
   state.account_login_readings <- List.filter (fun (reading, _, _) -> reading != view) state.account_login_readings;
   state.account_login_read_resume <- List.filter (fun (pending, _, _) -> pending != view) state.account_login_read_resume;
+  if not (action = Login.Close && Login.activation_incomplete view) then
+    state.account_login_activation_resume <- List.filter
+      (fun (pending, _, _) -> pending != view) state.account_login_activation_resume;
   if account_login_action_is_read action then
     state.account_login_readings <- (view, generation, action) :: state.account_login_readings;
   let post path body = Result.bind (check_workspace ()) (fun () ->
@@ -11361,6 +11371,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
     Option.iter (fun stop -> stop ()) view.cancel_stream;
     view.cancel_stream <- None) state.account_login_detached;
   state.account_login_detached <- [];
+  state.account_login_activation_resume <- [];
   state.account_login_readings <- [];
   state.account_login_read_resume <- [];
   state.identity_view <- None;
@@ -12503,6 +12514,14 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
+    let activations = state.account_login_activation_resume in
+    state.account_login_activation_resume <- [];
+    List.iter (fun ((view : Masc_tui_account_login.t), generation, saved) ->
+      if view.generation = generation
+         && List.exists (fun current -> current == view)
+              (Option.to_list state.account_login @ state.account_login_detached) then
+        launch_account_login_action state ~mailbox view (Masc_tui_account_login.Activate_saved saved))
+      activations;
     let account_reads = state.account_login_read_resume in
     state.account_login_read_resume <- [];
     List.iter (fun ((view : Masc_tui_account_login.t), generation, action) ->

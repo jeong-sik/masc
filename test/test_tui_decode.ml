@@ -2690,8 +2690,8 @@ let test_tool_envelope_outcome_rejects_unexpected_shapes () =
    to the pane under the pointer. *)
 let sgr_wheel_key params final =
   Option.map
-    (fun (direction, _, _) -> Tui_decode.wheel_key direction)
-    (Tui_decode.sgr_wheel_report params final)
+    (fun (direction, _, _) -> Masc.Tui_mouse_protocol.wheel_key direction)
+    (Masc.Tui_mouse_protocol.sgr_wheel_report params final)
 
 let test_sgr_wheel_up_is_its_own_key () =
   match sgr_wheel_key "<64;10;5" 'M' with
@@ -2706,8 +2706,8 @@ let test_sgr_wheel_down_is_its_own_key () =
   | None -> Alcotest.fail "wheel down should claim a key"
 
 let test_sgr_wheel_report_carries_its_position () =
-  match Tui_decode.sgr_wheel_report "<64;10;5" 'M' with
-  | Some (Tui_decode.Wheel_up, 5, 10) -> ()
+  match Masc.Tui_mouse_protocol.sgr_wheel_report "<64;10;5" 'M' with
+  | Some (Masc.Tui_mouse_protocol.Wheel_up, 5, 10) -> ()
   | Some (_, row, column) ->
       Alcotest.failf "expected row 5 column 10, got %d;%d" row column
   | None -> Alcotest.fail "a wheel notch should report where it happened"
@@ -2715,7 +2715,7 @@ let test_sgr_wheel_report_carries_its_position () =
 let test_sgr_wheel_report_needs_a_whole_position () =
   List.iter
     (fun (params, final) ->
-       match Tui_decode.sgr_wheel_report params final with
+       match Masc.Tui_mouse_protocol.sgr_wheel_report params final with
        | None -> ()
        | Some (_, row, column) ->
            Alcotest.failf "report %S should stay unclaimed, got %d;%d" params row
@@ -2737,38 +2737,38 @@ let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
    offset by 32. Reading only the button kept the notch and dropped where it
    happened, so a press never reached what it was on. *)
 let x10 ~button ~column ~row =
-  Tui_decode.x10_mouse_report ~button:(Char.chr (32 + button))
+  Masc.Tui_mouse_protocol.x10_mouse_report ~button:(Char.chr (32 + button))
     ~column:(Char.chr (32 + column)) ~row:(Char.chr (32 + row))
 
 let x10_mouse =
   Alcotest.testable
     (fun formatter -> function
-      | Tui_decode.X10_wheel (direction, row, column) ->
-          Format.fprintf formatter "%s %d,%d" (Tui_decode.wheel_key direction) row column
-      | Tui_decode.X10_left_press (row, column) ->
+      | Masc.Tui_mouse_protocol.X10_wheel (direction, row, column) ->
+          Format.fprintf formatter "%s %d,%d" (Masc.Tui_mouse_protocol.wheel_key direction) row column
+      | Masc.Tui_mouse_protocol.X10_left_press (row, column) ->
           Format.fprintf formatter "press %d,%d" row column
-      | Tui_decode.X10_other_press -> Format.fprintf formatter "other press"
-      | Tui_decode.X10_release (row, column) ->
+      | Masc.Tui_mouse_protocol.X10_other_press -> Format.fprintf formatter "other press"
+      | Masc.Tui_mouse_protocol.X10_release (row, column) ->
           Format.fprintf formatter "release %d,%d" row column)
     ( = )
 
 let test_x10_wheel_carries_its_position () =
   Alcotest.(check (option x10_mouse)) "wheel up at column 10, row 5"
-    (Some (Tui_decode.X10_wheel (Tui_decode.Wheel_up, 5, 10)))
+    (Some (Masc.Tui_mouse_protocol.X10_wheel (Masc.Tui_mouse_protocol.Wheel_up, 5, 10)))
     (x10 ~button:64 ~column:10 ~row:5);
   Alcotest.(check (option x10_mouse)) "wheel down"
-    (Some (Tui_decode.X10_wheel (Tui_decode.Wheel_down, 5, 10)))
+    (Some (Masc.Tui_mouse_protocol.X10_wheel (Masc.Tui_mouse_protocol.Wheel_down, 5, 10)))
     (x10 ~button:65 ~column:10 ~row:5)
 
 let test_x10_left_press_and_release_carry_their_position () =
   Alcotest.(check (option x10_mouse)) "a plain left press"
-    (Some (Tui_decode.X10_left_press (3, 4)))
+    (Some (Masc.Tui_mouse_protocol.X10_left_press (3, 4)))
     (x10 ~button:0 ~column:4 ~row:3);
   Alcotest.(check (option x10_mouse)) "the one release code"
-    (Some (Tui_decode.X10_release (3, 4)))
+    (Some (Masc.Tui_mouse_protocol.X10_release (3, 4)))
     (x10 ~button:3 ~column:4 ~row:3);
   Alcotest.(check (option x10_mouse)) "a release with shift held"
-    (Some (Tui_decode.X10_release (3, 4)))
+    (Some (Masc.Tui_mouse_protocol.X10_release (3, 4)))
     (x10 ~button:(3 + 4) ~column:4 ~row:3)
 
 (* Middle and right presses and shift/meta/ctrl chords are presses no surface
@@ -2777,7 +2777,7 @@ let test_x10_other_presses_are_named_so_their_release_is_not_left () =
   List.iter
     (fun button ->
       Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button)
-        (Some Tui_decode.X10_other_press) (x10 ~button ~column:4 ~row:3))
+        (Some Masc.Tui_mouse_protocol.X10_other_press) (x10 ~button ~column:4 ~row:3))
     [ 1; 2; 4; 8; 16 ]
 
 (* Motion reports and the horizontal wheel are gestures no surface reads. *)
@@ -2800,9 +2800,9 @@ let test_x10_and_sgr_agree () =
   List.iter
     (fun (button, params) ->
       let sgr =
-        match Tui_decode.sgr_wheel_report params 'M', Tui_decode.sgr_left_press params 'M' with
-        | Some (direction, row, column), _ -> Some (Tui_decode.X10_wheel (direction, row, column))
-        | None, Some (row, column) -> Some (Tui_decode.X10_left_press (row, column))
+        match Masc.Tui_mouse_protocol.sgr_wheel_report params 'M', Masc.Tui_mouse_protocol.sgr_left_press params 'M' with
+        | Some (direction, row, column), _ -> Some (Masc.Tui_mouse_protocol.X10_wheel (direction, row, column))
+        | None, Some (row, column) -> Some (Masc.Tui_mouse_protocol.X10_left_press (row, column))
         | None, None -> None
       in
       Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button) sgr
@@ -2814,10 +2814,10 @@ let test_x10_and_sgr_agree () =
    chord or drag is a gesture, not a choice. *)
 let test_sgr_left_press_reports_the_row_and_column () =
   Alcotest.check Alcotest.bool "release reaches screenshot gesture handling" true
-    (Tui_decode.sgr_left_release "<0;10;5" 'm' = Some (5,10));
+    (Masc.Tui_mouse_protocol.sgr_left_release "<0;10;5" 'm' = Some (5,10));
   Alcotest.check Alcotest.bool "press cannot also become release" true
-    (Tui_decode.sgr_left_release "<0;10;5" 'M' = None);
-  match Tui_decode.sgr_left_press "<0;10;5" 'M' with
+    (Masc.Tui_mouse_protocol.sgr_left_release "<0;10;5" 'M' = None);
+  match Masc.Tui_mouse_protocol.sgr_left_press "<0;10;5" 'M' with
   | Some (5, 10) -> ()
   | Some (row, column) ->
       Alcotest.failf "expected row 5 column 10, got %d;%d" row column
@@ -2834,7 +2834,7 @@ let test_sgr_left_press_ignores_releases_chords_and_wheel () =
   in
   List.iter
     (fun (params, final) ->
-       match Tui_decode.sgr_left_press params final with
+       match Masc.Tui_mouse_protocol.sgr_left_press params final with
        | None -> ()
        | Some (row, column) ->
            Alcotest.failf "report %S should stay unclaimed, got %d;%d" params

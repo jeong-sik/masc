@@ -1,0 +1,30 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   MASC Keepers (2)                                                     20:45:06  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+    Health  2 absent
+    fleet ok   running 0/0   turn capacity 0/0
+     HEALTH     KEEPER                             TURN TASK
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+     - unread   alpha                                 — —
+     - unread   beta                                  — —
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    OPERATIONS loading…
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  j/k:move  p:boot  w:wake  s:shutdown  x:delete  e:settings  a:new  l:logs  t:calls  q:quit  …?
+                                                                                    ; Awaiting you·1
+ › to beta   (i to write)

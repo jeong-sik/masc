@@ -144,11 +144,11 @@ let clamped_scroll_now (state : state) = function
    so a new reader is a compile error here, not a notch that quietly moves a
    list. *)
 let reader_after_wheel (reader : clamped_scroll)
-    (direction : Tui_decode.wheel_direction) : clamped_scroll option =
+    (direction : Masc.Tui_mouse_protocol.wheel_direction) : clamped_scroll option =
   let step value =
     match direction with
-    | Tui_decode.Wheel_down -> Masc_tui_types.scroll_down_from value ~by:1
-    | Tui_decode.Wheel_up -> max 0 (value - 1)
+    | Masc.Tui_mouse_protocol.Wheel_down -> Masc_tui_types.scroll_down_from value ~by:1
+    | Masc.Tui_mouse_protocol.Wheel_up -> max 0 (value - 1)
   in
   match reader with
   | Task_detail value -> Some (Task_detail (step value))

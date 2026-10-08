@@ -95,7 +95,7 @@ let api_usage_of_json json =
   | Type_error (message, _) -> Error ("api_usage: " ^ message)
 ;;
 
-let delta_usage_of_json json =
+let delta_usage_of_json json : (Agent_core.Types.delta_usage, string) result =
   let open Yojson.Safe.Util in
   try
     Ok
@@ -105,6 +105,7 @@ let delta_usage_of_json json =
           json |> member "cache_creation_input_tokens" |> to_int_option
       ; cache_read_input_tokens =
           json |> member "cache_read_input_tokens" |> to_int_option
+      ; cost_usd = json |> member "cost_usd" |> to_float_option
       }
   with
   | Type_error (message, _) -> Error ("delta_usage: " ^ message)
@@ -701,6 +702,9 @@ let float_is_finite value =
 
 let event_floats_are_finite = function
   | Agent_core_stream_message_start
+      { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
+    float_is_finite cost_usd
+  | Agent_core_stream_message_delta
       { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
     float_is_finite cost_usd
   | Audio_block { duration_sec = Some duration_sec; _ } ->

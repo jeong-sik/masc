@@ -1628,7 +1628,7 @@ status: reference
   - **`web_extension`**: 브라우저 확장 프로그램의 페이지 내부 DOM 조작 기반. 탭 활성화(`Tab_activation` / `activate_tab`)를 제공하지만, 브라우저가 인정하는 신뢰 포인터가 없어 호버와 드래그(`Trusted_hover`·`Trusted_drag`)는 지원하지 않는다.
   - **`webdriver_bidi`**: W3C WebDriver BiDi 프로토콜 기반의 브라우저 호스트 직접 제어(`masc-browser-host --bidi-url`). 신뢰 호버와 드래그(`Trusted_hover`·`Trusted_drag`)를 제공하지만, 창 포커스를 함께 빼앗는 특성 때문에 조용한 탭 활성화(`Tab_activation`)는 제공하지 않는다.
   - **공통 지원(9종)**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Dom_interaction`·`Point_click`·`Point_scroll`.
-  선택된 연결의 전송 방식이 요청된 역량을 제공하지 못하면 서버는 명령을 큐에 넣기 전에 `live_transport_unsupported` 거절 코드로 차단하며, 해당 역량을 지원하는 연결된 다른 브라우저 수나 운영자 안내 문서를 반환한다. 모든 실시간 브라우저 응답(`BrowserTabs`·`BrowserRead` 등)은 `clientId`와 함께 `transport` 필드를 필수로 노출한다.
+  선택된 연결의 전송 방식이 요청된 역량을 제공하지 못하면 서버는 명령을 큐에 넣기 전에 `live_transport_unsupported` 거절 코드로 차단하며, 해당 역량을 지원하는 연결된 다른 브라우저 수나 운영자 안내 문서를 반환한다. 선택한 연결에서 성공한 실시간 브라우저 응답(`BrowserRead` 등)과 탭·연결 목록(`BrowserTabs`)의 각 항목은 `clientId`와 함께 `transport` 필드를 노출하며, 연결 선택 이전의 오류 응답(`No_live_client` 등)과는 구분된다(#41839).
   → [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
   [Browser_host](../../lib/browser_host/browser_host.mli) ·
   [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)

@@ -11,8 +11,19 @@ let refusal_message = function
   | Rejected code -> "BiDi command rejected: " ^ code
   | Unanswered why | Unsent why -> why
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
+let verb_to_wire = function
+  | Browser_info -> "browser.info" | Tabs_list -> "tabs.list" | Page_read -> "page.read"
+  | Page_scene -> "page.scene" | Page_elements -> "page.elements" | Page_capture -> "page.capture"
+  | Page_interact -> "page.interact"
+let verb_of_wire = function
+  | "browser.info" -> Some Browser_info | "tabs.list" -> Some Tabs_list | "page.read" -> Some Page_read
+  | "page.scene" -> Some Page_scene | "page.elements" -> Some Page_elements
+  | "page.capture" -> Some Page_capture | "page.interact" -> Some Page_interact
+  | _ -> None
+type session_end_failure = Connection_gone of string | Not_confirmed of string
+let session_end_failure_message = function Connection_gone why | Not_confirmed why -> why
 type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
-  session_end : unit -> (unit,string) result; mutable session_may_exist : bool;
+  session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
   mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option }
 let create ~session_end ~command =
   {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;version=None}
@@ -206,6 +217,11 @@ let dispatch t ~verb args =
       | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction") in
       Result.map_error (fun detail -> Outcome_unknown detail) (with_tab id receipt))
 
+(* Firefox's error for a session command on a connection that has no session
+   (WebDriver's "invalid session id"). Firefox 157.0.1 answers [session.end]
+   with it before any [session.new], after a [session.new] it refused, and
+   it closes the socket once it has ended one. *)
+let no_session_error = "invalid session id"
 (* How long a finishing connection waits for Firefox to end the session. A
    Firefox that is there answers at once; the window only bounds one that is
    not, so stopping the host does not wait on it. *)
@@ -290,10 +306,22 @@ let with_connection ~env ~timeout ~url use =
          this side stopped trusting too, for as long as the socket is open: a
          page whose script hung is not a browser that is gone. *)
       let session_end () =
-        match !shut with Some reason->Error reason|None->
+        match !shut with Some reason->Error (Connection_gone reason)|None->
           (match exchange ~window:session_end_window_sec "session.end" (obj []) with
-           | Ok reply->Result.map ignore reply |> Result.map_error refusal_message
-           | Error `Deadline_exceeded->Error "no answer to session.end in time") in
+           | Ok (Ok _)->Ok ()
+           (* A session asked for and never confirmed, which Firefox says it
+              does not have: there is none to end. *)
+           | Ok (Error (Rejected code)) when String.equal code no_session_error->Ok ()
+           (* Firefox's own answer stays its answer when the socket closes
+              right behind it. *)
+           | Ok (Error (Rejected _ as declined))->Error (Not_confirmed (refusal_message declined))
+           (* No answer: the socket closing under the request is the
+              connection going, not Firefox declining. *)
+           | Ok (Error (Unanswered _ | Unsent _ as lost))->
+             (match !shut with
+              | Some reason->Error (Connection_gone reason)
+              | None->Error (Not_confirmed (refusal_message lost)))
+           | Error `Deadline_exceeded->Error (Not_confirmed "no answer to session.end in time")) in
       (* The host owns the whole command deadline. A cancelled command ends this
          connection instead of admitting another write behind an unknown one. *)
       Ok (create ~session_end ~command) in

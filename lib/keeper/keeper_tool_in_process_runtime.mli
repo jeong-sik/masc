@@ -247,8 +247,8 @@ val handle_masc_task_with_outcome
   -> Keeper_tool_execution.t
 
 (** RFC-0182 §3.1 — [handle_masc_plan_with_outcome] is the descriptor-projection
-    cluster handler for [masc_plan_*] + [masc_note_add] + [masc_deliver]
-    tools. Constructs a [Tool_plan.context] from [config] and calls
+    cluster handler for the [masc_plan_*] tools (set_task / get_task /
+    clear_task). Constructs a [Tool_plan.context] from [config] and calls
     [Tool_plan.dispatch]. *)
 val handle_masc_plan_with_outcome
   : config:Workspace.config -> name:string -> args:Yojson.Safe.t

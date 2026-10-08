@@ -37,6 +37,9 @@ type delta =
       }
   | Text of string
   | Thinking of string
+  | Native_tool_started of
+      { occurrence : tool_occurrence; tool_name : string option }
+  | Native_tool_ended of { occurrence : tool_occurrence }
   | Tool_started of
       { occurrence : tool_occurrence
       ; tool_name : string
@@ -188,6 +191,16 @@ let tool_start_deltas fields =
 let custom_deltas_unvalidated fields =
   match string_field fields "name" with
   | None -> [ Undecodable "CUSTOM has no name" ]
+  | Some ("KEEPER_NATIVE_TOOL_START" | "KEEPER_NATIVE_TOOL_END" as event) ->
+      (match object_field fields "value" with
+       | None -> [Undecodable (event ^ " value is not an object")]
+       | Some value ->
+           match tool_occurrence ~event value with
+           | Error detail -> [Undecodable detail]
+           | Ok occurrence ->
+               if event = "KEEPER_NATIVE_TOOL_START" then
+                 [Native_tool_started {occurrence; tool_name = string_field value "toolCallName"}]
+               else [Native_tool_ended {occurrence}])
   | Some "KEEPER_THINKING_DELTA" -> (
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_THINKING_DELTA value is not an object" ]
@@ -424,16 +437,15 @@ let event_deltas (event : Yojson.Safe.t) =
            | Error detail -> [ Undecodable detail ])
       | Some "CUSTOM" -> custom_deltas fields
       (* Accepted by the strict decode, nothing for this view to draw. *)
-      | Some
-          ( "TEXT_MESSAGE_START" | "TEXT_MESSAGE_END" | "STEP_STARTED"
-          | "STEP_FINISHED" | "STATE_SNAPSHOT" | "STATE_DELTA" ) ->
-          []
+      | Some ("TEXT_MESSAGE_START" | "TEXT_MESSAGE_END") -> []
       | Some unknown ->
           [ Undecodable (Printf.sprintf "unknown event type %s" unknown) ])
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       (* Spelled out rather than left to a catch-all so a new Yojson variant
          stops the build instead of landing here. *)
       [ Undecodable "event is not a JSON object" ]
+
+type observed_delta = { seq : int option; at : float option; delta : delta }
 
 let frame_deltas (frame : Sse_wire.frame) =
   let seq = match frame.id with
@@ -443,10 +455,18 @@ let frame_deltas (frame : Sse_wire.frame) =
       | Projection.Sse_id seq -> Some seq
       | Projection.Sse_ignored | Projection.Sse_frame_end
       | Projection.Sse_data _ | Projection.Sse_noncanonical_data -> None in
-  let deltas = match Yojson.Safe.from_string frame.data with
-    | json -> event_deltas json
-    | exception Yojson.Json_error detail -> [ Undecodable ("invalid JSON: " ^ detail) ] in
-  List.map (fun delta -> seq, delta) deltas
+  let at, deltas = match Yojson.Safe.from_string frame.data with
+    | json ->
+        let at = match json with
+          | `Assoc fields ->
+              (match List.assoc_opt "timestamp" fields with
+               | Some (`Int seconds) when seconds >= 0 -> Some (float_of_int seconds)
+               | Some (`Float seconds) when Float.is_finite seconds && seconds >= 0. -> Some seconds
+               | _ -> None)
+          | _ -> None in
+        at, event_deltas json
+    | exception Yojson.Json_error detail -> None, [ Undecodable ("invalid JSON: " ^ detail) ] in
+  List.map (fun delta -> {seq; at; delta}) deltas
 
 let feed t chunk =
   Sse_wire.feed t.decoder chunk |> List.concat_map frame_deltas

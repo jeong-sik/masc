@@ -62,13 +62,15 @@ type served_slot =
 
 val served_slot_id : served_slot -> string
 
-type write_scope = Context_only | Context_and_memory
+type write_scope = Context_only | Context_and_memory | Memory_maintenance
 (** The caller names the evidence's purpose. A durable range retains Memory
     processing. [Context_only] never writes Memory, so it never asks for a
     Memory judgment: with [continuity] it asks the [librarian.continuity]
     prompt for the working state alone, and without it the
     [librarian.working_context] prompt for the working contexts alone. Each
     answer is refused if it carries any other field. *)
+(* [Memory_maintenance] curates the current Memory snapshot without publishing
+   a working-context or continuity snapshot or advancing history cursors. *)
 
 type not_committed =
   { detail : string

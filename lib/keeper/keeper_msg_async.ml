@@ -1927,7 +1927,6 @@ let run_staging_cleanup_in_systhread ~ownership_root path =
       Fs_compat.cleanup_atomic_orphans
         ~ownership_root
         ~base_path:path
-        ~scope:Fs_compat.Directory_only
         ())
   in
   Eio_guard.check_if_ready ();

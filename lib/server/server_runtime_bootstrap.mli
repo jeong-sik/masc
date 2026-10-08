@@ -133,20 +133,15 @@ val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
 
 val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
 
-type lazy_startup_execution =
-  | Parallel
-  | Serial
-
 type lazy_startup_group = {
   group_name : string;
-  execution : lazy_startup_execution;
   task_names : string list;
 }
 
 val lazy_startup_plan : unit -> lazy_startup_group list
-(** Deterministic startup task grouping.  [Parallel] groups contain only
-    tasks whose stores are independent; [Serial] groups preserve ordering for
-    shared tool state and cleanup phases. *)
+(** Deterministic startup task grouping.  Groups run in list order; the
+    tasks inside a group run in parallel, so a group holds only tasks whose
+    stores are independent. *)
 
 val lazy_startup_task_names : unit -> string list
 (** Flattened task names in the same dependency order used to activate
@@ -163,12 +158,11 @@ val startup_failure_disposition : state_ready:bool -> startup_failure_dispositio
     available only after readiness has been published. *)
 
 type owner_initialization_error =
-  | Runtime_config_path_unavailable
   | Runtime_config_read_failed of string
+  | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
   | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
-  | Runtime_default_initialization_failed of Runtime.strict_init_error
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
   | Keeper_persistence_claim_failed of

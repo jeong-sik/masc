@@ -570,13 +570,8 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   Mcp_server.set_sse_callback state Sse.broadcast
 
 
-type lazy_startup_execution =
-  | Parallel
-  | Serial
-
 type lazy_startup_group = {
   group_name : string;
-  execution : lazy_startup_execution;
   task_names : string list;
 }
 
@@ -585,7 +580,6 @@ let lazy_startup_plan () =
     [
       {
         group_name = "initialize";
-        execution = Parallel;
         task_names = [ "restore_sessions" ];
       };
     ]
@@ -594,7 +588,6 @@ let lazy_startup_plan () =
     [
       {
         group_name = "cleanup";
-        execution = Parallel;
         task_names = [ "jsonl_prune" ];
       };
     ]
@@ -613,12 +606,11 @@ let startup_failure_disposition ~state_ready =
   if state_ready then Degraded_after_ready else Fatal_pre_ready
 
 type owner_initialization_error =
-  | Runtime_config_path_unavailable
   | Runtime_config_read_failed of string
+  | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
   | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
-  | Runtime_default_initialization_failed of Runtime.strict_init_error
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
   | Keeper_persistence_claim_failed of
@@ -648,12 +640,11 @@ type activated_owner_state =
   }
 
 let owner_initialization_error_to_string = function
-  | Runtime_config_path_unavailable ->
-    "no runtime config path; cannot initialize the default Runtime. Seed one \
-     with `masc init --base-path <dir>`, or point MASC_CONFIG_DIR at a config \
-     root that holds runtime.toml"
   | Runtime_config_read_failed detail ->
     "runtime config observation failed: " ^ detail
+  | Native_execution_runtime_failed error ->
+    "native execution runtime initialization failed: "
+    ^ Runtime_agent_execution_runtime.initialization_error_to_string error
   | Keeper_config_recovery_failed report ->
     let detail = match report.Keeper_config_journal.outcome with
       | Journal_corrupt detail -> detail
@@ -669,9 +660,6 @@ let owner_initialization_error_to_string = function
     "Goal verification run registry already has a process owner"
   | Run_registry_already_installed `Exact_lane ->
     "Exact lane run registry already has a process owner"
-  | Runtime_default_initialization_failed error ->
-    "Runtime.init_default_degraded failed: "
-    ^ Runtime.strict_init_error_to_string error
   | Keeper_persistence_preparation_failed error ->
     "Keeper persistence preparation failed: "
     ^ Server_bootstrap_loops.keeper_persistence_prepare_error_to_string error
@@ -1119,6 +1107,13 @@ let initialize_owner_state_blocking
       domain_mgr
   in
   install_domain_pool_references domain_pool;
+  (match Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr
+      ~domain_count:(Domain_pool.domain_count domain_pool) with
+   | Ok () ->
+     Log.Server.info "Native execution runtime created (%d codec domains)"
+       (Domain_pool.domain_count domain_pool)
+   | Error error ->
+     raise (Owner_initialization_failed (Native_execution_runtime_failed error)));
   Log.Server.info
     "Domain_pool created (%d shared domains, 1 independent snapshot codec domain) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);
@@ -1305,21 +1300,12 @@ let start_owner_lazy_tasks ~sw state =
     |> List.map (fun group ->
       group, List.map (fun name -> name, task_fn name) group.task_names)
   in
-  let execution_to_string = function
-    | Parallel -> "parallel"
-    | Serial -> "serial"
-  in
   let run_lazy_task_group (group, tasks) =
     Log.Server.info
-      "lazy_task_group: starting %s (%s, %d tasks)"
+      "lazy_task_group: starting %s (%d tasks)"
       group.group_name
-      (execution_to_string group.execution)
       (List.length tasks);
-    (match group.execution with
-     | Parallel ->
-       Eio.Fiber.all (List.map (fun task () -> run_lazy_task task) tasks)
-       |> ignore
-     | Serial -> List.iter run_lazy_task tasks);
+    Eio.Fiber.all (List.map (fun task () -> run_lazy_task task) tasks);
     Log.Server.info "lazy_task_group: finished %s" group.group_name
   in
   (match Server_startup_state.prepare_lazy_tasks ~tasks:task_names with

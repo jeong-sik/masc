@@ -26,7 +26,12 @@
 
 (** Typed class of the observed retryable provider/runtime failure. *)
 type retry_class =
-  | Rate_limited  (** soft 429 throttle; declared runtimes remain eligible *)
+  | Rate_limited
+      (** soft 429 throttle; declared runtimes remain eligible. A 429 that
+          states no wait may also be a spent usage window: when the provider
+          declares [usage-read], the Keeper walk reads it once, as after
+          [Authorization_refused], and a spent window rests the scope until
+          its stated reset. *)
   | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
   | Provider_capacity
       (** the provider refused for its own capacity: an HTTP 529 overload,
@@ -174,20 +179,6 @@ type terminal_class =
           family errors; the failure stays visible while the keeper remains
           alive *)
 
-(** Typed origin of a terminal observation. *)
-type failure_provenance =
-  | Agent_core_api_error
-  | Agent_core_provider_error
-  | Agent_core_agent_error
-  | Agent_core_mcp_error
-  | Agent_core_config_error
-  | Agent_core_serialization_error
-  | Agent_core_io_error
-  | Agent_core_orchestration_error
-  | Agent_core_internal_error
-  | Masc_internal_error
-  | Completion_contract
-
 type error_boundary =
   | Masc_execution
   | Agent_core_execution
@@ -204,15 +195,13 @@ type route =
   | Rotate_now of { rotate : rotate_class }
   | Exhausted_visible_alive of
       { terminal : terminal_class
-      ; provenance : failure_provenance
       ; detail : string
         (** Display-only bounded failure summary. Never matched. *)
       }
 
 val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
 (** Total over every [core_error] class. The caller supplies the actual execution
-    boundary so constructors shared by MASC and AGENT_CORE are never used as provenance
-    inference. MASC-internal typed envelopes are decoded only at
+    boundary. MASC-internal typed envelopes are decoded only at
     [Masc_execution], except [Terminal_effect_failed]: that MASC-owned effect
     crosses the live AGENT_CORE tool boundary and is therefore decoded at either
     boundary. No arm returns "no route". *)

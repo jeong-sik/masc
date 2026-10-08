@@ -7,14 +7,10 @@ type executor =
 
 type backend =
   | Ocaml_runtime
-  | Host_process
   | Sandbox_process
 
 type sandbox =
   | No_sandbox
-  | Host_sandbox_roots
-  | Turn_sandbox
-  | Docker_profile
   | Backend_selected
 
 type keeper_model_projection =
@@ -202,15 +198,11 @@ let executor_to_string = function
 
 let backend_to_string = function
   | Ocaml_runtime -> "ocaml_runtime"
-  | Host_process -> "host_process"
   | Sandbox_process -> "sandbox_process"
 ;;
 
 let sandbox_to_string = function
   | No_sandbox -> "none"
-  | Host_sandbox_roots -> "host_sandbox_roots"
-  | Turn_sandbox -> "turn_sandbox"
-  | Docker_profile -> "docker_profile"
   | Backend_selected -> "backend_selected"
 ;;
 
@@ -1993,15 +1985,37 @@ let masc_board_descriptor board_name =
           but leave the keeper model surface: no keeper called them in the
           August .masc/tool_calls log, and every turn carried their schemas.
           The board's own core and dashboard paths do not go through this
-          projection. *)
+          projection.
+          [Board_cleanup] deletes up to 50 posts by any author and sits at
+          CanAdmin in Tool_catalog; the keeper lane does not read that
+          permission, so only the projection keeps it off Keepers.
+          [Board_delete] is also CanAdmin but its handler refuses a caller who
+          is not the post's author. *)
        ~keeper_model_projection:
          (match board_name with
-          | Tool_name.Board_name.Board_sub_board_create
-          | Tool_name.Board_name.Board_sub_board_update
-          | Tool_name.Board_name.Board_sub_board_delete
-          | Tool_name.Board_name.Board_sub_board_get
-          | Tool_name.Board_name.Board_sub_board_list -> Operator_only
-          | _ -> Internal_name)
+          | Tool_name.Board_name.Board_cleanup
+          | Board_sub_board_create
+          | Board_sub_board_update
+          | Board_sub_board_delete
+          | Board_sub_board_get
+          | Board_sub_board_list -> Operator_only
+          | Board_close
+          | Board_comment
+          | Board_comment_vote
+          | Board_curation_read
+          | Board_curation_submit
+          | Board_delete
+          | Board_hearths
+          | Board_list
+          | Board_post
+          | Board_post_get
+          | Board_post_update
+          | Board_profile
+          | Board_reaction
+          | Board_reopen
+          | Board_search
+          | Board_stats
+          | Board_vote -> Internal_name)
        ~input_schema_source
        ~id:("masc.board." ^ Tool_name.Board_name.operation_name board_name)
        ~name
@@ -2440,20 +2454,19 @@ let masc_library_descriptors =
 let masc_local_runtime_descriptor
       (definition : Tool_schemas_local_runtime.definition) =
   let schema = definition.schema in
-  let keeper_model_projection =
-    match Tool_schemas_local_runtime.keeper_model_exposure definition.operation with
-    | Tool_schemas_local_runtime.Keeper_callable -> Internal_name
-    | Tool_schemas_local_runtime.Operator_diagnostic -> Operator_only
-  in
   let execution_policy =
     Tool_schemas_local_runtime.execution_policy definition.operation
   in
   let policy =
     policy ~readonly:execution_policy.read_only ()
   in
+  (* Operator diagnostics: registered in the catalog, never in the Keeper
+     model's per-turn tool list. Both operations can load a model and need
+     Admin. The metadata-only dashboard runtime probe has its own
+     [CanReadState] route and does not reuse these tool identities. *)
   in_process_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection
+    ~keeper_model_projection:Operator_only
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
     ~id:
@@ -2955,10 +2968,8 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_task_descriptor "set_goal" "masc_task_set_goal"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_plan_* current-task trio (3 entries).
-     The five plan-document tools (init/update/get + note_add/deliver)
-     were retired with their planning/<task_id> store; only the
-     current-task session pointer remains. ── *)
+  (* ── RFC-0182 §3.1 — masc_plan_* current-task trio (3 entries): the
+     session pointer to the Keeper's current task. ── *)
   ; masc_plan_descriptor ~keeper_model_projection:Operator_only
        "set_task" "masc_plan_set_task"
        ~readonly:false
@@ -3079,6 +3090,9 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "msx_change_disk" "masc_msx_change_disk" ~readonly:false
   ; (masc_misc_descriptor "msx_screen" "masc_msx_screen" ~readonly:true
      |> with_composable_output (Json_output { schema = msx_screen_output_schema }))
+  ; masc_misc_descriptor "msx_meta" "masc_msx_meta" ~readonly:true
+  ; masc_misc_descriptor "msx_checkpoint_info" "masc_msx_checkpoint_info"
+      ~readonly:true
   ; masc_misc_descriptor "msx_press" "masc_msx_press" ~readonly:false
   ; masc_misc_descriptor "msx_step" "masc_msx_step" ~readonly:false
   ; masc_misc_descriptor "msx_step_until_change" "masc_msx_step_until_change"
@@ -3086,6 +3100,8 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "msx_peek" "masc_msx_peek" ~readonly:true
   ; masc_misc_descriptor "msx_ram_diff" "masc_msx_ram_diff" ~readonly:true
   ; masc_misc_descriptor "dos_load" "masc_dos_load" ~readonly:false
+  ; masc_misc_descriptor "dos_meta" "masc_dos_meta" ~readonly:true
+  ; masc_misc_descriptor "dos_inventory" "masc_dos_inventory" ~readonly:true
   ; masc_misc_descriptor "dos_eject" "masc_dos_eject" ~readonly:false
   ; masc_misc_descriptor "dos_screen" "masc_dos_screen" ~readonly:true
   ; masc_misc_descriptor "dos_step" "masc_dos_step" ~readonly:false
@@ -3116,7 +3132,10 @@ let internal_descriptors : t list =
        ~ordinary_execution_mode:Concurrent
        "tool_help" "masc_tool_help"
        ~readonly:true
-  ; masc_misc_descriptor "gc" "masc_gc"
+  (* Tool_catalog keeps masc_gc at CanAdmin and the keeper lane has no other
+     permission check, so a model-visible name let any Keeper sweep the
+     workspace (a 09-20 call removed 3,462 messages). *)
+  ; masc_misc_descriptor ~keeper_model_projection:Operator_only "gc" "masc_gc"
       ~readonly:false
   (* The ask chain — store, operator surfaces, answer→wake — was reachable
      only from the MCP lane: nothing in this registry named the tools, so the

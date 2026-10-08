@@ -4,14 +4,9 @@ type publication =
   | Workspace_retired
 
 type config_observation =
-  | Config_text of
-      { path : string
-      ; source_text : string
-      }
-  | Config_unreadable of
-      { path : string
-      ; detail : string
-      }
+  { path : string
+  ; source_text : string
+  }
 
 type published =
   { snapshot : Skill_catalog_snapshot.t
@@ -279,51 +274,43 @@ let scan_additional_source ~base_path ~user_home addition =
   | Anchor_unavailable _ | Anchor_invalid _ | Path_rejected _ -> scan_resolved_source resolved
 ;;
 
-let build_snapshot ~base_path ~user_home ~additional_sources = function
-  | Config_unreadable { detail; _ } ->
-      Skill_catalog_snapshot.config_unreadable ~detail,
-      List.map (fun addition -> {source_id = addition.source.id;
-        message = "workspace Skill configuration is unreadable: " ^ detail}) additional_sources
-  | Config_text { source_text = config_text; _ } ->
-    (match Skill_source_config.parse_text config_text with
-     | Error diagnostics ->
-       Skill_catalog_snapshot.config_rejected ~source_text:config_text ~diagnostics,
-       List.map (fun addition -> {source_id = addition.source.id;
-         message = "workspace Skill configuration is invalid: " ^
-           String.concat "; " (List.map Skill_source_config.diagnostic_to_string diagnostics)}) additional_sources
-     | Ok config ->
-       let combined, accepted, diagnostics = List.fold_left
-         (fun (config, accepted, diagnostics) addition ->
-           match Skill_source_config.append_sources config [addition.source] with
-           | Ok config -> config, addition :: accepted, diagnostics
-           | Error errors -> config, accepted,
-               {source_id = addition.source.id;
-                message = String.concat "; " (List.map Skill_source_config.diagnostic_to_string errors)} :: diagnostics)
-         (config, [], []) additional_sources in
-       let original_scans =
-         List.map
-           (fun source ->
-              Skill_source_config.resolve ~base_path ~user_home source
-              |> scan_resolved_source)
-           config.sources
-       in
-       let additional_scans = List.rev_map (scan_additional_source ~base_path ~user_home) accepted in
-       let scan_diagnostics = List.filter_map (fun (scan : Skill_catalog_snapshot.source_scan) ->
-         match scan.observation with
-         | Source_unavailable {detail; _} -> Some {source_id = scan.source.source.id; message = detail}
-         | Source_missing _ -> Some {source_id = scan.source.source.id; message = "package Skill directory is missing"}
-         | Source_not_directory _ -> Some {source_id = scan.source.source.id; message = "package Skill source is not a directory"}
-         | Source_unresolved _ -> Some {source_id = scan.source.source.id; message = "package Skill source is unresolved"}
-         | Source_ready _ -> None) additional_scans in
-       (match Skill_catalog_snapshot.configured ~config:combined (original_scans @ additional_scans) with
-        | Ok snapshot -> snapshot, List.rev diagnostics @ scan_diagnostics
-        | Error _ ->
-          Skill_catalog_snapshot.config_unreadable
-            ~detail:"Skill snapshot source/config association failed", List.rev diagnostics))
-;;
-
-let observation_path = function
-  | Config_text { path; _ } | Config_unreadable { path; _ } -> path
+let build_snapshot ~base_path ~user_home ~additional_sources
+    ({ source_text = config_text; _ } : config_observation) =
+  match Skill_source_config.parse_text config_text with
+  | Error diagnostics ->
+    Skill_catalog_snapshot.config_rejected ~source_text:config_text ~diagnostics,
+    List.map (fun addition -> {source_id = addition.source.id;
+      message = "workspace Skill configuration is invalid: " ^
+        String.concat "; " (List.map Skill_source_config.diagnostic_to_string diagnostics)}) additional_sources
+  | Ok config ->
+    let combined, accepted, diagnostics = List.fold_left
+      (fun (config, accepted, diagnostics) addition ->
+        match Skill_source_config.append_sources config [addition.source] with
+        | Ok config -> config, addition :: accepted, diagnostics
+        | Error errors -> config, accepted,
+            {source_id = addition.source.id;
+             message = String.concat "; " (List.map Skill_source_config.diagnostic_to_string errors)} :: diagnostics)
+      (config, [], []) additional_sources in
+    let original_scans =
+      List.map
+        (fun source ->
+           Skill_source_config.resolve ~base_path ~user_home source
+           |> scan_resolved_source)
+        config.sources
+    in
+    let additional_scans = List.rev_map (scan_additional_source ~base_path ~user_home) accepted in
+    let scan_diagnostics = List.filter_map (fun (scan : Skill_catalog_snapshot.source_scan) ->
+      match scan.observation with
+      | Source_unavailable {detail; _} -> Some {source_id = scan.source.source.id; message = detail}
+      | Source_missing _ -> Some {source_id = scan.source.source.id; message = "package Skill directory is missing"}
+      | Source_not_directory _ -> Some {source_id = scan.source.source.id; message = "package Skill source is not a directory"}
+      | Source_unresolved _ -> Some {source_id = scan.source.source.id; message = "package Skill source is unresolved"}
+      | Source_ready _ -> None) additional_scans in
+    (match Skill_catalog_snapshot.configured ~config:combined (original_scans @ additional_scans) with
+     | Ok snapshot -> snapshot, List.rev diagnostics @ scan_diagnostics
+     | Error _ ->
+       Skill_catalog_snapshot.config_unreadable
+         ~detail:"Skill snapshot source/config association failed", List.rev diagnostics)
 ;;
 
 let configured_line ~headline ~config_path snapshot =
@@ -438,7 +425,7 @@ let refresh_internal ~workspace ~user_home ~source_update ~read_config =
       workspace.slot.additional_sources <- additions;
       workspace.slot.config_input <- Some (user_home, observation);
       Atomic.set workspace.slot.additional_diagnostics diagnostics;
-      publish workspace ~config_path:(observation_path observation) candidate)
+      publish workspace ~config_path:observation.path candidate)
 ;;
 
 let refresh ~workspace ~user_home ~read_config =
@@ -467,5 +454,5 @@ let update_additional_sources ~workspace ~sources =
                 ~user_home ~additional_sources:sources observation in
             workspace.slot.additional_sources <- sources;
             Atomic.set workspace.slot.additional_diagnostics diagnostics;
-            Ok (publish workspace ~config_path:(observation_path observation) candidate))
+            Ok (publish workspace ~config_path:observation.path candidate))
 ;;

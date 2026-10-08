@@ -77,7 +77,6 @@ module Auth_requirement : sig
   type t =
     | Public
     | Requires_auth
-    | Internal_only
 end
 (** Per-handler authentication classification.  The
     {!handle_request} dispatcher is the single enforcement

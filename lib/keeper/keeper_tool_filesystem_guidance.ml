@@ -18,7 +18,6 @@ type t =
       ; cwds : string
       }
   | Checkout_scan_failed of { detail : string }
-  | Cwd_not_directory of { cwd : string }
   | Offset_beyond_window of
       { offset : int
       ; window_bytes : int
@@ -43,7 +42,6 @@ let key = function
   | Limit_not_positive _ -> Prompt_names.keeper_tool_filesystem_limit_not_positive
   | Available_cwds_partial _ -> Prompt_names.keeper_tool_filesystem_available_cwds_partial
   | Checkout_scan_failed _ -> Prompt_names.keeper_tool_filesystem_checkout_scan_failed
-  | Cwd_not_directory _ -> Prompt_names.keeper_tool_filesystem_cwd_not_directory
   | Offset_beyond_window _ -> Prompt_names.keeper_tool_filesystem_offset_beyond_window
   | Capability_unavailable -> Prompt_names.keeper_tool_filesystem_capability_unavailable
   | Publication_failed -> Prompt_names.keeper_tool_filesystem_publication_failed
@@ -73,7 +71,6 @@ let vars = function
   | Limit_not_positive { limit } -> [ "limit", string_of_int limit ]
   | Available_cwds_partial { limit; cwds } -> [ "limit", limit; "cwds", cwds ]
   | Checkout_scan_failed { detail } -> [ "detail", detail ]
-  | Cwd_not_directory { cwd } -> [ "cwd", cwd ]
   | Offset_beyond_window { offset; window_bytes } ->
     [ "offset", string_of_int offset; "window_bytes", string_of_int window_bytes ]
   | Capability_unavailable
@@ -101,7 +98,6 @@ let fallback guidance =
   | Limit_not_positive { limit } -> Printf.sprintf "limit=%d" limit
   | Available_cwds_partial { limit; cwds } -> Printf.sprintf "limit=%s cwds=%s" limit cwds
   | Checkout_scan_failed { detail } -> detail
-  | Cwd_not_directory { cwd } -> "cwd_not_directory: " ^ cwd
   | Offset_beyond_window { offset; window_bytes } ->
     Printf.sprintf "offset=%d window_bytes=%d" offset window_bytes
   | Capability_unavailable

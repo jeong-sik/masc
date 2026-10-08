@@ -90,6 +90,33 @@ The mapper pin from MASC PR #34167 was already included in server source
 `5ebfc257c55a6a771ace0ab412051a3d5e5cce44`; the older “redeploy pending”
 report must not be used as current deployment status.
 
+On 2026-10-08 the merged `ocaml-msx` core at
+`eb0410eab4abe81c1300e0f7debd20fc298d2055` built successfully and was exercised
+with the real C-BIOS ROM set. Sangokushi II reached a rendered GRAPHIC6 opening
+after 3,000 frames (`pc=0b2e`, 28,258 non-black pixels, 99 disk calls). The
+same 1,200-frame probe produced rendered output for L'Empereur, Europa Sensen,
+Genghis Khan, Rune Master and Super Daisenryaku. These are media-load and
+rendering checks; they do not promote those games to campaign-complete.
+
+The same day, the MASC tool path was exercised from a copied operator
+checkpoint at the Sangokushi II player-count prompt. `masc_msx_restore` restored
+frame 3,925, `masc_msx_press` selected zero human players, and 3,000 subsequent
+space presses (300 frames per call) reached frame 904,045 and a rendered
+`204年 4月` AI-turn/event screen. This proves a long-running observer session
+through the Lane and Tool boundary, including input-ledger growth and bitmap
+screen publication. It is still not an observed termination screen or a human
+unification victory; the copied checkpoint and temporary base path were kept
+outside the operator's live `.masc` tree.
+
+The merged core was also checked to termination without the per-call Tool
+cadence: a replay restored the same post-setup checkpoint, sent the same
+space-edge input through the MSX keyboard matrix at a ten-frame probe cadence,
+and reached frame 3,000,000, PC `0x49a6`, with the rendered `301年 1月` KOEI
+copyright termination screen. This is a current-core all-AI observer ending,
+not a human unification victory. The accelerated replay is kept separate from
+the MASC Tool-path evidence above because its cadence is a diagnostic probe,
+not the production `masc_msx_press` frame budget.
+
 Campaign acceptance still requires readable interactive menus, starting a
 scenario, taking turns, completing a battle, saving progress, restarting and
 restoring that progress, and an observed ending. Record source/binary identity,

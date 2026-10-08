@@ -29,6 +29,19 @@ let test_resolve_overrides_maps_otel_switch () =
     (List.assoc_opt "MASC_OTEL_ENABLED" overrides)
 ;;
 
+let test_memory_count_settings () =
+  let doc =
+    [ "memory.category_cap", T.Toml_int 2
+    ; "memory.facts_per_category_cap", T.Toml_int 7 ]
+  in
+  let count, overrides = K.resolve_overrides ~env_lookup:empty_env doc in
+  check int "both count settings reach the boot overlay" 2 count;
+  check (option string) "category cap" (Some "2")
+    (List.assoc_opt Env_config_keeper.KeeperMemoryOs.category_cap_env_key overrides);
+  check (option string) "items per category" (Some "7")
+    (List.assoc_opt Env_config_keeper.KeeperMemoryOs.facts_per_category_cap_env_key overrides)
+;;
+
 let test_resolve_overrides_keeps_env_precedence () =
   let env_lookup = function
     | "MASC_KEEPER_BATCH_LIMIT" -> Some "from-env"
@@ -111,6 +124,8 @@ let () =
             test_resolve_overrides_maps_known_keys
         ; test_case "the otel switch maps from TOML" `Quick
             test_resolve_overrides_maps_otel_switch
+        ; test_case "memory category and item settings map from TOML" `Quick
+            test_memory_count_settings
         ; test_case "env vars preempt TOML" `Quick
             test_resolve_overrides_keeps_env_precedence
         ; test_case "vision output budget maps from TOML" `Quick

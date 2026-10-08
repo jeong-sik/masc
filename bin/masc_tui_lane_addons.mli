@@ -102,6 +102,10 @@ val select_initial_result : t -> t
 (** Choose the declared reading, or first record, for the pinned detail after
     its first scoped read. Refreshes preserve the existing row identity. *)
 val open_selected_instance : t -> t
+val open_declaration : t -> string -> t
+(** The view an inventory declaration opens to, with the configuration cursor
+    on that declaration so actions target it; [-1] when the snapshot does not
+    list it. *)
 (** Enter the selected worker or unresolved installation. A worker pins its
     incarnation; an installation opens its existing TOML detail section. *)
 val overview_count : ?mode:overview_mode -> snapshot -> int

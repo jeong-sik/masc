@@ -264,7 +264,7 @@ SSE 세션은 두 종류로 분류된다:
 `broadcast_to` 함수로 대상을 지정할 수 있다:
 
 ```ocaml
-type broadcast_target = All | Observers | Agent streams
+type broadcast_target = All | Observers | Presence_only
 ```
 
 `broadcast json`은 `broadcast_to All json`과 동일하다 (하위 호환).

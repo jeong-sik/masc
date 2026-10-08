@@ -55,7 +55,6 @@ type error_code =
   | Rate_limited          (** Too many requests. *)
   | Timeout               (** Operation timed out. *)
   | External_service_unavailable (** An external service or transport is unavailable. *)
-  | Not_implemented       (** Feature exists in schema but not in runtime. *)
   | Internal_error        (** Unexpected server-side failure. *)
   | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound). *)
   | Unavailable
@@ -80,7 +79,7 @@ val failure_class_of_error_code : error_code -> Tool_result.tool_failure_class
       the call → [Workflow_rejection].
     - [Rate_limited], [Timeout], [External_service_unavailable], [Unavailable]: something the call depends on
       did not answer → [Dependency_unavailable].
-    - [Internal_error], [Not_implemented]: masc failed → [Runtime_failure]. *)
+    - [Internal_error]: masc failed → [Runtime_failure]. *)
 
 (** {1 Raw JSON String Builders}
 
@@ -158,8 +157,6 @@ type field_constraint =
   | Non_empty          (** String must not be empty after trimming. *)
   | Type_string        (** Value must be a JSON string. *)
   | Type_int           (** Value must be a JSON integer. *)
-  | Type_float         (** Value must be a JSON number. *)
-  | Type_bool          (** Value must be a JSON boolean. *)
   | Min_int of int     (** Integer must be >= min. *)
   | Max_int of int     (** Integer must be <= max. *)
   | One_of of string list  (** String must be one of the listed values. *)

@@ -10,6 +10,9 @@ type memory_search_source =
   | Absorbed
       (** Facts a librarian pass merged into a newer claim (RFC-0456 §4.2),
           read from [<keeper>.memory-absorbed.jsonl]. *)
+  | Dropped
+      (** Historical originals and reasons from the removal journal.
+          These are not current claims or authority to restore them. *)
   | History
   | All
 

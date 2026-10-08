@@ -1406,13 +1406,12 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
     fetch already returns; the pane passes a cursor, so it is required here.
     Defined before {!fetch_keeper_context_inspector}, which reads the answer
     to a turn through it. *)
-(** One page of a turn's journal
-    ([GET /api/v1/keepers/:name/chat/events?operation_id=&since_seq=&since_offset=&limit=],
-    RFC-0412 §3.2). The page is checked against the operation it was asked
+(** One page from the operation or autonomous-turn endpoint selected by its
+    typed source. The page is checked against the exact source it was asked
     for; every failure is typed ({!Masc_tui_keeper_chat_log.events_error}) so
     the caller decides by code, not by reading the server's sentence. *)
 let fetch_keeper_chat_events ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(operation_id : string)
+    ~(keeper_name : string) ~(source : Masc_tui_keeper_chat_log.journal_source)
     ~(since_seq : Masc.Keeper_chat_event_log.replay_position)
     ~(since_offset : Masc.Keeper_chat_event_log.page_start) ~(limit : int) :
     ( Masc_tui_keeper_chat_log.events_page
@@ -1422,11 +1421,8 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
      the module that decodes the answer ([Masc_tui_keeper_chat_log]), where a
      test can reach it. *)
   let path =
-    Printf.sprintf "/api/v1/keepers/%s/chat/events?%s"
-      (percent_encode_path_segment keeper_name)
-      (Masc_tui_keeper_chat_log.events_query
-         ~encode_value:percent_encode_query_value ~operation_id ~since_seq
-         ~since_offset ~limit)
+    Masc_tui_keeper_chat_log.journal_path ~encode_value:percent_encode_path_segment
+      ~keeper_name ~source ~since_seq ~since_offset ~limit
   in
   match http_get ~host ~port ~path with
   | Error detail -> Error (Masc_tui_keeper_chat_log.Events_transport detail)
@@ -1439,14 +1435,9 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
       | json -> (
           match Masc_tui_keeper_chat_log.decode_events_page json with
           | Error detail -> Error (Masc_tui_keeper_chat_log.Events_undecodable detail)
-          | Ok page
-            when not
-                   (String.equal page.Masc_tui_keeper_chat_log.operation_id
-                      operation_id) ->
-              Error
-                (Masc_tui_keeper_chat_log.Events_undecodable
-                   (Printf.sprintf "page is for operation %s, asked for %s"
-                      page.Masc_tui_keeper_chat_log.operation_id operation_id))
+          | Ok page when page.Masc_tui_keeper_chat_log.source <> source ->
+              Error (Masc_tui_keeper_chat_log.Events_undecodable
+                "journal page source does not match the requested source")
           | Ok page -> Ok page)
       | exception Yojson.Json_error detail ->
           Error
@@ -2261,7 +2252,7 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     stamps the author from the HTTP auth resolver, so the payload carries
     text only. The response is the tools envelope [{ok, message}]; interpreting
     it stays with the caller. *)
-let board_workspace_field (identity : Masc.Tui_decode.server_identity) =
+let expected_workspace_field (identity : Masc.Tui_decode.server_identity) =
   "expected_workspace", `Assoc
     [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
     ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
@@ -2275,7 +2266,7 @@ let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : 
   in
   let payload =
     `Assoc
-      ([ board_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
+      ([ expected_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
       @ hearth_field)
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
@@ -2295,12 +2286,13 @@ let post_goal_confirmation ~host ~port confirmation =
     local literal, so the TUI and the tool cannot disagree about what
     "drop" means. The server owns the phase rules; an invalid transition is
     its rejection to return, not the TUI's to pre-guess. *)
-let post_goal_transition ~(host : string) ~(port : int) ~(goal_id : string)
-    ~(action : Goal_phase.Public_action.t)
+let post_goal_transition ~expected_workspace ~(host : string) ~(port : int)
+    ~(goal_id : string) ~(action : Goal_phase.Public_action.t)
     ~(note : string option) : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
-      ([ ("goal_id", `String goal_id)
+      ([ expected_workspace_field expected_workspace
+       ; ("goal_id", `String goal_id)
        ; ("action", `String (Goal_phase.Public_action.to_string action))
        ]
       @
@@ -2317,7 +2309,7 @@ let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id
     ~(up : bool) : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
-      [ board_workspace_field expected_workspace
+      [ expected_workspace_field expected_workspace
       ; ("post_id", `String post_id)
       ; ("direction", `String (if up then "up" else "down"))
       ]
@@ -2330,7 +2322,7 @@ let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id
 let post_board_comment ~expected_workspace ~(host : string) ~(port : int) ~(post_id : string)
     ~(content : string) : (Yojson.Safe.t, string) result =
   let payload =
-    `Assoc [ board_workspace_field expected_workspace; ("post_id", `String post_id); ("content", `String content) ]
+    `Assoc [ expected_workspace_field expected_workspace; ("post_id", `String post_id); ("content", `String content) ]
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
     ~body:(Yojson.Safe.to_string payload)

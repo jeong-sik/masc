@@ -9,12 +9,6 @@ val limit_for_category : rate_limit_config -> rate_limit_category -> int
 val category_for_tool : string -> rate_limit_category
 val category_for_tool_opt : string -> rate_limit_category option
 
-type cache_error =
-  | CacheReadFailed of string
-  | CacheWriteFailed of string
-  | CacheExpired of { key: string; age_hours: float }
-  | CacheCorrupted of string
-
 module Task_error : sig
   type t =
     | NotFound of string
@@ -53,11 +47,7 @@ end
 module System_error : sig
   type t =
     | NotInitialized
-    | AlreadyInitialized
-    | InvalidJson of string
     | IoError of string
-    | InvalidFilePath of string
-    | StorageError of string
     | ValidationError of string
     | LockContention of { key : string; attempts : int }
       (** Distributed lock acquire budget exhausted under transient
@@ -72,8 +62,6 @@ type t =
   | Agent of Agent_error.t
   | Auth of Auth_error.t
   | System of System_error.t
-  | RateLimitExceeded of rate_limit_error
-  | CacheError of cache_error
 
 val to_string : t -> string
 val show : t -> string
@@ -134,11 +122,6 @@ val is_retryable : t -> bool
        errors — replaying changes nothing).}
     {- [Auth (TokenExpired _)]: [true] (clears once
        [masc_auth_refresh] runs); other [Auth] variants: [false].}
-    {- [System (IoError _ | StorageError _)]: [true] (transient
-       FS / backend); other [System] variants: [false]
-       (caller-provided invariants).}
-    {- [RateLimitExceeded _]: [true] (replays after the
-       advertised wait).}
-    {- [CacheError (CacheReadFailed _ | CacheWriteFailed _
-       | CacheExpired _)]: [true]; [CacheCorrupted _]: [false]
-       (persisted-data invariant violation).} } *)
+    {- [System (IoError _ | LockContention _)]: [true] (transient
+       FS / backend / lock contention); other [System] variants: [false]
+       (caller-provided invariants).} } *)

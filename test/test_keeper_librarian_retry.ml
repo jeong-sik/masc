@@ -1289,6 +1289,10 @@ let test_removed_contract_fields_reject () =
 
 let test_prompt_contains_exact_current_selection () =
   let variables = Librarian.prompt_variables (input ()) in
+  let limits = List.assoc "memory_limits" variables |> Yojson.Safe.from_string in
+  check int "operator category cap reaches the actual memory prompt"
+    (Env_config.KeeperMemoryOs.category_cap ())
+    Yojson.Safe.Util.(member "category_cap" limits |> to_int);
   check bool "facts budget reaches the Librarian" true
     (String_util.contains_substring
        (List.assoc "facts_budget" variables)
@@ -1705,7 +1709,7 @@ let template_slot_names template =
    from its prompt cache for as long as the Memory is unchanged. *)
 let test_memory_prompt_puts_unchanging_slots_first () =
   let unchanging =
-    [ "facts_budget"; "working_contexts_rule"; "keeper_id"; "keeper_instructions"; "current_memory" ]
+    [ "facts_budget"; "memory_limits"; "working_contexts_rule"; "keeper_id"; "keeper_instructions"; "current_memory" ]
   in
   let slots =
     template_pieces (Prompt_registry.get_prompt Prompt_names.librarian)
@@ -1812,6 +1816,33 @@ let occurrences ~needle text =
     | Some at -> count (at + step) (acc + 1)
   in
   count 0 0
+;;
+
+(* The pending-input organization pass neither judges nor carries Memory, so
+   its prompt carries no current fact. The Memory pass prompt does. *)
+let test_working_context_prompt_carries_no_current_memory () =
+  let probe = "memory-probe-claim-for-the-working-context-pass" in
+  let input = { (input ()) with current = Some { Librarian.facts = [ fact ~claim:probe ] } } in
+  let render key variables =
+    match
+      Prompt_registry.render_prompt_template key
+        (("working_contexts_rule", "working contexts rule fixture") :: variables)
+    with
+    | Ok rendered -> rendered
+    | Error detail -> failf "%s render failed: %s" key detail
+  in
+  check int "the Memory pass prompt carries the current fact" 1
+    (occurrences ~needle:probe
+       (render Prompt_names.librarian (Librarian.prompt_variables input)));
+  check int "the working-context pass prompt carries no current fact" 0
+    (occurrences ~needle:probe
+       (render Prompt_names.librarian_working_context
+          (Librarian.working_context_prompt_variables input)));
+  check bool "the working-context pass supplies no current_memory variable" false
+    (List.mem_assoc "current_memory" (Librarian.working_context_prompt_variables input));
+  check bool "the working-context template has no current_memory slot" false
+    (List.mem "current_memory"
+       (template_slot_names (Prompt_registry.get_prompt Prompt_names.librarian_working_context)))
 ;;
 
 let test_every_librarian_prompt_names_its_keeper () =
@@ -2280,6 +2311,8 @@ let () =
             test_repo_template_renders_keeper_instructions
         ; test_case "every librarian prompt names its Keeper" `Quick
             test_every_librarian_prompt_names_its_keeper
+        ; test_case "the working-context prompt carries no current memory" `Quick
+            test_working_context_prompt_carries_no_current_memory
         ; test_case "the Memory prompt puts the unchanging slots first" `Quick
             test_memory_prompt_puts_unchanging_slots_first
         ; test_case "goal criteria reach the librarian model input" `Quick

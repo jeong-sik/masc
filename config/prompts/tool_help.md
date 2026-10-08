@@ -16,15 +16,6 @@ Use when you need this tool's canonical action.
 ### constraint.hidden
 Hidden from the default tool list.
 
-### constraint.placeholder
-Placeholder implementation; not a truthful default surface.
-
-### constraint.simulation
-Simulation-backed implementation.
-
-### constraint.adapter
-Compatibility or adapter surface.
-
 ### short_description.empty
 MASC tool.
 

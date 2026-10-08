@@ -35,7 +35,9 @@ type outstanding_snapshot =
 val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
 (** Read-only schema/integrity checked snapshot of queued and running operations.
     Exactly validated v1 chat-only stores are readable without migration; v2
-    inspection also includes every nonterminal semantic execution.
+    inspection also includes every nonterminal semantic execution and terminal
+    executions retaining an unacknowledged native-call receipt. Those receipts
+    still own retained checkpoint references and must survive lifecycle cleanup.
     Never creates, initializes, or recovers a store. Missing files remain distinct
     from a validated empty queue. Callers authorizing lifecycle changes must
     exclude the sole writer and its creation for the whole enclosing commit. *)
@@ -71,6 +73,10 @@ val submit
   -> (admission, error) result
 
 val get : t -> Operation.Operation_id.t -> (Operation.t option, error) result
+val list_restart_interrupted : t -> (Operation.t list, error) result
+(** Every durable [Failed Interrupted_by_restart] record, including settled
+    batch members. Re-reading after startup permits interrupted projection
+    writes to retry; it is independent of newly running operations. *)
 val inventory : t -> (inventory, error) result
 (** Pure selector receives the contiguous fresh, unbound queued operations
     starting at the claimable head and ending before the next continuation.
@@ -139,6 +145,12 @@ val fail_running
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
+val direct_native_call : t -> operation_id:Operation.Operation_id.t ->
+  (Keeper_native_call.state, error) result
+val update_direct_native_call : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  execution_digest:string -> Keeper_native_call.change -> (unit, error) result
+(** Owner-serialized native-call identity and checkpoint CAS. Every change
+    verifies the current direct-operation execution digest. *)
 val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
 val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->
@@ -195,11 +207,8 @@ end
     recovering records reserve only their own sources, never the running slot. *)
 type semantic_error =
   | Semantic_store_error of error
-  | Unknown_execution of Keeper_execution_scope_id.t
   | Admission_conflict of Keeper_execution_scope_id.t
-  | Execution_changed of Semantic.t
   | Sources_owned of Keeper_execution_scope_id.t list
-  | Execution_slot_busy of Keeper_execution_scope_id.t
   | Invalid_execution of Semantic.error
 
 type semantic_admission = Semantic_created of Semantic.t | Semantic_existing of Semantic.t
@@ -215,12 +224,6 @@ val semantic_prepare :
     Preparing phase together. Reusing identity never clears recorded evidence.
     An uncertain commit is an error; reload by that identity before deciding a
     retry. Different outstanding operations may coexist with disjoint sources. *)
-val semantic_apply :
-  t -> expected:Semantic.t -> now:float -> Semantic.action ->
-  (Semantic.t, semantic_error) result
-(** Exact-record CAS; terminal records are immutable. Only Running occupies the
-    single semantic execution slot. Startup moves interrupted Running records
-    to Recovering without clearing frames, allowing unrelated work to proceed. *)
 
 (** Gate waiting remains the original queued operation, but cannot be claimed
     until a bound durable resolution is supplied. A deferred runtime retry

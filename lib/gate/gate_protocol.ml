@@ -123,10 +123,9 @@ let validate ~max_content_length (msg : inbound_message) =
   else if String.trim msg.channel_user_id = "" then Error Empty_channel_user_id
   else if String.trim msg.idempotency_key = "" then Error Empty_idempotency_key
   else
-    let content = String.trim msg.content in
-    if content = "" then Error Empty_content
+    if String.trim msg.content = "" then Error Empty_content
     else
-      let len = String.length content in
+      let len = String.length msg.content in
       if len > max_content_length then Error (Content_too_long len)
       else Ok ()
 

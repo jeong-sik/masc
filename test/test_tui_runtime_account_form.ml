@@ -66,6 +66,15 @@ let editing = function
   | F.Submitted _ -> Alcotest.fail "the form submitted"
   | F.Copy _ -> Alcotest.fail "the form copied"
 
+let test_draft_keeps_opening_revision () =
+  let revision = String.make 64 'a' in
+  let form = match F.open_on ~source_revision:revision fixture with
+    | Ok form -> form | Error reason -> Alcotest.fail reason in
+  let form = editing (press form ["enter"; "x"]) in
+  let form = F.paste form "-account" |> fun form -> F.refused form "Save outcome unknown" in
+  Alcotest.(check (option string)) "edit and refusal retain the opening revision"
+    (Some revision) (F.source_revision form)
+
 let submitted = function
   | F.Submitted form -> form
   | F.Editing _ -> Alcotest.fail "enter on the last field did not submit"
@@ -565,6 +574,8 @@ let () =
     [ ( "form"
       , [ Alcotest.test_case "the id follows the chosen provider" `Quick
             test_the_id_follows_the_chosen_provider
+        ; Alcotest.test_case "draft keeps its opening source revision" `Quick
+            test_draft_keeps_opening_revision
         ; Alcotest.test_case "submit declares against the current file" `Quick
             test_submit_declares_against_the_current_file
         ; Alcotest.test_case "a home with a space is one argument" `Quick

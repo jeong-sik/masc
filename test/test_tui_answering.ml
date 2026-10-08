@@ -12,7 +12,7 @@ let row name state : Tui_decode.keeper_turn_row =
 let running ?preview ~lane ~started name =
   row name
     (Tui_decode.Keeper_turn_running
-       { lane; started_at_unix = started; preview; interrupt_token = "fixture-token" })
+       { lane; started_at_unix = started; preview; interrupt_token = "fixture-token"; turn_ref = None })
 ;;
 
 let texts lines =
@@ -481,6 +481,60 @@ let test_chat_shows_background_work_and_uncertainty () =
     (Astring.String.is_infix ~affix:"editing the report" (String.concat "\n" (text drawn)))
 ;;
 
+(* The pane draws each row behind a two-cell caret gutter, inside the frame.
+   One long name must not push the lane and the age of any row past the
+   frame: the name gives way first. Read through [answering_lines], so the
+   width is the one the pane works out from the terminal. *)
+let test_long_names_leave_the_lane_and_the_age_inside_the_frame () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    ignore
+      (Masc_tui_render_schedule.Terminal_size_cache.refresh cache ~probe:(fun () ->
+         Some size))
+  in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    let now = Unix.gettimeofday () in
+    let state =
+      Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    let long_ascii = "long-" ^ String.concat "" (List.init 24 (fun _ -> "keeper")) in
+    let long_wide = String.concat "" (List.init 30 (fun _ -> "한글이름")) in
+    state.keeper_turns
+    <- List.map
+         (fun name ->
+           running ~lane:Tui_decode.Turn_lane_chat_operation ~started:(now -. 120.) name)
+         [ long_ascii; long_wide; "alpha" ];
+    state.keeper_turns_observed_at <- Some now;
+    List.iter
+      (fun cols ->
+        set_size (26, cols);
+        let pane = Masc_tui_frame.inner_width ~cols - 2 in
+        match texts (Masc_tui_render_prim.answering_lines state) with
+        | [ ascii; wide; short ] as rows ->
+            List.iter
+              (fun text ->
+                Alcotest.(check bool)
+                  (Printf.sprintf "%d columns: the row fits behind the caret" cols)
+                  true
+                  (Masc_tui_message_layout.display_width text <= pane);
+                Alcotest.(check bool)
+                  (Printf.sprintf "%d columns: the lane and the age stay" cols)
+                  true
+                  (Astring.String.is_infix ~affix:"chat_operation  2m" text))
+              rows;
+            Alcotest.(check bool) "the long name keeps its start" true
+              (Astring.String.is_infix ~affix:"long-" ascii);
+            Alcotest.(check bool) "the wide name keeps its start" true
+              (Astring.String.is_infix ~affix:"한글" wide);
+            Alcotest.(check bool) "the short name is whole" true
+              (Astring.String.is_infix ~affix:"alpha" short)
+        | other ->
+            Alcotest.failf "%d columns: expected three rows, got %d" cols
+              (List.length other))
+      [ 60; 80; 120 ])
+;;
+
 let () =
   Alcotest.run "tui_answering"
     [ ( "chat activity", [Alcotest.test_case "background work and missing observation" `Quick
@@ -530,6 +584,8 @@ let () =
             test_advance_finishes_tracks_the_transition
         ; Alcotest.test_case "target indexes skip prose" `Quick
             test_target_indexes_skip_prose
+        ; Alcotest.test_case "long names leave the lane and the age inside the frame"
+            `Quick test_long_names_leave_the_lane_and_the_age_inside_the_frame
         ] )
     ]
 ;;

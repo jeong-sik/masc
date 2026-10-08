@@ -18,7 +18,6 @@ type t =
           scan path and the queued-stimulus path do not conflate failure
           sources in the same metric. *)
   | Scheduled_automation
-  | Empty_run_reasons
   | Reconcile_read_meta (** Supervisor reconcile-loop meta read failure (#14828 sweep). *)
 
 val to_label : t -> string

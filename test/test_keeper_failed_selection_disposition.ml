@@ -217,10 +217,7 @@ let assert_no_queue_action label outcome =
 let test_every_failure_route_preserves_batch () =
   let exhausted label terminal =
     KFR.Exhausted_visible_alive
-      { terminal
-      ; provenance = KFR.Masc_internal_error
-      ; detail = label
-      }
+      { terminal; detail = label }
   in
   [ ( "network transient"
     , KFR.Retry_after_observed
@@ -257,7 +254,7 @@ let test_every_failure_route_preserves_batch () =
    after a tool effect. *)
 let exhausted_route label terminal =
   KFR.Exhausted_visible_alive
-    { terminal; provenance = KFR.Masc_internal_error; detail = label }
+    { terminal; detail = label }
 ;;
 
 let observed_failure_routes =

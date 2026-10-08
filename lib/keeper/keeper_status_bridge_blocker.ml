@@ -151,15 +151,6 @@ let runtime_blocker_surface_of_failure_reason
       { blocker_class = "turn_failures"
       ; summary = lazy (turn_failures_summary ~count (latest_receipt ()))
       }
-  | Keeper_registry.Stale_termination_storm { count } ->
-    Some
-      { blocker_class = "stale_termination_storm"
-      ; summary = lazy (
-          Printf.sprintf
-            "Stale watchdog terminated %d keeper cycle(s) in the storm window; operator \
-             investigation is required before restart."
-            count)
-      }
   (* The registry wraps runtime exhaustion in [Provider_runtime_error] with the
      typed reason alongside it ([keeper_unified_turn_types.ml:100-112]). Reading
      the code and dropping the reason is what made the status bridge's
@@ -238,13 +229,6 @@ let runtime_blocker_surface_of_failure_reason
            "Keeper fiber did not resolve a terminal outcome; supervisor cleanup is \
             required."
          Fiber_unresolved)
-  | Keeper_registry.Turn_overflow_failure ->
-    Some
-      { blocker_class = "turn_overflow_failure"
-      ; summary = lazy (
-          "The turn's request exceeded the context window. Nothing recovers \
-           from this on its own; the Keeper stays active.")
-      }
   | Keeper_registry.Exception detail ->
     Some
       { blocker_class = "exception"

@@ -26,6 +26,16 @@ type t
     @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
 val create : max_slots:int -> priority_run_limit:int option -> t
 
+(** Change the allowance of a scheduler that may have holders and waiters.
+    A raised [max_slots] hands the new slots to waiters at once. A lowered
+    one takes effect as holders return slots: no slot is handed on while
+    more than [max_slots] are held. A waiter keeps the queue it joined; a
+    request queued after the change joins by the new run limit, and waiters
+    a removed limit left in the [Priority] queue are granted first.
+
+    @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
+val reconfigure : t -> max_slots:int -> priority_run_limit:int option -> unit
+
 (** How a wait for a slot ended. *)
 type wait_end =
   | Wait_granted
@@ -93,5 +103,7 @@ type snapshot =
   ; queue_length : int
   }
 
-(** Non-blocking point-in-time capacity snapshot. *)
+(** Non-blocking point-in-time capacity snapshot. After a lowered
+    {!reconfigure}, [active] can exceed [max_slots] until holders return
+    slots; [available] is then 0. *)
 val snapshot : t -> snapshot

@@ -325,6 +325,7 @@ def runtime_resolved_runtime(
         "is_default": False,
         "rate_limited": False,
         "rate_limit_resets_at": None,
+        "failed_attempt": None,
     }
 
 

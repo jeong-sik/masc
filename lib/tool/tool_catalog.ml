@@ -2,7 +2,7 @@
 
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
-    - Implementation status: Real, Adapter, Simulation, Placeholder
+    - Implementation status: every registered tool is Real
     - Surface: Canonical per-surface tool name membership SSOT
 
     Sub-module:
@@ -23,9 +23,6 @@ type lifecycle =
 
 type implementation_status =
   | Real
-  | Adapter
-  | Simulation
-  | Placeholder
 
 type metadata = {
   visibility : visibility;
@@ -111,12 +108,11 @@ let default_metadata ~required_permission =
     required_permission;
   }
 
-let hidden_active ?(allow_direct_call_when_hidden = true)
-    ?(implementation_status = Real) ~required_permission reason =
+let hidden_active ?(allow_direct_call_when_hidden = true) ~required_permission reason =
   {
     visibility = Hidden;
     lifecycle = Active;
-    implementation_status;
+    implementation_status = Real;
     reason = Some reason;
     allow_direct_call_when_hidden;
     readonly = None;
@@ -246,6 +242,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_lane_act", mutating_tool);
     ("masc_lane_action_status", read_state_tool);
     ("masc_msx_screen", read_state_tool);
+    ("masc_msx_meta", read_state_tool);
+    ("masc_msx_checkpoint_info", read_state_tool);
     ("keeper_portrait_read", read_state_tool);
     ("keeper_candle_balance", mutating_tool);
     ("keeper_candle_catalog", read_state_tool);
@@ -263,6 +261,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_msx_peek", read_state_tool);
     ("masc_msx_ram_diff", read_state_tool);
     ("masc_dos_screen", play_machine_read_tool);
+    ("masc_dos_meta", read_state_tool);
+    ("masc_dos_inventory", read_state_tool);
     ("masc_dos_peek", read_state_tool);
     ("masc_dos_load", mutating_tool);
     ("masc_dos_pass", play_machine_tool);
@@ -644,13 +644,6 @@ let is_public_mcp name = Hashtbl.mem public_mcp_set name
 
 let implementation_status_to_string = function
   | Real -> "real"
-  | Adapter -> "adapter"
-  | Simulation -> "simulation"
-  | Placeholder -> "placeholder"
-
-let implementation_allows_public_visibility = function
-  | Real | Adapter -> true
-  | Simulation | Placeholder -> false
 
 let metadata name =
   match Hashtbl.find_opt metadata_table name with
@@ -672,28 +665,12 @@ let metadata name =
       ; reason = Some "Not on the external MCP discovery surface."
       }
 
-let implementation_status name =
-  let meta = metadata name in
-  meta.implementation_status
-
-let is_placeholder name =
-  match implementation_status name with
-  | Placeholder -> true
-  | Real | Adapter | Simulation -> false
-
 let is_visible ?(include_hidden = false) name =
   let meta = metadata name in
   match meta.visibility with
   | Hidden when include_hidden -> true
-  (* MASC_PLACEHOLDER_TOOLS_ENABLED (compat): RFC-0371 B7 removed the
-     env read because no deployment set it, but operators relied on
-     `MASC_PLACEHOLDER_TOOLS_ENABLED=false` to hide placeholder tools.
-     Restored with [get_bool ~default:true] — setting it to false/0/no
-     hides placeholders; unset or true keeps the pre-B7 behavior. *)
-  | Hidden when is_placeholder name ->
-    Env_config_core.get_bool ~default:true "MASC_PLACEHOLDER_TOOLS_ENABLED"
   | Hidden -> false
-  | Default -> implementation_allows_public_visibility meta.implementation_status
+  | Default -> true
 
 let visibility_to_string = function
   | Default -> "default"

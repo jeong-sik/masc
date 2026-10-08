@@ -299,11 +299,6 @@ let checkpoint_cas_error_to_string = function
       "candidate session mismatch expected=%s candidate=%s"
       (Keeper_id.Trace_id.to_string expected)
       (Keeper_id.Trace_id.to_string candidate)
-  | Candidate_generation_mismatch { expected; candidate } ->
-    Printf.sprintf
-      "candidate generation mismatch expected=%d candidate=%d"
-      expected
-      candidate
   | Candidate_turn_regressed { source_turn; candidate_turn } ->
     Printf.sprintf
       "candidate turn regressed source=%d candidate=%d"
@@ -324,8 +319,6 @@ let checkpoint_installation_auxiliary_to_string = function
     ^ File_lock_eio.durable_lock_error_to_string error
   | Post_commit_unwind_interrupted failure ->
     "post-commit unwind interrupted: " ^ exception_detail failure
-  | History_write_failed failure ->
-    "history write failed: " ^ exception_detail failure
 ;;
 
 let purge_report_json report =

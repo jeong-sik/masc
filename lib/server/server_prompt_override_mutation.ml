@@ -34,6 +34,7 @@ let apply ~base_path request =
   Result.map (fun message ->
     let curator_refresh =
       if String.equal key Prompt_names.workspace_memory_curator
+         || String.equal key Prompt_names.workspace_memory_briefing
       then Some (Server_workspace_memory_curator.request ~base_path)
       else None in
     { message; curator_refresh }) persisted)

@@ -949,10 +949,6 @@ type checkpoint_cas_error =
       { expected : Keeper_id.Trace_id.t
       ; candidate : Keeper_id.Trace_id.t
       }
-  | Candidate_generation_mismatch of
-      { expected : int
-      ; candidate : int
-      }
    | Candidate_turn_regressed of
        { source_turn : int
        ; candidate_turn : int
@@ -964,7 +960,6 @@ type checkpoint_installation_auxiliary =
   | Commit_observer_failed of Eio.Exn.with_bt
   | Release_process_lock_failed of File_lock_eio.durable_lock_error
   | Post_commit_unwind_interrupted of Eio.Exn.with_bt
-  | History_write_failed of Eio.Exn.with_bt
 
 type not_installed_checkpoint =
   { cause : checkpoint_cas_error

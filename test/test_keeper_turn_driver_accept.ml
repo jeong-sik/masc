@@ -778,6 +778,30 @@ let test_reject_reason_describes_thinking_only_response () =
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
        (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
 
+let test_quiet_final_requires_explicit_completed_response () =
+  let policy = Keeper_tooling.Response.Allow_quiet_final in
+  List.iter (fun (label, result, expected) ->
+    Alcotest.(check bool) (label ^ " provider acceptance") expected
+      (Keeper_tooling.Response.accepts_response ~policy result.Runtime_agent.response);
+    let normalized = Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+      ~response_policy:policy ~runtime_id:"fixture.runtime" ~initial_messages:[]
+      ~run_result:result ~text:"" ~tool_names:[] () in
+    Alcotest.(check bool) (label ^ " finalization") expected (Result.is_ok normalized))
+    [ "explicit empty final", run_result ~content:[Text ""] (), true
+    ; "absent output", run_result (), false
+    ; "hidden reasoning", run_result ~content:[Thinking {signature=None; content="private"}] (), false
+    ; "truncated", run_result ~content:[Text ""] ~stop_reason:MaxTokens (), false
+    ; "refusal", run_result ~content:[Text ""] ~stop_reason:Refusal (), false
+    ];
+  let explicit = run_result ~content:[Text ""] () in
+  Alcotest.(check bool) "direct/default policy rejects an explicit empty final" false
+    (Keeper_tooling.Response.accepts_response ~policy:Require_progress explicit.response);
+  let interrupted = { explicit with Runtime_agent.stop_reason = InputRequired {turns_used=1; request=input_required_request ()} } in
+  Alcotest.(check bool) "input-required is not a quiet completed turn" true
+    (Result.is_error (Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+      ~response_policy:policy ~runtime_id:"fixture.runtime" ~initial_messages:[]
+      ~run_result:interrupted ~text:"" ~tool_names:[] ()))
+
 let test_finalization_blank_response_is_typed_accept_rejection () =
   let result =
     Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
@@ -1634,6 +1658,8 @@ let () =
             "max_tokens without content keeps its rotation kind"
             `Quick
             test_max_tokens_without_content_keeps_rotation_kind;
+          Alcotest.test_case "quiet final needs explicit completed response" `Quick
+            test_quiet_final_requires_explicit_completed_response;
           Alcotest.test_case
             "blank finalization response is typed no-progress"
             `Quick

@@ -592,20 +592,21 @@ let expect_rejected_before_any_node ~label ~node failure =
     failf "%s: the invalid node input lost its typed plan cause" label
 ;;
 
-(* The prior-art shape: a Serial search runs alone, then two Concurrent
-   searches share a batch. Only the last node's input breaks a declared bound,
-   and it breaks it with a literal, so nothing about it depends on the searches
-   before it. The plan used to run the first search, then fail the batch and
-   throw its result away. *)
+(* One search runs alone, then two more share the batch after it. Only the
+   last node's input breaks a declared bound, and it breaks it with a literal,
+   so nothing about it depends on the search before it. The plan used to run
+   the first search, then fail the batch and throw its result away. *)
 let test_static_input_rejection_runs_no_node () =
   Eio_main.run @@ fun _env ->
-  let search ~id ~tool query =
+  let search ?after ~id ~tool query =
     Plan.node
       ~id:(node_id id)
       ~tool_name:tool
+      ?after
       ~input:(object_template [ "query", Plan.Json_template.literal (`String query) ])
       ()
   in
+  let after = [ node_id "memory" ] in
   let over_the_board_bound = String.make 201 'q' in
   let plan =
     match
@@ -616,24 +617,24 @@ let test_static_input_rejection_runs_no_node () =
           ; canonical_descriptor "masc_board_search"
           ]
         [ search ~id:"memory" ~tool:"keeper_memory_search" "EACCES"
-        ; search ~id:"library" ~tool:"keeper_library_search" "EACCES"
-        ; search ~id:"board" ~tool:"masc_board_search" over_the_board_bound
+        ; search ~after ~id:"library" ~tool:"keeper_library_search" "EACCES"
+        ; search ~after ~id:"board" ~tool:"masc_board_search" over_the_board_bound
         ]
     with
     | Ok plan -> plan
-    | Error error -> fail ("prior-art shaped plan was rejected: " ^ Plan.error_to_string error)
+    | Error error -> fail ("the three-search plan was rejected: " ^ Plan.error_to_string error)
   in
   (match Executor.schedule plan with
-   | [ Executor.Serial_batch memory; Executor.Concurrent_batch concurrent ] ->
-     check string "the serial search runs first" "memory" (node_name memory.node);
+   | [ Executor.Concurrent_batch [ memory ]; Executor.Concurrent_batch concurrent ] ->
+     check string "the first search runs alone" "memory" (node_name memory.node);
      check
        (list string)
-       "the concurrent searches share the next batch"
+       "the searches after it share the next batch"
        [ "board"; "library" ]
        (List.map (fun (scheduled : Executor.scheduled_node) -> node_name scheduled.node)
           concurrent
         |> List.sort String.compare)
-   | _ -> fail "prior-art shaped plan no longer schedules serial then concurrent");
+   | _ -> fail "the plan no longer schedules one search ahead of the other two");
   match
     Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch:never_dispatched ()
   with
@@ -692,7 +693,7 @@ let test_enum_literal_is_refused_before_any_node () =
        check
          (list string)
          "the refusal names the declared members"
-         [ "current"; "absorbed"; "history"; "all" ]
+         [ "current"; "absorbed"; "dropped"; "history"; "all" ]
          (List.map Yojson.Safe.Util.to_string allowed)
      | _ -> fail "the source literal was not refused by its enum")
 ;;

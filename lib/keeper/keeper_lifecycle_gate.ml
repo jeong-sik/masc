@@ -5,17 +5,15 @@ type gate =
   | Reactive
   | Proactive
   | Autonomous
-  | Bootstrap
 
 type flags =
   { reactive : bool
   ; proactive : bool
   ; autonomous : bool
-  ; bootstrap : bool
   }
 
 let all_enabled =
-  { reactive = true; proactive = true; autonomous = true; bootstrap = true }
+  { reactive = true; proactive = true; autonomous = true }
 
 let gate_enabled gate ~(global : flags) ~(meta : flags) =
   (* Exhaustive by construction: a new [gate] variant fails to compile
@@ -26,10 +24,8 @@ let gate_enabled gate ~(global : flags) ~(meta : flags) =
   | Reactive -> global.reactive && meta.reactive
   | Proactive -> global.proactive && meta.proactive
   | Autonomous -> global.autonomous && meta.autonomous
-  | Bootstrap -> global.bootstrap && meta.bootstrap
 
 let gate_to_string = function
   | Reactive -> "reactive"
   | Proactive -> "proactive"
   | Autonomous -> "autonomous"
-  | Bootstrap -> "bootstrap"

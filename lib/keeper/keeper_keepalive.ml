@@ -1065,13 +1065,6 @@ let rec start_keepalive
            ~rollback:Keeper_keepalive_launch_transaction.Remove_registered
            launch_registered
        with
-       | Error (Keeper_keepalive_launch_transaction.Shutdown_reserved operation_id) ->
-         Log.Keeper.warn
-           "start_keepalive: skipped %s because shutdown operation %s owns admission"
-           m.name
-           (Keeper_shutdown_types.Operation_id.to_string operation_id);
-         Keepalive_registration_rejected
-           (Keeper_registry.Registration_shutdown_reserved operation_id)
        | Error Keeper_keepalive_launch_transaction.Intake_token_not_live ->
          Log.Keeper.error
            "start_keepalive: inactive durable-intake token rejected %s"

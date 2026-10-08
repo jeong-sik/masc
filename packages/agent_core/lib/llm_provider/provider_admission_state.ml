@@ -38,6 +38,9 @@ type 'scheduler entry =
   { key : key
   ; scheduler : 'scheduler
   ; declared : allowance
+  ; published : bool
+      (** The consumer published [declared] for this identity, so it is the
+          allowance every request on the identity runs under. *)
   }
 
 type 'scheduler t = 'scheduler entry list
@@ -45,7 +48,7 @@ type 'scheduler t = 'scheduler entry list
 let empty = []
 
 let conflict_for entry ~declared =
-  if allowance_equal entry.declared declared
+  if entry.published || allowance_equal entry.declared declared
   then None, entry
   else
     ( Some
@@ -77,9 +80,32 @@ let install key ~declared ~candidate state =
       { key
       ; scheduler = candidate
       ; declared
+      ; published = false
       }
     in
     entry :: state, { scheduler = candidate; conflict = None }
+;;
+
+type 'scheduler publication =
+  | Published_new of 'scheduler
+  | Published_unchanged of 'scheduler
+  | Published_changed of 'scheduler
+
+let publish key ~declared ~candidate state =
+  let rec loop before = function
+    | [] ->
+      ( { key; scheduler = candidate; declared; published = true } :: state
+      , Published_new candidate )
+    | entry :: after when key_equal key entry.key ->
+      let unchanged = allowance_equal entry.declared declared in
+      let entry = { entry with declared; published = true } in
+      ( List.rev_append before (entry :: after)
+      , if unchanged
+        then Published_unchanged entry.scheduler
+        else Published_changed entry.scheduler )
+    | entry :: after -> loop (entry :: before) after
+  in
+  loop [] state
 ;;
 
 let find_scheduler key state =
@@ -129,6 +155,31 @@ let%test "a different priority run limit is a conflict" =
     conflict.authoritative.priority_run_limit = Some 3
     && Option.is_none conflict.declared.priority_run_limit
   | Some (_, { conflict = None; _ }) | None -> false
+;;
+
+let%test "a published identity resolves every declaration to the published allowance" =
+  let state, _ =
+    install test_key ~declared:{ max = 2; priority_run_limit = None } ~candidate:"first" empty
+  in
+  let state, publication =
+    publish test_key ~declared:{ max = 4; priority_run_limit = Some 3 } ~candidate:"unused" state
+  in
+  (match publication with
+   | Published_changed scheduler -> String.equal scheduler "first"
+   | Published_new _ | Published_unchanged _ -> false)
+  && (match resolve_existing test_key ~declared:{ max = 2; priority_run_limit = None } state with
+      | Some (_, { scheduler; conflict = None }) -> String.equal scheduler "first"
+      | Some (_, { conflict = Some _; _ }) | None -> false)
+;;
+
+let%test "publishing an absent identity installs its candidate" =
+  match
+    publish test_key ~declared:{ max = 1; priority_run_limit = None } ~candidate:"new" empty
+  with
+  | state, Published_new scheduler ->
+    String.equal scheduler "new"
+    && Option.equal String.equal (find_scheduler test_key state) (Some "new")
+  | _, (Published_changed _ | Published_unchanged _) -> false
 ;;
 
 let%test "a raced installer reuses the winner" =

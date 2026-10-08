@@ -1560,7 +1560,7 @@ let spoken_row name ~turn_outcome ~spoken expected =
 (* Pending control boundaries retain the response while execution continues.
    Completed terminal tools own their delivery instead. *)
 let test_control_turn_keeps_spoken_words () =
-  let words = "I read the file; the clone failed on DNS." in
+  let words = "    첫 줄\n    둘째 줄  \n\n" in
   spoken_row "continuation checkpoint keeps the words"
     ~turn_outcome:Masc.Keeper_turn_outcome.Continuation_checkpoint
     ~spoken:(Some words) words;
@@ -1734,6 +1734,12 @@ let test_direct_reply_visible_text () =
   check_ok "declared visible -> reply text" (Some "all done")
     (body
        [ ("reply", `String "all done");
+         ("turn_outcome", `String "visible_reply")
+       ]);
+  let spaced_reply = "    첫 줄\n    둘째 줄  \n\n" in
+  check_ok "visible reply keeps indentation and paragraph breaks" (Some spaced_reply)
+    (body
+       [ ("reply", `String spaced_reply);
          ("turn_outcome", `String "visible_reply")
        ]);
   check_ok "empty reply -> None" None

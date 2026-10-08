@@ -281,7 +281,6 @@ let error_class = function
                   | Transfer.Source_owner_identity_changed
           | Transfer.Target_owner_not_active
                   | Transfer.Target_owner_identity_changed
-          | Transfer.Continuation_binding_mismatch
           | Transfer.Source_queue_validation_failed _ )
       ; _
       }

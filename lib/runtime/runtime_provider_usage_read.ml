@@ -461,7 +461,9 @@ end
 
    An HTTP 403 does not say why the account was refused. Kimi For Coding
    sends the same body type for a spent 5-hour window and for a client the
-   plan does not admit. The provider's usage endpoint answers the question
+   plan does not admit. An HTTP 429 that states no wait does not say whether
+   a throttle or a spent window refused it; Ollama Cloud answers a spent
+   session window that way. The provider's usage endpoint answers the question
    with counts: a window that gates model calls and whose used count reached
    its limit is spent until its stated reset. Only that answer rests the
    scope; the status alone rests nothing. Codex account snapshots cannot
@@ -682,19 +684,22 @@ let read_runtime_after_account_refusal ?fetch (rt : Runtime_instance.t) =
   (match outcome with
    | Read read ->
      Log.Runtime_agent.info
-       "provider usage read after a 403 for %s: %s"
+       "provider usage read after an account refusal for %s: %s"
        scope_label
        (account_refusal_read_to_string read)
    | Read_failed error ->
      Log.Runtime_agent.warn
-       "provider usage read after a 403 failed for %s: %s"
+       "provider usage read after an account refusal failed for %s: %s"
        scope_label
        (http_error_to_string error)
    | Read_raised name ->
-     Log.Runtime_agent.warn "provider usage read after a 403 raised for %s: %s" scope_label name
+     Log.Runtime_agent.warn
+       "provider usage read after an account refusal raised for %s: %s"
+       scope_label
+       name
    | Skipped skip ->
      Log.Runtime_agent.info
-       "provider usage not read after a 403 for %s: %s"
+       "provider usage not read after an account refusal for %s: %s"
        scope_label
        (account_refusal_skip_to_string skip));
   outcome

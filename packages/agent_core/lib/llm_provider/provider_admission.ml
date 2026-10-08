@@ -4,8 +4,11 @@
 module State = Provider_admission_state
 
 (* Stdlib.Mutex rather than Eio.Mutex: the critical section only swaps an
-   immutable registry state and never blocks or switches fibers. Scheduler
-   creation, diagnostics, snapshots, and permit waiting remain outside it. *)
+   immutable registry state and never switches fibers. A published allowance
+   change also reconfigures its scheduler inside it, taking that scheduler's
+   own short mutex and waking the waiters it grants, so schedulers take
+   allowances in the order the registry records them. Scheduler creation,
+   diagnostics, snapshots, and permit waiting remain outside it. *)
 let state : Slot_scheduler.t State.t ref = ref State.empty
 let state_mutex = Stdlib.Mutex.create ()
 
@@ -85,17 +88,89 @@ let allowance_of_config (config : Provider_config.t) ~max : State.allowance =
   { max; priority_run_limit = config.admission_priority_run_limit }
 ;;
 
-(* Reads the registry under its mutex and keeps the state it read: the
-   lookup installs nothing, so asking about an identity never admits it. *)
-let admitted_allowance_change ~(config : Provider_config.t) =
-  match config.max_concurrent_requests with
-  | None -> None
-  | Some max ->
-    let declared = allowance_of_config config ~max in
-    Stdlib.Mutex.protect state_mutex (fun () ->
-      match State.resolve_existing (key_of_config config) ~declared !state with
-      | None -> None
-      | Some ((_ : Slot_scheduler.t State.t), resolution) -> resolution.conflict)
+type allowance_disagreement =
+  { kind : string
+  ; base_url : string
+  ; declarations : (string * State.allowance) list
+  }
+
+type published_allowances = (State.key * State.allowance) list
+
+(* Groups the admitted configs by endpoint identity in the order they are
+   given; an identity whose configs declare more than one allowance is a
+   disagreement. *)
+let allowances_of_configs labelled =
+  let groups =
+    List.fold_left
+      (fun groups (label, (config : Provider_config.t)) ->
+         match config.max_concurrent_requests with
+         | None -> groups
+         | Some max ->
+           let key = key_of_config config in
+           let declaration = label, allowance_of_config config ~max in
+           let rec add = function
+             | [] -> [ key, config, [ declaration ] ]
+             | (group_key, first, declarations) :: rest
+               when State.key_equal group_key key ->
+               (group_key, first, declarations @ [ declaration ]) :: rest
+             | group :: rest -> group :: add rest
+           in
+           add groups)
+      []
+      labelled
+  in
+  let agrees declarations =
+    match declarations with
+    | [] -> true
+    | (_, first) :: rest ->
+      List.for_all (fun (_, allowance) -> State.allowance_equal allowance first) rest
+  in
+  match
+    List.filter_map
+      (fun (_, (config : Provider_config.t), declarations) ->
+         if agrees declarations
+         then None
+         else
+           Some
+             { kind = Provider_config.string_of_provider_kind config.kind
+             ; base_url = Complete_common.sanitize_url_for_log config.base_url
+             ; declarations
+             })
+      groups
+  with
+  | [] ->
+    Ok
+      (List.filter_map
+         (fun (key, _, declarations) ->
+            match declarations with
+            | (_, allowance) :: _ -> Some (key, allowance)
+            | [] -> None)
+         groups)
+  | disagreements -> Error disagreements
+;;
+
+(* The registry entry and its scheduler change under one hold of the
+   registry mutex, so two loads publishing at once leave every scheduler on
+   the allowance the registry records. *)
+let publish (published : published_allowances) =
+  List.iter
+    (fun (key, (allowance : State.allowance)) ->
+       let candidate =
+         Slot_scheduler.create
+           ~max_slots:allowance.max
+           ~priority_run_limit:allowance.priority_run_limit
+       in
+       Stdlib.Mutex.protect state_mutex (fun () ->
+         let next, publication = State.publish key ~declared:allowance ~candidate !state in
+         state := next;
+         match publication with
+         | State.Published_new _ | State.Published_unchanged _ -> ()
+         | State.Published_changed scheduler ->
+           Slot_scheduler.reconfigure
+             scheduler
+             ~max_slots:allowance.max
+             ~priority_run_limit:allowance.priority_run_limit))
+    published
 ;;
 
 type wait_outcome = Slot_scheduler.wait_end =

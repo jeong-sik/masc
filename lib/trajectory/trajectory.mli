@@ -30,7 +30,6 @@ type trajectory_outcome =
   | Completed
   | Failed of string
   | Timeout
-  | CostExceeded
   | Gated of string
 
 type trajectory = {

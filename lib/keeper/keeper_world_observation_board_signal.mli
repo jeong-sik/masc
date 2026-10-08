@@ -28,10 +28,13 @@ type board_read_operation =
   | Get_comments
   | Parse_queued_comment_identity
 
+(** A Board read that answered no row: the id did not parse, or nothing has
+    it ({!Board.board_read_error}). Reads are served from memory, so this is
+    never a passing I/O failure and reading again gives the same answer. *)
 type board_unavailable =
   { operation : board_read_operation
   ; post_id : string
-  ; error : Board.board_error
+  ; error : Board.board_read_error
   }
 
 type 'a board_read =
@@ -40,7 +43,7 @@ type 'a board_read =
 
 (** The comments after the keeper's latest comment on a post, which are by
     definition all written by someone else. They run to the end of the thread
-    in {!Board_dispatch.get_comments} order, the order [masc_board_post_get]
+    in {!Board_dispatch.read_comments} order, the order [masc_board_post_get]
     pages through. There is at least one: [oldest] always exists and [newer]
     holds the rest, oldest first. *)
 type replies_after_own_comment =
@@ -60,22 +63,6 @@ type comment_state =
   ]
 
 type comment_status = comment_state board_read
-
-(** Whether a failed board read is worth retrying (RFC board-unavailable-result).
-    Closed set: adding a new {!Board.board_error} variant forces a
-    classification decision in {!disposition_of_error} rather than defaulting
-    to "retry forever" or "silently drop". *)
-type disposition =
-  | Permanent
-      (** Retrying the same read reproduces the same error (e.g. the post
-          was deleted). Callers must consume/drop the affected stimulus and
-          must not requeue it. *)
-  | Transient
-      (** An environment-level hiccup unrelated to whether the target
-          exists. Callers may retain the stimulus for a later cycle. *)
-
-val disposition_of_error : Board.board_error -> disposition
-val disposition_of_unavailable : board_unavailable -> disposition
 
 (* [board_read_operation_to_string] renders the operation inside
    [unavailable_to_string] below, which is this module's only use of it. *)
@@ -150,5 +137,6 @@ val wake_reason
   -> signal:Board_dispatch.board_signal
   -> wake_reason option board_read
 (** [Available None] means the structural reactive pipeline found no
-    deterministic address for this keeper. [Unavailable _] preserves a typed
-    Board read failure so callers can retain durable work and avoid acking it. *)
+    deterministic address for this keeper. [Unavailable _] names the Board read
+    that answered no row (the post was swept or an id does not parse); reading
+    again gives the same answer, so callers consume the source. *)

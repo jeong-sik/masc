@@ -14,7 +14,6 @@ type lsp_process = {
 
 type spawn_error =
   | Command_not_found of string
-  | Startup_timeout of string
   | Process_error of string
 
 val pp_spawn_error : Format.formatter -> spawn_error -> unit

@@ -1876,9 +1876,9 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | Assistant_native_tool observation ->
           native_tool_attempted := true;
           (match observe_native_start native_tool_calls ~scope ~uuid ~ordinal observation with
-           | Native_start_new | Native_start_active_replay ->
+           | Native_start_new ->
                emit_stream_event on_stream_event (Native_tool_started observation)
-           | Native_start_closed_replay | Native_start_conflict -> ());
+           | Native_start_active_replay | Native_start_closed_replay | Native_start_conflict -> ());
           Ok ()) (Ok ()) (List.mapi (fun ordinal block -> ordinal, block) blocks) in
     let texts = List.rev !texts_rev in
     if List.exists (fun text -> String.length text > 0) texts then response_emitted := true;

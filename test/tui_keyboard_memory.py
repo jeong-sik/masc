@@ -467,16 +467,25 @@ def autonomous_turn_history_interaction() -> Interaction:
              "the unrecorded reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
-            # Named lanes remain legible without remembering the glyphs.
-            (re.compile("·\\s+THINKING\\s+2 reasoning steps".encode()),
-             "the named thinking lane"),
-            (re.compile("■\\s+TOOLS\\s+│\\s+✗".encode()),
-             "the named tool block"),
+            # The work lanes carry their labels again by default (#41661
+            # restored them): the badge is the mark plus the lane word, so a
+            # reader who has not memorised the glyphs can still read the lane
+            # (tui-chat-design). The thinking row is pinned as mark + THINKING;
+            # the block header row carries TOOLS, the quoted rail and the
+            # first call's status on one stripped row -- never the bare mark
+            # alone, which the body's own " · " separators also carry.
+            (re.compile("\u00b7\\s+THINKING".encode()),
+             "the thinking lane label"),
+            (re.compile("\u25a0\\s+TOOLS\\s+\u2502\\s+\u2717".encode()),
+             "the tool block header with its first call"),
         ):
             if find_needle(plain_pane, needle) < 0:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
+        # These pins are the revert guard the old word ban used to be: a
+        # renderer that drops TOOLS or THINKING from the badges fails here
+        # again, not silently.
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 

@@ -19,6 +19,7 @@ type t =
   ; launcher : launcher
   ; workspace_port : (int, Workspace_connection.error) result
   ; server : server
+  ; bidi_host : Browser_bidi_host_record.state
   }
 
 type verdict = Absent | Connected | Aligned | Unverified | Misconfigured
@@ -81,7 +82,8 @@ let observe ~base_path ~server =
     Workspace_connection.resolve ~base_path:(Some base_path) ~cli:None ~environment:None
     |> Result.map Workspace_connection.to_int
   in
-  { base_path; launcher; workspace_port; server }
+  { base_path; launcher; workspace_port; server
+  ; bidi_host = Browser_bidi_host_record.observe ~base_path }
 
 let verdict t =
   match t.server, t.launcher, t.workspace_port with
@@ -163,6 +165,178 @@ let message t =
          here; a running server's own check reports it. %s"
         port environment_note
 
+type bidi_attach = { launcher : string; arguments : string }
+
+(* What the launcher is given to attach to a Firefox the operator started
+   with --remote-debugging-port PORT. *)
+let bidi_host_arguments = "--bidi-url ws://127.0.0.1:PORT/session"
+
+let bidi_attach ~base_path =
+  { launcher = Filename.concat (host_directory base_path) launcher_name
+  ; arguments = bidi_host_arguments
+  }
+
+(* How a BiDi connection is added. *)
+let attach_bidi ~base_path =
+  let { launcher; arguments } = bidi_attach ~base_path in
+  Printf.sprintf
+    "the operator starts Firefox on a profile kept for this with --remote-debugging-port PORT, \
+     then runs %s %s (%s)"
+    launcher arguments
+    (Browser_lane.live_transport_setup_doc Browser_lane.Webdriver_bidi)
+
+let at seconds = Time_codec.rfc3339_of_unix seconds
+
+(* Whether the host the record names polls the server this process is. The
+   record is the host's own word; the lane's client list is the server's. *)
+let bidi_host_polls t (entry : Browser_bidi_host_record.entry) =
+  match t.server with
+  | Not_serving ->
+      " No MASC server runs in this process, so whether it polls one is not observed here."
+  | Serving { polling; _ } ->
+      if List.exists
+           (fun (info : Browser_lane.client_info) ->
+              info.transport = Browser_lane.Webdriver_bidi
+              && String.equal (Browser_lane.client_id_to_string info.client_id) entry.client_id)
+           polling
+      then " It polls this server."
+      else
+        " This server does not list that client now. The host asks again after a request \
+         that failed, so a server that only just started lists it within seconds."
+
+(* The host's results that got no acknowledgement are in the record; the
+   sentence only says there are some. *)
+let bidi_host_unacknowledged (entry : Browser_bidi_host_record.entry) =
+  match List.length entry.unacknowledged with
+  | 0 -> ""
+  | 1 -> " The server acknowledged all but one of its results; the record lists that one."
+  | count ->
+      Printf.sprintf " The server did not acknowledge %d of its results; the record lists them." count
+
+let bidi_host_session (ending : Browser_bidi_host_record.ending) =
+  match ending.session with
+  | No_session_left -> ""
+  | Session_left ->
+      " Firefox did not confirm that its BiDi session ended. Restart that Firefox before \
+       attaching again: while it holds the session it refuses the next host."
+  | Session_unknown ->
+      " Its connection to Firefox was gone before it could end its BiDi session. If that Firefox \
+       is still running, it holds the session and refuses the next host until it is restarted."
+
+let bidi_host_message t =
+  let attach = attach_bidi ~base_path:t.base_path in
+  match t.bidi_host with
+  | Browser_bidi_host_record.Never_started ->
+      Printf.sprintf
+        "No BiDi browser host has run for this workspace. Hover and drag on the live lane \
+         need one: %s."
+        attach
+  | Browser_bidi_host_record.Running ({ attached_at = None; _ } as entry) ->
+      Printf.sprintf "A BiDi browser host (pid %d) started at %s and is connecting to %s."
+        entry.pid (at entry.started_at) entry.bidi_url
+  | Browser_bidi_host_record.Running ({ attached_at = Some attached; _ } as entry) ->
+      Printf.sprintf "A BiDi browser host (pid %d) is attached to %s since %s, as client %s.%s%s"
+        entry.pid entry.bidi_url (at attached) entry.client_id (bidi_host_polls t entry)
+        (bidi_host_unacknowledged entry)
+  | Browser_bidi_host_record.Ended (entry, ending) ->
+      Printf.sprintf
+        "No BiDi browser host is running. The last one (pid %d) ended at %s: %s.%s%s To attach \
+         again, %s."
+        entry.pid (at ending.at) ending.reason (bidi_host_session ending)
+        (bidi_host_unacknowledged entry) attach
+  | Browser_bidi_host_record.Died entry ->
+      Printf.sprintf
+        "No BiDi browser host is running. The last one (pid %d, started at %s) left no reason \
+         for ending: it was killed or crashed, or could not write one. Its BiDi session may be \
+         left in that Firefox, which then refuses the next host until it is restarted.%s To \
+         attach again, %s."
+        entry.pid (at entry.started_at) (bidi_host_unacknowledged entry) attach
+  | Browser_bidi_host_record.Unreadable detail ->
+      Printf.sprintf
+        "The BiDi browser host's record cannot be read (%s). A host that starts replaces it: %s."
+        detail attach
+
+type bidi_host_report =
+  { state : Browser_bidi_host_record.state
+  ; attach : bidi_attach
+  ; message : string
+  }
+
+let bidi_host_report t =
+  { state = t.bidi_host
+  ; attach = bidi_attach ~base_path:t.base_path
+  ; message = bidi_host_message t
+  }
+
+let bidi_host_report_to_json { state; attach; message } =
+  let name, record, detail =
+    match state with
+    | Browser_bidi_host_record.Never_started -> "never_started", `Null, `Null
+    | Browser_bidi_host_record.Running entry ->
+        "running", Browser_bidi_host_record.entry_to_json entry, `Null
+    | Browser_bidi_host_record.Ended (entry, _) ->
+        "ended", Browser_bidi_host_record.entry_to_json entry, `Null
+    | Browser_bidi_host_record.Died entry -> "died", Browser_bidi_host_record.entry_to_json entry, `Null
+    | Browser_bidi_host_record.Unreadable detail -> "unreadable", `Null, `String detail
+  in
+  `Assoc
+    [ "state", `String name
+    ; "record", record
+    ; "detail", detail
+    ; ( "attach"
+      , `Assoc [ "launcher", `String attach.launcher; "arguments", `String attach.arguments ] )
+    ; "message", `String message
+    ]
+
+let bidi_host_to_json t = bidi_host_report_to_json (bidi_host_report t)
+
+let bidi_host_report_of_json json =
+  let ( let* ) = Result.bind in
+  let field fields name =
+    Option.to_result ~none:("the BiDi host report has no " ^ name) (List.assoc_opt name fields)
+  in
+  let text fields name =
+    let* value = field fields name in
+    match value with
+    | `String text -> Ok text
+    | _ -> Error ("the BiDi host report's " ^ name ^ " is not a string")
+  in
+  let* fields =
+    match json with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "the BiDi host report is not an object"
+  in
+  let* name = text fields "state" in
+  let entry () =
+    let* record = field fields "record" in
+    Browser_bidi_host_record.entry_of_json record
+  in
+  let* state =
+    match name with
+    | "never_started" -> Ok Browser_bidi_host_record.Never_started
+    | "running" -> Result.map (fun entry -> Browser_bidi_host_record.Running entry) (entry ())
+    | "ended" ->
+        let* entry = entry () in
+        (match entry.ended with
+         | Some ending -> Ok (Browser_bidi_host_record.Ended (entry, ending))
+         | None -> Error "the BiDi host report calls a record without an ending ended")
+    | "died" -> Result.map (fun entry -> Browser_bidi_host_record.Died entry) (entry ())
+    | "unreadable" ->
+        Result.map (fun detail -> Browser_bidi_host_record.Unreadable detail) (text fields "detail")
+    | _ -> Error "the BiDi host report names a state this reader does not know"
+  in
+  let* attach =
+    let* attach = field fields "attach" in
+    match attach with
+    | `Assoc attach ->
+        let* launcher = text attach "launcher" in
+        let* arguments = text attach "arguments" in
+        Ok { launcher; arguments }
+    | _ -> Error "the BiDi host report's attach is not an object"
+  in
+  let* message = text fields "message" in
+  Ok { state; attach; message }
+
 let to_json t =
   let workspace_port, workspace_port_error =
     match t.workspace_port with
@@ -187,4 +361,5 @@ let to_json t =
         | Absent -> "absent" | Connected -> "connected" | Aligned -> "aligned"
         | Unverified -> "unverified" | Misconfigured -> "misconfigured")
     ; "message", `String (message t)
+    ; "bidi_host", bidi_host_to_json t
     ]

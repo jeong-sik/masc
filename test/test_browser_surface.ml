@@ -580,6 +580,18 @@ let test_keeper_hears_which_connection_serves_the_work () =
       check int "no connected browser serves it yet" 0 U.(data |> member "servingClients" |> to_list |> List.length);
       check bool "so the remedy is the operator's, and says how" true
         (String_util.contains_substring U.(data |> member "retry" |> to_string) "masc-browser-host --bidi-url");
+      (* Only BiDi serves this, so the answer carries what the BiDi host's own
+         record says: here, that none has run for the workspace. *)
+      check string "the BiDi host's state is in the answer" "never_started"
+        U.(data |> member "bidiHost" |> member "state" |> to_string);
+      check bool "with how one is attached" true
+        (String_util.contains_substring U.(data |> member "bidiHost" |> member "message" |> to_string)
+           "--remote-debugging-port");
+      check bool "and the launcher by itself" true
+        (String.ends_with ~suffix:"/.masc/browser-lane/host/launch"
+           U.(data |> member "bidiHost" |> member "attach" |> member "launcher" |> to_string));
+      check string "with what it is given" "--bidi-url ws://127.0.0.1:PORT/session"
+        U.(data |> member "bidiHost" |> member "attach" |> member "arguments" |> to_string);
       let bidi = info 2 Lane.Webdriver_bidi in
       connect bidi;
       let data = interact extension hover in
@@ -591,6 +603,8 @@ let test_keeper_hears_which_connection_serves_the_work () =
       check string "drag is refused on the extension the same way" "trusted_drag" U.(data |> member "capability" |> to_string);
       let data = interact bidi ["action",`String "activate_tab"] in
       check string "tab activation is refused on BiDi" "tab_activation" U.(data |> member "capability" |> to_string);
+      check bool "a BiDi host's state is no part of what the extension serves" true
+        (U.(data |> member "bidiHost") = `Null);
       check (list string) "and the extension connection is offered" [id extension]
         U.(data |> member "servingClients" |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string));
       List.iter (fun client -> check bool "no refused request queued a browser command" true

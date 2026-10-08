@@ -47,9 +47,18 @@ let goto = function
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/dashboard/browser-lane/clients"
-      (with_permission_auth ~permission:Masc_domain.CanReadState (fun _state request reqd ->
-         reply request reqd (Ok (`Assoc ["clients", `List
-           (List.map Browser_lane.client_json (Browser_lane.active_clients ()))]))))
+      (with_permission_auth ~permission:Masc_domain.CanReadState (fun state request reqd ->
+         (* The connected clients are this server's own list. The BiDi host's
+            state is that host's record on disk, which also says why a host
+            that is not in the list ended. *)
+         let host =
+           Browser_lane_launcher.observe
+             ~base_path:(Mcp_server.workspace_config state).base_path
+             ~server:(Browser_lane_launcher.current_server ())
+         in
+         reply request reqd (Ok (`Assoc
+           [ "clients", `List (List.map Browser_lane.client_json (Browser_lane.active_clients ()))
+           ; "bidiHost", Browser_lane_launcher.bidi_host_to_json host ]))))
   |> Http.Router.post "/api/v1/dashboard/browser-lane/read"
       (with_permission_auth ~permission:Masc_domain.CanReadState (fun _state request reqd ->
          read_body request reqd (fun json ->

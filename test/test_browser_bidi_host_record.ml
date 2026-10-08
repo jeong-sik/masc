@@ -6,6 +6,19 @@
 open Alcotest
 module Record = Masc.Browser_bidi_host_record
 module Peer = Masc.Browser_bidi_peer
+module Launcher = Masc.Browser_lane_launcher
+
+(* What masc doctor says of the BiDi host for this workspace, and how it
+   rates it. The doctor is another process than the host, as this one is. *)
+let doctor base =
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  match
+    List.find_opt
+      (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_bidi_host)
+      observed.Onboarding_status.checks
+  with
+  | Some found -> found.condition, found.message
+  | None -> fail "the doctor says nothing of the BiDi host"
 
 (* This executable is also the second process of the lock case: started with
    this argument it takes the record as a host does, says so, and holds it
@@ -251,6 +264,10 @@ let test_a_reader_follows_a_host_from_start_to_death () =
         check int "the record names the host" pid running.pid;
         check bool "which has no session yet" true (running.attached_at = None)
       | other -> failf "a host that holds its lock is %s" (said other));
+     (let condition, message = doctor base in
+      check bool "the doctor waits on a host that is connecting" true
+        (condition = Onboarding_status.Needs_verification);
+      check bool "and says so" true (String_util.contains_substring message "is connecting to"));
      (* A second host for the workspace, which this process stands in for. *)
      (match take ~pid:(Unix.getpid ()) ~bidi_url:"ws://127.0.0.1:9333/session" base with
       | Error (Record.Another_host named) -> check (option int) "it is told who holds it" (Some pid) named
@@ -262,6 +279,18 @@ let test_a_reader_follows_a_host_from_start_to_death () =
      (match Record.observe ~base_path:base with
       | Record.Running running -> check bool "the record says so" true (running.attached_at <> None)
       | other -> failf "an attached host is %s" (said other));
+     (* With no server in this process, as for masc doctor. *)
+     (let condition, message = doctor base in
+      check bool "the doctor is satisfied by an attached host" true
+        (condition = Onboarding_status.Satisfied);
+      check bool "and names it" true
+        (String_util.contains_substring message (Printf.sprintf "(pid %d) is attached to" pid));
+      check bool "without a server it does not claim the host polls one" true
+        (String_util.contains_substring message "not observed here"));
+     check bool "the launcher observation carries the same state" true
+       (match (Launcher.observe ~base_path:base ~server:Launcher.Not_serving).bidi_host with
+        | Record.Running _ -> true
+        | Record.Never_started | Record.Ended _ | Record.Died _ | Record.Unreadable _ -> false);
      (* Asking needs no leave to write the lock file. *)
      let lock = Filename.concat lane "bidi-host.lock" in
      Unix.chmod lock 0o400;
@@ -274,9 +303,12 @@ let test_a_reader_follows_a_host_from_start_to_death () =
    | () -> finish ()
    | exception exn -> finish (); raise exn);
   (* The holder exited without an ending, as a killed host does. *)
-  match Record.observe ~base_path:base with
-  | Record.Died dead -> check int "the host that died" pid dead.pid
-  | other -> failf "a host that exited without an ending is %s" (said other)
+  (match Record.observe ~base_path:base with
+   | Record.Died dead -> check int "the host that died" pid dead.pid
+   | other -> failf "a host that exited without an ending is %s" (said other));
+  let condition, message = doctor base in
+  check bool "the doctor asks for a host again" true (condition = Onboarding_status.Needs_setup);
+  check bool "and says the last one died" true (String_util.contains_substring message "killed or crashed")
 
 (* What a process other than this one finds: it tries to take the workspace,
    as a second host would. Only another process sees the kernel's lock; this

@@ -11,6 +11,7 @@ type check_id =
   | Sandbox
   | Keeper_persistence
   | Browser_lane
+  | Browser_bidi_host
 
 type role = Required_to_open | Advisory
 
@@ -52,6 +53,7 @@ let check_id_name = function
   | Sandbox -> "sandbox"
   | Keeper_persistence -> "keeper_persistence"
   | Browser_lane -> "browser_lane"
+  | Browser_bidi_host -> "browser_bidi_host"
 
 (* Existing history opens on what every Keeper in the workspace shares: the
    workspace, a runtime.toml the server can load, and Keeper metadata its boot
@@ -65,7 +67,7 @@ let check_id_name = function
    is a separate surface; its drift is reported the same way. *)
 let role = function
   | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
-  | Model_connection | Keeper_declaration | Sandbox | Browser_lane -> Advisory
+  | Model_connection | Keeper_declaration | Sandbox | Browser_lane | Browser_bidi_host -> Advisory
 
 let role_name = function
   | Required_to_open -> "required_to_open"
@@ -182,17 +184,36 @@ let keeper_checks base_path =
 
 (* The browser tools read the same observation when no browser answers, so an
    operator and a Keeper are told the same cause. *)
+(* The BiDi host is read from its own record on disk, so this answers with
+   no server running. A workspace with no browser lane installed and no host
+   record has nothing to say about one. *)
+let browser_bidi_host_check (observation : Browser_lane_launcher.t) =
+  let report condition =
+    [check Browser_bidi_host condition (Browser_lane_launcher.bidi_host_message observation)
+       [Inspect_configuration]]
+  in
+  match observation.bidi_host, observation.launcher with
+  | Browser_bidi_host_record.Never_started, Browser_lane_launcher.Not_installed -> []
+  | ( Browser_bidi_host_record.Never_started
+    , ( Browser_lane_launcher.Undeclared | Browser_lane_launcher.Unreadable
+      | Browser_lane_launcher.Describes_another_launcher | Browser_lane_launcher.Follows_workspace ) )
+  | (Browser_bidi_host_record.Ended _ | Browser_bidi_host_record.Died _), _ -> report Needs_setup
+  | Browser_bidi_host_record.Running { attached_at = None; _ }, _ -> report Needs_verification
+  | Browser_bidi_host_record.Running { attached_at = Some _; _ }, _ -> report Satisfied
+  | Browser_bidi_host_record.Unreadable _, _ -> report Invalid
+
 let browser_lane_check base_path =
   let observation =
     Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
   let message = Browser_lane_launcher.message observation in
-  match Browser_lane_launcher.verdict observation with
-  | Browser_lane_launcher.Absent -> []
-  | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned ->
-    [check Browser_lane Satisfied message [Inspect_configuration]]
-  | Browser_lane_launcher.Unverified ->
-    [check Browser_lane Needs_verification message [Inspect_configuration]]
-  | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]]
+  (match Browser_lane_launcher.verdict observation with
+   | Browser_lane_launcher.Absent -> []
+   | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned ->
+     [check Browser_lane Satisfied message [Inspect_configuration]]
+   | Browser_lane_launcher.Unverified ->
+     [check Browser_lane Needs_verification message [Inspect_configuration]]
+   | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]])
+  @ browser_bidi_host_check observation
 
 let inspect ~base_path =
   match base_path with

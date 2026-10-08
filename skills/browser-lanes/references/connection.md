@@ -19,6 +19,9 @@
     읽기(`mode=text`·`elements`·`scene`·`screenshot`)는 둘 다 한다. `servingClients`에 연결이 있으면 그 clientId로
     탭 목록과 페이지를 다시 읽은 뒤 거기서 다시 한다. 탭 ID와 관측은 연결마다
     따로다. 비어 있으면 `retry`를 운영자에게 그대로 전한다.
+    `webdriver_bidi` 연결이 필요한 일이었으면 응답에 `bidiHost`가 있다. 그 `message`는
+    BiDi host가 지금 떠 있는지, 마지막 host가 언제 왜 끝났는지, 붙이는 방법을 말한다.
+    이것도 운영자에게 그대로 전한다. host를 띄우는 일은 운영자가 한다.
 - live 응답은 성공했을 때도 `clientId` 옆에 `transport`를 싣는다. hover나 drag가 필요한
   일이면 시작할 때 이 값을 본다. `web_extension`이면 그 연결로는 못 하므로, 연결 목록에
   `webdriver_bidi` 연결이 있는지 먼저 확인한다. automation과 stagehand 응답에는

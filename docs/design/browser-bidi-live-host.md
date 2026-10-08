@@ -192,6 +192,24 @@ record: a host that held the lock under its predecessor's record would be
 read as that predecessor. A record that could not be written later does not
 stop a serving host; the next write that succeeds carries it.
 
+Three places read the record and say what it says, with how a host is
+attached:
+
+- `masc doctor` prints a `browser_bidi_host` line. It reads the files, so it
+  answers with no server running. A host that is attached is `satisfied`,
+  one still connecting `needs_verification`, none running `needs_setup`, and
+  a record that cannot be read `invalid`. A workspace with no browser lane
+  installed and no record has no such line.
+- `GET /api/v1/dashboard/browser-lane/clients` adds `bidiHost` beside
+  `clients`: `state` (`never_started`, `running`, `ended`, `died`,
+  `unreadable`), the `record`, why it is unreadable as `detail`, the host
+  command as `attach` (`launcher` and `arguments`), and the same sentence as
+  `message`. A server also says whether its own client list has the host the
+  record names.
+- A Keeper whose hover or drag is refused as `live_transport_unsupported`
+  with no BiDi connection to offer gets the same `bidiHost` in the answer,
+  to pass on to the operator.
+
 Attaching again is the host command alone. A host that is stopped, or ends
 by itself, first ends the BiDi session it asked for; Firefox keeps running
 with its tabs and takes the next host, which registers as a new client. Without that step the

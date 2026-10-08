@@ -49,6 +49,9 @@ type t =
   ; workspace_port : (int, Workspace_connection.error) result
         (** The port connection.toml names, or the default when it names none. *)
   ; server : server
+  ; bidi_host : Browser_bidi_host_record.state
+        (** What the BiDi host's own record and its lock say. It is read from
+            disk, so it is known without a server. *)
   }
 
 val observe : base_path:string -> server:server -> t
@@ -72,7 +75,38 @@ val verdict : t -> verdict
 (** One operator sentence naming the cause and the change that resolves it. *)
 val message : t -> string
 
+(** One operator sentence for the BiDi host: whether one runs and is
+    attached, why the last one ended, and how one is attached. When a server
+    is observed it also says whether that server lists the host's client. *)
+val bidi_host_message : t -> string
+
+(** How a host is started, for a Firefox the operator started with
+    [--remote-debugging-port PORT]: the launcher this workspace has and what
+    it is given. *)
+type bidi_attach = { launcher : string; arguments : string }
+
+(** What a reader is told of the BiDi host: the state its record and lock
+    say, how one is attached, and {!bidi_host_message}. *)
+type bidi_host_report =
+  { state : Browser_bidi_host_record.state
+  ; attach : bidi_attach
+  ; message : string
+  }
+
+val bidi_host_report : t -> bidi_host_report
+
+(** [state] ([never_started], [running], [ended], [died], [unreadable]),
+    [record] (the host's own record, null when there is none to show),
+    [detail] (why the record is unreadable, null otherwise), [attach]
+    ([launcher] and [arguments]) and [message]. *)
+val bidi_host_report_to_json : bidi_host_report -> Yojson.Safe.t
+
+(** Reads what {!bidi_host_report_to_json} wrote. *)
+val bidi_host_report_of_json : Yojson.Safe.t -> (bidi_host_report, string) result
+
+val bidi_host_to_json : t -> Yojson.Safe.t
+
 (** [launcher], [workspace_port], [workspace_port_error], [serving_port],
-    [polling_hosts], [verdict] and [message], for a tool result a Keeper
-    reads. The two server fields are null when no server is observed. *)
+    [polling_hosts], [verdict], [message] and [bidi_host], for a tool result a
+    Keeper reads. The two server fields are null when no server is observed. *)
 val to_json : t -> Yojson.Safe.t

@@ -189,6 +189,190 @@ let browser_lane_declared_launcher_follows_the_workspace () =
   check bool "the workspace port is named" true
     (String_util.contains_substring (message Onboarding_status.Browser_lane observed) "64850")
 
+(* The BiDi host is read from the record it keeps on disk, so the doctor
+   answers for it with no server running. *)
+module Record = Masc.Browser_bidi_host_record
+module Launcher = Masc.Browser_lane_launcher
+
+let bidi_check observed =
+  List.find_opt (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_bidi_host)
+    observed.Onboarding_status.checks
+
+let says observed fragments =
+  List.iter (fun fragment ->
+      check bool ("the doctor says: " ^ fragment) true
+        (String_util.contains_substring (message Onboarding_status.Browser_bidi_host observed) fragment))
+    fragments
+
+let take_record base =
+  match
+    Record.take ~base_path:base ~pid:4242 ~bidi_url:"ws://127.0.0.1:9222/session"
+      ~client_id:"0199c0de-0000-7000-8000-000000000001" ~now:1_791_000_000.
+  with
+  | Ok { held; not_synced = None } -> held
+  | Ok { not_synced = Some detail; _ } -> fail detail
+  | Error refusal -> fail (Record.refusal_message refusal)
+
+let written = function Ok () -> () | Error failure -> fail (Record.write_failure_message failure)
+let released held = match Record.release held with Ok () -> () | Error detail -> fail detail
+
+let unacknowledged : Record.unacknowledged =
+  { request_id = Record.request_id_of_wire "0199c0de-0000-4000-8000-0000000000a1"
+  ; verb = Some Masc.Browser_bidi_peer.Page_interact; outcome = Record.Unknown
+  ; cause = Record.Unconfirmed; at = 1_791_000_030. }
+
+let a_workspace_without_a_browser_lane_says_nothing_of_a_bidi_host () = with_workspace @@ fun base ->
+  Unix.mkdir (Filename.concat base ".masc") 0o700;
+  check bool "no lane and no host record: no BiDi check" true
+    (bidi_check (Onboarding_status.inspect ~base_path:(Some base)) = None)
+
+let a_lane_with_no_bidi_host_says_how_one_is_attached () =
+  browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "a host that never ran is something to set up" true
+    (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Needs_setup);
+  says observed
+    [ "No BiDi browser host has run for this workspace"
+    ; "--remote-debugging-port"
+    ; Filename.concat base ".masc/browser-lane/host/launch" ^ " --bidi-url"
+    ; "docs/design/browser-bidi-live-host.md" ]
+
+let a_bidi_host_that_ended_says_when_and_why () =
+  browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  let held = take_record base in
+  written (Record.attached held ~now:1_791_000_002.);
+  let ended_with ~reason session =
+    written (Record.ended held ~reason ~session ~now:1_791_000_060.);
+    Onboarding_status.inspect ~base_path:(Some base)
+  in
+  let observed = ended_with ~reason:"stopped by SIGINT" Record.No_session_left in
+  check bool "a host that ended is something to set up again" true
+    (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Needs_setup);
+  says observed
+    [ "No BiDi browser host is running"; "(pid 4242)"; "ended at 2026-10-03T"; "stopped by SIGINT"
+    ; "To attach again" ];
+  List.iter (fun fragment ->
+      check bool ("a session that was ended is not spoken of: " ^ fragment) false
+        (String_util.contains_substring (message Onboarding_status.Browser_bidi_host observed) fragment))
+    [ "BiDi session"; "acknowledge" ];
+  says (ended_with ~reason:"stopped with its BiDi session left in Firefox" Record.Session_left)
+    [ "Firefox did not confirm that its BiDi session ended"; "Restart that Firefox before attaching again" ];
+  (* Firefox going away is not a session left in it. *)
+  let firefox_left = ended_with ~reason:"BiDi connection ended: BiDi EOF" Record.Session_unknown in
+  says firefox_left [ "was gone before it could end its BiDi session"; "If that Firefox is still running" ];
+  check bool "a host that could not ask does not say Firefox was asked" false
+    (String_util.contains_substring (message Onboarding_status.Browser_bidi_host firefox_left)
+       "did not confirm");
+  written (Record.note_unacknowledged held unacknowledged);
+  says (Onboarding_status.inspect ~base_path:(Some base)) [ "acknowledged all but one of its results" ];
+  written (Record.note_unacknowledged held unacknowledged);
+  says (Onboarding_status.inspect ~base_path:(Some base)) [ "did not acknowledge 2 of its results" ];
+  released held
+
+(* A host that gave the workspace up without an ending reads as one that
+   died. The case with a host that is running, read by another process as
+   the doctor reads it, is in test_browser_bidi_host_record. *)
+let a_bidi_host_that_died_says_the_session_may_be_left () =
+  browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  let held = take_record base in
+  written (Record.attached held ~now:1_791_000_002.);
+  released held;
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "a host that died is something to set up again" true
+    (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Needs_setup);
+  says observed
+    [ "left no reason for ending"; "killed or crashed"; "could not write one"; "(pid 4242"
+    ; "may be left in that Firefox"; "To attach again" ]
+
+let a_bidi_host_record_that_cannot_be_read_is_invalid () =
+  browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  write (Filename.concat base ".masc/browser-lane/bidi-host.json") "{\"pid\": 1";
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "a record that is not one is invalid" true
+    (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Invalid);
+  says observed [ "cannot be read"; "A host that starts replaces it" ]
+
+(* What a running server adds: whether its own client list has the host the
+   record names. *)
+let a_server_says_whether_the_attached_host_polls_it () =
+  let entry : Record.entry =
+    { pid = 4242; started_at = 1_791_000_000.; bidi_url = "ws://127.0.0.1:9222/session"
+    ; client_id = "0199c0de-0000-7000-8000-000000000001"; attached_at = Some 1_791_000_002.
+    ; unacknowledged = []; ended = None }
+  in
+  let client transport id : Browser_lane.client_info =
+    { client_id = (match Browser_lane.client_id_of_string id with Ok id -> id | Error detail -> fail detail)
+    ; browser = Browser_lane.Firefox; version = "157.0"; engine_version = "157.0"; transport }
+  in
+  let observation server : Launcher.t =
+    { base_path = "/workspace"; launcher = Launcher.Follows_workspace
+    ; workspace_port = Ok 8935; server; bidi_host = Record.Running entry }
+  in
+  let said server = Launcher.bidi_host_message (observation server) in
+  let says_of server fragment =
+    check bool fragment true (String_util.contains_substring (said server) fragment)
+  in
+  says_of Launcher.Not_serving "is attached to ws://127.0.0.1:9222/session";
+  says_of Launcher.Not_serving "whether it polls one is not observed here";
+  says_of
+    (Launcher.Serving
+       { port = 8935; polling = [ client Browser_lane.Webdriver_bidi entry.client_id ] })
+    "It polls this server.";
+  (* The same ID over the extension is another connection, and another BiDi
+     client is another host. *)
+  List.iter (fun polling ->
+      says_of (Launcher.Serving { port = 8935; polling })
+        "This server does not list that client now")
+    [ []
+    ; [ client Browser_lane.Web_extension entry.client_id ]
+    ; [ client Browser_lane.Webdriver_bidi "0199c0de-0000-7000-8000-000000000002" ] ];
+  check bool "a host still connecting is not called attached" true
+    (String_util.contains_substring
+       (Launcher.bidi_host_message
+          { (observation Launcher.Not_serving) with
+            bidi_host = Record.Running { entry with attached_at = None } })
+       "is connecting to ws://127.0.0.1:9222/session")
+
+(* What the server writes of the host, a reader of the same build reads back. *)
+let a_bidi_host_report_reads_back_as_written () =
+  let entry : Record.entry =
+    { pid = 4242; started_at = 1_791_000_000.; bidi_url = "ws://127.0.0.1:9222/session"
+    ; client_id = "0199c0de-0000-7000-8000-000000000001"; attached_at = Some 1_791_000_002.
+    ; unacknowledged = [ unacknowledged ]; ended = None }
+  in
+  let ending : Record.ending =
+    { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.Session_unknown }
+  in
+  let ended = { entry with ended = Some ending } in
+  let report bidi_host : Launcher.bidi_host_report =
+    Launcher.bidi_host_report
+      { base_path = "/workspace"; launcher = Launcher.Follows_workspace; workspace_port = Ok 8935
+      ; server = Launcher.Not_serving; bidi_host }
+  in
+  List.iter (fun (name, state) ->
+      let written = report state in
+      check bool name true
+        (Launcher.bidi_host_report_of_json (Launcher.bidi_host_report_to_json written) = Ok written))
+    [ "never started", Record.Never_started
+    ; "connecting", Record.Running { entry with attached_at = None }
+    ; "attached", Record.Running entry
+    ; "ended", Record.Ended (ended, ending)
+    ; "died", Record.Died entry
+    ; "unreadable", Record.Unreadable "bidi-host.json is not JSON" ];
+  check string "the launcher is this workspace's" "/workspace/.masc/browser-lane/host/launch"
+    (report Record.Never_started).attach.launcher;
+  let refused name json =
+    check bool name true (Result.is_error (Launcher.bidi_host_report_of_json json))
+  in
+  let fields = match Launcher.bidi_host_report_to_json (report (Record.Ended (ended, ending))) with
+    | `Assoc fields -> fields | _ -> fail "not an object" in
+  let with_field name value = `Assoc ((name, value) :: List.remove_assoc name fields) in
+  refused "a state this reader does not know" (with_field "state" (`String "paused"));
+  refused "an ended host whose record has no ending"
+    (with_field "record" (Record.entry_to_json entry));
+  refused "no way to attach" (`Assoc (List.remove_assoc "attach" fields));
+  refused "not an object" (`String "running")
+
 (* The front door opened imp's history only when no check at all was Invalid, so
    a browser lane launcher left on an old port sent an operator with a working
    imp back to "choose a workspace" on every bare `masc` (measured 2026-09-15:
@@ -303,13 +487,14 @@ let only_shared_checks_hold_history_closed () =
      decided in this test too. *)
   let expected : Onboarding_status.check_id -> Onboarding_status.role = function
     | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
-    | Model_connection | Keeper_declaration | Sandbox | Browser_lane -> Advisory
+    | Model_connection | Keeper_declaration | Sandbox | Browser_lane | Browser_bidi_host -> Advisory
   in
   List.iter (fun id ->
       check bool (Onboarding_status.check_id_name id) true
         (Onboarding_status.role id = expected id))
     Onboarding_status.[ Workspace; Runtime_configuration; Keeper_persistence;
-                        Model_connection; Keeper_declaration; Sandbox; Browser_lane ];
+                        Model_connection; Keeper_declaration; Sandbox; Browser_lane;
+                        Browser_bidi_host ];
   check bool "no workspace never opens history" true
     (Onboarding_status.opening (Onboarding_status.inspect ~base_path:None)
      = Onboarding_status.Needs_journey)
@@ -331,4 +516,18 @@ let () = run "Onboarding observations"
                  test_case "a workspace without imp opens its Keepers' history" `Quick
                    a_workspace_without_imp_opens_its_keepers_history;
                  test_case "only checks every Keeper shares hold history closed" `Quick
-                   only_shared_checks_hold_history_closed]]
+                   only_shared_checks_hold_history_closed];
+   "BiDi host", [test_case "a workspace without a browser lane says nothing of a BiDi host" `Quick
+                   a_workspace_without_a_browser_lane_says_nothing_of_a_bidi_host;
+                 test_case "a lane with no BiDi host says how one is attached" `Quick
+                   a_lane_with_no_bidi_host_says_how_one_is_attached;
+                 test_case "a BiDi host that ended says when and why" `Quick
+                   a_bidi_host_that_ended_says_when_and_why;
+                 test_case "a BiDi host that died says the session may be left" `Quick
+                   a_bidi_host_that_died_says_the_session_may_be_left;
+                 test_case "a BiDi host record that cannot be read is invalid" `Quick
+                   a_bidi_host_record_that_cannot_be_read_is_invalid;
+                 test_case "a BiDi host report reads back as written" `Quick
+                   a_bidi_host_report_reads_back_as_written;
+                 test_case "a server says whether the attached host polls it" `Quick
+                   a_server_says_whether_the_attached_host_polls_it]]

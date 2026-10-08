@@ -82,6 +82,20 @@ or running operator actions remain global warnings.
 The [consistency ledger](CONSISTENCY-PROGRESS.md) tracks the remaining surfaces
 and separates source changes from observed executable behavior.
 
+## Keeper list and Info
+
+The roster leads with the Keeper name, followed by its typed health and turn
+age. Its title keeps connection identity; search belongs to the working footer.
+The repeated Health tally, wall clock, table rules and selected OPERATIONS
+footer are removed. Fleet capacity, stale or incomplete observations and
+configuration failures retain their own readings above the list.
+
+Info owns lifecycle, turn phase, idle age and last outcome as separate Runtime
+Stats fields, beside the existing runtime target. These fields follow the same
+entry, refresh and retry lifecycle as their view. A failed refresh marks a
+retained reading stale. Muted labels give the values the foreground; long labels
+and values wrap into counted rows instead of being shortened to fit a cell.
+
 ## Implementation scope
 
 `sidebar_line`, `sidebar_rule` and `sidebar_heading` in

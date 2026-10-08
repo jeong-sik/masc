@@ -115,18 +115,17 @@ def run_primary_list_studio(executable: str, no_color: bool = False) -> None:
         key(b":go Keepers\r", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         for name, rows, columns in (("keepers-wide", 32, 140), ("keepers-narrow", 24, 80), ("keepers-short", 16, 80)):
-            drawn = capture(name, rows, columns, b"  Health  ")
+            drawn = capture(name, rows, columns, b"j/k:move")
             heading_row = h.screen_row_of(drawn, b"MASC Keepers")
-            health_row = h.screen_row_of(drawn, b"  Health  ")
-            if heading_row < 0 or health_row <= heading_row:
-                raise AssertionError("Keeper health was not separated from the title")
+            if heading_row < 0:
+                raise AssertionError("Keeper title missing from the viewport")
             if b"connected" not in drawn[heading_row] or b"Health" in drawn[heading_row]:
                 raise AssertionError("Keeper title lost connection identity or mixes health")
         # The preceding short-viewport case leaves 80 columns active. Restore
         # the wide geometry before waiting for the entire long Board title;
         # narrow previews intentionally fit their text to the current cells.
         h.resize_and_wait(process, fd, output, rows=32, columns=140,
-                          needle=b"  Health  ", controls=(h.FULL_REDRAW,),
+                          needle=b"j/k:move", controls=(h.FULL_REDRAW,),
                           final_cursor=b"\x1b[?25l")
         key(b":go Board\r", title.encode())
         capture("board-wide", 32, 140, title.encode())

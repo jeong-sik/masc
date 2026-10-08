@@ -17,7 +17,7 @@ Readers measured here:
   folded Gate argument row, which unfolds only if the press lands on it.
 
 The Keepers list reads none of them: it counts the rows it drew
-(render_keepers, count_frame_lines plus its three footer rows). It is measured
+(render_keepers, count_frame_lines plus its two footer rows). It is measured
 as the control, a body the frame lays out without the count.
 """
 import os
@@ -256,17 +256,11 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
             measured[(screen, columns)]["body_pane"] = region.measure_pane(
                 rows, left=left, right=right)
         if screen == "keepers":
-            health_rows = [row for row in rows
-                           if region.body_row(rows, row, left=left, right=right).startswith("Health ")]
-            if health_rows != [5]:
-                raise AssertionError(f"{where}: Health must have its own row 5: {health_rows!r}")
-            health = region.body_row(rows, 5, left=left, right=right)
-            if health != "Health 1 healthy · 1 idle":
-                raise AssertionError(f"{where}: Health lost the exact fixture reading: {health!r}")
-            title = region.body_row(rows, 3, left=left, right=right)
-            if any(text in title for text in ("Health", "1 healthy", "1 idle")):
-                raise AssertionError(f"{where}: Health was repeated in the title")
-            measured[(screen, columns)]["health_row"] = 5
+            body_rows = [region.body_row(rows, row, left=left, right=right)
+                         for row in rows]
+            for name in ("alpha", "beta"):
+                if not any(text.startswith(name + " ") for text in body_rows):
+                    raise AssertionError(f"{where}: Keeper row lost its leading name {name!r}")
         if screen in ("keeper-detail", "keeper-detail-roster"):
             if not measured[(screen, columns)]["windows"]:
                 raise AssertionError(f"{where}: overflowing Info pane has no scroll-window indicator")

@@ -1524,20 +1524,24 @@ def keeper_lanes_ia_interaction(
             process, master_fd, output, gate.requested, timeout=10.0
         ):
             raise AssertionError("Keepers did not request the composite snapshot")
-        keepers = release_and_wait_for_frame(
-            process, master_fd, output, gate, b"OPERATIONS"
+        # Composite facts are scrollable Info fields. Give the pane enough
+        # height to observe the held response and its outcome in one frame.
+        send_and_wait(process, master_fd, output, b"\r", "▸Info".encode())
+        resize_and_wait(process, master_fd, output, rows=70, columns=120,
+                       needle=b"Runtime Stats", controls=(FULL_REDRAW,))
+        release_and_wait_for_frame(
+            process, master_fd, output, gate, b"failing (last turn failed)"
         )
-        keepers_plain = CSI_RE.sub(b"", keepers).decode("utf-8")
+        keepers_plain = " ".join(screen_text(bytes(output)).decode("utf-8").split())
         for needle in (
-            "OPERATIONS",
-            "lifecycle failing (last turn failed)",
-            "turn executing",
-            "idle 59m",
-            "last done",
+            "Lifecycle: failing (last turn failed)",
+            "Turn: executing",
+            "Idle: 59m",
+            "Last outcome: done",
         ):
             if needle not in keepers_plain:
                 raise AssertionError(
-                    f"Keepers did not draw composite fact {needle!r}: "
+                    f"Keeper Info did not draw composite fact {needle!r}: "
                     f"{keepers_plain!r}"
                 )
 
@@ -2390,7 +2394,7 @@ def open_turn_roster_http_fixtures(started_at_unix: float) -> HttpFixtures:
     """alpha healthy and beta failing, each with a turn open.
 
     A failing keeper's keepalive runs the next attempt, so its turn is open
-    while the roster header counts it failing; alpha is the working keeper
+    while its row still says failing; alpha is the working keeper
     its row must not look like.
     """
     fixtures = keeper_runtime_http_fixtures()
@@ -2443,12 +2447,12 @@ def a_failing_keepers_open_turn_reads_failing(
 ) -> None:
     tab_until(process, master_fd, output, b"MASC Keepers")
     # Both turns opened about 42 seconds ago. The HEALTH cell carries the
-    # health word the header counts -- nothing for healthy alpha, "failing"
+    # health word -- nothing for healthy alpha, "failing"
     # for beta -- and the TURN cell after the name carries the open turn's run
     # time on both rows. A clock kept in HEALTH would leave it off beta's row,
     # whose only age would then be its last recorded turn's: the failure's.
     working = re.compile(rb"\balpha\b[^\n]*?\b\d+s\b")
-    failing = re.compile(rb"\bfailing +beta\b[^\n]*?\b\d+s\b")
+    failing = re.compile(rb"\bbeta\b[^\n]*?\bfailing\b[^\n]*?\b\d+s\b")
     deadline = time.monotonic() + 10.0
     screen = b""
     while time.monotonic() < deadline:
@@ -2462,8 +2466,6 @@ def a_failing_keepers_open_turn_reads_failing(
             "the roster did not draw both open turns' run time in TURN, and "
             f"beta's failing word in HEALTH: {screen!r}"
         )
-    if not re.search(rb"\b1 failing\b", screen):
-        raise AssertionError(f"the header did not count beta failing: {screen!r}")
     os.write(master_fd, b"q")
 
 

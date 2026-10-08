@@ -5264,6 +5264,7 @@ type state = {
   mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
   mutable keeper_queue_readings : string list;
+  mutable keeper_queue_inspections : (string * unit ref) list;
   (* Exact requests awaiting admission and accepted requests awaiting their
      ordered run-next call. No priority intent is inferred from queue text. *)
   mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
@@ -8166,6 +8167,7 @@ let withdraw_keeper_chat_requests (state : state) =
   state.keeper_chat_control_pending <- [];
   state.keeper_queue_inflight <- [];
   state.keeper_queue_readings <- [];
+  state.keeper_queue_inspections <- [];
   state.keeper_run_next_pending <- [];
   state.keeper_run_next_ready <- [];
   state.keeper_run_next_inflight <- [];
@@ -8948,6 +8950,7 @@ let create_state
   keeper_interactive_waiting = [];
   keeper_queue_inflight = [];
   keeper_queue_readings = [];
+  keeper_queue_inspections = [];
   keeper_run_next_pending = [];
   keeper_run_next_ready = [];
   keeper_priority_controls = [];

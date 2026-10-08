@@ -8279,6 +8279,16 @@ let chat_notice state ~keeper_name ~kind text =
               me_at = Unix.gettimeofday ();
             } ]
 
+let settle_retired_queue_inspections state =
+  let retired, current = List.partition
+      (fun (_, reading) -> reading != state.workspace_read_authority)
+      state.keeper_queue_inspections in
+  state.keeper_queue_inspections <- current;
+  List.iter (fun (keeper_name, _) ->
+    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_failure
+      (Printf.sprintf "/queue for %s was interrupted by workspace reconnection; retry after reconnecting"
+         keeper_name)) retired
+
 let launch_keeper_queue state ~mailbox ~keeper_name action =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
@@ -8301,8 +8311,12 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     && can_resume_preflight_keeper_input state keeper_name in
   let expected_workspace = state.server_identity in
   state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
-  if action = Inbox.Inspect then
+  if action = Inbox.Inspect then begin
     state.keeper_queue_readings <- keeper_name :: state.keeper_queue_readings;
+    state.keeper_queue_inspections <-
+      (keeper_name, state.workspace_read_authority)
+      :: List.filter (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections
+  end;
   let control_generation = match action with
     | Inbox.Pause | Inbox.Resume ->
         Some (begin_keeper_chat_control ~preserve_input_holds:local_resume
@@ -11516,6 +11530,7 @@ let apply_server_identity_reading state reading =
     suspend_workspace_readings state;
     settle_retired_sent_image state;
     settle_retired_chat_copy state;
+    settle_retired_queue_inspections state;
     (match !msx_pending_poll with
      | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
      | Poll_ready _ | Poll_pending _ -> ())
@@ -12402,6 +12417,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~(before : read_authority) =
   settle_retired_sent_image state;
   settle_retired_chat_copy state;
+  settle_retired_queue_inspections state;
   resume_task_followups state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup;
   let workspace_moved = before.read_workspace <> state.workspace_authority in
@@ -14454,6 +14470,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         control_generation;
       state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
       state.keeper_queue_readings <- List.filter ((<>) keeper_name) state.keeper_queue_readings;
+      state.keeper_queue_inspections <- List.filter
+        (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections;
       launch_keeper_turns_load state ~mailbox;
       let kind, lines = match result with
         | Error detail -> Notice_failure, [detail]

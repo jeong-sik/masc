@@ -282,6 +282,10 @@ val list_prompts : unit -> Yojson.Safe.t list
     lock so concurrent callers no longer serialize on
     disk I/O.  Sorted by [(category, key)]. *)
 
+val default_revisions : unit -> (string * string) list
+(** SHA-256 revisions of registered default prompt bodies, excluding overrides.
+    Prompts without a readable default body contribute no entry. *)
+
 val prompts_json : unit -> Yojson.Safe.t
 (** [`Assoc [("prompts", `List (list_prompts ()))]] —
     canonical envelope for the dashboard prompt route. *)

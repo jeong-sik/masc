@@ -1149,6 +1149,9 @@ class AtomicChatFixture:
         request = json.loads(body)
         if request.get("action") != "resume":
             raise AssertionError(f"retained input expected explicit resume: {request!r}")
+        expected = self.submitted[0]["expected_workspace"]
+        if set(expected) != {"base_path", "masc_root"} or request.get("expected_workspace") != expected:
+            raise AssertionError(f"resume changed the retained input workspace: {request!r}")
         self.paused = False
         self.resume_confirmed = True
         return 200, {"ok": True}

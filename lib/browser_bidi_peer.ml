@@ -16,9 +16,21 @@ let metadata t =
   let* name = string "browserName" caps in
   if name <> "firefox" then Error "BiDi peer must be Firefox"
   else let* version=string "browserVersion" caps in t.version<-Some version;Ok version
+(* Keep fixed page-script results within the document observation's 1 MiB
+   boundary before BiDi serializes them as a remote string. Even JSON escaping
+   every byte sixfold leaves room in the peer's 8 MiB WebSocket frame. The
+   refusal includes no page metadata, which can itself exceed the boundary. *)
+let page_reply_runtime = {js|
+function browserBidiReply(observe) {
+  const encoded = JSON.stringify(observe());
+  return new TextEncoder().encode(encoded).byteLength > 1024 * 1024
+    ? '{"pageReplyTooLarge":true}' : encoded;
+}
+|js}
 let evaluate t context body args =
   let declaration = "function(args) { " ^ Browser_scene_script.runtime
-    ^ "\nreturn JSON.stringify((function(){" ^ body ^ "}).call(null,args)); }" in
+    ^ "\n" ^ page_reply_runtime
+    ^ "\nreturn browserBidiReply(function(){return (function(){" ^ body ^ "}).call(null,args);}); }" in
   let* result = t.command "script.callFunction" (obj [
     "functionDeclaration",str declaration;"target",obj ["context",str context];
     "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str (Yojson.Safe.to_string args)]]]) in
@@ -26,7 +38,12 @@ let evaluate t context body args =
   match field "type" result with
   | Some (`String "success") ->
     let* value = required "result" result in let* encoded = string "value" value in
-    (try Ok (Yojson.Safe.from_string encoded) with Yojson.Json_error _ -> Error "invalid BiDi script JSON")
+    (try
+       let decoded = Yojson.Safe.from_string encoded in
+       match field "pageReplyTooLarge" decoded with
+       | Some (`Bool true) -> Error "BiDi page observation exceeds 1 MiB"
+       | _ -> Ok decoded
+     with Yojson.Json_error _ -> Error "invalid BiDi script JSON")
   | Some (`String "exception") -> Error "Firefox rejected the fixed page script"
   | _ -> Error "invalid BiDi script result"
 let script t context body args = evaluate t context ("arguments[0]=JSON.parse(arguments[0]);\n" ^ body) args
@@ -132,7 +149,12 @@ let dispatch t ~verb args =
   | Page_elements -> on_tab (fun context id -> pre (
         (* The inventory the automation lane reads, so its selectors mean the
            same thing to the DOM interactions below. *)
-        let* p=script t context Browser_page_script.elements (obj []) in with_tab id p))
+        let* p=script t context
+          ("if (document.readyState === 'loading') return {documentLoading:true};\n"
+           ^ Browser_page_script.elements) (obj []) in
+        if Option.is_some (field "documentLoading" p)
+        then Error "the document is still loading; read it again"
+        else with_tab id p))
   | Page_read -> on_tab (fun context id -> pre (let* p=read t context args in with_tab id p))
   | Page_scene -> on_tab (fun context id -> pre (let* fields=match args with `Assoc xs->Ok xs|_->Error "invalid scene arguments" in
         let* p=scene t context (obj (("mode",str "read")::fields)) in with_tab id p))

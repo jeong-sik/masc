@@ -85,6 +85,21 @@ let test_element_inventory () =
      | _ -> fail "the inventory ran other than one script")
   | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail) ->
     failf "the peer refused an element inventory: %s" detail
+(* The same peer survives a local read refusal and serves the next request. *)
+let test_page_read_refusal verb request refusal expected () =
+  let next = ref refusal in
+  let command method_ _ = match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction" -> Ok (script_value !next)
+    | other -> failf "unexpected read command: %s" other in
+  let peer = Peer.create ~command in
+  (match Peer.dispatch peer ~verb request with
+   | Error (Peer.Before_effect detail) -> check string "local read refusal" expected detail
+   | Error (Peer.Outcome_unknown detail) -> failf "read was unknown: %s" detail
+   | Ok _ -> fail "invalid observation was accepted");
+  next := obj ["url",`String "https://example.test/";"elements",`List []];
+  check bool "a subsequent read remains available" true
+    (Result.is_ok (Peer.dispatch peer ~verb request))
 let test_pointer_validation () =
   let calls=ref [] in
   let command method_ _ =
@@ -259,6 +274,16 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
     test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error];
+  "read refusal",[
+    test_case "loading elements retry on same peer" `Quick
+      (test_page_read_refusal Peer.Page_elements (obj ["tabId",`Int 1])
+        (obj ["documentLoading",`Bool true]) "the document is still loading; read it again");
+    test_case "oversized elements retry on same peer" `Quick
+      (test_page_read_refusal Peer.Page_elements (obj ["tabId",`Int 1])
+        (obj ["pageReplyTooLarge",`Bool true]) "BiDi page observation exceeds 1 MiB");
+    test_case "oversized document metadata retries on same peer" `Quick
+      (test_page_read_refusal Peer.Page_read (obj ["tabId",`Int 1;"includeHtml",`Bool true])
+        (obj ["pageReplyTooLarge",`Bool true]) "BiDi page observation exceeds 1 MiB")];
   "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "document source is the shared document helper" `Quick test_document_source;
     test_case "a document still loading is not its source" `Quick test_document_still_loading; test_case "parsed pointer boundary" `Quick test_pointer_validation;

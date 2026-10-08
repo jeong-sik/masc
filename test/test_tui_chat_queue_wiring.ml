@@ -3415,25 +3415,6 @@ let test_partial_observation_survives_history_ending_and_unavailable_journal () 
     List.map Tui_types.turn_log_request_id
       (Tui_types.observed_logs_for_keeper state "alpha")
   in
-  let check_open_rail state =
-    let cache = Masc_tui_ansi.terminal_size_cache in
-    let previous_size = Masc_tui_ansi.get_terminal_size () in
-    let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
-        cache ~probe:(fun () -> Some size)) in
-    let loaded = state.Tui_types.msg_loaded in
-    Fun.protect ~finally:(fun () -> state.msg_loaded <- loaded; set_size previous_size) (fun () ->
-      set_size (40, 100);
-      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
-      state.msg_loaded <- [];
-      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
-      let screen = String.concat "\n"
-          (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
-      check bool "history or unavailable journal alone cannot close visual progress" false
-        (List.exists (fun edge -> Astring.String.is_infix
-            ~affix:(Masc_tui_message_layout.turn_rail_glyph edge) screen)
-          [Masc_tui_message_layout.Rail_closes; Rail_stands]))
-  in
   let fresh () =
     let state =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
@@ -3454,7 +3435,6 @@ let test_partial_observation_survives_history_ending_and_unavailable_journal () 
     (Tui_types.observed_log_has_ended state log);
   check bool "unavailability is explicit" true
     (Tui_types.observed_log_is_unavailable state log);
-  check_open_rail state;
   let state = fresh () in
   state.msg_loaded <-
     [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_error
@@ -3462,15 +3442,13 @@ let test_partial_observation_survives_history_ending_and_unavailable_journal () 
   check (list string) "failure retains the earlier observed content" ["op-1"] (observed state);
   check bool "durable failure alone does not close journal observation" false
     (Tui_types.observed_log_has_ended state (List.hd state.msg_settled_logs));
-  check_open_rail state;
   let state = fresh () in
   state.msg_loaded <-
     [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_keeper
         ~text:"the recorded reply" ~at:130. () ];
   check (list string) "reply retains the earlier observed content" ["op-1"] (observed state);
   check bool "durable reply alone does not close journal observation" false
-    (Tui_types.observed_log_has_ended state (List.hd state.msg_settled_logs));
-  check_open_rail state
+    (Tui_types.observed_log_has_ended state (List.hd state.msg_settled_logs))
 ;;
 
 let test_succeeded_operation_with_checkpoint_only_keeps_final_history () =

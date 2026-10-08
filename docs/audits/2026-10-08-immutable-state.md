@@ -114,6 +114,29 @@ Completion remains unproven until the selected checks are assessed and any
 failures attributable to these changes are resolved. Broader producer inspection
 and review/integration evidence also remain separate from these source findings.
 
+## Tool statistics publication repair
+
+`Tool_registry.get_stats` returned live `call_stats` atomic cells, and the sort
+comparator repeatedly read those cells. `Tool_unified.tool_info_to_json` loaded
+each counter separately while claiming a consistent snapshot. A retained result
+therefore changed after later tool calls; call count, disposition, duration and
+source attribution could represent different update stages.
+
+The registry now stores a private atomic cell per tool containing an immutable
+`call_stats` value. Recording samples time once, constructs the complete next
+observation, and publishes it with CAS. Queries capture each tool's observation
+before sorting. Tool_unified serializes the retained scalars. This guarantees
+per-tool coherence, not a global transaction across tools or reset versus an
+already-started recording operation. Recording now allocates an immutable
+record per update attempt; the old zero-allocation claim was removed.
+
+`test_tool_registry` adds a retained-observation scenario across later recording
+and reset, including assignment attribution and disposition/source partitions.
+`test_tool_unified` additionally verifies that retained tool info serializes to
+the same JSON after later calls, while fresh info sees the new count.
+Parsing-only checks and whitespace checks passed. No behavior execution or
+runtime deployment of this third repair is claimed.
+
 ## First targeted execution result
 
 Run 37776731943 completed with failure before behavior tests ran:

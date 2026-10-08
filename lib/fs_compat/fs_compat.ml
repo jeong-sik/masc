@@ -1044,6 +1044,82 @@ let load_owned_regular_file ~ownership_root path =
   |> Result.map (Option.map (fun contents -> contents.content))
 ;;
 
+external open_owned_directory_root : string -> Unix.file_descr
+  = "caml_masc_owned_directory_root"
+external open_owned_directory_child : Unix.file_descr -> string -> Unix.file_descr
+  = "caml_masc_owned_directory_open"
+external owned_directory_names : Unix.file_descr -> string list
+  = "caml_masc_owned_directory_names"
+
+let read_owned_directory_blocking ~before_read ~after_read ~ownership_root path =
+  match owned_directory_paths ~ownership_root path with
+  | Error rejection ->
+    owned_file_error (Ownership_boundary_rejected { path; rejection })
+  | Ok descendants ->
+    let opened = ref [] in
+    let descriptors = ref [] in
+    let close_all () =
+      let close_failure = ref None in
+      List.iter (fun fd ->
+        try Unix.close fd with
+        | Unix.Unix_error _ as ex ->
+          if !close_failure = None then close_failure := Some ex) !descriptors;
+      !close_failure
+    in
+    let result =
+      try
+        let bind directory open_fd =
+          let before = Unix.lstat directory in
+          let fd = open_fd () in
+          descriptors := fd :: !descriptors;
+          let stat = Unix.fstat fd in
+          opened := (directory, fd, stat) :: !opened;
+          if before.Unix.st_kind <> Unix.S_DIR || not (same_file_identity before stat)
+          then raise (Unix.Unix_error (Unix.EAGAIN, "directory identity", directory));
+          fd
+        in
+        let root_fd = bind ownership_root (fun () -> open_owned_directory_root ownership_root) in
+        let fd = List.fold_left (fun parent directory ->
+          bind directory (fun () ->
+            open_owned_directory_child parent (Filename.basename directory))) root_fd descendants in
+        let current () =
+          List.for_all (fun (directory, _, descriptor) ->
+            let observed = Unix.lstat directory in
+            observed.Unix.st_kind = Unix.S_DIR
+            && same_file_identity observed descriptor) !opened
+        in
+        if not (current ()) then owned_file_error (Filesystem_identity_changed { path })
+        else begin
+          before_read path;
+          let names = owned_directory_names fd in
+          after_read path;
+          if current () then
+            Ok (List.sort String.compare
+              (List.filter (fun name -> name <> "." && name <> "..") names))
+          else owned_file_error (Filesystem_identity_changed { path })
+        end
+      with
+      | Eio.Cancel.Cancelled _ as cancellation ->
+        ignore (close_all ()); reraise_current cancellation
+      | cause -> owned_file_operation_error ~path Read_contents cause
+    in
+    match close_all (), result with
+    | None, result -> result
+    | Some cause, Ok _ -> owned_file_operation_error ~path Close_descriptor cause
+    | Some cause, Error error -> Error { error with close_failure = Some cause }
+;;
+
+let read_owned_directory ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~ownership_root path =
+  with_fs_or_fallback ~path
+    ~fallback:(fun () -> read_owned_directory_blocking ~before_read ~after_read ~ownership_root path)
+    (fun _fs ->
+      let result = Eio_unix.run_in_systhread
+        ~label:(labelled "fs-compat-read-owned-directory" path)
+        (fun () -> read_owned_directory_blocking ~before_read ~after_read ~ownership_root path) in
+      Eio.Fiber.check ();
+      result)
+;;
+
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int

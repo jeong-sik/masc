@@ -229,39 +229,15 @@ let canonical_root path =
   | exception Unix.Unix_error _ -> path
 ;;
 
-let same_file_identity (left : Unix.stats) (right : Unix.stats) =
-  left.Unix.st_dev = right.Unix.st_dev && left.Unix.st_ino = right.Unix.st_ino
-;;
-
-(* Bind enumeration to one opened directory handle, then compare the
-   directory and ownership-root identities around the read. A replacement by
-   an outside directory is reported as unavailable instead of publishing its
-   child names. [before_read] is a deterministic test seam for the same
-   replacement boundary; production callers leave it at its no-op default. *)
-let entries_of_stable ?(before_read = fun _ -> ()) ~ownership_root dir =
+(* Names come from the opened owned directory, so a temporary pathname swap
+   cannot leak another directory's entries even when it is restored before
+   the final validation. *)
+let entries_of_stable ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~ownership_root dir =
   let ownership_root = canonical_root ownership_root in
-  try
-    let root_before = Unix.lstat ownership_root in
-    let dir_before = Unix.lstat dir in
-    if root_before.Unix.st_kind <> Unix.S_DIR || dir_before.Unix.st_kind <> Unix.S_DIR then
-      Error ()
-    else begin
-      before_read dir;
-      let names =
-        Fs_compat.read_directory_nofollow
-          dir dir_before.Unix.st_dev dir_before.Unix.st_ino
-      in
-      let root_after = Unix.lstat ownership_root in
-      let dir_after = Unix.lstat dir in
-      if same_file_identity root_before root_after
-         && same_file_identity dir_before dir_after
-         && root_after.Unix.st_kind = Unix.S_DIR
-         && dir_after.Unix.st_kind = Unix.S_DIR
-      then Ok names
-      else Error ()
-    end
-  with
-  | Unix.Unix_error _ | Sys_error _ -> Error ()
+  match Fs_compat.read_owned_directory ~before_read ~after_read ~ownership_root dir with
+  | Error _ -> Error ()
+  | Ok names ->
+    Ok (List.filter (fun name -> not (String.starts_with ~prefix:"." name)) names)
 ;;
 
 (* A bad inventory entry must become a bounded result rather than a blocking
@@ -671,28 +647,32 @@ let unavailable_json name reason =
     ]
 ;;
 
+let inventory_digest_json ~programs_root ~shown_name real =
+  match Fs_compat.load_owned_regular_file_range_with_sha256
+          ~ownership_root:programs_root ~offset:0 ~max_bytes:0 real with
+  | Ok (Some inspected) ->
+    `Assoc
+      [ ("name", `String shown_name)
+      ; ("kind", `String "file")
+      ; ("bytes", `Int inspected.snapshot.file_size)
+      ; ("sha256", `String inspected.sha256)
+      ]
+  | Ok None | Error _ -> unavailable_json shown_name "entry is unavailable"
+;;
+
 let inventory_file_json ~programs_root ~parent path name =
   let shown_name = if parent = "" then name else parent ^ "/" ^ name in
   match within ~root:programs_root path with
   | None -> unavailable_json shown_name "entry leaves the DOS inventory"
   | Some real ->
     (match entry_kind real with
-     | Directory -> `Assoc [ ("name", `String shown_name); ("kind", `String "directory") ]
-     | Other -> unavailable_json shown_name "entry is not a regular file or directory"
+     | Directory -> unavailable_json shown_name "entry is not a mounted file"
+     | Other -> unavailable_json shown_name "entry is not a regular file"
      | Unavailable -> unavailable_json shown_name "entry is unavailable"
-     | Regular ->
-       (match read_regular_file ~ownership_root:programs_root real with
-        | Error reason -> unavailable_json shown_name reason
-        | Ok contents ->
-          `Assoc
-            [ ("name", `String shown_name)
-            ; ("kind", `String "file")
-            ; ("bytes", `Int (String.length contents))
-            ; ("sha256", `String Digestif.SHA256.(to_hex (digest_string contents)))
-            ]))
+     | Regular -> inventory_digest_json ~programs_root ~shown_name real)
 ;;
 
-let inventory_program_json ?(before_read = fun _ -> ()) ~programs_root name =
+let inventory_program_json ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~programs_root name =
   let path = Filename.concat programs_root name in
   match within ~root:programs_root path with
   | None -> unavailable_json name "entry leaves the DOS inventory"
@@ -700,18 +680,9 @@ let inventory_program_json ?(before_read = fun _ -> ()) ~programs_root name =
     (match entry_kind real with
      | Unavailable -> unavailable_json name "entry is unavailable"
      | Other -> unavailable_json name "entry is not a regular file or directory"
-     | Regular ->
-       (match read_regular_file ~ownership_root:programs_root real with
-        | Error reason -> unavailable_json name reason
-        | Ok contents ->
-          `Assoc
-            [ ("name", `String name)
-            ; ("kind", `String "file")
-            ; ("bytes", `Int (String.length contents))
-            ; ("sha256", `String Digestif.SHA256.(to_hex (digest_string contents)))
-            ])
+     | Regular -> inventory_digest_json ~programs_root ~shown_name:name real
      | Directory ->
-       (match entries_of_stable ~before_read ~ownership_root:programs_root real with
+       (match entries_of_stable ~before_read ~after_read ~ownership_root:programs_root real with
         | Error () -> unavailable_json name "directory changed during inventory"
         | Ok names ->
           let executables =
@@ -727,6 +698,7 @@ let inventory_program_json ?(before_read = fun _ -> ()) ~programs_root name =
           in
           let files =
             names
+            |> List.filter (fun child -> entry_kind (Filename.concat real child) <> Directory)
             |> List.map (fun child ->
                  inventory_file_json ~programs_root ~parent:name (Filename.concat real child)
                    child)
@@ -742,7 +714,7 @@ let inventory_program_json ?(before_read = fun _ -> ()) ~programs_root name =
             ]))
 ;;
 
-let handle_inventory_with_before_read ~before_read ~tool_name ~start_time ~base_path =
+let handle_inventory_with_read_hooks ~before_read ~after_read ~tool_name ~start_time ~base_path =
   let root = programs_dir ~base_path in
   try
     let result =
@@ -750,10 +722,10 @@ let handle_inventory_with_before_read ~before_read ~tool_name ~start_time ~base_
         if not (Sys.file_exists root) then Ok []
         else
           let canonical = canonical_root root in
-          match entries_of_stable ~before_read ~ownership_root:root canonical with
+          match entries_of_stable ~before_read ~after_read ~ownership_root:root canonical with
           | Error () -> Error ()
           | Ok names ->
-            Ok (List.map (inventory_program_json ~programs_root:canonical) names))
+            Ok (List.map (inventory_program_json ~before_read ~after_read ~programs_root:canonical) names))
     in
     (match result with
      | Ok programs ->
@@ -770,7 +742,8 @@ let handle_inventory_with_before_read ~before_read ~tool_name ~start_time ~base_
 ;;
 
 let handle_inventory ~tool_name ~start_time ~base_path =
-  handle_inventory_with_before_read ~before_read:(fun _ -> ()) ~tool_name ~start_time ~base_path
+  handle_inventory_with_read_hooks ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ())
+    ~tool_name ~start_time ~base_path
 ;;
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =

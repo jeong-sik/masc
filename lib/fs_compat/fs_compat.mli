@@ -248,6 +248,21 @@ val owned_regular_file_read_error_to_string
   :  owned_regular_file_read_error
   -> string
 
+(** Enumerate an owned directory through a descriptor rooted at the canonical
+    [ownership_root]. Each relative component is opened with no-follow [openat];
+    names come from that final descriptor, never from a second pathname lookup.
+    [before_read] runs after the directory is bound, for deterministic consumers
+    that exercise replacement races; [after_read] runs before final validation.
+    Changed pathname identities are refused.
+    Errors contain no file contents; callers must redact host paths at public
+    boundaries. Blocking operations use a system thread in Eio contexts. *)
+val read_owned_directory
+  : ?before_read:(string -> unit)
+  -> ?after_read:(string -> unit)
+  -> ownership_root:string
+  -> string
+  -> (string list, owned_regular_file_read_error) result
+
 (** Eio-native, deterministically sorted directory inventory. *)
 val read_dir : string -> string list
 

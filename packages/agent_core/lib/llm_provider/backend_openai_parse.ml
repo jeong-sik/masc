@@ -205,40 +205,49 @@ let derive_ms token_count tok_per_sec =
   | Some _, Some _ | Some _, None | None, Some _ | None, None -> None
 ;;
 
-let usage_of_openai_json json =
+(* Streaming usage objects are partial updates: an absent counter is not zero. *)
+let delta_usage_of_openai_json json : Types.delta_usage option =
   let open Yojson.Safe.Util in
   let usage = json |> member "usage" in
-  if usage = `Null
-  then None
-  else (
-    let prompt_tokens =
-      member_int_fallback usage [ "prompt_tokens"; "input_tokens" ]
-      |> Option.value ~default:0
-    in
+  if usage = `Null then None
+  else
     let cached_tokens =
       match member_int_fallback usage [ "prompt_cache_hit_tokens" ] with
-      | Some n -> n
+      | Some _ as count -> count
       | None ->
         let details = usage |> member "prompt_tokens_details" in
-        if details = `Null then 0 else Cli_common_json.member_int "cached_tokens" details
+        if details = `Null then None
+        else member_int_fallback details [ "cached_tokens" ]
+    in
+    let cost_usd =
+      let cost = match member "cost" usage with
+        | `Float amount -> Some amount
+        | `Int amount -> Some (float_of_int amount)
+        | `Intlit amount -> float_of_string_opt amount
+        | `Null | `Bool _ | `String _ | `List _ | `Assoc _ -> None in
+      match cost with
+      | Some amount when Float.is_finite amount && amount >= 0.0 -> Some amount
+      | Some _ | None -> None
     in
     Some
-      { input_tokens = prompt_tokens
-      ; output_tokens =
-          member_int_fallback usage [ "completion_tokens"; "output_tokens" ]
-          |> Option.value ~default:0
-      ; cache_creation_input_tokens = 0
+      { input_tokens = member_int_fallback usage [ "prompt_tokens"; "input_tokens" ]
+      ; output_tokens = member_int_fallback usage [ "completion_tokens"; "output_tokens" ]
+      ; cache_creation_input_tokens = None
       ; cache_read_input_tokens = cached_tokens
-      ; cost_usd =
-          (let cost = match member "cost" usage with
-             | `Float amount -> Some amount
-             | `Int amount -> Some (float_of_int amount)
-             | `Intlit amount -> float_of_string_opt amount
-             | `Null | `Bool _ | `String _ | `List _ | `Assoc _ -> None in
-           match cost with
-           | Some amount when Float.is_finite amount && amount >= 0.0 -> Some amount
-           | Some _ | None -> None)
+      ; cost_usd
+      }
+;;
+
+let usage_of_openai_json json : Types.api_usage option =
+  Option.map
+    (fun (usage : Types.delta_usage) ->
+      { input_tokens = Option.value usage.input_tokens ~default:0
+      ; output_tokens = Option.value usage.output_tokens ~default:0
+      ; cache_creation_input_tokens = Option.value usage.cache_creation_input_tokens ~default:0
+      ; cache_read_input_tokens = Option.value usage.cache_read_input_tokens ~default:0
+      ; cost_usd = usage.cost_usd
       })
+    (delta_usage_of_openai_json json)
 ;;
 
 (** Extract provider-reported inference telemetry from the raw JSON.

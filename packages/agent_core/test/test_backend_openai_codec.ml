@@ -1426,6 +1426,55 @@ let test_reported_openai_cost_reaches_sync_and_stream_usage () =
     (Option.is_none (Parse.usage_of_openai_json (`Assoc [])))
 ;;
 
+let test_partial_stream_usage_preserves_counter_presence () =
+  let run ~terminal_usage updates =
+    let state = Streaming.create_openai_stream_state () in
+    let acc = Complete_stream_acc.create_stream_acc () in
+    let feed raw =
+      let parsed = Streaming.parse_openai_sse_chunk
+          ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning raw in
+      let events, _ = Streaming.openai_sse_parse_result_to_events state parsed in
+      List.iter (Complete_stream_acc.accumulate_event acc) events
+    in
+    feed (Yojson.Safe.to_string (`Assoc ["id", `String "partial";
+      "model", `String "fixture"; "choices", `List [`Assoc
+        ["delta", `Assoc ["content", `String "ok"];
+         "finish_reason", (if terminal_usage then `Null else `String "stop")]]]));
+    List.iteri (fun i usage ->
+      let choices = if terminal_usage && i = List.length updates - 1 then
+        [`Assoc ["delta", `Assoc []; "finish_reason", `String "stop"]]
+        else [] in
+      feed (Yojson.Safe.to_string (`Assoc ["id", `String "partial";
+        "model", `String "fixture"; "choices", `List choices; "usage", usage]))) updates;
+    feed "[DONE]";
+    match Complete_stream_acc.finalize_stream_acc acc with
+    | Ok response -> Option.get response.usage
+    | Error _ -> Alcotest.fail "partial usage stream must complete"
+  in
+  let initial = `Assoc ["prompt_tokens", `Int 12; "completion_tokens", `Int 4;
+      "prompt_tokens_details", `Assoc ["cached_tokens", `Int 3]] in
+  List.iter (fun terminal_usage ->
+    let usage = run ~terminal_usage [initial; `Assoc ["cost", `Float 0.0123]] in
+    check_int "charge-only update preserves input" 12 usage.input_tokens;
+    check_int "charge-only update preserves output" 4 usage.output_tokens;
+    check_int "charge-only update preserves cache" 3 usage.cache_read_input_tokens;
+    Alcotest.(check (option (float 1e-9))) "charge retained" (Some 0.0123) usage.cost_usd;
+    let usage = run ~terminal_usage
+        [initial; `Assoc ["cost", `Int 0]; `Assoc ["output_tokens", `Int 0]] in
+    check_int "explicit zero replaces output" 0 usage.output_tokens;
+    check_int "output-only update preserves input" 12 usage.input_tokens;
+    check_int "output-only update preserves cache" 3 usage.cache_read_input_tokens;
+    Alcotest.(check (option (float 0.))) "absent charge preserves explicit zero" (Some 0.) usage.cost_usd
+  ) [false; true];
+  let delta = Option.get (Parse.delta_usage_of_openai_json
+      (`Assoc ["usage", `Assoc ["input_tokens", `Int 7;
+        "prompt_cache_hit_tokens", `Int 0]])) in
+  Alcotest.(check (option int)) "input alias present" (Some 7) delta.input_tokens;
+  Alcotest.(check (option int)) "cache zero present" (Some 0) delta.cache_read_input_tokens;
+  Alcotest.(check (option int)) "missing output absent" None delta.output_tokens;
+  Alcotest.(check (option int)) "unreported cache creation absent" None delta.cache_creation_input_tokens
+;;
+
 let test_usage_openai_fallbacks () =
   let usage =
     Parse.usage_of_openai_json
@@ -3137,6 +3186,8 @@ let () =
             test_parse_top_level_error_declares_status
         ; Alcotest.test_case "reported cost survives sync and stream accounting" `Quick
             test_reported_openai_cost_reaches_sync_and_stream_usage
+        ; Alcotest.test_case "partial streaming usage preserves counter presence" `Quick
+            test_partial_stream_usage_preserves_counter_presence
         ; Alcotest.test_case "usage fallbacks" `Quick test_usage_openai_fallbacks
         ; Alcotest.test_case
             "text list reasoning and reported telemetry"

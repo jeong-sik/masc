@@ -389,7 +389,7 @@ type openai_chunk =
   ; delta_reasoning_details : openai_reasoning_details_delta option
   ; delta_tool_calls : openai_tool_call_delta list
   ; finish_reason : string option
-  ; chunk_usage : api_usage option
+  ; chunk_usage : delta_usage option
   ; chunk_timings : inference_timings option
   }
 
@@ -694,7 +694,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                let chunk_model = Cli_common_json.member_str "model" json in
                (* [usage] is top-level, not under a choice, so it is read even
                   for the final [choices=[]] usage chunk. *)
-               let chunk_usage = Backend_openai_parse.usage_of_openai_json json in
+               let chunk_usage = Backend_openai_parse.delta_usage_of_openai_json json in
                (* llama-server attaches a top-level [timings] object to the
                   final chunk (the one with [finish_reason]) without opt-in;
                   [cache_n] is the prompt-token count reused from the slot KV
@@ -1418,7 +1418,7 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
        emit
          (MessageDelta
             { stop_reason = Some stop_reason
-            ; usage = Option.map Types.delta_usage_of_api_usage chunk.chunk_usage
+            ; usage = chunk.chunk_usage
             })
      | None ->
        (* With stream_options.include_usage the provider sends token totals in a
@@ -1432,7 +1432,7 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
           emit
             (MessageDelta
                { stop_reason = None
-               ; usage = Some (Types.delta_usage_of_api_usage usage)
+               ; usage = Some usage
                })
         | None -> ()));
     Ok (List.rev !events, !telemetry_event)

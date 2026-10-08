@@ -379,19 +379,18 @@ let test_inventory_directory_replacement_hides_child_names () =
         write_file (Filename.concat outside "outside-private-name.dat") "private";
         let moved = game ^ ".moved" in
         let result =
-          Tool_misc_dos_lane.inventory_program_json
+          Tool_misc_dos_lane.handle_inventory
             ~before_read:(fun real ->
               Unix.rename real moved;
               Unix.symlink outside real)
-            ~programs_root:root "game"
+            ~tool_name:"masc_dos_inventory" ~start_time:0.0 ~base_path
         in
-        let json = Yojson.Safe.to_string result in
-        check bool "replaced directory is unavailable" true
-          (match member "kind" result with
-           | Some (`String "unavailable") -> true
-           | _ -> false);
+        let response =
+          Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result)
+        in
+        check bool "replaced root is refused" false (is_completed result);
         check bool "outside child name is not enumerated" false
-          (contains "outside-private-name.dat" json)))
+          (contains "outside-private-name.dat" response)))
 ;;
 
 let test_load_runs_to_the_first_key_request () =

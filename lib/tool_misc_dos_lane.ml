@@ -739,18 +739,27 @@ let inventory_program_json ?(before_read = fun _ -> ()) ~programs_root name =
             ]))
 ;;
 
-let handle_inventory ~tool_name ~start_time ~base_path =
+let handle_inventory ?(before_read = fun _ -> ()) ~tool_name ~start_time ~base_path =
   let root = programs_dir ~base_path in
   try
-    let programs =
+    let result =
       off_domain (fun () ->
-        entries_of root |> List.map (inventory_program_json ~programs_root:root))
+        if not (Sys.file_exists root) then Ok []
+        else
+          let canonical = canonical_root root in
+          match entries_of_stable ~before_read ~ownership_root:root canonical with
+          | Error () -> Error ()
+          | Ok names ->
+            Ok (List.map (inventory_program_json ~programs_root:canonical) names))
     in
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:
-        (`Assoc
-          [ ("programs", `List programs) ])
-      ()
+    (match result with
+     | Ok programs ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:(`Assoc [ ("programs", `List programs) ])
+         ()
+     | Error () ->
+       Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+         "DOS inventory changed during enumeration")
   with
   | Sys_error _ ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time

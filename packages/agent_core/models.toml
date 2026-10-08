@@ -38,10 +38,16 @@
 # Claude Platform model overview / adaptive-thinking docs (checked 2026-07-10).
 # Static pricing rows use standard rates; time-limited promotional pricing is
 # intentionally not encoded as a model capability or runtime control.
+# A row that names temperature, top_p and top_k as ignored does so because the
+# API answers 400 to a non-default value of any of them on that model
+# ("`temperature` is deprecated for this model."; sent to the API 2026-10-08).
+# None of the three is sent and top_k is not offered.
 
 [[models]]
 id_prefix = "claude-fable-5"
 base = "anthropic"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
 anthropic_thinking_control = "always_adaptive"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
@@ -55,14 +61,21 @@ cache_read_multiplier = 0.1
 # every other Claude model uses (pricing table footnote, checked 2026-09-09).
 # Lookup takes the longest matching prefix, so this row -- not "claude-fable-5"
 # -- answers for the 5.1 ids; without it a cache read bills at four times the
-# real rate. Everything else matches the 5 row.
+# real rate. Forced tool use returns an error on 5.1 ("tool_choice: type "tool"
+# and "any" are not supported for this model."; sent to the API 2026-10-08)
+# while fable-5 still takes it, so required and named tool_choice are refused
+# here. Everything else matches the 5 row.
 [[models]]
 id_prefix = "claude-fable-5-1"
 base = "anthropic"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
 anthropic_thinking_control = "always_adaptive"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
 max_output_tokens = 128000
+supports_required_tool_choice = false
+supports_named_tool_choice = false
 input_per_million = 10.0
 output_per_million = 50.0
 cache_write_multiplier = 1.25
@@ -204,6 +217,8 @@ cache_read_multiplier = 0.1
 [[models]]
 id_prefix = "claude-opus-5-5"
 base = "anthropic"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
 anthropic_thinking_control = "always_adaptive"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
@@ -217,7 +232,9 @@ cache_read_multiplier = 0.05
 
 # Claude Sonnet 5.5 (released 2026-09-28). Specs from the platform model page,
 # effort page and pricing table (checked 2026-09-29): 1M/128K, $2/$10, 5m cache
-# write $2.50 = 1.25x, cache read $0.20 = 0.1x. Adaptive thinking stays the
+# write $2.50 = 1.25x. Cache read is $0.10 = 0.05x: the pricing table's
+# footnote prices cache hits on Opus 5.5 and Sonnet 5.5 at 0.05x (checked
+# 2026-10-08), and $0.20 is Sonnet 5's rate. Adaptive thinking stays the
 # default; the lowest mode is between_tools, not disabled (low..high only).
 # https://platform.claude.com/docs/en/build-with-claude/effort
 # Forced tool
@@ -228,6 +245,8 @@ cache_read_multiplier = 0.05
 [[models]]
 id_prefix = "claude-sonnet-5-5"
 base = "anthropic"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
 anthropic_thinking_control = "adaptive_between_tools"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
@@ -237,11 +256,13 @@ supports_named_tool_choice = false
 input_per_million = 2.0
 output_per_million = 10.0
 cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
+cache_read_multiplier = 0.05
 
 [[models]]
 id_prefix = "claude-sonnet-5"
 base = "anthropic"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
 anthropic_thinking_control = "adaptive_default"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000

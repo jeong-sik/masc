@@ -1468,6 +1468,10 @@ let test_anthropic_declared_ignored_sampling_drops_fields () =
   check int "top_k stays" 40 (json |> member "top_k" |> to_int)
 ;;
 
+(* The other half: capabilities that declare nothing keep the fields. They are
+   given outright so this does not ride on what one catalog row says -- the
+   claude-sonnet-5 row itself names all three as ignored, because the API
+   answers 400 to them (test_model_catalog_default). *)
 let test_anthropic_default_keeps_sampling_fields () =
   let config =
     PC.make
@@ -1475,6 +1479,7 @@ let test_anthropic_default_keeps_sampling_fields () =
       ~model_id:"claude-sonnet-5"
       ~base_url:"https://api.anthropic.com"
       ~max_tokens:16_000
+      ~model_capabilities_override:CAP.anthropic_capabilities
       ~temperature:0.7
       ~top_p:0.9
       ()

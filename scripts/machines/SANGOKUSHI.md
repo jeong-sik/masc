@@ -13,12 +13,14 @@ province, and resource values; record the result before proceeding. Use `step`
 for a visible animation or loading transition, not to wait out an unchanged
 menu. Bitmap `screen_text` is not a transcription of the picture.
 
-The local observations below used workers built from MASC
+The initial local observations below used workers built from MASC
 `2d296d4b6758647b9dce84ca6887722c7f3b1fa3` by
 [run 37836011821](https://github.com/jeong-sik/masc/actions/runs/37836011821).
-The game sessions were run separately from CI. That worker does **not** include
-`export_disk`; the new tool's actual game-save export/reload is still awaiting
-execution. Check the runner's discovered `tools.json` before using it.
+MSX disk export and fresh-boot game loading were subsequently verified with
+`1632107405d574726b90f0ac918ceeaf98ddbbcb`, built by
+[run 37841585944](https://github.com/jeong-sik/masc/actions/runs/37841585944).
+The game sessions were run separately from CI. The initial worker does not
+include `export_disk`; check the runner's discovered `tools.json` before using it.
 
 ## Sangokushi II on MSX
 
@@ -105,9 +107,10 @@ name-entry attempt displayed only part of the requested text; inspect the actual
 name rather than assuming every character arrived. Follow the visible B request afterward;
 swapping to A during an active campaign can disrupt the game's open files.
 
-The local run wrote the data disk and preserved those changes in a checkpoint;
-the original disk file remained unchanged. The proposed `export_disk` workflow
-is described below and has not yet been verified with that save.
+The local run wrote the data disk, exported it under a new name and loaded the
+saved campaign after a fresh boot in a new worker. Export left the original
+image, displayed screen and frame 12165 unchanged. The save/load sequence is
+described below.
 
 ## Sangokushi III on DOS
 
@@ -140,6 +143,13 @@ officer and cost from the current lists. The observed 100-gold action reduced
 gold from 3000 to 2900; the later report said land development had not changed.
 Spending money does not prove a successful improvement. `0`, Enter and the
 visible `y` confirmation end commands; inspect the next city/month.
+
+Diplomacy `3`, Enter, then alliance `1`, Enter opens ruler selection. Read the
+ruler and envoy lists, and the proposed terms before confirming. In the observed
+Cao Cao campaign, Liu Bei requested 260 gold. Accepting produced a success
+report, gold 2900 → 2640, and Liu Bei became an eligible ally in the alliance-break
+menu. That menu was inspected and canceled without breaking the alliance; the
+price and acceptance are specific to this negotiation.
 
 Battle placement uses direction digits and `0`, without Enter. In an observed
 two-unit defense, a wall tile refused Pan Feng's placement and another move up
@@ -182,9 +192,11 @@ On a later session using the same isolated workspace:
 
 Fresh checkpoints made with the tested MSX worker resumed interaction after
 worker replacement. One older format-1 checkpoint restored a picture but reset
-to C-BIOS after stepping; its cause remains unverified. A restored screenshot
-alone does not prove compatibility. Preserve the old checkpoint and verify
-continued input before depending on a restored campaign.
+to C-BIOS after stepping: it used an older core's incompatible machine layout.
+The saved RAM was not lost, but the newer core mapped it differently. Preserve
+such checkpoints for their matching core; otherwise start a fresh game or use
+the game's own save files with suitable media. A restored screenshot alone does
+not prove compatibility: verify continued input before relying on a campaign.
 
 With a worker that discovers `export_disk`, finish the MSX game's data-disk
 write and export **while that data disk is still mounted**:
@@ -196,7 +208,12 @@ write and export **while that data disk is still mounted**:
 Choose a new name; existing names are refused. Verify the filename, byte count
 and SHA-256 receipt, then test the game's own load flow after a fresh boot.
 A data disk need not be bootable. Exporting B after swapping away from D exports
-B, not the saved campaign on D. The actual game export/reload remains unverified
-on the newer worker; retaining a checkpoint is currently the demonstrated MSX
-restart path. No complete winning campaign or intended ending is established
-by these local observations.
+B, not the saved campaign on D.
+
+The verified reload started a new worker and loaded A with `load`, without
+`restore`. Title option `2` requested the exported D image; after selecting the
+saved slot and inserting B when requested, the game returned to Cao Pi,
+January 220, province 10, gold 950 and land 72. Return then opened the normal
+province command menu. Both checkpoint continuation and exported in-game-save
+loading are demonstrated for these tested workers and media. No complete
+winning campaign or intended ending is established by these observations.

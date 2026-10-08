@@ -1539,7 +1539,104 @@ let test_machine_dependencies_reject_cycles () = with_fixture (fun env _sw confi
   check Alcotest.int "concurrent admission cannot publish both sides of a cycle" 1 (List.length accepted);
   List.iter (fun id -> detach config id; await_phase (Eio.Stdenv.clock env) config id "detached") accepted)
 
+let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw config dir state ->
+  let names = ["masc_msx_step";"masc_msx_press";"masc_msx_screen";"masc_msx_save";"masc_msx_eject";
+    "masc_dos_step";"masc_dos_screen";"masc_dos_save";"masc_dos_eject";"masc_dos_pass"] in
+  let path = manifest dir "machine-activity" in
+  let original = In_channel.with_open_bin path In_channel.input_all in
+  write path (original ^ "\n[world.tools]\nexport = [" ^ String.concat "," (List.map (Printf.sprintf "%S") names) ^ "]\n");
+  let attached = unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
+    "run_id",`String "activity";"binding",`Assoc ["sources",`List []]]) in
+  let id = text "instance_id" attached in
+  let access = Lane_addon_sources.Unauthenticated in
+  let exports () = unwrap (Runtime.tool_exports ~config ~access ~reserved:[]) in
+  await (Eio.Stdenv.clock env) (fun () -> List.length (exports ()) = List.length names);
+  let call name arguments =
+    let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name=name) (exports ()) in
+    Machine_addon_host.call ~principal:(Lane_addon_call_context.Host_actor "fixture")
+      ~config ~access ~reserved:[] ~export ~arguments in
+  List.iter (fun name -> check bool "enabled machine can execute" true (Result.is_ok (call name (`Assoc []))))
+    ["masc_msx_step";"masc_dos_step"];
+  let runtime_path = Filename.concat dir "runtime-fixture.toml" in
+  write runtime_path (machine_runtime_config ~enabled:false);
+  ignore (unwrap (Masc.Runtime.init_default ~config_path:runtime_path));
+  List.iter (fun name ->
+    let before = List.length !(state.admissions) in
+    check bool "off is an explicit host refusal" true
+      (match call name (`Assoc []) with
+       | Error (Runtime.Host_refusal (Lane_addon_call_context.Activity_disabled _)) -> true | _ -> false);
+    check int "off cannot reach worker mutation" before (List.length !(state.admissions)))
+    ["masc_msx_step";"masc_dos_step"];
+  List.iter (fun name -> check bool "off retains observation, save and eject" true
+    (Result.is_ok (call name (`Assoc []))))
+    ["masc_msx_screen";"masc_msx_save";"masc_msx_eject";
+     "masc_dos_screen";"masc_dos_save";"masc_dos_eject"];
+  check bool "off still permits returning the controller" true
+    (Result.is_ok (call "masc_dos_pass" (`Assoc ["to",`String ""])));
+  write runtime_path (machine_runtime_config ~enabled:true);
+  ignore (unwrap (Masc.Runtime.init_default ~config_path:runtime_path));
+  check bool "reenabling resumes the same attached worker" true (Result.is_ok (call "masc_msx_step" (`Assoc [])));
+  detach config id;
+  await_phase (Eio.Stdenv.clock env) config id "detached")
+
+let test_machine_export_host_admission () = with_fixture (fun env _sw config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+  ignore (Auth.enable_auth config.base_path ~agent_name:"fixture-operator" ~require_token:true);
+  Fun.protect ~finally:(fun () -> Auth.disable_auth config.base_path) (fun () ->
+    let path = manifest dir "dos-export" in
+    let original = In_channel.with_open_bin path In_channel.input_all in
+    write path (original ^ "\n[world.tools]\nexport = [\"masc_dos_pass\", \"masc_dos_step\"]\n");
+    let id = unwrap (dispatch config Runtime.Attach ["manifest_path", `String path;
+      "run_id", `String "world"; "binding", `Assoc ["sources", `List []]]) |> text "instance_id" in
+    let access = Lane_addon_sources.Operator_configuration in
+    let exports () = unwrap (Runtime.tool_exports ~config ~access ~reserved:[]) in
+    await clock (fun () -> List.length (exports ()) = 2);
+    let call ~principal name arguments =
+      let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name = name) (exports ()) in
+      Machine_addon_host.call ~principal ~config ~access ~reserved:[] ~export ~arguments in
+    let principal = Lane_addon_call_context.Authenticated_agent "fixture-operator" in
+    let denied = call ~principal "masc_dos_pass" (`Assoc ["to", `String "not-invited"]) in
+    check bool "unknown recipient is a typed pre-effect host refusal" true
+      (match denied with Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
+    check int "denied handoff never invokes worker" 0 (List.length !(state.admissions));
+    let unnamed = call ~principal:Lane_addon_call_context.Anonymous "masc_dos_step" (`Assoc []) in
+    check bool "anonymous controller call is a typed host refusal" true
+      (match unnamed with Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
+    check int "anonymous call never invokes worker" 0 (List.length !(state.admissions));
+    state.controller := Some "revoked-player";
+    check bool "admitted caller reaches worker" true
+      (Result.is_ok (call ~principal "masc_dos_step" (`Assoc [])));
+    check bool "host supplies verified departure of missing credential" true
+      (match !(state.admissions) with
+       | [Some {Machine_controller_contract.observed_holder=Some "revoked-player";
+                release=Some No_credential; handoff_target=None}] -> true
+       | _ -> false);
+    detach config id; await_phase clock config id "detached"))
+
+let test_machine_notices_keep_effect_order () =
+  Eio_main.run (fun _ ->
+    let published = ref [] in
+    let relay ~author content = published := !published @ [author,content] in
+    let first = Machine_addon_events.create ~author:"first-actor" ~relay in
+    let second = Machine_addon_events.create ~author:"second-actor" ~relay in
+    let reply content = { (Mcp_protocol.Mcp_types.tool_result_of_text "ok") with
+      _meta=Some (`Assoc ["io.github.jeong-sik/masc.machine.events", `List [
+        `Assoc ["author", `String "forged-worker-author"; "content", `String content]]]) } in
+    Machine_addon_events.record first (reply "first effect");
+    Machine_addon_events.record second (reply "second effect");
+    Machine_addon_events.ready second;
+    Machine_addon_events.drain ();
+    check int "later publication cannot overtake pending credential release" 0 (List.length !published);
+    Machine_addon_events.ready first;
+    Machine_addon_events.drain ();
+    check (list (pair string string)) "effect order and host authors are preserved"
+      ["first-actor","first effect"; "second-actor","second effect"] !published)
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "machine notices keep effect order" `Quick test_machine_notices_keep_effect_order;
+  test_case "machine activity applies to worker calls" `Quick test_machine_activity_applies_to_worker_calls;
+  test_case "machine export host admission" `Quick test_machine_export_host_admission;
   test_case "tool exports bind live incarnations" `Quick test_tool_exports_bind_live_incarnations;
   test_case "machine source dependencies reject cycles" `Quick test_machine_dependencies_reject_cycles;
   test_case "invalid retained visibility is isolated" `Quick test_invalid_retained_visibility_is_isolated;

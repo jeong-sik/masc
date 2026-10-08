@@ -427,15 +427,20 @@ def run_browser_pointer_regression(executable: str) -> None:
         preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
 
 
-def run_browser_unserved_gesture_regression(executable: str) -> None:
+def run_browser_unserved_gesture_regression(executable: str, *, bidi_listed: bool = False) -> None:
     """A drag on a live WebExtension screenshot is not sent, and says why.
 
     The terminal is 80 columns wide: the reason and the next step have to be
     readable there. The reason outlives the lane's own refresh and goes with
-    the operator's next input.
+    the operator's next input. With a BiDi connection listed the next step is
+    the picker; with none it is where attaching one is written.
     """
     fixtures = overview_event_http_fixtures()
-    client = "11111111-1111-4111-8111-111111111111"
+    extension = "11111111-1111-4111-8111-111111111111"
+    bidi = "22222222-2222-4222-8222-222222222222"
+    connected = [{"clientId": extension, "browser": "firefox", "transport": "web_extension"}]
+    if bidi_listed:
+        connected.append({"clientId": bidi, "browser": "firefox", "transport": "webdriver_bidi"})
     actions, png = [], [""]
     clicked, captured_after_click = threading.Event(), threading.Event()
     refused, read_after_refusal = threading.Event(), threading.Event()
@@ -448,8 +453,9 @@ def run_browser_unserved_gesture_regression(executable: str) -> None:
 
     def read(body):
         request = json.loads(body)
-        assert request["lane"] == "live" and request.get("clientId") == client
-        text = "unserved fixture"
+        client = request.get("clientId")
+        assert request["lane"] == "live" and client in [row["clientId"] for row in connected]
+        text = "bidi fixture" if client == bidi else "extension fixture"
         if refused.is_set():
             read_after_refusal.set()
             text = "READ AFTER THE REFUSAL"
@@ -459,10 +465,10 @@ def run_browser_unserved_gesture_regression(executable: str) -> None:
 
     def screenshot(body):
         request = json.loads(body)
-        assert request["lane"] == "live" and request.get("clientId") == client
+        assert request["lane"] == "live" and request.get("clientId") == extension
         if clicked.is_set():
             captured_after_click.set()
-        return 200, {"ok":True,"data":{"source":"live","clientId":client,
+        return 200, {"ok":True,"data":{"source":"live","clientId":extension,
             "tabId":2,"title":"owned","url":url,"mimeType":"image/png","data":png[0],"viewport":viewport,"elapsed_ms":0}}
 
     def act(body):
@@ -470,19 +476,56 @@ def run_browser_unserved_gesture_regression(executable: str) -> None:
         clicked.set()
         return 200, {"ok":True,"data":{}}
 
-    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox","transport":"web_extension"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":connected}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
     fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(act)
+
+    chooser = b"Choose browser \xc2\xb7 separate sessions do not share login"
+    extension_row = "Live Firefox · WebExtension: no hover, drag • b:choose browser".encode()
+    extension_detail = "WebExtension: no hover, drag · BiDi serves them".encode()
 
     def interact(process, master, slave, output, _base):
         def image_drawn(start):
             wait_for_output(process, master, output, b"a=T", start=start, timeout=5)
 
-        palette_go(process, master, output, b"go Browser Lane", b"unserved fixture")
-        row = "Live Firefox · WebExtension: no hover, drag • b:choose browser".encode()
-        if row not in screen_text(bytes(output)):
-            raise AssertionError(f"connection row does not fit 80 columns: {screen_text(bytes(output))!r}")
+        def settled_screen(needle, start):
+            """The screen once the frame that drew [needle] after [start] is complete."""
+            wait_for_output(process, master, output, needle, start=start, timeout=5)
+            wait_for_output(process, master, output, FRAME_END,
+                start=end_of_needle(output, needle, start), timeout=3)
+            return screen_text(bytes(output[start:]))
+
+        def require(screen, *needles):
+            for needle in needles:
+                if needle not in screen:
+                    raise AssertionError(f"80-column screen lacks {needle!r}: {screen!r}")
+
+        if bidi_listed:
+            # Two connections are listed, so the lane asks which. The BiDi
+            # connection's row has to fit too, with what it leaves out.
+            palette_go(process, master, output, b"go Browser Lane", chooser)
+            wait_for_output(process, master, output, "Firefox · BiDi · existing login".encode(),
+                start=0, timeout=3)
+            os.write(master, b"j")
+            wait_for_terminal_input_consumed(slave)
+            read_available(master, output)
+            start = len(output)
+            os.write(master, b"\r")
+            require(settled_screen(b"bidi fixture", start),
+                "Live Firefox · BiDi: no HTML, elements, tab switch • b:choose browser".encode())
+            read_available(master, output)
+            start = len(output)
+            os.write(master, b"b")
+            require(settled_screen("Firefox · WebExtension · existing login".encode(), start),
+                extension_detail)
+            read_available(master, output)
+            start = len(output)
+            os.write(master, b"\r")
+            require(settled_screen(b"extension fixture", start), extension_row)
+        else:
+            palette_go(process, master, output, b"go Browser Lane", b"extension fixture")
+            require(screen_text(bytes(output)), extension_row)
         read_available(master, output)
         start = len(output)
         os.write(master, b"\x0f")
@@ -494,51 +537,52 @@ def run_browser_unserved_gesture_regression(executable: str) -> None:
         read_available(master, output)
         image_drawn(len(output))
         assert len(actions) == 1 and actions[0]["action"] == "click_at", actions
-        assert actions[0]["clientId"] == client
+        assert actions[0]["clientId"] == extension
         # A drag is not. Nothing is sent, the screenshot closes and the lane
-        # says what was not sent and where attaching a BiDi connection is written.
+        # says what was not sent and the next step.
         read_available(master, output)
         start = len(output)
         refused.set()
         os.write(master, b"\x1b[<0;2;5M\x1b[<0;5;8m")
         wait_for_output(process, master, output, b"Not sent", start=start, timeout=5)
         assert wait_for_fixture_event(process, master, output, read_after_refusal, timeout=5)
-        wait_for_output(process, master, output, b"READ AFTER THE REFUSAL", start=start, timeout=5)
-        wait_for_output(process, master, output, FRAME_END,
-            start=end_of_needle(output, b"READ AFTER THE REFUSAL", start), timeout=3)
-        after_refresh = screen_text(bytes(output[start:]))
-        for needle in ("Not sent · WebExtension: no drag · no BiDi connection is listed".encode(),
-                       b"Setup: docs/design/browser-bidi-live-host.md",
-                       b"READ AFTER THE REFUSAL"):
-            if needle not in after_refresh:
-                raise AssertionError(f"after its refresh the lane lost {needle!r}: {after_refresh!r}")
+        after_refresh = settled_screen(b"READ AFTER THE REFUSAL", start)
+        if bidi_listed:
+            require(after_refresh,
+                "Not sent · WebExtension: no drag · BiDi serves it · b:choose browser".encode())
+        else:
+            require(after_refresh,
+                "Not sent · WebExtension: no drag · no BiDi connection is listed".encode(),
+                b"Setup: docs/design/browser-bidi-live-host.md")
         if b"HTTP failed" in after_refresh:
             raise AssertionError(f"a gesture that was never sent reads as a failed read: {after_refresh!r}")
         assert len(actions) == 1, f"the unserved drag reached the lane: {actions!r}"
-        # The next input withdraws the reason; the picker says the same thing
-        # about the connection under its cursor.
+        # The next input withdraws the reason. j scrolls a page with nothing
+        # to scroll, so the lane stays and the rows under the reason move up:
+        # the connection row is drawn again only if the reason went.
         read_available(master, output)
-        start = len(output)
-        send_and_wait(process, master, output, b"b", b"Choose browser \xc2\xb7 separate sessions do not share login")
-        choice = "Firefox · WebExtension · existing login".encode()
-        wait_for_output(process, master, output, choice, start=start, timeout=3)
+        key_at = len(output)
+        os.write(master, b"j")
+        wait_for_output(process, master, output, b"Live Firefox", start=key_at, timeout=3)
         wait_for_output(process, master, output, FRAME_END,
-            start=bytes(output).rfind(choice, start), timeout=3)
-        picker = screen_text(bytes(output[start:]))
-        if "WebExtension: no hover, drag · BiDi serves them".encode() not in picker:
-            raise AssertionError(f"picker detail row missing at 80 columns: {picker!r}")
+            start=end_of_needle(output, b"Live Firefox", key_at), timeout=3)
+        after_key = screen_text(bytes(output[start:]))
+        require(after_key, extension_row, b"READ AFTER THE REFUSAL")
+        if b"Not sent" in after_key or b"Setup:" in after_key:
+            raise AssertionError(f"the next input left the refused gesture on screen: {after_key!r}")
+        # The picker says the same thing about the connection under its cursor.
         read_available(master, output)
         start = len(output)
+        os.write(master, b"b")
+        require(settled_screen("Firefox · WebExtension · existing login".encode(), start),
+            extension_detail)
         send_and_wait(process, master, output, b"\x1b", b"READ AFTER THE REFUSAL")
-        wait_for_output(process, master, output, FRAME_END,
-            start=end_of_needle(output, b"READ AFTER THE REFUSAL", start), timeout=3)
-        lane = screen_text(bytes(output[start:]))
-        if b"Not sent" in lane:
-            raise AssertionError(f"the next input left the refused gesture on screen: {lane!r}")
         send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
         os.write(master, b"q")
 
-    run_terminal_scenario(executable, description="Browser screenshot gesture the connection does not serve",
+    run_terminal_scenario(executable,
+        description=("Browser screenshot gesture a listed connection serves instead" if bidi_listed
+            else "Browser screenshot gesture the connection does not serve"),
         interact=interact, http_fixtures=fixtures, prepare_workspace=prepare, refresh=0.5,
         terminal_cols=80, preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
 
@@ -655,6 +699,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
     run_browser_viewport_cadence_regression(executable, follow_navigation=True)
     run_browser_pointer_regression(executable)
     run_browser_unserved_gesture_regression(executable)
+    run_browser_unserved_gesture_regression(executable, bidi_listed=True)
     run_browser_viewport_regression(executable)
     run_browser_viewport_regression(executable, cell_geometry=False)
     fixtures = overview_event_http_fixtures()

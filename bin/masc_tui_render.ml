@@ -8968,13 +8968,10 @@ let browser_lane_fixed_rows view =
   6 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
   + List.length (browser_lane_unserved_gesture_rows view)
 
-(* The picker's rows around its choices: the status row, the heading and the
-   divider above them, and the row below that an empty list explains itself
-   on. The detail row for the highlighted choice is drawn only when a choice
-   still fits beside it. *)
-let browser_picker_frame_rows = 4
-let browser_picker_detail_rows ~budget =
-  if budget > browser_picker_frame_rows then 1 else 0
+(* The picker's rows besides its choices: the status row, the heading and the
+   divider above them, the detail row for the highlighted choice below them,
+   and the row an empty connection list explains itself on. *)
+let browser_picker_frame_rows = 5
 
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -9092,8 +9089,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";
           c.push_divider ();
-          let detail_rows = browser_picker_detail_rows ~budget in
-          let room = max 1 (budget - browser_picker_frame_rows - detail_rows) in
+          let room = max 1 (budget - browser_picker_frame_rows) in
           let start = max 0 (cursor - room + 1) in
           browser_choices view |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
@@ -9103,10 +9099,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               else c.push_styled ~style:Ansi.reset line);
           (* One row whatever the choice, so the rows below do not move with
              the cursor. *)
-          if detail_rows > 0 then
-            c.push_styled ~style:(Theme.recede ())
-              ("  " ^ Option.value ~default:""
-                 (Option.bind (List.nth_opt (browser_choices view) cursor) browser_choice_detail));
+          c.push_styled ~style:(Theme.recede ())
+            ("  " ^ Option.value ~default:""
+               (Option.bind (List.nth_opt (browser_choices view) cursor) browser_choice_detail));
           (match browser_lane_picker_empty_line view with
            | None -> ()
            | Some line ->
@@ -9114,7 +9109,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             if awaiting_browser view then (
               c.push_styled ~style:(Theme.info ()) "  Live requires the MASC extension and its registered native host.";
               c.push_styled ~style:(Theme.recede ())
-                ("  Setup: " ^ Browser_lane.live_transport_setup_doc Browser_lane.Web_extension);
+                ("  " ^ transport_setup_row [Browser_lane.Web_extension]);
               c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh."))
       | None ->
       List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ row))

@@ -3660,7 +3660,7 @@ module Browser_lane_view = struct
   let after_action t =
     { t with reading = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; selected_tab = None; scroll = 0; load = Idle;
-      read_continuation = No_read_continuation }
+      read_continuation = No_read_continuation; unserved_gesture = None }
   let defer_read t = { t with read_continuation = Deferred_read }
   let pending_read t = match t.read_continuation with
     | No_read_continuation -> None | Deferred_read -> Some Read
@@ -3748,6 +3748,9 @@ module Browser_lane_view = struct
     | serving ->
         let them = match capabilities with [_] -> "it" | [] | _ :: _ :: _ -> "them" in
         Some (transport_names serving ^ " serves " ^ them)
+  (* Where attaching a connection of one of these transports is written. *)
+  let transport_setup_row transports =
+    "Setup: " ^ String.concat " or " (List.map Browser_lane.live_transport_setup_doc transports)
   let connection_name (client : client) =
     browser_name client.browser ^ " · " ^ transport_label client.transport
   (* The title names the connection; the connection row adds what it leaves
@@ -3850,7 +3853,7 @@ module Browser_lane_view = struct
         [cause ^ " · " ^ transport_names serving ^ " serves it · b:choose browser"]
     | serving ->
         [cause ^ " · no " ^ transport_names serving ^ " connection is listed";
-         "Setup: " ^ String.concat " or " (List.map Browser_lane.live_transport_setup_doc serving)]
+         transport_setup_row serving]
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -3894,7 +3897,7 @@ module Browser_lane_view = struct
   let choose_client client t =
     { t with source = Live; selected_client = Some client; selected_tab = None;
       reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
-      scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
+      scroll = 0; load = Idle; client_picker = None; read_view = Text_view; unserved_gesture = None }
   let choose_browser choice t =
     if browser_choice_selected t choice then { t with client_picker = None }
     else match choice with

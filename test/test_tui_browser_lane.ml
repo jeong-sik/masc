@@ -163,9 +163,9 @@ let test_screenshot_drag_hint () =
   expect "the server's own browser takes the drag"
     (screenshot_drag_hint (create ()) (shot ~source:"automation" firefox.client_id) = "drag: move")
 
-(* What an 80-column terminal leaves a Browser Lane row once the surface frame
-   has taken its four cells. The rows below are written to fit it. *)
-let row_cells = 76
+(* What an 80-column terminal leaves a Browser Lane row inside the surface
+   frame. The rows below are written to fit it. *)
+let row_cells = Masc_tui_frame.inner_width ~cols:80
 let cells text =
   let count = ref 0 in
   String.iter (fun byte -> if Char.code byte land 0xC0 <> 0x80 then incr count) text;
@@ -295,6 +295,10 @@ let test_unserved_gesture () =
     (refreshed.load = Idle && refreshed.unserved_gesture = Some unserved);
   expect "the next input withdraws it"
     ((withdraw_unserved_gesture refreshed).unserved_gesture = None);
+  expect "choosing a connection or finishing an action leaves no refusal about the old one"
+    ((choose_client zen refreshed).unserved_gesture = None
+     && (after_action refreshed).unserved_gesture = None
+     && (switch_source Automation refreshed).unserved_gesture = None);
   expect "an input with nothing refused changes nothing"
     (withdraw_unserved_gesture ready == ready)
 

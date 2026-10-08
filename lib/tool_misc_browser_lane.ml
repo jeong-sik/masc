@@ -157,11 +157,11 @@ let selection_error ~base_path ~tool_name ~start_time error =
         ^ String.concat "; or " (List.map Browser_lane.live_transport_setup serving_transports)
         ^ ". The same request returns the same answer until then; other work this \
            connection serves is unaffected. No browser command was dispatched." in
-    (* What only a BiDi connection serves is refused for want of one, so the
+    (* When no connected client serves work that BiDi supports, the
        answer carries what that host's own record says: whether one runs and
        why the last one ended. The operator acts on it, not the Keeper. *)
     let bidi_host =
-      if List.mem Browser_lane.Webdriver_bidi serving_transports
+      if serving_clients = [] && List.mem Browser_lane.Webdriver_bidi serving_transports
       then ["bidiHost", Browser_lane_launcher.bidi_host_to_json (observe ())]
       else [] in
     rejection

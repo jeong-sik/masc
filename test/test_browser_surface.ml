@@ -599,7 +599,11 @@ let test_keeper_hears_which_connection_serves_the_work () =
         U.(data |> member "servingClients" |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string));
       check bool "and the retry starts from that connection's own tabs" true
         (String_util.contains_substring U.(data |> member "retry" |> to_string) "list its tabs");
+      check bool "an available BiDi connection needs no operator host remedy" false
+        (List.mem_assoc "bidiHost" U.(data |> to_assoc));
       let data = interact extension ["action",`String "drag";"from",point;"to",point;"viewport",viewport] in
+      check bool "drag also retries the available connection without a host remedy" false
+        (List.mem_assoc "bidiHost" U.(data |> to_assoc));
       check string "drag is refused on the extension the same way" "trusted_drag" U.(data |> member "capability" |> to_string);
       let data = interact bidi ["action",`String "activate_tab"] in
       check string "tab activation is refused on BiDi" "tab_activation" U.(data |> member "capability" |> to_string);
@@ -608,7 +612,13 @@ let test_keeper_hears_which_connection_serves_the_work () =
       check (list string) "and the extension connection is offered" [id extension]
         U.(data |> member "servingClients" |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string));
       List.iter (fun client -> check bool "no refused request queued a browser command" true
-        (Lane.take_command ~client_info:client ~window_sec:0.001 = Ok None)) [extension;bidi]))
+        (Lane.take_command ~client_info:client ~window_sec:0.001 = Ok None)) [extension;bidi];
+      ignore (Lane.disconnect_client ~client_id:bidi.client_id);
+      let data = interact extension hover in
+      check int "a disconnected alternative is no longer offered" 0
+        U.(data |> member "servingClients" |> to_list |> List.length);
+      check string "host remedy returns only after the serving connection leaves" "never_started"
+        U.(data |> member "bidiHost" |> member "state" |> to_string)))
 
 let test_scoped_scene_acknowledgement () =
   Eio_main.run (fun env ->

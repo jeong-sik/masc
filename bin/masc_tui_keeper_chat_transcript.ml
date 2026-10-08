@@ -264,6 +264,8 @@ type t =
        for the run to start" whether the keeper was busy with something else
        or the run was stuck. *)
     mutable admission : (Live.admission * int) option
+  ; mutable initial_receipt : (float * Projection.interactive_receipt option) option
+  ; mutable priority_unavailable : bool
   ; mutable attempt : int
         (* 0-based runtime attempt the growing trail belongs to. *)
   ; mutable current_runtime_id : string option
@@ -366,6 +368,8 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; awaiting = None
   ; last_approval_settlement = None
   ; admission = None
+  ; initial_receipt = None
+  ; priority_unavailable = false
   ; attempt = 0
   ; current_runtime_id = None
   ; observed_model = None
@@ -388,6 +392,12 @@ let create ~keeper_name ~request_id ~started_at =
   create_for_source ~keeper_name ~source:(Masc_tui_keeper_chat_log.Operation request_id) ~started_at
 
 let bump t = t.revision <- t.revision + 1
+
+let note_priority_unavailable t =
+  if not t.priority_unavailable then begin
+    t.priority_unavailable <- true;
+    bump t
+  end
 let current_runtime_id t = t.current_runtime_id
 
 let runtime_identity_text ~keeper_name ~configured_runtime transcript =
@@ -2209,10 +2219,11 @@ let apply_delta ~now t (delta : Live.delta) =
       else (match t.batch_execution_id with
         | Some existing when existing <> binding.execution_id -> note_unreadable t "batch execution identity changed"
         | Some _ | None -> t.batch_execution_id <- Some binding.execution_id)
-  | Live.Accepted { admission; queue_length; _ } ->
+  | Live.Accepted { admission; queue_length; interactive } ->
       (* Recorded, not acted on: the phase still moves on RUN_STARTED. This
          only answers "why has it not started yet". *)
-      t.admission <- Some (admission, queue_length)
+      t.admission <- Some (admission, queue_length);
+      if t.initial_receipt = None then t.initial_receipt <- Some (now, interactive)
   | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
       (match t.phase with
        | Stream_ended | Stream_failed _ -> ()
@@ -2542,10 +2553,16 @@ let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
       ~source:(Masc_tui_keeper_chat_log.source log)
       ~started_at:(Masc_tui_keeper_chat_log.started_at log) in
   let timed = ref true in
+  let apply_receipt entry =
+    apply ~now:(Option.value entry.Masc_tui_keeper_chat_log.at ~default:now) t entry.delta
+  in
+  Option.iter apply_receipt (Masc_tui_keeper_chat_log.first_acceptance log);
   List.iter (fun (entry : Masc_tui_keeper_chat_log.entry) ->
       if entry.at = None then timed := false;
       apply ~now:(Option.value entry.at ~default:now) t entry.delta)
     (Masc_tui_keeper_chat_log.entries log);
+  Option.iter apply_receipt (Masc_tui_keeper_chat_log.latest_acceptance log);
+  if Masc_tui_keeper_chat_log.priority_unavailable log then note_priority_unavailable t;
   if not !timed then t.ended_at <- None;
   Option.iter (reconcile_operation t) (Masc_tui_keeper_chat_log.operation_state log);
   t
@@ -2646,6 +2663,7 @@ type drawn =
   | Drawn_error of string
 
 type drawn_origin =
+  | Admission_of_request of string
   | Text_stretch of int
   | Thinking_stretch of int
   | Tool_stretch of int
@@ -2664,6 +2682,32 @@ type drawn_item =
   ; superseded_runtime_id : string option
   ; drawn : drawn
   }
+
+let admission_prelude t =
+  Option.bind t.initial_receipt (fun (at, interactive) ->
+    let interactive_text = Option.bind interactive (fun (receipt : Projection.interactive_receipt) ->
+      let text = match receipt.outcome with
+        | Projection.Applied ->
+            (match receipt.interrupt_error with
+             | Some detail -> Some ("Message accepted; interruption unavailable: " ^ detail)
+             | None when receipt.signalled -> Some "Update accepted; stopping the observed turn before continuing"
+             | None when receipt.resumed -> Some "Update accepted; chat interruption pause released"
+             | None -> None)
+        | Projection.Stale_control ->
+            Some "Message queued: chat controls changed after this input; the newer stop or resume remains in effect"
+        | Projection.Paused -> Some "Message queued: Keeper remains paused; inspect with /queue"
+        | Projection.Replayed -> None in
+      text) in
+    let texts = Option.to_list interactive_text
+      @ (if t.priority_unavailable then
+          ["Submitted message already started or settled; no other turn was interrupted"]
+        else []) in
+    match texts with
+    | [] -> None
+    | _ :: _ -> Some
+        { origin = Admission_of_request t.request_id; response_part = None;
+          at = Some at; segment = 0; superseded = None; superseded_runtime_id = None;
+          drawn = Drawn_status (safe_block (String.concat "\n" texts)) })
 
 (* The drawn items with each noted delivery record standing over the skill
    item the trail derived from the same read call, and, apart, the noted
@@ -2854,7 +2898,7 @@ let drawn t =
                       reply_outcome))
           } ]
   in
-  match t.phase with
+  let items = match t.phase with
   | Waiting | Working | Stream_ended -> items
   | Stream_failed message ->
       items
@@ -2866,4 +2910,6 @@ let drawn t =
           ; superseded_runtime_id = None
           ; drawn = Drawn_error (safe_block message)
           } ]
+  in
+  Option.to_list (admission_prelude t) @ items
 ;;

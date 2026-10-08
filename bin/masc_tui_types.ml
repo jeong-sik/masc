@@ -815,6 +815,9 @@ type msg_anchor =
    A surviving journal stretch keeps its origin when reasoning is folded or
    a final reply replaces its streamed text. *)
 type chat_search_anchor =
+  | Search_admission of string
+      (** Full request identity: admission belongs to the input even when
+          batch binding changes the execution that consumes it. *)
   | Search_history of {
       row_anchor : msg_anchor;
       reply_source : Masc_tui_keeper_chat_log.journal_source option;
@@ -3048,14 +3051,13 @@ let turn_log_create ~keeper_name ~request_id ~started_at =
   turn_log_create_for_source ~keeper_name ~source:(Masc_tui_keeper_chat_log.Operation request_id) ~started_at
 ;;
 
-(* The acceptance is the server taking the POST, not a fact about the turn:
-   it never went through the bus, carries no seq, and comes again with every
-   re-POST after a cut. The transcript reads it (it answers "why has this not
-   started"); the log does not keep it, so a resend adds no entry and a log
-   that heard nothing but the acceptance has nothing to draw. *)
+(* Acceptance belongs to the request, not the execution journal. Keep its
+   first/latest scalar observations so rebuilding a transcript retains the
+   original notice without duplicating it on every re-POST. *)
 let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   match delta with
   | Masc_tui_keeper_chat_live.Accepted _ ->
+      ignore (Masc_tui_keeper_chat_log.add ~at:now turn_log.tl_log ~seq:None delta);
       Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
   | Masc_tui_keeper_chat_live.Batch_bound _
   | Masc_tui_keeper_chat_live.Run_started | Masc_tui_keeper_chat_live.Text _
@@ -3077,6 +3079,14 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add ~at:now turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
+;;
+
+let turn_log_note_priority_unavailable turn_log =
+  match Masc_tui_keeper_chat_transcript.admission turn_log.tl_transcript with
+  | Some ((Masc_tui_keeper_chat_live.Running | Settled), _) ->
+      Masc_tui_keeper_chat_log.note_priority_unavailable turn_log.tl_log;
+      Masc_tui_keeper_chat_transcript.note_priority_unavailable turn_log.tl_transcript
+  | Some (Queued, _) | None -> ()
 ;;
 
 (* A v2 journal page: the log's own fold ({!Masc_tui_keeper_chat_log.add_journaled})
@@ -7421,9 +7431,31 @@ let unavailable_journal_operation_targets state keeper_name =
 let hold_settled_log state turn_log =
   let source = Masc_tui_keeper_chat_log.source turn_log.tl_log in
   let keeper_name = turn_log_keeper_name turn_log in
+  (* A journal has no HTTP acceptance. Whichever execution log wins must
+     retain the first receipt observed for this exact request, without
+     putting that receipt in the journal or resetting execution state. *)
+  let inherit_acceptance ~from ~into =
+    if Masc_tui_keeper_chat_log.first_acceptance into.tl_log = None then begin
+      let copy (entry : Masc_tui_keeper_chat_log.entry) =
+        turn_log_add ~now:(Option.value entry.at ~default:(turn_log_started_at from))
+          into ~seq:None entry.delta
+      in
+      Option.iter copy (Masc_tui_keeper_chat_log.first_acceptance from.tl_log);
+      Option.iter copy (Masc_tui_keeper_chat_log.latest_acceptance from.tl_log)
+    end;
+    if Masc_tui_keeper_chat_log.priority_unavailable from.tl_log then begin
+      Masc_tui_keeper_chat_log.note_priority_unavailable into.tl_log;
+      Masc_tui_keeper_chat_transcript.note_priority_unavailable into.tl_transcript
+    end
+  in
   let replaceable =
     match settled_log_for_source state ~keeper_name source with
-    | Some existing -> existing == turn_log || not (turn_log_holds_the_turn existing)
+    | Some existing when existing == turn_log -> true
+    | Some existing ->
+        let replace = not (turn_log_holds_the_turn existing) in
+        if replace then inherit_acceptance ~from:existing ~into:turn_log
+        else inherit_acceptance ~from:turn_log ~into:existing;
+        replace
     | None -> true
   in
   if replaceable then begin
@@ -7839,7 +7871,9 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
    executable so the decision is linkable by a test. *)
 let settle_turn_log state (entry : inflight) =
   Masc_tui_keeper_chat_log.commit entry.log.tl_log;
-  if Masc_tui_keeper_chat_log.entries entry.log.tl_log <> [] then
+  if Masc_tui_keeper_chat_log.entries entry.log.tl_log <> []
+     || Option.is_some (Masc_tui_keeper_chat_transcript.admission_prelude entry.log.tl_transcript)
+  then
     hold_settled_log state entry.log;
   match state.msg_live with
   | Some visible

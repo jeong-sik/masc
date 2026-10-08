@@ -94,7 +94,11 @@ Foreign sessions cannot poison local state. The runtime observes only root
 partial/assistant frames after its existing parsing and session checks; child
 and unscoped partial metadata cannot consume the root ticket. Their parsed
 message starts retire the prior root inheritance cursor rather than letting an
-unstamped later fragment adopt its group. Global strict JSON duplicate rejection remains in force. Malformed optional attribution in
+unstamped later fragment adopt its group. They retain an already witnessed
+root command without creating or reviving one; only a fresh root response
+start clears the cursor uncertainty and permits that command proof again.
+A stale root-start replay still suspends command proof as well as retiring the
+cursor. Global strict JSON duplicate rejection remains in force. Malformed optional attribution in
 an otherwise admitted frame is an observation rejection, preserving the
 existing single-shot body and completion behavior.
 

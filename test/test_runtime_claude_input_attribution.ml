@@ -256,6 +256,34 @@ let test_command_cannot_conceal_uncertain_cursor_or_outlive_result () =
       ((observe t (assistant "late-unstamped" None) []).attribution=A.Unattributed))
     [[];stamp "foreign" ["foreign"];["user_message_uuid",`String "input-1";"user_message_uuids",`Null]]
 
+let test_unowned_start_retires_cursor_without_suspending_command () =
+  let t=create () in ignore (A.written t);
+  ignore (observe t (start "witness" "root-before-child") own);
+  A.unowned_response_start t ~message_id:"child-model";
+  check bool "child scope cannot lend root proof to an unbound fragment" true
+    ((observe t (fragment "before-fresh-root") []).attribution=A.Unattributed);
+  check bool "complete envelope alone cannot clear uncertain response scope" true
+    ((observe t (assistant "before-root-envelope" None) []).attribution=A.Unattributed);
+  let restored=observe t (start "fresh-root" "root-after-child") [] in
+  check bool "fresh root uses the original command witness" true
+    (match restored.attribution with
+     | A.Command_inherited witness -> witness.stamp_uuid="witness"
+         && witness.group.primary="input-1" && witness.group.consumed=["input-1"]
+     | A.Unattributed | A.Explicit _ | A.Inherited _ | A.Rejected _ -> false);
+  List.iter (fun prepare ->
+    let t=create () in ignore (A.written t); prepare t;
+    A.unowned_response_start t ~message_id:"child-model";
+    check bool "fresh root cannot create or revive missing command evidence" true
+      ((observe t (start "fresh-root" "root-after-child") []).attribution=A.Unattributed))
+    [(fun _ -> ());
+     (fun t -> ignore (observe t (start "witness" "root") own);
+       ignore (observe t (assistant "foreign" None) (stamp "other" ["other"])));
+     (fun t -> ignore (observe t (start "witness" "root") own);
+       ignore (observe t (result "terminal" A.Provider_success) own));
+     (fun t -> ignore (observe t (start "witness" "root") own);
+       ignore (observe t (start "next" "next-root") []);
+       ignore (A.observe t ~session_id:"session-1" ~frame:(start "witness" "root") own))]
+
 let test_command_proof_does_not_select_reused_model_occurrence () =
   let prepare stamp =
     let t=create () in ignore (A.written t);
@@ -300,4 +328,5 @@ let () = run "Claude input attribution"
     test_case "typed SDK command owns later model responses" `Quick test_typed_command_owns_later_model_responses;
     test_case "command requires own primary write and fresh witness" `Quick test_command_requires_own_primary_write_and_fresh_witness;
     test_case "command respects cursor uncertainty and result end" `Quick test_command_cannot_conceal_uncertain_cursor_or_outlive_result;
+    test_case "unowned start retains witnessed command until fresh root" `Quick test_unowned_start_retires_cursor_without_suspending_command;
     test_case "command proof does not select reused model occurrence" `Quick test_command_proof_does_not_select_reused_model_occurrence]]

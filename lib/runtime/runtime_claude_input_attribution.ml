@@ -209,7 +209,6 @@ let quarantine t frame reason =
   | Assistant {message_id=None;_} | Result _ -> ()
 
 let unowned_response_start t ~message_id =
-  suspend_command t;
   t.response_scope <- Uncertain_scope;
   t.current <- None;
   Hashtbl.replace t.responses message_id Ambiguous
@@ -238,6 +237,9 @@ let observe t ~session_id ~frame fields =
                  (match t.current, previous.response with
                   | Some current, Some original when current == original -> ()
                   | Some _, Some _ | Some _, None | None, (Some _ | None) ->
+                      (* A stale root replay contradicts the active response;
+                         unlike a child start it also suspends command proof. *)
+                      suspend_command t;
                       unowned_response_start t ~message_id)
              | Partial_stop _ | Partial_fragment _ | Assistant _ | Result _ -> ());
             None

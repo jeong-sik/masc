@@ -71,7 +71,10 @@ val written : t -> observation
 val write_unknown : t -> observation
 val unowned_response_start : t -> message_id:string -> unit
 (** A parsed SDK start without root ownership retires the inheritance cursor.
-    It cannot consume the host ticket or establish a root response binding. *)
+    It cannot consume the host ticket or establish a root response binding.
+    Existing command evidence is retained, but cannot be inherited until a
+    fresh root response start establishes a clear response scope. It does not
+    revive an already suspended or ended command. *)
 val observe : t -> session_id:string -> frame:frame ->
   (string * Yojson.Safe.t) list -> observation option
 (** Called for validated root frames only. Exact duplicate metadata emits no

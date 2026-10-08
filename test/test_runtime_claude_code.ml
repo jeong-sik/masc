@@ -3199,6 +3199,44 @@ let test_input_typed_command_owns_unstamped_agent_tool_round () =
      input_stamp "foreign-primary" ["__INPUT_UUID__";"foreign-primary"],false;
      ["user_message_uuid",`String "__INPUT_UUID__";"user_message_uuids",`Null],false]
 
+let test_input_command_recovers_after_unowned_partial_start () =
+  List.iter (fun parent ->
+    let unowned_start =
+      match Yojson.Safe.from_string (input_begin "unowned-start" "child-model" input_own_stamp) with
+      | `Assoc fields ->
+          let fields=List.remove_assoc "parent_tool_use_id" fields in
+          let ownership=Option.to_list (Option.map (fun id -> "parent_tool_use_id", `String id) parent) in
+          Yojson.Safe.to_string (`Assoc (ownership @ fields))
+      | _ -> fail "partial fixture must be an object" in
+    List.iter (fun (initial_stamp, witnessed) ->
+      let observations=run_input_success [
+        Emit (input_begin "root-command-witness" "root-before-child" initial_stamp);
+        Emit unowned_start;
+        Emit (input_tick ~uuid:(Some "uncertain-root-fragment") []);
+        Emit (input_begin "fresh-root-start" "root-after-child" []);
+        Emit assistant;
+        Emit (with_input_fields result input_own_stamp)] in
+      check bool "unowned partial is not root input evidence" false
+        (List.exists (fun (o : Input_evidence.observation) ->
+          Option.bind o.frame input_frame_uuid=Some "unowned-start") observations);
+      check bool "root fragment cannot inherit before a fresh root start" true
+        ((input_observed "uncertain-root-fragment" observations).attribution=Input_evidence.Unattributed);
+      List.iter (fun uuid ->
+        let observation=input_observed uuid observations in
+        check bool "fresh root retains only the original witnessed command" witnessed
+          (match observation.attribution with
+           | Input_evidence.Command_inherited witness ->
+               witness.stamp_uuid="root-command-witness"
+               && witness.group.primary=observation.ticket.client_uuid
+               && witness.group.consumed=[observation.ticket.client_uuid]
+           | Unattributed | Explicit _ | Inherited _ | Rejected _ -> false);
+        if not witnessed then check bool "child stamp cannot create root command proof" true
+          (observation.attribution=Input_evidence.Unattributed))
+        ["fresh-root-start";"assistant-fixture-1"])
+      [input_own_stamp,true; [],false;
+       input_stamp "foreign-primary" ["__INPUT_UUID__";"foreign-primary"],false])
+    [Some "parent-agent"; None]
+
 let test_input_command_owns_native_agent_with_reused_model_id () =
   let first =
     {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"reuse-first-native","message":{"id":"reused-native-model","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"reuse-first-read","name":"Read","input":{"file_path":"/tmp/fixture"}}]}}|} in
@@ -3847,6 +3885,7 @@ let () =
         test_case "rejected partial identity quarantines inheritance" `Quick test_input_rejected_partial_identity_cannot_keep_old_inheritance;
         test_case "old start retires scope and historical stop preserves it" `Quick test_input_replayed_boundaries_preserve_exact_scope;
         test_case "typed command owns unstamped Agent tool round" `Quick test_input_typed_command_owns_unstamped_agent_tool_round;
+        test_case "command recovers after child or unscoped partial start" `Quick test_input_command_recovers_after_unowned_partial_start;
         test_case "command owns native Agent with reused model ID" `Quick test_input_command_owns_native_agent_with_reused_model_id;
         test_case "strict duplicate and session boundary" `Quick test_input_metadata_duplicate_and_foreign_session_stay_protocol_errors]
     ; "session", [ test_case "resume identity" `Quick test_resume_preserves_session_identity ]

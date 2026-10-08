@@ -508,6 +508,40 @@ let test_a_link_out_of_the_inventory_is_refused () =
           (is_completed (load ~base_path "game"))))
 ;;
 
+(* The lexical realpath check is not the read boundary: replace the leaf
+   between the first parent inspection and the descriptor check and require the
+   descriptor-bound reader to reject the changed identity. The hook is the
+   deterministic replacement point used by Fs_compat's regression suite, so
+   this does not depend on a sleep or a timing race. *)
+let test_inventory_read_rejects_a_controlled_replacement () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    mkdir_p root;
+    Unix.chmod root 0o700;
+    let path = Filename.concat root "race.com" in
+    let moved = path ^ ".old" in
+    write_file path hello_com;
+    let inspections = ref 0 in
+    let parent_lstat directory =
+      let stat = Unix.lstat directory in
+      if String.equal directory root then begin
+        incr inspections;
+        if !inspections = 2 then begin
+          Unix.rename path moved;
+          write_file path "replacement"
+        end
+      end;
+      stat
+    in
+    match
+      Fs_compat.Owned_read_for_testing.load_with_snapshot
+        ~parent_lstat ~owner_uid:(Unix.geteuid ()) ~ownership_root:root path
+    with
+    | Error { Fs_compat.failure = Fs_compat.Filesystem_identity_changed _; _ } -> ()
+    | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+    | Ok _ -> fail "descriptor-bound inventory read accepted a replaced leaf")
+;;
+
 (* A game directory often holds several programs: 삼국지3 boots KOEI.COM,
    which runs OPEN.EXE and MAIN.EXE beside it, and the setup and editor sit
    there too. The refusal used to ask the caller to name one with no argument
@@ -1663,6 +1697,8 @@ let () =
             test_click_reaches_the_guest_and_the_ledger
         ; test_case "inventory only" `Quick test_only_inventory_names_resolve
         ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
+        ; test_case "inventory replacement identity" `Quick
+            test_inventory_read_rejects_a_controlled_replacement
         ; test_case "boot inside a directory" `Quick
             test_boot_names_the_program_inside_a_directory
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key

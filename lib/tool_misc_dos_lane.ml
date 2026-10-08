@@ -224,21 +224,14 @@ let entries_of dir =
 let programs_available ~base_path = entries_of (programs_dir ~base_path)
 
 (* A bad inventory entry must become a bounded result rather than a blocking
-   open (a FIFO with no writer) or an exception containing the host path. *)
-let read_regular_file path =
-  try
-    let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0 in
-    match (Unix.fstat fd).Unix.st_kind with
-    | Unix.S_REG ->
-      let ic = Unix.in_channel_of_descr fd in
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr ic)
-        (fun () -> Ok (In_channel.input_all ic))
-    | _ ->
-      Unix.close fd;
-      Error "entry is not a regular file"
-  with
-  | Unix.Unix_error _ | Sys_error _ -> Error "entry is unavailable"
+   open (a FIFO with no writer) or an exception containing the host path.
+   Fs_compat binds containment and identity to the descriptor it reads: the
+   earlier realpath is only a name check, while lstat/open/fstat and the
+   parent-chain revalidation are the actual read boundary. *)
+let read_regular_file ~ownership_root path =
+  match Fs_compat.load_owned_regular_file ~ownership_root path with
+  | Ok (Some contents) -> Ok contents
+  | Ok None | Error _ -> Error "entry is unavailable"
 ;;
 
 type entry_kind = Directory | Regular | Other | Unavailable
@@ -369,7 +362,7 @@ let resolve_program ?boot ~base_path name =
         let read_one f =
           match within ~root (Filename.concat path f) with
           | Some real ->
-            (match read_regular_file real with
+            (match read_regular_file ~ownership_root:root real with
              | Ok bytes -> Ok (f, bytes)
              | Error reason -> Error (Printf.sprintf "%s is unavailable: %s" f reason))
           | None -> Error (left_inventory ~root (trimmed ^ "/" ^ f))
@@ -405,7 +398,7 @@ let resolve_program ?boot ~base_path name =
         (* One file boots alone, and is mounted under its own name too — a
            program that opens itself (overlays, self-reading installers)
            finds it. *)
-        (match read_regular_file path with
+        (match read_regular_file ~ownership_root:root path with
          | Ok bytes -> Ok (trimmed, bytes, [ (trimmed, bytes) ])
          | Error reason -> Error (Printf.sprintf "%s is unavailable: %s" trimmed reason)))
 ;;
@@ -644,7 +637,7 @@ let inventory_file_json ~programs_root ~parent path name =
      | Other -> unavailable_json shown_name "entry is not a regular file or directory"
      | Unavailable -> unavailable_json shown_name "entry is unavailable"
      | Regular ->
-       (match read_regular_file real with
+       (match read_regular_file ~ownership_root:programs_root real with
         | Error reason -> unavailable_json shown_name reason
         | Ok contents ->
           `Assoc
@@ -664,7 +657,7 @@ let inventory_program_json ~programs_root name =
      | Unavailable -> unavailable_json name "entry is unavailable"
      | Other -> unavailable_json name "entry is not a regular file or directory"
      | Regular ->
-       (match read_regular_file real with
+       (match read_regular_file ~ownership_root:programs_root real with
         | Error reason -> unavailable_json name reason
         | Ok contents ->
           `Assoc

@@ -1523,27 +1523,48 @@ let test_kind_absent_reads_utterance () =
       | messages ->
           Alcotest.failf "expected 2 rows, got %d" (List.length messages))
 
-let test_unknown_kind_reported_reads_utterance () =
-  let base_dir = temp_base_path "keeper-chat-store-kind-unknown" in
-  Fun.protect
-    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
-    (fun () ->
-      let keeper_name = "keeper-chat-kind-unknown" in
-      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
-      let before = drop_value invalid_payload in
-      let path = chat_path ~base_dir ~keeper_name in
-      write_file path
-        ({|{"id":"unknown-kind","role":"assistant","content":"hi","ts":1.0,"kind":"weird"}|}
-        ^ "\n");
-      match K.load ~base_dir ~keeper_name with
-      | [ asst ] ->
-          Alcotest.(check bool)
-            "unknown kind reads as utterance (conservative arm)" true
-            (K.Row_kind.equal asst.kind K.Row_kind.Utterance);
-          Alcotest.(check (float 0.001)) "unknown kind reported" 1.0
-            (drop_value invalid_payload -. before)
-      | messages ->
-          Alcotest.failf "expected 1 row, got %d" (List.length messages))
+let test_invalid_kind_cannot_acknowledge_input () =
+  List.iter
+    (fun kind ->
+       let base_dir = temp_base_path "keeper-chat-store-kind-invalid" in
+       Fun.protect
+         ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+         (fun () ->
+            let keeper_name = "keeper-chat-kind-invalid" in
+            let path = chat_path ~base_dir ~keeper_name in
+            let turn_ref = Ids.Turn_ref.make ~trace_id:"kind-authority" ~absolute_turn:1 in
+            let user =
+              `Assoc
+                [ "id", `String "pending-user"; "role", `String "user"
+                ; "content", `String "please check"; "ts", `Float 1.0
+                ; "speaker_authority", `String "owner"
+                ; "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)
+                ]
+            in
+            let assistant =
+              `Assoc
+                [ "id", `String "invalid-kind"; "role", `String "assistant"
+                ; "content", `String "done"; "ts", `Float 2.0
+                ; "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)
+                ; "kind", kind
+                ]
+            in
+            let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
+            let before = drop_value invalid_payload in
+            write_file path
+              (Yojson.Safe.to_string user ^ "\n"
+               ^ Yojson.Safe.to_string assistant ^ "\n");
+            let messages = K.load ~base_dir ~keeper_name in
+            Alcotest.(check (list string)) "invalid assistant is excluded"
+              [ "pending-user" ] (List.map (fun (m : K.chat_message) -> m.id) messages);
+            Alcotest.(check (float 0.001)) "invalid kind is reported" 1.0
+              (drop_value invalid_payload -. before);
+            let pending = MS.pending_messages_of_messages ~targets:[ keeper_name ] messages in
+            Alcotest.(check int) "input remains pending" 1 (List.length pending);
+            match K.load_all_result ~base_dir ~keeper_name with
+            | Error _ -> ()
+            | Ok _ -> Alcotest.fail "strict reader accepted an invalid kind"))
+    [ `String "weird"; `String ""; `String " "; `Int 1; `Null; `Bool false ]
 
 let audio_path ~base_dir token =
   Filename.concat
@@ -3600,8 +3621,8 @@ let () =
             test_failure_turn_kind_roundtrip;
           Alcotest.test_case "absent kind reads utterance" `Quick
             test_kind_absent_reads_utterance;
-          Alcotest.test_case "unknown kind reported, reads utterance" `Quick
-            test_unknown_kind_reported_reads_utterance;
+          Alcotest.test_case "invalid kind cannot acknowledge input" `Quick
+            test_invalid_kind_cannot_acknowledge_input;
         ] );
       ( "approval_lifecycle",
         [ Alcotest.test_case

@@ -189,11 +189,9 @@ type chat_message = {
          written before P4 lack the field and read as []; the offline
          backfill tool stamps them. *)
   kind : Row_kind.t;
-      (* Declared by the writer at append.  Absent field (every row
-         written before this field existed) reads as [Utterance]; an
-         unknown label is reported as a persistence read drop and the
-         row reads as [Utterance] (the conservative arm: it renders and
-         advances the watermark like any reply). *)
+      (* Absent kind means an utterance. A present kind must decode to a
+         known label; invalid labels or values invalidate the row, so they
+         cannot acknowledge pending input as keeper speech. *)
   turn_ref : Ids.Turn_ref.t option;
       (* RFC-0233 §7: "<trace_id>#<absolute_turn>" join key for the turn
          that produced this row.  Stamped by [append_turn] /
@@ -215,4 +213,3 @@ type chat_message = {
          malformed persisted value is reported as a persistence read drop and
          reads as [None]; the row stays valid. *)
 }
-

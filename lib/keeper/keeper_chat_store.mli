@@ -224,11 +224,9 @@ type chat_message = Keeper_chat_types.chat_message = {
           those).  Malformed persisted entries are reported as
           persistence read drops and skipped; the row stays valid. *)
   kind : Row_kind.t;
-      (** Declared by the writer at append.  Absent persisted field
-          (every row written before it existed) reads as [Utterance];
-          an unknown label is reported as a persistence read drop and
-          reads as [Utterance] — the conservative arm: the row renders
-          and advances the watermark like any reply. *)
+      (** Absent persisted kind means [Utterance]. A present field must
+          name a known kind; malformed values are reported and the row is
+          rejected, so unknown input cannot acknowledge keeper speech. *)
   turn_ref : Ids.Turn_ref.t option;
       (** RFC-0233 §7: ["<trace_id>#<absolute_turn>"] join key for the turn
           that produced this row.  Stamped by {!append_turn} /
@@ -527,7 +525,7 @@ val load_all_result :
   base_dir:string -> keeper_name:string -> (chat_message list, string) result
 (** Fail-closed whole-transcript reader for consumers whose durable cursor
     advances past the returned rows. Unlike {!load_all}, one unreadable row,
-    a [surface] that does not decode, an unknown typed [speaker_authority],
+    a [surface] that does not decode, an invalid [kind], an unknown typed [speaker_authority],
     speaker identity without its authority, an incomplete final row, or a
     store read failure is an error rather than a silently shorter history.
     Missing authority remains valid only for rows written without any speaker

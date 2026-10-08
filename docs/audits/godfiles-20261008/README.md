@@ -30,6 +30,7 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41972](https://github.com/jeong-sik/masc/pull/41972) | Duplicate recovery report types/projections removed; existing consumer reads canonical rich rows and exact operation identities | `atomic_write.ml/.mli`, publication reconciliation tests |
 | [#41974](https://github.com/jeong-sik/masc/pull/41974) | Ordinary atomic replacement effect owner separated; direct public bindings; cancellation docs and cold file-ingestion evidence corrected | `atomic_write.ml/.mli`, `fs_compat.ml/.mli`, blob tests |
 | [#41987](https://github.com/jeong-sik/masc/pull/41987) | Pure turn completion policy and response normalization; ignored history argument and testing forwarders removed; Muse fixture preparation repaired | `keeper_agent_run.ml/.mli`, direct adapter and policy tests |
+| [#41992](https://github.com/jeong-sik/masc/pull/41992) | HITL request/domain owner with explicit host/config acquisition before pure projection; shared HTTP/CLI captured bundle and direct test consumers | `hitl_summary_worker.ml/.mli`, HITL fixture |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather

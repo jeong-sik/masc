@@ -63,9 +63,16 @@ let read t context args =
     | Some (`Int n) when n > 0 && n <= 100000 -> Ok n | _ -> Error "invalid maxChars" in
   match field "includeHtml" args with
   (* The automation lane's document helper: it drops HTML over 1 MiB and says
-     so, instead of returning a cut document. *)
+     so, instead of returning a cut document. The extension runs it once the
+     parser is done; nothing waits for the parser here, and a half-parsed
+     document must not be recorded as the complete one. *)
   | Some (`Bool true) ->
-    script t context (Browser_lane.Document.runtime ^ "\nreturn browserDocument();") (obj [])
+    let* page = script t context
+      ("if (document.readyState === 'loading') return {documentLoading:true};\n"
+       ^ Browser_lane.Document.runtime ^ "\nreturn browserDocument();") (obj []) in
+    if Option.is_some (field "documentLoading" page)
+    then Error "the document is still loading; read it again"
+    else Ok page
   | None | Some (`Bool false) -> script t context
       "const chars=Array.from(document.body?.innerText??''); const cap=arguments[0].cap; return {url:location.href,title:document.title,text:chars.slice(0,cap).join(''),chars:chars.length,truncated:chars.length>cap};" (obj ["cap",`Int cap])
   | _ -> Error "invalid includeHtml"

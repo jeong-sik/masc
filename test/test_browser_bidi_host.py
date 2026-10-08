@@ -55,7 +55,7 @@ def run(host, firefox, out=None):
                 pass
 
             def do_GET(self):
-                data = fixture.read_bytes()
+                data = (oversized if self.path == "/oversized" else fixture).read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
@@ -125,6 +125,11 @@ pad.onpointerdown=e=>{down=e.isTrusted;pad.setPointerCapture(e.pointerId)};
 pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
 </script>''', encoding="utf-8")
         fixture_url = f"http://127.0.0.1:{server.server_port}/fixture"
+        # A document whose source passes the helper's 1 MiB bound.
+        oversized = root / "oversized.html"
+        oversized.write_text('<!doctype html><meta charset="utf-8"><title>Oversized fixture</title><p>'
+            + "x" * (1100 * 1024), encoding="utf-8")
+        oversized_url = f"http://127.0.0.1:{server.server_port}/oversized"
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -134,7 +139,8 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
         native_log = (evidence / "native.log").open("wb")
         try:
             ff = subprocess.Popen([firefox, "--headless", "--no-remote", "--profile", str(root / "profile"),
-                "--remote-debugging-port", str(port), fixture_url, fixture_url], stdout=log, stderr=log)
+                "--remote-debugging-port", str(port), fixture_url, fixture_url, oversized_url],
+                stdout=log, stderr=log)
             deadline = time.monotonic() + 20
             while True:
                 try:
@@ -155,6 +161,19 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
                 result = results.get(timeout=25)
                 assert result["id"] == ident
                 return result
+
+            def capture(tab):
+                """A capture of a viewport at rest. A wheel can still be
+                committing when a capture compares its before and after; that
+                one answer is asked again, within a bound."""
+                deadline = time.monotonic() + 5
+                while True:
+                    shot = call("page.capture", {"tabId": tab})
+                    if not shot["ok"] and shot.get("error") == "viewport_changed_during_capture":
+                        assert time.monotonic() < deadline, shot
+                        continue
+                    assert shot["ok"], shot
+                    return shot
 
             tabs = call("tabs.list", {})
             assert tabs["ok"], tabs
@@ -194,6 +213,26 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert source["data"]["htmlComplete"] is True and source["data"]["htmlUnavailableReason"] is None
             assert "<title>BiDi native fixture</title>" in source["data"]["html"], source
             assert source["data"]["documentId"] == shot["data"]["viewport"]["documentId"], source
+            # Past the helper's bound the source is left out with its reason,
+            # never cut. A tab still loading says so and is asked again.
+            deadline = time.monotonic() + 20
+            while True:
+                listing = call("tabs.list", {})
+                assert listing["ok"], listing
+                large = [tab["id"] for tab in listing["data"] if tab["url"] == oversized_url]
+                if large:
+                    break
+                assert time.monotonic() < deadline, listing
+            assert len(large) == 1, listing
+            while True:
+                bounded_out = call("page.read", {"tabId": large[0], "includeHtml": True})
+                if bounded_out["ok"]:
+                    break
+                assert "still loading" in bounded_out.get("error", ""), bounded_out
+                assert time.monotonic() < deadline, bounded_out
+            assert bounded_out["data"]["html"] is None and bounded_out["data"]["htmlComplete"] is False, bounded_out
+            assert bounded_out["data"]["htmlUnavailableReason"] == "document_html_exceeds_1_mib", bounded_out
+            assert bounded_out["data"]["documentId"] and bounded_out["data"]["tabId"] == large[0], bounded_out
             observed = call("page.scene", {"tabId": first, "view": "content", "maxChars": 50000})
             assert observed["ok"], observed
             scene = observed["data"]
@@ -251,8 +290,7 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert long_text[0].endswith("\U0001F600"), long_text
             # The wheel above may still be settling, and the pointer guard
             # compares every viewport value: hover from a capture taken now.
-            settled = call("page.capture", {"tabId": first})
-            assert settled["ok"], settled
+            settled = capture(first)
             here, frame = settled["data"]["url"], settled["data"]["viewport"]
             assert frame["width"] >= 900 and frame["height"] >= 220, frame
             reveal = call("page.interact", {"tabId": first, "action": "hover_at", "expectedUrl": here,
@@ -265,9 +303,7 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             buttons = [node for node in seen["data"]["nodes"] if node.get("text") == "Add reaction"]
             assert len(buttons) == 1 and buttons[0]["rects"], seen
             box = buttons[0]["rects"][0]
-            pictured = call("page.capture", {"tabId": first})
-            assert pictured["ok"], pictured
-            frame = pictured["data"]["viewport"]
+            frame = capture(first)["data"]["viewport"]
             pressed = call("page.interact", {"tabId": first, "action": "click_at", "expectedUrl": here,
                 "viewport": frame, "point": {"x": (box["x"] + box["width"] / 2) / frame["width"],
                                              "y": (box["y"] + box["height"] / 2) / frame["height"]}})

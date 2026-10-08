@@ -42,6 +42,18 @@ let test_document_source () =
      | _ -> fail "the document read ran other than one script")
   | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail) ->
     failf "the peer refused a document-source read: %s" detail
+(* A document the parser has not finished is not returned as its source. *)
+let test_document_still_loading () =
+  let command method_ _ = match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction" -> Ok (script_value (obj ["documentLoading",`Bool true]))
+    | other -> failf "unexpected document command: %s" other in
+  let peer=Peer.create ~command in
+  match Peer.dispatch peer ~verb:Peer.Page_read (obj ["tabId",`Int 1;"includeHtml",`Bool true]) with
+  | Error (Peer.Before_effect detail) ->
+    check string "the refusal says to read again" "the document is still loading; read it again" detail
+  | Error (Peer.Outcome_unknown detail) -> failf "a read was reported as an unknown outcome: %s" detail
+  | Ok _ -> fail "a document still loading was returned as its source"
 (* The inventory is the automation lane's own page script, run in the tab the
    request names and returned with that tab's ID. *)
 let test_element_inventory () =
@@ -248,5 +260,6 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
     test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error];
   "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
-    test_case "document source is the shared document helper" `Quick test_document_source; test_case "parsed pointer boundary" `Quick test_pointer_validation;
+    test_case "document source is the shared document helper" `Quick test_document_source;
+    test_case "a document still loading is not its source" `Quick test_document_still_loading; test_case "parsed pointer boundary" `Quick test_pointer_validation;
     test_case "the peer serves what the lane table says" `Quick test_peer_serves_what_the_lane_table_says]]

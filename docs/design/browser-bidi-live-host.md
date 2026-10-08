@@ -87,7 +87,9 @@ activate_tab on a BiDi connection before it queues a command, by the same
 table. page.elements runs the automation lane's element script in the
 requested tab, so its selectors are the ones the DOM interactions take. A
 page.read with includeHtml runs the automation lane's document helper, which
-leaves the HTML out and says why when the result passes 1 MiB. A successful
+leaves the HTML out and says why when the result passes 1 MiB. A document the
+parser has not finished is refused before effect rather than returned as
+complete. A successful
 follow receipt does not guarantee application content is ready; existing guarded
 read recovery remains necessary. A BiDi session enables browser-wide automation
 and must not be exposed beyond loopback.

@@ -825,7 +825,9 @@ def identity_refresh_workspace_chain(binary: str) -> None:
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         def open_identity(marker):
             # Workspace withdrawal returns to the roster, so re-enter detail.
-            _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
+            # Re-selecting an already visible roster need not repaint its title.
+            if b"MASC Keepers (" not in screen(output):
+                _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Identity")
             if marker in screen(output):
@@ -1720,7 +1722,11 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output)
                 release.set()
                 assert _keyboard_harness.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
-                _keyboard_harness.send_and_wait(process, fd, output, b"r", b"resource-b")
+                # Authority recovery starts the B resource list read. It may
+                # already be drawn when the held A response is released.
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                    lambda: b"resource-b" in screen(output), timeout=WAIT_SECONDS), \
+                    "B resource list did not recover after workspace withdrawal"
                 _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)
                 if held_method == "initialize":
@@ -1849,10 +1855,13 @@ def live_identity_before_chat_and_lifecycle(binary: str, captures: Path | None =
             expected = ["/api/v1/keepers/alpha/boot"] if operation == "boot-recovery" else []
             assert [path for path, _ in writes] == expected, (operation, writes)
             if operation == "chat":
-                # Main retires the chat pane on authority withdrawal. The
-                # draft must return to its editable composer when A returns.
-                assert b"MASC Keepers" in screen(output), screen(output)
-                assert "▸ chat".encode() not in screen(output), screen(output)
+                # The dispatch probe makes authority unread. Keep the draft
+                # in its disabled composer until the operator leaves it;
+                # roster shortcuts must not receive continued typing.
+                assert "▸ chat".encode() in screen(output), screen(output)
+                assert _keyboard_harness.composer_showing(b"private-A-message").search(screen(output)), screen(output)
+                assert b"Enter:disabled" in screen(output), screen(output)
+                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
                 assert writes == [], "leaving the refused draft dispatched chat"
                 wire.publish("a-returned")
                 os.write(fd, b"r")

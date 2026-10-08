@@ -1853,27 +1853,45 @@ def chat_visibility_modes_interaction(
             )
         if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
             raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
-        # The skill row leads with its mark, lane label and the
-        # skill's name, with the badge padding and SGR runs between -- the
-        # same token-split shape the tool-lane needles above take, because
-        # a literal "◆ ci-red-attribution" never exists as contiguous
-        # bytes. The rail is a token of its own, the way " · " is above: a
-        # needle anchored on the gutter mark crosses into the body, and
-        # Skill rows are Shade_quoted, so the renderer draws "│" (>= 0x80,
-        # outside the gap class) between badge padding and body.
-        # Body-anchored needles (✗, 씀, proof) never cross it and keep the
-        # plain gap.
-        if re.search(
-            "◆".encode()
-            + rb"[\x1b\x20-\x7e]*?"
-            + "│".encode()
-            + rb"[\x1b\x20-\x7e]*?"
-            + rb"ci-red-attribution",
-            initial,
-        ) is None:
+        # The diagnostic header owns the turn identity; the compact Skill
+        # body follows on the next row. Read the completed screen so an older
+        # reading-mode frame cannot supply the Skill mark or name separately.
+        turn_row = screen_row_of(
+            observed_rows, "TURN #54 · 요청 trace-..531-00020#54".encode()
+        )
+        skill_row = screen_row_of(observed_rows, b"ci-red-attribution")
+        reasoning_row = screen_row_of(observed_rows, b"2 reasoning steps")
+        tool_row = screen_row_of(observed_rows, b"masc_fusion")
+        if not (
+            title_row < turn_row
+            and skill_row == turn_row + 1
+            and skill_row < reasoning_row < tool_row < composer_row
+        ):
             raise AssertionError(
-                f"the exact Skill evidence did not start its turn: {initial!r}"
+                "the Skill body, reasoning and tool did not belong to their turn: "
+                f"{observed_rows!r}"
             )
+        turn = observed_rows[turn_row].decode("utf-8")
+        skill = observed_rows[skill_row].decode("utf-8")
+        rail_column = turn.find("╭")
+        quote_column = turn.find("│")
+        if (
+            rail_column < 0
+            or quote_column <= rail_column
+            or re.fullmatch(r"\s*\d\d:\d\d\s+◆\s+SKILL\s*",
+                            turn[rail_column + 1:quote_column]) is None
+            or skill[quote_column:quote_column + 1] != "│"
+            or not skill[quote_column + 1:].lstrip().startswith("ci-red-attribution")
+        ):
+            raise AssertionError(f"the Skill header lost ownership of its body: {observed_rows!r}")
+        for row, mark in (
+            (skill_row, "│"), (reasoning_row, "├"), (tool_row, "╰")
+        ):
+            text = observed_rows[row].decode("utf-8")
+            if text[rail_column:rail_column + 1] != mark:
+                raise AssertionError(
+                    f"the Skill turn bracket lost {mark!r} at row {row}: {observed_rows!r}"
+                )
         # How far one invocation got is not on the resting row any more:
         # the row stands for every trigger of that skill.
         if "전달됨".encode() in initial:

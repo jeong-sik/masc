@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MASC · 실행 검증 화면</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#151515;color:#eee;font:15px/1.65 system-ui,sans-serif}main{max-width:1250px;margin:56px auto;padding:0 28px}h1{font-size:26px;font-weight:600;margin:0 0 8px}p{color:#b7b7b7;max-width:850px}nav{display:flex;flex-wrap:wrap;gap:8px;margin:26px 0 16px}button{font:inherit;color:#ccc;background:#222;border:1px solid #444;border-radius:7px;padding:7px 15px;cursor:pointer}button[aria-pressed=true]{background:#e1e1e1;color:#171717;border-color:#e1e1e1}figure{margin:0;overflow:auto;background:#292929;border-radius:8px;border:1px solid #444}img{display:block;max-width:100%;height:auto}figcaption{padding:12px 16px;color:#aaa;background:#1c1c1c;font-size:13px}small{display:block;margin-top:22px;color:#999}code{color:#ccc}a{color:#bbb}
+</style>
+<main>
+<h1>대화가 먼저 읽히는 TUI</h1>
+<p>실제로 빌드한 TUI를 테스트용 서버와 터미널에서 실행한 화면입니다. 대화의 넓은 왼쪽 칸과 반복 표시는 줄이고, 상세 정보는 기존 단축키로 열 수 있게 했습니다.</p>
+<nav aria-label="검증 화면">
+<button data-image="01-chat-80.png" data-caption="채팅 · 80 × 30칸" aria-pressed="true">채팅 · 좁게</button>
+<button data-image="02-chat-120.png" data-caption="채팅 · 120 × 30칸" aria-pressed="false">채팅 · 넓게</button>
+<button data-image="02-keepers-narrow.png" data-caption="Keepers · 80 × 24칸 · 실행 출처 미검증" aria-pressed="false">Keepers 목록</button>
+</nav>
+<figure><img id="screen" src="01-chat-80.png" alt="80칸 터미널에서 실행한 MASC 채팅"><figcaption id="caption">채팅 · 80 × 30칸</figcaption></figure>
+<small>Keepers 목록 캡처는 로그의 CI 표시와 로컬 실행 메타데이터가 충돌하여 실행 출처가 미검증입니다.<br>소스 <code>22b0cf94cb</code> · macOS ARM64 · 테스트용 대화와 상태입니다.<br>원본 ANSI 출력과 행·열·텍스트가 일치하는 xterm 재생 캡처입니다. 글꼴은 재생 터미널 설정이며, 현재 설치된 TUI의 화면은 아닙니다. 노란 경고는 테스트 서버에서 현재 작업을 조회할 수 없다는 실제 표시입니다.<br><a href="README.md">검증 범위와 남은 항목</a> · <a href="chat-screens-manifest.json">캡처와 실행 파일 식별값</a></small>
+</main>
+<script>document.querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('button').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));document.querySelector('#screen').src=button.dataset.image;document.querySelector('#screen').alt=button.dataset.caption;document.querySelector('#caption').textContent=button.dataset.caption}));</script>
+</html>

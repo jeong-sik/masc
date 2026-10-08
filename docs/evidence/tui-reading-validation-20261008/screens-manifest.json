@@ -1,0 +1,63 @@
+{
+  "provenance": "xterm replay of fixture PTY frames; execution origin unverified",
+  "source_sha": "22b0cf94cb588eca4ff1e169dcffd6a7b6d11f28",
+  "run": {
+    "headSha": "22b0cf94cb588eca4ff1e169dcffd6a7b6d11f28",
+    "origin": "operator-authorized local PTY",
+    "platform": "macOS",
+    "build_exit_code": 0,
+    "binary": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-home-work-reading-20261007/_build/default/bin/masc_tui.exe",
+    "binarySha256": "aee76021d8473f7b64416f2659d12df51f9c8a85ad5799229c770cf813ef8694"
+  },
+  "binary_sha256": [
+    "aee76021d8473f7b64416f2659d12df51f9c8a85ad5799229c770cf813ef8694"
+  ],
+  "suite": "test_tui_board_heading_width",
+  "suite_pass_seen": true,
+  "log_sha256": "f3cbfb448c262b96533780cbb7aea297497ba9ec955bc5a4b4535cdc03db2d1b",
+  "frames": [
+    {
+      "name": "02-keepers-narrow",
+      "columns": 80,
+      "rows": 24,
+      "frame_sha256": "1abc4b4aa60db0b11d34d3e4186f4ba221a53ec198d5138e5b142b103f8c9fc7",
+      "screenshot_sha256": "56f15d7efdd5ae4001b91b7ab3718fade773f88d40646c268a1536b71c85ee53",
+      "pty_screen": " Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System\n\n   MASC Keepers (2)                                           HTTP [connected]  \n                                                                                \n    fleet ok   running 0/0   turn capacity 0/0                                  \n     KEEPER                           HEALTH       TURN TASK                    \n     alpha                            ●               — —                       \n     beta                             · idle          — —                       \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n ────────────────────────────────────────────────────────────────────────────── \n  j/k:move  p:pause  w:wake  s:shutdown  x:delete  e:settings  a:new  q:quit  …?\n › to alpha   (i to write)                                                      ",
+      "observed_xterm_screen": " Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System\n\n   MASC Keepers (2)                                           HTTP [connected]  \n                                                                                \n    fleet ok   running 0/0   turn capacity 0/0                                  \n     KEEPER                           HEALTH       TURN TASK                    \n     alpha                            ●               — —                       \n     beta                             · idle          — —                       \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n ────────────────────────────────────────────────────────────────────────────── \n  j/k:move  p:pause  w:wake  s:shutdown  x:delete  e:settings  a:new  q:quit  …?\n › to alpha   (i to write)                                                      ",
+      "actual_columns": 80,
+      "actual_rows": 24,
+      "terminal_layout": {
+        "viewport": {
+          "width": 779,
+          "height": 443
+        },
+        "native_scrollbar_width": 0,
+        "screen": {
+          "left": 5,
+          "top": 5,
+          "right": 773,
+          "bottom": 437,
+          "width": 768,
+          "height": 432,
+          "scrollWidth": 768,
+          "scrollHeight": 432,
+          "clientWidth": 768,
+          "clientHeight": 432
+        },
+        "font": {
+          "family": "DejaVu Sans Mono, Liberation Mono, monospace",
+          "size": 16,
+          "status": "loaded"
+        },
+        "clippedBy": []
+      }
+    }
+  ],
+  "origin_validated": false,
+  "origin_conflict": {
+    "captured_records": "CI fixture PTY",
+    "run_metadata": "operator-authorized local PTY",
+    "previous_manifest": "xterm replay of local fixture PTY frames",
+    "resolution": "Retained frame and screenshot hashes do not resolve the execution origin conflict."
+  }
+}

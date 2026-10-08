@@ -252,6 +252,34 @@ def measure_pane(rows: dict[int, bytes], *, left: int, right: int) -> dict[str, 
     return {"top": tops[0], "bottom": bottoms[0]}
 
 
+def measure_rail(rows: dict[int, bytes], *, left: int, right: int, bottom: int) -> dict[str, int]:
+    """A borderless rail occupies one uninterrupted right separator.
+
+    Content and rules sit inside that separator without left or corner
+    borders. A chat portrait may precede the rail, so locate its heading.
+    The caller supplies the bottom from layout geometry, independently of
+    the observed separator, so a missing lower suffix cannot pass.
+    """
+    if right - left < 2:
+        raise AssertionError(f"rail has no room for content in cells {left}-{right}")
+    headings = [row for row, text in rows.items()
+                if "KEEPERS" in cells(text, left, right - 1)]
+    if len(headings) != 1:
+        raise AssertionError(f"rail must have one KEEPERS heading: {headings!r}")
+    top = headings[0] - 1
+    edges = sorted(row for row, text in rows.items()
+                   if row >= top and cells(text, right - 1, right) == "│")
+    if bottom < top or edges != list(range(top, bottom + 1)):
+        raise AssertionError(f"rail in cells {left}-{right} has a broken separator: {edges!r}")
+    content = {row: cells(rows[row], left, right - 1) for row in edges}
+    if any(text.lstrip().startswith((BOX_TOP_LEFT, BOX_BOTTOM_LEFT, "│"))
+           for text in content.values()):
+        raise AssertionError(f"rail in cells {left}-{right} contains a framed border: {content!r}")
+    if not any(text.strip() and not is_rule(text) for text in content.values()):
+        raise AssertionError(f"rail in cells {left}-{right} has no content: {content!r}")
+    return {"top": top, "bottom": bottom}
+
+
 def assert_pane_edge(rows: dict[int, bytes], column: int, where: str) -> None:
     """The column a side pane's border stands in holds a border glyph on a
     row of the body's top band, so a body slice cut there is cut at the pane

@@ -28,8 +28,15 @@ val create
   :  session_end:(unit -> (unit, session_end_failure) result)
   -> command:(string -> Yojson.Safe.t -> (Yojson.Safe.t, refusal) result)
   -> t
+(** Why the browser gave no session. [Session_refused]: it answered
+    [session.new] with "session not created". Firefox does that while it
+    holds a session, which it keeps after the socket that asked for it has
+    closed: another host's that is attached, or one a host that died left.
+    [Session_failed]: any other way, with nothing said of a session there. *)
+type session_failure = Session_refused of string | Session_failed of string
+val session_failure_message : session_failure -> string
 (** Asks the browser for a BiDi session and answers the browser's version. *)
-val metadata : t -> (string, string) result
+val metadata : t -> (string, session_failure) result
 (** Ends the session {!metadata} asked for; [Ok ()] when there is none to
     end, which is also what Firefox's "invalid session id" says of a session
     that was asked for and never confirmed. There is one to end from the

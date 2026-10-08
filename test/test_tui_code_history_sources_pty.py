@@ -29,12 +29,17 @@ def run(executable, columns):
     fixtures["/api/v1/git/log"] = h.PathHttpResponse(git)
     fixtures["/api/v1/ide/file-activity"] = h.PathHttpResponse(activity)
 
-    def home(process, fd, output):
-        if history.window(output, columns)[0] != 1:
-            h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
+    def go_top(process, fd, output):
+        # Home redraws only when the reader was scrolled. At its first row the
+        # frame is unchanged and the presenter writes nothing, so a wait for a
+        # newly drawn "rows 1-" never ends. Wait for the reader's state.
+        h.write_all(fd, output, b"\x1b[H")
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: history.window(output, columns)[0] == 1, timeout=3), \
+            "history reader did not return to its first row"
 
     def read_document(process, fd, output):
-        home(process, fd, output)
+        go_top(process, fd, output)
         parts = {}
         while True:
             first, last, total, body = history.window(output, columns)
@@ -62,7 +67,7 @@ def run(executable, columns):
 
         # r retries both sources without leaving the history overlay.
         mode.update(git=True, activity=False)
-        home(process, fd, output)
+        go_top(process, fd, output)
         h.send_and_wait(process, fd, output, b"r", b"Commit: abc1234")
         document = read_document(process, fd, output)
         assert "activitysourceoffline" in document, document
@@ -70,7 +75,7 @@ def run(executable, columns):
         assert "Githistoryunavailable" not in document, document
 
         mode.update(git=False, activity=False)
-        home(process, fd, output)
+        go_top(process, fd, output)
         # The HTTP error wraps after "source" at 60 columns. Wait for the
         # new source state, then check the complete error across its rows.
         h.send_and_wait(process, fd, output, b"r", b"Git history unavailable")
@@ -81,7 +86,7 @@ def run(executable, columns):
         assert "nocommitorexactKeeperchangetouches" not in document, document
 
         mode.update(git=True, activity=True)
-        home(process, fd, output)
+        go_top(process, fd, output)
         h.send_and_wait(process, fd, output, b"r", b"Commit: abc1234")
         document = read_document(process, fd, output)
         assert "KEEPERTAIL" in document, document

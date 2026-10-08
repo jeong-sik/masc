@@ -175,7 +175,7 @@
 (test
  (name test_msx_vision)
  (modules test_msx_vision)
- (libraries masc.machine_configuration alcotest unix base64 yojson fs_compat masc masc_test_deps
+ (libraries masc.msx_worker mcp_protocol mcp_protocol.eio eio.unix masc.machine_configuration alcotest unix base64 yojson fs_compat masc masc_test_deps
    masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
 
 (test
@@ -9769,3 +9769,9 @@
  (name test_lane_addon_tool_result)
  (modules test_lane_addon_tool_result)
  (libraries alcotest masc.lane_addon_tool_result masc.tool_types mcp_protocol yojson))
+
+(test
+ (name test_msx_addon_worker)
+ (modules test_msx_addon_worker)
+ (libraries masc.lane_addon_call_context masc.msx_worker masc.msx_lane masc.masc_core masc.machine_configuration
+  mcp_protocol mcp_protocol.eio eio_main eio.unix alcotest yojson base64 digestif unix))

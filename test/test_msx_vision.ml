@@ -1,5 +1,4 @@
 open Alcotest
-open Masc
 
 let decode_png_with_python ~colour_type ~png ~pixels:rgb ~width ~height =
   (* An independent standard-library decoder verifies both PNG framing and
@@ -65,75 +64,62 @@ let test_rgba () =
   check bool "overflow rejected" true
     (Result.is_error (Rgb_png.encode_rgba ~width:max_int ~height:max_int ~rgba:""))
 
-let test_keeper_capture () =
-  let base = Filename.temp_dir "msx-vision-" "" in
-  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
-  Unix.putenv "MASC_BASE_PATH" base;
-  Config_dir_resolver.reset ();
+let test_worker_capture () =
+  let module Client = Mcp_protocol_eio.Client in
+  let module S = Mcp_protocol.Mcp_types in
+  let unwrap = function Ok value -> value | Error message -> fail message in
+  let base_path = Filename.temp_dir "msx-worker-vision-" "" in
+  Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
   Fun.protect ~finally:(fun () ->
-    Msx_lane.install_activity_observer None;
     ignore (Msx_lane.eject ());
-    Unix.putenv "MASC_BASE_PATH" (Option.value ~default:"" previous);
-    Config_dir_resolver.reset ();
-    Fs_compat.remove_tree base) (fun () ->
-      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-      let config = Workspace.default_config base in
-      let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String "vision-player"]) with
-        | Ok meta -> meta | Error e -> fail e in
-      let screen () = Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
-        ~config ~meta ~name:"masc_msx_screen" ~args:(`Assoc []) in
-      ignore (Msx_lane.eject ());
-      check bool "no machine fails" true
-        (match (screen ()).disposition with Tool_result.Failed _ -> true | _ -> false);
-      (match Msx_lane.load ~ledger_dir:(Filename.concat base "ledger") ~roms_dir:None
-         ~cart_path:None ~disk_path:None with Ok _ -> () | Error e -> fail (Msx_lane.error_to_string e));
-      let before = match Msx_lane.capture () with Ok value -> value | Error _ -> fail "no capture" in
-      let result = screen () in
-      let json = match result.data with Some d -> d | None -> fail result.raw_output in
-      let open Yojson.Safe.Util in
-      let handle = json |> member "artifact" |> to_string in
-      let dir = Keeper_vision_tool.frames_dir ~keeper_name:meta.name in
-      let png = match Multimodal.Vision_artifact_store.load ~dir
-        (Multimodal.Vision_artifact_store.of_string handle) with
-        | Ok bytes -> bytes | Error e -> fail (Multimodal.Vision_artifact_store.load_error_to_string e) in
-      let obs, frame = before in
-      check int "captured same frame" obs.frame (json |> member "frame" |> to_int);
-      decode_with_python ~png ~rgb:frame.rgb ~width:frame.width ~height:frame.height;
-      check int "screen did not advance" obs.frame
-        (match Msx_lane.screen () with Ok o -> o.frame | Error _ -> fail "no machine");
-      check int "no input ledger changes" 0 (List.length (Msx_lane.ledger ()));
-      let first_png = match Keeper_msx_screen.encode_frame frame with
-        | Ok png -> png | Error e -> fail e in
-      Gc.full_major ();
-      let allocated_before = Gc.allocated_bytes () in
-      for _ = 1 to 100 do
-        match Keeper_msx_screen.encode_frame frame with
-        | Ok repeated -> if repeated != first_png then fail "unchanged RGB re-encoded PNG"
-        | Error e -> fail e
-      done;
-      Printf.printf "100 retained PNG reads allocated %.0f bytes (PNG %d bytes)\n%!"
-        (Gc.allocated_bytes () -. allocated_before) (String.length first_png);
-      let changed_frame = { frame with rgb = String.make (String.length frame.rgb) '\255' } in
-      let changed_png = match Keeper_msx_screen.encode_frame changed_frame with
-        | Ok png -> png | Error e -> fail e in
-      decode_with_python ~png:changed_png ~rgb:changed_frame.rgb
-        ~width:changed_frame.width ~height:changed_frame.height;
-      let reshaped = { changed_frame with width = changed_frame.height; height = changed_frame.width } in
-      (match Keeper_msx_screen.encode_frame reshaped with
-       | Ok png -> decode_with_python ~png ~rgb:reshaped.rgb ~width:reshaped.width ~height:reshaped.height
-       | Error e -> fail e);
-      let again = screen () in
-      check string "unchanged frame deduplicates artifact" handle
-        (Option.get again.data |> member "artifact" |> to_string);
-      let other_dir = Keeper_vision_tool.frames_dir ~keeper_name:"another-player" in
-      check bool "not stored for another Keeper" false (Sys.file_exists (Filename.concat other_dir handle));
-      Sys.remove (Filename.concat dir handle);
-      Unix.rmdir dir;
-      Out_channel.with_open_bin dir (fun oc -> output_string oc "not a directory");
-      check bool "storage failure is explicit" true
-        (match (screen ()).disposition with Tool_result.Failed _ -> true | _ -> false))
+    Msx_lane.install_activity_observer None;
+    Fs_compat.remove_tree base_path) (fun () ->
+    Eio_main.run (fun env ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+        Eio.Switch.run (fun sw ->
+          let request_source,request_sink = Eio_unix.pipe ~sw () in
+          let response_source,response_sink = Eio_unix.pipe ~sw () in
+          Eio.Fiber.first
+            (fun () -> Mcp_protocol_eio.Server.run (Msx_addon_worker.create ~base_path ())
+              ~stdin:request_source ~stdout:response_sink ~clock:(Eio.Stdenv.clock env) ())
+            (fun () ->
+              let client = Client.create ~stdin:response_source ~stdout:request_sink
+                ~clock:(Eio.Stdenv.clock env) () in
+              ignore (unwrap (Client.initialize client ~client_name:"vision-fixture" ~client_version:"1"));
+              let call name arguments = unwrap (Client.call_tool client
+                ~name:Lane_addon_call_context.tool_name
+                ~arguments:(Lane_addon_call_context.to_json ~tool:name ~arguments
+                  ~principal:(Lane_addon_call_context.Keeper "vision-player")) ()) in
+              let screen () = call "masc_msx_screen" (`Assoc []) in
+              check bool "unloaded worker screen fails explicitly" true ((screen ()).is_error = Some true);
+              check bool "synthetic worker load succeeds" false
+                ((call "masc_msx_load" (`Assoc ["roms_dir",`String ""])).is_error = Some true);
+              let before,frame = match Msx_lane.capture () with
+                | Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
+              let result = screen () in
+              let png result = match List.find_map (function
+                | S.ImageContent {mime_type="image/png";data;_} -> Some (Base64.decode_exn data)
+                | _ -> None) result.S.content with
+                | Some png -> png | None -> fail "worker screen omitted its PNG" in
+              let metadata = match result.structured_content with Some value -> value | None -> fail "no observation" in
+              check int "PNG and observation describe the captured frame" before.frame
+                Yojson.Safe.Util.(metadata |> member "frame" |> to_int);
+              Eio_unix.run_in_systhread (fun () ->
+                decode_with_python ~png:(png result) ~rgb:frame.rgb ~width:frame.width ~height:frame.height);
+              check string "repeated capture preserves exact image bytes" (png result) (png (screen ()));
+              check int "screen reads do not advance the machine" before.frame
+                (match Msx_lane.screen () with Ok observation -> observation.frame | Error _ -> fail "machine lost");
+              check int "screen reads do not inject input" 0 (List.length (Msx_lane.ledger ()));
+              ignore (call "masc_msx_eject" (`Assoc []));
+              check bool "eject cannot return the retained old image" true ((screen ()).is_error = Some true);
+              ignore (call "masc_msx_load" (`Assoc ["roms_dir",`String ""]));
+              let _,fresh = match Msx_lane.capture () with
+                | Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
+              let fresh_png = png (screen ()) in
+              Eio_unix.run_in_systhread (fun () ->
+                decode_with_python ~png:fresh_png ~rgb:fresh.rgb ~width:fresh.width ~height:fresh.height))))))
 
 let () = run "MSX vision"
   ["pixels", [test_case "PNG roundtrip" `Quick test_rgb;
                test_case "RGBA PNG roundtrip" `Quick test_rgba];
-   "Keeper", [test_case "screen yields owned image without input" `Quick test_keeper_capture]]
+   "worker", [test_case "stdio screen yields exact pixels without input" `Quick test_worker_capture]]

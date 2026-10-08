@@ -49,17 +49,17 @@ turn-timeout-s = 0
 
 [claude_code."claude-sonnet-5"]
 
-[models."claude-opus-5"]
-api-name = "claude-opus-5"
+[models."claude-opus-5-5"]
+api-name = "claude-opus-5-5"
 max-context = 1000000
 tools-support = true
 streaming = true
 turn-timeout-s = 0
 
-[claude_code."claude-opus-5"]
+[claude_code."claude-opus-5-5"]
 
 [runtime.lanes.fusion-judge]
-candidates = ["claude_code.claude-opus-5", "claude_code.claude-sonnet-5"]
+candidates = ["claude_code.claude-opus-5-5", "claude_code.claude-sonnet-5"]
 |}
     claude_cli
 ;;
@@ -74,7 +74,7 @@ let () =
 let official_client_runtime = "claude_code.claude-sonnet-5"
 let agent_core_runtime = "stub-http.stub-model"
 let judge_lane = "fusion-judge"
-let judge_lane_first = "claude_code.claude-opus-5"
+let judge_lane_first = "claude_code.claude-opus-5-5"
 
 let write_file ~path ~perm contents =
   let channel = open_out_gen [ Open_creat; Open_trunc; Open_wronly ] perm path in

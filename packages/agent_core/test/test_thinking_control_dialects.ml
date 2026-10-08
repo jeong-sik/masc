@@ -1372,14 +1372,14 @@ let test_anthropic_reasoning_dialect_preserves_thinking () =
     (RD.normalize_effort_value dialect RE.Max)
 ;;
 
-let test_anthropic_opus5_uses_adaptive_effort () =
+(* Opus 5.5 is always_adaptive: thinking cannot be turned off, so no thinking
+   field goes out and the effort is the whole control. *)
+let test_anthropic_opus_5_5_sends_effort_alone () =
   let config =
-    anthropic_config ~enable_thinking:true ~reasoning_effort:RE.Medium "claude-opus-5"
+    anthropic_config ~enable_thinking:true ~reasoning_effort:RE.Medium "claude-opus-5-5"
   in
   let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
-  let thinking = json |> member "thinking" in
-  check string "thinking type" "adaptive" (thinking |> member "type" |> to_string);
-  check_member_absent "budget_tokens" thinking;
+  check_member_absent "thinking" json;
   check
     string
     "effort"
@@ -1426,7 +1426,7 @@ let test_anthropic_output_config_merges_format_and_effort () =
       ~enable_thinking:true
       ~reasoning_effort:RE.Max
       ~response_format:(JsonSchema schema)
-      "claude-opus-5"
+      "claude-opus-5-5"
   in
   let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
   let output_config = json |> member "output_config" in
@@ -1672,9 +1672,9 @@ let () =
               `Quick
               test_anthropic_reasoning_dialect_preserves_thinking
           ; test_case
-              "anthropic opus 5 uses adaptive effort"
+              "anthropic opus 5.5 sends effort alone"
               `Quick
-              test_anthropic_opus5_uses_adaptive_effort
+              test_anthropic_opus_5_5_sends_effort_alone
           ; test_case
               "anthropic claude alias uses adaptive effort"
               `Quick

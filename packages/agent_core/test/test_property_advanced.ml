@@ -99,7 +99,7 @@ let tool_choice_gen =
 
 let model_gen =
   QCheck.Gen.oneof
-    [ QCheck.Gen.return "claude-opus-5"
+    [ QCheck.Gen.return "claude-opus-5-5"
     ; QCheck.Gen.return "claude-sonnet-5"
     ; QCheck.Gen.return "claude-fable-5"
     ; QCheck.Gen.string_printable

@@ -211,6 +211,12 @@ let live_capability_to_wire = function
   | Tab_activation -> "tab_activation"
 ;;
 
+let live_capability_of_wire raw =
+  List.find_opt
+    (fun capability -> String.equal (live_capability_to_wire capability) raw)
+    all_of_live_capability
+;;
+
 let live_capability_of_interaction = function
   | Activate_tab -> Tab_activation
   | Click _ | Fill _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
@@ -439,13 +445,37 @@ type selection_error =
   | Transport_unsupported of
       { client_id : client_id; transport : live_transport; capability : live_capability }
 
-let selection_error_code = function
-  | Activity_rejected (Lane_off _) -> "browser_lane_off"
-  | Activity_rejected Activity_unavailable -> "browser_activity_unavailable"
-  | No_live_client -> "no_live_client"
-  | Selected_client_disconnected _ -> "selected_client_disconnected"
-  | Ambiguous_clients _ -> "ambiguous_browser_clients"
-  | Transport_unsupported _ -> "live_transport_unsupported"
+(* The refusal's name without its details: what a reader of a recorded
+   rejection recovers from the code. *)
+type selection_case =
+  | Lane_off_case
+  | Activity_unavailable_case
+  | No_live_client_case
+  | Selected_client_disconnected_case
+  | Ambiguous_clients_case
+  | Transport_unsupported_case
+[@@deriving enumerate]
+
+let selection_case = function
+  | Activity_rejected (Lane_off _) -> Lane_off_case
+  | Activity_rejected Activity_unavailable -> Activity_unavailable_case
+  | No_live_client -> No_live_client_case
+  | Selected_client_disconnected _ -> Selected_client_disconnected_case
+  | Ambiguous_clients _ -> Ambiguous_clients_case
+  | Transport_unsupported _ -> Transport_unsupported_case
+
+let selection_case_code = function
+  | Lane_off_case -> "browser_lane_off"
+  | Activity_unavailable_case -> "browser_activity_unavailable"
+  | No_live_client_case -> "no_live_client"
+  | Selected_client_disconnected_case -> "selected_client_disconnected"
+  | Ambiguous_clients_case -> "ambiguous_browser_clients"
+  | Transport_unsupported_case -> "live_transport_unsupported"
+
+let selection_case_of_code code =
+  List.find_opt (fun case -> String.equal (selection_case_code case) code) all_of_selection_case
+
+let selection_error_code error = selection_case_code (selection_case error)
 
 let selection_error_message = function
   | Activity_rejected rejection -> activity_rejection_message rejection

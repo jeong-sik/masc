@@ -69,7 +69,10 @@ def run_browser_client_picker_regression(executable: str) -> None:
 
     def interact(process, master_fd, slave_fd, output, _base):
         palette_go(process, master_fd, output, b"go Browser Lane", b"Choose browser \xc2\xb7 separate sessions do not share login")
-        wait_for_output(process, master_fd, output, "Firefox · BiDi".encode(), start=0, timeout=3.0)
+        # The title names the chosen connection the same way a row does, so
+        # the row is recognised by the part only a row carries.
+        bidi_row = "Firefox · BiDi · existing login".encode()
+        wait_for_output(process, master_fd, output, bidi_row, start=0, timeout=3.0)
         if reads:
             raise AssertionError("unselected multi-client view sent a browser read")
         os.write(master_fd, b"j")
@@ -82,12 +85,13 @@ def run_browser_client_picker_regression(executable: str) -> None:
         send_and_wait(process, master_fd, output, b"b", b"Choose browser \xc2\xb7 separate sessions do not share login")
         # b clears the displayed inventory until discovery settles. Require a
         # row from this request, not Firefox text in an earlier chooser frame.
-        wait_for_output(process, master_fd, output, "Firefox · BiDi".encode(), start=chooser_start, timeout=3.0)
+        wait_for_output(process, master_fd, output, bidi_row, start=chooser_start, timeout=3.0)
         wait_for_output(process, master_fd, output, FRAME_END,
-                        start=bytes(output).rfind("Firefox · BiDi".encode(), chooser_start), timeout=3.0)
+                        start=bytes(output).rfind(bidi_row, chooser_start), timeout=3.0)
         picker = screen_text(bytes(output))
-        for option in ("Firefox · WebExtension".encode(), "Firefox · BiDi".encode(),
-                       b"Stagehand Chromium", b"Independent Firefox/Zen"):
+        for option in ("Firefox · WebExtension · existing login".encode(), bidi_row,
+                       b"Stagehand Chromium", b"Independent Firefox/Zen",
+                       "Firefox · WebExtension: no hover, drag · a BiDi connection serves them".encode()):
             if option not in picker:
                 raise AssertionError(f"browser picker omitted {option!r}: {picker!r}")
         send_and_wait(process, master_fd, output, b"\r", b"Firefox selected page")

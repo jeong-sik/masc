@@ -3698,23 +3698,79 @@ module Browser_lane_view = struct
   let transport_label = function
     | Browser_lane.Web_extension -> "WebExtension"
     | Browser_lane.Webdriver_bidi -> "BiDi"
+  (* The operator's word for a piece of live work. *)
+  let capability_word : Browser_lane.live_capability -> string = function
+    | Tab_listing -> "tab list"
+    | Text_read -> "text"
+    | Document_source -> "page source"
+    | Element_inventory -> "element list"
+    | Viewport_capture -> "screenshot"
+    | Scene_read -> "scene"
+    | Dom_interaction -> "click/fill"
+    | Point_click -> "point click"
+    | Point_scroll -> "point scroll"
+    | Trusted_hover -> "hover"
+    | Trusted_drag -> "drag"
+    | Tab_activation -> "tab switch"
+  (* What a live connection of this transport leaves out, read from the lane's
+     table, and the transports that serve all of it. *)
+  let transport_lacks transport =
+    List.filter (fun capability -> not (Browser_lane.live_transport_serves transport capability))
+      Browser_lane.all_of_live_capability
+  let transports_serving_all capabilities =
+    List.filter (fun transport ->
+      List.for_all (Browser_lane.live_transport_serves transport) capabilities)
+      Browser_lane.all_of_live_transport
+  let transport_limits transport =
+    match transport_lacks transport with
+    | [] -> None
+    | lacking -> Some ("no " ^ String.concat ", " (List.map capability_word lacking))
+  (* The same facts for one live connection wherever it is named: the title,
+     the connection row and the picker's detail row. *)
+  let connection_label t = match t.source, t.selected_client with
+    | Live, Some client ->
+        Some (browser_name client.browser ^ " · " ^ transport_label client.transport)
+    | Live, None | Automation, _ | Stagehand, _ -> browser_label t
+  let connection_limits t = match t.source, t.selected_client with
+    | Live, Some client -> transport_limits client.transport
+    | Live, None | Automation, _ | Stagehand, _ -> None
   let browser_choice_label = function
     | Connected_browser client ->
         browser_name client.browser ^ " · " ^ transport_label client.transport
         ^ " · existing login · " ^ client.client_id
     | Stagehand_browser -> "Stagehand Chromium · sentence actions · separate login"
     | Automation_browser -> "Independent Firefox/Zen · automation · separate login"
+  (* The row under the picker for the highlighted choice. A live connection
+     says what it leaves out and which kind of connection serves that; the
+     server's own browsers are described by their row. The row sits below the
+     whole list, so it names the connection it is about. *)
+  let browser_choice_detail = function
+    | Stagehand_browser | Automation_browser -> None
+    | Connected_browser client ->
+        (match transport_lacks client.transport with
+         | [] -> None
+         | lacking ->
+             let words = String.concat ", " (List.map capability_word lacking) in
+             let elsewhere = match transports_serving_all lacking with
+               | [] -> ""
+               | serving ->
+                   " · a " ^ String.concat " or " (List.map transport_label serving)
+                   ^ " connection serves them" in
+             Some (browser_name client.browser ^ " · " ^ transport_label client.transport
+                   ^ ": no " ^ words ^ elsewhere))
   (* Whether the connection a screenshot came from takes a drag. A live
      screenshot names its client, and the answer is the lane table's for that
      client's transport. It is unknown when the view no longer holds that
      client: the footer then says so instead of naming a rule. *)
   type drag_support = Drag_served | Drag_needs of Browser_lane.live_transport list | Drag_unknown
+  let screenshot_client t (shot : screenshot) =
+    List.find_opt (fun (client : client) -> Some client.client_id = shot.client_id)
+      (Option.to_list t.selected_client @ listed_clients t)
   let screenshot_drag_support t (shot : screenshot) =
     match shot.source with
     | Automation | Stagehand -> Drag_served
     | Live ->
-        let known = Option.to_list t.selected_client @ listed_clients t in
-        (match List.find_opt (fun (client : client) -> Some client.client_id = shot.client_id) known with
+        (match screenshot_client t shot with
          | None -> Drag_unknown
          | Some client ->
              if Browser_lane.live_transport_serves client.transport Browser_lane.Trusted_drag
@@ -3726,6 +3782,26 @@ module Browser_lane_view = struct
     | Drag_needs transports ->
         "drag: needs a " ^ String.concat " or " (List.map transport_label transports) ^ " connection"
     | Drag_unknown -> "drag: connection not listed"
+  (* Why a pointer gesture on a live screenshot is not sent: the connection it
+     came from does not serve it. The sentence ends with the operator's next
+     step, which depends on whether a serving connection is listed. A
+     connection the view no longer holds is left to the server to answer. *)
+  let pointer_refusal t (shot : screenshot) action =
+    match shot.source, screenshot_client t shot with
+    | (Automation | Stagehand), _ | Live, None -> None
+    | Live, Some client ->
+        let capability = Browser_lane.live_capability_of_interaction action in
+        if Browser_lane.live_transport_serves client.transport capability then None
+        else
+          let serving = Browser_lane.live_transports_serving capability in
+          let kinds = String.concat " or " (List.map transport_label serving) in
+          let next =
+            if List.exists (fun (other : client) -> List.mem other.transport serving) (listed_clients t)
+            then "b:choose browser"
+            else "none is listed: "
+                 ^ String.concat "; or " (List.map Browser_lane.live_transport_setup serving) in
+          Some (Printf.sprintf "this %s connection does not serve %s; a %s connection does · %s"
+                  (transport_label client.transport) (capability_word capability) kinds next)
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])

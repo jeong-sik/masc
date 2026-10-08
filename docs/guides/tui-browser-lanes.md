@@ -30,7 +30,8 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `o` / `x` | Open / close the automation or stagehand session |
 | Ctrl-^ / Esc / Left | Hide the reader and return to the previous surface |
 
-Browser belongs to Config. Its title shows the source and latest HTTP request
+Browser belongs to Config. Its title shows the source, the browser and how a
+live browser is reached (`live · Firefox · BiDi`), then the latest HTTP request
 status. The browser picker explains which choices use the existing login and
 which have separate sessions. The current browser is marked; choosing it again
 retains the current tab and scroll. Switching to a different browser clears old
@@ -41,6 +42,30 @@ Reads show latency, tab count, selected title, URL, character count and truncati
 A failed or pending refresh retains content labeled as a previous read. Switching
 source clears that content; generation-stamped replies reject earlier requests.
 Reads happen on entry, source or tab selection, navigation, and explicit refresh.
+
+A live browser is reached over its WebExtension or an attached BiDi connection,
+and the two serve different work
+([the table](../design/browser-lane.md#what-each-live-connection-serves)). The
+TUI reads that table in four places:
+
+- The connection row under the status: `Live Firefox · WebExtension · no hover,
+  drag`, or `Live Firefox · BiDi · no page source, element list, tab switch`.
+- The row under the picker, for the highlighted connection: `Firefox ·
+  WebExtension: no hover, drag · a BiDi connection serves them`.
+- The screenshot footer: `drag: move` when the connection the screenshot came
+  from takes a drag, `drag: needs a BiDi connection` when it does not.
+- A drag on a screenshot from a connection that does not take it is not sent.
+  The screenshot closes and the cause row says which kind of connection serves
+  it, then `b:choose browser` when one is listed, or how to attach one when
+  none is.
+
+In a Keeper's chat, the tool results view shows a refused browser call as its
+case and what was asked of which connection, for example `BrowserInteract ·
+failed · live_transport_unsupported · this WebExtension connection does not
+serve hover · no connected browser does`. Other browser refusals that sent
+nothing (`no_live_client`, `ambiguous_browser_clients`,
+`selected_client_disconnected`, `browser_lane_off`) show their case and the
+refusal's next-step sentence.
 
 The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Typing
 belongs to the editor and cannot trigger Browser commands or the Keeper composer.

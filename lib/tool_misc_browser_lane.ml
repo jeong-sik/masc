@@ -149,14 +149,16 @@ let selection_error ~base_path ~tool_name ~start_time error =
         ^ String.concat "; or " (List.map Browser_lane.live_transport_setup serving_transports)
         ^ ". The same request returns the same answer until then; other work this \
            connection serves is unaffected. No browser command was dispatched." in
-    rejection ["clients", `List (clients ());
-               "clientId", `String (Browser_lane.client_id_to_string client_id);
+    (* The short deciding fields come first: several readers of a recorded
+       rejection keep only its beginning. *)
+    rejection ["capability", `String (Browser_lane.live_capability_to_wire capability);
                "transport", `String (Browser_lane.live_transport_to_string transport);
-               "capability", `String (Browser_lane.live_capability_to_wire capability);
+               "clientId", `String (Browser_lane.client_id_to_string client_id);
+               "retry", `String retry;
                "servingTransports", `List (List.map (fun transport ->
                  `String (Browser_lane.live_transport_to_string transport)) serving_transports);
                "servingClients", `List (List.map Browser_lane.client_json serving_clients);
-               "retry", `String retry]
+               "clients", `List (clients ())]
 
 let read_failure ~base_path ~tool_name ~start_time = function
   | Browser_surface.Unselected error -> selection_error ~base_path ~tool_name ~start_time error

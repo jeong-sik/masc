@@ -1233,7 +1233,9 @@ let clip_tool_result ~max_cells text =
     | prefix :: _ -> prefix ^ "…"
 
 
-let tool_result_preview (activity : Keeper_chat_transcript.tool_activity) value =
+(* [failed] is the row's own verdict. A browser refusal is read back only from
+   a failed call, so the rows of calls that returned are never parsed for one. *)
+let tool_result_preview ~failed (activity : Keeper_chat_transcript.tool_activity) value =
   match Keeper_chat_transcript.descriptor_of_tool_name activity.Keeper_chat_transcript.tool_name with
   | Some descriptor
     when descriptor.runtime_handler = Masc.Keeper_tool_descriptor.Tool_execute ->
@@ -1250,7 +1252,15 @@ let tool_result_preview (activity : Keeper_chat_transcript.tool_activity) value 
              (List.filter (fun text -> String.trim text <> "")
                 [ Masc_tui_execute_result.status_text result; output ])
        | None -> value)
-  | Some _ | None -> value
+  | Some _ | None ->
+      if not failed then value
+      else
+        (match Masc_tui_browser_rejection.of_result value with
+         | Some rejection ->
+             Masc_tui_browser_rejection.line
+               ~transport_label:Browser_lane_view.transport_label
+               ~capability_word:Browser_lane_view.capability_word rejection
+         | None -> value)
 
 
 let tool_result_rows state ~keeper_name ~max_cells projection =
@@ -1302,7 +1312,9 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
         let preview, unavailable =
           match association with
           | Call_execution_exact call ->
-              Option.map (tool_result_preview activity) call.kc_output,
+              let failed =
+                durable_failure || activity.outcome = Keeper_chat_transcript.Failed in
+              Option.map (tool_result_preview ~failed activity) call.kc_output,
               "result text not recorded"
           | Call_log_not_loaded -> None, "result preview not loaded"
           | Call_log_loading -> None, "loading result preview"

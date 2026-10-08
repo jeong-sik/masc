@@ -8993,7 +8993,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   in
   let title = Printf.sprintf "%s  %s  %s[%s]%s"
       (screen_title " MASC Browser Lane") (source_name view.source ^ " · "
-       ^ Option.value (browser_label view) ~default:"no browser")
+       ^ Option.value (connection_label view) ~default:"no browser")
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
@@ -9077,7 +9077,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";
           c.push_divider ();
-          let room = max 1 (budget - 4) in
+          let room = max 1 (budget - 5) in
           let start = max 0 (cursor - room + 1) in
           browser_choices view |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
@@ -9085,6 +9085,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                 ^ (if browser_choice_selected view choice then " (current)" else "") in
               if index = cursor then c.push_selected line
               else c.push_styled ~style:Ansi.reset line);
+          (* Always one row, so the rows below do not move with the cursor. *)
+          c.push_styled ~style:(Theme.recede ())
+            ("  " ^ Option.value ~default:""
+               (Option.bind (List.nth_opt (browser_choices view) cursor) browser_choice_detail));
           (match browser_lane_picker_empty_line view with
            | None -> ()
            | Some line ->
@@ -9106,8 +9110,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               | None -> "  No observed elements in this viewport • Ctrl-O:image")
          | None -> match view.source with
              | Live ->
-               (match browser_label view with
-                | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation • c:stagehand"
+               (match connection_label view with
+                | Some connection ->
+                    let limits = match connection_limits view with
+                      | Some limits -> " · " ^ limits
+                      | None -> "" in
+                    "  Live " ^ connection ^ limits ^ " • b:choose browser • a:automation • c:stagehand"
                 | None -> "  Live • b:choose browser • a:automation • c:stagehand")
              | Automation -> "  Independent browser • b:choose browser • g:URL • o:open / x:close • l:live • c:stagehand"
              | Stagehand -> "  Stagehand Chromium • b:choose browser • g:URL • o:open / x:close • l:live • a:automation");

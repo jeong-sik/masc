@@ -19786,8 +19786,21 @@ and is loaded on demand through keeper_skill.
                           let action = if row=start_row && column=start_column then
                             Browser_lane.Click_at {point=from;viewport=shot.viewport}
                           else Browser_lane.Drag {from;to_={x;y};viewport=shot.viewport} in
-                          launch_browser_lane state ~mailbox:async_messages
-                            (Viewport_pointer {tab_id=shot.tab_id;expected_url=shot.url;action})
+                          (match state.browser_lane with
+                           (* A gesture during an in-flight request is consumed,
+                              as [launch_browser_lane] consumes it. *)
+                           | Some view when Browser_lane_view.busy view -> ()
+                           | Some view ->
+                               (match Browser_lane_view.pointer_refusal view shot action with
+                                | Some detail ->
+                                    (* Nothing is sent. The screenshot closes so the
+                                       reason and the next step are on screen. *)
+                                    close ();
+                                    state.browser_lane <- Some { view with load = Failed detail }
+                                | None ->
+                                    launch_browser_lane state ~mailbox:async_messages
+                                      (Viewport_pointer {tab_id=shot.tab_id;expected_url=shot.url;action}))
+                           | None -> ())
                       | None -> ())
                  | _ -> ())
             | Key ("esc" | "q") -> close ()

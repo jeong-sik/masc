@@ -163,6 +163,62 @@ let test_screenshot_drag_hint () =
   expect "the server's own browser takes the drag"
     (screenshot_drag_hint (create ()) (shot ~source:"automation" firefox.client_id) = "drag: move")
 
+(* One live connection reads the same wherever it is named: the title, the
+   connection row and the picker's detail row all come from the lane table. *)
+let test_connection_facts () =
+  let bidi = { firefox with client_id = "33333333-3333-4333-8333-333333333333";
+               transport = Browser_lane.Webdriver_bidi } in
+  let on_extension = choose_client firefox { (create ()) with clients = Some [firefox; bidi] } in
+  let on_bidi = choose_client bidi on_extension in
+  let on_automation = switch_source Automation on_extension in
+  expect "the title and the row name how the browser is reached"
+    (connection_label on_extension = Some "Firefox · WebExtension"
+     && connection_label on_bidi = Some "Firefox · BiDi");
+  expect "the row says what the extension leaves out"
+    (connection_limits on_extension = Some "no hover, drag");
+  expect "and what BiDi leaves out"
+    (connection_limits on_bidi = Some "no page source, element list, tab switch");
+  expect "a server-owned browser has no live transport to name"
+    (connection_label on_automation = Some "browser" && connection_limits on_automation = None);
+  expect "live with no browser chosen names none"
+    (connection_label (create ()) = None && connection_limits (create ()) = None);
+  expect "the picker detail names the connection that serves the rest"
+    (browser_choice_detail (Connected_browser firefox)
+       = Some "Firefox · WebExtension: no hover, drag · a BiDi connection serves them"
+     && browser_choice_detail (Connected_browser bidi)
+       = Some "Firefox · BiDi: no page source, element list, tab switch · a WebExtension connection serves them");
+  expect "the server's own browsers are described by their row"
+    (browser_choice_detail Stagehand_browser = None && browser_choice_detail Automation_browser = None)
+
+(* A gesture the screenshot's connection does not serve is answered before it
+   is sent, with the next step for the operator. *)
+let test_pointer_refusal () =
+  let bidi = { firefox with client_id = "33333333-3333-4333-8333-333333333333";
+               transport = Browser_lane.Webdriver_bidi } in
+  let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
+  let drag (shot : screenshot) =
+    Browser_lane.Drag {from={x=0.1;y=0.1}; to_={x=0.2;y=0.2}; viewport=shot.viewport} in
+  let click (shot : screenshot) = Browser_lane.Click_at {point={x=0.1;y=0.1}; viewport=shot.viewport} in
+  let both = { (create ()) with clients = Some [firefox; bidi] } in
+  let alone = { (create ()) with clients = Some [firefox] } in
+  let on_extension = shot firefox.client_id and on_bidi = shot bidi.client_id in
+  expect "a drag on the extension is not sent, and a listed BiDi connection is the next step"
+    (pointer_refusal both on_extension (drag on_extension)
+       = Some "this WebExtension connection does not serve drag; a BiDi connection does · b:choose browser");
+  expect "with no BiDi connection listed the next step is to attach one"
+    (pointer_refusal alone on_extension (drag on_extension)
+       = Some ("this WebExtension connection does not serve drag; a BiDi connection does · none is listed: "
+               ^ Browser_lane.live_transport_setup Browser_lane.Webdriver_bidi));
+  expect "a point click is sent on either connection"
+    (pointer_refusal both on_extension (click on_extension) = None
+     && pointer_refusal both on_bidi (click on_bidi) = None);
+  expect "a drag is sent on BiDi" (pointer_refusal both on_bidi (drag on_bidi) = None);
+  let automation = shot ~source:"automation" firefox.client_id in
+  expect "the server's own browser answers for itself"
+    (pointer_refusal both automation (drag automation) = None);
+  expect "a connection the view no longer holds is left to the server"
+    (pointer_refusal (create ()) on_extension (drag on_extension) = None)
+
 let test_screenshot_ownership_and_draft () =
   let pending = { (loaded ()) with scroll = 3; url_draft = Some "https://example.org/?q=한글";
       load = Loading (8, Screenshot 2) } in
@@ -392,6 +448,8 @@ let () =
      "picker empty row reads the list", test_picker_empty_row;
      "client inventory contract", test_clients_decode;
      "screenshot drag hint follows the connection", test_screenshot_drag_hint;
+     "one connection reads the same in title, row and picker", test_connection_facts;
+     "an unserved pointer gesture is answered before it is sent", test_pointer_refusal;
      "screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;
      "read and tab selection", test_read_and_selection;
      "closed-tab refresh recovery", test_refresh_rediscovers_tabs;

@@ -7056,6 +7056,8 @@
 
 (include stanzas/test_browser_surface.inc)
 
+(include stanzas/test_tui_browser_rejection.inc)
+
 (include stanzas/test_browser_lane_name.inc)
 
 (include stanzas/test_execute_file_artifact.inc)

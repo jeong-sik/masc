@@ -300,6 +300,21 @@ let test_inventory_does_not_prune () = with_clients (fun sw connect ->
   | Ok (Ok (Lane.Answered _)) -> ()
   | _ -> fail "explicit disconnect must still settle the request")
 
+let test_duplicate_result_after_lost_ack_is_accepted () = with_clients (fun sw connect ->
+  let info = connect Lane.Firefox in
+  let pending = Eio.Fiber.fork_promise ~sw (fun () ->
+    Lane.issue_for ~target:(target info.client_id) ~verb:Lane.Tabs_list ~timeout_sec:1.) in
+  let command = take info in
+  let result = payload "delivered" in
+  check bool "first result is delivered" true
+    (Lane.deliver_result ~client_id:info.client_id ~id:command.id ~payload:result = Ok ());
+  answered pending "delivered";
+  check bool "same result retry is acknowledged" true
+    (Lane.deliver_result ~client_id:info.client_id ~id:command.id ~payload:result = Ok ());
+  check bool "same ID cannot acknowledge a changed result" true
+    (Lane.deliver_result ~client_id:info.client_id ~id:command.id ~payload:(payload "changed")
+     = Error "result_id_reused_with_different_payload"))
+
 let () = run "browser client routing" ["ownership", [
   test_case "each live transport serves its part of the table" `Quick test_transport_table;
   test_case "unserved live work is refused before queue admission" `Quick test_unserved_work_queues_nothing;
@@ -307,6 +322,7 @@ let () = run "browser client routing" ["ownership", [
   test_case "inventory observes without pruning a pending client" `Quick test_inventory_does_not_prune;
   test_case "optional document preserves existing work" `Quick test_optional_document_preserves_existing_work;
   test_case "colliding tab IDs and spoofed results" `Quick test_colliding_tabs_are_isolated;
+  test_case "duplicate result after lost acknowledgement" `Quick test_duplicate_result_after_lost_ack_is_accepted;
   test_case "single selection and stale identity" `Quick test_single_and_stale_selection;
   test_case "resolved target expires before dispatch" `Quick test_expired_resolved_target_is_pre_dispatch;
   test_case "expired queued actions do not execute" `Quick test_timed_out_queue_is_not_executed;

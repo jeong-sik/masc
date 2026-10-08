@@ -23,6 +23,7 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41899](https://github.com/jeong-sik/masc/pull/41899) | One closed row classification; server failure producer; shared terminal authority and all consumers updated | `keeper_chat_store.ml`, `server_routes_http_keeper_stream.ml`, chat primitives |
 | [#41915](https://github.com/jeong-sik/masc/pull/41915) | Pure terminal mouse protocol separated from domain JSON contracts; direct input/scroll consumers updated | `tui_decode.ml/.mli`, main TUI and render primitives |
 | [#41932](https://github.com/jeong-sik/masc/pull/41932) | Strict pure Read coordinate decoding; effects sequenced after successful decode; private duplicate guidance variant removed | `keeper_tool_filesystem_runtime.ml` |
+| [#41955](https://github.com/jeong-sik/masc/pull/41955) | Canonical retained media projection; image acquisition effects separated from rendering; media-only autonomous and failure rows keep output | main TUI and history consumers |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -52,6 +53,8 @@ Dashboard failure/output and current row-contract checks subsequently passed; se
 TUI compilation and SGR PTY interaction passed; see
 [mouse-protocol/README.md](mouse-protocol/README.md). Remaining targets are scoped
 in the individual evidence documents rather than inferred from adjacent checks.
+TUI retained media, canonical history and image acquisition checks are recorded
+in [tui-output-media/README.md](tui-output-media/README.md).
 
 `validation.log` records successful OCaml 5.5.1 parse-only checks on the changed
 source/interface files, combined diff whitespace checking, and validation of

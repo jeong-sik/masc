@@ -8,7 +8,7 @@
     {2 What the server sends}
 
     An array of rows, each with [role] ("user" / "assistant" / "tool"),
-    [content], and [ts]. An assistant row carrying
+    [content], and [ts]. A server-owned row carrying
     [role: "request_failure"] is a delivery that failed rather than
     something the keeper said. An assistant row the server marks
     [autonomous_turn] also carries [blocks], among them a [t: "trace"] block
@@ -40,8 +40,8 @@
     [structural_id] keeps row identity through that projection and refresh. *)
 
 (** The surface a row arrived on, mirrored from [Surface_ref.t] in the server.
-    This library carries no [masc] dependency, so it cannot name that type;
-    [test_tui_chat_surface_mirror] holds the two in step. *)
+    [test_tui_chat_surface_mirror] checks the presentation projection against
+    the server contract. *)
 module Surface : sig
   type channel =
     | Channel_name of string
@@ -217,6 +217,9 @@ type row =
   ; attachments : attachment_note list
       (** Files this row carries. Empty for every kind but a message that
           arrived with one. *)
+  ; media : Masc_tui_chat_media.t list
+      (** Canonical image, voice, attachment and SVG output from Keeper speech
+          or a failed request. Media-only turns retain their message row. *)
   }
 
 type decoded =

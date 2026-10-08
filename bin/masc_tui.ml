@@ -7104,7 +7104,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
      The typed preview below is derived from the original text and refs. *)
   let text =
     Keeper_chat_history.text_with_attachments
-      ~format_bytes:Masc_tui_context_inspector.format_bytes ~text
+      ~format_bytes:Masc_tui_context_inspector.format_bytes
+      ~text:(Masc_tui_chat_media.append_text ~text row.Keeper_chat_history.media)
       ~notes:row.Keeper_chat_history.attachments
   in
   { me_role = role
@@ -7120,8 +7121,11 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_turn_sequence = row.Keeper_chat_history.turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
-  ; me_image = Masc_tui_image_preview.in_message ~text:row.Keeper_chat_history.text
-      ~attachments:(List.map (fun note -> note.Keeper_chat_history.att_image) row.attachments)
+  ; me_image =
+      (match Masc_tui_chat_media.newest_image row.Keeper_chat_history.media with
+       | Some preview -> preview
+       | None -> Masc_tui_image_preview.in_message ~text:row.Keeper_chat_history.text
+           ~attachments:(List.map (fun note -> note.Keeper_chat_history.att_image) row.attachments))
   ; me_memory_summary =
       Option.map
         (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
@@ -9254,16 +9258,15 @@ let settle_retired_sent_image state =
              pending.sir_name)
   | Some _ | None -> ()
 
-(* Fetch retained wire bytes through the authenticated artifact endpoint. No
-   local filename or reference-supplied URL is ever opened. The render fiber
-   receives only the decoded image after network work completes. *)
-let open_stored_image state ~mailbox ~notice ~name reference =
+(* Image acquisition has no terminal effects. Capture the endpoint and UI
+   generation before forking; the mailbox consumer owns stale-result rejection. *)
+let open_message_image state ~mailbox ~notice ~name source =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   if !terminal_draws_images = Some false then
     notice ~kind:Notice_failure terminal_draws_no_images
   else begin
-    notice ~kind:Notice_reply (Printf.sprintf "Loading sent image (any key cancels): %s" name);
+    notice ~kind:Notice_reply (Printf.sprintf "Loading image (any key cancels): %s" name);
     let port = state.port in
     let keeper_name = state.msg_target_keeper_name in
     let generation = state.image_request_generation in
@@ -9271,27 +9274,15 @@ let open_stored_image state ~mailbox ~notice ~name reference =
     state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
       sir_keeper=keeper_name; sir_name=name; sir_authority=state.workspace_read_authority};
     let run () =
-      let result =
-        (* The authenticated HTTP client needs the fiber's Eio handlers.
-           Only JSON/base64 decoding belongs on a system thread. *)
-        match Masc_tui_http.http_get ~host:server_peer_host ~port
-            ~path:("/api/v1/artifacts/" ^ reference.Tool_output.sha256) with
-        | Error _ as error -> error
-        | Ok (status_code, body) when not (Tui_decode.is_success_http_status status_code) ->
-            (* Refusal wording reads the shared credential refresh state. *)
-            Error (Masc_tui_http.refusal ~status_code ~body)
-        | Ok (status_code, body) ->
-            Eio_guard.run_in_systhread ~label:"tui-sent-image-decode" (fun () ->
-              let response = Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body in
-              Result.bind response (Masc_tui_image_preview.decode_artifact reference))
-      in
+      let result = Masc_tui_image_requests.load ~host:server_peer_host ~port
+        ~cache_dir:ensure_img_cache_dir source in
       enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; result })
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None ->
         state.sent_image_read <- None;
-        notice ~kind:Notice_failure "sent image preview requires an active connection"
+        notice ~kind:Notice_failure "image preview requires an active connection"
   end
   end
 
@@ -9304,10 +9295,12 @@ let open_named_image state ~mailbox =
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
   | Masc_tui_image_preview.Staged attachment -> open_staged_image state ~notice attachment
   | Masc_tui_image_preview.Stored_attachment { name; reference } ->
-      open_stored_image state ~mailbox ~notice ~name reference
-  | Masc_tui_image_preview.Unavailable_attachment name ->
+      open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Retained reference)
+  | Masc_tui_image_preview.Output_image { name; source } ->
+      open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
+  | Masc_tui_image_preview.Unavailable_image { name; reason } ->
       notice ~kind:Notice_failure
-        (Printf.sprintf "Ctrl-O %s: this attachment has no retained image payload; attach it again to preview it" name)
+        (Printf.sprintf "Ctrl-O %s: %s" name reason)
   | Masc_tui_image_preview.No_image ->
       notice ~kind:Notice_reply "Ctrl-O: no image in this conversation or the composer"
 

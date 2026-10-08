@@ -1,0 +1,36 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha ▸ chat                                                                                               
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+       ● AUTO                요청 media#1                                                                               
+                             Image · GENERATED_OUTPUT_REFUSED · /generated-image                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    현재 작업 확인 불가                                                                                                 
+    >                                                                                                                   
+                                                                                                                        
+ alpha · ● healthy AUTO · gate: not loaded · running · configured: anthropic.claude-opus-5  Context unavailable · Ctrl-X
+  Enter:send  Ctrl-J:newline  /:commands  Esc:list  Ctrl-Q:leave  PgUp:scroll back  Ctrl-G:next Keeper  …?

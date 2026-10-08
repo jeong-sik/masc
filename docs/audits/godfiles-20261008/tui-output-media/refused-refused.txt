@@ -1,0 +1,36 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha ▸ chat                                                                                               
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+       ● AUTO                요청 media#1                                                                               
+                             Image · GENERATED_OUTPUT_REFUSED · /generated-image                                        
+       › LOCAL             │ Loading image (any key cancels): GENERATED_OUTPUT_REFUSED                                  
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    현재 작업 확인 불가                                                                                                 
+    >                                                                                                                   
+                                                                                                                        
+ alpha · ● healthy AUTO · gate: not loaded · running · configured: anthropic.claude-opus-5  Context unavailable · Ctrl-X
+  sent image GENERATED_OUTPUT_REFUSED: HTTP 503: output image unavailable  Enter:send  Ctrl-J:newline  Esc:list  …?

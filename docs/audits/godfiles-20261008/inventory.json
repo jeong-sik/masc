@@ -12,11 +12,16 @@
       "path": "bin/masc_tui.ml",
       "baseline_lines": 27845,
       "kind": "production",
-      "status": "partial: terminal mouse grammar owner and direct consumers updated; remaining responsibilities pending semantic review",
-      "current_lines": 27845,
+      "status": "partial: mouse grammar and retained media projection separated; image acquisition moved to its effect owner; remaining responsibilities pending semantic review",
+      "current_lines": 27838,
       "validation_artifact": "mouse-protocol/README.md",
       "prs": [
-        41915
+        41915,
+        41955
+      ],
+      "validation_artifacts": [
+        "mouse-protocol/README.md",
+        "tui-output-media/README.md"
       ]
     },
     {

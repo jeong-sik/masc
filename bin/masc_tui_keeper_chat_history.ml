@@ -116,6 +116,7 @@ type row =
   ; kind : kind
   ; text : string
   ; attachments : attachment_note list
+  ; media : Masc_tui_chat_media.t list
   }
 
 type decoded =
@@ -715,6 +716,7 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                         ; journal
                         ; pass = Masc_tui_message_layout.Pass_committed
                         }
+                  ; media = []
                   ; attachments = []
                   ; text =
                       String.concat "\n"
@@ -753,6 +755,7 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
               ; journal = []
               ; pass = Masc_tui_message_layout.Pass_failed { kind }
               }
+        ; media = []
         ; attachments = []
         ; text =
             Printf.sprintf "%s\n%s\nsnapshot present: %s"
@@ -787,6 +790,7 @@ let memory_row_of_json = function
                       ; pass = Masc_tui_message_layout.No_pass
                       }
                 ; text = summary
+                ; media = []
                 ; attachments = []
                 }
             | Some _, None | None, Some _ | None, None -> None)
@@ -1164,6 +1168,7 @@ let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id ~e
           ; execution_source
           ; kind = Skill_activity activities
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ]
@@ -1217,6 +1222,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_so
           ; execution_source
           ; kind = Tool_calls tool_block
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ]
@@ -1230,6 +1236,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_so
           ; execution_source
           ; kind = Reasoning (reasoning @ omitted_note)
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ]
@@ -1243,6 +1250,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_so
           ; execution_source
           ; kind = Tool_calls tool_block
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ]
@@ -1256,6 +1264,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_so
           ; execution_source
           ; kind = Reasoning reasoning
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ; Utterance
@@ -1267,6 +1276,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_so
           ; execution_source
           ; kind = Tool_calls tool_block
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ]
@@ -1335,6 +1345,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                 ; execution_source
                 ; kind = Addressed_to_keeper { speaker; surface }
                 ; text = content
+                ; media = []
                 ; attachments = attachment_notes_of fields
                 }
             ]
@@ -1373,6 +1384,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                    | None -> Option.map (fun id -> Masc_tui_keeper_chat_log.Operation id) origin_request_id)
               ; kind = Delivery_failed { origin_request_id; recovered_at = None }
               ; text = content
+              ; media = (match List.assoc_opt "blocks" fields with
+                  | Some blocks -> Masc_tui_chat_media.of_json blocks | None -> [])
               ; attachments = attachment_notes_of fields
               }
           ]
@@ -1410,6 +1423,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                    ; execution_source
                    ; kind = Fusion_conclusion fusion
                    ; text = ""
+                   ; media = []
                    ; attachments = []
                    })
               (fusion_conclusions_of fields)
@@ -1434,6 +1448,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                   ~operation_id ~execution_source at skill_projection
               , [] )
           in
+          let media = match List.assoc_opt "blocks" fields with
+            | Some blocks -> Masc_tui_chat_media.of_json blocks | None -> [] in
           let said =
             (* An autonomous turn that wrote nothing has nothing to say.
                With a trace the calls are the turn; without one the wake
@@ -1456,6 +1472,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                under the Skill row. *)
             if
               String.trim content = ""
+              && media = []
               && (autonomous || skill_rows <> [] || trace_rows <> [])
             then []
             else
@@ -1469,6 +1486,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                   ; execution_source
                   ; kind = if autonomous then Autonomous_reply else Said_by_keeper
                   ; text = content
+                  ; media
                   ; attachments = []
                   }
               ]
@@ -1538,6 +1556,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                  ; execution_source
                  ; kind
                  ; text = content
+                 ; media = []
                  ; attachments = []
                  }
              ])
@@ -1604,6 +1623,7 @@ let fold_tool_blocks parsed_rows =
         ; execution_source
         ; kind = Tool_calls (Transcript.tool_block activities)
         ; text = ""
+        ; media = []
         ; attachments = []
         }
         :: acc

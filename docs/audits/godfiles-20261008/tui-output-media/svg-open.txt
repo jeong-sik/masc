@@ -1,0 +1,3 @@
+GENERATED_OUTPUT_SVG                                                                                                   
+_Gf=100,a=T,r=33,q=2,m=0;iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURf8AAP///0EdNBEAAAABYktHRAH/Ai3eAAAAB3RJTUUH6goIDRcA+VS1zwAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyNi0xMC0wOFQxMzoyMzowMCswMDowMPuHFwEAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjYtMTAtMDhUMTM6MjM6MDArMDA6MDCK2q+9AAAAKHRFWHRkYXRlOnRpbWVzdGFtcAAyMDI2LTEwLTA4VDEzOjIzOjAwKzAwOjAw3c+OYgAAAAtJREFUCNdjYEAFAAAQAAGhxSHBAAAAAElFTkSuQmCC\
+  any key: back                                                                                                        

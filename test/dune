@@ -3448,6 +3448,12 @@
   yojson))
 
 (test
+ (name test_tui_chat_media)
+ (modules test_tui_chat_media)
+ (libraries alcotest masc masc_tui_chat_media masc_tui_image_preview
+  masc_tui_keeper_chat_history yojson))
+
+(test
  (name test_tui_keeper_chat_queue)
  (modules test_tui_keeper_chat_queue)
  (libraries alcotest astring masc_tui_keeper_chat_queue

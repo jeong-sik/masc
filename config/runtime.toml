@@ -602,8 +602,8 @@ turn-timeout-s = 600.0
 
 [claude_code.claude-code-opus-high]
 
-# The rest of the Claude Code ladder: Fable 5.1, Opus 5, Opus 5.5 and Sonnet 5.5
-# at every level the CLI takes (low..max), and Haiku 4.5.
+# The rest of the Claude Code ladder: Fable 5.1, Opus 5, Opus 5.5, Sonnet 5.5 and
+# Haiku 5.5 at every level the CLI takes (low..max), and Haiku 4.5.
 # Haiku 4.5 carries no level, so the CLI picks; its window is 200K
 # (OpenRouter /models anthropic/claude-haiku-4.5, 2026-09-22), and it
 # answered `claude -p --model claude-haiku-4-5` the same day.
@@ -839,6 +839,71 @@ reasoning-effort = "max"
 supports-image-input = true
 
 [claude_code.claude-code-fable-max]
+
+# Haiku 5.5 (released 2026-10-07) serves on the subscription: Claude Code
+# 2.1.294 answered `claude-subscription -p --model claude-haiku-5-5` on
+# 2026-10-08 at the CLI default and at --effort low, xhigh and max, and
+# reported a 1M context window each time. Ladder low..max as the platform
+# effort page (checked the same day).
+[models.claude-code-haiku-5-5-low]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.claude-code-haiku-5-5-low.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-low]
+
+[models.claude-code-haiku-5-5-medium]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.claude-code-haiku-5-5-medium.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-medium]
+
+[models.claude-code-haiku-5-5-high]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.claude-code-haiku-5-5-high.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-high]
+
+[models.claude-code-haiku-5-5-xhigh]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.claude-code-haiku-5-5-xhigh.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-xhigh]
+
+[models.claude-code-haiku-5-5-max]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.claude-code-haiku-5-5-max.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-max]
 
 [models.claude-code-haiku]
 api-name = "claude-haiku-4-5"

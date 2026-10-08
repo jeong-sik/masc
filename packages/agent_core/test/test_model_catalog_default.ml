@@ -40,6 +40,7 @@ let subscription_model_rows =
     (* Sonnet 5.5 refuses forced tool use where sonnet-5 takes it, and
        "claude-sonnet-5" prefixes it, so it needs its own row. *)
   ; "claude-sonnet-5-5", "claude-sonnet-5-5"
+  ; "claude-haiku-5-5", "claude-haiku-5-5"
   ; "gpt-5.6-sol", "gpt-5.6-sol"
   ; "gpt-5.6-terra", "gpt-5.6-terra"
   ; "gpt-5.6-luna", "gpt-5.6"
@@ -59,6 +60,62 @@ let subscription_model_rows =
   ; "gemini-3.1-pro-high", "gemini-3.1-pro"
   ; "gpt-oss-120b-medium", "gpt-oss-120b"
   ]
+;;
+
+(* Haiku 5.5 departs from the "anthropic" base in three places, and each one is
+   a request the API answers with 400 when the row is wrong: sampling fields,
+   the shape that turns thinking off, and the effort that shape may carry. Its
+   price is the fourth: the model is priced by prompt length and a row holds one
+   rate, so the row states none.
+   https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide *)
+let test_haiku_5_5_row_reaches_the_wire () =
+  let module Backend = Llm_provider.Backend_anthropic in
+  let module Effort = Llm_provider.Reasoning_effort in
+  let model_id = "claude-haiku-5-5" in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Haiku 5.5 wire" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
+    let config ?temperature ?top_p ?top_k ?enable_thinking ?reasoning_effort () =
+      Llm_provider.Provider_config.make
+        ~kind:Anthropic ~model_id
+        ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+        ?temperature ?top_p ?top_k ?enable_thinking ?reasoning_effort ()
+    in
+    let body config = Backend.build_request ~config ~messages () |> Yojson.Safe.from_string in
+    let member name body = Yojson.Safe.Util.member name body in
+    let thinking body = member "thinking" body in
+    let sampled = body (config ~temperature:0.2 ~top_p:0.5 ~top_k:40 ()) in
+    check bool "temperature is not sent" true (member "temperature" sampled = `Null);
+    check bool "top_p is not sent" true (member "top_p" sampled = `Null);
+    check bool "top_k is not sent" true (member "top_k" sampled = `Null);
+    check (option bool) "top_k is not offered" (Some false)
+      (Option.map
+         (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
+         (Capabilities.for_model_id_catalog model_id));
+    check bool "default leaves adaptive choice to the provider" true
+      (thinking (body (config ())) = `Null);
+    check bool "thinking on asks for adaptive" true
+      (thinking (body (config ~enable_thinking:true ()))
+       = `Assoc [ "type", `String "adaptive" ]);
+    let off = body (config ~enable_thinking:false ()) in
+    check bool "thinking off sends disabled" true
+      (thinking off = `Assoc [ "type", `String "disabled" ]);
+    check bool "the disabled request names no effort" true
+      (member "output_config" off = `Null);
+    (* The API takes [disabled] at high effort or below and answers 400 above
+       it, so these two must not reach the wire. *)
+    List.iter
+      (fun effort ->
+        check bool
+          (Printf.sprintf "thinking off at %s is refused" (Effort.to_string effort))
+          true
+          (match body (config ~enable_thinking:false ~reasoning_effort:effort ()) with
+           | _ -> false
+           | exception Invalid_argument _ -> true))
+      [ Effort.XHigh; Effort.Max ];
+    check bool "no flat price is stated" true
+      (Option.is_none (Llm_provider.Pricing.pricing_for_model_opt model_id)))
 ;;
 
 let test_subscription_models_resolve_their_own_rows () =
@@ -160,6 +217,7 @@ let subscription_model_efforts =
        effort parameter set (checked 2026-09-23), as the other Claude rows. *)
   ; None, "claude-opus-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "claude-sonnet-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "claude-haiku-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ; "ultra" ]
   ; None, "gpt-6.1-sol", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
@@ -224,7 +282,8 @@ let test_responses_sol_rejects_codex_only_ultra () =
    The list covers the Anthropic models masc runs. The Mythos rows are left out
    because they are not part of that set; they carry the same gap, and Mythos
    5.1 shares Fable 5.1's 0.025x cache read, so a row of its own comes with
-   whichever change starts running them. *)
+   whichever change starts running them. Haiku 5.5 is left out because its row
+   states no price at all, so it has no multiplier to carry. *)
 let anthropic_cache_pricing_rows =
   [ "claude-opus-5", 1.25, 0.1
   ; "claude-opus-5-5", 1.25, 0.05
@@ -977,6 +1036,10 @@ let () =
             "Sonnet 5.5 thinking modes reach the wire"
             `Quick
             test_sonnet_5_5_thinking_modes_reach_the_wire
+        ; test_case
+            "Haiku 5.5 row reaches the wire"
+            `Quick
+            test_haiku_5_5_row_reaches_the_wire
         ; test_case
             "subscription models admit their reasoning efforts"
             `Quick

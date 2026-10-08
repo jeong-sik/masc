@@ -671,7 +671,9 @@ let test_stop_ack_releases_only_input_after_that_stop () =
   Tui_types.release_retained_keeper_input state "alpha";
   check bool "explicit resume releases only stopped input for its keeper" true
     (state.keeper_interactive_waiting =
-      ["beta", "other-stopped", Tui_types.Retained_after_stop;
+      ["alpha", "after-stop", Tui_types.Awaiting_control {
+         generation=Tui_types.keeper_chat_control_generation state "alpha"; target=None};
+       "beta", "other-stopped", Tui_types.Retained_after_stop;
        "alpha", "fresh-input", Tui_types.Awaiting_control {generation=acknowledged;target=None}])
 ;;
 
@@ -707,6 +709,33 @@ let test_control_receipts_are_scoped_to_each_keeper () =
     (Tui_types.finish_keeper_chat_control state "alpha" ~generation:alpha);
   check bool "alpha does not invalidate beta receipt" true
     (Tui_types.finish_keeper_chat_control state "beta" ~generation:beta)
+;;
+
+let test_preflight_resume_keeps_priority_intents_until_server_resume () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let alpha = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"alpha" () in
+  let beta = Keeper_chat.create_request ~keeper_name:"beta" ~message:"beta" () in
+  let ids requests =
+    List.map (fun (request : Keeper_chat.request) -> request.request_id) requests in
+  state.keeper_run_next_pending <- [alpha; beta];
+  state.keeper_run_next_ready <- [alpha; beta];
+  state.keeper_auto_priority_pending <- ["alpha", alpha.request_id; "beta", beta.request_id];
+  let resume =
+    Tui_types.begin_keeper_chat_control ~preserve_priority_requests:true state "alpha" in
+  check (list string) "an unconfirmed preflight keeps pending priority intents"
+    [alpha.request_id; beta.request_id] (ids state.keeper_run_next_pending);
+  check (list string) "an unconfirmed preflight keeps ready priority intents"
+    [alpha.request_id; beta.request_id] (ids state.keeper_run_next_ready);
+  check (list string) "an unconfirmed preflight keeps automatic priority"
+    ["alpha"; "beta"] (List.map fst state.keeper_auto_priority_pending);
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:resume : bool);
+  Tui_types.clear_keeper_priority_requests state "alpha";
+  check (list string) "a confirmed server resume drops only alpha pending intents"
+    [beta.request_id] (ids state.keeper_run_next_pending);
+  check (list string) "a confirmed server resume drops only alpha ready intents"
+    [beta.request_id] (ids state.keeper_run_next_ready);
+  check (list string) "a confirmed server resume drops only alpha automatic priority"
+    ["beta"] (List.map fst state.keeper_auto_priority_pending)
 ;;
 
 let test_new_control_discards_only_its_keeper_priority_intents () =
@@ -991,23 +1020,35 @@ let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
     Tui_types.Awaiting_control {generation=0; target=None}) :: state.keeper_interactive_waiting;
   check bool "later Enter cannot bypass retained first input" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
-  check bool "an already-paused owner still needs a server resume" false
-    (Tui_types.resume_preflight_keeper_input ~owner_paused:true state "alpha");
-  check bool "paused owner refusal preserves the queued input hold" true
+  check bool "never-posted input needs a current owner reading" true
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
+  check bool "checking eligibility preserves the queued input hold" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
-  check bool "operator can resume never-posted input locally" true
-    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
+  let resume = Tui_types.begin_keeper_chat_control ~preserve_input_holds:true state "alpha" in
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:resume);
+  check bool "a failed owner reading can retry the local resume" true
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
+  check bool "a failed owner reading does not release input" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  Tui_types.release_retained_keeper_input state "alpha";
   (match Tui_types.next_authorized_keeper_input state "alpha" with
    | Some (first, _) -> check string "resume dispatches original input first"
        item.request.request_id first.request.request_id
    | None -> fail "local resume still blocked");
+  (match Q.take state.msg_queued ~request_id:item.request.request_id with
+   | Some (_, queue) -> state.msg_queued <- queue
+   | None -> fail "resumed input disappeared");
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (next, _) -> check string "later Enter follows the resumed input"
+       later.request_id next.request.request_id
+   | None -> fail "later Enter lost its control generation");
   check bool "local resume does not manufacture a server control token" true
     (state.keeper_chat_control_tokens = [] && state.keeper_chat_control_pending = []);
   state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
     Tui_types.Retained_before_dispatch];
   ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
   check bool "a real stop still requires its server resume receipt" false
-    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
   check bool "server-stopped input remains held" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
 ;;
@@ -1020,13 +1061,13 @@ let test_workspace_suspension_preserves_real_stop_ownership () =
   Tui_types.withdraw_keeper_chat_requests state;
   Tui_types.restore_suspended_keeper_input state local;
   check bool "workspace return permits explicit local preflight resume" true
-    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
   ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
   let stopped = Tui_types.suspend_keeper_input state in
   Tui_types.withdraw_keeper_chat_requests state;
   Tui_types.restore_suspended_keeper_input state stopped;
   check bool "workspace return never converts a real stop to local resume" false
-    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
   check bool "real stopped input remains undispatchable" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
 ;;
@@ -5238,6 +5279,7 @@ let () =
         [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
         ; test_case "preflight recovery keeps newer input and full queue" `Quick test_preflight_recovery_keeps_newer_input_and_a_full_queue
         ; test_case "preflight recovery preserves order and steer intent" `Quick test_preflight_recovery_preserves_order_and_steer_intent
+        ; test_case "preflight resume keeps priority intents until a server resume" `Quick test_preflight_resume_keeps_priority_intents_until_server_resume
         ; test_case "preflight local resume preserves FIFO and server stops" `Quick test_preflight_local_resume_keeps_fifo_and_respects_server_stop
         ; test_case "workspace suspension preserves real stop ownership" `Quick test_workspace_suspension_preserves_real_stop_ownership
         ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership

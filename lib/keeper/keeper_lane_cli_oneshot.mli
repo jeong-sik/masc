@@ -7,7 +7,8 @@
 
     - the prompt carries the lane schema in the exact Agent Core sentence
       ({!Agent_core.Exact_output.schema_instruction_text}), so the model gets
-      the same words on both transports;
+      the same words on both transports, except where the client does not
+      accept a written value (see {!prompt_with_schema});
     - the answer is parsed with a strict [Yojson.Safe.from_string] — no fence
       stripping, no repair — because that is precisely what Agent Core does to
       a [Json_syntax_only] HTTP body. An unparseable answer is the CLI's
@@ -133,7 +134,11 @@ val walk
 
 val prompt_with_schema :
   requirement:Agent_core.Exact_output.output_requirement -> prompt:string -> string
-(** The exact text submitted by [run], including its schema instructions. *)
+(** The exact text [run] submits to a client that returns what the model
+    writes (Claude Code, Codex, Muse Code), including its schema instructions.
+    An Antigravity slot gets {!Runtime_antigravity.structured_output_instruction}
+    in place of the Agent Core sentence, because that client takes a
+    schema-bound answer through its [finish] tool. *)
 
 type input_capacity =
   { runtime_id : string

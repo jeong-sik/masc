@@ -172,3 +172,61 @@ rendering, no image policy, no review slot, no approval is reachable from
 No `extract_text`, no wiring, and no PDF run yet. H5-S2 stays `not_measured`
 for real extraction. Until this proposal is accepted, document projection in
 production stays `unavailable: no_document_reader`.
+
+## Time budget for the keeper-turn reader (answer to c-1e3cdd3ef158bda3432ea0958e5aa616)
+Read at main 5d0f1558. Coordinates are lib/keeper/ unless noted.
+
+### What exists
+- `provider_call_deadline_sec` is resolved in keeper_runtime_resolved.ml:129-131
+  (operator value from `turn.provider_call_deadline_sec`, else the failsafe
+  floor), read by `Keeper_runtime_resolved.provider_call_deadline_sec ()`
+  (:230-231) and injected into the provider context at
+  keeper_turn_driver.ml:3212-3213. In keeper_turn_driver_try_provider.ml
+  (:434, :2068-2070, :2155) it is the **no-progress ceiling on one provider
+  attempt**, measured against the keeper's live progress signal
+  (`provider_progress_probe`, keeper_turn_driver.ml:~3214-3260), armed per
+  attempt inside the provider run (`run_started_at`, :2073).
+- `stream_idle_timeout_sec`, `first_event_timeout_sec` and the body timeout
+  govern the provider stream, not anything before it.
+- `Monotonic_deadline` exists (used by `Verification_pdf_inspection`), with
+  `after ~seconds` and `remaining_seconds`.
+
+### What does not exist
+- I found **no whole-turn deadline with a remaining time** and **no reserved
+  budget for fallback provider calls** in lib/ (searched turn_deadline,
+  turn_budget, walk_deadline, lane_deadline, attempt_deadline,
+  remaining_budget, fallback_reserv; the only hits were unrelated).
+  `turn_budget` in keeper_agent_run.ml:2281 is a context-token budget.
+- `project_input_for_attempt` (keeper_turn_driver.ml:1347, called at ~:2342)
+  runs inside the candidate walk **before** the attempt's provider run, so the
+  per-attempt no-progress watchdog is not yet armed while it executes. A reader
+  invoked there is bounded only by what the reader enforces itself.
+- `Voice_bridge.transcribe_audio` takes no deadline argument; it walks the STT
+  endpoint chain with each endpoint's own transport behavior. The audio reader
+  therefore has the same exposure today.
+
+### Consequence and proposal
+There is no "remaining turn time" to hand to `extract_text`, and no reservation
+to subtract. Per the leader's rule (no new fixed seconds; unavailable/incomplete
+when no budget can be passed):
+1. `extract_text` takes a caller-supplied `Monotonic_deadline.t` and returns
+   `Poppler_budget_spent`-style failure when it is spent. It adds no constant.
+   `inspect` keeps its existing 60 s deadline, error set and directory cleanup
+   unchanged (it constructs its own deadline exactly as today).
+2. The keeper turn builds that deadline from an **existing operator-declared
+   value**: `Keeper_runtime_resolved.provider_call_deadline_sec ()`. This is a
+   semantic reuse (a no-progress ceiling used as a wall-clock cap for the one
+   pre-provider step), not a remaining-turn computation. If the leader does not
+   accept that reuse, the alternative is the stated rule: pass no budget and
+   report the document as `unavailable: no_budget`, which keeps H5-S2 not
+   measured for real PDFs.
+3. A true remaining-turn budget would be a new policy (a turn start time held in
+   the walk, a reservation for the fallback provider call). That is a separate
+   decision and is not started here.
+4. The audio reader's missing deadline is recorded as a gap, not changed here.
+
+### For the independent review requested
+That `inspect` still gets the same 60 s deadline, the same error variants
+(`Poppler_budget_spent`, `Too_many_pages`, `Rendered_bytes_exceeded`,
+`Image_policy_rejected`, `Payload_budget_exceeded`, `Storage_failed`) and the
+same `Fs_compat.remove_tree` on release after `extract_text` is factored out.

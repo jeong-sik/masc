@@ -185,6 +185,19 @@ val escapes : string -> bool
     such names, and a file the guest creates under one is never written to
     the saves directory. *)
 
+type prepared_load
+(** In-memory validated guest and save snapshot. No open file handles; discarded
+    preparations are reclaimed normally. An admitted commit attempt consumes the guest. *)
+val prepare_load :
+  ledger_dir:string -> saves_dir:string -> checkpoint_dir:string ->
+  program_name:string -> program_bytes:string -> files:(string * string) list ->
+  (prepared_load, error) result
+val commit_load :
+  who:string -> prepared_load -> announce:(unit -> unit) ->
+  (observation * ran, error) result
+(** Rechecks activity, current controller and the save snapshot's lane counter
+    under the lane lock before changing the ledger or installing the guest. *)
+
 val load :
   who:string ->
   ledger_dir:string ->
@@ -389,6 +402,16 @@ val checkpoint_format : int
 val save : who:string -> dir:string -> slot:Machine_checkpoint.slot -> (observation, error) result
 (** Writes the machine to [slot], replacing what was there. Needs no
     controller and does not move the machine: anyone watching may save. *)
+
+type prepared_restore
+(** Validated in-memory checkpoint snapshot with no open resources. *)
+val prepare_restore :
+  dir:string -> slot:Machine_checkpoint.slot -> ledger_dir:string ->
+  saves_dir_of:(string -> string) -> (prepared_restore, error) result
+val commit_restore :
+  who:string -> prepared_restore -> announce:(unit -> unit) -> (observation, error) result
+(** Rechecks activity and the current controller under the lane lock, consumes
+    the prepared guest once, then atomically replaces the lane state. *)
 
 val restore :
   who:string ->

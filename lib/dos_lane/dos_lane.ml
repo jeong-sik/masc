@@ -648,9 +648,8 @@ let ran_then_kept st ~who ran =
   Ok (observe st, { ran with unsaved; autosave })
 ;;
 
-(* The saves over the inventory, matched the way DOS matches names. Read
-   under the machine's lock by [load], so a save the running machine writes
-   cannot land between this read and the new machine's first record of it. *)
+(* The saves over inventory, matched the way DOS matches names. Preparation
+   snapshots the lane counter first; commit rejects a concurrent guest run. *)
 let with_saves ~saves_dir files =
   match
     if Sys.file_exists saves_dir && Sys.is_directory saves_dir then
@@ -694,62 +693,73 @@ let is_mz image =
   String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
 ;;
 
-let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files ~announce =
+type prepared_load = {
+  load_machine : (Dos_machine.t * (string, string) Hashtbl.t) option ref;
+  load_program : string;
+  load_ledger_dir : string;
+  load_saves_dir : string;
+  load_checkpoint_dir : string;
+  load_change_count : int;
+}
+
+let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files =
   let* () = require_activity () in
+  (* Guest writes raise this counter. A load must not install a save overlay
+     read across a concurrent run of the old machine. *)
+  let load_change_count = locked (fun () -> !change_count) in
+  let* files = with_saves ~saves_dir files in
+  if String.length program_bytes = 0 then
+    Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
+  else match dos_name_collision files with
+  | Some (earlier, later) ->
+      Error (Invalid_request (Printf.sprintf
+        "%s and %s are one name to DOS; the guest can only see one" earlier later))
+  | None ->
+      let m = Dos_machine.create () in
+      List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
+      if is_mz program_bytes then Dos_machine.load_exe m program_bytes
+      else Dos_machine.load_com m program_bytes;
+      let kept = Hashtbl.create (List.length files) in
+      List.iter (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents) files;
+      Ok {load_machine=ref (Some (m, kept)); load_program=program_name;
+          load_ledger_dir=ledger_dir; load_saves_dir=saves_dir;
+          load_checkpoint_dir=checkpoint_dir; load_change_count}
+;;
+
+let commit_load ~who prepared ~announce =
   locked (fun () ->
-    match Option.map (refuse_other ~who) !state with
-    | Some (Error e) -> Error e
-    | Some (Ok ()) | None ->
-    match with_saves ~saves_dir files with
-    | Error e -> Error e
-    | Ok files ->
-    if String.length program_bytes = 0 then
-      Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
-    else
-      match dos_name_collision files with
-      | Some (earlier, later) ->
-        Error
-          (Invalid_request
-             (Printf.sprintf "%s and %s are one name to DOS; the guest can only see one"
-                earlier later))
-      | None ->
-        (* A new machine starts a new ledger. *)
-        let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
-        match
-          mkdir_p ledger_dir;
-          Out_channel.with_open_bin ledger_path (fun _ -> ())
-        with
-        | exception Sys_error message -> Error (Unreadable message)
-        | () -> begin
-        let m = Dos_machine.create () in
-        List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
-        (* The image's own bytes choose the loader, not its name: an MZ header is
-           a relocatable EXE, anything else is a flat COM at 0x100. A misnamed
-           file still boots the way DOS would boot it. *)
-        if is_mz program_bytes then Dos_machine.load_exe m program_bytes
-        else Dos_machine.load_com m program_bytes;
-        let kept = Hashtbl.create (List.length files) in
-        List.iter
-          (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents)
-          files;
-        let st =
-          { m; steps = 0; program = program_name; ledger_path; entries = []; saves_dir; checkpoint_dir; kept
-          ; controller = Some who; incarnation = Random_id.uuid_v7 (); autosaved_once = false }
-        in
+    let* () = require_activity () in
+    let* () = match !state with None -> Ok () | Some st -> refuse_other st ~who in
+    if !change_count <> prepared.load_change_count then
+      Error (Invalid_request "DOS machine changed during load preparation; request the load again")
+    else match !(prepared.load_machine) with
+    | None -> Error (Invalid_request "DOS load preparation was already consumed")
+    | Some (m, kept) ->
+      prepared.load_machine := None;
+      let ledger_path = Filename.concat prepared.load_ledger_dir "ledger.jsonl" in
+      match
+        mkdir_p prepared.load_ledger_dir;
+        Out_channel.with_open_bin ledger_path (fun _ -> ())
+      with
+      | exception Sys_error message -> Error (Unreadable message)
+      | () ->
+        let st = {m; steps=0; program=prepared.load_program; ledger_path; entries=[];
+          saves_dir=prepared.load_saves_dir; checkpoint_dir=prepared.load_checkpoint_dir; kept;
+          controller=Some who; incarnation=Random_id.uuid_v7 (); autosaved_once=false} in
         state := Some st;
         mark_change ();
-        note_activity ~who (Printf.sprintf "load %s" program_name);
-        let booted =
-          running (fun () ->
-            let ran = advance st ~budget:boot_steps ~until_ready:true in
-            ran_then_kept st ~who ran)
-        in
-        (* Announced once the machine is the workspace's and has booted as far
-           as it will, still under the lock so announcements keep machine
-           order. *)
+        note_activity ~who (Printf.sprintf "load %s" prepared.load_program);
+        let booted = running (fun () ->
+          let ran = advance st ~budget:boot_steps ~until_ready:true in
+          ran_then_kept st ~who ran) in
         announce ();
-        booted
-      end)
+        booted)
+;;
+
+let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files ~announce =
+  let* prepared = prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir
+      ~program_name ~program_bytes ~files in
+  commit_load ~who prepared ~announce
 ;;
 
 let eject ~who ~announce () =
@@ -1073,75 +1083,73 @@ let meta_of_json json =
   | _ -> corrupt "the lane's fields are missing"
 ;;
 
-let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
+type prepared_restore = {
+  restore_machine : (Dos_machine.t * (string, string) Hashtbl.t) option ref;
+  restore_meta : restored_meta;
+  restore_lines : string;
+  restore_ledger_dir : string;
+  restore_saves_dir : string;
+  restore_checkpoint_dir : string;
+  restore_slot : Machine_checkpoint.slot;
+}
+
+let prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of =
   let* () = require_activity () in
+  let* checkpoint = match Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
+      ~format:checkpoint_format with
+    | Ok checkpoint -> Ok checkpoint
+    | Error (Machine_checkpoint.Unreadable message) -> Error (Unreadable message)
+    | Error e -> Error (Checkpoint_refused e) in
+  let* meta = meta_of_json checkpoint.Machine_checkpoint.meta in
+  let* m = match Dos_snapshot.restore checkpoint.machine_bytes with
+    | Ok m -> Ok m
+    | Error (Dos_snapshot.Wrong_format {saved; supported}) ->
+        Error (Checkpoint_refused (Machine_checkpoint.Other_format {saved; expected=supported}))
+    | Error ((Dos_snapshot.Not_a_snapshot | Dos_snapshot.Corrupt _) as e) ->
+        Error (Checkpoint_refused (Machine_checkpoint.Corrupt (Dos_snapshot.error_to_string e))) in
+  let kept = Hashtbl.create 16 in
+  List.iter (fun name ->
+    Option.iter (Hashtbl.replace kept name) (Dos_machine.read_mounted m name))
+    (Dos_machine.mounted_names m);
+  let lines = String.concat ""
+      (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") meta.saved_ledger) in
+  Ok {restore_machine=ref (Some (m, kept)); restore_meta=meta; restore_lines=lines;
+      restore_ledger_dir=ledger_dir; restore_saves_dir=saves_dir_of meta.saved_saves;
+      restore_checkpoint_dir=dir; restore_slot=slot}
+;;
+
+let commit_restore ~who prepared ~announce =
   locked (fun () ->
-    match Option.map (refuse_other ~who) !state with
-    | Some (Error e) -> Error e
-    | Some (Ok ()) | None ->
-      (* Everything is read and checked before anything changes: a refused
-         restore leaves the machine, its ledger and its controller as they
-         were. *)
+    let* () = require_activity () in
+    let* () = match !state with None -> Ok () | Some st -> refuse_other st ~who in
+    match !(prepared.restore_machine) with
+    | None -> Error (Invalid_request "DOS restore preparation was already consumed")
+    | Some (m, kept) ->
+      prepared.restore_machine := None;
+      let meta = prepared.restore_meta in
+      let ledger_path = Filename.concat prepared.restore_ledger_dir "ledger.jsonl" in
       match
-        Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
-          ~format:checkpoint_format
+        mkdir_p prepared.restore_ledger_dir;
+        write_atomically ~dir:prepared.restore_ledger_dir "ledger.jsonl" prepared.restore_lines
       with
-      | Error (Machine_checkpoint.Unreadable message) -> Error (Unreadable message)
-      | Error e -> Error (Checkpoint_refused e)
-      | Ok { Machine_checkpoint.meta; machine_bytes; header = _ } ->
-        match meta_of_json meta with
-        | Error e -> Error e
-        | Ok meta ->
-          match Dos_snapshot.restore machine_bytes with
-          | Error (Dos_snapshot.Wrong_format { saved; supported }) ->
-            Error
-              (Checkpoint_refused
-                 (Machine_checkpoint.Other_format { saved; expected = supported }))
-          | Error ((Dos_snapshot.Not_a_snapshot | Dos_snapshot.Corrupt _) as e) ->
-            Error
-              (Checkpoint_refused
-                 (Machine_checkpoint.Corrupt (Dos_snapshot.error_to_string e)))
-          | Ok m ->
-            let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
-            let lines =
-              String.concat ""
-                (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") meta.saved_ledger)
-            in
-            match
-              mkdir_p ledger_dir;
-              write_atomically ~dir:ledger_dir "ledger.jsonl" lines
-            with
-            | exception Sys_error message -> Error (Unreadable message)
-            | () ->
-              (* The saves directory keeps what is on disk. The restored
-                 machine's files are taken as already kept, so nothing is
-                 written back until the guest writes again: an older
-                 checkpoint never overwrites a newer save a game made after
-                 it. *)
-              let kept = Hashtbl.create 16 in
-              List.iter
-                (fun name ->
-                  Option.iter (Hashtbl.replace kept name) (Dos_machine.read_mounted m name))
-                (Dos_machine.mounted_names m);
-              let st =
-                { m
-                ; steps = meta.saved_steps
-                ; program = meta.saved_program
-                ; ledger_path
-                ; entries = List.rev meta.saved_ledger
-                ; saves_dir = saves_dir_of meta.saved_saves
-                ; checkpoint_dir = dir
-                ; kept
-                ; controller = Some who
-                ; incarnation = Random_id.uuid_v7 ()
-                ; autosaved_once = false
-                }
-              in
-              state := Some st;
-              mark_change ();
-              note_activity ~who ("restore " ^ Machine_checkpoint.slot_to_string slot);
-              announce ();
-              Ok (observe st))
+      | exception Sys_error message -> Error (Unreadable message)
+      | () ->
+        (* Restored files are already kept: an older checkpoint never writes
+           over a newer guest save. No preparation path is read again here. *)
+        let st = {m; steps=meta.saved_steps; program=meta.saved_program; ledger_path;
+          entries=List.rev meta.saved_ledger; saves_dir=prepared.restore_saves_dir;
+          checkpoint_dir=prepared.restore_checkpoint_dir; kept; controller=Some who;
+          incarnation=Random_id.uuid_v7 (); autosaved_once=false} in
+        state := Some st;
+        mark_change ();
+        note_activity ~who ("restore " ^ Machine_checkpoint.slot_to_string prepared.restore_slot);
+        announce ();
+        Ok (observe st))
+;;
+
+let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
+  let* prepared = prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of in
+  commit_restore ~who prepared ~announce
 ;;
 
 let checkpoints ~dir =

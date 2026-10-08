@@ -1167,7 +1167,7 @@ let test_a_holder_departs_with_its_credential () =
     (match
        Keeper_dos_controller.execute ~config ~who:"minsu" ~name:"masc_dos_pass"
          ~args:(`Assoc [ ("to", `String "operator") ])
-         ~run:(fun () -> fail "unreadable auth must refuse before the supplied operation")
+         ~run:(fun ?dos_admission:_ () -> fail "unreadable auth must refuse before the supplied operation")
      with
      | Error (Keeper_dos_controller.Seats_unknown _) -> ()
      | Error (Keeper_dos_controller.Refused message) ->
@@ -1187,7 +1187,7 @@ let test_a_pass_is_refused_when_the_credentials_do_not_list () =
     match
       Keeper_dos_controller.execute ~config:(Workspace.default_config base_path)
         ~who:"operator" ~name:"masc_dos_pass" ~args:(`Assoc [ ("to", `String "minsu") ])
-        ~run:(fun () -> fail "unlisted credentials must refuse before the supplied operation")
+        ~run:(fun ?dos_admission:_ () -> fail "unlisted credentials must refuse before the supplied operation")
     with
     | Error (Keeper_dos_controller.Seats_unknown _) -> ()
     | Error (Keeper_dos_controller.Refused message) ->
@@ -1826,6 +1826,51 @@ let test_activity_refusal_is_proven_pre_effect () =
     [Machine_configuration.Disabled; Unobserved]
 ;;
 
+let test_prepared_load_rejects_changed_save_snapshot () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let prepared = match Dos_lane.prepare_load
+        ~ledger_dir:(Tool_misc_dos_lane.dos_dir ~base_path)
+        ~saves_dir:(Tool_misc_dos_lane.saves_dir ~base_path "echo.com")
+        ~checkpoint_dir:(checkpoints_dir ~base_path)
+        ~program_name:"echo.com" ~program_bytes:echo_com ~files:[] with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    ignore (dispatch ~base_path "masc_dos_step" ["steps", `Int 1; "until_ready", `Bool false]);
+    let before = mark () in
+    (match Dos_lane.commit_load ~who:"dos-test" prepared ~announce:ignore with
+     | Error (Dos_lane.Invalid_request _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "a changed save snapshot was installed");
+    check int "refused preparation leaves current screen unchanged" before.count (mark ()).count)
+;;
+
+let test_prepared_restore_uses_snapshot_and_rechecks_controller () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "prepared");
+    let slot = match Machine_checkpoint.slot_of_string "prepared" with
+      | Ok slot -> slot | Error detail -> fail detail in
+    let prepared = match Dos_lane.prepare_restore ~dir:(checkpoints_dir ~base_path) ~slot
+        ~ledger_dir:(Tool_misc_dos_lane.dos_dir ~base_path)
+        ~saves_dir_of:(Tool_misc_dos_lane.saves_dir ~base_path) with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    write_file (Machine_checkpoint.path ~dir:(checkpoints_dir ~base_path) slot) "replaced after preparation";
+    (match Dos_lane.commit_restore ~who:"other" prepared ~announce:ignore with
+     | Error (Dos_lane.Held_by _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "prepared restore ignored current controller");
+    (match Dos_lane.commit_restore ~who:"dos-test" prepared ~announce:ignore with
+     | Ok _ -> () | Error error -> fail (Dos_lane.error_to_string error));
+    let after = mark () in
+    (match Dos_lane.commit_restore ~who:"dos-test" prepared ~announce:ignore with
+     | Error (Dos_lane.Invalid_request _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "prepared mutable guest was installed twice");
+    check int "consumed preparation cannot replace current screen" after.count (mark ()).count)
+;;
+
 let () =
   run "dos-lane-tools"
     [ ( "tools"
@@ -1895,6 +1940,8 @@ let () =
         ; test_case "peek" `Quick test_peek_reads_the_text_page
         ; test_case "read-only" `Quick test_read_only_classification
         ; test_case "declared" `Quick test_every_tool_is_declared
+        ; test_case "prepared load detects concurrent guest changes" `Quick test_prepared_load_rejects_changed_save_snapshot
+        ; test_case "prepared restore snapshots bytes and rechecks ownership" `Quick test_prepared_restore_uses_snapshot_and_rechecks_controller
         ; test_case "checkpoint round trip" `Quick
             test_a_restored_machine_plays_on_as_if_never_stopped
         ; test_case "restore needs the controller" `Quick test_restore_needs_the_controller

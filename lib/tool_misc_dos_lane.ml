@@ -627,7 +627,7 @@ let release_retired_keeper ~holder ~by =
          ~announce:(announce ~author:by (departure_notice holder Keeper_stopped))))
 ;;
 
-let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
+let handle_load ?(admit_effect = fun run -> run ()) ~tool_name ~start_time ~base_path ~agent_name args =
   match get_string_opt args "program" with
   | None | Some "" ->
     (* No name: the inventory, so the next call can name a program. Named
@@ -635,11 +635,12 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
        an autosave from before it is worth resuming rather than starting
        over. *)
     let autosave = autosave_lookup_fields (lookup_autosave ~base_path) in
+    let programs = off_domain (fun () -> programs_available ~base_path) in
     Tool_result.make_ok ~tool_name ~start_time
       ~data:
         (`Assoc
           ([ ( "programs_available"
-             , `List (List.map (fun n -> `String n) (programs_available ~base_path)) ) ]
+             , `List (List.map (fun n -> `String n) programs) ) ]
            @ autosave))
       ()
   | Some name ->
@@ -649,21 +650,21 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
       | Some b when String.trim b = "" -> None
       | Some b -> Some (String.trim b)
     in
-    (match resolve_program ?boot ~base_path name with
+    (match off_domain (fun () -> resolve_program ?boot ~base_path name) with
      | Error message -> reject ~tool_name ~start_time message
      | Ok (program_name, program_bytes, files) ->
-       let announce_load =
-         announce ~author:agent_name
-           (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name) in
-       let loaded =
-         off_domain (fun () ->
-           Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
-             ~saves_dir:(saves_dir ~base_path (String.trim name))
-             ~checkpoint_dir:(checkpoints_dir ~base_path) ~program_name ~program_bytes
-             ~files ~announce:announce_load)
-       in
-       after_announcing
-         (of_lane_run ~base_path ~extra:[ core_field ] ~tool_name ~start_time loaded))
+       let prepared = off_domain (fun () ->
+         Dos_lane.prepare_load ~ledger_dir:(dos_dir ~base_path)
+           ~saves_dir:(saves_dir ~base_path (String.trim name))
+           ~checkpoint_dir:(checkpoints_dir ~base_path) ~program_name ~program_bytes ~files) in
+       match prepared with
+       | Error error -> of_lane_run ~base_path ~extra:[core_field] ~tool_name ~start_time (Error error)
+       | Ok prepared ->
+         after_announcing (admit_effect (fun () ->
+           let announce_load = announce ~author:agent_name
+               (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name) in
+           let loaded = off_domain (fun () -> Dos_lane.commit_load ~who:agent_name prepared ~announce:announce_load) in
+           of_lane_run ~base_path ~extra:[core_field] ~tool_name ~start_time loaded)))
 ;;
 
 (* masc_dos_meta — the linked core identity is a read-only lane fact. It does
@@ -1049,7 +1050,7 @@ let listed_json (l : Machine_checkpoint.listed) =
 (* No slot lists them, the way masc_dos_load with no program lists the
    inventory: restoring a default name could replace a game in progress
    with one nobody meant. *)
-let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
+let handle_restore ?(admit_effect = fun run -> run ()) ~tool_name ~start_time ~base_path ~agent_name args =
   let dir = checkpoints_dir ~base_path in
   match slot_arg args with
   | Error message -> reject ~tool_name ~start_time message
@@ -1065,15 +1066,18 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
          ()
      | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e))
   | Ok (Some slot) ->
-    let announce_restore =
-      announce ~author:agent_name
-        (Printf.sprintf "%s 님이 DOS 기계를 %s 체크포인트로 되돌렸습니다" agent_name
-           (Machine_checkpoint.slot_to_string slot)) in
-    let restored =
-      off_domain (fun () ->
-        Dos_lane.restore ~who:agent_name ~dir ~slot ~ledger_dir:(dos_dir ~base_path)
-          ~saves_dir_of:(saves_dir ~base_path) ~announce:announce_restore)
-    in
-    after_announcing
-      (of_lane ~base_path ~extra:[ slot_field slot; core_field ] ~tool_name ~start_time restored)
+    let prepared = off_domain (fun () ->
+      Dos_lane.prepare_restore ~dir ~slot ~ledger_dir:(dos_dir ~base_path)
+        ~saves_dir_of:(saves_dir ~base_path)) in
+    (match prepared with
+     | Error error -> of_lane ~base_path ~extra:[slot_field slot; core_field]
+         ~tool_name ~start_time (Error error)
+     | Ok prepared ->
+       after_announcing (admit_effect (fun () ->
+         let announce_restore = announce ~author:agent_name
+             (Printf.sprintf "%s 님이 DOS 기계를 %s 체크포인트로 되돌렸습니다"
+                agent_name (Machine_checkpoint.slot_to_string slot)) in
+         let restored = off_domain (fun () -> Dos_lane.commit_restore ~who:agent_name prepared
+             ~announce:announce_restore) in
+         of_lane ~base_path ~extra:[slot_field slot; core_field] ~tool_name ~start_time restored)))
 ;;

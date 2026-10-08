@@ -232,11 +232,23 @@ let refusal_result ~tool_name = function
       ~start_time:(Tool_timing.start ()) message
 ;;
 
-let execute ~config ~who ~name ~args ~run =
+let execute ~config ~who ~name ~args
+    ~(run : ?dos_admission:((unit -> Tool_result.result) -> Tool_result.result) -> unit -> Tool_result.result option) =
   let recover_error error =
     Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error) in
   let operation = Tool_schemas_misc.misc_operation_of_tool_name name in
   match operation with
+  | Some (Tool_schemas_misc.Misc_dos_load | Tool_schemas_misc.Misc_dos_restore) ->
+    (* Dispatch still owns tool validation and preparation. Only its prepared
+       lane effect enters the credential transaction. Preserve typed refusal
+       at this outer service boundary as well as the tool answer. *)
+    let refusal = ref None in
+    let dos_admission perform =
+      match with_move_admission ~config ~who ~run:perform with
+      | Ok result -> result
+      | Error reason -> refusal := Some reason; refusal_result ~tool_name:name reason in
+    let result = run ~dos_admission () in
+    (match !refusal with None -> Ok result | Some reason -> Error reason)
   | Some Tool_schemas_misc.Misc_dos_pass ->
     let result = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
       Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
@@ -253,7 +265,7 @@ let execute ~config ~who ~name ~args ~run =
   | Some _ | None ->
     (match Option.map Tool_schemas_misc.dos_controller_need operation with
      | Some Tool_schemas_misc.Takes_controller ->
-       with_move_admission ~config ~who ~run
+       with_move_admission ~config ~who ~run:(fun () -> run ())
      | Some Tool_schemas_misc.Hands_controller -> Error (Refused "unsupported DOS handoff operation")
      | Some Tool_schemas_misc.No_controller | None -> Ok (run ()))
 ;;

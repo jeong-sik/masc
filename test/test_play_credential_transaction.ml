@@ -813,7 +813,7 @@ let test_preparation_allows_disconnect_before_final_admission () =
      | Error (Refused detail) -> fail detail
      | Ok _ -> fail "prepared operation bypassed final participation admission");
     check (option string) "disconnect remains effective" None (controller ());
-    check string "refused commit did not replace the machine" before
+    check (option string) "refused commit did not replace the machine" before
       (dos_ok (Dos_lane.screen ())).Dos_lane.program)
     ["masc_dos_load"; "masc_dos_restore"]
 

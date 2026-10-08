@@ -2350,3 +2350,80 @@ for (const watched of ['dos', 'msx']) for (const initiallyConnected of [true, fa
     assert.equal(page.requests.some(r => r.method === 'POST'), false, 'observation never changes participation itself');
   });
 }
+
+for (const status of [401, 403]) {
+  test('a fresh say ' + status + ' persists its cleared receipt before retryable cleanup and reload', async () => {
+    const storage = new Map();
+    let failCleanup = false;
+    storage.delete = key => {
+      if (failCleanup && key === 'masc.play.room.draft') throw new Error('temporary cleanup failure');
+      return Map.prototype.delete.call(storage, key);
+    };
+    const roomReply = ({ body }) => response(body.action === 'say' ? { error:'invitation revoked' } : emptyRoom,
+      body.action === 'say' ? status : 200);
+    const page = fixture(gameReply, { storage, roomReply });
+    await page.settle();
+    failCleanup = true;
+    page.get('chat-text').value = 'fresh rejected send';
+    page.get('chat-send').handlers.click();
+    await page.settle();
+    const persisted = JSON.parse(storage.get('masc.play.room.draft'));
+    assert.equal(persisted.pending, null, 'terminal rejection is durable before cleanup can fail');
+    assert.equal(persisted.text, 'fresh rejected send');
+    assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+    assert.equal(page.get('chat-send').disabled, true);
+    failCleanup = false;
+    const reloaded = fixture(gameReply, { storage, hash:'', roomReply: () => response({ error:'revoked' }, status) });
+    await reloaded.settle();
+    assert.equal(storage.size, 0, 'reload is not wedged by a rejected pending receipt');
+    assert.equal(reloaded.roomRequests.some(r => r.body.action === 'say'), false);
+    assert.equal(page.roomRequests.filter(r => r.body.action === 'say').length, 1);
+  });
+}
+
+test('terminal say receipt persistence can recover locally without retrying the rejected mutation', async () => {
+  const storage = new Map();
+  let denySettlement = false;
+  storage.set = (key, value) => {
+    if (denySettlement && key === 'masc.play.room.draft' && JSON.parse(value).pending === null)
+      throw new Error('receipt write unavailable');
+    return Map.prototype.set.call(storage, key, value);
+  };
+  const page = fixture(gameReply, { storage, roomReply: ({ body }) => {
+    if (body.action === 'say') { denySettlement = true; return response({ error:'revoked' }, 401); }
+    return response(emptyRoom);
+  } });
+  await page.settle();
+  page.get('chat-text').value = 'known rejected receipt';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  assert.equal(JSON.parse(storage.get('masc.play.room.draft')).pending.text, 'known rejected receipt');
+  denySettlement = false;
+  await page.get('leave').handlers.click();
+  assert.equal(storage.size, 0, 'local cleanup first retries terminal receipt persistence');
+  assert.equal(page.roomRequests.filter(r => r.body.action === 'say').length, 1);
+  assert.equal(page.requests.some(r => r.method === 'POST'), false, 'rejected bearer is never reused for disconnect');
+});
+
+test('explicit reconnect retries departure-marker cleanup after storage recovers', async () => {
+  const storage = new Map([['masc.play.invite', 'fixture-token'], ['masc.play.departure', 'pending']]);
+  let failRemoval = true;
+  storage.delete = key => {
+    if (key === 'masc.play.departure' && failRemoval) throw new Error('departure cleanup unavailable');
+    return Map.prototype.delete.call(storage, key);
+  };
+  const page = fixture(gameReply, { storage });
+  await page.settle();
+  assert.equal(storage.get('masc.play.departure'), 'pending');
+  assert.equal(page.get('chat-text').disabled, true);
+  assert.equal(page.padButton.disabled, true);
+  failRemoval = false;
+  await page.poll(5000);
+  assert.equal(storage.has('masc.play.departure'), false, 'retained reopen intent retries cleanup on ordinary seat poll');
+  assert.equal(page.get('chat-text').disabled, false);
+  assert.equal(page.padButton.disabled, false);
+  page.get('chat-text').value = 'rejoined room';
+  page.get('chat-send').handlers.click();
+  await page.settle();
+  assert.equal(page.roomRequests.filter(r => r.body.action === 'say').length, 1);
+});

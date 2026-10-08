@@ -116,6 +116,10 @@ let code_history_rows (state : state) ~cols =
   | Some (_, Masc_tui_fetched.Loading) -> wrap None "(loading history)"
   | Some (_, Masc_tui_fetched.Absent) | None -> []
   | Some ((scope, path), Masc_tui_fetched.Ready listing) ->
+      let git_failure = match listing.chl_git_error with
+        | None -> []
+        | Some detail -> wrap None (field "Git history unavailable" detail)
+      in
       let entries = List.concat_map
         (fun entry ->
           let lines = match entry with
@@ -144,7 +148,7 @@ let code_history_rows (state : state) ~cols =
         listing.chl_entries
       in
       let empty = match listing.chl_entries with
-        | [] -> wrap None "(no commit or exact Keeper change touches this file)"
+        | [] -> wrap None "(no history entries returned; see source coverage below)"
         | _ :: _ -> []
       in
       let note = match state.code_lsp_note with
@@ -155,7 +159,7 @@ let code_history_rows (state : state) ~cols =
         | Code_scope_keeper keeper -> "Keeper " ^ keeper
         | Code_scope_repo repo -> "Repository " ^ repo
       in
-      entries @ empty @ wrap None (field "File" path)
+      git_failure @ entries @ empty @ wrap None (field "File" path)
       @ wrap None (field "Scope" scope_text)
       @ wrap None (field "Coverage" listing.chl_activity_note) @ note
 

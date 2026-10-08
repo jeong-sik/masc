@@ -17,6 +17,11 @@ exception Test_isolation_breach of string
 (** Set global Eio filesystem. Call at server startup. *)
 val set_fs : Eio.Fs.dir_ty Eio.Path.t -> unit
 
+(** Enumerate one opened directory without following a final symlink. The
+    returned names are read from that directory descriptor, so pathname
+    replacement after open cannot redirect the enumeration. *)
+val read_directory_nofollow : string -> string list
+
 (** Clear global fs (testing/shutdown). *)
 val clear_fs : unit -> unit
 

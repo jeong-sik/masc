@@ -234,16 +234,7 @@ let same_file_identity (left : Unix.stats) (right : Unix.stats) =
 ;;
 
 let entries_of_open_directory dir =
-  let handle = Unix.opendir dir in
-  Fun.protect
-    ~finally:(fun () -> Unix.closedir handle)
-    (fun () ->
-      let rec read acc =
-        match Unix.readdir handle with
-        | exception End_of_file -> acc
-        | name -> read (name :: acc)
-      in
-      read [])
+  Fs_compat.read_directory_nofollow dir
   |> List.filter (fun name -> not (String.starts_with ~prefix:"." name))
   |> List.sort String.compare
 ;;

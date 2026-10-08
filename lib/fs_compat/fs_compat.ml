@@ -1311,6 +1311,8 @@ let file_mtime (path : string) : float option =
 ;;
 
 external publish_paths_raw : bool -> string -> string -> unit = "caml_masc_publish_paths"
+
+external read_directory_nofollow : string -> string list = "caml_masc_readdir_nofollow"
 let publish_paths exchange left right =
   if String.contains left '\000' || String.contains right '\000' then
     invalid_arg "filesystem publication paths cannot contain NUL";

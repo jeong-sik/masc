@@ -2,7 +2,9 @@ name = "masc_msx_screen"
 description = """
 Read the MSX frame without advancing time.
 
-Returns mode, PC, text, a 64x24 ASCII view and tiles. Text is empty in \
+Returns mode, PC, `ppi_a` and `slot3_sel` raw bytes, text, a 64x24 ASCII \
+view and tiles. `slot3_sel` is stored in normal polarity; hardware reads \
+at FFFFh are inverted. Text is empty in \
 bitmap modes; tile IDs depend on the game. The sprite attribute table rides \
 only when sprites=true. Keeper calls include a PNG artifact and dimensions; \
 use keeper_analyze_image for vision."""

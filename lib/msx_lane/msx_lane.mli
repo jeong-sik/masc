@@ -45,6 +45,8 @@ type observation = {
   mode : string;  (** {!Msx.display_mode_to_string} *)
   pc : int;
   halted : bool;
+  ppi_a : int;  (** Primary-slot selection register, as read from PPI port A. *)
+  slot3_sel : int;  (** Stored subslot byte; hardware reads address FFFFh inverted. *)
   screen_text : string;
       (** name table as characters — meaningful when the pattern set is a font.
           Empty in bitmap modes ({!is_bitmap_mode}): there the name table is

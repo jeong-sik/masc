@@ -91,6 +91,7 @@ def prepare(binding, sources):
         raise InvalidInput("max_tokens must be a positive provider output limit")
     if not sources:
         raise InvalidInput("Fusion computation requires supplied input sources")
+    declared_installations = {}
     if role is Role.JUDGE:
         declared = binding.get("sources")
         if not isinstance(declared, list) or not declared:
@@ -108,6 +109,7 @@ def prepare(binding, sources):
                 or len(set(actual_ids)) != len(actual_ids)
                 or set(declared_ids) != set(actual_ids)):
             raise InvalidInput("Judge declared source IDs do not match supplied sources")
+        declared_installations = dict(zip(declared_ids, installations))
     references, inputs, statuses = [], [], []
     producer_instances = set()
     for source in sources:
@@ -121,6 +123,9 @@ def prepare(binding, sources):
                 if observation["kind"] != "lane_output":
                     raise InvalidInput("Judge inputs must be retained Lane output ports")
                 producer = object_value(observation.get("producer"), "input producer")
+                installation = string(producer.get("installation_id"), "producer.installation_id")
+                if installation != declared_installations[source.source_id]:
+                    raise InvalidInput("Judge source producer differs from its declared installation")
                 instance = string(producer.get("instance_id"), "producer.instance_id")
                 if instance in producer_instances:
                     raise InvalidInput("Judge inputs repeat one producer instance")

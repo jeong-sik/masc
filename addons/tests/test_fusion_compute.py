@@ -522,6 +522,25 @@ serve("duplex-envelope", observe, sampling_client=client, max_reply_bytes=int(sy
             self.assertIn("exactly one computation row", result["content"][0]["text"])
             self.assertEqual(host.calls, [])
 
+    def test_judge_binds_each_source_alias_to_its_declared_installation(self):
+        with tempfile.TemporaryDirectory() as root:
+            panel = call(Host(root), [source()])["structuredContent"]
+            settings = binding("judge")
+            settings["sources"] = [{"source_id": "declared-alias", "kind": "lane_output",
+                "installation_id": "panel-a", "output_id": "result", "selection": "latest_completed"}]
+            for installation in ("panel-b", "", None):
+                with self.subTest(installation=installation):
+                    captured = upstream(panel, installation_id=installation)
+                    captured["source_id"] = "declared-alias"
+                    host = Host(root)
+                    self.assertTrue(call(host, [captured], settings, ping=True)["isError"])
+                    self.assertEqual(host.calls, [], "foreign or unbound output cannot enter the judge prompt")
+            captured = upstream(panel, installation_id="panel-a")
+            captured["source_id"] = "declared-alias"
+            host = Host(root)
+            self.assertFalse(call(host, [captured], settings)["isError"])
+            self.assertEqual(len(host.calls), 1, "an alias need not equal its installation name")
+
     def test_nonfinite_nested_inputs_refuse_without_closing_connection(self):
         with tempfile.TemporaryDirectory() as root:
             for value in (float("nan"), float("inf"), float("-inf")):

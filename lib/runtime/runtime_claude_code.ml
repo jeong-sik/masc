@@ -925,7 +925,7 @@ let task_fields kind =
   @ match kind with
     | Task_start -> ["tool_use_id"; "description"; "subagent_type"; "is_backgrounded";
         "spawn_depth"; "parent_task_id"; "task_type"; "workflow_name"; "prompt";
-        "skip_transcript"; "ambient"; "owned_by_subagent"]
+        "skip_transcript"; "ambient"; "owned_by_subagent"; "awaited"]
     | Task_update -> ["patch"]
     | Task_progress -> ["tool_use_id"; "description"; "subagent_type"; "usage";
         "last_tool_name"; "summary"; "workflow_progress"]
@@ -1438,6 +1438,9 @@ let parse_task_frame ~expected_session_id fields =
         let* _workflow = optional string "workflow_name" fields in
         let* subagent_type = optional string "subagent_type" fields in
         let* is_backgrounded = optional bool "is_backgrounded" fields in
+        (* Claude 2.1.294 marks resumed tasks awaited by their caller.
+           This scheduling observation does not prove spawning ownership. *)
+        let* _awaited = optional bool "awaited" fields in
         let* skip_transcript = optional bool "skip_transcript" fields in
         let* ambient = optional bool "ambient" fields in
         let* task_type = optional string "task_type" fields in

@@ -16,6 +16,15 @@ The source basis is installed Claude Code 2.1.292, binary SHA256
 `97a01e5bc74a199e67189435d0331ea3a24eac2e07db4b76d9148c5b0386138f`.
 Offsets below are zero-based file byte coordinates, not runtime addresses.
 
+The later installed Claude Code 2.1.294 binary has SHA256
+`def0d15e64dd7d89621f88d28214f885b1c38b0ddd69762fb8593e34915d6d53`.
+Its task-start schema declares optional boolean `awaited` at byte 185531667;
+the producer conditionally emits `awaited: true` at byte 189988368. The decoder
+validates this known scheduling field without using it as ownership evidence.
+Unknown fields remain rejected; this is not permission to infer new task
+semantics from future extensions. These are binary-source observations, not a
+captured live task execution.
+
 - SDK task schemas and run ordering: 184620453–184626890; progress schema:
   184643080–184643855. `spawn_depth=1` explicitly means a top-level subagent.
   A resumed task keeps its task ID and gets a newer run ID. Runs of the same

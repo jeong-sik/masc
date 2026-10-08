@@ -2726,9 +2726,9 @@ let test_tasks_survive_native_return_without_changing_root_response () =
   with_fixture [Emit starts; Emit (agent_launch_result "parent-agent");
     Emit {|{"type":"system","subtype":"background_tasks_changed","uuid":"level-before","session_id":"__SESSION__","tasks":[{"task_id":"task-one","run_id":"alpha","task_type":"local_agent","description":"level membership only"}]}|};
     (* A legal first registration can arrive after the native return. *)
-    Emit (task_wire ~uuid:"start-one" "task_started" task_start_payload);
+    Emit (task_wire ~uuid:"start-one" "task_started" (("awaited",`Bool true)::task_start_payload));
     Emit (task_wire ~task_id:"task-two" ~call_id:(Some "second-agent") ~uuid:"start-two"
-      "task_started" (("is_backgrounded",`Bool false)::List.remove_assoc "is_backgrounded" task_start_payload));
+      "task_started" (("awaited",`Bool false)::("is_backgrounded",`Bool false)::List.remove_assoc "is_backgrounded" task_start_payload));
     Emit {|{"type":"system","subtype":"background_tasks_changed","uuid":"empty-level","session_id":"__SESSION__","tasks":[]}|};
     Emit (task_wire ~uuid:"progress-one" "task_progress" (task_progress_payload (`Int 30)));
     Emit (task_wire ~task_id:"task-two" ~uuid:"background-two" "task_updated"
@@ -2874,6 +2874,12 @@ let test_task_telemetry_identity_and_counter_validation () =
     check_frames [parent_tool_assistant;malformed] [];
     check_frames [parent_tool_assistant;malformed;start] ["valid-start"])
     (duplicate_subtype "task_started" :: duplicate_subtype "task_progress" :: blank_identities);
+  List.iter (fun value ->
+    let malformed = replace_wire_field "awaited" value start in
+    check_frames [parent_tool_assistant;malformed] [];
+    check_frames [parent_tool_assistant;malformed;
+      replace_wire_field "awaited" (`Bool true) start] ["valid-start"])
+    [`Null;`String "true";`Int 1;`Assoc [];`List []];
   let ended timestamp = task_wire ~uuid:"valid-end" "task_updated"
     ["patch", `Assoc ["end_time", `Int timestamp]] in
   check_frames [parent_tool_assistant;start;ended (-1)] ["valid-start"];

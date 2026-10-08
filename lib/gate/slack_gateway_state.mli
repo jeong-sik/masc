@@ -49,7 +49,8 @@ type inbound_file =
 
 (** The readable body of a message: its text, plus one line per file. A file
     posted with no message arrives with [text] empty, so the files are the whole
-    message and dropping them drops it entirely. *)
+    message and dropping them drops it entirely. Nonblank text is preserved
+    verbatim before the file lines. *)
 val text_with_files : text:string -> files:inbound_file list -> string
 
 (** A Slack event inside an [events_api] envelope ([payload.event]). Closed sum of

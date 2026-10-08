@@ -12,7 +12,8 @@ let fresh () =
   Transcript.create ~keeper_name:"keeper.one" ~request_id:"req-1"
     ~started_at:origin
 
-let rows ?(now = origin) t = Transcript.status_rows ~now t
+let rows ?(show_timing = true) ?(now = origin) t =
+  Transcript.status_rows ~show_timing ~now t
 
 let feed ?(now = origin) t deltas =
   List.iter (Transcript.apply ~now t) deltas
@@ -894,6 +895,11 @@ let test_progress_row_carries_the_turn_age () =
        check bool "a turn that has not started yet still reports its age" true
          (contains ~needle:"12s" text)
    | got -> failf "expected a progress row, got %d rows" (List.length got));
+  (match rows ~show_timing:false ~now:(origin +. 12.) t with
+   | (Transcript.Progress, text) :: _ ->
+       check string "hiding timing keeps the admission fact"
+         "sent; not accepted yet" text
+   | got -> failf "expected admission progress, got %d rows" (List.length got));
   feed t [ Live.Run_started ];
   (match rows ~now:(origin +. 90.) t with
    | (Transcript.Progress, text) :: _ ->
@@ -2715,7 +2721,11 @@ let test_checkpoint_wait_keeps_the_request_live () =
     turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace-1#3"}; Live.Run_finished];
   check bool "checkpoint waits for continuation" true (Transcript.awaiting_continuation t);
   check (option (float 0.)) "checkpoint does not settle request" None (Transcript.settled_at t);
+  check int "an idle continuation reserves no status row even days later" 0
+    (List.length (rows ~now:(origin +. 172_800.) t));
   feed t [Live.Run_started];
+  check bool "the next segment restores progress" true
+    (List.exists (fun (kind, _) -> kind = Transcript.Progress) (rows t));
   check phase "continued segment is working" Transcript.Working (Transcript.phase t);
   check bool "new segment no longer waits" false (Transcript.awaiting_continuation t);
   feed t [tool_started ~block_index:0 "after" "read_file"; tool_ended ~block_index:0 "after";

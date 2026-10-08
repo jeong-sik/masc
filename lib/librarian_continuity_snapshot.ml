@@ -178,9 +178,19 @@ let checkpoint_prefix_range ~trace_id ~lines ~messages =
 ;;
 
 let prefix_sha256 messages range =
-  R.slice messages range
-  |> List.map Agent_core.Checkpoint.message_to_json
-  |> fun messages -> Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`List messages)) |> to_hex)
+  (* Hash the same compact JSON array without materializing the whole prefix
+     as a JSON tree and then a string. Only one encoded message is needed at
+     a time; range selection still owns the atom and pinned-message rules. *)
+  let module Hash = Digestif.SHA256 in
+  let rec feed ctx = function
+    | [] -> Hash.feed_string ctx "]" |> Hash.get |> Hash.to_hex
+    | message :: rest ->
+      let encoded = Agent_core.Checkpoint.message_to_json message |> Yojson.Safe.to_string in
+      let ctx = Hash.feed_string ctx encoded in
+      let ctx = match rest with [] -> ctx | _ :: _ -> Hash.feed_string ctx "," in
+      feed ctx rest
+  in
+  feed (Hash.feed_string (Hash.init ()) "[") (R.slice messages range)
 ;;
 
 (* Only the lines of the history's current generation can witness where it

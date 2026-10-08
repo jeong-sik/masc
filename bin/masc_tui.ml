@@ -1593,7 +1593,7 @@ let workspace_enqueue state =
   let authority = state.workspace_authority in
   fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, message))
 
-let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
+let check_workspace_request ?schedule_form_action state ~mailbox ~authority ~identity ~host ~port () =
   if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
   else
     let reading = Masc_tui_loader.load_server_identity ~host ~port in
@@ -1601,7 +1601,12 @@ let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
     else if Masc_tui_types.server_workspace_matches ~expected:identity reading then Ok ()
     else begin
       let detail = "Workspace identity changed or is unavailable; request withdrawn" in
-      enqueue_async mailbox (Workspace_scoped (authority, Workspace_identity_unconfirmed detail));
+      let withdrawal = match schedule_form_action with
+        | None -> Workspace_identity_unconfirmed detail
+        | Some action ->
+          Schedule_form_authority_refused
+            {action; detail; workspace = workspace_input_identity_of_server identity} in
+      enqueue_async mailbox (Workspace_scoped (authority, withdrawal));
       Error detail
     end
 
@@ -2076,11 +2081,11 @@ let inflight_by_request_id state request_id =
    replacements of the same words with the reasoning lost at the first
    (RFC-0412 §3.3). A log with no entries is not kept: the POST never left, or
    the stream never opened, and there is nothing to draw. *)
-let settle_live_turn state (request : Keeper_chat.request) =
+let settle_live_turn state (request : Keeper_chat.request) ~record =
   match inflight_entry_by_request_id state request.Keeper_chat.request_id with
   | Some entry
     when Keeper_chat.same_request_identity entry.sent_request request ->
-      settle_turn_log state entry
+      settle_turn_log_ended_by state entry ~record
   | Some _ | None -> ()
 
 (* Ask the server to interrupt the turn this request opened.
@@ -6287,6 +6292,51 @@ let launch_keeper_chat_copy state ~mailbox ~keeper_name =
     (fun () -> Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name)
 ;;
 
+let read_keeper_chat_operation state ~mailbox ~authority ~identity
+    ~keeper_name ~operation_id =
+  let host = server_peer_host and port = state.port in
+  try
+    let ( let* ) = Result.bind in
+    let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+    let path = Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
+      (Masc_tui_http.percent_encode_path_segment keeper_name)
+      (Masc_tui_http.percent_encode_path_segment operation_id) in
+    let* json = Masc_tui_http.get_json ~host ~port ~path in
+    Keeper_chat_log.decode_operation_state ~operation_id json
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let apply_keeper_chat_operation_state state ~journal_id log = function
+  | Ok observed ->
+      Keeper_chat_log.observe_operation_state log.tl_log observed;
+      Option.iter (Keeper_chat_transcript.reconcile_operation log.tl_transcript)
+        (Keeper_chat_log.operation_state log.tl_log)
+  | Error detail ->
+      Keeper_chat_log.observe_operation_state log.tl_log None;
+      add_event state "error"
+        (Printf.sprintf "operation for %s not loaded: %s"
+           (Keeper_chat.compact_request_id journal_id)
+           (Keeper_chat.terminal_safe_text detail))
+;;
+
+let launch_unavailable_journal_operations state ~mailbox ~keeper_name =
+  let targets = unavailable_journal_operation_targets state keeper_name in
+  match targets, Eio_context.get_switch_opt () with
+  | [], (Some _ | None) | _ :: _, None -> ()
+  | _ :: _, Some sw ->
+      let enqueue_async = workspace_enqueue state in
+      let authority = state.workspace_authority and identity = state.server_identity in
+      List.iter (journal_read_started state) targets;
+      fork_workspace_job state ~sw (fun () ->
+        List.iter (fun operation_id ->
+          let operation_state = read_keeper_chat_operation state ~mailbox ~authority ~identity
+            ~keeper_name ~operation_id in
+          enqueue_async mailbox
+            (Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state})) targets)
+;;
+
 (* One fiber per load, reading the journals one after another in the order
    the targets came -- newest turn first -- each from where the session's
    record of it ends, and handing each turn's lines to the mailbox as they
@@ -6308,7 +6358,19 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
   let host = server_peer_host in
   let port = state.port in
   let run (source, started_at, since_seq) =
-    let journal =
+    (* The journal can lack its final event after interruption or an append
+       failure. Its cursor remains the journal's; the exact operation is a
+       separate authority for whether that execution is still running. Read
+       it first: terminal store settlement follows the final journal append,
+       so the following journal read cannot cut off that terminal prefix. *)
+    let read_operation () =
+      match source with
+      | Keeper_chat_log.Autonomous_turn _ -> Ok None
+      | Keeper_chat_log.Operation operation_id ->
+          read_keeper_chat_operation state ~mailbox ~authority ~identity
+            ~keeper_name ~operation_id |> Result.map Option.some
+    in
+    let read_journal () =
       try
         Keeper_chat_log.read_whole_journal ~since_seq
           ~fetch:(fun ~since_seq ~since_offset ->
@@ -6324,8 +6386,10 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
     in
+    let operation_state, journal = Keeper_chat_log.read_with_operation_state
+      ~read_operation ~read_journal in
     enqueue_async mailbox
-      (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal })
+      (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state })
   in
   match targets, Eio_context.get_switch_opt () with
   | [], Some _ | [], None -> ()
@@ -6439,8 +6503,8 @@ let switch_to_next_keeper_message state ~mailbox ~drain_queue =
    started before the latest turn persisted must keep that session's output.
 
    Errors used to be kept on sight for the opposite reason. Most are notices
-   the server has no row for -- a blocked dispatch, a recovery fence waiting on
-   Ctrl-R -- and dropping those loses the only record of them. A failed turn is
+   the server has no row for -- a blocked dispatch, a refused read -- and
+   dropping those loses the only record of them. A failed turn is
    the overlap the server does record, so it showed twice, which was the price
    of not being able to tell the two apart.
 
@@ -7546,9 +7610,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
 
    The refusals here are about whether the message can be delivered at all: no
    keeper selected, a roster this build could not read, a keeper that is no
-   longer registered. What used to sit above them — a prepared fence, an
-   unverified outcome, a blocked recovery, each with its own Ctrl-R — is gone
-   with the fence that produced them. *)
+   longer registered. *)
 let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
   match
     match keeper_name with
@@ -10795,6 +10857,14 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_config_view_error <- None;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
+  (* A refusal receipt answers one workspace's create or modify form; the
+     next workspace's forms must not inherit it. Losing the reading, or
+     reading the same workspace again, is not the next workspace: the guard's
+     own withdrawal and the refresh after it leave the receipt on screen. *)
+  (match state.schedule_form_refusal, workspace_input_identity_of_server state.server_identity with
+   | Some refusal, Some current when refusal.sfr_workspace <> Some current ->
+     state.schedule_form_refusal <- None
+   | Some _, (Some _ | None) | None, (Some _ | None) -> ());
   state.keeper_usage <- Keeper_usage_unread;
   state.github_identity_view <- None;
   state.github_identity_view_error <- None;
@@ -13584,6 +13654,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Workspace_identity_unconfirmed detail ->
       apply_server_identity_reading state (Error detail);
       report_action state "error" detail
+  | Schedule_form_authority_refused {action; detail; workspace} ->
+      (* This receipt belongs to the guard's withdrawal, and is presented
+         only after that withdrawal retires the former workspace readings.
+         Its Workspace_scoped envelope rejects delivery to a successor. *)
+      apply_server_identity_reading state (Error detail);
+      state.schedule_form_refusal <- Some
+        { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
+        ; sfr_workspace = workspace };
+      report_action state "error" (action ^ ": " ^ detail)
   | Lane_package_catalog_loaded (generation,directory,result) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -15358,7 +15437,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             Keeper_chat.error_certainty ~was_unverified:false error
             <> Keeper_chat.Outcome_unverified
       in
-      if terminal then settle_live_turn state request;
+      if terminal then
+        settle_live_turn state request
+          ~record:(Keeper_chat.operation_record_of_result result);
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
@@ -16068,7 +16149,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Some entry when Keeper_chat.same_request_identity entry.sent_request request ->
            Masc_tui_types.retain_preflight_inputs state [entry]
        | Some _ | None -> ());
-      settle_live_turn state request;
+      settle_live_turn state request ~record:None;
       (match inflight_by_request_id state request.Keeper_chat.request_id with
        | Some current when Keeper_chat.same_request_identity current request ->
            drop_inflight state request;
@@ -16242,8 +16323,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         state.msg_loaded_keeper <- Some keeper_name;
         launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
           !journal_targets;
-        launch_current_autonomous_journals state ~mailbox ~keeper_name
-  | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal } -> (
+        launch_current_autonomous_journals state ~mailbox ~keeper_name;
+        launch_unavailable_journal_operations state ~mailbox ~keeper_name
+  | Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state} ->
+      journal_read_finished state operation_id;
+      Option.iter (fun log ->
+        apply_keeper_chat_operation_state state ~journal_id:operation_id log
+          (Result.map Option.some operation_state))
+        (settled_log_for_request state ~keeper_name operation_id)
+  | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state } -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever
          keeper the pane shows now, and the log is kept per keeper. *)
@@ -16267,8 +16355,31 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
                   [ (source, started_at, since_seq) ])
       in
-      (match receive_journal_result state ~keeper_name ~source ~started_at journal with
-      | Ok (log, accepted) ->
+      let reconcile_operation log =
+        apply_keeper_chat_operation_state state ~journal_id log operation_state
+      in
+      (* The operation record remains authoritative when its journal cannot
+         be read. Settle the retained transcript before classifying the
+         independent journal failure below. *)
+      (match journal with
+       | Ok _ -> ()
+       | Error _ -> Option.iter reconcile_operation
+           (settled_log_for_request state ~keeper_name journal_id));
+      (match journal with
+      | Ok lines ->
+          (* The lines join the session's record of the turn when it has one
+             -- a cut live stream's partial log, an earlier read of a turn
+             then still running -- else a fresh log. The same fold, the same
+             seq dedup. *)
+          let log =
+            match settled_log_for_request state ~keeper_name journal_id with
+            | Some held when not (turn_log_holds_the_turn held) -> held
+            | Some _ | None ->
+                turn_log_create_for_source ~keeper_name ~source
+                  ~started_at:(journal_log_started_at ~fallback:started_at lines)
+          in
+          let accepted = turn_log_add_journaled log lines in
+          reconcile_operation log;
           (* An observer-followed turn has no pane-owned delta delivery.
              Refresh its durable results after the journal accepts them;
              replayed seqs and text-only reads do not request another load. *)
@@ -16281,11 +16392,29 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                     | _ -> false)
                   accepted
           then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
-          if turn_log_holds_the_turn log then (
-            match state.msg_loaded_keeper with
+          Keeper_chat_log.commit log.tl_log;
+          if Keeper_chat_log.entries log.tl_log <> [] then hold_settled_log state log;
+          (match state.msg_loaded_keeper with
             | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
                 enrich_held_logs_from_rows state ~keeper_name state.msg_loaded
-            | Some _ | None -> ())
+            | Some _ | None -> ());
+          if not (turn_log_holds_the_turn log) &&
+            (* A journal read whole that still cannot stand for the turn has
+               nothing more to say when the loaded transcript says the turn is
+               over: a cancelled turn (finished without a recorded reply), or
+               a failure the server never journaled (#33108). A turn still
+               running is asked again on the next load, from where this read
+               stopped. *)
+            ((match Keeper_chat_transcript.phase log.tl_transcript with
+             | Keeper_chat_transcript.Stream_ended
+             | Keeper_chat_transcript.Stream_failed _ ->
+                 true
+             | Keeper_chat_transcript.Waiting | Keeper_chat_transcript.Working ->
+                 false)
+            || (match source with
+                | Keeper_chat_log.Operation _ -> loaded_turn_has_ended state ~keeper_name journal_id
+                | Keeper_chat_log.Autonomous_turn _ -> false))
+          then remember_journal_unavailable state journal_id
       | Error (Keeper_chat_log.Unknown_operation | Keeper_chat_log.Journal_pruned | Keeper_chat_log.Journal_missing) ->
           (* Nothing to reload, now or later this session: the v1 rows are
              the turn. *)
@@ -17081,7 +17210,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               page.Keeper_chat_history.has_more
               && Option.is_some page.Keeper_chat_history.next_before;
             state.msg_older_error <- None;
-            launch_keeper_chat_journal_loads state ~mailbox ~keeper_name journal_targets
+            launch_keeper_chat_journal_loads state ~mailbox ~keeper_name journal_targets;
+            launch_unavailable_journal_operations state ~mailbox ~keeper_name
         | Error detail ->
             (* The cursor is kept so the same page can be asked for again;
                what is on screen is untouched. *)
@@ -19238,41 +19368,52 @@ and is loaded on demand through keeper_skill.
           | Error detail -> report_action state "error" detail))
   in
   let handle_schedule_form ~action ~stem ~post =
+    (* A refusal stays on the Schedules surface for the last-action window:
+       the action line alone is lost under a workspace warning. A new
+       attempt clears the previous one. *)
+    state.schedule_form_refusal <- None;
     let authority = state.workspace_authority in
     let identity = state.server_identity in
+    let report_form_refusal detail =
+      state.schedule_form_refusal <- Some
+        { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
+        ; sfr_workspace = workspace_input_identity_of_server identity };
+      report_action state "error" (action ^ ": " ^ detail)
+    in
     let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
     | None ->
-      report_action state "error"
+      report_form_refusal
         ("no $EDITOR set; export EDITOR to " ^ action ^ " a schedule here")
     | Some _ ->
       (match
          Masc_tui_editor.roundtrip ~restore:restore_terminal
            ~reenter:reenter_terminal stem
        with
-       | Error abort -> report_editor_abort state ~action abort
+       | Error Masc_tui_editor.Cancelled ->
+           report_editor_abort state ~action Masc_tui_editor.Cancelled
+       | Error (Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ as abort) ->
+           report_form_refusal (Masc_tui_editor.abort_detail abort)
        | Ok declaration ->
          (match Yojson.Safe.from_string declaration with
           | exception Yojson.Json_error message ->
-            report_action state "error"
-              (action ^ ": body is not JSON: " ^ message)
+            report_form_refusal ("body is not JSON: " ^ message)
           | `Assoc _ ->
             (match Result.bind
-               (check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port ())
+               (check_workspace_request ~schedule_form_action:action state
+                  ~mailbox:async_messages ~authority ~identity ~host ~port ())
                (fun () -> post declaration) with
-             | Error detail -> report_action state "error" (action ^ ": " ^ detail)
+             | Error detail -> report_form_refusal detail
              | Ok response ->
                (match Masc.Tui_decode.tool_envelope_outcome response with
-                | Error detail ->
-                  report_action state "error" (action ^ ": " ^ detail)
+                | Error detail -> report_form_refusal detail
                 | Ok message ->
                   report_action state "system" (action ^ ": " ^ message);
                   state.schedule_cancel_armed <- None;
                   state.schedule_cancel_error <- None;
                   launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages))
           | _ ->
-            report_action state "error"
-              (action ^ ": the editor form must be a JSON object")))
+            report_form_refusal "the editor form must be a JSON object"))
   in
   let handle_schedule_create () =
     handle_schedule_form ~action:"create"
@@ -19282,6 +19423,9 @@ and is loaded on demand through keeper_skill.
           ~port:state.port ~body_json)
   in
   let handle_schedule_modify () =
+    (* Every modify attempt retires the earlier refusal, including the ones
+       refused before an editor opens; their reason goes to the footer. *)
+    state.schedule_form_refusal <- None;
     match selected_schedule_row state with
     | None -> report_action state "error" "modify: no schedule under the cursor"
     (* The refusal was always real; it just arrived after the operator had

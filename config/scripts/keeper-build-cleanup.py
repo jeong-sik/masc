@@ -46,11 +46,15 @@ def process_paths() -> list[Path]:
             for name in ("cwd", "exe"):
                 paths.append(Path(os.readlink(process / name)))
             for descriptor in (process / "fd").iterdir():
-                target = os.readlink(descriptor)
+                try:
+                    target = os.readlink(descriptor)
+                except FileNotFoundError:
+                    # This descriptor closed; later ones may still own a checkout.
+                    continue
                 if target.startswith("/"):
                     paths.append(Path(target))
         except FileNotFoundError:
-            # A process or descriptor vanished while enumerating it.
+            # The process exited while its ownership was being inspected.
             continue
     return paths
 

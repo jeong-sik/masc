@@ -5,8 +5,10 @@ let expect message condition = if not condition then failwith message
 let success = function Ok value -> value | Error detail -> failwith detail
 let tab id title = `Assoc ["id", `Int id; "title", `String title;
                            "url", `String "https://example.org/"; "active", `Bool (id = 2)]
-let firefox = { client_id = "11111111-1111-4111-8111-111111111111"; browser = Firefox }
-let zen = { client_id = "22222222-2222-4222-8222-222222222222"; browser = Zen }
+let firefox = { client_id = "11111111-1111-4111-8111-111111111111"; browser = Firefox;
+                transport = Browser_lane.Web_extension }
+let zen = { client_id = "22222222-2222-4222-8222-222222222222"; browser = Zen;
+            transport = Browser_lane.Web_extension }
 let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; zen] }
 let response ?(source="live") ?(client=firefox.client_id) ?(page_id=2) () =
   `Assoc ["ok", `Bool true; "data", `Assoc [
@@ -224,12 +226,23 @@ let test_picker_empty_row () =
   expect "connections to offer need no empty row" (two.clients = Some [firefox; zen] && row two = None)
 
 let test_clients_decode () =
-  let row id browser = `Assoc ["clientId", `String id; "browser", `String browser] in
+  let row ?(transport="web_extension") id browser =
+    `Assoc ["clientId", `String id; "browser", `String browser; "transport", `String transport] in
   let envelope rows = `Assoc ["ok", `Bool true; "data", `Assoc ["clients", `List rows]] in
   expect "backend-normalized Zen identity preserved"
     (decode_clients (envelope [row zen.client_id "zen"]) = Ok [zen]);
+  let bidi = {firefox with client_id=zen.client_id; transport=Browser_lane.Webdriver_bidi} in
+  let clients = success (decode_clients (envelope
+    [row firefox.client_id "firefox"; row ~transport:"webdriver_bidi" bidi.client_id "firefox"])) in
+  expect "same Firefox retains two distinct transports" (clients = [firefox; bidi]);
+  expect "picker identifies the extension connection"
+    (browser_choice_label (Connected_browser firefox) = "Firefox · WebExtension · existing login · " ^ firefox.client_id);
+  expect "picker identifies the trusted hover connection"
+    (browser_choice_label (Connected_browser bidi) = "Firefox · BiDi · existing login · " ^ bidi.client_id);
   List.iter (fun rows -> expect "invalid client inventory rejected" (Result.is_error (decode_clients (envelope rows))))
-    [[row "" "zen"]; [row zen.client_id "unknown"]; [row zen.client_id "zen"; row zen.client_id "firefox"]];
+    [[row "" "zen"]; [row zen.client_id "unknown"]; [row zen.client_id "zen"; row zen.client_id "firefox"];
+     [row ~transport:"unknown" firefox.client_id "firefox"];
+     [`Assoc ["clientId", `String firefox.client_id; "browser", `String "firefox"]]];
   let missing_id = `Assoc ["ok", `Bool true; "data", `Assoc [
     "source", `String "live"; "clientId", `Null; "elapsed_ms", `Int 0;
     "tabs", `List []; "page", `Null]] in

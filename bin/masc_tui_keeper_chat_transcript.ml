@@ -15,6 +15,10 @@ type phase =
   | Stream_ended
   | Stream_failed of string
 
+type ending_source =
+  | Ending_heard_in_stream
+  | Ending_read_from_record
+
 type interrupt =
   | Not_requested
   | Signal_sent of { turn_id : int option; signalled_at_ns : int64 }
@@ -221,6 +225,7 @@ type t =
            reasoning only creates another stretch inside that response. *)
   ; mutable next_tool_local_id : int
   ; mutable segment : int
+  ; mutable segment_turn_refs : (int * string) list
   ; mutable phase : phase
   ; mutable ended_at : float option
         (* [Some] the instant the run said it was over -- finished or failed.
@@ -286,6 +291,11 @@ type t =
         (* Not a trail node: the server streams the reply text as deltas --
            chunked at the end when nothing streamed -- so the text is already
            in the trail. [drawn] reconciles the two. *)
+  ; mutable ending_source : ending_source
+        (* How [phase] came to be closed. A log that heard RUN_FINISHED or
+           RUN_ERROR holds the turn it drew. One closed from the operation
+           record never heard the end, so the journal appends it missed may
+           still be missing and it holds part of the turn at most. *)
   ; mutable settled_at : float option
         (* The instant the turn's outcome landed: the first of Run_finished,
            Run_failed or Reply_details. [started_at] is when the request left;
@@ -293,9 +303,9 @@ type t =
            moment when it covered a span, and a turn that ran twenty minutes
            sits under rows typed during it carrying an opening clock (the
            2026-09-10 msx-retro-mania misread). *)
-  ; mutable noted_skills : (string * skill_activity) list
+  ; mutable noted_skills : ((string * string) * skill_activity) list
         (* The exact delivery records [note_skill_activity] took, keyed by
-           the read call's tool-use id, in the order they were first noted.
+           the read call's (turn_ref, tool-use id), in first-noted order.
            Not a trail node: the stream has no event for a delivery, so
            [drawn] lays these over the skill items the trail derived from
            the same calls, and draws the ones whose call the trail never saw
@@ -320,6 +330,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; response_first_stretch = 0
   ; next_tool_local_id = 0
   ; segment = 0
+  ; segment_turn_refs = []
   ; phase = Waiting
   ; ended_at = None
   ; interrupt = Not_requested
@@ -338,6 +349,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
+  ; ending_source = Ending_heard_in_stream
   ; settled_at = None
   ; noted_skills = []
   ; revision = 0
@@ -484,6 +496,7 @@ let settled_at t = t.settled_at
 let attempt t = t.attempt
 let reply t = t.reply
 let phase t = t.phase
+let ending_source t = t.ending_source
 let awaiting_continuation t =
   match t.phase, t.reply with
   | Waiting, Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ } -> true
@@ -1415,6 +1428,8 @@ let project_trail t ~thinking ~text ~tools ~skills ~superseded =
               split acc ((origin, at, activity) :: generic) [] rest
           | Some skill ->
               let acc = flush_generic acc generic in
+              let skill = { skill with turn_ref =
+                Option.map safe_line (nonblank (List.assoc_opt segment t.segment_turn_refs)) } in
               split acc [] ((origin, at, skill) :: skills) rest)
     in
     group |> List.rev |> List.map (fun (call : live_tool_call) -> call.local_id, call.started_at, activity_of_live_call t call) |> split acc [] []
@@ -1507,7 +1522,7 @@ let quiet_after_s = 2.0
 
 (* The model side's phase as one clause, or [None] before the first byte,
    where the named runtime is the subject instead. *)
-let model_phase_text ~now t =
+let model_phase_text ~show_timing ~now t =
   match t.model_signal with
   | None -> None
   | Some signal ->
@@ -1518,17 +1533,15 @@ let model_phase_text ~now t =
       | Answering_at since -> "STREAMING · answering", since
       | Tool_returned_at (tool_name, since) -> tool_name ^ " returned", since
     in
-    if now -. since < quiet_after_s then Some word
+    if not show_timing || now -. since < quiet_after_s then Some word
     else
       match Masc_tui_message_layout.age_text ~now ~since with
       | None -> Some word
       | Some age -> Some (Printf.sprintf "%s, nothing back for %s" word age)
 ;;
 
-let phase_text ~now t =
+let phase_text ~show_timing ~now t =
   match t.phase with
-  | Waiting when awaiting_continuation t ->
-      "waiting for the Keeper to continue; this request is still open"
   | Waiting -> (
       (* The wait before RUN_STARTED is the one an operator cannot read from
          the outside. Saying which of the two it is -- the keeper's queue, or a
@@ -1617,6 +1630,7 @@ let phase_text ~now t =
       (* Keep the age beside the current pending calls. A held approval's
          age belongs to the approval surface, not another call's progress. *)
       let in_this_call =
+        if not show_timing then "" else
         match List.filter
           (fun (call : live_tool_call) ->
             Some call.local_id <> awaiting_call
@@ -1652,6 +1666,7 @@ let phase_text ~now t =
          then went quiet for ten seconds reports the minute. Which of the two
          is growing is the difference between slow and stuck. *)
       let silent_for =
+        if not show_timing then "" else
         match t.runtime_named_at with
         | None -> ""
         | Some since -> (
@@ -1682,7 +1697,7 @@ let phase_text ~now t =
       let leading =
         if has_pending_activity then runtime_tag
         else
-          match model_phase_text ~now t with
+          match model_phase_text ~show_timing ~now t with
           | Some phase -> String.concat " \xc2\xb7 " (List.filter (fun part -> part <> "") [phase; runtime_tag])
           | None -> (
             match t.current_runtime_id with
@@ -1755,10 +1770,12 @@ let elapsed_text ~now t =
       else Some (Masc_tui_message_layout.span_text (ended -. t.started_at))
   | None -> Masc_tui_message_layout.age_text ~now ~since:t.started_at
 
-let progress_text ~now t =
+let progress_text ~show_timing ~now t =
+  let phase = phase_text ~show_timing ~now t in
+  if not show_timing then phase else
   match elapsed_text ~now t with
-  | None -> phase_text ~now t
-  | Some age -> Printf.sprintf "%s · %s" (phase_text ~now t) age
+  | None -> phase
+  | Some age -> Printf.sprintf "%s · %s" phase age
 
 (* The question, as an Attention row. It is the one row an operator has to act
    on, so it is styled like the others that need them rather than like
@@ -1773,8 +1790,9 @@ let awaiting_text t =
       | because -> Printf.sprintf "%s\n  because %s" base because)
     t.awaiting
 
-let status_rows ~now t =
-  [ Some (Progress, progress_text ~now t)
+let status_rows ?(show_timing = true) ~now t =
+  [ (if awaiting_continuation t then None
+     else Some (Progress, progress_text ~show_timing ~now t))
   ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text t)
   ; Option.map
       (fun settlement ->
@@ -2220,6 +2238,7 @@ let apply_delta ~now t (delta : Live.delta) =
         | _ -> message
       in
       t.phase <- Stream_failed message;
+      t.ending_source <- Ending_heard_in_stream;
       t.ended_at <- Some now;
       settle t ~now
   | Live.Run_finished ->
@@ -2231,9 +2250,12 @@ let apply_delta ~now t (delta : Live.delta) =
          t.settled_at <- None
        | _, (Some _ | None) ->
          t.phase <- Stream_ended;
+         t.ending_source <- Ending_heard_in_stream;
          t.ended_at <- Some now;
          settle t ~now)
   | Live.Reply_details { reply; turn_outcome; turn_ref } ->
+      t.segment_turn_refs <-
+        (t.segment, turn_ref) :: List.remove_assoc t.segment t.segment_turn_refs;
       t.reply <-
         Some { reply_text = reply; reply_at = now; reply_outcome = turn_outcome; reply_turn_ref = turn_ref };
       (match turn_outcome with
@@ -2246,6 +2268,62 @@ let apply ~now t delta =
   bump t;
   apply_delta ~now t delta
 
+(* The operation closes progress but does not fill gaps in its journal.
+   Keep the same partial-log authority as a terminal subscription receipt. *)
+let reconcile_operation t (state : Keeper_chat_operation.state) =
+  let ending_source = match t.phase with
+    | Waiting | Working -> Ending_read_from_record
+    | Stream_ended | Stream_failed _ -> t.ending_source in
+  match state with
+  | Queued | Running _ -> ()
+  | Failed { completed_at; failure } ->
+      (match t.phase with
+       | Stream_failed _ -> ()
+       | Waiting | Working | Stream_ended ->
+           apply ~now:completed_at t (Live.Run_failed { message = failure.detail });
+           t.ending_source <- ending_source)
+  | Cancelled { completed_at } ->
+      (match t.phase with
+       | Stream_failed _ -> ()
+       | Waiting | Working | Stream_ended ->
+           apply ~now:completed_at t (Live.Run_failed { message = "요청이 취소되었습니다" });
+           t.ending_source <- ending_source)
+  | Succeeded { completed_at; _ } ->
+      (match t.phase with
+       | Stream_ended | Stream_failed _ -> ()
+       | Waiting | Working ->
+           bump t;
+           t.phase <- Stream_ended;
+           t.ending_source <- Ending_read_from_record;
+           t.ended_at <- Some completed_at;
+           settle t ~now:completed_at)
+;;
+
+(* A stop or a restart settles the operation on the server without writing its
+   closing event, so the journal stops where the turn was cut and this log
+   never sees RUN_FINISHED or RUN_ERROR. The end is known only from the
+   operation record the server answered a repeat with. Only a turn still open
+   is closed; one a delta already ended keeps its own ending. This is not a
+   rejection: the server ran the request, so [rejection] stays empty. *)
+let close_from_operation_record ~now t (record : Projection.operation_record) =
+  match t.phase with
+  | Stream_ended | Stream_failed _ -> ()
+  | Waiting | Working ->
+      (match record with
+       | Projection.Operation_succeeded -> t.phase <- Stream_ended
+       | Operation_failed ->
+           t.phase <-
+             Stream_failed
+               "the server recorded this request as failed; its closing event never reached this screen"
+       | Operation_cancelled ->
+           t.phase <-
+             Stream_failed
+               "the server recorded this request as cancelled; its closing event never reached this screen");
+      t.ending_source <- Ending_read_from_record;
+      t.ended_at <- Some now;
+      settle t ~now;
+      bump t
+
 (* Replay source identity and event clocks without inventing a run age. *)
 let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
   let t = create_for_source ~keeper_name:(Masc_tui_keeper_chat_log.keeper_name log)
@@ -2257,6 +2335,7 @@ let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
       apply ~now:(Option.value entry.at ~default:now) t entry.delta)
     (Masc_tui_keeper_chat_log.entries log);
   if not !timed then t.ended_at <- None;
+  Option.iter (reconcile_operation t) (Masc_tui_keeper_chat_log.operation_state log);
   t
 ;;
 
@@ -2295,31 +2374,36 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
    can never reach are taken; calling, pending and failed are the stream's
    own words, and the two evidence gaps name no read. The record is kept
    whole, not merged field by field, so the row a held turn draws for the
-   read says what the loaded row said about it. Keyed by the read call's
-   tool-use id, the one identity the wire and the ledger share; a record
-   without one has nothing to stand over. A later record for the same id
+   read says what the loaded row said about it. Keyed by the exact turn and
+   tool-use id: a continuation may reuse a provider id in a different turn.
+   An incomplete identity has nothing to stand over. A later record for the same key
    replaces the earlier one, as a later page replaces the loaded row. *)
+let skill_identity (skill : skill_activity) =
+  match skill.turn_ref, skill.skill_tool_use_id with
+  | Some turn_ref, Some use_id -> Some (turn_ref, use_id)
+  | (None, _) | (_, None) -> None
+
 let note_skill_activity t (evidence : skill_activity) =
   match evidence.state with
   | Skill_calling | Skill_served_pending | Skill_failed | Skill_evidence_missing
   | Skill_evidence_unavailable ->
       ()
   | Skill_served_only | Skill_delivered | Skill_used -> (
-      match evidence.skill_tool_use_id with
+      match skill_identity evidence with
       | None -> ()
-      | Some use_id ->
+      | Some key ->
           let known =
-            List.exists (fun (noted_id, _) -> String.equal noted_id use_id)
+            List.exists (fun (noted_key, _) -> noted_key = key)
               t.noted_skills
           in
           t.noted_skills <-
             (if known then
                List.map
-                 (fun (noted_id, noted) ->
-                   if String.equal noted_id use_id then (noted_id, evidence)
-                   else (noted_id, noted))
+                 (fun (noted_key, noted) ->
+                   if noted_key = key then (noted_key, evidence)
+                   else (noted_key, noted))
                  t.noted_skills
-             else t.noted_skills @ [ (use_id, evidence) ]);
+             else t.noted_skills @ [ (key, evidence) ]);
           bump t)
 
 let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
@@ -2371,7 +2455,7 @@ type drawn_item =
    cut stream, a gap in the journal -- while the loaded row that carried the
    record is one a held log leaves out of the timeline.
 
-   Only the id pairs the two. The stream's tool start always names its call
+   Only the exact turn and id pair the two. The stream's tool start names its call
    (the agent-core stream bridge reports a start without a tool id as a
    protocol error instead), so a skill item without an id is not expected.
    One that came anyway would stay as the stream drew it, and the record
@@ -2396,13 +2480,13 @@ let with_noted_skills noted items =
         | Skill_calling | Skill_served_pending | Skill_served_only
         | Skill_delivered | Skill_used | Skill_evidence_missing
         | Skill_evidence_unavailable -> (
-            match skill.skill_tool_use_id with
+            match skill_identity skill with
             | None -> skill
-            | Some use_id -> (
+            | Some key -> (
                 match
                   List.find_map
-                    (fun (noted_id, note) ->
-                      if String.equal noted_id use_id then Some note else None)
+                    (fun (noted_key, note) ->
+                      if noted_key = key then Some note else None)
                     noted
                 with
                 | Some note -> note
@@ -2426,18 +2510,16 @@ let with_noted_skills noted items =
                 item)
           items
       in
-      let drawn_use_ids =
+      let drawn_identities =
         List.concat_map
           (fun item ->
-            List.filter_map
-              (fun (skill : skill_activity) -> skill.skill_tool_use_id)
-              (skills_of item))
+            List.filter_map skill_identity (skills_of item))
           items
       in
       let unseen =
         List.filter_map
-          (fun (noted_id, note) ->
-            if List.exists (String.equal noted_id) drawn_use_ids then None
+          (fun (noted_key, note) ->
+            if List.mem noted_key drawn_identities then None
             else Some note)
           noted
       in

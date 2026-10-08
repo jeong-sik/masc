@@ -129,7 +129,7 @@ val connector_projection :
   connector_projection
 (** Project the producer-typed turn outcome onto connector UI. Status remains a
     typed block for transcript persistence; only the connector boundary renders
-    it as text. *)
+    it as text. A nonblank visible reply retains its original whitespace. *)
 
 type trace_tool_status =
   | Trace_tool_pending

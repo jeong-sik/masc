@@ -121,8 +121,8 @@ type keeper_chat_stream_request = {
           or an integer [>= 0]; anything else fails the parse. *)
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
-    [message] is the text fallback used by the existing direct keeper
-    path; [user_blocks] preserves semantic text/media input for the
+    [message] retains the nonblank request text verbatim, or uses a text fallback
+    when it is blank; [user_blocks] preserves semantic text/media input for the
     block-aware runtime path. [turn_instructions] and [surface_context]
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]
@@ -397,6 +397,11 @@ module For_testing : sig
     operation_id:string ->
     since_seq:Keeper_chat_event_log.replay_position ->
     (int * Ag_ui.event) list
+  val restart_terminal_after_replay :
+    base_path:string -> keeper_name:string -> operation:Keeper_chat_operation.t ->
+    replayed:(int, unit) Hashtbl.t -> Ag_ui.event option
+  (** Cursor-independent restart failure, absent when this replay already
+      delivered the terminal for that exact durable settlement. *)
   val has_connector_context : keeper_chat_stream_request -> bool
   val has_external_speaker : keeper_chat_stream_request -> bool
   val message_for_request : keeper_chat_stream_request -> string

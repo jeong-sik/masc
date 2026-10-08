@@ -355,7 +355,10 @@ let classify_official_client_turn ~model_facing_name ~seen ~elapsed_s ~text
             "client reported %d host-tool call(s) but no declared tool ran"
             dynamic_tool_calls
       }
-  | [] -> Replied_no_tool { reply_bytes = String.length text; elapsed_s }
+  | [] ->
+    (match text with
+     | Some text -> Replied_no_tool { reply_bytes = String.length text; elapsed_s }
+     | None -> Provider_rejected {detail="completed turn has no assistant message"})
   | invoked -> Other_tool_invoked { requested = model_facing_name; invoked; elapsed_s }
 ;;
 
@@ -454,7 +457,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                      ~model_facing_name
                      ~seen
                      ~elapsed_s:(now () -. started)
-                     ~text:turn.text
+                     ~text:(Some turn.text)
                      ~dynamic_tool_calls:turn.dynamic_tool_calls))
            | Runtime_execution.Codex_app_server exec ->
              let config : Runtime_codex_app_server.config =
@@ -644,7 +647,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                            ~model_facing_name
                            ~seen
                            ~elapsed_s:(now () -. started)
-                           ~text:turn.text
+                           ~text:(Some turn.text)
                            ~dynamic_tool_calls:(List.length !seen))))))))
 ;;
 

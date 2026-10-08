@@ -15,6 +15,14 @@ type phase =
   | Stream_ended  (** The run reported it finished. *)
   | Stream_failed of string  (** The run reported an error. *)
 
+(** How a closed {!phase} was learned. *)
+type ending_source =
+  | Ending_heard_in_stream
+      (** RUN_FINISHED or RUN_ERROR reached this log. *)
+  | Ending_read_from_record
+      (** Only the server's operation record said the request ended, so the
+          journal appends this log missed may still be missing. *)
+
 (** What came of an operator's request to interrupt this turn.
 
     [Signal_sent] is not "the turn stopped". The server reports whether it
@@ -130,6 +138,9 @@ type skill_activity = private
           every decoded activation and every live call carries one. *)
   ; skill_tool_use_id : string option
   ; turn_ref : string option
+      (** The activation's exact turn, or the Reply_details receipt for the
+          stream segment that made this call. Absent until that receipt
+          arrives; a later continuation never supplies it. *)
   ; content_revision : string option
   ; runtime_id : string option
   ; state : skill_state
@@ -306,6 +317,17 @@ val apply : now:float -> t -> Masc_tui_keeper_chat_live.delta -> unit
     occurrence. Provider ids are optional correlation data; an unknown
     occurrence is reported unreadable rather than attached by position. *)
 
+val reconcile_operation : t -> Keeper_chat_operation.state -> unit
+(** Reconcile an exact durable operation state without fabricating journal
+    events or a reply. Preserve partial text, tools, and continuation history. *)
+
+val close_from_operation_record :
+  now:float -> t -> Masc_tui_keeper_chat_projection.operation_record -> unit
+(** Ends a turn whose closing event never reached the log, from what the
+    server's operation record says about the request. A turn already ended by
+    a delta is left as it is. Unlike {!note_rejection} it does not claim the
+    server refused the request. *)
+
 val note_interrupt : t -> interrupt -> unit
 
 val note_tool_outcome :
@@ -322,10 +344,10 @@ val note_skill_activity : t -> skill_activity -> unit
 (** Folds in the exact delivery record of one skill read -- the states the
     wire has no event for ([Skill_served_only], [Skill_delivered],
     [Skill_used]), the calls the read led to, and the proof ids -- keyed by
-    its [skill_tool_use_id]. A record in a state the stream speaks for
+    [(turn_ref, skill_tool_use_id)]. A record in a state the stream speaks for
     itself (calling, pending, failed) or an evidence gap changes nothing,
-    and neither does one without a tool-use id. A second record for the
-    same id replaces the first. {!drawn} lays the record over the skill item
+    and neither does one without that complete identity. A second record for the
+    same identity replaces the first. {!drawn} lays the record over the skill item
     derived from the same call, and draws it on its own when the trail never
     saw that call. *)
 
@@ -335,6 +357,12 @@ val revision : t -> int
     drawn from this transcript. *)
 
 val phase : t -> phase
+
+val ending_source : t -> ending_source
+(** {!Ending_read_from_record} only after {!close_from_operation_record} closed
+    the turn. A later RUN_FINISHED or RUN_ERROR the log hears sets it back to
+    {!Ending_heard_in_stream}. *)
+
 val awaiting_continuation : t -> bool
 (** A checkpoint segment ended; the original request still awaits its answer. *)
 val admission : t -> (Masc_tui_keeper_chat_live.admission * int) option
@@ -581,7 +609,7 @@ val awaiting_approval : t -> awaiting_approval option
 (** The call the turn is held at, if any. One at a time: the turn cannot reach
     a second call while it is waiting on this one. *)
 
-val status_rows : now:float -> t -> (status_kind * string) list
+val status_rows : ?show_timing:bool -> now:float -> t -> (status_kind * string) list
 (** The status rows the chat pane draws for this turn.
 
     Returned as a list rather than drawn directly because the pane's row
@@ -589,6 +617,13 @@ val status_rows : now:float -> t -> (status_kind * string) list
     budget answering differently from the drawing is how the unavailable row
     once went missing while the send hint still read Enter:send
     (see [keeper_message_status_rows]). One list, counted and drawn.
+
+    Between continuation segments there is no progress row: the open
+    request is retained, but no run is starting. Approval and diagnostic rows
+    remain available. A subsequent [Run_started] restores progress.
+
+    [show_timing] defaults to true. When false, generated request, call and
+    silence ages are omitted; activity, approvals and error text remain.
 
     The progress row carries the turn's age, measured against [now] rather
     than a clock read here so a test can state the instant. A [now] before

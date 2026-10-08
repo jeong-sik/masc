@@ -48,7 +48,7 @@ val parse_user_blocks : Yojson.Safe.t -> (user_input_block list, string) result
     fields, unknown block types, and malformed media refs are request errors.
     An image block names exactly one carrier — [attachment_id] (bytes),
     [url] (http/https only), or [file_id] — and zero or several at once are
-    request errors. *)
+    request errors. Nonblank text blocks retain their original whitespace. *)
 
 val validate_attachment_references :
   attachments:Keeper_chat_store.attachment list ->
@@ -61,8 +61,9 @@ val validate_attachment_references :
 
 val fallback_message :
   attachments:Keeper_chat_store.attachment list -> user_input_block list -> string
-(** Text fallback for the existing string-only keeper turn path.  Raw media data
-    is never included. *)
+(** Text fallback for the existing string-only keeper turn path. Nonblank text
+    blocks retain their original bytes, joined by paragraph separators.
+    Raw media data is never included. *)
 
 val to_agent_core_blocks :
   attachments:Keeper_chat_store.attachment list ->

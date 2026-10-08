@@ -316,6 +316,7 @@ type error =
   | Turn_failed of string
   | Turn_failed_with_observation of
       { detail : string
+      ; api_error_status : int option
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
@@ -1324,6 +1325,7 @@ let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~
     Error
       (Turn_failed_with_observation
          { detail = terminal_failure_detail ()
+         ; api_error_status
          ; tool_effect_attempted
          ; response_emitted
          })
@@ -1639,7 +1641,11 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         assistant_texts
         |> String.concat "\n"
         |> String.trim
-        |> fun value -> if value = "" then None else Some value
+        |> fun value ->
+        (* A successful result with an explicit empty string is a completed
+           answer. Absence/null with no assistant text remains a protocol
+           failure; the Keeper chooses whether a quiet answer is admissible. *)
+        if value = "" then result else Some value
     in
     let* text =
       match text with

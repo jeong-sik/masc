@@ -65,6 +65,7 @@ let runtime ?resets ~scope ~exhausted id : Tui_decode.runtime_option =
   ; ro_quota_scope = Some scope
   ; ro_rate_limited = false
   ; ro_rate_limit_resets_at = None
+  ; ro_failed_attempt = None
   }
 
 let contains ~affix text = Astring.String.is_infix ~affix text

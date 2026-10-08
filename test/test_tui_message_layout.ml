@@ -27,6 +27,7 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
   ; timestamp
   ; timeline_bucket
   ; span_clock = None
+  ; diagnostics = []
   ; speaker = Option.value speaker ~default:role
   ; role_label = role
   ; role_label_mark_cells =
@@ -911,6 +912,7 @@ let transcript count =
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
         timeline_bucket = None;
         span_clock = None;
+        diagnostics = [];
         speaker = "code-reviewer";
         role_label = "code-reviewer";
         request_label = Printf.sprintf "turn-%d" index;
@@ -1240,7 +1242,7 @@ let without_hour_rail rows =
     (fun (row : Layout.row) ->
       match row.kind with
       | Layout.Metadata (Layout.Timeline_break _) -> false
-      | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+      | Layout.Metadata (Layout.Diagnostic | Layout.Origin _ | Layout.Continued_at _)
       | Layout.Body | Layout.Viewport_gap _ ->
           true)
     rows
@@ -1338,7 +1340,7 @@ let test_a_turn_keeps_one_heading_across_its_blocks () =
        (fun (row : Layout.row) ->
          match row.kind with
          | Layout.Metadata (Layout.Origin _) -> Some row.style
-         | Layout.Metadata (Layout.Continued_at _ | Layout.Timeline_break _)
+         | Layout.Metadata (Layout.Diagnostic | Layout.Continued_at _ | Layout.Timeline_break _)
          | Layout.Body | Layout.Viewport_gap _ ->
              None)
        drawn
@@ -1474,7 +1476,7 @@ let test_timeline_breaks_follow_civil_hours () =
         match row.kind with
         | Layout.Metadata (Layout.Timeline_break bucket) ->
             Some (bucket.tb_hour, row.text)
-        | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+        | Layout.Metadata (Layout.Diagnostic | Layout.Origin _ | Layout.Continued_at _)
         | Layout.Body
         (* The fold marker is not a timeline rail. Named rather than matched
            by a wildcard, so the next row kind fails here instead of being
@@ -1534,7 +1536,7 @@ let test_oversized_hour_group_counts_its_deferred_rail () =
   | _ -> fail "the deferred hour rail was not reachable in scrollback"
 ;;
 
-let test_compact_origin_modes_keep_and_reach_the_hour_rail () =
+let test_clock_modes_control_the_hour_rail () =
   let newest =
     entry ~timeline_bucket:(timeline_bucket 19) Layout.Keeper "keeper.one"
       "turn-19" "latest body"
@@ -1556,7 +1558,15 @@ let test_compact_origin_modes_keep_and_reach_the_hour_rail () =
       with
       | [ { Layout.kind = Layout.Metadata (Layout.Timeline_break _); _ } ] -> ()
       | _ -> fail (name ^ " made a cramped hour rail unreachable by scrolling"))
-    [ "inline", Layout.Origin_inline; "bare", Layout.Origin_bare ]
+    [ "inline", Layout.Origin_inline ];
+  let newest = { newest with Layout.span_clock = Some "19:00→19:01";
+      turn_rail = Layout.Rail_opens } in
+  let bare = Layout.visible_rows ~origin:Layout.Origin_bare
+      ~inner_width:60 ~height:10 [newest] in
+  check (list string) "bare mode keeps only the message body"
+    ["  latest body"] (List.map (fun (row : Layout.row) -> row.text) bare);
+  check int "bare mode reserves no clock or hour rows" 1
+    (Layout.total_rows ~origin:Layout.Origin_bare ~inner_width:60 [newest])
 ;;
 
 let test_repeated_dst_hour_has_distinct_rails () =
@@ -1573,7 +1583,7 @@ let test_repeated_dst_hour_has_distinct_rails () =
     |> List.filter_map (fun (row : Layout.row) ->
          match row.kind with
          | Layout.Metadata (Layout.Timeline_break _) -> Some row.text
-         | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+         | Layout.Metadata (Layout.Diagnostic | Layout.Origin _ | Layout.Continued_at _)
          | Layout.Body
          | Layout.Viewport_gap _ ->
              None)
@@ -3008,7 +3018,33 @@ let test_scrolled_styled_meter_rows () =
     check bool "each row closes before footer" true (String.ends_with ~suffix:reset row);
     check bool "meter and wide glyphs obey cells" true (Layout.display_width row <= 12)) rows
 
+let test_diagnostics_continue_the_turn_rail () =
+  List.iter (fun rail ->
+    let source = { (entry Layout.Keeper "keeper" "request" "first\nlast") with
+      turn_rail=rail; diagnostics=["request exact-id"] } in
+    let rows = Layout.visible_rows ~inner_width:80 ~height:100 [source] in
+    let diagnostic = List.find (fun (r : Layout.row) -> r.kind = Layout.Metadata Layout.Diagnostic) rows in
+    check bool "expanded metadata continues the body rail" true (holds diagnostic.gutter "│");
+    check bool "expanded row includes its rail in width" true (diagnostic.gutter_rail_cells > 0))
+    [Layout.Rail_opens; Rail_closes]
+;;
+
+let test_diagnostics_keep_the_message_opening () =
+  let source = entry Layout.Keeper "keeper" "request-id"
+      (String.concat "\n" (List.init 20 (Printf.sprintf "body-%02d"))) in
+  let source = {source with diagnostics=["request exact-id"; "attempt 1: runtime"]} in
+  List.iter (fun origin ->
+    let rows = Layout.visible_rows ~origin ~inner_width:80 ~height:5 [source] in
+    check bool "opening survives expanded diagnostics" true
+      (List.exists (fun (row : Layout.row) -> row.kind = Layout.Body && holds row.text "body-00") rows);
+    check bool "latest output survives expanded diagnostics" true
+      (List.exists (fun (row : Layout.row) -> row.kind = Layout.Body && holds row.text "body-19") rows))
+    [Layout.Origin_inline; Origin_bare; Origin_row]
+;;
+
 let () =
+  test_diagnostics_keep_the_message_opening ();
+  test_diagnostics_continue_the_turn_rail ();
   run "tui_message_layout"
     [
       ( "scrolled styles", [test_case "styled quota cells keep blanks and close each row" `Quick test_scrolled_styled_meter_rows] );
@@ -3057,8 +3093,8 @@ let () =
             `Quick test_tiny_viewport_keeps_message_over_hour_rail
         ; test_case "oversized hour groups count their deferred rail" `Quick
             test_oversized_hour_group_counts_its_deferred_rail
-        ; test_case "compact origin modes keep and reach the hour rail" `Quick
-            test_compact_origin_modes_keep_and_reach_the_hour_rail
+        ; test_case "clock modes control the hour rail" `Quick
+            test_clock_modes_control_the_hour_rail
         ; test_case "DST fallback hours remain visibly distinct" `Quick
             test_repeated_dst_hour_has_distinct_rails
         ; test_case "a load failure keeps its address at eighty columns"

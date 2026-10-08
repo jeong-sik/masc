@@ -360,6 +360,10 @@ val sweep_abandoned_microvm_guests :
 
 type build_cleanup_report = { cleaned : int; failed : int }
 
+val build_cleanup_report_of_string : string -> (build_cleanup_report, string) result
+(** Decode a completed guest sweep. A guest that skipped the sweep reports its
+    reason as an error rather than successful empty maintenance. *)
+
 (** Attach-only artifact cleanup. Caller must hold the Owner maintenance slot.
     Unsupported or absent guests are skipped; this never boots a guest. *)
 val cleanup_attached_builds : config:Workspace.config ->

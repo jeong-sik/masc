@@ -282,6 +282,10 @@ type error =
   | Turn_failed of string
   | Turn_failed_with_observation of
       { detail : string
+      ; api_error_status : int option
+        (** The result frame's structured HTTP status, when present. Keep it
+            separate from the diagnostic so callers can distinguish account
+            access from a generic provider rejection without reading prose. *)
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }

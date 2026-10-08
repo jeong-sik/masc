@@ -28,6 +28,7 @@ let all_layers =
     L.Own_board_posts;
     L.Board_activity;
     L.Own_recent_actions;
+    L.Recent_work;
     L.Fleet_messages;
   ]
 

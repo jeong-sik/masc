@@ -86,7 +86,7 @@ let load_checkpoint binding reference =
   let* () = validate_scope binding checkpoint in
   Ok checkpoint
 
-let restore binding (call : Native.t) =
+let restore_checkpoints binding (call : Native.t) =
   let* () = if call.operation_digest = binding.execution_digest then Ok ()
     else Error "native call operation input changed" in
   let* seed = load_checkpoint binding call.seed_checkpoint in
@@ -107,7 +107,7 @@ let restore binding (call : Native.t) =
              New_input {blocks=content; metadata})
        | Some {Agent_core.Types.role = (User | Assistant | System | Tool); _}
        | None -> Error "native seed does not contain its exact original input") in
-  Ok {call; checkpoint; initial_messages; system_prompt; input}
+  Ok (seed, {call; checkpoint; initial_messages; system_prompt; input})
 
 let execution_dir binding call_id =
   match Fs_compat.get_fs_opt () with
@@ -115,15 +115,40 @@ let execution_dir binding call_id =
   | Some fs ->
     Ok Eio.Path.(fs / binding.session_dir / "native-executions" / call_id)
 
-let inspect_terminal binding (call : Native.t) =
+let open_projection binding (call : Native.t) =
   let* () = if call.operation_digest = binding.execution_digest then Ok ()
     else Error "native call operation input changed before journal inspection" in
   let* runtime = match Runtime_agent_execution_runtime.get () with
     | Some runtime -> Ok runtime
     | None -> Error "native execution runtime has not been initialized" in
   let* dir = execution_dir binding call.call_id in
-  let* projection = Agent.open_execution_projection ~runtime ~dir call.locator
+  Agent.open_execution_projection ~runtime ~dir call.locator
+  |> Result.map_error Agent.Execution_projection.error_to_string
+
+let restore binding call =
+  let* seed, resumed = restore_checkpoints binding call in
+  let* projection = open_projection binding call in
+  let* settled = Agent.Execution_projection.settled_tool_invocations projection
     |> Result.map_error Agent.Execution_projection.error_to_string in
+  let* seed = Keeper_repetition_context.load seed.context
+    |> Result.map_error Keeper_repetition_snapshot.error_to_string in
+  let* checkpoint = Keeper_repetition_context.load resumed.checkpoint.context
+    |> Result.map_error Keeper_repetition_snapshot.error_to_string in
+  let* recovered = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Keeper_native_repetition_recovery.reconcile
+      ~scope:(Keeper_execution_scope_id.direct_operation binding.operation_id)
+      ~seed ~checkpoint ~settled
+    |> Result.map_error Keeper_native_repetition_recovery.error_to_string) in
+  (* Reconcile only in memory. The retained seed/latest artifacts and Owner
+     references remain exact; the next normal checkpoint CAS commits this
+     recovered projection. Both setup's source and the shared context copy
+     must carry it, otherwise strict repetition restore would conflict. *)
+  let context = Agent_core.Context.copy ~eio:true resumed.checkpoint.context in
+  Keeper_repetition_context.save context recovered;
+  Ok {resumed with checkpoint={resumed.checkpoint with context}}
+
+let inspect_terminal binding call =
+  let* projection = open_projection binding call in
   Agent.read_execution_terminal projection
   |> Result.map_error Agent.Execution_projection.error_to_string
 

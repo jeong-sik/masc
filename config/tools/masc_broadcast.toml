@@ -24,7 +24,7 @@ description = "Your agent name"
 name = "content"
 type = "string"
 required = true
-description = "Broadcast body text (use @mention for specific agents)"
+description = "Broadcast body text (use @mention for specific agents) Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[params]]
 name = "task_cache_subject_agent"
@@ -48,7 +48,7 @@ additional_properties = false
 name = "content"
 type = "string"
 required = true
-description = "Broadcast body text"
+description = "Broadcast body text Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
 
 [[agent_core_projection.params]]
 name = "task_cache_subject_agent"

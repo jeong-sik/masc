@@ -132,8 +132,14 @@ let test_strict_nested_wire_and_journal () =
         (replace progress (Journal.keeper_chat_event_to_json event))));
     let _, projected = Server_keeper_chat_agui_projection.project ~timestamp:1000.
       ~redact_text:Fun.id Server_keeper_chat_agui_projection.initial event in
-    let wire = match projected with Some event -> Ag_ui.event_to_sse ~id:1
-      { event with Ag_ui.custom_value = Option.map (replace progress) event.custom_value } | None -> fail "missing progress" in
+    let wire = match projected with
+      | Some event ->
+          let malformed = Ag_ui.make_event ~timestamp:event.timestamp
+            ~run_id:event.run_id ~custom_name:event.custom_name
+            ~custom_value:(Option.map (replace progress) event.custom_value)
+            ~thread_id:event.thread_id event.event_type in
+          Ag_ui.event_to_sse ~id:1 malformed
+      | None -> fail "missing progress" in
     check bool "malformed wire is unreadable, never a tool update" true
       (match Live.feed (Live.create ()) wire with
        | [{delta=Live.Undecodable _;_}] -> true | _ -> false))

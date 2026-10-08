@@ -14,6 +14,11 @@ import tui_keyboard_harness as h
 
 def run(executable):
     fixture = chat.AtomicChatFixture(first_working=True)
+    # Token reports draw beside the runtime roster row. Supply that actual
+    # read contract before using observed token counters as ordered witnesses.
+    runtime_path = "/api/v1/gate/keepers?detailed=true"
+    fixture.fixtures[runtime_path] = h.keeper_runtime_http_fixtures(
+        alpha_runtime_id="fixture-runtime")[runtime_path]
     stop_answer = threading.Event()
     resume_reasoning = threading.Event()
     stop_reasoning = threading.Event()
@@ -150,6 +155,8 @@ def run(executable):
 
         try:
             chat.open_atomic_chat(process, fd, output)
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"configured: fixture-runtime" in h.screen_text(bytes(output)), timeout=5), "runtime roster row did not arrive"
             h.send_and_wait(process, fd, output, b"phase-check", h.composer_showing(b"phase-check"))
             os.write(fd, b"\r")
             observe("answering", b"STREAMING")

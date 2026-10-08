@@ -1606,16 +1606,17 @@ let check_workspace_request ?schedule_form_action state ~mailbox ~authority ~ide
     else if Masc_tui_types.server_workspace_matches ~expected:identity reading then Ok ()
     else begin
       let detail = "Workspace identity changed or is unavailable; request withdrawn" in
-      let withdrawal = match schedule_form_action with
-        | None ->
-            Workspace_identity_unconfirmed { detail; latest = reading }
-        | Some action ->
+      (* The form refusal is a receipt; the observed identity is a separately
+         stamped read. A newer refresh can retire the latter alone. *)
+      Option.iter (fun action ->
+        enqueue_async mailbox
+          (Workspace_scoped (authority, None,
             Schedule_form_authority_refused
-              { action; detail; workspace = workspace_input_identity_of_server identity }
-      in
+              { action; detail; workspace = workspace_input_identity_of_server identity })))
+        schedule_form_action;
       enqueue_async mailbox
         (Workspace_scoped (authority, Some reading_authority,
-          withdrawal));
+          Workspace_identity_unconfirmed { detail; latest = reading }));
       Error detail
     end
 
@@ -11034,6 +11035,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_async_observation_error <- None;
   state.tools_skill_evidence <- None;
   state.tools_evidence_reference <- None;
+  state.browser_lane_read_resume <- None;
   state.tools_skill_cursor <- 0;
   state.tools_scroll <- 0;
   state.msg_loaded_pages <- [];
@@ -12370,6 +12372,18 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (* The surface on view asks again from the list it reads on arrival.
        Its request went out under the old authority, and a surface outside
        the bundle has no tick of its own to recover it. *)
+    (* Restore a nested Browser request before a surface's generic refresh
+       can replace its scene/screenshot selection with the tab inventory. *)
+    let browser_resume = state.browser_lane_read_resume in
+    state.browser_lane_read_resume <- None;
+    (match browser_resume, state.browser_lane with
+     | Some (generation, prior, operation), Some current
+       when generation = state.browser_lane_generation
+         && prior.source = current.source
+         && prior.selected_client = current.selected_client
+         && prior.selected_tab = current.selected_tab ->
+           launch_browser_lane state ~mailbox operation
+     | _ -> ());
     launch_surface_reads state ~mailbox state.view;
     refresh_acting_pane_changes state ~mailbox;
     if state.gate_receipt_refresh_pending then
@@ -14331,10 +14345,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~before:authority;
       report_action state "error" detail
   | Schedule_form_authority_refused {action; detail; workspace} ->
-      (* This receipt belongs to the guard's withdrawal, and is presented
-         only after that withdrawal retires the former workspace readings.
-         Its Workspace_scoped envelope rejects delivery to a successor. *)
-      apply_server_identity_reading state (Error detail);
+      (* Identity observation is delivered separately under its read epoch. *)
       state.schedule_form_refusal <- Some
         { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
         ; sfr_workspace = workspace };

@@ -6126,6 +6126,7 @@ type state = {
   mutable browser_history_generation: int;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
+  mutable browser_lane_read_resume: (int * Browser_lane_view.t * Browser_lane_view.operation) option;
   mutable connectors: Masc.Tui_decode_connectors.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
@@ -6772,7 +6773,8 @@ let suspend_workspace_readings state =
   state.browser_history <- Option.map Browser_history.suspend state.browser_history;
   state.browser_lane <- Option.map (fun (view : Browser_lane_view.t) ->
     match view.load with
-    | Browser_lane_view.Loading (_, operation) when Browser_lane_view.operation_is_read operation ->
+    | Browser_lane_view.Loading (generation, operation) when Browser_lane_view.operation_is_read operation ->
+        state.browser_lane_read_resume <- Some (generation, view, operation);
         {view with load=Browser_lane_view.Idle; refresh_pending=None}
     | _ -> view) state.browser_lane;
   let suspend_lane (view : Masc_tui_lane_addons.t) =
@@ -9357,6 +9359,7 @@ let create_state
   browser_history_generation = 0;
   browser_lane_visibility = Browser_lane_hidden;
   browser_lane_generation = 0;
+  browser_lane_read_resume = None;
   connectors = None;
   connectors_error = None;
   connectors_inflight = false;

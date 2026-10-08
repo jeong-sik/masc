@@ -15,9 +15,9 @@ let reply_frame_limit = 8 * 1024 * 1024
 let http_timeout_sec = 55.
 let extension_timeout_sec = 20.
 let reconnect_delay_sec = 5.
-(* How long a host that is ending waits for the server to take its
-   disconnect. *)
-let disconnect_window_sec = 0.25
+(* How long a host that is leaving waits on the server for a request already
+   in flight: its disconnect, and a result the server is acknowledging. *)
+let leaving_window_sec = 0.25
 
 type verb = Masc.Browser_bidi_peer.verb =
   | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
@@ -277,7 +277,7 @@ let result_undelivered_message = function
   | Token_unreadable detail -> detail
   | Unreached_as_host_ended error ->
       "the host was ending and its one attempt did not reach the server (" ^ http_error_message error ^ ")"
-  | Browser_left_first -> "the browser connection ended before the server took the result"
+  | Browser_left_first -> "the browser connection ended before the server acknowledged the result"
 
 (* A transport step under its deadline. The step's outcome stands when the
    step finished, even as the deadline passed; [None] only when it had not.
@@ -503,7 +503,7 @@ let disconnect link =
   | Ok token ->
       Eio.Fiber.first
         (fun () -> ignore (ask link ~server:link.server ~token "disconnect" (`Assoc [])))
-        (fun () -> Eio.Time.sleep link.clock disconnect_window_sec)
+        (fun () -> Eio.Time.sleep link.clock leaving_window_sec)
 
 let run env config =
   let clock = Eio.Stdenv.clock env in
@@ -572,14 +572,18 @@ let run_bidi env config url =
       { browser = "firefox"; version; engine_version = version; transport = Browser_lane.Webdriver_bidi } in
     let link = { clock; client; config; info; server = config.server } in
     let bidi_ended reason = "BiDi connection ended: " ^ reason in
-    (* A wait on the server lasts only while Firefox is still attached. A
-       result handed over as the connection ended stands. *)
-    let while_attached wait =
+    (* A wait on the server lasts only while Firefox is still attached, and
+       [grace_sec] past that. What the server handed over as the wait ended
+       stands. *)
+    let while_attached ?(grace_sec = 0.) wait =
       match Eio.Promise.peek ended with
       | Some reason -> Error (bidi_ended reason)
       | None ->
           Watched_work.run
-            ~watcher:(fun () -> Error (bidi_ended (Eio.Promise.await ended)))
+            ~watcher:(fun () ->
+              let reason = Eio.Promise.await ended in
+              Eio.Time.sleep clock grace_sec;
+              Error (bidi_ended reason))
             (fun () -> Ok (wait ()))
     in
     let answer id = function
@@ -590,10 +594,13 @@ let run_bidi env config url =
             ; "effectPhase", `String "not_started" ]
       | Error (Masc.Browser_bidi_peer.Outcome_unknown message) -> failure id message
     in
-    (* A result is sent again for as long as Firefox is attached. One cut
-       short by Firefox leaving is recorded like any other undelivered one. *)
+    (* A result is sent again for as long as Firefox is attached. When
+       Firefox leaves, an attempt already in flight gets a moment for the
+       server's acknowledgement, so a result the server is taking is not
+       reported lost; one cut short is recorded like any other undelivered
+       one. *)
     let publish_while_attached payload =
-      match while_attached (fun () -> publish link payload) with
+      match while_attached ~grace_sec:leaving_window_sec (fun () -> publish link payload) with
       | Ok delivery -> record_delivery delivery; Ok ()
       | Error _ as ended -> record_delivery (Error Browser_left_first); ended
     in

@@ -1970,6 +1970,19 @@ status: reference
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
   `admits_self_directed_progress`가 이 경계를 정의한다. TUI 첫 화면의 투영은
   `Dashboard Goals`를 따른다.
+  → [Goal_phase](../../lib/goal/goal_phase.mli) · [Goal_store](../../lib/goal/goal_store.mli)
+
+**Goal Creation Input Check (목표 생성 입력 검증)**
+: 새 Goal 생성 입력의 제목·측정 조건·마감일을 검증하는 입력 불변식 계약(#41399).
+  RFC-0387 B1의 측정 가능한 성공 조건(`metric` 및 `target_value`) 필수 선언에 더해,
+  새 Goal 생성의 모든 진입 경로에서 빈 제목(`title` 누락 또는 공백 문자열)을 거절하며
+  알 수 없는 ID 단독 지정 시 `"Untitled goal"`로 기본 명명하던 폴백을 금지한다. 또한 이미
+  경과한 마감일(`due_date`)을 지정한 목표 생성은 본질적으로 도달 불가능(unreachable by
+  construction)하므로 `Rejected`(`Validation_error`)로 즉시 거절한다. 마감일은 UTC 역일 기준
+  당일 23:59:59 UTC에 만료되는 것으로 판정하며 운영자 로컬 타임존과 무관하다. 반면 기존 Goal의
+  수정(`upsert_goal` 업데이트) 시에는 마감일 경과가 정상적인 생명주기 진행이고 과거 날짜 소급
+  지정 역시 기록 정정이므로 이 검증으로 차단되지 않는다.
+  → [Goal_store](../../lib/goal/goal_store.mli) · [Goal_due](../../lib/goal/goal_due.mli)
 
 **Goal Measurement (목표 관측값)**
 : Goal의 선언된 지표(`metric`)를 누가 언제 얼마로 봤는지 남긴 기록 한 건. 값, 증거,
@@ -2247,9 +2260,33 @@ status: reference
   operation id 하나로 완전한 키다. 답은 먼저 커밋되고 그 뒤에 알린다 — 커밋은 HITL·Fusion과
   같은 fail-closed durable 경로를 쓰고, 뒤따르는 live wake는 힌트일 뿐이라 `Running`
   Keeper에게만 닿고 실패는 로그로 남긴다(자극은 이미 큐에 있어 다음 admitted turn에 읽힌다).
-  `Fusion_completed`·`Hitl_resolved`와 같은 부류다.
+  `Fusion_completed`·`Hitl_resolved`와 같은 부류다. 반환 텍스트가 미리보기 상한(480 바이트)을
+  초과하면 말단을 침묵 절단하지 않고 `masc_keeper_delegate_status` 조회를 명시적으로 안내한다(#41766).
   → [Keeper_delegate_completion_wake](../../lib/keeper/keeper_delegate_completion_wake.mli) ·
-  [Keeper_event_queue](../../lib/keeper_runtime/keeper_event_queue.mli)
+  [Keeper_event_queue](../../lib/keeper_runtime/keeper_event_queue.mli) ·
+  [Keeper_world_observation](../../lib/keeper/keeper_world_observation.ml)
+
+**Event Row Preview Ceiling (이벤트 행 미리보기 상한)**
+: Keeper 프롬프트의 대기 사건 행(`pending_board_event`)에서 긴 본문이 프롬프트 공간을
+  과도하게 차지하거나 반대로 말단 데이터가 침묵 유실되는 것을 방지하는 정합성 계약(#41766).
+  다른 Keeper에게 맡긴 위임 완료 답변(`delegate_completion`)이나 비동기 컴포지션 실패·취소 상세
+  (`composition_completion`), Fusion 심판 결과(`fusion_completion`) 등은 공통으로 480 바이트의
+  공백 제거(`String.trim`) 기준 미리보기 상한(`delegate_reply_preview_max_len`,
+  `fusion_result_preview_max_len`)을 적용한다. 본문이 잘릴 때의 동작과 원문 조회 안내는 사건 종류별로
+  명확히 분리된다:
+  1. 위임 완료 답변(`Delegate_replied`, `Delegate_failed`): 480 바이트 초과 시 줄임표(`...`)로 끝을
+     자르되 결코 침묵 절단(`silent cut`)하지 않고, `masc_keeper_delegate_status` 조회 경로와
+     `operation_id`를 덧붙여 말단에 위치한 아티팩트 객체나 코드 블록을 온전히 복원할 수 있게 한다.
+  2. 비동기 컴포지션 완료(`Composition_completed`): 성공 시에는 중복 적재를 막기 위해 본문을 비우고,
+     실패나 취소 상세가 480 바이트를 초과하면 `keeper_composition_status` 조회 경로와 `request_id`를
+     덧붙여 침묵 절단을 방지한다.
+  3. Fusion 심판 완료(`Fusion_completed`): 결과 메시지를 480 바이트 상한으로 자르되, 싱크가 증거
+     게시글을 작성하여 `board_post_id`가 존재하는 경우에 한해 `masc_fusion_status` 조회 경로와
+     `run_id`를 덧붙인다. `board_post_id`가 빈 문자열(`""`)인 종단 실패나 취소의 경우, 영속 증거가
+     없으므로 헛된 조회를 막기 위해 조회 안내를 덧붙이지 않는다.
+  → [Keeper_world_observation](../../lib/keeper/keeper_world_observation.ml) ·
+  [Prompt_names](../../lib/prompt_registry/prompt_names.mli) ·
+  [Keeper prompt](../../config/prompts/keeper.md)
 
 **Approval Queue Phase (승인 큐 진행 단계)**
 : Human-in-the-Loop (HITL) 승인 큐에서 각 승인 요청 항목이 거치고 있는 진행 단계를

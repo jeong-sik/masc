@@ -5,7 +5,7 @@ GH="${GUARD_GH:-gh}"
 here="$(cd "$(dirname "$0")" && pwd)"
 repo=""; pr=""; head=""; body=""; run=""; replace_cr=""
 review_base=""; review_diff=""
-check_only=0; merge_check=0; receipt_json=0
+check_only=0; merge_check=0; receipt_json=0; print_footer=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo|--pr|--head|--body|--run|--replace-own-cr|--review-base|--review-diff)
@@ -17,7 +17,7 @@ while [ $# -gt 0 ]; do
     --run) run="$2"; shift 2;; --replace-own-cr) replace_cr="$2"; shift 2;;
     --review-base) review_base="$2"; shift 2;; --review-diff) review_diff="$2"; shift 2;;
     --check) check_only=1; shift;; --merge-check) merge_check=1; shift;;
-    --receipt-json) receipt_json=1; shift;;
+    --receipt-json) receipt_json=1; shift;; --print-footer) print_footer=1; shift;;
     *) echo "approve-guard: unknown argument $1" >&2; exit 1;;
   esac
 done
@@ -26,9 +26,57 @@ done
 [ -z "$replace_cr" ] || [[ "$replace_cr" =~ ^[1-9][0-9]*$ ]] || exit 2
 [ "$check_only" -eq 0 ] || [ "$merge_check" -eq 0 ] || exit 2
 [ "$receipt_json" -eq 0 ] || [ "$merge_check" -eq 1 ] || exit 2
+# Read-only helper mode: print the exact footer tail a reviewer should append,
+# computed from the PR's live base/head. Mutually exclusive with every mode.
+[ "$print_footer" -eq 0 ] || { [ "$check_only" -eq 0 ] && [ "$merge_check" -eq 0 ] && [ -z "$body" ] && [ -z "$run" ] && [ -z "$replace_cr" ] && [ -z "$review_base" ] && [ -z "$review_diff" ]; } || exit 2
 source "$here/ci-checks.sh"
 source "$here/review-verdict.sh"
+# Read-only helper: print the exact footer line a reviewer should append,
+# computed from the PR's live base/head. Posts nothing and approves nothing.
+if [ "$print_footer" -eq 1 ]; then
+  read_current_pr || exit $?
+  current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || exit 1
+  printf 'approve-guard: head `%s` · %s review · reviewed base `%s` · diff sha256 `%s`\n' \
+    "$head" "$review_policy" "$pr_base_sha" "$current_diff"
+  exit 0
+fi
 refuse() { echo "REFUSED #$pr head $head: $*" >&2; exit 2; }
+# Diagnostic detail for refusals: one line per failed test, never consulted for admission.
+refusal_detail=""
+refused_scope_reviews=""
+check_review_scope() {
+  printf '%s' "$1" |
+    python3 "$here/review-scope.py" --repo "$repo" --head "$head" \
+      --base-ref "$pr_base" --base-sha "$pr_base_sha" --stack "$pr_stack" --gh "$GH"
+}
+emit_refusal_detail() {
+  local review_json scope_status rid who
+  [ -z "$refusal_detail" ] || printf '%s' "$refusal_detail" >&2
+  # A malformed footer cannot authorize a review, but it must not hide an
+  # independent scope failure. Defer any scope comparison API calls until
+  # admission actually refuses, and reuse the review JSON already read.
+  while IFS= read -r review_json; do
+    [ -n "$review_json" ] || continue
+    scope_status=0
+    check_review_scope "$review_json" || scope_status=$?
+    [ "$scope_status" -ne 0 ] || continue
+    rid=$(printf '%s' "$review_json" | jq -r '.id')
+    who=$(printf '%s' "$review_json" | jq -r '.user.login')
+    if [ "$scope_status" -eq 2 ]; then
+      printf '  review %s by %s: review-scope stamp does not match this PR base/stack (expected review-scope: %s)\n' "$rid" "$who" "$(compute_scope)" >&2
+    else
+      printf '  review %s by %s: review-scope could not be verified\n' "$rid" "$who" >&2
+    fi
+  done <<<"$refused_scope_reviews"
+}
+refuse_detail() {
+  echo "REFUSED #$pr head $head: $*" >&2
+  emit_refusal_detail
+  exit 2
+}
+compute_scope() {
+  python3 -c 'import json,sys; s=json.loads(sys.argv[3]); print(json.dumps({"base_ref":sys.argv[1],"base_sha":sys.argv[2],"stack":None if s is None else {"number":s["number"],"position":s["position"],"base_ref":s["base"]["ref"]}},separators=(",",":")))' "$pr_base" "$pr_base_sha" "$pr_stack"
+}
 read_current_pr
 current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || refuse "complete review diff unavailable"
 # Read-only candidate admission uses repository review evidence; Actions
@@ -39,20 +87,21 @@ if [ "$merge_check" -eq 0 ]; then
   me=$(ci_gh_json user '.login')
   [ -n "$me" ] || exit 1
 fi
-footer_prefix=$(printf 'approve-guard: head `%s` · ' "$head")
 # Neither GitHub commit_id nor a footer alone supplies immutable head binding.
-verdict_pattern="^verdict: PASS head: ${head} by: [A-Za-z0-9._-]+$"
-[ "$review_policy" != release ] || verdict_pattern="^verdict: PASS head: ${head} run: [1-9][0-9]* by: [A-Za-z0-9._-]+$"
-approval_head_jq="((.body // \"\" | split(\"\\n\") | first) | test(\"${verdict_pattern}\")) and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | startswith(\"${footer_prefix}\"))"
-approval_head_jq="$approval_head_jq and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | test(\" · reviewed base [\`][0-9a-f]{40}[\`] · diff sha256 [\`]${current_diff}[\`]$\"))"
+# review-refusal.py is the single admission test; it prints the review id when
+# admitted and the failed tests otherwise (exit 1).
+admit_review() {
+  printf '%s' "$1" | python3 "$here/review-refusal.py" --head "$head" --policy "$review_policy" \
+    --base-sha "$pr_base_sha" --current-diff "$current_diff" --release-run "${release_run:-}"
+}
 review_rows() {
   ci_gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv' |
     sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++'
 }
 check_reviews() {
-  local rows who rid state bound scope_status
+  local rows who rid state bound scope_status review_json admit_status
   rows=$(review_rows) || return 1
-  approvals=""; replaced=""; own_approval=""
+  approvals=""; replaced=""; own_approval=""; refusal_detail=""; refused_scope_reviews=""
   while IFS=$'\t' read -r who rid state; do
     [ -n "$who" ] || continue
     if [ "$state" = CHANGES_REQUESTED ]; then
@@ -60,13 +109,26 @@ check_reviews() {
       else refuse "open CHANGES_REQUESTED from $who (review $rid)"; fi
     fi
     if [ "$state" = APPROVED ] && [ "$who" != "$pr_author" ]; then
-      bound=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select(.state == \"APPROVED\" and (.author_association == \"OWNER\" or .author_association == \"MEMBER\" or .author_association == \"COLLABORATOR\") and ($approval_head_jq)) | .id") || return 1
+      review_json=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" '.') || return 1
+      admit_status=0
+      bound=$(admit_review "$review_json") || admit_status=$?
+      [ "$admit_status" -le 1 ] || return 1
+      if [ "$admit_status" -eq 1 ]; then
+        refusal_detail="$refusal_detail  review $rid by $who: not admitted
+$(printf '%s\n' "$bound" | sed 's/^/    - /')
+"
+        bound=""
+        refused_scope_reviews="$refused_scope_reviews$(printf '%s' "$review_json" | jq -c .)
+"
+      fi
       if [ -n "$bound" ]; then
         scope_status=0
-        ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" '.' |
-          python3 "$here/review-scope.py" --repo "$repo" --head "$head" \
-            --base-ref "$pr_base" --base-sha "$pr_base_sha" --stack "$pr_stack" --gh "$GH" || scope_status=$?
-        if [ "$scope_status" -eq 2 ]; then continue; fi
+        check_review_scope "$review_json" || scope_status=$?
+        if [ "$scope_status" -eq 2 ]; then
+          refusal_detail="$refusal_detail  review $rid by $who: footer is bound, but its review-scope stamp does not match this PR base/stack (expected review-scope: $(compute_scope))
+"
+          continue
+        fi
         [ "$scope_status" -eq 0 ] || return 1
         approvals="$approvals $bound"
         [ "$who" != "$me" ] || own_approval="$bound"
@@ -79,12 +141,15 @@ check_verdict() {
   local value state cited by
   value=$(verdict_for "$pr" "$head") || return 1
   read -r state cited by <<<"$value"
-  [ -z "$state" ] || [ "$state" = PASS ] || refuse "latest structured verdict is $state"
+  if [ -n "$state" ] && [ "$state" != PASS ]; then
+    [ -n "$approvals" ] || emit_refusal_detail
+    refuse "latest structured verdict is $state"
+  fi
 }
 check_reviews
 check_verdict
 if [ "$merge_check" -eq 1 ]; then
-  [ -n "$approvals" ] || refuse "no trusted non-author approval bound to this head and complete diff"
+  [ -n "$approvals" ] || refuse_detail "no trusted non-author approval bound to this head and complete diff"
   read_current_pr
   check_reviews
   [ -n "$approvals" ] || refuse "approval changed during merge check"
@@ -144,7 +209,7 @@ check_verdict
 if [ "$check_only" -eq 1 ]; then echo "WOULD APPROVE #$pr head $head policy $review_policy"; exit 0; fi
 # Bind the reviewed base and native stack position to the approval itself.
 # Main may advance later when the reviewed diff base remains identical.
-scope=$(python3 -c 'import json,sys; s=json.loads(sys.argv[3]); print(json.dumps({"base_ref":sys.argv[1],"base_sha":sys.argv[2],"stack":None if s is None else {"number":s["number"],"position":s["position"],"base_ref":s["base"]["ref"]}},separators=(",",":")))' "$pr_base" "$pr_base_sha" "$pr_stack")
+scope=$(compute_scope)
 footer=$(printf '\n\n---\nreview-scope: %s\napprove-guard: head `%s` · %s review' "$scope" "$head" "$review_policy")
 if [ -n "$own_approval" ]; then
   previous_scope=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$own_approval" '.body | split("\n") | map(select(startswith("review-scope: "))) | if length == 1 then .[0] else "" end')
@@ -158,6 +223,8 @@ fi
 footer="$footer$(printf ' · reviewed base `%s` · diff sha256 `%s`' "$review_base" "$review_diff")"
 response=$( { printf '%s' "$review_body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/$repo/pulls/$pr/reviews" -f event=APPROVE -f "commit_id=$head" -F body=@- --jq '[(.id|tostring), .state, .commit_id] | @tsv')
 IFS=$'\t' read -r rid state commit <<<"$response"
-back=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select($approval_head_jq) | [.state, .commit_id] | @tsv")
+back_json=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" '.')
+admit_review "$back_json" >/dev/null || { echo "approval readback is not admitted for this head" >&2; exit 1; }
+back=$(printf '%s' "$back_json" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["state"]+"\t"+r["commit_id"])')
 [ "$back" = "$(printf 'APPROVED\t%s' "$head")" ] || { echo "approval readback differs from submitted head" >&2; exit 1; }
 echo "APPROVED #$pr head $head review $rid"

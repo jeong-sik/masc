@@ -153,6 +153,84 @@ let page_json ?(schema = "masc.keeper_chat_events.v2") ?(next_since_offset = `In
     ; "next_since_offset", next_since_offset
     ]
 
+let test_operation_and_journal_read_order () =
+  let open Keeper_chat_operation in
+  List.iter (fun next ->
+    let calls = ref [] and states = ref [Queued; next] in
+    let read_operation () =
+      calls := !calls @ ["operation"];
+      match !states with
+      | value :: rest -> states := rest; Ok (Some value)
+      | [] -> fail "unexpected operation reread" in
+    let read_journal () = calls := !calls @ ["journal"]; Ok [] in
+    let observed, _ = Log.read_with_operation_state ~read_operation ~read_journal in
+    check bool "claim between reads is observed" true (observed = Ok (Some next));
+    check (list string) "journal follows the newest operation observation"
+      ["operation";"journal";"operation";"journal"] !calls)
+    [Running {started_at=2.}; Succeeded {completed_at=3.;outcome_ref="result"}];
+  List.iter (fun initial ->
+    let terminal = Succeeded {completed_at=3.;outcome_ref="result"} in
+    let states = ref [initial; terminal] in
+    let first = [line 0 1.0 (E.Text_delta "retained partial output")] in
+    let journals = ref [Ok first; Error Log.Journal_pruned] in
+    let read_operation () = match !states with
+      | x :: xs -> states := xs; Ok (Some x)
+      | [] -> fail "unexpected extra operation read" in
+    let read_journal () = match !journals with
+      | x :: xs -> journals := xs; x
+      | [] -> fail "unexpected extra journal read" in
+    let observed, journal = Log.read_with_operation_state ~read_operation ~read_journal in
+    check bool "operation settling during the journal read is observed" true (observed = Ok (Some terminal));
+    check bool "failed terminal reread preserves the first successful journal" true (journal = Ok first);
+    check int "the terminal journal was retried" 0 (List.length !journals))
+    [Queued; Running {started_at=2.}];
+  let terminal = Failed {completed_at=3.;failure={kind=Interrupted_by_restart;
+    detail="server restarted";outcome_ref=None}} in
+  let observed, journal = Log.read_with_operation_state
+    ~read_operation:(fun () -> Ok (Some terminal))
+    ~read_journal:(fun () -> Error Log.Journal_pruned) in
+  check bool "journal absence cannot erase the exact failure" true
+    (observed = Ok (Some terminal) && journal = Error Log.Journal_pruned)
+
+let test_failed_operation_recheck_keeps_the_working_observation () =
+  let open Keeper_chat_operation in
+  List.iter (fun refreshed ->
+    List.iter (fun initial ->
+      let states = ref [Ok (Some initial); refreshed] in
+      let first = [line 0 1.0 (E.Text_delta "retained working output")] in
+      let reads = ref 0 in
+      let read_operation () = match !states with
+        | x :: xs -> states := xs; x
+        | [] -> fail "unexpected operation read" in
+      let read_journal () = incr reads; Ok first in
+      let observed, journal = Log.read_with_operation_state ~read_operation ~read_journal in
+      check bool "failed refresh cannot erase the exact earlier observation" true
+        (observed = Ok (Some initial));
+      check bool "working output survives the failed refresh" true (journal = Ok first);
+      check int "unavailable recheck does not refetch a successful journal" 1 !reads)
+      [Queued; Running {started_at=2.}])
+    [Error "operation endpoint temporarily unavailable"; Ok None]
+
+let test_decode_exact_operation_state () =
+  let body fields = `Assoc (["schema", `String "masc.keeper_chat_operation.v1";
+    "operation_id", `String "exact"] @ fields) in
+  let failed = ["state", `String "Failed"; "completed_at", `Float 4.;
+    "failure_kind", `String "Turn_cancelled"; "failure_detail", `String "stopped"] in
+  (match Log.decode_operation_state ~operation_id:"exact" (body failed) with
+   | Ok (Keeper_chat_operation.Failed {completed_at; failure}) ->
+       check (float 0.) "completion time" 4. completed_at;
+       check string "failure reason" "stopped" failure.detail
+   | _ -> fail "exact failed operation was not decoded");
+  List.iter (fun json ->
+    check bool "malformed or mismatched authority cannot settle a journal" true
+      (Result.is_error (Log.decode_operation_state ~operation_id:"exact" json)))
+    [ `Null; `Bool false; `List []; `String "not an operation"
+    ; body ["state", `String "surprise"]
+    ; body ["state", `String "Cancelled"; "completed_at", `Float nan]
+    ; body ["state", `String "Failed"; "completed_at", `Float 4.]
+    ; `Assoc ["schema", `String "masc.keeper_chat_operation.v1";
+        "operation_id", `String "another"; "state", `String "Queued"] ]
+
 let test_decode_events_page () =
   let lines =
     [ line 0 1.0 (E.Run_started { run_id = "r"; thread_id = "keeper:keeper.one" })
@@ -813,7 +891,11 @@ let () =
             test_a_blank_reason_is_not_a_reason
         ] )
     ; ( "v2 page"
-      , [ test_case "decode events page" `Quick test_decode_events_page
+      , [ test_case "failed operation recheck retains observed state" `Quick
+            test_failed_operation_recheck_keeps_the_working_observation
+        ; test_case "operation and journal observation order" `Quick test_operation_and_journal_read_order
+        ; test_case "decode exact operation state" `Quick test_decode_exact_operation_state
+        ; test_case "decode events page" `Quick test_decode_events_page
         ; test_case "add_journaled holds undrawn positions" `Quick
             test_add_journaled_holds_undrawn_positions
         ; test_case "decode events error by code" `Quick

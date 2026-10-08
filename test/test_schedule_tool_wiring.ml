@@ -606,6 +606,55 @@ let test_creation_boundary_owns_result_delivery_destination () =
    | Error detail -> fail detail)
 ;;
 
+(* An edit from a surface with no conversation (the TUI and dashboard routes
+   stamp no channel) used to replace the creator's route with [none], so the
+   wake's result stopped reaching the thread that asked for it. *)
+let test_update_keeps_the_creators_result_delivery () =
+  with_config
+  @@ fun config ->
+  let channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"dashboard-thread-77" with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
+  let schedule_id = "sched-update-keeps-result-destination" in
+  let created =
+    dispatch_exn
+      ~continuation_channel:channel
+      config
+      Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String schedule_id
+        ; "due_at_unix", `Float future_due_at
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "before"
+        ])
+  in
+  check bool "routed schedule creation succeeds" true (Tool_result.is_success created);
+  let updated =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (`Assoc
+        [ "schedule_id", `String schedule_id
+        ; "due_at_unix", `Float (future_due_at +. 300.0)
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "after"
+        ; "recurrence_kind", `String "one_shot"
+        ])
+  in
+  check bool "update without a channel succeeds" true (Tool_result.is_success updated);
+  let request =
+    match Schedule_store.get_schedule config ~schedule_id with
+    | Some request -> request
+    | None -> fail "updated schedule was not persisted"
+  in
+  match Schedule_payload_projection.result_delivery request with
+  | Ok (Some persisted) ->
+    check bool "the creator's route survives the edit" true
+      (Keeper_continuation_channel.same_route channel persisted)
+  | Ok None -> fail "the edit dropped the creator's result destination"
+  | Error detail -> fail detail
+;;
+
 let test_get_recurring_schedule_after_accept_advance () =
   with_config
   @@ fun config ->
@@ -1993,6 +2042,8 @@ let () =
             test_results_survive_the_checkpoint_encoder
         ; test_case "creation boundary owns result delivery destination" `Quick
             test_creation_boundary_owns_result_delivery_destination
+        ; test_case "update keeps the creator's result delivery" `Quick
+            test_update_keeps_the_creators_result_delivery
         ; test_case "get recurring schedule after accept advance" `Quick
             test_get_recurring_schedule_after_accept_advance
         ; test_case "create accepts explicit ISO-8601 offset" `Quick

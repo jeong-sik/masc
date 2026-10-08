@@ -33,6 +33,7 @@ type layer_id =
   | Own_board_posts
   | Board_activity
   | Own_recent_actions
+  | Recent_work
   | Fleet_messages
 
 val ordered : layer_id list

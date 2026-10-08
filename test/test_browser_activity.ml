@@ -105,7 +105,7 @@ let test_off_preselection () = with_lane (fun _ current ->
 let test_off_preselected_stale () = with_lane (fun sw current ->
   let client_id = match Lane.client_id_of_string "00000000-0000-4000-8000-000000000002" with
     | Ok id -> id | Error detail -> fail detail in
-  let client_info : Lane.client_info = {client_id;browser=Firefox;version="fixture";engine_version="fixture"} in
+  let client_info : Lane.client_info = {client_id;browser=Firefox;version="fixture";transport=Browser_lane.Web_extension; engine_version="fixture"} in
   ignore (Lane.take_command ~client_info ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id));
   let target = match Lane.resolve_target ~verb:Lane.Tabs_list (Live_route (Some client_id)) with
@@ -133,7 +133,7 @@ let test_accepted_finishes () = with_lane (fun sw current ->
 let test_live_retains_accepted () = with_lane (fun sw current ->
   let client_id = match Lane.client_id_of_string "00000000-0000-4000-8000-000000000001" with
     | Ok id -> id | Error detail -> fail detail in
-  let client_info : Lane.client_info = {client_id;browser=Firefox;version="fixture";engine_version="fixture"} in
+  let client_info : Lane.client_info = {client_id;browser=Firefox;version="fixture";transport=Browser_lane.Web_extension; engine_version="fixture"} in
   ignore (Lane.take_command ~client_info ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id));
   let target = match Lane.resolve_target ~verb:Lane.Tabs_list (Live_route (Some client_id)) with Ok target -> target | Error _ -> fail "target" in

@@ -26,7 +26,12 @@
 
 (** Typed class of the observed retryable provider/runtime failure. *)
 type retry_class =
-  | Rate_limited  (** soft 429 throttle; declared runtimes remain eligible *)
+  | Rate_limited
+      (** soft 429 throttle; declared runtimes remain eligible. A 429 that
+          states no wait may also be a spent usage window: when the provider
+          declares [usage-read], the Keeper walk reads it once, as after
+          [Authorization_refused], and a spent window rests the scope until
+          its stated reset. *)
   | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
   | Provider_capacity
       (** the provider refused for its own capacity: an HTTP 529 overload,

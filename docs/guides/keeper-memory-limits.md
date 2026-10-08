@@ -32,7 +32,11 @@ conversation. A successful decision on the same facts, current Goal context,
 Keeper instructions, limits and prompt is not repeated on every wake; failures
 remain retryable on the next wake.
 Restart clears that observation and rechecks persisted Keepers, including ones
-that did not launch. A partial consolidation is eligible again on a later wake.
+that did not launch. A committed partial consolidation requests another pass on
+the same serialized lane when it reduces category excess or total per-category
+item excess without increasing the other. Sleeping Keepers therefore continue
+making room without needing another turn. Unchanged counts, mere rewrites and
+failed decisions wait for a later wake; they do not trigger repeated cleanup.
 The cleanup uses the regular disposition and absorption checks; it leaves
 working contexts and history cursors untouched.
 
@@ -56,5 +60,15 @@ the normal write path retains identity deduplication and truth maintenance.
 The dropped corpus is derived from the complete removal journal, with latest
 mentions and current membership excluding re-added facts. A broken journal
 produces a retrieval failure (or partial-read metadata alongside other `all`
-results), not a clean miss. Ordinary journal appends are best-effort: this search
-recovers recorded originals but does not establish lossless archival durability.
+results), not a clean miss. A removal with an explicit reason prepares a recovery
+receipt before replacing the current snapshot. If journal finalization fails,
+the receipt retains the reason and the snapshot retains the complete original.
+Later writers must finish that journal entry before replacing this evidence.
+Search reports the pending archive explicitly until a writer recovers it.
+All journal appenders and interrupted-tail recovery share a stable lock, so
+recovery cannot truncate another process's live append. If a snapshot cannot
+be decoded and is quarantined, its pending removal receipt moves aside first;
+both files retain their original bytes while subsequent writes can start fresh.
+This also covers explicit retractions and supersessions. Older missing journal
+entries are not reconstructed; absence is still not proof that a fact never
+existed. Entries without reason-bearing removals remain best-effort observations.

@@ -16,4 +16,4 @@ description = "Keeper handle to message"
 name = "message"
 type = "string"
 required = true
-description = "Message text to send to the keeper"
+description = "Message text to send to the keeper, also shown to the operator in chat. Use readable prose with normal word spacing, punctuation, and paragraph breaks, including Korean spacing. Shorten wording when needed; do not remove spaces between words. Preserve quoted source text, code, paths, and identifiers exactly."

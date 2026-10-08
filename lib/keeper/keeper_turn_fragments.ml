@@ -6,13 +6,15 @@ module H = Keeper_context_core_history
 
 let ( let* ) = Result.bind
 
+type observed_message =
+  { turn_ref : Ids.Turn_ref.t
+  ; recorded_at : float
+  ; source : string option
+  ; message : Agent_core.Types.message
+  }
+
 type fragment =
-  | Message of
-      { turn_ref : Ids.Turn_ref.t
-      ; recorded_at : float
-      ; source : string option
-      ; message : Agent_core.Types.message
-      }
+  | Message of observed_message
   | Tool_observation of
       { turn_ref : Ids.Turn_ref.t
       ; recorded_at : float
@@ -118,9 +120,7 @@ let decode_tagged ~turn_ref json assoc : (fragment, read_error) result =
   else wire (W.wire_fail [ W.Wire_field H.key_kind ] (W.Unknown_token kind))
 ;;
 
-let decode_line text : (line, read_error) result =
-  match Yojson.Safe.from_string text with
-  | exception Yojson.Json_error message -> Error (Not_json message)
+let decode_json : Yojson.Safe.t -> (line, read_error) result = function
   | `Assoc assoc as json ->
     if not (List.mem_assoc H.key_turn_ref assoc)
     then Ok Untagged
@@ -130,6 +130,12 @@ let decode_line text : (line, read_error) result =
       | Ok turn_ref -> Result.map (fun fragment -> Fragment fragment) (decode_tagged ~turn_ref json assoc))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Result.map_error (fun error -> Malformed error) (W.wire_here W.Expected_object)
+;;
+
+let decode_line text =
+  match Yojson.Safe.from_string text with
+  | json -> decode_json json
+  | exception Yojson.Json_error message -> Error (Not_json message)
 ;;
 
 let numbered_lines ~rows ~rows_end ~end_offset =
@@ -171,6 +177,46 @@ let read ~session_dir file =
       { error; cleanup_failure } ->
     settled cleanup_failure;
     unreadable error
+;;
+
+type recent_messages =
+  { messages : observed_message list
+  ; prefix_omitted : bool
+  }
+
+let read_recent_messages ~session_dir ~roles ~limit file =
+  let file_path = path ~session_dir file in
+  let of_tail = function
+    | Fs_compat.Private_jsonl_tail.Tail_missing -> Ok { messages=[]; prefix_omitted=false }
+    | Tail_present { incomplete_tail=true; _ } ->
+      Error "history ends with an incomplete append"
+    | Tail_present { rows; prefix_omitted; incomplete_tail=false; _ } ->
+      let lines = numbered_lines ~rows ~rows_end:(String.length rows) ~end_offset:(String.length rows) in
+      let* messages = List.fold_left (fun acc (_, line) ->
+        let* acc = acc in
+        match line with
+        | Error error -> Error (read_error_to_string error)
+        | Ok (Fragment (Message ({message;_} as observed))) when List.mem message.role roles ->
+          Ok (observed :: acc)
+        | Ok (Fragment (Message _ | Tool_observation _)) | Ok Untagged -> Ok acc)
+          (Ok []) lines in
+      let omitted = prefix_omitted || List.length messages > limit in
+      Ok { messages=List.rev (List.filteri (fun i _ -> i < limit) messages); prefix_omitted=omitted }
+  in
+  if limit <= 0 then Ok {messages=[]; prefix_omitted=true} else
+  (* Same physical history observation window as Keeper status. This bounds
+     read work, not Keeper execution; an omitted prefix is explicit below. *)
+  match Fs_compat.read_private_jsonl_tail_locked_result file_path
+      ~max_bytes:Keeper_status_options_defaults.max_tail_bytes with
+  | Fs_compat.Private_file_succeeded tail -> of_tail tail
+  | Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
+    Log.Keeper.warn "recent history descriptor cleanup: %s"
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    of_tail value
+  | Private_file_failed error -> Error (Fs_compat.Private_jsonl_tail.error_to_string error)
+  | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+    Error (Fs_compat.Private_jsonl_tail.error_to_string error ^ "; " ^
+           Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
 ;;
 
 let of_turn turn_ref lines =

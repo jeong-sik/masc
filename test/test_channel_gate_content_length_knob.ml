@@ -29,7 +29,7 @@ let test_knob_raises_the_ceiling () =
     check int "the setting is applied" 8000 (Channel_gate.max_content_length ()))
 ;;
 
-(* The caller compares [String.length trimmed > max_content_length ()], so a
+(* The caller compares [String.length content > max_content_length ()], so a
    non-positive ceiling rejects every message rather than admitting more. The
    floor keeps a hostile or fat-fingered setting from turning the gate into a
    total block. *)

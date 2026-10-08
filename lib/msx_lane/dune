@@ -3,4 +3,6 @@
 (library
  (name msx_lane)
  (public_name masc.msx_lane)
- (libraries ocaml-msx.msx yojson base64 digestif masc.masc_random_id masc.machine_live_publication masc.machine_configuration))
+ (libraries ocaml-msx.msx ocaml-msx.core-identity unix yojson base64 digestif masc.masc_random_id masc.machine_live_publication masc.machine_configuration)
+ (preprocess
+  (pps ppx_deriving_yojson)))

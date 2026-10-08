@@ -216,11 +216,31 @@ val load_owned_regular_file_range
     snapshot validated across that exact read. Negative bounds return a typed
     read error; an offset at or beyond EOF returns empty [content]. *)
 
+(** A request-held root descriptor. Canonicalization is performed once and
+    checked against the identity observed before it. The callback result is
+    refused if the original root spelling or canonical directory changed.
+    The callback and entry reads are blocking; run this entire scope on a
+    system thread in Eio contexts. The handle is valid only in the callback. *)
+type owned_inventory_root
+val with_owned_inventory_root
+  : string
+  -> (owned_inventory_root -> ('a, owned_regular_file_read_error) result)
+  -> ('a, owned_regular_file_read_error) result
+val owned_inventory_root_path : owned_inventory_root -> string
+val owned_inventory_entry_kind
+  : owned_inventory_root -> string
+  -> (Unix.file_kind, owned_regular_file_read_error) result
+
 type owned_regular_file_range_digest =
   { content : string
   ; sha256 : string
   ; snapshot : owned_regular_file_snapshot
   }
+
+(** Hash a regular file opened relative to the held root descriptor. *)
+val owned_inventory_entry_digest
+  : owned_inventory_root -> string
+  -> (owned_regular_file_range_digest, owned_regular_file_read_error) result
 
 val load_owned_regular_file_range_with_sha256
   :  ownership_root:string
@@ -242,6 +262,22 @@ val load_owned_regular_file_range_with_sha256
 val owned_regular_file_read_error_to_string
   :  owned_regular_file_read_error
   -> string
+
+(** Enumerate an owned directory through a descriptor rooted at the canonical
+    [ownership_root]. Each relative component is opened with no-follow [openat];
+    names come from that final descriptor, never from a second pathname lookup.
+    [before_read] runs after the directory is bound, for deterministic consumers
+    that exercise replacement races; [after_read] runs before final validation.
+    Changed pathname identities are refused.
+    Errors contain no file contents; callers must redact host paths at public
+    boundaries. Blocking operations use a system thread in Eio contexts. *)
+val read_owned_directory
+  : ?inventory_root:owned_inventory_root
+  -> ?before_read:(string -> unit)
+  -> ?after_read:(string -> unit)
+  -> ownership_root:string
+  -> string
+  -> (string list, owned_regular_file_read_error) result
 
 (** Eio-native, deterministically sorted directory inventory. *)
 val read_dir : string -> string list
@@ -1105,6 +1141,40 @@ val read_private_jsonl_rows_locked_result :
   , Private_jsonl_rows.error )
   private_file_transaction_outcome
 
+module Private_jsonl_tail : sig
+  type t =
+    | Tail_missing
+    | Tail_present of
+        { rows : string
+        ; prefix_omitted : bool
+        ; incomplete_tail : bool
+        ; end_offset : int
+        }
+
+  type error =
+    | Invalid_max_bytes of int
+    | Read_error of Private_jsonl_rows.error
+
+  val error_to_string : error -> string
+end
+
+(** Read a bounded observational tail under the same locks and descriptor
+    validation as {!read_private_jsonl_rows_locked_result}. [max_bytes] must
+    be positive. Reads at most [max_bytes] trailing bytes plus one boundary
+    lookbehind byte; it never scans farther to find a row or matching content.
+    Only complete rows are returned. A leading partial row is discarded;
+    [prefix_omitted] means older bytes were outside the window, so an empty
+    [rows] value does not establish absence in the full store. A final fragment
+    is discarded and reported by [incomplete_tail]. [end_offset] is the locked
+    file length, not a durable consumer cursor. Missing stores and descriptor
+    cleanup failures retain the full reader's distinct outcomes. *)
+val read_private_jsonl_tail_locked_result :
+  string ->
+  max_bytes:int ->
+  ( Private_jsonl_tail.t
+  , Private_jsonl_tail.error )
+  private_file_transaction_outcome
+
 type private_jsonl_transaction_success =
   | Snapshot_succeeded of private_jsonl_snapshot
   | Cursor_succeeded of Private_jsonl_cursor.t
@@ -1191,13 +1261,15 @@ val read_private_jsonl_durable_locked_result :
   after:Private_jsonl_cursor.t option ->
   (private_jsonl_snapshot, private_jsonl_transaction_error) result
 
-(** Process-start recovery read of a private JSONL store under its stable
-    sibling lock. Behaves like {!read_private_jsonl_durable_locked_result} with
-    [after = None], except that a torn tail (an incomplete final row left by a
+(** Process-start or prepared-transaction recovery read of a private JSONL store
+    under its stable sibling lock. Behaves like
+    {!read_private_jsonl_durable_locked_result} with [after = None], except that
+    a torn tail (an incomplete final row left by a
     mid-append crash) is truncated to the last complete row and fsynced while
     the lock is held, after which reading resumes with the truncated cursor.
-    Every other failure propagates unchanged. Only process-start recovery may
-    use this entry point; general reads keep hard-failing on
+    Every other failure propagates unchanged. Only process-start recovery or a
+    serialized writer recovering a prepared transaction whose committed state
+    it has verified may use this entry point; general reads keep hard-failing on
     [Incomplete_transaction_tail]. *)
 val recover_private_jsonl_durable_locked_result :
   string ->
@@ -1236,6 +1308,20 @@ val read_private_jsonl_durable_locked_with_io_for_testing :
   string ->
   after:Private_jsonl_cursor.t option ->
   (private_jsonl_snapshot, private_jsonl_transaction_error) result
+
+(** Append complete rows under the canonical in-process mutex and stable
+    sibling lock used by {!recover_private_jsonl_durable_locked_result}.
+    A torn final row is truncated and fsynced under that same lock before the
+    append; complete malformed rows are never removed. Existing-file appends
+    read only the final byte unless recovery is needed. Descriptor settlement
+    failures retain the committed cursor in the typed error. A contended
+    cross-process lock returns [Stable_lock_contended] without changing data.
+    All writers of a store using this operation must use the stable protocol;
+    data-inode locking and cached JSONL appends do not share its authority. *)
+val append_private_jsonl_durable_stable_result :
+  string ->
+  string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
 (** Append complete newline-terminated JSONL rows iff [expected] still names
     the exact store identity and end offset observed by the caller. All

@@ -113,6 +113,12 @@ status: reference
   → [Lane_addon_sampling](../../lib/lane_addon/lane_addon_sampling.mli) ·
   [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
 
+**Sampling Response Attestation (샘플링 응답 증명)**
+: `Lane_addon_sampling`의 호스트 투영 샘플링 영수증(`host-projected sampling receipt`)에서 거대한 모델 응답 본문을 인입 봉투마다 복제하지 않고 응답의 무결성을 증명하는 계약(#41752). 응답의 `content.text`와 `content.data` 문자열을 정규화나 Base64 디코딩 없이 원본 UTF-8 바이트 그대로 SHA-256 다이제스트(`text_sha256`·`data_sha256`)로 투영하여 전달한다. 원시 샘플링 응답이 사전에 다이제스트 필드를 직접 주장하는 것은 즉시 거절되며(`InvalidInput`), 패키지에 노출되는 기타 응답 필드는 있는 그대로 보존·대조된다. 패키지 소비자는 브로커 샘플링 좌표만 제거한 뒤 동일한 투영을 계산하여 호스트 영수증과 일치하는지 검증한다. 호스트 전용 메타데이터는 비공개로 유지되며 불변 요청·종단 블롭에 완전한 원본 응답과 오류 진단이 유지되므로, 결합 소스 인입 봉투(`combined source ingress envelope`)의 바이트 비대화를 방지하면서도 엄격한 재생 검증을 보장한다.
+  → [Lane_addon_sampling](../../lib/lane_addon/lane_addon_sampling.mli) ·
+  [fusion_sampling](../../addons/fusion_sampling.py) ·
+  [Fusion lane composition](../design/fusion-lane-composition.md)
+
 **HITL**
 : Human-in-the-Loop의 약어. Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는
   경로다. 사람의 답을 기다리는 동안에도 다른 Keeper의 턴이나 상관없는 작업은 계속 돈다.
@@ -665,6 +671,160 @@ status: reference
   반드시 싣는다. 값은 다른 Keeper가 보낸 경우 그 Keeper 식별자이고, 운영자·커넥터 화자면 `null`이다
   (RFC-0468 §3.2). 접수 응답은 실행 완료를 뜻하지 않는다.
   → [Keeper_chat_operation_payload](../../lib/keeper/keeper_chat_operation_payload.mli)
+
+**Keeper Turn Slot Admission Priority (키퍼 턴 슬롯 진입 우선순위)**
+: 한 Keeper 파이버(`Owner` fiber)의 단일 실행 슬롯(`turn slot`)이 해제되었을 때, 큐에 대기 중인
+  청구 가능한 직접 입력(`claimable queued chat operation`)이 자율 턴(`autonomous turn`)보다
+  항상 먼저 슬롯을 획득하는 엄격한 우선순위 규칙(#41654). 자율 레인이 바쁜 슬롯을 반복
+  관측하더라도 진입 순서는 바뀌지 않으며, 이전 RFC-0373 방향(direction 2)의 유예 부채
+  한도(`autonomous_deferral_debt_cap`) 메커니즘은 폐기되었다. 러너가 준비되지 않은 Queued
+  chat은 자율 진입을 막지 않으며, 이전에 슬롯을 거절당한 자율 레인은 청구 가능한 직접 오퍼레이션이
+  슬롯을 가져가지 않고 슬롯이 여전히 미청구(`unclaimed`) 상태일 때 `notify_turn_slot_released`
+  신호로 깨어나 실행을 재개한다.
+  → [Keeper_owner](../../lib/keeper/keeper_owner.mli)
+
+**Cancelled Chat Terminal Retention (취소된 채팅 종단 보존)**
+: Keeper 채팅 오퍼레이션이 취소되거나 실패했을 때, 라이브 SSE 스트림 구독자의 연결 여부와
+  무관하게 종단 에러 이벤트(`Keeper_chat_events.Event_error`)의 동기 저널 기록을
+  시도(`Journal.append_result`)하는 계약(#41657). 기록에 성공하면 재연결 클라이언트의 replay에
+  보존되어 취소 상태를 확정적으로 재생할 수 있고, 저널 기록에 실패하면 `seq` 없는 live 오류
+  이벤트(`Ag_ui.Run_error`, code는 failure kind)로 투영된다.
+  → [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
+  [Server_routes_http_keeper_stream](../../lib/server/server_routes_http_keeper_stream.mli)
+
+**Keeper Quiet Final (키퍼 조용한 종료)**
+: 새 입력 없는 자율 wake(예정 깨움) 턴에서, 모델이 명시적으로 빈 텍스트 final(`EndTurn`)로
+  닫는 것을 완성으로 인정하는 응답 정책(#41747). `completion_policy`가 `Require_progress`
+  (직접 대화의 기본)일 때는 보이는 텍스트나 도구 진행이 필요하지만, 결과 전달이 예정되지
+  않은 Schedule_due 사건만 있거나 사건이 없고 대기 메시지가 비어 있으면 `Allow_quiet_final`
+  로 완성을 허용한다. 일반 Board 게시글·댓글 등 다른 모든 사건은 진행을 요구한다.
+  경계: 내용 결손, 숨은 추론만의 종료, 중단된 출력, 프로바이더 실패는 조용한 종료가
+  아니며 엄격히 오류로 남는다 — 문장을 해석해 침묵을 완성으로 읽지 않는다.
+  → [Keeper_tooling.Response](../../lib/keeper_tooling/response.mli) ·
+  [Keeper_agent_run](../../lib/keeper/keeper_agent_run.ml)
+
+**Chat Operation Reconciliation (채팅 오퍼레이션 정산)**
+: Keeper 채팅 오퍼레이션의 이벤트 스트림이 서버 재시작이나 연결 단절 등으로 종단 이벤트(`terminal event`) 없이 종료되었을 때, 듀러블 오퍼레이션 상태(`Keeper_chat_operation.state`)와 저널 엔드포인트(`read_whole_journal`)를 대조하여 화면 표시와 진행 행을 정합화하는 계약(#41680, #41705, #41730). 오퍼레이션이 이미 종료(`succeeded`·`failed`·`cancelled`)되었으나 스트림이 닫히지 않아 라이브 진행 행(`progress row`)에 과거 실행이 멈춘 채로 잔류하는 현상을 방지하며(`reconcile_operation`), 가짜 응답이나 합성 저널 이벤트를 임의로 조작하지 않고(`without fabricating journal events or a reply`) 스트림 도중 보존된 부분 텍스트(`partial text`), 도구 호출, 스킬 전달 영수증, 이전 연속 턴 이력을 그대로 보존한다. 저널 재조회 시 오퍼레이션 상태를 먼저 관측하고 저널을 읽은 뒤, 큐/실행 상태가 전진했는지 재확인(`read_with_operation_state`)하여 재조회 실패 시에도 첫 성공 저널을 유지하는 범위 내에서 최신 오퍼레이션 상태와의 정합성을 보장한다. 아울러 서버 재시작으로 중단된 세그먼트를 정산할 때(`record_restart_terminal`)는 세그먼트 오류 표식으로 `Restart_settlement settlement`(`Keeper_chat_event_log.Restart_settlement`)를 부여하여 이전 세그먼트의 과거 에러가 새 재시작 정산을 가로채지 못하게 방지하며, 재시작 종단 전달 재시도 시 재연결 커서가 저널보다 앞서더라도 중복 재생 없이 안정적으로 중단 종단을 완결한다(#41705, #41730).
+  → [Masc_tui_keeper_chat_log](../../bin/masc_tui_keeper_chat_log.mli) ·
+  [Masc_tui_keeper_chat_transcript](../../bin/masc_tui_keeper_chat_transcript.mli) ·
+  [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
+  [Keeper_chat_operation_store](../../lib/keeper_chat_operations/keeper_chat_operation_store.mli)
+
+**Keeper Direct Native Call (키퍼 직접 네이티브 호출)**
+: 한 직접 Keeper 채팅 오퍼레이션(`Keeper_chat_operation`) 안에서 실행되는 단일
+  네이티브 Agent API 호출 단위(#41655). 입력 접수(`input admission`) 직후이자
+  도구/효과 실행 전에 포착된 정확한 체크포인트를 불변의 시드(`seed_checkpoint`)로
+  보존한다. 상태 전이는 `No_native_call` → `Active` → `Terminal_unacknowledged`를
+  따르며, 진행 중인 호출의 새 체크포인트는 시드를 보존한 채 전진(`advance`)한다.
+  서버 재시작 복구 시 durable Core scope에서 활성 호출을 복원하거나, 저널이 이미
+  종료된 경우 미확인 종단 영수증(`Terminal_unacknowledged`)으로 정산하여 유실된
+  응답을 지어내지 않는다. 알 수 없거나 보존되지 않은 효과가 있는 호출은 제공자
+  재시도(fallback)가 격리(fencing)된다.
+  → [Keeper_native_call](../../lib/keeper_chat_operations/keeper_native_call.mli) ·
+  [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli)
+
+**Native Result Retention (네이티브 실행 결과 보존)**
+: 네이티브 API 호출의 정규 결과(canonical results)를 해당 호출의 transcript와
+  대조·검증하는 제약 계약(#41655). 접수된 정확한 시드(`seed_checkpoint`) 이전의
+  메시지나 결과는 이후의 호출을 해소(discharge)할 수 없으며, transcript에 보존된
+  각 결과 발생(occurrence)은 최대 하나의 정규 결과만 해소할 수 있다. 도구 시도가
+  접수된 후의 재시작 복구에서는 정규 정산된(settled) 루트 도구 결과를 모두 보존하고
+  transcript를 엄격히 결속하며, 예외는 확인된 퇴역 이력 절단(`retired_history_cut`)뿐이다.
+  → [Keeper_native_result_retention](../../lib/keeper/keeper_native_result_retention.mli) ·
+  [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli)
+
+**Execution Projection (실행 프로젝션)**
+: Agent Core에서 에이전트 실행 런(`Run_id`)의 구조화된 계층 트리와 이벤트 스트림을
+  외부에 읽기 전용으로 노출하는 단일 진실 공급원(SSOT) 인터페이스 계약(#41673).
+  런·턴·프로바이더 시도·출력 블록·도구 호출의 생명주기를 노드(`Node_opened`·
+  `Node_updated`·`Node_closed`)와 종단 상태(`terminal`: `Succeeded`, `Failed`, `Cancelled`)로
+  표현한다. 페이지네이션(`read_page`)은 `through` 미지정 시 호출 시점의 현재 권위적 상태
+  (`current atomic authority`)를 관측하며, 반환된 `high_watermark`를 후속 `through`로 재사용할 때만
+  해당 시점의 확정 접두사(`committed prefix`)가 고정된다. 정규 정산 도구 호출 목록
+  (`settled_tool_invocations`)은 루트 런의 확정 관측일 뿐 재실행 권한(`replay authority`)이 아니며,
+  미정산 호출 누락이 재시도 안전을 뜻하지 않고 중첩 런 결과는 둘러싼 도구 결과 뒤에 남는다.
+  → [Agent_execution_projection](../../packages/agent_core/lib/agent/agent_execution_projection.mli) ·
+  [Agent_execution_projection_intf](../../packages/agent_core/lib/agent/agent_execution_projection_intf.mli)
+
+**Keeper Native Repetition Recovery (키퍼 네이티브 반복 복구)**
+: 네이티브 Keeper 실행 중 영속화된 도구 결과(`durable ToolResult`) 정산과 다음
+  체크포인트 저장 사이에 프로세스가 중단·재시작되었을 때, 유실된 도구 반복 관측값
+  (`repetition observation`)을 결정론적으로 복원하는 정합성 계약(#41673).
+  핸들러·게이트·옵서버를 재실행하지 않으며, 스코프 불일치·시드 변경·미정산 체크포인트·
+  잘못된 정산 결과·미지원 출처·스냅샷 오류(`Scope_mismatch`, `Seed_observations_changed`,
+  `Checkpoint_observation_not_settled`, `Invalid_settled_result`, `Unsupported_result_provenance`,
+  `Repetition_error`) 등 6종의 타입화된 오류가 발생하면 복구를 거절한다. 불변 네이티브
+  시드(`seed`)가 체크포인트 관측값의 정확한 접미사(`suffix`)로 검증되고 각 관측값이
+  정규 발생 건을 순서대로 소비한 경우에만 누락 관측값을 정규 정산 순서(`canonical settlement order`)로
+  보충하며, 유실된 라이브 옵서버 순서는 추론하지 않는다.
+  → [Keeper_native_repetition_recovery](../../lib/keeper/keeper_native_repetition_recovery.mli) ·
+  [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli) ·
+  [Keeper native restart harness](../../docs/guides/KEEPER-NATIVE-RESTART-HARNESS.md)
+
+**Keeper Chat Event Timeline (키퍼 채팅 이벤트 타임라인)**
+: 직접 채팅 오퍼레이션(`/chat/events`)과 자율 턴(`/turns/:turn_ref/events`,
+  `masc.keeper_turn_events.v1`) 양쪽의 정규화된 이벤트(`keeper_chat_event`)
+  스트림을 시간축으로 통합 소비·표현하는 인터페이스 계약(#41661, #41667).
+  라이브 SSE 스트림과 저널 리플레이 모두 서버의 epoch-seconds 시계를
+  보존하여, 클라이언트의 연결 시점이나 리플레이 여부에 관계없이 타임라인
+  이벤트의 시계열 순서와 타이밍을 유지한다. 옵서버 증분 알림은 알림 자체의
+  페이로드를 추가하지 않고 마지막 수락 시퀀스 이후의 저널을 읽어 일관성을
+  유지한다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Pending Chat Input Separation (대기 채팅 입력 분리)**
+: 사용자의 입력이 로컬 디스패치(`local dispatch`), 미확인 전송(`unconfirmed transport`),
+  서버 큐 접수(`server queue admission`) 단계를 거치는 동안 확정된 대화 이력과
+  분리된 별도 대기 영역(`pending area`)에 머무는 상태 계약(#41661, #41667).
+  `Run_started` 이벤트 또는 영속화된 권위적 입력 확인이 도착하기 전까지는
+  처리가 시작된 것으로 간주하지 않으며, 검증된 거절(refusal) 시 원본 회상 텍스트를
+  보존한 채 실패로 표시한다. 배치 입력의 경우 단일 공유 응답에 앞서 모든 묶인
+  입력 식별자가 차례대로 보존된다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Thinking Stream Index Separation (사고 스트림 인덱스 분리)**
+: 프로바이더 런타임(Codex, Claude, GLM 등)의 추론/사고 스트림(`ThinkingDelta` /
+  `Agent_core_thinking_delta`)이 공개 텍스트 답변(`TextDelta`)의 콘텐츠 인덱스(`content index`)를
+  점유하거나 오염시키지 않도록 식별자와 블록 인덱스를 엄격히 분리하는 경계 계약(#41661, #41667).
+  완료된 추론 블록은 누락된 접미사(suffix)만 기여하며, 불투명 서명(opaque signatures)이나
+  비공개 페이로드는 공개 텍스트로 노출하지 않는다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Native Tool Observed Occurrence (네이티브 도구 관측 출현)**
+: 공식 클라이언트나 네이티브 런타임의 내장 도구 시작/종료 관측(`tool_stream_occurrence`,
+  `native_tool`)은 관측된 실행 생애주기일 뿐, MASC 도구 실행 영수증(`MASC execution receipts`)이나
+  도구 성공 실행을 증명하지 않는다는 경계 규약(#41661, #41667).
+  같은 진행 중 출현(`in-flight occurrence`) 범위 안에서 동일한 프로바이더 도구 식별자의
+  반복 관측은 단일 콘텐츠 인덱스를 유지하며, 이후의 종료 관측이 최초 출현을 닫고
+  어댑터의 식별자 매핑을 정리한다.
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
+  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Authored Whitespace Preservation (작성 공백 보존)**
+: 운영자 대면 채팅, Board 게시글 및 댓글, 커넥터(Slack, Discord), 위임(delegation)
+  요청 전반에서 한국어 띄어쓰기를 포함한 작성자의 공백·들여쓰기·문단 구분을 임의로
+  축약하거나 제거하지 않고 원문 그대로 보존하는 전역 텍스트 규약(#41683, #41690,
+  #41693, #41701, #41708, #41717).
+  단어 사이 공백을 임의로 압축하거나 붙여쓰는 행위를 금지하며, 글자 수 예산이나
+  Channel Gate의 본문 바이트 제한에 도달할 때도 공백을 지우는 대신 문장 길이를 줄이거나
+  단락을 분할하는 방식을 취한다. TUI 캡션, 마크다운 렌더링, 대시보드 편집/전송,
+  저널 스토어 및 모델 입력 프롬프트 전 구간에서 작성 공백의 불변성을 유지한다.
+  → [Keeper_chat_blocks](../../lib/keeper/keeper_chat_blocks.mli) ·
+  [Channel_gate](../../lib/gate/channel_gate.mli) ·
+  [Keeper prompt speaking convention](../../config/prompts/keeper.md)
+
+**Clock Density Stage (시계 밀도 단계)**
+: TUI 채팅 화면에서 타임스탬프와 시간대 구분선 노출 밀도를 단계적으로 제어하는
+  인터페이스 계약(#41699, #41749).
+  기본 모드(`Origin_bare`)에서는 시각·턴 시간 범위·시간 구분선·진행 타이머를 생략하여
+  메시지 본문의 가독성을 극대화하고, 단축키(`Ctrl-F`) 입력을 통해 간이 시계(`Origin_inline`)
+  또는 전체 헤더 시계(`Origin_row`) 메타데이터를 동적으로 복원·토글한다
+  (`Origin_bare` → `Origin_inline` → `Origin_row` → `Origin_bare`).
+  → [Masc_tui_message_layout](../../bin/masc_tui_message_layout.mli) ·
+  [Tui-chat-design](../../.agents/skills/tui-chat-design/SKILL.md)
 
 **Speaker Authority (화자 권한)**
 : Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
@@ -1337,12 +1497,18 @@ status: reference
 : 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과
   키 기록(ledger)이 다 들어 있어서, 서버를 다시 켜도 그 순간부터 이어서 할 수 있다.
   게임 메뉴로 하는 저장과 다르다. 게임마다 메뉴가 없어도 되고, 저장한 뒤로 한 일까지
-  남는다. 지금은 DOS Lane 이 `masc_dos_save`·`masc_dos_restore` 로 쓴다.
-  파일 머리에 어느 기계인지, 형식 번호, 만든 코어의 digest 가 적힌다. 기계나 형식
-  번호가 다르면 읽지 않는다. 코어 digest 는 보여 주기만 하고 비교하지 않는다.
-  되살리면 새 incarnation 이 되고, 조종권은 되살린 사람이 쥔다.
-  → [Machine_checkpoint](../../lib/machine_checkpoint/machine_checkpoint.mli),
-  [Dos_lane.restore](../../lib/dos_lane/dos_lane.mli)
+  남는다. DOS Lane(`masc_dos_save`·`masc_dos_restore`)과 MSX Lane(`masc_msx_save`·
+  `masc_msx_restore`·`masc_msx_checkpoint_info`)이 공통으로 쓴다. DOS Lane 파일 머리에는
+  어느 기계인지, 형식 번호, 만든 코어의 digest 가 적히며, 되살리면 새 incarnation 이 되고
+  조종권은 되살린 사람이 쥔다. MSX Lane은 JSON 엔벨로프 형식을 사용하며, 기계를 실제로
+  복원(restore)하지 않고도 슬롯의 형식 버전, 저장 시각(mtime), 저장 코어 식별자(`core_sha`),
+  미디어 이름, 입력 엣지 수, 바이트 크기, sha256을 무부작용으로 검사하는 조회 계약
+  (`masc_msx_checkpoint_info`)을 제공한다(#41773). 이 조회의 성공이 복원 가능성 전체나
+  미디어 파일 실재를 보증하지는 않으며, `core_sha` 필드가 없는 구 저장본은 잘못된 코어가
+  아니라 미기록(`unknown`)으로 취급된다.
+  → [Machine_checkpoint](../../lib/machine_checkpoint/machine_checkpoint.mli) ·
+  [Dos_lane.restore](../../lib/dos_lane/dos_lane.mli) ·
+  [Msx_lane](../../lib/msx_lane/msx_lane.mli)
 
 **슬롯 (Slot)**
 : 기계 체크포인트에 붙이는 이름. 영문자·숫자·`_`·`-` 로 1~64자이고, 경로가 될 수
@@ -1381,10 +1547,35 @@ status: reference
   `msx_capture` 원천이 이 머신을 관측한다.
   → [Msx_lane](../../lib/msx_lane/msx_lane.mli)
 
+**MSX Core Identity (MSX 코어 식별자)**
+: 실행 중인 서버 프로세스가 링크한 `ocaml-msx` 코어의 정체성을 나타내는 식별 계약(#41773).
+  바이너리가 링크한 실제 코어 소스 다이제스트(`source_digest`), CI 고정 핀의 다이제스트
+  (`pinned_source_digest`), 그리고 두 다이제스트의 일치 여부(`matches_pin`)로 구성된다.
+  `Dos_lane.core`와 대칭을 이루며, `masc_msx_meta` 도구를 통해 머신 복원이나 재기동 없이
+  서버의 코어 일치 상태를 조회할 수 있다. 다이제스트는 `ocaml-msx` 빌드 시점에 `lib/` 최상위
+  소스 바이트(dune 및 `*.ml`/`*.mli`)로부터 계산되므로(`Msx_core_identity`), 커밋 이력이
+  없는 opam 릴리스 패키지 환경에서도 대상 소스 불일치를 결정론적으로 감지한다(전체 바이너리
+  무결성이나 하위 디렉터리 변조를 검증하는 것은 아님).
+  → [Msx_lane.core](../../lib/msx_lane/msx_lane.mli) ·
+  [Msx_lane.checkpoint_info](../../lib/msx_lane/msx_lane.mli)
+
 **Browser Lane**
 : 서버가 관리하는 브라우저 세션. Keeper 는 `masc_browser_*` 도구로 탭을 읽고
   조작한다. Lane Add-on의 `browser_document` 원천이 이 세션을 관측한다.
   → [Browser_lane](../../lib/browser_lane/browser_lane.ml)
+
+**Trusted Hover (신뢰 호버)**
+: 브라우저 연결에서 클릭 없이 포인터를 올리는 `hover_at` 조작이, 관측된 URL과 뷰포트
+  (`expectedUrl`·`viewport`) 가드를 통과한 뒤에만 실행되는 계약(#41620). 첨부된 live
+  Firefox BiDi 탭과 자동화 레인에서 동작하며, 가드가 낡은 URL이나 뷰포트에서 실패하면
+  입력을 보내기 전에 `Rejected_before_effect`로 거절한다 — 포인터 움직임도 효과이므로
+  조용한 실패 대신 거절 사유를 남긴다. WebExtension 경로의 hover는 서버에서 큐잉 전에
+  거절한다. 경계: 가드 검증과 입력 주입은 원자적 트랜잭션이 아니어서 검증 직후 조작자가
+  페이지를 변경할 수 있고, 결과 불확실(`unknown outcome`) 시 재시도(write replay) 없이
+  클라이언트를 중단한다.
+  → [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
+  [Browser_interaction](../../lib/browser_interaction.mli) ·
+  [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)
 
 **Machine Change Mark (기계 변경 표식)**
 : MSX Lane·DOS Lane 기계의 화면이 바뀌었는지 싸게 묻기 위한 표식. 변경 횟수(`count`)와
@@ -1810,6 +2001,19 @@ status: reference
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
   `admits_self_directed_progress`가 이 경계를 정의한다. TUI 첫 화면의 투영은
   `Dashboard Goals`를 따른다.
+  → [Goal_phase](../../lib/goal/goal_phase.mli) · [Goal_store](../../lib/goal/goal_store.mli)
+
+**Goal Creation Input Check (목표 생성 입력 검증)**
+: 새 Goal 생성 입력의 제목·측정 조건·마감일을 검증하는 입력 불변식 계약(#41399).
+  RFC-0387 B1의 측정 가능한 성공 조건(`metric` 및 `target_value`) 필수 선언에 더해,
+  새 Goal 생성의 모든 진입 경로에서 빈 제목(`title` 누락 또는 공백 문자열)을 거절하며
+  알 수 없는 ID 단독 지정 시 `"Untitled goal"`로 기본 명명하던 폴백을 금지한다. 또한 이미
+  경과한 마감일(`due_date`)을 지정한 목표 생성은 본질적으로 도달 불가능(unreachable by
+  construction)하므로 `Rejected`(`Validation_error`)로 즉시 거절한다. 마감일은 UTC 역일 기준
+  당일 23:59:59 UTC에 만료되는 것으로 판정하며 운영자 로컬 타임존과 무관하다. 반면 기존 Goal의
+  수정(`upsert_goal` 업데이트) 시에는 마감일 경과가 정상적인 생명주기 진행이고 과거 날짜 소급
+  지정 역시 기록 정정이므로 이 검증으로 차단되지 않는다.
+  → [Goal_store](../../lib/goal/goal_store.mli) · [Goal_due](../../lib/goal/goal_due.mli)
 
 **Goal Measurement (목표 관측값)**
 : Goal의 선언된 지표(`metric`)를 누가 언제 얼마로 봤는지 남긴 기록 한 건. 값, 증거,
@@ -1941,6 +2145,13 @@ status: reference
   evidence action이 필요하다.
   → [fusion-compute](../../addons/fusion-compute/README.md),
   [model access boundary](../design/lane-addon-model-boundary.md)
+
+**Fusion Input Lineage (Fusion 입력 계보)**
+: `fusion-compute` Lane Add-on의 조립형 계산에서 모델의 현재 관측 증거와 상속된 이전 입력 참조를 엄격히 분리하는 불변식(#41732). 각 계산의 행 증거(`row evidence`)는 오직 현재 모델 요청과 허용된 결과만을 포함하며, 이전 단계에서 상속된 불변 참조들은 `fields.input_evidence`에 격리되어 모델 요청 내부에 보존된다. 심판(`judge`)은 입력 참조들을 검증하여 후속 단계로 계승하고, 보고서(`fusion-report`)는 현재의 `model_evidence`와 나란히 전체 입력 계보를 노출한다. `input_evidence` 배열은 필수이며 오직 `uri`와 `sha256`만을 갖는 불변 참조만을 허용한다(현재 모델 영수증 주소 검증의 `lane-evidence:<sha256>`는 상속 URI의 한 예시이며, 계보 형식 검증은 정확한 {uri, sha256} 키 집합과 불변 digest를 검사함). 이를 통해 워커는 이전 요청 이력을 안전하게 분석할 수 있으면서도, 호스트가 낡은 영수증을 새 관측 입력의 유효한 결과로 오인하는 재생 취약점을 방지한다.
+  → [fusion_sampling](../../addons/fusion_sampling.py) ·
+  [fusion-compute](../../addons/fusion-compute/server.py) ·
+  [fusion-report](../../addons/fusion-report/server.py) ·
+  [Fusion lane composition](../design/fusion-lane-composition.md)
 
 **Fusion Seat (자리)**
 : Fusion 실행에서 답을 내는 한 자리. panel 한 명과 judge 하나가 각각 한 자리다
@@ -2087,9 +2298,34 @@ status: reference
   operation id 하나로 완전한 키다. 답은 먼저 커밋되고 그 뒤에 알린다 — 커밋은 HITL·Fusion과
   같은 fail-closed durable 경로를 쓰고, 뒤따르는 live wake는 힌트일 뿐이라 `Running`
   Keeper에게만 닿고 실패는 로그로 남긴다(자극은 이미 큐에 있어 다음 admitted turn에 읽힌다).
-  `Fusion_completed`·`Hitl_resolved`와 같은 부류다.
+  `Fusion_completed`·`Hitl_resolved`와 같은 부류다. 반환 텍스트가 미리보기 상한(480 바이트)을
+  초과하면 말단을 침묵 절단하지 않고 `masc_keeper_delegate_status` 조회를 명시적으로 안내한다(#41766).
   → [Keeper_delegate_completion_wake](../../lib/keeper/keeper_delegate_completion_wake.mli) ·
-  [Keeper_event_queue](../../lib/keeper_runtime/keeper_event_queue.mli)
+  [Keeper_event_queue](../../lib/keeper_runtime/keeper_event_queue.mli) ·
+  [Keeper_world_observation](../../lib/keeper/keeper_world_observation.ml)
+
+**Event Row Preview Ceiling (이벤트 행 미리보기 상한)**
+: Keeper 프롬프트의 대기 사건 행(`pending_board_event`)에서 긴 본문이 프롬프트 공간을
+  과도하게 차지하거나 반대로 말단 데이터가 침묵 유실되는 것을 방지하는 정합성 계약(#41766).
+  다른 Keeper에게 맡긴 위임 완료 답변(`delegate_completion`)이나 비동기 컴포지션 실패·취소 상세
+  (`composition_completion`), Fusion 심판 결과(`fusion_completion`) 등은 공통으로 480 바이트의
+  공백 제거(`String.trim`) 기준 미리보기 상한(`delegate_reply_preview_max_len`,
+  `fusion_result_preview_max_len`)을 적용한다. 본문이 잘릴 때의 동작과 원문 조회 안내는 사건 종류별로
+  명확히 분리된다:
+  1. 위임 완료 답변(`Delegate_replied`, `Delegate_failed`): 480 바이트 초과 시 줄임표(`...`)로 끝을
+     자르되 결코 침묵 절단(`silent cut`)하지 않고, `masc_keeper_delegate_status` 조회 경로와
+     `operation_id`를 덧붙여 말단에 위치한 아티팩트 객체나 코드 블록을 복원할 수 있게 한다(단, 조회
+     경로는 operation 기록이 보존되어 있을 때 유효하며, 보존 기간 만료 등으로 기록 부재 시 원문 복원은 불가).
+  2. 비동기 컴포지션 완료(`Composition_completed`): 성공 시에는 중복 적재를 막기 위해 본문을 비우고,
+     실패나 취소 상세가 480 바이트를 초과하면 `keeper_composition_status` 조회 경로와 `request_id`를
+     덧붙여 침묵 절단을 방지한다.
+  3. Fusion 심판 완료(`Fusion_completed`): 결과 메시지를 480 바이트 상한으로 자르되, 싱크가 증거
+     게시글을 작성하여 `board_post_id`가 존재하는 경우에 한해 `masc_fusion_status` 조회 경로와
+     `run_id`를 덧붙인다. `board_post_id`가 빈 문자열(`""`)인 종단 실패나 취소의 경우, 영속 증거가
+     없으므로 헛된 조회를 막기 위해 조회 안내를 덧붙이지 않는다.
+  → [Keeper_world_observation](../../lib/keeper/keeper_world_observation.ml) ·
+  [Prompt_names](../../lib/prompt_registry/prompt_names.mli) ·
+  [Keeper prompt](../../config/prompts/keeper.md)
 
 **Approval Queue Phase (승인 큐 진행 단계)**
 : Human-in-the-Loop (HITL) 승인 큐에서 각 승인 요청 항목이 거치고 있는 진행 단계를
@@ -2987,6 +3223,11 @@ status: reference
 : `keeper_memory_search`는 먼저 쿼리에 맞는 소스 결속 주장과 그 경로·다이제스트를 고른 뒤, 그 후보만 잠금 아래에서 재검증한다. 쿼리에 맞지 않는 소스는 읽거나 무효화하지 않고 저장된 채 미검증으로 둔다. 매칭 후보의 읽기가 끝나지 않으면 본문을 보류하고 `source_verification.status="incomplete"`와 재조회 안내를 돌려준다. 검증된 현재 결과를 가린 뒤가 아니라 후보 검증·제외 후 `limit`을 적용하므로 오래되거나 확인할 수 없는 후보가 유효한 뒤쪽 결과를 밀어내지 않는다.
   → [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.mli) · [keeper_tool_memory_runtime](../../lib/keeper/keeper_tool_memory_runtime.ml)
 
+**Memory Retraction Plan Receipt (기억 철회 계획 영수증)**
+: Memory OS에서 사유(`reason`)를 수반하는 기억 철회(`retract_fact`) 및 대체(`supersede_fact`) 시, 스냅샷 교체 전에 디스크에 사전 기록되는 영구 복구 증거(#41590). 사전 준비(`prepared`) 단계에서 계획 ID(`plan_id`), 이전/목표 리비전(`prior_revision`·`target_revision`), 이전/목표 스냅샷 SHA-256(`prior_snapshot_sha256`·`target_snapshot_sha256`), 철회 문장 목록(`dropped_statements`)을 사이드카 JSON(`.memory-retraction-plan.json`)으로 기록한다. 스냅샷 교체 후 저널 저널링(`append_removal_journal_and_clear_receipt`)이 완료되어야만 영수증이 삭제되며, 만약 저널 확정 전에 프로세스가 중단되더라도 부팅 시 또는 후속 쓰기자가 `reconcile_retraction_plan_receipt`를 통해 스냅샷과 영수증을 대조하여 저널을 확정한다. 정산되지 않은 대기 영수증이 있는 동안에는 `read_dropped` 조회가 명시적 에러를 반환하고, 후속 쓰기자가 제거된 원본을 다른 내용으로 덮어쓰는 것을 차단한다.
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
+  [Keeper_memory_os_types](../../lib/keeper/keeper_memory_os_types.mli)
+
 **Shared Fact (작업공간 기억 원장 행)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
@@ -3034,6 +3275,21 @@ status: reference
   카운터는 그 셋을 따른다([`keeper_official_client_host.ml`](../../lib/keeper/keeper_official_client_host.ml)).
   요약이 빠져도 turn은 거절하지 않고 WARN으로 알린다.
   → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
+
+**Recent Work Context (최근 작업 발췌)**
+: 자율 턴(`autonomous turn`)이 직전 직접 대화의 요청과 이전 자율 턴의 결론을
+  이어받아 작업할 수 있도록 제공하는 유계된 이력 발췌(#41675). 직접 대화
+  이력(`conversation`)과 최신 내부 어시스턴트 메시지(`autonomous_reply`)를
+  독립적으로 수집하여, 자율 루프의 긴 반복 실행이 사용자의 원래 요청을 밀어내지
+  (`displace`) 않도록 돕는다. 단, 물리 창 생략(`Physical window omission`)은
+  명시적으로 보존되나 창 밖 대화의 무손실 보존이나 작업 완료 여부까지 증명하지는
+  않는다. 인라인 표시 한도를 넘는 큰 발췌는 현재 도구 표면이 정규 아티팩트
+  판독기(`keeper_artifact_read`)를 제공할 때만 내용 주소화된 아티팩트
+  (`Evidence of string`)로 결속되며, 판독기 부재나 저장 실패 시 인라인으로
+  되돌리지 않고 누락(`Unavailable`) 상태를 명시한다. 이 발췌는 불완전할 수 있는
+  역사적 발췌일 뿐이며, 완료 상태를 증명하거나 새로운 할 일 목록·열린 의무를 규정하지 않는다.
+  → [Keeper_recent_work](../../lib/keeper/keeper_recent_work.mli) ·
+  [Keeper Unified Prompt](../../lib/keeper/keeper_unified_prompt.mli)
 
 **Extra System Context (턴별 문맥)**
 : Keeper hook이 매 turn 새로 조립해 provider 지시 표면에 얹는 `System` 메시지.

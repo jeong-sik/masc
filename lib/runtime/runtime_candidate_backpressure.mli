@@ -25,6 +25,12 @@ val keeper_recorder : keeper_name:string -> recorder
 
 val same_recorder : recorder -> recorder -> bool
 
+val recorder_keeper_name : recorder -> string
+(** The Keeper whose walk recorded the failed attempt. *)
+
+val attempt_failure_to_wire_name : attempt_failure -> string
+val attempt_failure_of_wire_name : string -> attempt_failure option
+
 type failed_attempt = Runtime_candidate_backpressure_state.failed_attempt =
   | Failed_attempt of { noted_at : float; failure : attempt_failure; recorded_by : recorder }
 

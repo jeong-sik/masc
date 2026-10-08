@@ -1780,6 +1780,10 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
   let redact_text = Keeper_secret_redaction.redact_text redaction in
+  let task_source = match submission with
+    | Owner_operation {operation_id; _} -> Keeper_native_task_journal.Operation operation_id in
+  let task_journal = Keeper_native_task_journal.create ~base_path
+      ~keeper_name:payload.name ~source:task_source ~redact_text in
   let content_generation = Keeper_chat_events.publish_with_sequence events
     (Run_started { run_id; thread_id }) in
   Option.iter (fun (operation_id, execution_id) ->
@@ -2039,8 +2043,11 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
           ~tool_source_map
-      | Keeper_hooks_agent_core.Native_task_observed _ ->
-          (* Task journal transport is separate from native block progress. *)
+      | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
+          (* Independent receiver journal, including after root stream closure.
+             Persistence failure is not a tool occurrence mapping failure. *)
+          Keeper_native_task_journal.observe task_journal ~attempt bound
+          |> Keeper_native_task_journal.report ~keeper_name:payload.name;
           Ok ()
       | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
         push_worker_event (Stream_native_tool_progress

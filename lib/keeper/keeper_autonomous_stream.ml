@@ -9,6 +9,7 @@ type t =
   ; turn_ref : Ids.Turn_ref.t
   ; events : Events.t option
   ; accum : Accum.t
+  ; task_journal : Keeper_native_task_journal.t
   ; text : Keeper_stream_text_redaction.Scoped.t
   ; redact_text : string -> string
   ; mutex : Eio.Mutex.t
@@ -61,6 +62,9 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
   let t =
     { base_path; keeper_name; turn_ref; events; accum = Accum.create ();
       text = Keeper_stream_text_redaction.Scoped.create redaction;
+      task_journal = Keeper_native_task_journal.create ~base_path ~keeper_name
+        ~source:(Keeper_native_task_journal.Autonomous_turn turn_ref)
+        ~redact_text:(Keeper_secret_redaction.redact_text redaction);
       redact_text = Keeper_secret_redaction.redact_text redaction;
       mutex = Eio.Mutex.create (); bridge = Bridge.empty_state
         ~generation:content_generation (); closed = false }
@@ -123,9 +127,10 @@ let on_tool_stream_observation t observation = with_stream t (fun () -> match ob
   | Keeper_hooks_agent_core.Turn_closed_without_sources {turn} ->
       (match Accum.close_turn_without_sources t.accum ~turn with
        | Ok () -> () | Error detail -> mapping_failed t detail)
-  | Keeper_hooks_agent_core.Native_task_observed _ ->
-      (* Task journal transport is separate from native block progress. *)
-      ()
+  | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
+      (* Root closure and native block indices do not own this receiver journal. *)
+      Keeper_native_task_journal.observe t.task_journal ~attempt bound
+      |> Keeper_native_task_journal.report ~keeper_name:t.keeper_name
   | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
       (* This observation updates an existing native row. It is not a model
          content boundary: keep any partial secret held across later deltas. *)
@@ -171,3 +176,5 @@ let finish t ending =
         | Completed _ -> Events.Run_finished {run_id = Ids.Turn_ref.to_string t.turn_ref}
         | Failed message -> Events.Event_error {message = t.redact_text message}
         | Cancelled -> Events.Event_error {message = "Autonomous turn cancelled"}))))
+
+let task_journal_health t = Keeper_native_task_journal.health t.task_journal

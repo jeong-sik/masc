@@ -3196,6 +3196,220 @@ let test_task_binding_freezes_exact_envelope_and_dispatch () =
    | _ -> fail "two actual driver calls required")
 ;;
 
+module Task_journal = Keeper_native_task_journal
+
+let task_journal_ok (outcome : 'a Task_journal.outcome) =
+  match outcome.result, outcome.cleanup_failure with
+  | Ok value, None -> value
+  | Error error, _ -> fail (Task_journal.error_to_string error)
+  | Ok _, Some failure -> fail (Fs_compat.private_jsonl_operation_failure_to_string failure)
+;;
+
+let task_journal_operation name =
+  match Keeper_chat_operation.Operation_id.of_string name with
+  | Ok id -> Task_journal.Operation id | Error detail -> fail detail
+;;
+
+(* The store tests cannot manufacture a privileged binding with JSON. Obtain
+   one through the real fake-CLI -> runtime -> adapter -> driver callback. *)
+let with_task_journal_bindings ?on_bound f =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let envelope = Yojson.Safe.to_string (`Assoc ["type",`String "assistant";
+      "parent_tool_use_id",`Null;"session_id",`String "__SESSION__";
+      "uuid",`String "task-parent-envelope";"message",`Assoc ["id",`String "task-parent-response";
+      "role",`String "assistant";"model",`String "claude-fixture";"content",`List [
+        `Assoc ["type",`String "tool_use";"id",`String "task-parent-call";
+          "name",`String "Agent";"input",`Assoc ["prompt",`String "Complete the delegated fixture task.";
+          "description",`String "background task persistence";"subagent_type",`String "general-purpose"]]]]]) in
+    let frame ~uuid subtype fields = task_binding_frame ~uuid ~task_id:"task/id"
+        ~call_id:"task-parent-call" subtype fields in
+    let observed = ref [] in
+    with_fixture [Emit_with_input envelope;
+      Emit (task_binding_native_result ~uuid:"task-parent-return" ~call_id:"task-parent-call");
+      Emit (frame ~uuid:"task-journal-start" "task_started"
+        ["task_type",`String "local_agent";"spawn_depth",`Int 1;
+         "description",`String "EXCLUDED_DESCRIPTION";"subagent_type",`String "general-purpose";
+         "is_backgrounded",`Bool true]);
+      Emit (frame ~uuid:"task-journal-progress" "task_progress"
+        ["description",`String "EXCLUDED_PROGRESS";"usage",`Assoc
+          ["total_tokens",`Int 12;"tool_uses",`Int 1;"duration_ms",`Int (-3)];
+         "last_tool_name",`String "Read"]);
+      Emit (frame ~uuid:"task-journal-end" "task_notification"
+        ["status",`String "completed";"summary",`String "EXCLUDED_SUMMARY";
+         "output_file",`String "/EXCLUDED_PATH"]);
+      Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Unchanged answer");
+      Emit (result_text ~turn_id:"final" "Unchanged answer")]
+      (fun cli_path ->
+        let result = with_fixture_yolo ~keeper_name:"claude-fixture" (fun () ->
+          run_keeper_turn ~base_path ~cli_path ~goal:"TASK_JOURNAL"
+            ~required_native_posture:Runtime_native_tools.Native_full
+            ~on_native_task_observation:(fun ~attempt bound ->
+              observed := (attempt,bound) :: !observed;
+              Option.iter (fun observe -> observe ~base_path ~attempt bound) on_bound) ()) in
+        (match result with Error error -> fail (Agent_core.Error.to_string error)
+         | Ok result -> check string "root answer is unchanged" "Unchanged answer" (keeper_response_text result));
+        let observations = List.rev !observed in
+        check int "actual driver yielded all owned task edges" 3 (List.length observations);
+        f ~base_path observations))
+;;
+
+let test_native_task_journal_commit_replay_and_scope () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let secret = "general-purpose" and keeper_name = "claude-fixture" in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let redact_text = Keeper_secret_redaction.redact_text
+        (Keeper_secret_redaction.snapshot ~base_path ~keeper_name) in
+    let source = task_journal_operation "execution-operation" in
+    let sink = Task_journal.create ~base_path ~keeper_name ~source ~redact_text in
+    let publications = List.map (fun (attempt,bound) ->
+      match Task_journal.prepare sink ~attempt bound with Ok p -> p
+      | Error e -> fail (Task_journal.error_to_string e)) observations in
+    let committed = List.map (fun publication -> task_journal_ok (Task_journal.append publication)) publications in
+    let reader = Task_journal.reader_of_publication (List.hd publications) in
+    let rows = task_journal_ok (Task_journal.read reader) in
+    check (list int) "one durable contiguous receiver sequence" [1;2;3]
+      (List.map (fun (r:Task_journal.record) -> r.seq) rows);
+    List.iter2 (fun publication expected ->
+      match expected, task_journal_ok (Task_journal.append publication) with
+      | Task_journal.Appended old, Task_journal.Replayed replay ->
+          check bool "replay retains exact original receipt and recorded time" true (old=replay)
+      | _ -> fail "expected append then exact replay") publications committed;
+    List.iter (fun (r:Task_journal.record) ->
+      match r.observation.origin.source with
+      | Runtime_native_tasks.Operation {operation_id} ->
+          check string "canonical execution operation is retained" "execution-operation" operation_id
+      | Autonomous_turn _ -> fail "operation changed to autonomous source") rows;
+    (match List.map (fun (r:Task_journal.record) -> r.observation.event) rows with
+     | [Runtime_native_tasks.Task_registered {subagent_type=Some value;_};
+        Task_progress_reported {usage;_};Task_terminal_reported _] ->
+          check string "only supplied metadata leaf is redacted" (redact_text secret) value;
+          check int "signed provider duration survives journal" (-3) usage.duration_ms
+     | _ -> fail "wrong typed disk events");
+    let bytes = In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all in
+    List.iter (fun value -> check bool "private source strings never reach journal" false
+      (Astring.String.is_infix ~affix:value bytes))
+      [secret;"EXCLUDED_DESCRIPTION";"EXCLUDED_PROGRESS";"EXCLUDED_SUMMARY";"EXCLUDED_PATH"];
+    let attempt,bound = List.hd observations in
+    let foreign_source = Task_journal.create ~base_path ~keeper_name
+        ~source:(task_journal_operation "member-request-alias") ~redact_text in
+    (match (Task_journal.observe foreign_source ~attempt bound).result with
+     | Error (Task_journal.Conflicting_uuid "task-journal-start") -> ()
+     | _ -> fail "same UUID with different source was acknowledged");
+    check int "conflict is retained as task persistence health" 1
+      (List.length (Task_journal.health foreign_source));
+    check int "conflict cannot append a row" 3 (List.length (task_journal_ok (Task_journal.read reader)));
+    let alias = Task_journal.create ~base_path:(Filename.concat base_path ".")
+        ~keeper_name ~source ~redact_text in
+    (match (Task_journal.observe alias ~attempt bound).result with
+     | Ok (Task_journal.Replayed _) -> () | _ -> fail "canonical root alias split the receiver journal");
+    let separate_root = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree separate_root) (fun () ->
+      let other = Task_journal.create ~base_path:separate_root ~keeper_name ~source ~redact_text in
+      (match task_journal_ok (Task_journal.observe other ~attempt bound) with
+       | Task_journal.Appended r -> check int "other canonical root has its own sequence" 1 r.seq
+       | Replayed _ -> fail "other workspace inherited a receipt"));
+    let other_keeper = Task_journal.create ~base_path ~keeper_name:"claude/fixture" ~source ~redact_text in
+    let other = match Task_journal.prepare other_keeper ~attempt bound with
+      | Ok p -> p | Error e -> fail (Task_journal.error_to_string e) in
+    let other_reader = Task_journal.reader_of_publication other in
+    check bool "slash is encoded, never a path segment" false
+      (String.equal (Task_journal.path reader) (Task_journal.path other_reader));
+    ignore (task_journal_ok (Task_journal.append other));
+    (* Copying a valid row from another authority cannot establish that scope. *)
+    Out_channel.with_open_bin (Task_journal.path other_reader) (fun out -> output_string out bytes);
+    (match (Task_journal.append other).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "foreign-scope copied journal was accepted"))
+;;
+
+let test_native_task_journal_atomicity_recovery_and_failure () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let sink = Task_journal.create ~base_path ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "operation") ~redact_text:Fun.id in
+    let publications = List.map (fun (attempt,bound) ->
+      Result.get_ok (Task_journal.prepare sink ~attempt bound)) observations in
+    let first = List.hd publications and second = List.nth publications 1 and third = List.nth publications 2 in
+    let reader = Task_journal.reader_of_publication first in
+    let workers = List.init 4 (fun _ -> Domain.spawn (fun () ->
+      Eio_main.run (fun _ -> Task_journal.append first))) in
+    let outcomes = List.map Domain.join workers |> List.map task_journal_ok in
+    check int "concurrent duplicate writers commit exactly once" 1
+      (List.length (List.filter (function Task_journal.Appended _ -> true | Replayed _ -> false) outcomes));
+    let append_bytes bytes = Out_channel.with_open_gen
+      [Open_wronly;Open_append;Open_binary] 0o600 (Task_journal.path reader)
+      (fun out -> output_string out bytes) in
+    append_bytes "{\"uncommitted";
+    check int "reader excludes torn uncommitted tail" 1
+      (List.length (task_journal_ok (Task_journal.read reader)));
+    (match task_journal_ok (Task_journal.append second) with
+     | Task_journal.Appended r -> check int "recovery assigns next committed sequence" 2 r.seq
+     | Replayed _ -> fail "new event became replay");
+    append_bytes "{}\n";
+    let before = In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all in
+    (match (Task_journal.append third).result with
+     | Error (Task_journal.Corrupt {line=3;_}) -> () | _ -> fail "complete corrupt row was recovered as a torn tail");
+    check string "complete corruption is preserved, not replaced" before
+      (In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all);
+    let blocked = Filename.concat base_path "file-instead-of-directory" in
+    Out_channel.with_open_bin blocked (fun out -> output_string out "unchanged");
+    let unavailable = Task_journal.create ~base_path:blocked ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "operation") ~redact_text:Fun.id in
+    let attempt,bound = List.hd observations in
+    (match (Task_journal.observe unavailable ~attempt bound).result with
+     | Error _ -> () | Ok _ -> fail "I/O failure produced a committed receipt");
+    check int "failed observation remains explicitly unhealthy" 1
+      (List.length (Task_journal.health unavailable));
+    check string "filesystem failure cannot overwrite unrelated file" "unchanged"
+      (In_channel.with_open_bin blocked In_channel.input_all))
+;;
+
+let test_native_task_journal_callback_failure_preserves_root_answer () =
+  let outcomes = ref [] in
+  with_task_journal_bindings
+    ~on_bound:(fun ~base_path ~attempt bound ->
+      let blocker = Filename.concat base_path "task-store-blocker" in
+      Out_channel.with_open_bin blocker (fun out -> output_string out "fixture");
+      let sink = Task_journal.create ~base_path:blocker ~keeper_name:"claude-fixture"
+          ~source:(task_journal_operation "callback-operation") ~redact_text:Fun.id in
+      outcomes := Task_journal.observe sink ~attempt bound :: !outcomes)
+    (fun ~base_path:_ _ ->
+      check int "all actual driver callbacks returned typed persistence failures" 3 (List.length !outcomes);
+      List.iter (fun (outcome:Task_journal.commit Task_journal.outcome) ->
+        match outcome.result with Error _ -> ()
+        | Ok _ -> fail "blocked task store reported a receipt") !outcomes)
+;;
+
+let test_native_task_journal_autonomous_closed_root () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    Eio_main.run (fun _ ->
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"task-journal-autonomous" ~absolute_turn:1 in
+      let stream = Keeper_autonomous_stream.create ~base_path ~keeper_name:"claude-fixture" ~turn_ref in
+      Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+      let root_path = Keeper_chat_event_log.turn_journal_path ~base_dir:base_path
+          ~keeper_name:"claude-fixture" ~turn_ref in
+      let root_before = In_channel.with_open_bin root_path In_channel.input_all in
+      List.iter (fun (attempt,bound) ->
+        Keeper_autonomous_stream.on_tool_stream_observation stream
+          (Keeper_hooks_agent_core.Native_task_observed {attempt;bound})) observations;
+      check string "late tasks append no root events or fabricated lifecycle"
+        root_before (In_channel.with_open_bin root_path In_channel.input_all);
+      check int "task writes remain healthy after root journal closure" 0
+        (List.length (Keeper_autonomous_stream.task_journal_health stream));
+      let _,(bound:Keeper_claude_task_binding.bound) = List.hd observations in
+      let reader = Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name:"claude-fixture"
+        ~receiver_generation:bound.ticket.receiver_generation ~session_id:bound.ticket.session_id) in
+      let rows = task_journal_ok (Task_journal.read reader) in
+      check int "all late bound observations persisted without reopening root" 3 (List.length rows);
+      List.iter (fun (r:Task_journal.record) -> match r.observation.origin.source with
+        | Runtime_native_tasks.Autonomous_turn {turn_ref=actual} ->
+            check string "actual autonomous reference retained" (Ids.Turn_ref.to_string turn_ref) actual
+        | Operation _ -> fail "invented operation for autonomous task") rows;
+      check bool "task writes never restore the closed root current identity" true
+        (Keeper_autonomous_stream.current ~base_path ~keeper_name:"claude-fixture" = None)))
+;;
+
 let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
@@ -4443,6 +4657,14 @@ let () =
             test_every_posture_names_the_schema_lookup
         ; test_case "task input and routed dispatch retain exact native envelope" `Quick
             test_task_binding_freezes_exact_envelope_and_dispatch
+        ; test_case "native task journal retains authority and exact replay" `Quick
+            test_native_task_journal_commit_replay_and_scope
+        ; test_case "native task journal serializes writers and distinguishes corruption" `Quick
+            test_native_task_journal_atomicity_recovery_and_failure
+        ; test_case "task persistence callback failure preserves root answer" `Quick
+            test_native_task_journal_callback_failure_preserves_root_answer
+        ; test_case "autonomous task journal outlives its closed root stream" `Quick
+            test_native_task_journal_autonomous_closed_root
         ; test_case "later command witness cannot adopt an unattributed task owner" `Quick
             test_task_binding_does_not_adopt_an_earlier_unattributed_call
         ; test_case "task metadata retains closed native owner without flushing model content" `Quick

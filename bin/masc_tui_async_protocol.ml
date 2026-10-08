@@ -109,6 +109,12 @@ type currency_authority_request = {
   car_identity : Masc.Tui_decode.server_identity option;
 }
 
+(* What the resume preflight learned about the Keeper's owner before the queue
+   snapshot is read. *)
+type resume_confirmation =
+  | Owner_resumed
+  | Owner_already_active
+
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
   | Workspace_identity_unconfirmed of string
@@ -116,6 +122,7 @@ type async_msg =
       { action : string; detail : string; workspace : workspace_input_identity option }
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
+  | Keeper_queue_resume_confirmed of string * int * resume_confirmation
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
@@ -161,6 +168,17 @@ type async_msg =
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
+  (* The confirm-queue read that rode a refresh was refused because the same
+     pass confirmed the workspace identity first ([Approval.Flow.invalidate]
+     runs inside [apply_server_identity_reading]). The surface that draws the
+     count re-reads it now, on the same ticket-generation terms every other
+     approval listing rides. *)
+  | Approvals_listing_superseded
+  | Approvals_summary_loaded of
+      Masc_tui_types.Snapshot_read.request
+      * Masc_tui_operator_projection.Listing_order.ticket
+      * Masc.Tui_decode.server_identity
+      * (approval_snapshot, string) result
   | Surface_composer_released
   | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of

@@ -577,13 +577,22 @@ let test_board_write_routes_reject_foreign_workspace () =
   let seed = match board_post_by_title "workspace seed" with
     | Some post -> post | None -> fail "seed post missing" in
   let post_id = Masc.Board.Post_id.to_string seed.id in
+  let status, _ = post "/api/v1/tools/masc_board_comment" current
+      [ "post_id", `String post_id; "content", `String "workspace seed comment" ] in
+  check int "matching workspace creates comment" 201 status;
+  let comment_id = match Masc.Board_dispatch.get_comments ~post_id with
+    | Ok [comment] -> Masc.Board.Comment_id.to_string comment.id
+    | Ok _ -> fail "expected one seed comment"
+    | Error error -> fail (Masc.Board.show_board_error error) in
   let writes =
     [ "/api/v1/tools/masc_board_post", 201,
       [ "title", `String "workspace guarded write"; "body", `String "new post" ]
     ; "/api/v1/tools/masc_board_comment", 201,
       [ "post_id", `String post_id; "content", `String "guarded comment" ]
     ; "/api/v1/tools/masc_board_vote", 200,
-      [ "post_id", `String post_id; "direction", `String "up" ] ] in
+      [ "post_id", `String post_id; "direction", `String "up" ]
+    ; "/api/v1/tools/masc_board_comment_vote", 200,
+      [ "comment_id", `String comment_id; "direction", `String "up" ] ] in
   List.iter (fun (path, _, fields) ->
     List.iter (fun workspace ->
       let status, _ = post path workspace fields in
@@ -592,11 +601,21 @@ let test_board_write_routes_reject_foreign_workspace () =
   check bool "refused post has no effect" true
     (Option.is_none (board_post_by_title "workspace guarded write"));
   (match Masc.Board_dispatch.get_comments ~post_id with
-   | Ok comments -> check int "refused comment has no effect" 0 (List.length comments)
+   | Ok [comment] -> check string "refused comment has no effect" comment_id
+       (Masc.Board.Comment_id.to_string comment.id)
+   | Ok _ -> fail "refused comment changed the seed comment set"
+   | Error error -> fail (Masc.Board.show_board_error error));
+  (match Masc.Board_dispatch.current_vote_for_comment ~voter:"workspace-writer" ~comment_id with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "refused workspace changed the comment vote"
    | Error error -> fail (Masc.Board.show_board_error error));
   List.iter (fun (path, status, fields) ->
     let actual, _ = post path current fields in
-    check int (path ^ " accepts matching workspace") status actual) writes
+    check int (path ^ " accepts matching workspace") status actual) writes;
+  match Masc.Board_dispatch.current_vote_for_comment ~voter:"workspace-writer" ~comment_id with
+  | Ok (Some Masc.Board.Up) -> ()
+  | Ok (Some Masc.Board.Down) | Ok None -> fail "matching workspace did not store comment vote"
+  | Error error -> fail (Masc.Board.show_board_error error)
 ;;
 
 let test_board_write_routes_use_authenticated_actor () =

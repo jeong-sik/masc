@@ -556,6 +556,43 @@ let walk_real ~dir slots =
     ~requirement ~prompt:"Judge this." ()
 ;;
 
+(* Antigravity takes a schema-bound answer only as the arguments of its
+   [finish] tool. Told to return a JSON value the model writes one, the CLI
+   refuses it, and the whole prompt goes out a second time. *)
+let test_an_antigravity_slot_is_told_to_answer_through_finish () =
+  with_quota_fixture (fun ~dir:_ ~path:_ ~marker:_ ~claude_cli:_ ~load_config:_ ~env:_ ->
+    let prompt_for runtime_id =
+      let seen = ref None in
+      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+        seen := Some prompt;
+        Ok {|{"verdict":"pass"}|}
+      in
+      match run ~runner ~runtime_id () with
+      | Error failure -> failf "must succeed: %s" (Cli_oneshot.failure_to_string failure)
+      | Ok _ ->
+        (match !seen with
+         | Some prompt -> prompt
+         | None -> fail "the runner never saw a prompt")
+    in
+    let written = Exact_output.schema_instruction_text requirement in
+    let schema = Exact_output.domain_schema requirement in
+    let through_finish = Runtime_antigravity.structured_output_instruction ~schema in
+    let antigravity = prompt_for b in
+    check bool "an Antigravity slot ends with the finish-tool sentence" true
+      (String.ends_with ~suffix:through_finish antigravity);
+    check bool "and is not told to write the value" false
+      (String.ends_with ~suffix:written antigravity);
+    check bool "the sentence ends with the schema the flag carries" true
+      (String.ends_with ~suffix:(Yojson.Safe.to_string schema) through_finish);
+    check bool "and differs from the sentence for a written value" false
+      (String.equal through_finish written);
+    List.iter
+      (fun runtime_id ->
+         check bool (runtime_id ^ " keeps the Agent Core sentence") true
+           (String.ends_with ~suffix:written (prompt_for runtime_id)))
+      [ a1; c ])
+;;
+
 let test_real_quota_reorders_siblings_and_next_walk () =
   with_quota_fixture (fun ~dir ~path:_ ~marker ~claude_cli:_ ~load_config:_ ~env:_ ->
     let require_b = function
@@ -718,6 +755,10 @@ let () =
             "the prompt keeps its instruction alongside the schema"
             `Quick
             test_the_prompt_keeps_its_instruction_alongside_the_schema
+        ; test_case
+            "an Antigravity slot is told to answer through finish"
+            `Quick
+            test_an_antigravity_slot_is_told_to_answer_through_finish
         ; test_case
             "a fenced answer is invalid output, not repaired"
             `Quick

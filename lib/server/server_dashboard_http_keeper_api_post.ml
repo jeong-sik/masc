@@ -1566,23 +1566,39 @@ let persist_directive_pause ~config ~name =
       ();
     Error detail
 
+type directive_request_error =
+  | Invalid_directive_request of string
+  | Directive_workspace_changed
+
+let parse_workspace_directive ~config parse body_str =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    match Workspace.validate_expected_workspace ~config json with
+    | Error Workspace.Invalid_workspace_precondition ->
+      Error (Invalid_directive_request "invalid expected_workspace precondition")
+    | Error Workspace.Workspace_precondition_failed -> Error Directive_workspace_changed
+    | Ok json -> Result.map_error (fun detail -> Invalid_directive_request detail) (parse json)
+  with Yojson.Json_error detail ->
+    Error (Invalid_directive_request ("invalid json: " ^ detail))
+
+let respond_directive_request_error ~request reqd = function
+  | Invalid_directive_request detail ->
+    respond_error ~status:`Bad_request ~request ~ok:false reqd detail
+  | Directive_workspace_changed ->
+    respond_error ~status:`Conflict ~request ~ok:false reqd
+      "workspace changed since identity probe; Keeper directive was not applied"
+
 let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_directive in
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let parsed =
-      try
-        let json = Yojson.Safe.from_string body_str in
-        parse_keeper_directive_json json
-      with Yojson.Json_error e ->
-        Error (Printf.sprintf "invalid json: %s" e)
-    in
-    match parsed with
-    | Error message -> respond_error ~ok:false reqd message
+    let config = Mcp_server.workspace_config state in
+    (* Admission and every effect below use this same workspace snapshot. *)
+    match parse_workspace_directive ~config parse_keeper_directive_json body_str with
+    | Error error -> respond_directive_request_error ~request:req reqd error
     | Ok (Resume_owner request) ->
-      let config = Mcp_server.workspace_config state in
       (match run_resume_owner config ~name request with
        | Error error ->
          Log.Keeper.warn
@@ -1625,7 +1641,6 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
               response
               reqd))
     | Ok (Plain_directive plain_directive) ->
-      let config = Mcp_server.workspace_config state in
       let action_str = plain_directive_action plain_directive in
       let directive = plain_directive_to_keeper_directive plain_directive in
       let read_result = Keeper_meta_store.read_meta config name in
@@ -1655,7 +1670,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
             reqd
         | Ok () ->
           let resolved_agent_name = name in
-          Keeper_keepalive.process_directive
+          Keeper_keepalive.process_directive ~base_path:config.base_path
             ~agent_name:resolved_agent_name
             directive;
           (match plain_directive with
@@ -1735,20 +1750,10 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
     [{targets: [{name, operator_operation_id}, ...]}] fences.
     Cache invalidation still runs once for the whole batch. *)
 let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
-  let parsed =
-    try
-      let json = Yojson.Safe.from_string body_str in
-      parse_bulk_directive_json json
-    with Yojson.Json_error e ->
-      Error (Printf.sprintf "invalid json: %s" (String.escaped e))
-  in
-  match parsed with
-  | Error msg ->
-      Http.Response.json_value ~status:`Bad_request
-        (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
-        reqd
+  let config = Mcp_server.workspace_config state in
+  match parse_workspace_directive ~config parse_bulk_directive_json body_str with
+  | Error error -> respond_directive_request_error ~request:req reqd error
   | Ok parsed ->
-      let config = Mcp_server.workspace_config state in
       let action_str, requested_count, results =
         match parsed with
         | Bulk_resume_owner targets ->
@@ -1809,7 +1814,7 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
                | Ok () ->
                  let resolved_agent_name = name
                  in
-                 Keeper_keepalive.process_directive
+                 Keeper_keepalive.process_directive ~base_path:config.base_path
                    ~agent_name:resolved_agent_name
                    directive;
                  `Assoc [ "name", `String name; "ok", `Bool true ])

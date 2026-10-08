@@ -108,7 +108,14 @@ jobs:
           # running the suite needs: dune-project gates alcotest,
           # qcheck-core, qcheck-alcotest and bisect_ppx behind :with-test.
           install-flags: --with-test
-          os-packages: ${{ inputs.minimal && 'jq ripgrep' || 'jq ripgrep poppler-utils ffmpeg libreoffice-impress python3-venv' }}
+          os-packages: jq ripgrep
+
+      # Real PDF, presentation and video inspection run on the host. Keep
+      # their dependencies separate from opam and omit optional apt recommends.
+      # The preceding dependency action has already refreshed the apt index.
+      - name: Install native media verification tools
+        if: inputs.minimal == false
+        run: sudo apt-get install -y --no-install-recommends poppler-utils ffmpeg libreoffice-impress python3-venv
 
       - name: Prepare managed presentation verification inputs
         if: inputs.minimal == false
@@ -131,12 +138,29 @@ jobs:
         with:
           arch: amd64
 
+      # Full suites already selected a Buildx builder while preparing the shim.
+      # Targeted non-minimal suites also need one for the sandbox image cache.
+      - name: Set up image cache for targeted suites
+        if: inputs.minimal == false && inputs.suite != ''
+        uses: docker/setup-buildx-action@v4
+
       # The release lane exercises the embedded recipe through the shipped CLI.
       # Behavior only needs the same checked-in image; preparing it must not
       # force a separate server build before Dune schedules the full suite.
       - name: Prepare Keeper sandbox image
         if: inputs.minimal == false
-        run: docker build -t masc-sandbox-test:ci - < sandbox-images/base/Dockerfile
+        uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_SUMMARY: 'false'
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: ./sandbox-images/base
+          file: ./sandbox-images/base/Dockerfile
+          tags: masc-sandbox-test:ci
+          load: true
+          pull: true
+          cache-from: type=gha,scope=masc-keeper-sandbox-${{ runner.arch }}
+          cache-to: type=gha,scope=masc-keeper-sandbox-${{ runner.arch }},mode=min,ignore-error=true
 
       - name: Test
         id: tests

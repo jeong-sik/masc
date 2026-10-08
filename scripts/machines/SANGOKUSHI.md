@@ -169,6 +169,15 @@ screen matched the pre-save screen. Check any `unsaved` entries before claiming
 files reached disk. In this game, Esc often does nothing; an empty Enter at the
 save/load submenu returned to the command prompt.
 
+Keep the ending assets with the game, including `END.EXE`, `ENDSTIL.DAT`,
+`KOEI.DAT` and `FMDRV.COM`. A separate probe on the newer native DOS worker
+used ordinary DOS `EXEC` calls to load the sound driver and unchanged ending
+executable. It displayed the character scenes, Korean narrative and copyright
+screen, then exited with code 0 after the observed final key prompt. This tests
+the renderer and assets; it does not demonstrate a victorious campaign or the
+normal `MAIN.EXE` transition into the ending. Boot normal play with `KOEI.COM`:
+directly loading `END.EXE` is not equivalent to the game's parent/driver setup.
+
 ## Three different ways to preserve progress
 
 | Method | What it preserves | How to resume |
@@ -216,4 +225,5 @@ saved slot and inserting B when requested, the game returned to Cao Pi,
 January 220, province 10, gold 950 and land 72. Return then opened the normal
 province command menu. Both checkpoint continuation and exported in-game-save
 loading are demonstrated for these tested workers and media. No complete
-winning campaign or intended ending is established by these observations.
+winning campaign or its normal ending transition is established by these
+observations.

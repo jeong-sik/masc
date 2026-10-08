@@ -48,6 +48,7 @@ let operation_of_misc : Tool_schemas_misc.misc_operation -> operation option = f
   | Tool_schemas_misc.Misc_browser_instruct
   | Tool_schemas_misc.Misc_msx_load
   | Tool_schemas_misc.Misc_msx_eject
+  | Tool_schemas_misc.Misc_msx_export_disk
   | Tool_schemas_misc.Misc_msx_save
   | Tool_schemas_misc.Misc_msx_restore
   | Tool_schemas_misc.Misc_msx_change_disk

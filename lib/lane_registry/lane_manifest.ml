@@ -95,6 +95,7 @@ let lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builti
   | Tool_schemas_misc.Misc_browser_instruct -> [ Lane_id.Browser Browser_lane.Lane_name.Stagehand ]
   | Tool_schemas_misc.Misc_msx_load
   | Tool_schemas_misc.Misc_msx_eject
+  | Tool_schemas_misc.Misc_msx_export_disk
   | Tool_schemas_misc.Misc_msx_save
   | Tool_schemas_misc.Misc_msx_restore
   | Tool_schemas_misc.Misc_msx_change_disk

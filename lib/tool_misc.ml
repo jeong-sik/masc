@@ -256,6 +256,7 @@ let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args
       Some (Tool_misc_browser_lane.handle_instruct ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_msx_load
   | Some Tool_schemas_misc.Misc_msx_change_disk
+  | Some Tool_schemas_misc.Misc_msx_export_disk
   | Some Tool_schemas_misc.Misc_msx_save
   | Some Tool_schemas_misc.Misc_msx_restore
   | Some Tool_schemas_misc.Misc_msx_eject
@@ -331,6 +332,7 @@ let is_read_only = function
   (* Loading, ejecting, pressing and stepping change the shared machine. *)
   | Tool_schemas_misc.Misc_msx_load
   | Tool_schemas_misc.Misc_msx_eject
+  | Tool_schemas_misc.Misc_msx_export_disk
   | Tool_schemas_misc.Misc_msx_save
   | Tool_schemas_misc.Misc_msx_restore
   | Tool_schemas_misc.Misc_msx_change_disk

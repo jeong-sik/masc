@@ -19,6 +19,7 @@ val browser_instruct : Masc_domain.tool_schema
 (** MSX lane tools (RFC-0439 §3.5), read from config/tools/masc_msx_*.toml. *)
 val msx_load : Masc_domain.tool_schema
 val msx_eject : Masc_domain.tool_schema
+val msx_export_disk : Masc_domain.tool_schema
 val msx_save : Masc_domain.tool_schema
 val msx_restore : Masc_domain.tool_schema
 val msx_change_disk : Masc_domain.tool_schema

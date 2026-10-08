@@ -24,3 +24,12 @@ and run. Actual games and installed-host reconciliation remain separate checks. 
 [tool ownership](../../docs/design/lane-addon-tool-exports.md) for integration
 status and SDK metadata limits. Public MCP version negotiation belongs to the
 host; the private worker negotiates the version supported by its installed SDK.
+
+
+Guest floppy writes remain in the machine until checkpointed or exported.
+`masc_msx_export_disk` publishes the currently mounted disk to a new `.dsk` in
+`carts/`, refusing existing names and preserving source images. Export a game's
+data floppy after its save finishes, before swapping it out, to load that save
+after a fresh boot independently of an emulator checkpoint. See the
+[local play guide](../../scripts/machines/README.md) for the receipt and path
+ownership boundary.

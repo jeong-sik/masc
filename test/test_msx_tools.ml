@@ -796,6 +796,71 @@ let test_disk_swap_retains_guest_writes_and_checkpoint () =
     (In_channel.with_open_bin b In_channel.input_all).[512]
 ;;
 
+let test_disk_export_survives_fresh_boot () =
+  with_workspace @@ fun base_path ->
+  let ledger_dir, a, b = disk_swap_fixture base_path in
+  let call name args = dispatch ~base_path name args in
+  let catalog = Filename.concat ledger_dir "carts" in
+  Sys.mkdir catalog 0o755;
+  check bool "mount data disk" true
+    (is_completed (call "masc_msx_change_disk" ["disk", `String b]));
+  check bool "guest writes data disk" true
+    (is_completed (call "masc_msx_press"
+      ["keys", `List [`String "return"]; "hold_frames", `Int 1; "frames", `Int 2]));
+  read_guest_disk '!';
+  let before = Msx_lane.screen () |> lane_observation "before export" in
+  let identity = incarnation () and ledger = Msx_lane.ledger () in
+  let mark = Msx_lane.current_publication () in
+  let export name = call "masc_msx_export_disk" ["filename", `String name] in
+  (* Preservation stays available when new execution has been disabled. *)
+  Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Disabled));
+  let result = export "campaign-data.dsk" in
+  check bool "export succeeds" true (is_completed result);
+  check int "export frame receipt" before.frame (frame_of result);
+  check string "export does not replace machine" identity (incarnation ());
+  check bool "input ledger is untouched" true (ledger = Msx_lane.ledger ());
+  check bool "publication is untouched" true (mark = Msx_lane.current_publication ());
+  let destination = Filename.concat catalog "campaign-data.dsk" in
+  let contents = In_channel.with_open_bin destination In_channel.input_all in
+  check char "export contains guest write" '!' contents.[512];
+  check (option int) "receipt byte count" (Some (String.length contents))
+    (match member "byte_length" (Tool_result.data result) with Some (`Int n) -> Some n | _ -> None);
+  check (option string) "receipt digest identifies bytes"
+    (Some Digestif.SHA256.(to_hex (digest_string contents)))
+    (match member "sha256" (Tool_result.data result) with Some (`String s) -> Some s | _ -> None);
+  check (option string) "receipt filename" (Some "campaign-data.dsk")
+    (match member "filename" (Tool_result.data result) with Some (`String s) -> Some s | _ -> None);
+  check char "source remains untouched" 'B' (In_channel.with_open_bin b In_channel.input_all).[512];
+  check bool "existing export refused" true (rejected (export "campaign-data.dsk"));
+  check string "existing bytes preserved" contents (In_channel.with_open_bin destination In_channel.input_all);
+  List.iter (fun name -> check bool ("unsafe filename refused: " ^ name) true
+    (rejected (export name))) ["../escape.dsk"; "/tmp/escape.dsk"; "data.rom"; "data.DSK"; ".dsk"; "a/b.dsk"];
+  let dangling = Filename.concat catalog "dangling.dsk" in
+  Unix.symlink (Filename.concat base_path "absent-target") dangling;
+  check bool "dangling symlink is not overwritten" true (rejected (export "dangling.dsk"));
+  check bool "dangling target not created" false (Sys.file_exists (Filename.concat base_path "absent-target"));
+  let held_catalog = catalog ^ "-held" in
+  Sys.rename catalog held_catalog;
+  Unix.symlink held_catalog catalog;
+  check bool "symlinked catalog refused" true (rejected (export "escape.dsk"));
+  check bool "catalog target not written" false (Sys.file_exists (Filename.concat held_catalog "escape.dsk"));
+  Unix.unlink catalog;
+  Sys.rename held_catalog catalog;
+  check int "all exports preserve clock" before.frame
+    (Msx_lane.screen () |> lane_observation "after exports").frame;
+  Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+  ignore (Msx_lane.eject () |> lane_observation "eject");
+  check bool "missing machine refused" true (rejected (export "no-machine.dsk"));
+  ignore (Msx_lane.load ~ledger_dir ~roms_dir:(Some (Filename.concat base_path "synthetic-bios"))
+    ~cart_path:None ~disk_path:(Some a) |> lane_observation "fresh boot");
+  check bool "fresh boot loads exported catalog disk" true
+    (is_completed (call "masc_msx_change_disk" ["disk", `String "campaign-data.dsk"]));
+  read_guest_disk '!';
+  ignore (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None
+    |> lane_observation "BIOS-only boot");
+  check bool "no disk refused" true (rejected (export "no-disk.dsk"))
+;;
+
 let test_disk_backup_failure_preserves_machine () =
   with_workspace @@ fun base_path ->
   let ledger_dir, _, b = disk_swap_fixture base_path in
@@ -1016,6 +1081,7 @@ let test_registration () =
         (Option.is_some (Embedded_config.read ("tools/" ^ name ^ ".toml"))))
     [ (Tool_schemas_misc.Misc_msx_load, "masc_msx_load", false)
     ; (Tool_schemas_misc.Misc_msx_change_disk, "masc_msx_change_disk", false)
+    ; (Tool_schemas_misc.Misc_msx_export_disk, "masc_msx_export_disk", false)
     ; (Tool_schemas_misc.Misc_msx_save, "masc_msx_save", false)
     ; (Tool_schemas_misc.Misc_msx_restore, "masc_msx_restore", false)
     ; (Tool_schemas_misc.Misc_msx_eject, "masc_msx_eject", false)
@@ -1345,6 +1411,7 @@ let () =
         ; test_case "disk image loads into the drive" `Quick test_disk_load
         ; test_case "checkpoint survives eject and rejects corruption" `Quick test_checkpoint_roundtrip
         ; test_case "disk swaps retain guest writes across checkpoint restore" `Quick test_disk_swap_retains_guest_writes_and_checkpoint
+        ; test_case "exported guest disk survives fresh boot" `Quick test_disk_export_survives_fresh_boot
         ; test_case "failed disk backup preserves machine and ledger" `Quick test_disk_backup_failure_preserves_machine
         ; test_case "failed disk boot preserves machine and ledger" `Quick test_rejected_disk_preserves_machine
         ; test_case "a press that raises releases its keys" `Quick test_press_that_raises_releases_its_keys

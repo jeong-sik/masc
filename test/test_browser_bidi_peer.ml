@@ -171,9 +171,40 @@ let test_held_open_completion outcome () =
         Eio.Promise.resolve eof_u read));
       Eio.Time.with_timeout_exn clock 2. (fun ()->
         let actual=Peer.with_connection ~env ~timeout:1.
-          ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port) (fun _->outcome) in
+          ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port) (fun ~ended:_ _->outcome) in
         check (result unit string) "callback result preserved" outcome actual;
         check bool "socket EOF without any extra protocol write" true (Eio.Promise.await eof))))
+(* The window a scripted case gives the connection to attach and answer, and
+   the bound on the whole case. *)
+let scripted_timeout_sec = 1.
+let scripted_case_deadline_sec = 2.
+(* Firefox going away is told to whoever holds the connection, also when no
+   command is in flight: a host waiting for work has to learn that the
+   browser it serves is gone. *)
+let test_a_closed_socket_ends_the_connection () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let clock=Eio.Stdenv.clock env in
+      let listener=Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:1
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
+      let port=match Eio.Net.listening_addr listener with
+        | `Tcp (_,port)->port
+        | `Unix _->fail "TCP expected" in
+      let close,close_u=Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun ()->Eio.Switch.run (fun peer_sw ->
+        let flow,_=Eio.Net.accept ~sw:peer_sw listener in
+        let head=Ws_direct_eio.Driver.read_head ~clock flow in
+        let key=match Ws_direct_eio.Handshake.request_key head with Ok key->key|Error e->fail e in
+        Eio.Flow.copy_string (Ws_direct_eio.Handshake.server_response ~key) flow;
+        Eio.Promise.await close));
+      Eio.Time.with_timeout_exn clock scripted_case_deadline_sec (fun ()->
+        let actual=Peer.with_connection ~env ~timeout:scripted_timeout_sec
+          ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port)
+          (fun ~ended _->
+            check bool "attached and idle: not ended" true (Eio.Promise.peek ended=None);
+            Eio.Promise.resolve close_u ();
+            Error ("ended: " ^ Eio.Promise.await ended)) in
+        check (result unit string) "the holder is told why" (Error "ended: BiDi EOF") actual)))
 (* A peer that refuses the WebSocket upgrade. ws-direct raises [Failure] for
    the refused handshake; the connection returns it as its error rather than
    letting it out of [with_connection], where the native host would end on an
@@ -193,7 +224,7 @@ let test_refused_upgrade_is_the_connections_error () =
       match
         Peer.with_connection ~env ~timeout:1.
           ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port)
-          (fun _->used:=true;Ok ())
+          (fun ~ended:_ _->used:=true;Ok ())
       with
       | Error _->check bool "no peer was handed to the callback" false !used
       | Ok ()->fail "a refused upgrade produced a connection"
@@ -303,7 +334,8 @@ let test_peer_serves_what_the_lane_table_says () =
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity];
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
     test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
-    test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error];
+    test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error;
+    test_case "a closed socket ends the connection for its holder" `Quick test_a_closed_socket_ends_the_connection];
   "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "document source is the shared document helper" `Quick test_document_source;
     test_case "a document still loading is not answered for" `Quick test_document_still_loading;

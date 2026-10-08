@@ -72,10 +72,29 @@ two browsers. A request that names no `clientId` is then refused as
 `ambiguous_browser_clients`; a Keeper picks the `webdriver_bidi` connection
 from the list and keeps its `clientId` for the task.
 
-The host runs in the foreground until it is stopped. It also ends by itself
-when a command's outcome is unknown, or when a poll or a result does not reach
-the server, so restarting the MASC server ends it. It does not retry. The
-reason goes to the host's own log output and is not reported to the server.
+The host runs in the foreground until it is stopped. Restarting the MASC
+server does not end it. A poll the server did not answer is asked again after
+five seconds, at the port the workspace's `connection.toml` names once that
+port answers, and a result that may not have arrived is sent again before the
+next poll. The restarted server sees the same client ID, and Firefox is not
+asked for a new session.
+
+Sending a result again delivers it only when the first attempt was never
+handled. The server takes a result once, so when the first attempt arrived
+and only its answer was lost, the second is refused and the host logs that.
+A restarted server does not know requests the earlier process issued; a
+result for one of those is lost whichever attempt arrives.
+
+It ends by itself in three cases, and says which in its own log output:
+
+- Firefox closed the BiDi connection, or the connection failed. This ends a
+  host that is waiting for work too; a command the connection ended under is
+  answered first.
+- A command's outcome is unknown.
+- The server refuses the client's registration. It does so, for one, once it
+  has retired that client after two minutes without a poll.
+
+The reason is not reported to the server.
 
 Attaching again takes both steps, Firefox first. The host does not end the
 BiDi session it created, the session stays in Firefox after the host is gone,

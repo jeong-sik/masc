@@ -71,6 +71,17 @@ terminal palettes supply the neutral sidebar band.
 These are presentation roles. Existing keyboard bindings, actor attribution,
 mutation confirmation, data ownership and paging semantics remain authoritative.
 
+## Working footer
+
+Working surfaces show their controls, action outcomes and actionable warnings.
+They do not repeat other Keepers' activity or passive connection diagnostics at
+the bottom of each screen. System's identity row contains the server version,
+commit, port, age and workspace paths. Workspace/build disagreements and armed
+or running operator actions remain global warnings.
+
+The [consistency ledger](CONSISTENCY-PROGRESS.md) tracks the remaining surfaces
+and separates source changes from observed executable behavior.
+
 ## Implementation scope
 
 `sidebar_line`, `sidebar_rule` and `sidebar_heading` in

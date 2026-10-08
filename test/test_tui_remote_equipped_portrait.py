@@ -295,8 +295,8 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             # Hold an already-dispatched Boot's paused-owner response across
             # the boundary. The remaining Resume/Boot plan belongs to its
             # original workspace, even though C names the same Keeper.
-            # Keep the exact authority path in the footer for this boundary
-            # proof; the earlier 99-column portrait pixel checks stay intact.
+            # Keep room for the exact System authority path during the held
+            # response; the earlier portrait pixel checks stay intact.
             _keyboard_harness.resize_and_wait(process, fd, output, rows=70, columns=300, needle=b"Identity")
             boot_armed.set()
             os.write(fd, b"p")
@@ -309,9 +309,12 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             roster.publish("c-current")
             c_base = str(evidence / "another-remote-workspace")
             remote_identity.publish(c_base)
-            screen_is(lambda text: b"Base: " + c_base.encode() in text
-                      and b"MASC Keepers" in text,
+            screen_is(lambda text: b"MASC Keepers" in text and b"Identity" not in text,
                       "C authority did not withdraw B's detail selection")
+            _keyboard_harness.palette_go(process, fd, output, b"go System", b"MASC System")
+            screen_is(lambda text: b"base " + c_base.encode() in text,
+                      "System did not show the applied C authority while B Boot was held")
+            _keyboard_harness.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
             # Row withdrawal returns the old detail to the list. Select C's
             # actual row and reopen Info, where Current failure is rendered.
             _keyboard_harness.select_keeper_row(process, fd, output, keeper.encode())

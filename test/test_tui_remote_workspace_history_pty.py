@@ -406,11 +406,12 @@ def scoped_roster_authority(binary: str, *, matching_c: bool = False) -> None:
             _keyboard_harness.resize_and_wait(process, fd, output, rows=32, columns=500,
                              needle=b"MASC " + detour, controls=(_keyboard_harness.FULL_REDRAW,))
             os.write(fd, b"r")
-            # While a scoped read is held the full revalidation still owns
-            # /health. Its exact Base footer is the applied identity barrier;
-            # the wider frame keeps both workspace paths visible.
+            # While the scoped roster remains held, System reads the applied
+            # health identity. Its exact base is the authority barrier; opening
+            # this view does not release the old scoped response.
             expected_base = _base.encode() if matching_c else b"/fixture-workspace-c"
-            await_screen(lambda text: b"Base: " + expected_base in text
+            _keyboard_harness.palette_go(process, fd, output, b"go System", b"MASC System")
+            await_screen(lambda text: b"base " + expected_base in text
                          and (not matching_c or b"[workspace mismatch]" not in text),
                          "full C identity reading did not become current")
             c_boundary = len(output)

@@ -62,6 +62,14 @@ type status_item =
       }
   | Port of int
 
+(* A working surface needs decisions and warnings. Passive diagnostics and
+   other Keepers' activity have their own System/Activity surfaces. *)
+let needs_operator = function
+  | Workspace_mismatch _ | Server_worktree_binary | Tui_build_mismatch _
+  | Keeper_action_armed _ | Keeper_action_running _ -> true
+  | Refresh_interval _ | Server_build _ | Server_base_path _
+  | Keeper_answering _ | Keeper_answered _ | Port _ -> false
+
 (* Enough of the commit to tell two checkouts apart, which is the question
    this answers: [Port: 8935] alone is the same on every build that ever
    served that port. *)
@@ -647,9 +655,9 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
        if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
        else Masc_tui_message_layout.fit_width rendered room ^ more_key)
 
-(** [line ~dim ~reset ~max_cells ~port ~hints] is one footer line, terminated by a
-    newline. [Port] closes every footer and is appended here; [status] carries
-    only the extra facts a surface has, in the order they should read.
+(** [line ~dim ~reset ~max_cells ~hints] is one footer line, terminated by a
+    newline. A diagnostic caller can explicitly supply [port]; normal working
+    surfaces keep connection identity on System.
 
     [literal_prefix] carries surface status such as a search query. Its spaces
     are preserved while the separately supplied hints are split into items.
@@ -665,11 +673,12 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
     A conflict notice is the exception: it is rendered in front of the hints
     ({!leads_the_row}) rather than left in the tail, so it outlives the keys
     instead of going before them. *)
-let line ?literal_prefix ?action_text ?position ?(status = []) ~dim ~reset
-    ~max_cells ~port ~hints () =
+let line ?literal_prefix ?action_text ?position ?(status = []) ?port ~dim ~reset
+    ~max_cells ~hints () =
   let hints = prepare_hints hints in
   let statuses =
-    List.filter_map status_item_projection (status @ [ Port port ])
+    List.filter_map status_item_projection
+      (status @ Option.to_list (Option.map (fun port -> Port port) port))
   in
   let conflicts, statuses = List.partition leads_the_row statuses in
   let conflicts =

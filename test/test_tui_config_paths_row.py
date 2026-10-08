@@ -1,57 +1,72 @@
-"""The Config paths row names the base path once."""
+"""System keeps workspace and server identities readable across widths."""
 import os
 import sys
 
 import tui_keyboard_harness as h
 
-
-
 BASE_LABEL = b"  base "
 # What the row draws for a masc root that sits under the base path: the label
 # beside it, not the path again.
 NESTED = b"masc <base>/.masc"
-AGE_LABEL = b"binary "
+SERVER_LABEL = b"  server "
+VERSION = "0.51.2"
+COMMIT = "abcdef0123456789abcdef0123456789abcdef0123"
 
 
-def paths_row(rows: dict[int, bytes], columns: int) -> bytes:
-    index = h.screen_row_of(rows, BASE_LABEL)
+def identity_row(rows: dict[int, bytes], label: bytes, columns: int) -> bytes:
+    index = h.screen_row_of(rows, label)
     if index < 0:
-        raise AssertionError(f"at {columns} columns no row carries the base path")
+        raise AssertionError(f"at {columns} columns no row carries {label!r}")
     return rows[index].rstrip()
 
 
 def run(executable: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
+    fixtures["/health"] = (200, {
+        "version": VERSION,
+        "build": {"binary_commit": COMMIT, "binary_commit_age_seconds": 7200},
+    })
 
     def interact(process, fd, _slave, output, base_path):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go System", b"MASC System")
-        for columns in (120, 100):
+        port = process.args[process.args.index("--port") + 1].encode()
+        for columns in (120, 100, 60):
             drawn = h.resize_and_wait(process, fd, output, rows=30,
                                       columns=columns, needle=BASE_LABEL,
                                       controls=(h.FULL_REDRAW,))
-            row = paths_row(h.screen_rows(drawn), columns)
-            if NESTED not in row:
+            rows = h.screen_rows(drawn)
+            paths = identity_row(rows, BASE_LABEL, columns)
+            server = identity_row(rows, SERVER_LABEL, columns)
+            if NESTED not in paths:
                 raise AssertionError(
                     f"at {columns} columns the masc root under the base path was "
-                    f"spelled in full: {row!r}")
-            # The collapse is there to give the base path room, not to take the
-            # row's third fact with it.
-            if AGE_LABEL not in row:
-                raise AssertionError(
-                    f"at {columns} columns the row lost the binary age: {row!r}")
+                    f"lost or repeated the full base: {paths!r}")
+            # The temporary directory's unique suffix distinguishes this
+            # workspace even when the middle of its path is folded.
+            suffix = os.path.basename(base_path).rsplit("-", 1)[-1].encode()
+            if suffix not in paths:
+                raise AssertionError(f"at {columns} columns the base path lost its identity: {paths!r}")
+            for fact in (VERSION.encode(), COMMIT[:7].encode(), b":" + port, b"2h"):
+                if fact not in server:
+                    raise AssertionError(f"at {columns} columns server identity lost {fact!r}: {server!r}")
+            for row in (paths, server):
+                if h.fixture_cell_width(row.decode()) > columns:
+                    raise AssertionError(f"at {columns} columns identity row overflows: {row!r}")
+            if h.screen_row_of(rows, SERVER_LABEL) != h.screen_row_of(rows, BASE_LABEL) + 1:
+                raise AssertionError(f"at {columns} columns the identity is not two adjacent rows")
             base = base_path.encode()
-            if row.count(base) > 1:
+            if paths.count(base) > 1:
                 raise AssertionError(
                     f"at {columns} columns the base path is drawn "
-                    f"{row.count(base)} times: {row!r}")
+                    f"{paths.count(base)} times: {paths!r}")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,
-                            description="Config paths row across widths",
+                            description="System identity rows across widths",
                             interact=interact, http_fixtures=fixtures)
 
 
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
-    print("Config paths row names the base once: PASS")
+    print("System identity rows preserve workspace and server facts: PASS")

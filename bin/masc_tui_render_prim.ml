@@ -551,16 +551,6 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     match state.server_identity with
     | None -> []
     | Some identity ->
-        (* The health probe owns the exact path. Escape terminal controls, but
-           do not trim or rewrite characters that may belong to the path. *)
-        [ Masc_tui_footer.Server_build
-            { version = identity.Tui_decode.sid_version
-            ; commit = identity.Tui_decode.sid_binary_commit
-            }
-        ; Masc_tui_footer.Server_base_path
-            (Terminal_text.single_line identity.Tui_decode.sid_base_path)
-        ]
-        @
         (* Only a definite yes warns: an older server that cannot say
            (None) must not read as either lane. *)
         (match identity.Tui_decode.sid_executable_in_worktree with
@@ -600,66 +590,9 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     | Masc_tui_types.Workspace_identity_unread
     | Masc_tui_types.Workspace_identity_match -> []
   in
-  (* Keepers mid-turn, the one this pane last messaged first: that is the
-     answer the operator who walked away is waiting on. *)
-  let answering =
-    let running =
-      List.filter_map
-        (fun (row : Tui_decode.keeper_turn_row) ->
-          match row.ktr_state with
-          | Tui_decode.Keeper_turn_running { started_at_unix; _ } ->
-              Some (row.ktr_keeper_name, started_at_unix)
-          | Tui_decode.Keeper_turn_idle
-          | Tui_decode.Keeper_turn_unavailable _ -> None)
-        state.keeper_turns
-    in
-    let running =
-      match state.msg_target_keeper_name with
-      | Some target when List.mem_assoc target running ->
-          (target, List.assoc target running)
-          :: List.filter (fun (name, _) -> name <> target) running
-      | Some _ | None -> running
-    in
-    match running with
-    | [] -> []
-    | (_, lead_started_at) :: _ ->
-        (* The lead keeper's elapsed time rides the badge: a turn that has
-           been running for twenty minutes reads as the stall it probably
-           is, from every surface. Clamped so clock skew never counts up
-           from the future. *)
-        let lead_elapsed_s =
-          Some
-            (int_of_float
-               (Float.max 0. (Unix.gettimeofday () -. lead_started_at)))
-        in
-        [ Masc_tui_footer.Keeper_answering
-            { names = List.map fst running; lead_elapsed_s }
-        ]
-  in
-  (* The glow after a finish: the newest one leads, the rest fold into +N.
-     [advance_finishes] already dropped expired entries and keepers that
-     started running again, but a footer drawn between polls still filters
-     by its own clock so the glow dies on time, not on the next poll. *)
-  let answered =
-    let now = Unix.gettimeofday () in
-    match
-      List.filter
-        (fun (_, finished_at) ->
-          now -. finished_at <= Masc_tui_answering.finish_glow_ttl_seconds)
-        state.keeper_turn_finishes
-    with
-    | [] -> []
-    | (name, finished_at) :: rest ->
-        [ Masc_tui_footer.Keeper_answered
-            { name
-            ; seconds_ago = int_of_float (Float.max 0. (now -. finished_at))
-            ; more = List.length rest
-            }
-        ]
-  in
   Masc_tui_footer.line ?literal_prefix ?action_text ?position
-    ~status:(status @ identity @ conflict @ answering @ answered)
-    ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
+    ~status:(List.filter Masc_tui_footer.needs_operator status @ identity @ conflict)
+    ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~hints ()
 
 
 (* The slash word being typed, painted: the run already pressed in the accent,

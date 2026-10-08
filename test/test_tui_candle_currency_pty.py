@@ -395,14 +395,12 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
     baseline = {}
     def core_rows(output):
         # Compare Home decision rows, preserving request identities. The footer
-        # also says m:Usage, but its separately seeded HTTP port is not a body
-        # fact and differs between the off/disabled/error/ready scenarios.
+        # also names navigation actions; exclude it by its quit control so
+        # passive connection telemetry is not required to identify this row.
         end = output.rfind(h.FRAME_END)
         assert end >= 0, "Dashboard projection has no complete frame"
         rows = h.screen_rows(bytes(output[:end + len(h.FRAME_END)]))
         footer = h.screen_row_of(rows, b"q:quit")
-        # At 100 columns the footer hints fill the row and the port suffix is
-        # dropped, so the row is identified by its q:quit hint alone.
         assert footer > 1, rows
         markers = (b"Approval", b"Question", b"Needs your decision",
                    b"Continue", b"Home destinations")

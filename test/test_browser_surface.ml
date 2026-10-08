@@ -85,7 +85,76 @@ let test_tool_input_recovery () =
       check bool "correcting the argument succeeds without reconnecting or changing the page" true
         (match result with Tool_result.Completed _ -> true | _ -> false);
       check string "corrected response retains the observed connection" valid_id
-        Yojson.Safe.Util.(Tool_result.data result |> member "clientId" |> to_string)))
+        Yojson.Safe.Util.(Tool_result.data result |> member "clientId" |> to_string);
+      check string "and says how that browser is reached" "web_extension"
+        Yojson.Safe.Util.(Tool_result.data result |> member "transport" |> to_string);
+      (* A tab list is a bare array from the browser; an object answer may carry
+         fields under the route's names. Either way the Keeper sees one
+         connection, the route's. *)
+      let forged = Eio.Fiber.fork_promise ~sw (fun () ->
+        Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())
+          (`Assoc ["lane",`String "live";"clientId",`String valid_id;"tabId",`Int 1;"mode",`String "elements"])) in
+      let command = match Browser_lane.take_command ~client_info:info ~window_sec:1. with
+        | Ok (Some command) -> command | _ -> fail "the element read did not reach the browser" in
+      ignore (Browser_lane.deliver_result ~client_id ~id:command.id
+        ~payload:(`Assoc ["ok",`Bool true;"data",`Assoc ["tabId",`Int 1;"elements",`List [];
+          "clientId",`String "forged";"transport",`String "carrier_pigeon"]]));
+      let data = Tool_result.data (Eio.Promise.await_exn forged) in
+      check string "a supplied client is replaced by the route's" valid_id
+        Yojson.Safe.Util.(data |> member "clientId" |> to_string);
+      check string "and a supplied transport by the route's" "web_extension"
+        Yojson.Safe.Util.(data |> member "transport" |> to_string);
+      let occurrences needle text =
+        let limit = String.length text - String.length needle in
+        let rec count index found =
+          if index > limit then found
+          else count (index + 1)
+            (if String.sub text index (String.length needle) = needle then found + 1 else found) in
+        count 0 0 in
+      let recorded = Yojson.Safe.to_string data in
+      check int "each name appears once in what the Keeper is told" 2
+        (occurrences {|"clientId":|} recorded + occurrences {|"transport":|} recorded)))
+(* The scene and the screenshot are rebuilt around the route's connection
+   fields, so each names the live connection once, whatever the browser sent
+   under those names. *)
+let test_live_scene_and_capture_state_their_connection () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let client_id = match Browser_lane.client_id_of_string "40000000-0000-4000-8000-000000000001" with
+        | Ok id -> id | Error detail -> fail detail in
+      let info : Browser_lane.client_info =
+        {client_id;browser=Browser_lane.Firefox;version="fixture";transport=Browser_lane.Webdriver_bidi;
+         engine_version="fixture"} in
+      Eio.Switch.on_release sw (fun () -> ignore (Browser_lane.disconnect_client ~client_id));
+      ignore (Browser_lane.take_command ~client_info:info ~window_sec:0.001);
+      let request : Surface.request = {route=Browser_lane.Live_route (Some client_id);tab_id=Some 7} in
+      let forged = ["clientId",`String "forged";"transport",`String "carrier_pigeon"] in
+      let viewport = `Assoc ["documentId",`String "fixture";"width",`Int 800;"height",`Int 600;
+        "scrollX",`Int 0;"scrollY",`Int 0] in
+      let answered name read data =
+        let pending = Eio.Fiber.fork_promise ~sw read in
+        let command = match Browser_lane.take_command ~client_info:info ~window_sec:1. with
+          | Ok (Some command) -> command | _ -> fail (name ^ " did not reach the browser") in
+        ignore (Browser_lane.deliver_result ~client_id ~id:command.id
+          ~payload:(`Assoc ["ok",`Bool true;"data",`Assoc (data @ forged)]));
+        let fields = match Eio.Promise.await_exn pending with
+          | Ok (`Assoc fields) -> fields
+          | Ok _ -> fail (name ^ " is not an object")
+          | Error failure -> fail (Surface.failure_message failure) in
+        List.iter (fun (key, expected) ->
+          check bool (name ^ " states its " ^ key ^ " once, the route's") true
+            (List.filter (fun (field, _) -> field = key) fields = [key, `String expected]))
+          ["clientId", Browser_lane.client_id_to_string client_id; "transport", "webdriver_bidi"] in
+      answered "a live scene" (fun () -> Masc.Browser_scene.read request ~max_chars:1000)
+        ["tabId",`Int 7;"schema",`String "masc.browser.scene.v1";"documentId",`String "fixture";
+         "url",`String "https://example.org";"title",`String "Page";
+         "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
+         "nodes",`List [];"truncated",`Bool false;"view",`String "content";"scope",`Null];
+      answered "a live screenshot" (fun () -> Surface.capture request)
+        ["tabId",`Int 7;"url",`String "https://example.org";"title",`String "Page";
+         "mimeType",`String "image/png";"viewport",viewport;
+         "data",`String (Base64.encode_string "\137PNG\r\n\026\nfixture")]))
 let test_remote_failure () =
   match Surface.decode_answer ~lane:Browser_lane.Lane_name.Live (Browser_lane.Answered
     (`Assoc ["ok",`Bool false;"error",`String "tab closed"])) with
@@ -245,6 +314,9 @@ let test_live_read_pins_client_between_hops () =
           (Result.is_error (Surface.read {route=Browser_lane.Live_route (Some first.client_id);tab_id=Some 1}));
         check bool "reply identifies the original single client" true
           (Yojson.Safe.Util.member "clientId" data = `String (Browser_lane.client_id_to_string first.client_id));
+        check bool "and how that browser is reached" true
+          (Yojson.Safe.Util.member "transport" data
+           = `String (Browser_lane.live_transport_to_string first.transport));
         check bool "page belongs to the pinned browser" true
           (Yojson.Safe.Util.(data |> member "page" |> member "text") = `String "first-owned")
       | _ -> fail "second connection disrupted the once-resolved read"))
@@ -643,6 +715,8 @@ let () = run "browser surface" ["behavior",[
   test_case "backend failure is visible" `Quick test_remote_failure;
   test_case "an absent lane names its own setup" `Quick test_absent_lane_names_its_setup;
   test_case "capture target and image identity" `Quick test_capture_identity;
+  test_case "a live scene and screenshot state their connection" `Quick
+    test_live_scene_and_capture_state_their_connection;
   test_case "Keeper discovers ambiguous clients without dispatch" `Quick test_keeper_discovers_clients_without_dispatch;
   test_case "off precedes live client guidance" `Quick test_off_precedes_client_guidance;
   test_case "Keeper hears why no browser is connected" `Quick test_keeper_hears_why_no_browser_is_connected;

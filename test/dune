@@ -1910,6 +1910,9 @@
   ; test_compression decodes its own gzip output with the library's reader
   decompress.de
   decompress.gz
+  ; test_goal_store and test_goal_tools freeze the creation clock
+  ptime
+  eio.mock
   masc.tool_metrics_store)
  (deps ../bin/main_eio.exe))
 
@@ -2884,6 +2887,8 @@
 (include stanzas/test_runtime_agent_execution_restart.inc)
 (include stanzas/test_keeper_native_result_retention.inc)
 (include stanzas/test_keeper_native_context_resume.inc)
+(include stanzas/test_keeper_ingress_native_restart.inc)
+(include stanzas/test_keeper_native_repetition_recovery.inc)
 
 (include stanzas/test_runtime_model_temperature_toml.inc)
 
@@ -3291,7 +3296,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries masc.keeper_chat_operations masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -6179,7 +6184,7 @@
 (test
  (name test_tui_chat_activity)
  (modules test_tui_chat_activity)
- (libraries alcotest astring masc_tui_answering masc_tui_types masc_tui_keeper_chat_live
+ (libraries masc.keeper_chat_operations alcotest astring masc_tui_answering masc_tui_types masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
   masc_tui_roster_pane masc_tui_frame masc_tui_message_layout))
@@ -6406,6 +6411,12 @@
 (include stanzas/test_keeper_operator_note.inc)
 
 (include stanzas/test_keeper_memory_journal_projection.inc)
+
+(test
+ (name test_keeper_memory_journal_serialization)
+ (modules test_keeper_memory_journal_serialization)
+ (libraries alcotest masc masc_test_deps unix yojson))
+
 (include stanzas/test_review_prompt_sections_reach_the_model.inc)
 (include stanzas/test_prompt_templates_render.inc)
 (include stanzas/test_tui_send_disposition.inc)
@@ -8630,6 +8641,15 @@
  (deps (alias runtest-test_tui_chat_replay_failure_pty)))
 
 (rule
+ (alias runtest-test_tui_stale_chat_progress_pty)
+ (deps test_tui_stale_chat_progress_pty.py tui_keyboard_harness.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_stale_chat_progress_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_stale_chat_progress_pty)))
+
+(rule
  (alias runtest-test_tui_account_login_pty)
  (deps
   test_tui_account_login_pty.py
@@ -8729,6 +8749,8 @@
  (name runtest)
  (deps (alias runtest-test_tui_chat_load_errors_pty)))
 (include stanzas/test_tui_schedule_detail_viewport_pty.inc)
+
+(include stanzas/test_tui_schedule_form_refusal_pty.inc)
 (rule
  (alias runtest-test_tui_keeper_create_journey_pty)
  (deps test_tui_keeper_create_journey_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
@@ -9741,4 +9763,9 @@
 (test
  (name test_h5_media_failover_continuity)
  (modules test_h5_media_failover_continuity)
+ (libraries masc_test_deps))
+
+(executable
+ (name test_h3_working_state_meaning)
+ (modules test_h3_working_state_meaning)
  (libraries masc_test_deps))

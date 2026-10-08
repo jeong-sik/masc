@@ -247,9 +247,11 @@ val list_durable_range_receipt_keeper_ids : keepers_dir:string -> string list
 val validate_durable_range_receipts :
   keepers_dir:string -> keeper_id:string -> (unit, string) result
 
-(** Durable recovery evidence for one destructive ordinary-current batch. The
-    file exists only between plan preparation and exact journal finalization,
-    and is included in whole-Keeper purge. *)
+(** Durable recovery evidence for a committed removal with an explicit reason.
+    The file is prepared before snapshot replacement and cleared only after
+    exact journal finalization. Later writers reconcile it before replacing
+    the snapshot that preserves the removed originals. Whole-Keeper purge
+    includes this sidecar. *)
 val retraction_plan_receipt_path : keepers_dir:string -> keeper_id:string -> string
 
 (** Record a librarian pass that produced no snapshot. The commit path already
@@ -310,8 +312,10 @@ val read_dropped :
     later re-additions or absorptions. Scans the complete journal in an IO pool
     job; a malformed or unreadable journal is an error, not an empty archive.
     This is historical evidence, never current-fact or restoration authority.
-    Ordinary journal writes are best-effort, so absence is not proof that a
-    fact was never stored or removed. *)
+    A pending removal receipt is an explicit error until a writer finalizes
+    the journal; this read never mutates it. Journal lines without explicit
+    drop reasons remain best-effort, so absence is not proof that a fact was
+    never stored or removed. *)
 
 val source_kind_to_string : source_kind -> string
 
@@ -548,9 +552,12 @@ val retract_fact
   -> (t, retract_error) result
 (** Atomically retract one exact ordinary-current fact and remove every derived
     fact that no longer has a complete support path. The direct target and its
-    reason are written to the same journal commit as the resulting snapshot;
-    cascaded removals are represented by [change.invalidated]. Invalid input
-    and a missing target fail before any snapshot or journal write. *)
+    reason are preserved before snapshot replacement. If journal finalization
+    fails after replacement, success still describes the committed snapshot;
+    its prepared receipt preserves the reason, and later writers cannot
+    replace the removed original until finalization succeeds. Cascaded
+    removals are represented by [change.invalidated]. Invalid input and a
+    missing target fail before any snapshot or journal write. *)
 
 val supersede_fact
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -567,8 +574,9 @@ val supersede_fact
     [first_seen]; bytes already current under another identity are a
     re-observation of that fact. Derived facts that lose their support with
     the target are removed as in {!retract_fact}. The removal is journaled
-    with a [superseded_by] reason in the same commit. Every refusal writes no
-    snapshot and no journal line.
+    with a [superseded_by] reason in the same commit, using the same durable
+    preparation and pending-finalization behavior as {!retract_fact}. Every
+    refusal writes no snapshot and no journal line.
 
     If the target is absent, its latest journal removal must name a
     Librarian drop of an authored fact. That permits an ordinary upsert and
@@ -607,8 +615,12 @@ val to_json : t -> Yojson.Safe.t
     refused with [rejection], to a fresh [.rejected-<now>] path and journal the
     quarantine -- exactly what a writer would do on its next commit, done once
     at boot under the same locks after the operator accepted it (RFC-0420).
-    [Ok] carries the path the bytes went to. [Error] names a snapshot that
-    could not be moved; it stays in place. *)
+    A pending removal receipt moves aside first, preserving its original
+    bytes even when it cannot be decoded. This prevents an active receipt
+    from requiring the quarantined snapshot's hash on the next write.
+    [Ok] carries the snapshot's rejected path. [Error] leaves the snapshot
+    in place and names any receipt that was already moved; that rejected
+    snapshot still refuses the next boot. *)
 val move_aside_for_keepers_dir
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> keepers_dir:string

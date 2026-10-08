@@ -64,6 +64,20 @@ missing or skipped required job is not evidence of full verification.
 native stack scope admission or non-native parent waits. It reads full CI
 evidence only for release heads.
 
+## Reading a refusal
+
+When a non-author APPROVED review exists but is not admitted, the
+`no trusted non-author approval bound to this head and complete diff` refusal
+(from `approve-guard.sh --merge-check`, and so from `merge-guard.sh`) lists,
+per review, which test failed (author association, first-line verdict,
+footer prefix, `reviewed base`/`diff sha256` tail, a stale diff hash, or the
+`review-scope` stamp) and prints the exact last line to copy. `review-refusal.py`
+makes the admission decision and the reasons come from the same code, so the
+guard and the explanation cannot disagree.
+
+Offline checks: `python3 -I scripts/review/test_review_refusal.py` and
+`python3 -I scripts/review/test_approve_guard_refusal.py`.
+
 ## Preparing an approved candidate
 
 `prepare-approved-batch.py` combines explicitly selected, directly main-based

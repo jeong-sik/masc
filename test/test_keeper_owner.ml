@@ -3210,6 +3210,7 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
        (match Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
         | Ok () -> ()
         | Error detail -> fail ("persist keeper meta: " ^ detail));
+       let member_id = operation_id "kmsg-restart-row-member" in
        let operation_id = operation_id "kmsg-restart-row" in
        let source =
          Keeper_chat_operation_payload.source_to_json
@@ -3251,7 +3252,14 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
          ~input:(operation_input "running at crash")
        |> Result.get_ok
        |> ignore;
-       Keeper_chat_operation_store.claim_next seed ~now:11.0 |> Result.get_ok |> ignore;
+       Keeper_chat_operation_store.submit seed ~now:10.5 ~operation_id:member_id
+         ~source ~input:(operation_input "second input at crash")
+       |> Result.get_ok |> ignore;
+       let batch _ candidates =
+         Ok (Some { Keeper_chat_operation_store.members =
+           List.map (fun (op : Chat_operation.t) -> op.operation_id) candidates;
+           input = operation_input "combined request" }) in
+       Keeper_chat_operation_store.claim_next ~batch seed ~now:11.0 |> Result.get_ok |> ignore;
        Keeper_chat_operation_store.close seed |> Result.get_ok;
        (* The run the crash cut off had journaled its start and nothing after. *)
        let journal =
@@ -3268,7 +3276,21 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
         with
         | Ok () -> ()
         | Error detail -> fail ("seed journal: " ^ detail));
-       Eio.Switch.run @@ fun sw ->
+       (* The next member resumed after an earlier segment error, then the
+          process died while writing its next row. Neither that error nor the
+          incomplete bytes acknowledge the newly interrupted segment. *)
+       let member_operation_id = Chat_operation.Operation_id.to_string member_id in
+       let member_journal = Keeper_chat_event_log.open_journal ~base_dir:base_path
+           ~keeper_name ~operation_id:member_operation_id () in
+       (match Keeper_chat_event_log.append_result member_journal ~seq:0 ~ts:9.0
+           (Keeper_chat_events.Event_error { message = "previous segment failure" }) with
+        | Ok () -> () | Error detail -> fail detail);
+       let member_path = Keeper_chat_event_log.journal_path ~base_dir:base_path
+           ~keeper_name ~operation_id:member_operation_id in
+       let torn = open_out_gen [Open_wronly; Open_append; Open_binary] 0o600 member_path in
+       output_string torn "{\"incomplete\":";
+       close_out torn;
+       let start_and_check () = Eio.Switch.run (fun sw ->
        (match
           Owner_registry.install_from_store
             ~sw
@@ -3281,6 +3303,7 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
        (* A subscriber that reopens the operation replays this journal, so a
           journal that stops at [Run_started] leaves it waiting on a terminal
           the settled operation will never send. *)
+       List.iter (fun journal ->
        (match Keeper_chat_event_log.read_journal journal with
         | Ok entries ->
           (match List.rev entries with
@@ -3293,6 +3316,9 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
                (List.length entries)
            | _ -> fail "the restart-interrupted journal does not end with a terminal error")
         | Error _ -> fail "the restart-interrupted journal could not be read");
+       (match Keeper_chat_event_log.next_sequence journal with
+        | Ok seq -> check int "restart terminal follows complete rows with no torn tail" 2 seq
+        | Error _ -> fail "restart left a torn or corrupt journal")) [journal; member_journal];
        let rows = Keeper_chat_store.load ~base_dir:base_path ~keeper_name in
        let failure_rows =
          List.filter
@@ -3301,12 +3327,14 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
               && Keeper_chat_store.Row_kind.equal row.kind Keeper_chat_store.Row_kind.Transport_failure)
            rows
        in
-       (match failure_rows with
-        | [ row ] ->
-          check string "the row says what happened"
-            "Keeper request failed: the server restarted before this request finished."
-            row.content
-        | rows -> failf "expected one transport-failure row, got %d" (List.length rows)))
+       check int "each batch member has a failure row" 2 (List.length failure_rows);
+       List.iter (fun (row : Keeper_chat_store.chat_message) ->
+         check string "the row says what happened"
+           "Keeper request failed: the server restarted before this request finished."
+           row.content) failure_rows) in
+       start_and_check ();
+       (* The operation store no longer returns these settled segments. *)
+       start_and_check ())
 ;;
 
 (* A shared chat batch runs once and journals to every member. The restart

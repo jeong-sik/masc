@@ -122,15 +122,10 @@ val observe_task_transition
   -> details:Yojson.Safe.t
   -> unit
 
-(** {1 Transition event types} *)
-
-type transition_event_type =
-  | Task_transition
-  | Task_cancelled
+(** {1 Transition log event} *)
 
 val transition_log_event
-  :  event_type:transition_event_type
-  -> ?actor_kind:task_actor_kind
+  :  ?actor_kind:task_actor_kind
   -> agent_name:string
   -> task_id:string
   -> from_status:Masc_domain.task_status

@@ -1,8 +1,5 @@
-type t =
-  | Parsing
-  | Missing_config
+type t = Parsing
 
 let to_label = function
   | Parsing -> "parsing"
-  | Missing_config -> "missing_config"
 ;;

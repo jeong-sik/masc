@@ -275,6 +275,8 @@ val keeper_world_event_rows_scheduled_wake_title : string
 val keeper_world_event_rows_external_attention_title : string
 val keeper_world_event_rows_ask_title : string
 val keeper_world_event_rows_ask_skipped : string
+val keeper_world_event_rows_delegate_reply_lookup : string
+val keeper_world_event_rows_composition_detail_lookup : string
 val keeper_world_event_rows_completion_authority_title : string
 val keeper_world_event_rows_completion_authority_preview : string
 val keeper_world_event_rows_task_outcome_title : string

@@ -686,6 +686,17 @@ status: reference
   → [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
   [Server_routes_http_keeper_stream](../../lib/server/server_routes_http_keeper_stream.mli)
 
+**Keeper Quiet Final (키퍼 조용한 종료)**
+: 새 입력 없는 자율 wake(예정 깨움) 턴에서, 모델이 명시적으로 빈 텍스트 final(`EndTurn`)로
+  닫는 것을 완성으로 인정하는 응답 정책(#41747). `completion_policy`가 `Require_progress`
+  (직접 대화의 기본)일 때는 보이는 텍스트나 도구 진행이 필요하지만, 결과 전달이 예정되지
+  않은 Schedule_due 사건만 있거나 사건이 없고 대기 메시지가 비어 있으면 `Allow_quiet_final`
+  로 완성을 허용한다. 일반 Board 게시글·댓글 등 다른 모든 사건은 진행을 요구한다.
+  경계: 내용 결손, 숨은 추론만의 종료, 중단된 출력, 프로바이더 실패는 조용한 종료가
+  아니며 엄격히 오류로 남는다 — 문장을 해석해 침묵을 완성으로 읽지 않는다.
+  → [Keeper_tooling.Response](../../lib/keeper_tooling/response.mli) ·
+  [Keeper_agent_run](../../lib/keeper/keeper_agent_run.ml)
+
 **Keeper Direct Native Call (키퍼 직접 네이티브 호출)**
 : 한 직접 Keeper 채팅 오퍼레이션(`Keeper_chat_operation`) 안에서 실행되는 단일
   네이티브 Agent API 호출 단위(#41655). 입력 접수(`input admission`) 직후이자
@@ -708,6 +719,34 @@ status: reference
   transcript를 엄격히 결속하며, 예외는 확인된 퇴역 이력 절단(`retired_history_cut`)뿐이다.
   → [Keeper_native_result_retention](../../lib/keeper/keeper_native_result_retention.mli) ·
   [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli)
+
+**Execution Projection (실행 프로젝션)**
+: Agent Core에서 에이전트 실행 런(`Run_id`)의 구조화된 계층 트리와 이벤트 스트림을
+  외부에 읽기 전용으로 노출하는 단일 진실 공급원(SSOT) 인터페이스 계약(#41673).
+  런·턴·프로바이더 시도·출력 블록·도구 호출의 생명주기를 노드(`Node_opened`·
+  `Node_updated`·`Node_closed`)와 종단 상태(`terminal`: `Succeeded`, `Failed`, `Cancelled`)로
+  표현한다. 페이지네이션(`read_page`)은 `through` 미지정 시 호출 시점의 현재 권위적 상태
+  (`current atomic authority`)를 관측하며, 반환된 `high_watermark`를 후속 `through`로 재사용할 때만
+  해당 시점의 확정 접두사(`committed prefix`)가 고정된다. 정규 정산 도구 호출 목록
+  (`settled_tool_invocations`)은 루트 런의 확정 관측일 뿐 재실행 권한(`replay authority`)이 아니며,
+  미정산 호출 누락이 재시도 안전을 뜻하지 않고 중첩 런 결과는 둘러싼 도구 결과 뒤에 남는다.
+  → [Agent_execution_projection](../../packages/agent_core/lib/agent/agent_execution_projection.mli) ·
+  [Agent_execution_projection_intf](../../packages/agent_core/lib/agent/agent_execution_projection_intf.mli)
+
+**Keeper Native Repetition Recovery (키퍼 네이티브 반복 복구)**
+: 네이티브 Keeper 실행 중 영속화된 도구 결과(`durable ToolResult`) 정산과 다음
+  체크포인트 저장 사이에 프로세스가 중단·재시작되었을 때, 유실된 도구 반복 관측값
+  (`repetition observation`)을 결정론적으로 복원하는 정합성 계약(#41673).
+  핸들러·게이트·옵서버를 재실행하지 않으며, 스코프 불일치·시드 변경·미정산 체크포인트·
+  잘못된 정산 결과·미지원 출처·스냅샷 오류(`Scope_mismatch`, `Seed_observations_changed`,
+  `Checkpoint_observation_not_settled`, `Invalid_settled_result`, `Unsupported_result_provenance`,
+  `Repetition_error`) 등 6종의 타입화된 오류가 발생하면 복구를 거절한다. 불변 네이티브
+  시드(`seed`)가 체크포인트 관측값의 정확한 접미사(`suffix`)로 검증되고 각 관측값이
+  정규 발생 건을 순서대로 소비한 경우에만 누락 관측값을 정규 정산 순서(`canonical settlement order`)로
+  보충하며, 유실된 라이브 옵서버 순서는 추론하지 않는다.
+  → [Keeper_native_repetition_recovery](../../lib/keeper/keeper_native_repetition_recovery.mli) ·
+  [Keeper_direct_native_continuation](../../lib/keeper/keeper_direct_native_continuation.mli) ·
+  [Keeper native restart harness](../../docs/guides/KEEPER-NATIVE-RESTART-HARNESS.md)
 
 **Keeper Chat Event Timeline (키퍼 채팅 이벤트 타임라인)**
 : 직접 채팅 오퍼레이션(`/chat/events`)과 자율 턴(`/turns/:turn_ref/events`,
@@ -750,6 +789,29 @@ status: reference
   어댑터의 식별자 매핑을 정리한다.
   → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
   [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+
+**Authored Whitespace Preservation (작성 공백 보존)**
+: 운영자 대면 채팅, Board 게시글 및 댓글, 커넥터(Slack, Discord), 위임(delegation)
+  요청 전반에서 한국어 띄어쓰기를 포함한 작성자의 공백·들여쓰기·문단 구분을 임의로
+  축약하거나 제거하지 않고 원문 그대로 보존하는 전역 텍스트 규약(#41683, #41690,
+  #41693, #41701, #41708, #41717).
+  단어 사이 공백을 임의로 압축하거나 붙여쓰는 행위를 금지하며, 글자 수 예산이나
+  Channel Gate의 본문 바이트 제한에 도달할 때도 공백을 지우는 대신 문장 길이를 줄이거나
+  단락을 분할하는 방식을 취한다. TUI 캡션, 마크다운 렌더링, 대시보드 편집/전송,
+  저널 스토어 및 모델 입력 프롬프트 전 구간에서 작성 공백의 불변성을 유지한다.
+  → [Keeper_chat_blocks](../../lib/keeper/keeper_chat_blocks.mli) ·
+  [Channel_gate](../../lib/gate/channel_gate.mli) ·
+  [Keeper prompt speaking convention](../../config/prompts/keeper.md)
+
+**Clock Density Stage (시계 밀도 단계)**
+: TUI 채팅 화면에서 타임스탬프와 시간대 구분선 노출 밀도를 단계적으로 제어하는
+  인터페이스 계약(#41699, #41749).
+  기본 모드(`Origin_bare`)에서는 시각·턴 시간 범위·시간 구분선·진행 타이머를 생략하여
+  메시지 본문의 가독성을 극대화하고, 단축키(`Ctrl-F`) 입력을 통해 간이 시계(`Origin_inline`)
+  또는 전체 헤더 시계(`Origin_row`) 메타데이터를 동적으로 복원·토글한다
+  (`Origin_bare` → `Origin_inline` → `Origin_row` → `Origin_bare`).
+  → [Masc_tui_message_layout](../../bin/masc_tui_message_layout.mli) ·
+  [Tui-chat-design](../../.agents/skills/tui-chat-design/SKILL.md)
 
 **Speaker Authority (화자 권한)**
 : Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
@@ -1470,6 +1532,19 @@ status: reference
 : 서버가 관리하는 브라우저 세션. Keeper 는 `masc_browser_*` 도구로 탭을 읽고
   조작한다. Lane Add-on의 `browser_document` 원천이 이 세션을 관측한다.
   → [Browser_lane](../../lib/browser_lane/browser_lane.ml)
+
+**Trusted Hover (신뢰 호버)**
+: 브라우저 연결에서 클릭 없이 포인터를 올리는 `hover_at` 조작이, 관측된 URL과 뷰포트
+  (`expectedUrl`·`viewport`) 가드를 통과한 뒤에만 실행되는 계약(#41620). 첨부된 live
+  Firefox BiDi 탭과 자동화 레인에서 동작하며, 가드가 낡은 URL이나 뷰포트에서 실패하면
+  입력을 보내기 전에 `Rejected_before_effect`로 거절한다 — 포인터 움직임도 효과이므로
+  조용한 실패 대신 거절 사유를 남긴다. WebExtension 경로의 hover는 서버에서 큐잉 전에
+  거절한다. 경계: 가드 검증과 입력 주입은 원자적 트랜잭션이 아니어서 검증 직후 조작자가
+  페이지를 변경할 수 있고, 결과 불확실(`unknown outcome`) 시 재시도(write replay) 없이
+  클라이언트를 중단한다.
+  → [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
+  [Browser_interaction](../../lib/browser_interaction.mli) ·
+  [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)
 
 **Machine Change Mark (기계 변경 표식)**
 : MSX Lane·DOS Lane 기계의 화면이 바뀌었는지 싸게 묻기 위한 표식. 변경 횟수(`count`)와

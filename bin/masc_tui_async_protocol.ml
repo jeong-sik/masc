@@ -112,6 +112,8 @@ type currency_authority_request = {
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
   | Workspace_identity_unconfirmed of string
+  | Schedule_form_authority_refused of
+      { action : string; detail : string; workspace : workspace_input_identity option }
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
@@ -202,10 +204,16 @@ type async_msg =
       * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_copy_loaded of
       int * string * (Masc_tui_keeper_chat_history.decoded, string) result
+  | Keeper_chat_operation_loaded of
+      { keeper_name : string
+      ; operation_id : string
+      ; operation_state : (Keeper_chat_operation.state, string) result
+      }
   | Keeper_chat_journal_loaded of
       { keeper_name : string
       ; source : Masc_tui_keeper_chat_log.journal_source
       ; started_at : float
+      ; operation_state : (Keeper_chat_operation.state option, string) result
       ; journal :
           ( Masc.Keeper_chat_event_log.journaled_event list
           , Masc_tui_keeper_chat_log.events_error )

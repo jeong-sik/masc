@@ -354,13 +354,19 @@ let live_transports_serving capability =
 ;;
 
 (* What adds a connection of each kind. Both are the operator's to do. *)
-let live_transport_setup = function
-  | Web_extension ->
-    "the operator loads the browser-lane extension and its native host in that browser \
-     (connectors/browser)"
-  | Webdriver_bidi ->
-    "the operator attaches that browser's Remote Agent with masc-browser-host --bidi-url \
-     (docs/design/browser-bidi-live-host.md)"
+(* Where the steps for attaching a connection of this transport are written. *)
+let live_transport_setup_doc = function
+  | Web_extension -> "connectors/browser/host/README.md"
+  | Webdriver_bidi -> "docs/design/browser-bidi-live-host.md"
+;;
+
+let live_transport_setup transport =
+  let steps = match transport with
+    | Web_extension ->
+      "the operator loads the browser-lane extension and its native host in that browser"
+    | Webdriver_bidi ->
+      "the operator attaches that browser's Remote Agent with masc-browser-host --bidi-url" in
+  Printf.sprintf "%s (%s)" steps (live_transport_setup_doc transport)
 ;;
 
 type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string;

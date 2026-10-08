@@ -48,24 +48,31 @@ and the two serve different work
 ([the table](../design/browser-lane.md#what-each-live-connection-serves)). The
 TUI reads that table in four places:
 
-- The connection row under the status: `Live Firefox · WebExtension · no hover,
-  drag`, or `Live Firefox · BiDi · no page source, element list, tab switch`.
-- The row under the picker, for the highlighted connection: `Firefox ·
-  WebExtension: no hover, drag · a BiDi connection serves them`.
+- The connection row under the status: `Live Firefox · WebExtension: no hover,
+  drag`, or `Live Firefox · BiDi: no HTML, elements, tab switch`.
+- The row under the picker, for the highlighted connection: `WebExtension: no
+  hover, drag · BiDi serves them`.
 - The screenshot footer: `drag: move` when the connection the screenshot came
   from takes a drag, `drag: needs a BiDi connection` when it does not.
-- A drag on a screenshot from a connection that does not take it is not sent.
-  The screenshot closes and the cause row says which kind of connection serves
-  it, then `b:choose browser` when one is listed, or how to attach one when
-  none is.
+- A pointer gesture on a screenshot whose connection does not serve it is not
+  sent. The screenshot closes and a row under the status says so:
+  `Not sent · WebExtension: no drag · BiDi serves it · b:choose browser` when a
+  BiDi connection is listed. When none is, the row ends `no BiDi connection is
+  listed` and the next row names where attaching one is written
+  (`Setup: docs/design/browser-bidi-live-host.md`). The read badge does not
+  change, because nothing was requested. The rows stay through the lane's own
+  refreshes and go with the next key or click.
+
+These rows fit an 80-column terminal up to the `b:choose browser` key.
 
 In a Keeper's chat, the tool results view shows a refused browser call as its
-case and what was asked of which connection, for example `BrowserInteract ·
-failed · live_transport_unsupported · this WebExtension connection does not
-serve hover · no connected browser does`. Other browser refusals that sent
-nothing (`no_live_client`, `ambiguous_browser_clients`,
-`selected_client_disconnected`, `browser_lane_off`) show their case and the
-refusal's next-step sentence.
+case, what the connection leaves out and how many connected browsers serve it,
+for example `BrowserInteract · failed · live_transport_unsupported ·
+WebExtension: no hover · 0 connections serve it`. Other browser refusals that
+sent nothing (`no_live_client`, `ambiguous_browser_clients`,
+`selected_client_disconnected`, `browser_lane_off`,
+`browser_activity_unavailable`) show their case and the refusal's next-step
+sentence.
 
 The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Typing
 belongs to the editor and cannot trigger Browser commands or the Keeper composer.

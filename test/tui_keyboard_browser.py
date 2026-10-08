@@ -91,7 +91,7 @@ def run_browser_client_picker_regression(executable: str) -> None:
         picker = screen_text(bytes(output))
         for option in ("Firefox · WebExtension · existing login".encode(), bidi_row,
                        b"Stagehand Chromium", b"Independent Firefox/Zen",
-                       "Firefox · WebExtension: no hover, drag · a BiDi connection serves them".encode()):
+                       "WebExtension: no hover, drag · BiDi serves them".encode()):
             if option not in picker:
                 raise AssertionError(f"browser picker omitted {option!r}: {picker!r}")
         send_and_wait(process, master_fd, output, b"\r", b"Firefox selected page")
@@ -427,6 +427,122 @@ def run_browser_pointer_regression(executable: str) -> None:
         preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
 
 
+def run_browser_unserved_gesture_regression(executable: str) -> None:
+    """A drag on a live WebExtension screenshot is not sent, and says why.
+
+    The terminal is 80 columns wide: the reason and the next step have to be
+    readable there. The reason outlives the lane's own refresh and goes with
+    the operator's next input.
+    """
+    fixtures = overview_event_http_fixtures()
+    client = "11111111-1111-4111-8111-111111111111"
+    actions, png = [], [""]
+    clicked, captured_after_click = threading.Event(), threading.Event()
+    refused, read_after_refusal = threading.Event(), threading.Event()
+    viewport = {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}
+    url = "https://example.org/"
+
+    def prepare(base):
+        seed_image_workspace(base)
+        png[0] = base64.b64encode(Path(base, IMAGE_NAME).read_bytes()).decode()
+
+    def read(body):
+        request = json.loads(body)
+        assert request["lane"] == "live" and request.get("clientId") == client
+        text = "unserved fixture"
+        if refused.is_set():
+            read_after_refusal.set()
+            text = "READ AFTER THE REFUSAL"
+        return 200, {"ok":True,"data":{"source":"live","clientId":client,
+            "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":url,"active":True}],
+            "page":{"tabId":2,"title":"owned","url":url,"text":text,"chars":len(text),"truncated":False}}}
+
+    def screenshot(body):
+        request = json.loads(body)
+        assert request["lane"] == "live" and request.get("clientId") == client
+        if clicked.is_set():
+            captured_after_click.set()
+        return 200, {"ok":True,"data":{"source":"live","clientId":client,
+            "tabId":2,"title":"owned","url":url,"mimeType":"image/png","data":png[0],"viewport":viewport,"elapsed_ms":0}}
+
+    def act(body):
+        actions.append(json.loads(body))
+        clicked.set()
+        return 200, {"ok":True,"data":{}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox","transport":"web_extension"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+    fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(act)
+
+    def interact(process, master, slave, output, _base):
+        def image_drawn(start):
+            wait_for_output(process, master, output, b"a=T", start=start, timeout=5)
+
+        palette_go(process, master, output, b"go Browser Lane", b"unserved fixture")
+        row = "Live Firefox · WebExtension: no hover, drag • b:choose browser".encode()
+        if row not in screen_text(bytes(output)):
+            raise AssertionError(f"connection row does not fit 80 columns: {screen_text(bytes(output))!r}")
+        read_available(master, output)
+        start = len(output)
+        os.write(master, b"\x0f")
+        image_drawn(start)
+        # A point click is work this connection serves, so it is sent.
+        os.write(master, b"\x1b[<0;2;5M\x1b[<0;2;5m")
+        assert wait_for_fixture_event(process, master, output, clicked, timeout=5)
+        assert wait_for_fixture_event(process, master, output, captured_after_click, timeout=5)
+        read_available(master, output)
+        image_drawn(len(output))
+        assert len(actions) == 1 and actions[0]["action"] == "click_at", actions
+        assert actions[0]["clientId"] == client
+        # A drag is not. Nothing is sent, the screenshot closes and the lane
+        # says what was not sent and where attaching a BiDi connection is written.
+        read_available(master, output)
+        start = len(output)
+        refused.set()
+        os.write(master, b"\x1b[<0;2;5M\x1b[<0;5;8m")
+        wait_for_output(process, master, output, b"Not sent", start=start, timeout=5)
+        assert wait_for_fixture_event(process, master, output, read_after_refusal, timeout=5)
+        wait_for_output(process, master, output, b"READ AFTER THE REFUSAL", start=start, timeout=5)
+        wait_for_output(process, master, output, FRAME_END,
+            start=end_of_needle(output, b"READ AFTER THE REFUSAL", start), timeout=3)
+        after_refresh = screen_text(bytes(output[start:]))
+        for needle in ("Not sent · WebExtension: no drag · no BiDi connection is listed".encode(),
+                       b"Setup: docs/design/browser-bidi-live-host.md",
+                       b"READ AFTER THE REFUSAL"):
+            if needle not in after_refresh:
+                raise AssertionError(f"after its refresh the lane lost {needle!r}: {after_refresh!r}")
+        if b"HTTP failed" in after_refresh:
+            raise AssertionError(f"a gesture that was never sent reads as a failed read: {after_refresh!r}")
+        assert len(actions) == 1, f"the unserved drag reached the lane: {actions!r}"
+        # The next input withdraws the reason; the picker says the same thing
+        # about the connection under its cursor.
+        read_available(master, output)
+        start = len(output)
+        send_and_wait(process, master, output, b"b", b"Choose browser \xc2\xb7 separate sessions do not share login")
+        choice = "Firefox · WebExtension · existing login".encode()
+        wait_for_output(process, master, output, choice, start=start, timeout=3)
+        wait_for_output(process, master, output, FRAME_END,
+            start=bytes(output).rfind(choice, start), timeout=3)
+        picker = screen_text(bytes(output[start:]))
+        if "WebExtension: no hover, drag · BiDi serves them".encode() not in picker:
+            raise AssertionError(f"picker detail row missing at 80 columns: {picker!r}")
+        read_available(master, output)
+        start = len(output)
+        send_and_wait(process, master, output, b"\x1b", b"READ AFTER THE REFUSAL")
+        wait_for_output(process, master, output, FRAME_END,
+            start=end_of_needle(output, b"READ AFTER THE REFUSAL", start), timeout=3)
+        lane = screen_text(bytes(output[start:]))
+        if b"Not sent" in lane:
+            raise AssertionError(f"the next input left the refused gesture on screen: {lane!r}")
+        send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
+        os.write(master, b"q")
+
+    run_terminal_scenario(executable, description="Browser screenshot gesture the connection does not serve",
+        interact=interact, http_fixtures=fixtures, prepare_workspace=prepare, refresh=0.5,
+        terminal_cols=80, preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
+
+
 def run_browser_viewport_cadence_regression(executable: str, *, follow_navigation: bool = False) -> None:
     fixtures = overview_event_http_fixtures()
     client = "11111111-1111-4111-8111-111111111111"
@@ -538,6 +654,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
     run_browser_viewport_cadence_regression(executable)
     run_browser_viewport_cadence_regression(executable, follow_navigation=True)
     run_browser_pointer_regression(executable)
+    run_browser_unserved_gesture_regression(executable)
     run_browser_viewport_regression(executable)
     run_browser_viewport_regression(executable, cell_geometry=False)
     fixtures = overview_event_http_fixtures()

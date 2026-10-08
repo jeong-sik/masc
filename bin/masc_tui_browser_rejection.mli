@@ -23,11 +23,20 @@ type t =
 
 val of_result : string -> t option
 
-(** The refusal on one row: the case code, then what was asked of which kind
-    of connection or the refusal's own next-step sentence. The caller supplies
-    the operator's words for a transport and for a piece of live work. *)
+(** The refusal on one row: the case code, then what the connection leaves
+    out and how many connected browsers serve it, or the refusal's own
+    next-step sentence. [lacking] is the caller's clause for a transport that
+    leaves a piece of live work out, the one its other rows use. *)
 val line
-  :  transport_label:(Browser_lane.live_transport -> string)
-  -> capability_word:(Browser_lane.live_capability -> string)
+  :  lacking:(Browser_lane.live_transport -> Browser_lane.live_capability -> string)
   -> t
+  -> string
+
+(** What a Keeper chat row shows for a call's recorded result. [failed] is the
+    row's own verdict: only a failed call's text is read for a refusal, and it
+    then shows as {!line}. Every other text is shown as it was recorded. *)
+val preview
+  :  failed:bool
+  -> lacking:(Browser_lane.live_transport -> Browser_lane.live_capability -> string)
+  -> string
   -> string

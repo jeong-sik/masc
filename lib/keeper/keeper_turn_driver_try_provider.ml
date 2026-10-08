@@ -1806,7 +1806,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
       | None -> ctx.hooks
       | Some (gate : Keeper_tool_approval_gate.t) ->
         let gate_hooks =
-          { Agent_core.Hooks.empty with pre_tool_use = Some gate.pre_tool_use }
+          { Agent_core.Hooks.empty with pre_tool_use = Some (gate.pre_tool_use ~identity_tool_index:gate.identity_tool_index) }
         in
         Some
           (match ctx.hooks with

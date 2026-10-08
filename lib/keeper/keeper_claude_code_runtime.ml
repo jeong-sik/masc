@@ -1447,22 +1447,14 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
   let observed_next_shrink_capacity_bytes = ref None in
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
-  let starting_capacity_bytes =
-    (* Every turn starts at the runtime's own ceiling when it has one, and
-       unbounded otherwise: the provider's typed overflow is what narrows it.
-       The shrink below cuts only the conversation window; the pinned
-       briefing is sent whole. *)
-    Option.value
-      (Runtime.prompt_capacity_bytes_of_runtime_id runtime_id)
-      ~default:unbounded_model_input_capacity_bytes
-  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
         ?on_memory_capacity_refusal
         ~on_memory_retry:(fun () ->
           resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
-        ~starting_capacity:starting_capacity_bytes
+        (* The provider's typed overflow narrows the initially unbounded turn. *)
+        ~starting_capacity:unbounded_model_input_capacity_bytes
         ~same_run_retry_authorized:(fun () ->
           !context_overflow_retry_safe)
         ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->

@@ -497,7 +497,7 @@ let board_event_kind_label = function
     "completion_authority_rejected"
   | Keeper_world_observation.Task_outcome _ -> "task_outcome"
   | Keeper_world_observation.Task_cancelled _ -> "task_cancelled"
-  | Keeper_world_observation.Delegate_completed -> "keeper_delegate_completed"
+  | Keeper_world_observation.Delegate_completed _ -> "keeper_delegate_completed"
   | Keeper_world_observation.Composition_completed ->
     "keeper_composition_completed"
   | Keeper_world_observation.Ask_answered_row _ -> "ask_answered"
@@ -702,8 +702,30 @@ let board_event_note_fields = function
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Completion_authority_rejected _
   | Keeper_world_observation.Task_outcome _
-  | Keeper_world_observation.Task_cancelled _
+  | Keeper_world_observation.Task_cancelled _ ->
+    (* No side fact: the row is its own complete account. *)
+    []
+  (* [reply_full] restates the original reply exactly when the row's
+     preview cut at [delegate_reply_preview_max_len]: the tail is where
+     exact export objects and code fences live, and this note is the
+     row's only lossless copy. The cut test compares the trimmed bytes
+     the preview measured, so a padded short reply stays note-free and
+     an uncropped reply is never rendered twice. [Delegate_no_reply] and
+     [Delegate_failed] keep no note: their content is short by
+     construction and the row already carries it whole. *)
   | Keeper_world_observation.Delegate_completed
+      (Keeper_event_queue.Delegate_replied reply) ->
+    if
+      String.length (String.trim reply)
+      > Keeper_world_observation.delegate_reply_preview_max_len
+    then [ "reply_full", reply ]
+    else []
+  | Keeper_world_observation.Delegate_completed
+      (Keeper_event_queue.Delegate_no_reply
+      | Keeper_event_queue.Delegate_failed _) ->
+    (* No side fact: these payloads are short by construction and the
+       row already carries them whole; see the note above. *)
+    []
   (* The answer is the row's title and preview; there is no side fact to add. *)
   | Keeper_world_observation.Ask_answered_row _
   | Keeper_world_observation.Composition_completed -> []
@@ -901,7 +923,7 @@ let group_scheduled_wake_events events =
     | Keeper_world_observation.Completion_authority_rejected _
     | Keeper_world_observation.Task_outcome _
     | Keeper_world_observation.Task_cancelled _
-    | Keeper_world_observation.Delegate_completed
+    | Keeper_world_observation.Delegate_completed _
     | Keeper_world_observation.Ask_answered_row _
     | Keeper_world_observation.Composition_completed -> groups
   in
@@ -1041,7 +1063,7 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Task_cancelled _
-         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
@@ -1091,7 +1113,7 @@ let format_task_outcome_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Task_cancelled _
-         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
@@ -1145,7 +1167,7 @@ let format_task_cancellation_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Task_outcome _
-         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events

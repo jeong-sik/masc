@@ -27,6 +27,8 @@ def scoped_identity_journey(executable, *, unread):
     lock = threading.Lock()
     calls = []
     state = {"changed": False}
+    boot_revalidated = threading.Event()
+    tool_mode_reads = 0
     label = b"scoped-unread-operator" if unread else b"scoped-foreign-question"
     ask = copy.deepcopy(approvals.keeper_asks_response())
     ask[1]["asks"][0].update(ask_id=label.decode(), context=label.decode())
@@ -61,6 +63,19 @@ def scoped_identity_journey(executable, *, unread):
         else h.approval_selection_snapshot([]),
     )
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+
+    def tool_modes():
+        nonlocal tool_mode_reads
+        with lock:
+            tool_mode_reads += 1
+            # Cold-start identity recovery schedules a second full refresh.
+            # Each publication in chat launches this read only after applying
+            # its bundle; the second read proves revalidation has landed.
+            if tool_mode_reads == 2:
+                boot_revalidated.set()
+        return (200, {"overrides": []})
+
+    fixtures["/api/v1/keepers/tool-approval-mode"] = tool_modes
 
     def prepare(base):
         home.seed_goals(base)
@@ -125,6 +140,8 @@ def scoped_identity_journey(executable, *, unread):
         # The chat footer has no HTTP badge; assert the captured A health and
         # briefing readings below rather than waiting for an absent label.
         h.wait_for_output(process, fd, output, b"Esc:list", start=0, timeout=10)
+        assert h.wait_for_fixture_event(process, fd, output,
+            boot_revalidated, timeout=10), "startup identity revalidation did not publish"
         h.drain_until_quiet(process, fd, output)
         initial = snapshot()
         local_reads = [response for path, _, response in initial if path == "/health"]
@@ -775,6 +792,14 @@ def recovery_operator_boundary_journey(executable, *, foreign):
 
     def prepare(base):
         home.seed_goals(base)
+        # The withdrawal row describes the last conversation. Keep Home open
+        # while giving that row a real destination whose authority can be lost.
+        config = Path(base, ".masc", "config")
+        config.mkdir(parents=True, exist_ok=True)
+        (config / "runtime.toml").write_text(
+            '[tui]\nopening = "overview"\nlast_chat_keeper = "alpha"\n',
+            encoding="utf-8",
+        )
         local = Path(base).resolve()
         replacement = local / "recovery-foreign-B"
         (replacement / ".masc").mkdir(parents=True)

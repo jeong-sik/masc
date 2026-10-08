@@ -52,8 +52,14 @@ def run(executable, columns, failed):
             assert b"alpha-change.ml" in screen, screen
             # The coverage sentence folds in the narrow table, including
             # when an Activity pane reserves space at 120 columns.
+            # resize_and_wait returns as soon as the sentence is drawn, which
+            # can be before its frame ends, and visible() reads completed
+            # frames only: wait for the end of the frame that holds it.
+            wide = len(output)
             h.resize_and_wait(process, fd, output, rows=30, columns=180,
                 needle=b"1 Keeper reads failed", controls=(h.FULL_REDRAW,))
+            h.wait_for_output(process, fd, output, h.FRAME_END,
+                start=h.end_of_needle(output, b"1 Keeper reads failed", wide), timeout=3.0)
             assert b"1 Keeper reads failed" in visible(output), visible(output)
             h.resize_and_wait(process, fd, output, rows=30, columns=columns,
                 needle=b"alpha-change.ml", controls=(h.FULL_REDRAW,))

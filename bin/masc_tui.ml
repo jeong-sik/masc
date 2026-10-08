@@ -12320,6 +12320,18 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (* Retained nested readers own their selection independently of the list
        underneath. Reissue their observations without resetting navigation. *)
     (match state.view with
+     | Fusion ->
+         (match state.fusion_launch with
+          | Some (Fusion_launch_reading_presets _) ->
+              launch_fusion_launch_options_load state ~mailbox
+          | Some (Fusion_launch_open _ | Fusion_launch_started _) | None -> ())
+     | Board ->
+         (match state.board_mode with
+          | Board_read post_id ->
+              Masc_tui_board_requests.start_board_post_refresh state
+                ~host:server_peer_host ~port:state.port ~post_id
+                ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+          | Board_list | Board_compose -> ())
      | Keepers Keeper_message ->
          Option.iter (fun keeper_name ->
            launch_keeper_chat_file_changes_load ~force:true state ~mailbox ~keeper_name)

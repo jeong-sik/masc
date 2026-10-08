@@ -3,6 +3,9 @@
 type failure = Before_effect of string | Outcome_unknown of string
 (** Native host verbs, decoded once from the MASC poll wire. *)
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
+(** The name a verb goes by on the wire and in the host's record. *)
+val verb_to_wire : verb -> string
+val verb_of_wire : string -> verb option
 (** Why a command has no result. [Rejected] is the browser's own error
     answer, with its code. [Unanswered] is a command that was written and got
     no readable answer: the connection ended under it, the reply did not come
@@ -10,25 +13,35 @@ type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture 
     connection had already ended. *)
 type refusal = Rejected of string | Unanswered of string | Unsent of string
 type t
+(** Why a session was not ended. [Connection_gone]: there was no socket left
+    to ask over, so a Firefox that has quit holds no session and one that
+    still runs keeps it; this side cannot tell which. [Not_confirmed]:
+    Firefox could be asked and did not confirm. It answered with an error
+    other than having no session, or did not answer in time, and is taken to
+    keep the session. *)
+type session_end_failure = Connection_gone of string | Not_confirmed of string
+val session_end_failure_message : session_end_failure -> string
 (** [command] carries one BiDi command; [session_end] ends the session. They
     are separate because the session is also ended on a connection that
     carries no further command. *)
 val create
-  :  session_end:(unit -> (unit, string) result)
+  :  session_end:(unit -> (unit, session_end_failure) result)
   -> command:(string -> Yojson.Safe.t -> (Yojson.Safe.t, refusal) result)
   -> t
 (** Asks the browser for a BiDi session and answers the browser's version. *)
 val metadata : t -> (string, string) result
 (** Ends the session {!metadata} asked for; [Ok ()] when there is none to
-    end. There is one to end from the moment the request is written, also
-    when no answer came, and none once the browser rejected it. Firefox
+    end, which is also what Firefox's "invalid session id" says of a session
+    that was asked for and never confirmed. There is one to end from the
+    moment the request is written, also when no answer came, and none once
+    the browser rejected it. Firefox
     keeps a session whose socket closed and takes one at a time, so a session
     left behind refuses every later connection until that Firefox is
     restarted. Ending it closes no tab and leaves the browser running. Under
     {!with_connection} this is sent for as long as the socket is open, also
     after a command got no reply, and waits at most
     {!session_end_window_sec}. *)
-val end_session : t -> (unit, string) result
+val end_session : t -> (unit, session_end_failure) result
 val session_end_window_sec : float
 val dispatch : t -> verb:verb -> Yojson.Safe.t -> (Yojson.Safe.t, failure) result
 (** One socket message carries at most this many bytes; a larger one ends the

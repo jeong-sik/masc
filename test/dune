@@ -9738,7 +9738,11 @@
  (name runtest)
  (deps (alias runtest-test_tui_chat_progress_clock_pty)))
 
-(test
+; H2 crash-resume harness: scenario subcommands need orchestrated env
+; (H2_ROOT, H2_ASYNC_*), so it is an executable, not a (test) — a (test)
+; stanza would run it with no args under the default runtest alias and exit 2.
+; Run: ./test_h2_composition_resume.exe <scenario> with H2_ROOT set.
+(executable
  (name test_h2_composition_resume)
  (modules test_h2_composition_resume)
  (libraries masc_test_deps))

@@ -143,10 +143,15 @@ type terminal_error_receipt =
       (** The journal already ended in an [Event_error]; nothing was written
           and [message] is the one it carries. *)
 
+type terminal_error_segment = Existing_segment | Newly_settled_segment
+(** [Newly_settled_segment] is used when the operation store has just settled
+    a running segment after restart. An error from a previous segment cannot
+    acknowledge this settlement. The store supplies the once-only claim. *)
+
 val record_terminal_error :
-  journal -> ts:float -> message:string -> (terminal_error_receipt, string) result
-(** Ends a settled operation's journal with an [Event_error] unless it already
-    ends in one. A [Run_finished] earlier in the journal is a continuation
+  ?segment:terminal_error_segment -> journal -> ts:float -> message:string -> (terminal_error_receipt, string) result
+(** Ends a settled operation's journal with an [Event_error] unless [Existing_segment] already
+    ends in one. [Newly_settled_segment] always appends its own terminal. A [Run_finished] earlier in the journal is a continuation
     boundary, not a record of this failure, so it does not stop the append.
     Every settlement path that has no live stream to carry its terminal
     (Owner settlement, restart recovery) records it here, so a reader that

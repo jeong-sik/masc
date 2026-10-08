@@ -81,6 +81,17 @@ val committed : t -> bool
 val revision : t -> int
 (** Bumped by every mutation; the memo key for anything derived from the log. *)
 
+val operation_state : t -> Keeper_chat_operation.state option
+val observe_operation_state : t -> Keeper_chat_operation.state option -> unit
+(** Exact operation read, separate from journal events and their replay cursor.
+    [None] means the operation read is unavailable. A terminal observation is
+    retained across later reads. Autonomous journals have no operation state. *)
+
+val decode_operation_state :
+  operation_id:string -> Yojson.Safe.t -> (Keeper_chat_operation.state, string) result
+(** Decode the operation API's state only after checking its schema and exact
+    operation identity. Unknown states and malformed terminal facts fail. *)
+
 type events_page =
   { source : journal_source
   ; events : Masc.Keeper_chat_event_log.journaled_event list
@@ -180,3 +191,13 @@ val read_whole_journal :
     while both cursors advance past the ones asked from. The first error ends
     the read; a page that claims more without advancing is
     {!Events_undecodable}, naming the positions, never a shorter [Ok]. *)
+
+val read_with_operation_state :
+  read_operation:(unit -> (Keeper_chat_operation.state option, string) result) ->
+  read_journal:(unit -> (Masc.Keeper_chat_event_log.journaled_event list, events_error) result) ->
+  (Keeper_chat_operation.state option, string) result
+  * (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
+(** Read operation state before its journal. Recheck queued and running observations after reading the journal. If the
+    state advanced, read the journal again; retain a successful first journal
+    if that second fetch fails. An unavailable operation recheck retains the
+    first successful observation. A journal failure does not discard the state. *)

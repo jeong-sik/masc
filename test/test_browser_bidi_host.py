@@ -380,7 +380,7 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert attached["pid"] == native.pid and attached["ended"] is None, attached
             turned_away = json.loads((other_root / ".masc/browser-lane/bidi-host.json").read_text())
             assert turned_away["ended"]["reason"] == "BiDi command rejected: session not created", turned_away
-            assert turned_away["ended"]["session_in_firefox"] == "none", turned_away
+            assert turned_away["ended"]["session_in_firefox"] == "refused", turned_away
             # A host that is stopped ends the BiDi session it created, so
             # this same Firefox, not restarted, takes the next host. Its tabs
             # are the ones the first host saw.

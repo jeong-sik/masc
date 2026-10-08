@@ -404,14 +404,22 @@ val save : who:string -> dir:string -> slot:Machine_checkpoint.slot -> (observat
     controller and does not move the machine: anyone watching may save. *)
 
 type prepared_restore
-(** Validated in-memory checkpoint snapshot with no open resources. *)
+(** Validated guest snapshot owning one uniquely named staged ledger file.
+    The caller must scope it with {!discard_prepared_restore}, including when
+    controller admission refuses. Commit and discard claim ownership atomically. *)
 val prepare_restore :
   dir:string -> slot:Machine_checkpoint.slot -> ledger_dir:string ->
   saves_dir_of:(string -> string) -> (prepared_restore, error) result
+val discard_prepared_restore : prepared_restore -> unit
+(** Discard an unconsumed preparation. Idempotent after commit/discard; only its
+    temporary path is removed, never the installed ledger. IO cleanup failures
+    propagate to the owner, which must report them without masking cancellation. *)
 val commit_restore :
   who:string -> prepared_restore -> announce:(unit -> unit) -> (observation, error) result
 (** Rechecks activity and the current controller under the lane lock, consumes
-    the prepared guest once, then atomically replaces the lane state. *)
+    the prepared guest once, then renames the already-written ledger and replaces
+    lane state. No ledger serialization or full-file write occurs under admission.
+    A controller/activity refusal leaves ownership with the scoped caller. *)
 
 val restore :
   who:string ->

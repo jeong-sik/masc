@@ -1083,15 +1083,28 @@ let meta_of_json json =
   | _ -> corrupt "the lane's fields are missing"
 ;;
 
-type prepared_restore = {
-  restore_machine : (Dos_machine.t * (string, string) Hashtbl.t) option ref;
+type restore_payload = {
+  restore_machine : Dos_machine.t;
+  restore_kept : (string, string) Hashtbl.t;
   restore_meta : restored_meta;
-  restore_lines : string;
-  restore_ledger_dir : string;
+  restore_entries : entry list;
+  restore_staged_ledger : string;
+  restore_ledger_path : string;
   restore_saves_dir : string;
   restore_checkpoint_dir : string;
   restore_slot : Machine_checkpoint.slot;
 }
+
+type prepared_restore = restore_payload option Atomic.t
+
+let remove_restore_stage path =
+  try Unix.unlink path with Unix.Unix_error (Unix.ENOENT,_,_) -> ()
+
+let discard_prepared_restore prepared =
+  match Atomic.exchange prepared None with
+  | None -> ()
+  | Some owned -> remove_restore_stage owned.restore_staged_ledger
+;;
 
 let prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of =
   let* () = require_activity () in
@@ -1113,43 +1126,62 @@ let prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of =
     (Dos_machine.mounted_names m);
   let lines = String.concat ""
       (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") meta.saved_ledger) in
-  Ok {restore_machine=ref (Some (m, kept)); restore_meta=meta; restore_lines=lines;
-      restore_ledger_dir=ledger_dir; restore_saves_dir=saves_dir_of meta.saved_saves;
-      restore_checkpoint_dir=dir; restore_slot=slot}
+  let entries = List.rev meta.saved_ledger in
+  let saves_dir = saves_dir_of meta.saved_saves in
+  try
+    mkdir_p ledger_dir;
+    let temporary,channel = Filename.open_temp_file ~temp_dir:ledger_dir ".restore-ledger-" ".tmp" in
+    let transferred = ref false in
+    Fun.protect ~finally:(fun () ->
+      close_out_noerr channel;
+      if not !transferred then remove_restore_stage temporary)
+      (fun () ->
+        output_string channel lines;
+        close_out channel;
+        let prepared = Atomic.make (Some {
+          restore_machine=m;restore_kept=kept;restore_meta=meta;restore_entries=entries;
+          restore_staged_ledger=temporary;restore_ledger_path=Filename.concat ledger_dir "ledger.jsonl";
+          restore_saves_dir=saves_dir;restore_checkpoint_dir=dir;restore_slot=slot}) in
+        transferred := true;
+        Ok prepared)
+  with
+  | Sys_error message -> Error (Unreadable message)
+  | Unix.Unix_error (error,operation,path) ->
+      Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error))
 ;;
 
 let commit_restore ~who prepared ~announce =
+  (* After admission the lock covers revalidation and publication only. The
+     caller's cleanup and this commit atomically compete for the one payload;
+     cleanup can never unlink a staged file already owned by this commit. *)
   locked (fun () ->
     let* () = require_activity () in
     let* () = match !state with None -> Ok () | Some st -> refuse_other st ~who in
-    match !(prepared.restore_machine) with
-    | None -> Error (Invalid_request "DOS restore preparation was already consumed")
-    | Some (m, kept) ->
-      prepared.restore_machine := None;
-      let meta = prepared.restore_meta in
-      let ledger_path = Filename.concat prepared.restore_ledger_dir "ledger.jsonl" in
-      match
-        mkdir_p prepared.restore_ledger_dir;
-        write_atomically ~dir:prepared.restore_ledger_dir "ledger.jsonl" prepared.restore_lines
-      with
-      | exception Sys_error message -> Error (Unreadable message)
-      | () ->
-        (* Restored files are already kept: an older checkpoint never writes
-           over a newer guest save. No preparation path is read again here. *)
-        let st = {m; steps=meta.saved_steps; program=meta.saved_program; ledger_path;
-          entries=List.rev meta.saved_ledger; saves_dir=prepared.restore_saves_dir;
-          checkpoint_dir=prepared.restore_checkpoint_dir; kept; controller=Some who;
-          incarnation=Random_id.uuid_v7 (); autosaved_once=false} in
-        state := Some st;
-        mark_change ();
-        note_activity ~who ("restore " ^ Machine_checkpoint.slot_to_string prepared.restore_slot);
-        announce ();
-        Ok (observe st))
+    match Atomic.exchange prepared None with
+    | None -> Error (Invalid_request "DOS restore preparation was already consumed or discarded")
+    | Some owned ->
+      Fun.protect ~finally:(fun () -> remove_restore_stage owned.restore_staged_ledger)
+        (fun () ->
+          let meta = owned.restore_meta in
+          let st = {m=owned.restore_machine; steps=meta.saved_steps; program=meta.saved_program;
+            ledger_path=owned.restore_ledger_path; entries=owned.restore_entries;
+            saves_dir=owned.restore_saves_dir;checkpoint_dir=owned.restore_checkpoint_dir;
+            kept=owned.restore_kept;controller=Some who;
+            incarnation=Random_id.uuid_v7 ();autosaved_once=false} in
+          match Sys.rename owned.restore_staged_ledger owned.restore_ledger_path with
+          | exception Sys_error message -> Error (Unreadable message)
+          | () ->
+            state := Some st;
+            mark_change ();
+            note_activity ~who ("restore " ^ Machine_checkpoint.slot_to_string owned.restore_slot);
+            announce ();
+            Ok (observe st)))
 ;;
 
 let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
   let* prepared = prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of in
-  commit_restore ~who prepared ~announce
+  Fun.protect ~finally:(fun () -> discard_prepared_restore prepared)
+    (fun () -> commit_restore ~who prepared ~announce)
 ;;
 
 let checkpoints ~dir =

@@ -1047,6 +1047,41 @@ let listed_json (l : Machine_checkpoint.listed) =
      | Error e -> [ ("unreadable", `String (Machine_checkpoint.error_to_string e)) ])
 ;;
 
+type restore_preparation_handoff =
+  | Restore_waiting
+  | Restore_prepared of Dos_lane.prepared_restore
+  | Restore_abandoned
+
+let discard_restore_preparation prepared =
+  try Dos_lane.discard_prepared_restore prepared with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Log.Misc.warn "DOS restore preparation cleanup failed: %s" (Printexc.to_string exn)
+
+let with_restore_preparation ~prepare use =
+  let handoff = Atomic.make Restore_waiting in
+  (* Install ownership before the worker starts. Cancellation may abandon its
+     result wait while the worker is still writing the temporary ledger. *)
+  Eio_guard.protect ~finally:(fun () ->
+    match Atomic.exchange handoff Restore_abandoned with
+    | Restore_waiting | Restore_abandoned -> ()
+    | Restore_prepared prepared -> off_domain (fun () -> discard_restore_preparation prepared))
+    (fun () ->
+      let prepared = off_domain (fun () ->
+        match prepare () with
+        | Error _ as error -> error
+        | Ok prepared ->
+            if Atomic.compare_and_set handoff Restore_waiting (Restore_prepared prepared)
+            then Ok prepared
+            else begin
+              discard_restore_preparation prepared;
+              Error (Dos_lane.Invalid_request "DOS restore preparation was abandoned")
+            end) in
+      (* A systhread backend can deliver a result after cancellation. No such
+         completed preparation may proceed into credential admission. *)
+      Eio_guard.check_if_ready ();
+      use prepared)
+;;
+
 (* No slot lists them, the way masc_dos_load with no program lists the
    inventory: restoring a default name could replace a game in progress
    with one nobody meant. *)
@@ -1066,10 +1101,9 @@ let handle_restore ?(admit_effect = fun run -> run ()) ~tool_name ~start_time ~b
          ()
      | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e))
   | Ok (Some slot) ->
-    let prepared = off_domain (fun () ->
+    with_restore_preparation ~prepare:(fun () ->
       Dos_lane.prepare_restore ~dir ~slot ~ledger_dir:(dos_dir ~base_path)
-        ~saves_dir_of:(saves_dir ~base_path)) in
-    (match prepared with
+        ~saves_dir_of:(saves_dir ~base_path)) (function
      | Error error -> of_lane ~base_path ~extra:[slot_field slot; core_field]
          ~tool_name ~start_time (Error error)
      | Ok prepared ->

@@ -1,6 +1,7 @@
 (** Worker-only stdio proof using a synthetic COM program. *)
 open Alcotest
-module Client = Mcp_protocol_eio.Client
+module Transport = Mcp_protocol_eio.Stdio_transport
+module Client = Mcp_protocol_eio.Generic_client.Make (Transport)
 module S = Mcp_protocol.Mcp_types
 module C = Machine_controller_contract
 let unwrap = function Ok value -> value | Error message -> fail message
@@ -58,8 +59,10 @@ let test_stdio_controller () =
             (fun () -> Mcp_protocol_eio.Server.run (Dos_addon_worker.create ~base_path ())
               ~stdin:request_source ~stdout:response_sink ~clock:(Eio.Stdenv.clock env) ())
             (fun () ->
-              let client = Client.create ~stdin:response_source ~stdout:request_sink
-                ~clock:(Eio.Stdenv.clock env) () in
+              (* Match the DOS package reply envelope, which includes RGB artifacts. *)
+              let transport = Transport.create ~stdin:response_source ~stdout:request_sink
+                ~max_size:4194304 () in
+              let client = Client.create ~transport ~clock:(Eio.Stdenv.clock env) () in
               ignore (unwrap (Client.initialize client ~client_name:"worker-fixture" ~client_version:"1"));
               let tools = unwrap (Client.list_tools_all client) in
               check int "machine tools and private control ports" 18 (List.length tools);

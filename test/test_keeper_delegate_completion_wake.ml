@@ -304,7 +304,12 @@ let a_cut_reply_names_the_read_path () =
 let the_full_reply_rides_lossless_through_the_projection () =
   with_workspace (fun config ->
     ensure_keeper config ~keeper_name:asker;
-    let long_reply = String.make (480 + 64) 'x' in
+    let tail = "끝\"}],\"isError\":false}" in
+    let long_reply =
+      "{\"content\":[{\"type\":\"text\",\"text\":\""
+      ^ String.make 610 'x'
+      ^ tail
+    in
     let deliver ?(op = operation_id) terminal =
       match
         Wake.deliver
@@ -344,11 +349,17 @@ let the_full_reply_rides_lossless_through_the_projection () =
     in
     check int "the preview ceiling is unchanged" 480
       WO.delegate_reply_preview_max_len;
+    check bool "the exported reply exceeds 648 bytes" true
+      (String.length long_reply >= 648);
     let long_fields = fields_of (operation_id ^ "-long") in
     (match List.assoc_opt "reply_full" long_fields with
      | Some reply_full ->
        check string "a cut reply is restated in full, byte for byte" long_reply
-         reply_full
+         reply_full;
+       check string "the UTF-8 tail after the preview survives" tail
+         (String.sub reply_full
+            (String.length reply_full - String.length tail)
+            (String.length tail))
      | None -> fail "a cut reply must carry its full text in the note fields");
     (match List.assoc_opt "preview" long_fields with
      | Some preview ->

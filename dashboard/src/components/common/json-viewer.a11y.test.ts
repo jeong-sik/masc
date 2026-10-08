@@ -148,4 +148,25 @@ describe('JsonViewer render guards', () => {
     expect(text).not.toContain('k200:')
     expect(text).toContain('300')
   })
+
+  it('lets the user page forward to reach array items past the first batch', () => {
+    const wide = Array.from({ length: 1_000 }, (_, i) => `item-${i}`)
+    render(html`<${JsonViewer} data=${wide} />`, container)
+    expect(container.textContent).not.toContain('item-200')
+    fireEvent.click(container.querySelector('button[aria-label^="Show "]')!)
+    expect(container.textContent).toContain('item-200')
+    expect(container.textContent).toContain('item-399')
+    expect(container.textContent).not.toContain('item-400')
+  })
+
+  it('lets the user page forward to reach object entries past the first batch', () => {
+    const wide: Record<string, string> = {}
+    for (let i = 0; i < 500; i++) wide[`k${i}`] = `v${i}`
+    render(html`<${JsonViewer} data=${wide} />`, container)
+    expect(container.textContent).not.toContain('k200:')
+    fireEvent.click(container.querySelector('button[aria-label^="Show "]')!)
+    expect(container.textContent).toContain('k200:')
+    expect(container.textContent).toContain('k399:')
+    expect(container.textContent).not.toContain('k400:')
+  })
 })

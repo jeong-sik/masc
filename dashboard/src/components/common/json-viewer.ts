@@ -67,6 +67,11 @@ function LongStringLeaf({ data, label }: { data: string; label?: string }) {
 
 export function JsonViewer({ data, label, initialCollapsed = false, collapseNested = true, level = 0, ancestors = [] }: { data: unknown; label?: string; initialCollapsed?: boolean; collapseNested?: boolean; level?: number; ancestors?: object[] }) {
   const [collapsed, setCollapsed] = useState(initialCollapsed)
+  // Progressive disclosure: draw at most MAX_RENDERED_ITEMS entries at a time
+  // so a very wide container still cannot flood the DOM on one paint, but the
+  // user can page forward to reach entries past the first batch (the render
+  // guard alone used to make index >= MAX_RENDERED_ITEMS unreachable).
+  const [itemLimit, setItemLimit] = useState(MAX_RENDERED_ITEMS)
 
   const isObject = data !== null && typeof data === 'object'
   const isArray = Array.isArray(data)
@@ -138,14 +143,23 @@ export function JsonViewer({ data, label, initialCollapsed = false, collapseNest
       ${!collapsed && html`
         <div class="pl-4 ml-1.5 border-l border-[var(--color-border-divider)] mt-1 flex flex-col gap-0.5 w-full min-w-0">
           ${(isArray
-            ? (data as unknown[]).slice(0, MAX_RENDERED_ITEMS)
-            : (entries as [string, unknown][]).slice(0, MAX_RENDERED_ITEMS)
+            ? (data as unknown[]).slice(0, itemLimit)
+            : (entries as [string, unknown][]).slice(0, itemLimit)
           ).map((entry, idx) => {
             const [key, val] = isArray ? [String(idx), entry] : (entry as [string, unknown])
             return html`<${JsonViewer} key=${key} data=${val} label=${key} level=${level + 1} initialCollapsed=${collapseNested && level >= 2} collapseNested=${collapseNested} ancestors=${nextAncestors} />`
           })}
-          ${(isArray ? (data as unknown[]).length : entries.length) > MAX_RENDERED_ITEMS
-            ? html`<div class="text-[var(--color-fg-muted)] text-2xs py-0.5">… 나머지 ${((isArray ? (data as unknown[]).length : entries.length) - MAX_RENDERED_ITEMS).toLocaleString()}개 항목 미표시 (렌더 방어)</div>`
+          ${(isArray ? (data as unknown[]).length : entries.length) > itemLimit
+            ? html`
+                <button
+                  type="button"
+                  class="cursor-pointer hover:bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] px-1 -mx-1 select-none text-left bg-transparent border-0 text-[var(--color-accent)] text-2xs py-0.5"
+                  onClick=${() => setItemLimit(itemLimit + MAX_RENDERED_ITEMS)}
+                  aria-label=${`Show ${Math.min(MAX_RENDERED_ITEMS, (isArray ? (data as unknown[]).length : entries.length) - itemLimit).toLocaleString()} more ${toggleLabel} items`}
+                >
+                  … 나머지 ${((isArray ? (data as unknown[]).length : entries.length) - itemLimit).toLocaleString()}개 항목 — 다음 ${Math.min(MAX_RENDERED_ITEMS, (isArray ? (data as unknown[]).length : entries.length) - itemLimit).toLocaleString()}개 보기 (렌더 방어)
+                </button>
+              `
             : null}
         </div>
       `}

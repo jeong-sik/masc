@@ -79,4 +79,11 @@ val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
     machine once, with [Machine_changed Msx]; a save or a refusal wakes nothing. *)
 val checkpoint_response :
   config:Workspace.config -> restore:bool -> body:string ->
-  [ `OK | `Bad_request | `Conflict | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
+  [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
+
+(** Workspace-bound read of one admitted checkpoint operation. Missing/pending
+    evidence never proves completion. Committed receipts precede a same-request
+    current lane snapshot, explicitly allowed to contain later effects. *)
+val checkpoint_status_response :
+  config:Workspace.config -> body:string ->
+  [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t

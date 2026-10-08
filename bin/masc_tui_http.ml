@@ -753,17 +753,48 @@ let post_msx_change_disk ~expected_workspace ~host ~port ~disk =
       | `String message -> Error message | _ -> Error "disk change refused")
 ;;
 
-let post_msx_checkpoint ~expected_workspace ~host ~port ~restore ~slot =
+type checkpoint_error =
+  | Checkpoint_refused of string
+  | Checkpoint_outcome_unknown of string
+
+let decode_checkpoint_receipt ~expected_workspace ~operation_id ~restore ~slot json =
+  Masc.Tui_decode.decode_msx_checkpoint_receipt ~operation_id ~restore ~slot
+    ~base_path:(Masc_tui_types.canonical_path expected_workspace.Masc.Tui_decode.sid_base_path)
+    ~masc_root:(Masc_tui_types.canonical_path expected_workspace.sid_masc_root) json
+
+let post_msx_checkpoint ~expected_workspace ~operation_id ~host ~port ~restore ~slot =
   let path = if restore then "/api/v1/msx/restore" else "/api/v1/msx/save" in
-  let body = msx_write_body ~expected_workspace ["slot", `String slot] in
-  match post_json ~host ~port ~path ~body with
-  | Error e -> Error e
-  | Ok json ->
-    let open Yojson.Safe.Util in
-    match member "ok" json with
-    | `Bool true -> Ok ()
-    | _ -> (match member "message" json with
-      | `String message -> Error message | _ -> Error "checkpoint refused")
+  let body = msx_write_body ~expected_workspace ["slot", `String slot;"operation_id",`String operation_id] in
+  let result = http_post ~headers:(auth_headers ()) ~host ~port ~path ~body in
+  match result with
+  | Error detail -> Error (Checkpoint_outcome_unknown detail)
+  | Ok (status_code, _) when status_code >= 400 && status_code < 500 ->
+      (match mutation_outcome result with
+       | Post_refused detail -> Error (Checkpoint_refused detail)
+       | Post_answered _ | Post_unanswered _ ->
+           Error (Checkpoint_outcome_unknown "checkpoint admission response is unreadable"))
+  | Ok (status_code, body) ->
+      (* Even a 5xx needs this operation/workspace's typed receipt to prove a
+         pre-effect refusal. Legacy action/slot-only envelopes cannot settle it. *)
+      let decoded =
+        if (status_code >= 200 && status_code < 300) || (status_code >= 500 && status_code < 600) then
+          Result.bind (decode_json ~allow_empty:false ~status_code:200 ~body)
+            (decode_checkpoint_receipt ~expected_workspace ~operation_id ~restore ~slot)
+        else Error "checkpoint response status did not confirm its operation" in
+      (match decoded with
+       | Ok (Checkpoint_committed _) -> Ok ()
+       | Ok (Checkpoint_refused detail) -> Error (Checkpoint_refused detail)
+       | Ok Checkpoint_pending -> Error (Checkpoint_outcome_unknown "checkpoint operation is pending")
+       | Ok (Checkpoint_unknown detail) | Error detail -> Error (Checkpoint_outcome_unknown detail))
+
+let inspect_msx_checkpoint ~expected_workspace ~operation_id ~host ~port ~restore ~slot =
+  let body = msx_write_body ~expected_workspace
+    ["slot",`String slot;"operation_id",`String operation_id;
+     "checkpoint",`String (if restore then "restore" else "save")] in
+  let ( let* ) = Result.bind in
+  let* json = post_json ~host ~port ~path:"/api/v1/msx/checkpoint-operation" ~body in
+  decode_checkpoint_receipt ~expected_workspace ~operation_id ~restore ~slot json
+
 ;;
 
 (* Advance the shared machine one poll-cadence step and read back the frame it

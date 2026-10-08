@@ -495,6 +495,198 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
         http_requests=requests, http_fixtures=fixtures)
 
 
+def run_checkpoint_certainty(executable, outcome):
+    """A tick barrier and correlated receipt protect both quick-slot operations."""
+    current, _observed, prepare, health = workspace_fixture()
+    requests = []
+    first_tick, release_tick, activity_read = (threading.Event() for _ in range(3))
+    checkpoint, inspected, completed = (threading.Event() for _ in range(3))
+    stale_read_started, release_stale_read, stale_read_returned = (threading.Event() for _ in range(3))
+    operation = {}
+    inspections = []
+    generic_reads_after = []
+    restore = outcome != 'save_unknown'
+    rgb = base64.b64encode(b'\xff\x00\x00').decode()
+
+    def pixels(number):
+        return {'state': 'changed', 'source_kind': 'msx_capture', 'change_count': number,
+            'incarnation': 'history-' + str(number), 'frame_number': number,
+            'screen': {'format': 'rgb8', 'width': 1, 'height': 1, 'rgb_base64': rgb}}
+
+    def live(_path):
+        if outcome == 'late_read' and activity_read.is_set() and not checkpoint.is_set() and not stale_read_started.is_set():
+            stale_read_started.set()
+            assert release_stale_read.wait(8), 'stale observation was not released during the scenario'
+            stale_read_returned.set()
+            return 200, pixels(1)
+        if checkpoint.is_set():
+            generic_reads_after.append(True)
+        return 200, pixels(1)
+
+    def tick(_body):
+        first_tick.set()
+        assert release_tick.wait(8), 'held tick was not released during the scenario'
+        return 409, {'ok': False, 'code': 'activity_disabled'}
+
+    def activity():
+        activity_read.set()
+        return 200, {'schema': 'masc.msx-activity/v1', 'activity': 'off'}
+
+    def write(body):
+        operation.update(json.loads(body))
+        assert operation['expected_workspace']['base_path'] == current['base']
+        assert operation['operation_id']
+        checkpoint.set()
+        if outcome in ('refused', 'wrong_operation', 'wrong_workspace'):
+            base = current['base'] if outcome != 'wrong_workspace' else str(Path(current['base'], 'foreign'))
+            return 503, {'ok': False, 'checkpoint': 'restore', 'slot': 'quick',
+                'operation_id': operation['operation_id'] if outcome != 'wrong_operation' else 'another-operation',
+                'workspace': {'base_path': base, 'masc_root': str(Path(base, '.masc'))},
+                'epoch': 'fixture-server', 'status': 'refused',
+                'effect_disposition': 'proven_pre_effect', 'message': 'worker unavailable'}
+        return h.DroppedHttpResponse()
+
+    def inspect(body):
+        request = json.loads(body)
+        inspections.append(request)
+        assert request['operation_id'] == operation['operation_id']
+        inspected.set()
+        if outcome == 'failed':
+            return 503, {'error': 'inspection unavailable'}
+        base = current['base'] if outcome != 'read_swap' else str(Path(current['base'], 'other-workspace'))
+        done = outcome in ('lost', 'read_swap', 'late_read') or completed.is_set()
+        result = {'ok': done, 'operation_id': request['operation_id'], 'checkpoint': request['checkpoint'],
+            'slot': 'quick', 'epoch': 'fixture-server', 'status': 'committed' if done else 'pending',
+            'workspace': {'base_path': base, 'masc_root': str(Path(base, '.masc'))}}
+        if done:
+            result['effect'] = {'change_count': 2, 'incarnation': 'history-2', 'checkpoint_sha256': 'a' * 64}
+            if restore:
+                result.update(live=pixels(2), live_relation='observed_after_completion')
+        return 200, result
+
+    def interact(process, master, _slave, output, _base):
+        def key(value, needle):
+            return press(process, master, output, value, needle)
+        checkpoint_key = b'\x1b[18~' if restore else b'\x1b[17~'
+        def reinspect(value):
+            before = len(inspections)
+            os.write(master, value)
+            assert h.wait_for_fixture_state(process, master, output,
+                lambda: len(inspections) > before, timeout=8)
+        try:
+            key(b':go Collab\r', '› guest'.encode())
+            key(b'm', b'frame 1 ')
+            key(b'\x1b[15~', b'Controlling')
+            assert h.wait_for_fixture_event(process, master, output, first_tick, timeout=8)
+            key(checkpoint_key, b'Wait for the outstanding MSX tick')
+            assert not checkpoint.is_set(), requests
+            # Release the late tick while the test is still live. The activity
+            # request proves its completion was consumed before checkpointing.
+            release_tick.set()
+            assert h.wait_for_fixture_event(process, master, output, activity_read, timeout=8)
+            if outcome == 'late_read':
+                assert h.wait_for_fixture_event(process, master, output, stale_read_started, timeout=8)
+            start = len(output)
+            os.write(master, checkpoint_key)
+            needle = (b'Checkpoint refused:' if outcome == 'refused' else
+                      b'Restore completed; showing' if outcome in ('lost', 'late_read') else
+                      b'Checkpoint inspection failed' if outcome in ('failed', 'read_swap') else
+                      b'Checkpoint is still pending')
+            h.wait_for_output(process, master, output, needle, start=start, timeout=8)
+            if outcome != 'refused':
+                assert inspected.is_set()
+                assert not generic_reads_after, generic_reads_after
+                screen = h.screen_text(bytes(output))
+                assert (b'frame 2 ' if outcome in ('lost', 'late_read') else b'frame 1 ') in screen, screen
+                if outcome == 'late_read':
+                    # The pre-checkpoint read returns only after receipt-bound
+                    # frame 2 was installed. It must not repaint frame 1.
+                    release_stale_read.set()
+                    assert h.wait_for_fixture_event(process, master, output, stale_read_returned, timeout=8)
+                    assert h.drain_until_quiet(process, master, output)
+                    key(b'+', b'frame 2 ')
+                    screen = h.screen_text(bytes(output))
+                    assert b'frame 2 ' in screen and b'frame 1 ' not in screen, screen
+                elif outcome in ('pending', 'save_unknown', 'wrong_operation', 'wrong_workspace'):
+                    # Neither control admission nor another save/restore can
+                    # release a pending operation or overwrite quick.
+                    reinspect(b'\x1b[15~')
+                    reinspect(checkpoint_key)
+                    completed.set()
+                    key(b'\x1b[15~', b'Restore completed; showing' if restore else b'Saved quick checkpoint; operation receipt verified.')
+                elif outcome in ('failed', 'read_swap'):
+                    reinspect(b'\x1b[15~')
+                    assert b'frame 1 ' in h.screen_text(bytes(output))
+            path = '/api/v1/msx/restore' if restore else '/api/v1/msx/save'
+            assert sum(route == path for route, _ in requests) == 1, requests
+            assert sum(route == '/api/v1/msx/tick' for route, _ in requests) == 1, requests
+            os.write(master, b'\x1b\x1bq')
+        finally:
+            release_tick.set()
+            release_stale_read.set()
+
+    h.run_terminal_scenario(executable,
+        description='checkpoint ' + outcome + ' retains uncertainty until a correlated operation settles',
+        interact=interact, prepare_workspace=prepare, refresh=60.0, terminal_cols=200,
+        http_requests=requests, http_fixtures={'/health': health, '/health?full=1': health,
+            '/api/v1/play/invites': (200, {'invites': [row()]}),
+            '/api/v1/lane-addons/live': h.PathHttpResponse(live),
+            '/api/v1/msx/activity': activity,
+            '/api/v1/msx/tick': h.RequestHttpResponse(tick),
+            '/api/v1/msx/restore': h.RequestHttpResponse(write),
+            '/api/v1/msx/save': h.RequestHttpResponse(write),
+            '/api/v1/msx/checkpoint-operation': h.RequestHttpResponse(inspect)})
+
+
+def run_workspace_control_rearm(executable):
+    """Activity alone cannot rearm a refused tick; fresh explicit F5 can."""
+    current, _observed, prepare, health = workspace_fixture()
+    requests = []
+    ticks = []
+    resumed = threading.Event()
+    rgb = base64.b64encode(b'\xff\x00\x00').decode()
+
+    def live(_path):
+        number = 3 if ticks else 1
+        return 200, {'state': 'changed', 'source_kind': 'msx_capture', 'change_count': number,
+            'incarnation': 'a', 'frame_number': number,
+            'screen': {'format': 'rgb8', 'width': 1, 'height': 1, 'rgb_base64': rgb}}
+
+    def tick(_body):
+        ticks.append('tick')
+        if len(ticks) == 1:
+            # A transient replacement at POST refused the original binding;
+            # health and later reads again describe the original workspace.
+            return 409, {'ok': False, 'code': 'workspace_precondition_failed',
+                         'message': 'workspace precondition failed'}
+        resumed.set()
+        return 200, {'loaded': False}
+
+    def interact(process, master, _slave, output, _base):
+        def key(value, needle):
+            return press(process, master, output, value, needle)
+        key(b':go Collab\r', '› guest'.encode())
+        key(b'm', b'frame 1 ')
+        key(b'\x1b[15~', b'Controlling')
+        h.wait_for_output(process, master, output, b'MSX workspace changed;', timeout=8)
+        # A completed activity/live consumer is a causal barrier, not a sleep.
+        h.wait_for_output(process, master, output, b'frame 3 ', timeout=8)
+        assert ticks == ['tick'], ticks
+        key(b'\x1b[15~', b'Watching only')
+        key(b'\x1b[15~', b'Controlling')
+        assert h.wait_for_fixture_event(process, master, output, resumed, timeout=8)
+        os.write(master, b'\x1b\x1bq')
+
+    h.run_terminal_scenario(executable,
+        description='fresh explicit control admission rearms a workspace-refused MSX tick',
+        interact=interact, prepare_workspace=prepare, refresh=60.0, terminal_cols=200,
+        http_requests=requests, http_fixtures={'/health': health, '/health?full=1': health,
+            '/api/v1/play/invites': (200, {'invites': [row()]}),
+            '/api/v1/lane-addons/live': h.PathHttpResponse(live),
+            '/api/v1/msx/activity': (200, {'schema': 'masc.msx-activity/v1', 'activity': 'on'}),
+            '/api/v1/msx/tick': h.RequestHttpResponse(tick)})
+
+
 if __name__ == '__main__':
     run_unknown(sys.argv[1], 'issue')
     run_unknown(sys.argv[1], 'revoke')
@@ -507,4 +699,7 @@ if __name__ == '__main__':
     for operation in ('press', 'save', 'restore', 'load', 'disk', 'tick'):
         run_machine_post_workspace_swap(sys.argv[1], operation)
     run_machine_post_workspace_swap(sys.argv[1], 'save', alias_identity=True)
+    for outcome in ('refused', 'failed', 'lost', 'pending', 'read_swap', 'save_unknown', 'wrong_operation', 'wrong_workspace', 'late_read'):
+        run_checkpoint_certainty(sys.argv[1], outcome)
+    run_workspace_control_rearm(sys.argv[1])
     print('tui Collab authority: PASS')

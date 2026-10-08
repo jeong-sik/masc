@@ -55,3 +55,8 @@ val package_preview_payload : Mcp_server.server_state -> (string * string) list 
   (Yojson.Safe.t, string) result
 (** Shared H1/H2 payloads. The transport applies its read-auth gate before
     calling these filesystem readers. *)
+
+(** Locked read used after a correlated checkpoint receipt has settled. Caller
+    captures and validates workspace config in the same request. Returned pixels
+    are current at this read and may reflect effects later than that receipt. *)
+val msx_live : Machine_lane.t -> since:since option -> unit -> Yojson.Safe.t

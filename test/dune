@@ -3417,6 +3417,13 @@
   masc_tui_keeper_chat_transcript))
 
 (test
+ (name test_tui_chat_response_origins)
+ (modules test_tui_chat_response_origins)
+ (libraries alcotest astring masc masc_tui_types masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_log masc_tui_render_chat masc_tui_frame_presenter
+  masc_tui_ansi masc_tui_theme masc_tui_render_schedule masc_tui_roster_pane))
+
+(test
  (name test_tui_autonomous_journal)
  (modules test_tui_autonomous_journal)
  (libraries alcotest masc masc.masc_types masc_tui_types masc_tui_observer
@@ -3444,6 +3451,7 @@
   masc_tui_credential
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
+  masc_tui_keeper_chat_transcript
   yojson))
 
 (test

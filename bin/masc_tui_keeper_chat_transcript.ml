@@ -166,8 +166,9 @@ type unreadable =
    have opened (arguments stream in, the result lands). *)
 type trail_node =
   | Node_segment_boundary
-  | Node_thinking of float * Buffer.t
-  | Node_text of float * Buffer.t
+  | Node_response_boundary
+  | Node_thinking of int * float * Buffer.t
+  | Node_text of int * float * Buffer.t
   | Node_tool of int
   | Node_superseded of
       { attempt : int
@@ -217,6 +218,11 @@ type t =
   ; thinking_buffer : Buffer.t
   ; mutable reversed_tool_calls : live_tool_call list
   ; mutable reversed_trail : trail_node list
+  ; mutable next_stretch_id : int
+  ; mutable response_first_stretch : int
+        (* First possible stretch id in the response the canonical reply owns.
+           Provider message starts and tool rounds advance this frontier;
+           reasoning only creates another stretch inside that response. *)
   ; mutable next_tool_local_id : int
   ; mutable segment : int
   ; mutable segment_turn_refs : (int * string) list
@@ -320,6 +326,8 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; thinking_buffer = Buffer.create 256
   ; reversed_tool_calls = []
   ; reversed_trail = []
+  ; next_stretch_id = 0
+  ; response_first_stretch = 0
   ; next_tool_local_id = 0
   ; segment = 0
   ; segment_turn_refs = []
@@ -446,21 +454,31 @@ let stream_details_within ~keeper_name ~room transcript =
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
    between closes it. Coalescing here rather than at draw time keeps the trail
    bounded by the turn's shape (rounds), not by its chunking on the wire. *)
+let fresh_stretch t =
+  let id = t.next_stretch_id in
+  t.next_stretch_id <- id + 1;
+  id
+
+let begin_response t =
+  t.response_first_stretch <- t.next_stretch_id;
+  t.reversed_trail <- Node_response_boundary :: t.reversed_trail
+
 let trail_thinking ~now t text =
   (match t.reversed_trail with
-   | Node_thinking (_, buffer) :: _ -> Buffer.add_string buffer text
-   | (Node_segment_boundary | Node_text _ | Node_tool _ | Node_superseded _) :: _ | [] ->
+   | Node_thinking (_, _, buffer) :: _ -> Buffer.add_string buffer text
+   | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_tool _ | Node_superseded _) :: _ | [] ->
        let buffer = Buffer.create 256 in
        Buffer.add_string buffer text;
-       t.reversed_trail <- Node_thinking (now, buffer) :: t.reversed_trail)
+       t.reversed_trail <- Node_thinking (fresh_stretch t, now, buffer) :: t.reversed_trail)
 
 let trail_text ~now t text =
   (match t.reversed_trail with
-   | Node_text (_, buffer) :: _ -> Buffer.add_string buffer text
-   | (Node_segment_boundary | Node_thinking _ | Node_tool _ | Node_superseded _) :: _ | [] ->
+   | Node_text (_, _, buffer) :: _ -> Buffer.add_string buffer text
+   | (Node_segment_boundary | Node_response_boundary | Node_thinking _ | Node_tool _ | Node_superseded _) :: _ | [] ->
        let buffer = Buffer.create 256 in
        Buffer.add_string buffer text;
-       t.reversed_trail <- Node_text (now, buffer) :: t.reversed_trail)
+       let id = fresh_stretch t in
+       t.reversed_trail <- Node_text (id, now, buffer) :: t.reversed_trail)
 
 let keeper_name t = t.keeper_name
 let request_id t = t.request_id
@@ -1390,33 +1408,36 @@ let project_trail t ~thinking ~text ~tools ~skills ~superseded =
       | [] -> acc
       | activities ->
           let activities = List.rev activities in
-          tools ~segment ~at:(fst (List.hd activities)) (tool_block (List.map snd activities)) :: acc
+          let origin, at, _ = List.hd activities in
+          tools ~segment ~origin ~at (tool_block (List.map (fun (_, _, activity) -> activity) activities)) :: acc
     in
     let flush_skills acc pending =
       match pending with
       | [] -> acc
       | pending ->
           let pending = List.rev pending in
-          skills ~segment ~at:(fst (List.hd pending)) (List.map snd pending) :: acc
+          let origin, at, _ = List.hd pending in
+          skills ~segment ~origin ~at (List.map (fun (_, _, skill) -> skill) pending) :: acc
     in
     let rec split acc generic skills = function
       | [] -> flush_skills (flush_generic acc generic) skills
-      | (at, activity) :: rest -> (
+      | (origin, at, activity) :: rest -> (
           match skill_activity_of_tool activity with
           | None ->
               let acc = flush_skills acc skills in
-              split acc ((at, activity) :: generic) [] rest
+              split acc ((origin, at, activity) :: generic) [] rest
           | Some skill ->
               let acc = flush_generic acc generic in
               let skill = { skill with turn_ref =
                 Option.map safe_line (nonblank (List.assoc_opt segment t.segment_turn_refs)) } in
-              split acc [] ((at, skill) :: skills) rest)
+              split acc [] ((origin, at, skill) :: skills) rest)
     in
-    group |> List.rev |> List.map (fun (call : live_tool_call) -> call.started_at, activity_of_live_call t call) |> split acc [] []
+    group |> List.rev |> List.map (fun (call : live_tool_call) -> call.local_id, call.started_at, activity_of_live_call t call) |> split acc [] []
   in
   let rec walk segment acc group = function
     | [] -> List.rev (flush_tools ~segment acc group)
     | Node_segment_boundary :: rest -> walk (segment + 1) (flush_tools ~segment acc group) [] rest
+    | Node_response_boundary :: rest -> walk segment (flush_tools ~segment acc group) [] rest
     | Node_tool local_id :: rest -> (
         match call_of local_id with
         | Some call -> walk segment acc (call :: group) rest
@@ -1429,7 +1450,7 @@ let project_trail t ~thinking ~text ~tools ~skills ~superseded =
           | items -> superseded ~attempt ~runtime_id items :: acc
         in
         walk segment acc [] rest
-    | Node_thinking (at, buffer) :: rest ->
+    | Node_thinking (origin, at, buffer) :: rest ->
         let acc = flush_tools ~segment acc group in
         let lines =
           Buffer.contents buffer
@@ -1438,14 +1459,14 @@ let project_trail t ~thinking ~text ~tools ~skills ~superseded =
           |> List.map safe_line
         in
         let acc =
-          match lines with [] -> acc | lines -> thinking ~segment ~at lines :: acc
+          match lines with [] -> acc | lines -> thinking ~segment ~origin ~at lines :: acc
         in
         walk segment acc [] rest
-    | Node_text (at, buffer) :: rest ->
+    | Node_text (origin, at, buffer) :: rest ->
         let acc = flush_tools ~segment acc group in
         let body = safe_block (Buffer.contents buffer) in
         let acc =
-          if String.trim body = "" then acc else text ~segment ~at body :: acc
+          if String.trim body = "" then acc else text ~segment ~origin ~at body :: acc
         in
         walk segment acc [] rest
   in
@@ -1453,10 +1474,10 @@ let project_trail t ~thinking ~text ~tools ~skills ~superseded =
 
 let trail t =
   project_trail t
-    ~thinking:(fun ~segment:_ ~at:_ lines -> Trail_thinking lines)
-    ~text:(fun ~segment:_ ~at:_ text -> Trail_text text)
-    ~tools:(fun ~segment:_ ~at:_ block -> Trail_tools block)
-    ~skills:(fun ~segment:_ ~at:_ skills -> Trail_skill skills)
+    ~thinking:(fun ~segment:_ ~origin:_ ~at:_ lines -> Trail_thinking lines)
+    ~text:(fun ~segment:_ ~origin:_ ~at:_ text -> Trail_text text)
+    ~tools:(fun ~segment:_ ~origin:_ ~at:_ block -> Trail_tools block)
+    ~skills:(fun ~segment:_ ~origin:_ ~at:_ skills -> Trail_skill skills)
     ~superseded:(fun ~attempt ~runtime_id items ->
       Trail_superseded { attempt; runtime_id; items })
 
@@ -1977,6 +1998,7 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; duration = None
            }
            :: t.reversed_tool_calls;
+         t.response_first_stretch <- t.next_stretch_id;
          t.reversed_trail <- Node_tool local_id :: t.reversed_trail)
 
 let apply_delta ~now t (delta : Live.delta) =
@@ -1988,6 +2010,12 @@ let apply_delta ~now t (delta : Live.delta) =
         Buffer.clear t.text_buffer;
         Buffer.clear t.thinking_buffer;
         t.reply <- None;
+        t.response_first_stretch <- t.next_stretch_id;
+        t.observed_model <- None;
+        t.observed_usage <- None;
+        t.observed_stop_reason <- None;
+        t.model_signal <- None;
+        t.runtime_named_at <- None;
         t.interrupt <- Not_requested
       end;
       match t.phase with
@@ -2014,6 +2042,7 @@ let apply_delta ~now t (delta : Live.delta) =
          in [reversed_tool_calls] and the superseded node still names them. *)
       Buffer.clear t.text_buffer;
       Buffer.clear t.thinking_buffer;
+      t.response_first_stretch <- t.next_stretch_id;
       (* Only the nodes since the last boundary fold; earlier superseded
          blocks stay where they are, so blocks are siblings -- one per
          superseded attempt, each keeping its number -- and never nest.
@@ -2056,16 +2085,14 @@ let apply_delta ~now t (delta : Live.delta) =
       (match t.phase with
        | Waiting | Working -> t.phase <- Working
        | Stream_ended | Stream_failed _ -> ())
-  | Live.Stream_model_started { model } ->
+  | Live.Stream_model_started { model; usage; _ } ->
+      (* The bridge publishes one start per provider response; exact prelude
+         replays are suppressed there with stream-scope authority. Journal
+         replays retain sequence identity and are deduplicated by the log.
+         A provider id may legally be reused in a later response. *)
+      begin_response t;
       t.observed_model <- Some model;
-      (* A request's counters and its stop reason belong to that request. The
-         provider accumulates the counters inside one request and reports the
-         reason at its end, so a turn that calls tools asks several times and
-         each answer starts from neither. Carrying the previous request's
-         numbers into this one would label one round's tokens as what the turn
-         has spent, and carrying its reason would leave [stopped: tool_use] on
-         the header while the next round is still writing. *)
-      t.observed_usage <- None;
+      t.observed_usage <- usage;
       t.observed_stop_reason <- None;
       t.model_signal <- Some (Model_started_at now)
   | Live.Stream_details { usage; stop_reason } ->
@@ -2075,7 +2102,15 @@ let apply_delta ~now t (delta : Live.delta) =
          sends the counters and the stop reason in the same event, but not
          always in the same one. *)
       (match usage with
-       | Some usage -> t.observed_usage <- Some usage
+       | Some usage ->
+           let retain next previous = match next with Some _ -> next | None -> previous in
+           t.observed_usage <- Some (match t.observed_usage with
+             | None -> usage
+             | Some previous ->
+                 { Live.input_tokens = retain usage.input_tokens previous.input_tokens
+                 ; output_tokens = retain usage.output_tokens previous.output_tokens
+                 ; cache_read_input_tokens = retain usage.cache_read_input_tokens previous.cache_read_input_tokens
+                 ; cache_creation_input_tokens = retain usage.cache_creation_input_tokens previous.cache_creation_input_tokens })
        | None -> ());
       (match stop_reason with
        | Some stop_reason -> t.observed_stop_reason <- Some stop_reason
@@ -2397,8 +2432,17 @@ type drawn =
   | Drawn_status of string
   | Drawn_error of string
 
+type drawn_origin =
+  | Text_stretch of int
+  | Thinking_stretch of int
+  | Tool_stretch of int
+  | Unstreamed_skills
+  | Reply_of_segment of int
+  | Error_of_segment of int
+
 type drawn_item =
-  { at : float option
+  { origin : drawn_origin
+  ; at : float option
   ; segment : int
   ; superseded : int option
   ; superseded_runtime_id : string option
@@ -2485,50 +2529,34 @@ let with_noted_skills noted items =
    streamed. Superseded blocks are siblings in the trail, never nested (see
    [trail_item]), so one level of flattening is the whole of it. *)
 let drawn t =
-  let item ~segment ~at drawn =
-    [{ at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }] in
+  let item ~segment ~origin ~at drawn =
+    [{ origin; at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }] in
   let items, unseen =
     project_trail t
-      ~thinking:(fun ~segment ~at lines -> item ~segment ~at (Drawn_thinking lines))
-      ~text:(fun ~segment ~at text -> item ~segment ~at (Drawn_text text))
-      ~tools:(fun ~segment ~at block -> item ~segment ~at (Drawn_tools block))
-      ~skills:(fun ~segment ~at skills -> item ~segment ~at (Drawn_skill skills))
+      ~thinking:(fun ~segment ~origin ~at lines -> item ~segment ~origin:(Thinking_stretch origin) ~at (Drawn_thinking lines))
+      ~text:(fun ~segment ~origin ~at text -> item ~segment ~origin:(Text_stretch origin) ~at (Drawn_text text))
+      ~tools:(fun ~segment ~origin ~at block -> item ~segment ~origin:(Tool_stretch origin) ~at (Drawn_tools block))
+      ~skills:(fun ~segment ~origin ~at skills -> item ~segment ~origin:(Tool_stretch origin) ~at (Drawn_skill skills))
       ~superseded:(fun ~attempt ~runtime_id items ->
         List.concat items |> List.map (fun item ->
           { item with superseded = Some attempt; superseded_runtime_id = runtime_id }))
     |> List.concat
     |> with_noted_skills t.noted_skills
   in
-  let current_text = function
-    | { superseded = None; drawn = Drawn_text _; segment; _ } -> segment = t.segment
-    | { superseded = Some _; _ }
-    | { superseded = None
-      ; drawn =
-          ( Drawn_thinking _ | Drawn_skill _ | Drawn_tools _ | Drawn_reply _
-          | Drawn_status _ | Drawn_error _ )
-      ; _ } ->
-        false
+  let current_text item =
+    match item.origin, item.superseded, item.drawn with
+    | Text_stretch id, None, Drawn_text _ -> id >= t.response_first_stretch
+    | _ -> false
   in
-  (* The recorded reply is the terminal message's text
-     ([Agent_core.Types.text_of_content result.response.content], normalized),
-     not the whole turn's: a turn that said "Let me check." before its tool
-     round and "Done." after records "Done.". So only the last stretch of the
-     current attempt is the one the reply stands for; the stretches before it
-     are the turn's earlier rounds and stay as they streamed. A tool or skill
-     round of the current attempt ends the stretch before it: text that
-     streamed before the round is progress, and a turn that streamed nothing
-     after it has no stretch for the reply to stand for. *)
+  (* The flat canonical reply can stand for the last text stretch only. A
+     provider message start or tool round ends the preceding response even
+     when no later text arrives. Earlier observed stretches keep their places;
+     resolving a multi-block final reply requires content provenance that the
+     current flat reply event does not carry. *)
   let last_text =
-    List.fold_left
-      (fun (index, last) item ->
-        let last =
-          match item.superseded, item.drawn with
-          | None, (Drawn_tools _ | Drawn_skill _) -> None
-          | _ -> if current_text item then Some index else last
-        in
-        (index + 1, last))
-      (0, None) items
-    |> snd
+    List.mapi (fun index item -> index, item) items
+    |> List.fold_left (fun last (index, item) ->
+         if current_text item then Some index else last) None
   in
   (* A read the trail never saw has no place of its own in it. Every read
      comes before the turn's terminal message, so it goes ahead of the
@@ -2539,7 +2567,7 @@ let drawn t =
     | [] -> items, last_text
     | skills -> (
         let unseen_item =
-          { at = None; segment = t.segment; superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
+          { origin = Unstreamed_skills; at = None; segment = t.segment; superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
         in
         match last_text with
         | None -> items @ [ unseen_item ], None
@@ -2562,11 +2590,12 @@ let drawn t =
          request's identity, not its words), and a journal is read per
          operation into the log created with that id. So a reply on this
          transcript is this operation's, and the operation records one reply:
-         the terminal message, the last stretch of the current attempt. The
-         record is the store's text for it and stands where that stretch
+         the terminal response. The
+         record is the store's text for it and stands where its last stretch
          was, typed as the record -- whatever the stream's copy read. *)
       let reply_item =
-        { at = t.settled_at
+        { origin = Reply_of_segment t.segment
+        ; at = t.settled_at
         ; segment = t.segment
         ; superseded = None
         ; superseded_runtime_id = None
@@ -2578,13 +2607,16 @@ let drawn t =
           (* Nothing streamed for the reply: the record is all there is. *)
           items @ [ reply_item ]
       | Some last ->
-          List.mapi (fun index item -> if index = last then { reply_item with at = item.at } else item) items)
+          List.mapi (fun index item ->
+            if index = last then { reply_item with origin = item.origin; at = item.at }
+            else item) items)
   | Some { reply_text; reply_at; reply_outcome; reply_turn_ref } ->
       (* Nothing is chunked for a control outcome, and a visible reply with
          no text has nothing to chunk: the one row that says how the turn
          ended comes from the recorded reply. *)
       items
-      @ [ { at = Some reply_at
+      @ [ { origin = Reply_of_segment t.segment
+          ; at = Some reply_at
           ; segment = t.segment
           ; superseded = None
           ; superseded_runtime_id = None
@@ -2599,7 +2631,8 @@ let drawn t =
   | Waiting | Working | Stream_ended -> items
   | Stream_failed message ->
       items
-      @ [ { at = t.ended_at
+      @ [ { origin = Error_of_segment t.segment
+          ; at = t.ended_at
           ; segment = t.segment
           ; superseded = None
           ; superseded_runtime_id = None

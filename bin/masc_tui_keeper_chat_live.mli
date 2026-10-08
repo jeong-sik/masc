@@ -75,7 +75,15 @@ type delta =
       }
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
-  | Stream_model_started of { model : string }
+  | Stream_model_started of
+      { message_id : string option
+      ; model : string
+      ; usage : stream_usage option
+      }
+      (** A provider response start and its initial counter snapshot. The
+          producer suppresses exact replays within one open stream scope;
+          every published start opens a new response even when a later scope
+          reuses [message_id]. The id is optional correlation data. *)
   | Stream_details of
       { usage : stream_usage option
       ; stop_reason : string option

@@ -209,14 +209,22 @@ change either side, so the retry text names what the operator does.
 
 Tab IDs belong to their selected client. The operator read resolves that client
 once before listing tabs and keeps it for the subsequent page request. Successful
-read and screenshot replies include `clientId` and, for a live browser, its
-`transport`; Keeper BrowserTabs returns an object containing `tabs`, `clientId`
-and `transport`, and BrowserRead/Interact also preserve the selected identity.
-Both come from the resolved route (`Browser_lane.target_connection_fields`) and
-replace anything a page or backend answered under those names. Carry that ID
-into subsequent operations; the transport says which
-[live work](#what-each-live-connection-serves) the connection serves before a
-request is refused for it.
+read, screenshot and scene replies include `clientId` and, for a live browser,
+its `transport`; Keeper BrowserTabs returns an object containing `clientId`,
+`transport` and `tabs`, and BrowserRead/Interact answers carry the same two
+fields, the stored screenshot included. All of them take the fields from the
+resolved route (`Browser_lane.target_connection_fields`); a value the page or
+browser answered under those names is dropped. The stored screenshot reads them
+back through `Browser_lane.connection_fields_of_json`, which refuses a client
+ID without its transport. Carry that ID into subsequent operations; the
+transport says which [live work](#what-each-live-connection-serves) the
+connection serves before a request is refused for it.
+
+Two answers do not follow that rule. The automation lane's optional document
+read keeps `clientId: "automation:<session>"`, the session its observer read,
+because the document source requires that string. The interaction route the
+dashboard and TUI call (`Browser_interaction.perform`) returns the browser's
+receipt with neither field; its caller already named the connection.
 
 Native transport requires `x-lane: live`, the lane token, and the identity
 headers: `x-browser-client-id`, `x-browser-name`, `x-browser-version`, and

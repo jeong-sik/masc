@@ -411,12 +411,31 @@ let target_client_id = function Automation | Stagehand -> None | Live_client cli
 (* Where an answer came from, as every successful answer states it: a live
    connection's ID and how its browser is reached. The server's own browsers
    have no client, and no transport to name. *)
-let connection_field_names = ["clientId"; "transport"]
+let client_id_field = "clientId"
+let transport_field = "transport"
+let connection_field_names = [client_id_field; transport_field]
+let live_connection_fields ~client_id ~transport =
+  [client_id_field, `String (client_id_to_string client_id);
+   transport_field, `String (live_transport_to_string transport)]
 let target_connection_fields = function
   | Live_client client ->
-    ["clientId", `String (client_id_to_string client.info.client_id);
-     "transport", `String (live_transport_to_string client.info.transport)]
-  | Automation | Stagehand -> ["clientId", `Null]
+    live_connection_fields ~client_id:client.info.client_id ~transport:client.info.transport
+  | Automation | Stagehand -> [client_id_field, `Null]
+(* Those fields read back from an answer, for a holder that keeps only what
+   it can check. An answer states no connection, the server's own browser, or
+   a live connection together with its transport. A client ID without its
+   transport, or a transport without its client, is none of the three. *)
+let connection_fields_of_json fields =
+  match List.assoc_opt client_id_field fields, List.assoc_opt transport_field fields with
+  | None, None -> Ok []
+  | Some `Null, None -> Ok [client_id_field, `Null]
+  | Some (`String client_id), Some (`String transport) ->
+    Result.bind (client_id_of_string client_id) (fun client_id ->
+      Result.map (fun transport -> live_connection_fields ~client_id ~transport)
+        (live_transport_of_string transport))
+  | Some (`String client_id), None ->
+    Result.bind (client_id_of_string client_id) (fun _ -> Error "client_without_transport")
+  | Some _, _ | None, Some _ -> Error "invalid_connection_fields"
 (* The route's own values replace anything a page or backend supplied under
    the same names, so a reader that takes the first key and one that takes the
    last see the same connection. *)

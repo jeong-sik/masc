@@ -181,9 +181,10 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
   ignore (Lane.deliver_result ~client_id:bidi.client_id ~id:command.id ~payload:(payload "document"));
   answered document "document")
 
-(* Every successful answer states its connection through one function: a
-   live browser's client ID and transport, a null client for the server's own
-   browsers, and never a value a page or backend supplied under those names. *)
+(* A successful answer states its connection through one function: a live
+   browser's client ID and transport, a null client for the server's own
+   browsers. Where an answer is rebuilt around those fields, a value the page
+   or browser supplied under the same names is dropped. *)
 let test_answers_state_their_connection () = with_clients (fun sw connect ->
   let extension = connect Lane.Firefox in
   let bidi = { (info Lane.Firefox) with transport=Lane.Webdriver_bidi } in
@@ -203,7 +204,29 @@ let test_answers_state_their_connection () = with_clients (fun sw connect ->
     (Lane.with_connection_fields (target bidi.client_id) supplied = expected bidi "webdriver_bidi" @ ["tabId", `Int 2]);
   check bool "also for the server's own browsers" true
     (Lane.with_connection_fields Lane.Automation supplied = ["clientId", `Null; "tabId", `Int 2]);
-  (* The optional document read attaches the same fields. *)
+  (* A holder that keeps only checked fields reads back exactly what was
+     stated, and refuses half a live connection. *)
+  List.iter (fun (name, written) ->
+    check bool (name ^ " reads back as written") true
+      (Lane.connection_fields_of_json (written @ ["tabId", `Int 2]) = Ok written))
+    ["an extension connection", stated extension; "a BiDi connection", stated bidi;
+     "the server's own browser", Lane.target_connection_fields Lane.Automation;
+     "an answer that states no connection", []];
+  let client_id = `String (Lane.client_id_to_string bidi.client_id) in
+  List.iter (fun (name, fields, expected) ->
+    check (result reject string) name (Error expected) (Lane.connection_fields_of_json fields))
+    ["a client without its transport", ["clientId", client_id], "client_without_transport";
+     "a transport without its client", ["transport", `String "webdriver_bidi"], "invalid_connection_fields";
+     "a transport on the server's own browser",
+     ["clientId", `Null; "transport", `String "webdriver_bidi"], "invalid_connection_fields";
+     "a transport no connection has",
+     ["clientId", client_id; "transport", `String "carrier_pigeon"], "unsupported_browser_transport";
+     "a client that is not an ID",
+     ["clientId", `String "forged"; "transport", `String "webdriver_bidi"], "invalid_client_id";
+     "a client of another JSON type", ["clientId", `Int 7], "invalid_connection_fields"];
+  (* The live optional document read attaches the same fields. The automation
+     lane's keeps the session ID its own observer wrote, which the document
+     source requires. *)
   let document = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_document_if_idle ~target:(target bidi.client_id) ~tab_id:2 ~timeout_sec:1.) in
   let command = take bidi in

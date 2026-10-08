@@ -3245,7 +3245,7 @@ status: reference
 **Memory OS (키퍼 자기 기억)**
 : 개별 Keeper가 장기적으로 유지하는 독립적인 사적 사실(`Fact`) 저장소.
   - **저장 위치와 격리**: 작업공간의 `.masc/config/keepers/<keeper-id>.memory-current.json`(일반 사실) 및 `<keeper-id>.memory-source-current.json`(소스 파일 결속 사실)에 저장된다. 각 Keeper가 자신의 기억 파일을 독립적으로 소유하며, 다른 Keeper가 직접 읽거나 수정할 수 없다.
-  - **용량 및 상한 규격**: 카테고리 수 상한은 기본 30개(`MASC_KEEPER_MEMORY_CATEGORY_CAP`, 설정 `memory.category_cap`), 카테고리당 사실 수 상한은 기본 30개(`MASC_KEEPER_MEMORY_FACTS_PER_CATEGORY_CAP`, 설정 `memory.facts_per_category_cap`)로 제한된다(`Keeper_memory_limits.measure`). 전체 기억 용량 상한은 Keeper당 512KiB이며, 상한 초과 시 쓰기(`keeper_memory_write`)가 거절된다.
+  - **용량 및 상한 규격**: 카테고리 수 상한은 기본 30개(`MASC_KEEPER_MEMORY_CATEGORY_CAP`, 설정 `memory.category_cap`), 카테고리당 사실 수 상한은 기본 30개(`MASC_KEEPER_MEMORY_FACTS_PER_CATEGORY_CAP`, 설정 `memory.facts_per_category_cap`)를 넘으면 Librarian 정리 대상이 된다(`Keeper_memory_limits.exceeded`, `Keeper_memory_cleanup`). 정리 결과는 `Limits_reached`, `Progress_with_excess`, `Excess_retained`(초과를 그대로 둠)로 나뉘어 초과가 남을 수 있다. 쓰기를 곧바로 거절하는 상한이 아니다. 전체 기억 용량 기본값은 Keeper당 512KiB(`facts_max_bytes_default`)다.
   - **조작 도구**: 키퍼 본인만이 `keeper_memory_write`(기록), `keeper_memory_search`(검색), `keeper_memory_retract`(철회) 도구를 통해 자기 기억을 관리한다.
   - **원장과의 경계**: 키퍼의 자기 기억은 사적 상태로 보존된다. Workspace Memory Ledger에 수집되어 분류되더라도 키퍼의 원본 기억 파일이 직접 수정되거나 다른 키퍼의 메모리와 합쳐지지 않는다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) · [Keeper_memory_limits](../../lib/keeper/keeper_memory_limits.mli) · [Keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.mli)
@@ -3302,13 +3302,13 @@ status: reference
   - **원장과의 구별 및 명칭 주의**:
     - 프롬프트 섹션의 제목에 'ledger(원장)'라는 단어가 포함되어 있어 많은 이들이 이 섹션을 원장 데이터 그 자체로 오해하기 쉽다.
     - 그러나 본문에 실리는 내용은 구조화된 원장(JSON 장부)이 아니라, 모델이 주장과 충돌을 자연어로 압축 요약한 '브리핑 글'이다.
-    - 브리핑 글은 모델 요약 과정에서의 압축·생략이 존재할 수 있으며, 원장의 실제 분류 세부사항(각 키퍼 사실의 주장·충돌 배정 내역)을 보려면 요약 글이 아닌 `keeper_workspace_memory_read` 도구를 통해 원장을 직접 조회해야 한다.
+    - 브리핑 글의 합성 프롬프트(`workspace_memory_briefing`)는 임의의 바이트 목표를 맞추려고 문장을 자르거나 사실을 빼지 말라고 하므로 글이 상한 없이 커질 수 있다. 원장의 실제 분류 세부사항(각 키퍼 사실의 주장·충돌 배정 내역)을 보려면 요약 글이 아닌 `keeper_workspace_memory_read` 도구를 통해 원장을 직접 조회해야 한다.
   - **합성 및 캐시 불변식**: 완성본과 자료 식별자를 함께 보존한다. 새 합성이 진행되거나 실패한 동안에는 이전 완성본을 갱신 대기(`Stale`)로 표시하고, 첫 완성본이 없으면 준비 중임을 알린다. 자료와 합성 계약이 같으면 모델을 다시 부르지 않는다.
   → [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli) · [server_workspace_memory_curator](../../lib/server/server_workspace_memory_curator.ml) · [keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.ml)
 
 **Memory OS vs Workspace Memory Ledger vs Shared Briefing (기억 체계 삼자 경계)**
 : 작업공간에서 자주 혼동되는 세 가지 기억·맥락 계층의 책임과 경계를 구분하는 불변식.
-  - **키퍼 자기 기억 (Memory OS)**: 키퍼 개인의 독립적인 사적 사실 스토어(`.masc/config/keepers/<name>.memory-current.json`). 카테고리 30개×30개 상한(512KiB). 키퍼 본인만 쓰고 읽으며 다른 키퍼가 직접 접근할 수 없다.
+  - **키퍼 자기 기억 (Memory OS)**: 키퍼 개인의 독립적인 사적 사실 스토어(`.masc/config/keepers/<name>.memory-current.json`). 카테고리 30개×30개는 넘으면 정리 대상이 되는 기준이고(초과가 남을 수 있다), 용량 기본값은 512KiB. 키퍼 본인만 쓰고 읽으며 다른 키퍼가 직접 접근할 수 없다.
   - **작업공간 기억 원장 (Workspace Memory Ledger)**: 모든 키퍼의 변경된 사실만 모아 분류한 공용 불변 장부(`.masc/workspace-memory/ledger.json`). `claims`·`conflicts`·`facts`(배치)로 구성된 구조화된 JSON 데이터이며 `keeper_workspace_memory_read`로 조회한다. 키퍼의 자기 기억을 수정하지 않는다.
   - **브리핑 글 (Shared Briefing)**: 원장의 주장·충돌을 모델이 읽고 종합 요약한 자연어 글(`.masc/workspace-memory/briefing.json`). 매 턴 키퍼 시스템 프롬프트의 `## Shared workspace memory ledger` 헤더 아래 주입된다. 제목에 '원장'이 표기되어 있으나 실체는 요약문이므로, 원시 분류 내역은 원장 도구로 직접 확인해야 한다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) · [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli)

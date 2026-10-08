@@ -23846,6 +23846,14 @@ and is loaded on demand through keeper_skill.
                      scroll (if key = "pagedown" then delta else -delta)
                  | "home" -> state.browser_lane <- Some { view with scroll = 0 }
                  | _ -> ()))
+       | Some "R" when Option.is_some (browser_history_on_screen state) ->
+           (* History's [r] reloads observations. [R] rechecks workspace
+              authority even when retained rows cannot authorize that read.
+              Do not refresh the live browser hidden underneath history. *)
+           start_http_refresh state ~host:server_peer_host ~port:state.port
+             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox:async_messages
        | Some key
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
               && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->

@@ -9200,7 +9200,7 @@ let render_browser_history (state : state) (history : Browser_history.t) =
   let terminal_rows, cols = get_terminal_size () in
   let title = screen_title (" MASC Browser Lane · " ^ Terminal_text.single_line history.keeper_name ^ " · retained observations") in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  h/Esc:back to browser"
+    ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  R:recheck workspace  h/Esc:back to browser"
     ~body:(fun ~budget c ->
       let status = match history.content with
         | Listing -> "Reading the Keeper's recent tool receipts…"

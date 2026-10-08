@@ -76,7 +76,16 @@ let test_unconfirmed_workspace_is_visible_without_a_header_badge () =
     check_bool "retained rows always carry the workspace warning" true
       (contains ~needle:"[workspace unconfirmed]" row);
     check_at_most_cells "warning and action respect the footer budget" width row)
-    [60; 98; 160];
+    [80; 98; 160];
+  (* At 60 cells the complete warning and the pinned doors cannot fit
+     together. Preserve the established atomic-notice and navigation policy. *)
+  let narrow = render_action state 60 in
+  List.iter (fun key ->
+    check_bool ("a cramped warning preserves " ^ key) true
+      (contains ~needle:(Masc_tui_theme.strip_sgr key) narrow))
+    (Masc_tui_footer.undroppable_keys
+       (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints state.view)));
+  check_at_most_cells "a cramped warning remains bounded" 60 narrow;
   state.workspace_identity <- Workspace_identity_match;
   check_bool "a confirmed workspace removes the warning" false
     (contains ~needle:"[workspace unconfirmed]" (render_action state 98))

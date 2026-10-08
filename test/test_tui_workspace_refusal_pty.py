@@ -68,7 +68,12 @@ def retained_rows_refuse_writes(executable, surface):
             h.send_and_wait(process, fd, output, b"]", "▸Sandbox".encode())
         health.refuse(process, fd, output)
         keys = (b"a",) if surface == "Repository" else (b"d", b"m", b"s")
-        h.send_and_wait(process, fd, output, keys[0], b"Workspace identity is unconfirmed")
+        # Workspace's side pane leaves too little footer room for the full
+        # refusal sentence. Its action label and the retained identity badge
+        # identify the refusal together; the effect ledger below proves it.
+        refusal = b"Repository add:" if surface == "Repository" else b"Workspace identity is unconfirmed"
+        frame = h.send_and_wait(process, fd, output, keys[0], refusal)
+        assert b"[workspace unconfirmed]" in h.screen_text(frame), "refused action lost its identity warning"
         for key in keys[1:]:
             os.write(fd, key)
         h.drain_until_quiet(process, fd, output)

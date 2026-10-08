@@ -339,7 +339,7 @@ def saved_activation_recovery(binary, *, detached=False, already_admitted=False)
                 wait_event(activation_started, "activation POST did not start")
             start = len(output)
             unconfirmed.set()
-            h.wait_for_output(process, fd, output, b"workspace identity unconfirmed", start=start, timeout=10)
+            h.wait_for_output(process, fd, output, b"[workspace unconfirmed]", start=start, timeout=10)
             if already_admitted:
                 release_activation.set()
                 h.wait_for_output(process, fd, output, "런타임에 활성화했습니다".encode(), start=start, timeout=10)

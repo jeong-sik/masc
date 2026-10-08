@@ -597,9 +597,10 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
         [ Masc_tui_footer.Workspace_mismatch
             (Terminal_text.single_line local_base_path)
         ]
+    | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
+        [ Masc_tui_footer.Workspace_unconfirmed ]
     | Masc_tui_types.Workspace_identity_unread
-    | Masc_tui_types.Workspace_identity_match
-    | Masc_tui_types.Workspace_identity_match_unconfirmed _ -> []
+    | Masc_tui_types.Workspace_identity_match -> []
   in
   (* Keepers mid-turn, the one this pane last messaged first: that is the
      answer the operator who walked away is waiting on. *)

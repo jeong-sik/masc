@@ -68,6 +68,19 @@ let test_action_text_is_not_dropped_as_a_key () =
     check_at_most_cells "narrow action footer remains bounded" 60 (String.trim narrow))
     [ Masc_tui_types.Tools; Masc_tui_types.Repositories ]
 
+let test_unconfirmed_workspace_is_visible_without_a_header_badge () =
+  let state = action_state Masc_tui_types.Repositories in
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "health unavailable";
+  List.iter (fun width ->
+    let row = render_action state width in
+    check_bool "retained rows always carry the workspace warning" true
+      (contains ~needle:"[workspace unconfirmed]" row);
+    check_at_most_cells "warning and action respect the footer budget" width row)
+    [60; 98; 160];
+  state.workspace_identity <- Workspace_identity_match;
+  check_bool "a confirmed workspace removes the warning" false
+    (contains ~needle:"[workspace unconfirmed]" (render_action state 98))
+
 let test_action_text_preserves_the_search_prefix () =
   let state = action_state Masc_tui_types.Tools in
   state.search_last <- "deploy  note";
@@ -1293,6 +1306,8 @@ let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "action text is not dropped as a key" `Quick
           test_action_text_is_not_dropped_as_a_key
+      ; Alcotest.test_case "unconfirmed workspace is visible without a header badge" `Quick
+          test_unconfirmed_workspace_is_visible_without_a_header_badge
       ; Alcotest.test_case "action text preserves the search prefix" `Quick
           test_action_text_preserves_the_search_prefix
       ; Alcotest.test_case "expired action leaves the original footer" `Quick

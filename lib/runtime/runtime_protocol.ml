@@ -131,4 +131,3 @@ let resolve protocol =
 
 let api_format_of_protocol protocol = Result.map snd (resolve protocol)
 ;;
-

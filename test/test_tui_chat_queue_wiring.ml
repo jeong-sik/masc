@@ -1385,6 +1385,7 @@ let test_a_turn_the_server_ended_without_a_closing_event_is_closed () =
         inflight_with_log ~keeper_name:"alpha" ~started_at:10.
           [ Live.Run_started; Live.Text "partial" ]
       in
+      state.msg_inflight <- [entry];
       state.msg_live <- Some entry.log;
       check string "before settling it is the running turn" "working" (phase_name entry);
       check bool "and the pane draws it" true
@@ -2121,7 +2122,10 @@ let test_exact_operation_ending_keeps_unjournaled_rows () =
     let log = settled_log ~request_id:"cut" [Live.Run_started; Live.Text "half"] in
     Log.observe_operation_state log.tl_log (Some terminal);
     Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
-    let expected = List.map (fun (row : Tui_types.msg_entry) -> row.me_text) state.msg_loaded in
+    let expected =
+      [ "asked"; "2 reasoning steps, content withheld"; "Gate approved read_file"
+      ; "read_file a.ml"; "answered"; "delivery failed" ]
+    in
     let verify log =
       state.msg_settled_logs <- [log];
       check bool "record-only terminal closes progress" true
@@ -3018,8 +3022,9 @@ let test_a_journal_revision_draws_its_facts_in_columns () =
     in
     let full = draw Tui_types.Memory_full in
     let row_with affix = List.find_opt (Astring.String.is_infix ~affix) full in
-    (match row_with "+ lesson  verifier_exact", row_with "the ran-on-main contract" with
-     | Some first, Some wrapped ->
+    (match row_with "+ lesson  verifier_exact", row_with "never satisfies",
+           row_with "contract" with
+     | Some first, Some wrapped, Some continuation ->
          let column row affix =
            match Astring.String.find_sub ~sub:affix row with
            | Some index -> Masc_tui_message_layout.display_width (String.sub row 0 index)
@@ -3027,7 +3032,10 @@ let test_a_journal_revision_draws_its_facts_in_columns () =
          in
          check int "the wrapped claim starts under the claim, not under the sign"
            (column first "verifier_exact")
-           (column wrapped "the ran-on-main")
+           (column wrapped "never satisfies")
+         ; check int "the continuation stays under the claim column"
+             (column first "verifier_exact")
+             (column continuation "contract")
      | _ -> fail ("the fact did not draw in columns: " ^ String.concat "\n" full));
     (* The summary wraps at this width; its head is what the row opens on. *)
     check bool "the summary heads the revision" true
@@ -3840,10 +3848,18 @@ let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
       let frame, _ = Masc_tui_render_chat.render_keeper_message state in
       String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
     let count needle text = List.length (Astring.String.cuts ~sep:needle text) - 1 in
+    let count_skill text =
+      text
+      |> String.split_on_char '\n'
+      |> List.filter (fun line ->
+           Astring.String.is_infix ~affix:"checkpoint-skill" line
+           && not (Astring.String.is_infix ~affix:"checkpoint-skills" line))
+      |> List.length
+    in
     let verify marker_count markers =
       let rendered = screen () in
       check int "one Skill per observed or unmatched durable invocation" marker_count
-        (count "checkpoint-skill" rendered);
+        (count_skill rendered);
       List.iter (fun marker -> check int (marker ^ " appears once") 1 (count marker rendered))
         ("EARLIER_PROGRESS" :: "FINAL_HISTORY_REPLY" :: markers) in
     install [first; final];

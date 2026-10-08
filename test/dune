@@ -9822,6 +9822,11 @@
   masc.masc_types native_tool_outcome_fixture masc_tui_keeper_chat_live masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript))
 
+(test
+ (name test_redaction_source_spans)
+ (modules test_redaction_source_spans)
+ (libraries alcotest masc masc.secret_patterns re unix))
+
 (rule
  (alias runtest-test_tui_chat_progress_clock_pty)
  (deps

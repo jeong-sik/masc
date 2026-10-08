@@ -20,7 +20,7 @@ val set_fs : Eio.Fs.dir_ty Eio.Path.t -> unit
 (** Enumerate one opened directory without following a final symlink. The
     returned names are read from that directory descriptor, so pathname
     replacement after open cannot redirect the enumeration. *)
-val read_directory_nofollow : string -> string list
+val read_directory_nofollow : string -> int -> int -> string list
 
 (** Clear global fs (testing/shutdown). *)
 val clear_fs : unit -> unit

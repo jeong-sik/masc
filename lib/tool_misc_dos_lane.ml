@@ -233,12 +233,6 @@ let same_file_identity (left : Unix.stats) (right : Unix.stats) =
   left.Unix.st_dev = right.Unix.st_dev && left.Unix.st_ino = right.Unix.st_ino
 ;;
 
-let entries_of_open_directory dir =
-  Fs_compat.read_directory_nofollow dir
-  |> List.filter (fun name -> not (String.starts_with ~prefix:"." name))
-  |> List.sort String.compare
-;;
-
 (* Bind enumeration to one opened directory handle, then compare the
    directory and ownership-root identities around the read. A replacement by
    an outside directory is reported as unavailable instead of publishing its
@@ -253,7 +247,10 @@ let entries_of_stable ?(before_read = fun _ -> ()) ~ownership_root dir =
       Error ()
     else begin
       before_read dir;
-      let names = entries_of_open_directory dir in
+      let names =
+        Fs_compat.read_directory_nofollow
+          dir dir_before.Unix.st_dev dir_before.Unix.st_ino
+      in
       let root_after = Unix.lstat ownership_root in
       let dir_after = Unix.lstat dir in
       if same_file_identity root_before root_after

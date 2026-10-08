@@ -363,9 +363,9 @@ let test_a_linked_inventory_root_is_readable () =
 ;;
 
 (* Enumerating a directory is part of the boundary too. Replace the validated
-   game directory with a symlink to an outside directory at the deterministic
-   read seam and ensure the response contains neither the outside child name
-   nor a partial files list. *)
+   inventory root with a different real directory at the deterministic read
+   seam and ensure the descriptor identity check refuses it before publishing
+   the outside child name. *)
 let test_inventory_directory_replacement_hides_child_names () =
   with_workspace (fun base_path ->
     let root = programs_dir ~base_path in
@@ -383,7 +383,7 @@ let test_inventory_directory_replacement_hides_child_names () =
           Tool_misc_dos_lane.handle_inventory_with_before_read
             ~before_read:(fun real ->
               Unix.rename real moved;
-              Unix.symlink outside real;
+              Unix.rename outside real;
               replaced := true)
             ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path
         in

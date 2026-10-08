@@ -122,7 +122,9 @@ let add_routes router =
                       snapshot.prompt_overrides in
                     ok_json [ "preset", Prompt_preset.snapshot_to_json snapshot;
                               "directory", `String (Prompt_preset.source_directory ~base_path snapshot);
-                              "saved_settings", matching; "prompt_files", `List files ])
+                              "saved_settings", matching; "prompt_files", `List files;
+                              "default_prompts", Prompt_preset.default_comparison_to_json
+                                (Prompt_preset.compare_defaults snapshot) ])
                | Error message ->
                  respond_json_value_with_cors
                    ~status:`Not_found

@@ -113,6 +113,12 @@ status: reference
   → [Lane_addon_sampling](../../lib/lane_addon/lane_addon_sampling.mli) ·
   [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
 
+**Sampling Response Attestation (샘플링 응답 증명)**
+: `Lane_addon_sampling`의 호스트 투영 샘플링 영수증(`host-projected sampling receipt`)에서 거대한 모델 응답 본문을 인입 봉투마다 복제하지 않고 응답의 무결성을 증명하는 계약(#41752). 응답의 `content.text`와 `content.data` 문자열을 정규화나 Base64 디코딩 없이 원본 UTF-8 바이트 그대로 SHA-256 다이제스트(`text_sha256`·`data_sha256`)로 투영하여 전달한다. 원시 샘플링 응답이 사전에 다이제스트 필드를 직접 주장하는 것은 즉시 거절되며(`InvalidInput`), 패키지에 노출되는 기타 응답 필드는 있는 그대로 보존·대조된다. 패키지 소비자는 브로커 샘플링 좌표만 제거한 뒤 동일한 투영을 계산하여 호스트 영수증과 일치하는지 검증한다. 호스트 전용 메타데이터는 비공개로 유지되며 불변 요청·종단 블롭에 완전한 원본 응답과 오류 진단이 유지되므로, 결합 소스 인입 봉투(`combined source ingress envelope`)의 바이트 비대화를 방지하면서도 엄격한 재생 검증을 보장한다.
+  → [Lane_addon_sampling](../../lib/lane_addon/lane_addon_sampling.mli) ·
+  [fusion_sampling](../../addons/fusion_sampling.py) ·
+  [Fusion lane composition](../design/fusion-lane-composition.md)
+
 **HITL**
 : Human-in-the-Loop의 약어. Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는
   경로다. 사람의 답을 기다리는 동안에도 다른 Keeper의 턴이나 상관없는 작업은 계속 돈다.
@@ -572,7 +578,7 @@ status: reference
     이름과 정규화된 관심사(`board_interests`)를 명시하여, 역할 본문을 state에서 제거하고 신호와 명시적 관심사로 판정한다.
   - 푸시 이벤트 다중 키퍼 배치(#40521): 새 Board 이벤트 발생 시 `Keeper_board_attention_fanout`을 통해
     후보 키퍼들을 단일 evaluate 요청에 복수 질문으로 묶어 일괄 판정한다.
-  - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued_pending`)도 `ask_jev`의
+  - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued`)도 `ask_jev`의
     첫 번째 관문을 거치며, 재큐 후보에도 같은 직접 확정 조건을 적용한다(#40428).
   - 신뢰도 관측 가능성: 확정된 종단 로그 행에 실제 신뢰도가 보존되어 운영자가 임계값을 사후
     재조정할 수 있는 정량적 근거를 제공한다(#40420).
@@ -696,6 +702,13 @@ status: reference
   아니며 엄격히 오류로 남는다 — 문장을 해석해 침묵을 완성으로 읽지 않는다.
   → [Keeper_tooling.Response](../../lib/keeper_tooling/response.mli) ·
   [Keeper_agent_run](../../lib/keeper/keeper_agent_run.ml)
+
+**Chat Operation Reconciliation (채팅 오퍼레이션 정산)**
+: Keeper 채팅 오퍼레이션의 이벤트 스트림이 서버 재시작이나 연결 단절 등으로 종단 이벤트(`terminal event`) 없이 종료되었을 때, 듀러블 오퍼레이션 상태(`Keeper_chat_operation.state`)와 저널 엔드포인트(`read_whole_journal`)를 대조하여 화면 표시와 진행 행을 정합화하는 계약(#41680, #41705, #41730). 오퍼레이션이 이미 종료(`succeeded`·`failed`·`cancelled`)되었으나 스트림이 닫히지 않아 라이브 진행 행(`progress row`)에 과거 실행이 멈춘 채로 잔류하는 현상을 방지하며(`reconcile_operation`), 가짜 응답이나 합성 저널 이벤트를 임의로 조작하지 않고(`without fabricating journal events or a reply`) 스트림 도중 보존된 부분 텍스트(`partial text`), 도구 호출, 스킬 전달 영수증, 이전 연속 턴 이력을 그대로 보존한다. 저널 재조회 시 오퍼레이션 상태를 먼저 관측하고 저널을 읽은 뒤, 큐/실행 상태가 전진했는지 재확인(`read_with_operation_state`)하여 재조회 실패 시에도 첫 성공 저널을 유지하는 범위 내에서 최신 오퍼레이션 상태와의 정합성을 보장한다. 아울러 서버 재시작으로 중단된 세그먼트를 정산할 때(`record_restart_terminal`)는 세그먼트 오류 표식으로 `Restart_settlement settlement`(`Keeper_chat_event_log.Restart_settlement`)를 부여하여 이전 세그먼트의 과거 에러가 새 재시작 정산을 가로채지 못하게 방지하며, 재시작 종단 전달 재시도 시 재연결 커서가 저널보다 앞서더라도 중복 재생 없이 안정적으로 중단 종단을 완결한다(#41705, #41730).
+  → [Masc_tui_keeper_chat_log](../../bin/masc_tui_keeper_chat_log.mli) ·
+  [Masc_tui_keeper_chat_transcript](../../bin/masc_tui_keeper_chat_transcript.mli) ·
+  [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
+  [Keeper_chat_operation_store](../../lib/keeper_chat_operations/keeper_chat_operation_store.mli)
 
 **Keeper Direct Native Call (키퍼 직접 네이티브 호출)**
 : 한 직접 Keeper 채팅 오퍼레이션(`Keeper_chat_operation`) 안에서 실행되는 단일
@@ -857,7 +870,7 @@ status: reference
   - 상태별 건수와 뷰포트 예산: 기본 compact/results 화면은 총 대기 건수와 전달·우선 순서
     확인 상태를 한 요약 행에 표시한다. 실패와 재확인 상태는 요약에서 숨기지 않는다.
     `Tools_full`(`Ctrl-D` 두 번 또는 `/tools full`)은 `queued at Keeper`·`awaiting receipt`·
-    `rechecking delivery` 건수를 분리하고 로컬 NEXT 프리뷰(`local_waiting_next_preview`)를
+    `rechecking delivery` 건수를 분리하고 로컬 NEXT 프리뷰를
     별도 행으로 표시한다. 각 모드는 같은 표시 행 계산으로 뷰포트 예산을 예약하며,
     큐 입력 단축키(`Ctrl-T:queue`)와 현재 작업 중단 안내를 보존한다.
   - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
@@ -1420,6 +1433,49 @@ status: reference
   남아 다음 로드에서 다시 쓰인다.
   → [Dos_lane](../../lib/dos_lane/dos_lane.mli)
 
+**DOS Core Identity (DOS 코어 식별자)**
+: 실행 중인 서버 프로세스가 링크한 `ocaml-dos` 코어의 정체성을 나타내는 식별 계약(#41812).
+  바이너리가 링크한 실제 코어 소스 다이제스트(`source_digest`), CI 고정 핀의 다이제스트
+  (`pinned_source_digest`), 그리고 두 다이제스트의 일치 여부(`matches_pin`)로 구성된다.
+  `Msx_lane.core`와 대칭을 이루며, `masc_dos_meta` 도구를 통해 게임 로드나 기계 기동, 조종권
+  (`Controller`) 획득 없이도 서버의 코어 일치 상태를 무부작용으로 검증할 수 있다. 다이제스트는
+  `ocaml-dos` 빌드 시점에 `lib/` 소스로부터 계산되므로(`Dos_core_identity`), 커밋 이력이 없는
+  opam 릴리스 패키지 환경에서도 대상 소스 불일치를 결정론적으로 감지한다(전체 바이너리 무결성이나
+  하위 디렉터리 변조를 검증하는 것은 아님).
+  → [Dos_lane.core](../../lib/dos_lane/dos_lane.mli) ·
+  [Tool_misc_dos_lane](../../lib/tool_misc_dos_lane.ml) ·
+  [masc_dos_meta](../../config/tools/masc_dos_meta.toml)
+
+**DOS Program Inventory (DOS 프로그램 인벤토리)**
+: 공유 DOS 머신에 배치된 연산자 소유 프로그램들의 정적 자산 목록 및 메타데이터 계약(#41819).
+  기본 위치는 `<base-path>/.masc/dos/programs/`이며, MASC 설치나 네트워크 다운로드로 채워지지 않고
+  연산자가 직접 배치한다. 읽기 전용 도구 `masc_dos_inventory`를 통해 머신을 기동하거나 조종권
+  (`Controller`)을 획득하지 않고도 무부작용으로 기본 자산을 조회할 수 있다.
+  - **기본 자산 범위 (Base Inventory Scope)**: 최상위의 단독 일반 파일(Regular)과 프로그램 디렉터리를
+    열거한다. 일반 파일은 이름·바이트 크기·SHA-256 다이제스트를 노출하며(확장자 필터링 없이 직렬화),
+    디렉터리는 이름과 직속 하위 파일 목록(`files`)을 담는다(디렉터리 자체에는 바이트 크기·해시를 두지
+    않음). 이 정보는 기본 배치 자산(`asset_scope: "base_inventory"`)만을 나타내며, `masc_dos_load`
+    시점에 합성되는 영속 저장본(`saved_overlay: "applied_on_load"`)이나 런타임에 게임이 생성한 파일은
+    포함하지 않는다.
+  - **호스트 경로 은닉 (Host Path Redaction)**: 작업공간 외부의 호스트 파일시스템 경로는 도구 출력과
+    오류 메시지 전반에서 엄격히 마스킹되며, 인벤토리 경계(`programs/`) 기준의 상대 이름만 노출된다.
+  - **소유 루트 권한 결속 및 실패 표면 분리 (Owned Inventory Root & Failure Separation)**: 인벤토리
+    열거와 해시 계산은 정규화된 루트 디스크립터를 잡은 상태(`Fs_compat.with_owned_inventory_root`)에서
+    이루어지며, 각 하위 항목은 `O_NOFOLLOW`로 열어 디스크립터 식별자(`fstat`)를 대조한다. 도트 항목(`.`, `..`)은
+    필터링되어 결정론적 정렬을 유지한다. 실패 표면은 둘로 분리된다:
+    - **개별 항목 실패**: 인벤토리 루트 밖으로 빠져나가는 심볼릭 링크, 비정규 파일, 디렉터리 내부 교체
+      경쟁은 도구 전체를 중단하지 않고 해당 항목의 `kind: "unavailable"` 및 사유로 보고된다.
+    - **루트 수준 실패**: 인벤토리 루트 디렉터리 자체가 열거 도중 교체되거나 파일시스템 접근이 불가한
+      경우 도구 호출 전체가 `Runtime_failure`로 거절된다.
+  - **게임 중립성 및 호환성 비보증 (Game-Neutral & No Compatibility Guarantee)**: MASC 런타임과 도구는
+    특정 상업용 게임의 내부 포맷을 해석하거나 제목별로 특화 분기하지 않는다. 디렉터리 내 실행 파일 후보
+    (`executable_candidates`)와 기본 부팅 파일(`default_boot`)은 정적 명명 규칙에 따라 객관적으로
+    제시될 뿐이며, 에뮬레이터 상에서의 실제 실행 성공이나 바이너리 호환성을 사전에 보증하는 것은 아니다.
+  → [Tool_misc_dos_lane](../../lib/tool_misc_dos_lane.ml) ·
+  [Fs_compat.with_owned_inventory_root](../../lib/fs_compat/fs_compat.mli) ·
+  [Fs_compat.read_owned_directory](../../lib/fs_compat/fs_compat.mli) ·
+  [DOS Programs Runbook](../operations/dos-programs-runbook.md)
+
 **조종권 (Controller)**
 : DOS Lane 기계의 시간을 움직일 수 있는 한 참가자의 차례. 참가자는 Keeper,
   운영자(`Admin`), 유효한 공유 DOS 플레이 초대(`Player`)의 이름으로 구분된다.
@@ -1484,12 +1540,18 @@ status: reference
 : 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과
   키 기록(ledger)이 다 들어 있어서, 서버를 다시 켜도 그 순간부터 이어서 할 수 있다.
   게임 메뉴로 하는 저장과 다르다. 게임마다 메뉴가 없어도 되고, 저장한 뒤로 한 일까지
-  남는다. 지금은 DOS Lane 이 `masc_dos_save`·`masc_dos_restore` 로 쓴다.
-  파일 머리에 어느 기계인지, 형식 번호, 만든 코어의 digest 가 적힌다. 기계나 형식
-  번호가 다르면 읽지 않는다. 코어 digest 는 보여 주기만 하고 비교하지 않는다.
-  되살리면 새 incarnation 이 되고, 조종권은 되살린 사람이 쥔다.
-  → [Machine_checkpoint](../../lib/machine_checkpoint/machine_checkpoint.mli),
-  [Dos_lane.restore](../../lib/dos_lane/dos_lane.mli)
+  남는다. DOS Lane(`masc_dos_save`·`masc_dos_restore`)과 MSX Lane(`masc_msx_save`·
+  `masc_msx_restore`·`masc_msx_checkpoint_info`)이 공통으로 쓴다. DOS Lane 파일 머리에는
+  어느 기계인지, 형식 번호, 만든 코어의 digest 가 적히며, 되살리면 새 incarnation 이 되고
+  조종권은 되살린 사람이 쥔다. MSX Lane은 JSON 엔벨로프 형식을 사용하며, 기계를 실제로
+  복원(restore)하지 않고도 슬롯의 형식 버전, 저장 시각(mtime), 저장 코어 식별자(`core_sha`),
+  미디어 이름, 입력 엣지 수, 바이트 크기, sha256을 무부작용으로 검사하는 조회 계약
+  (`masc_msx_checkpoint_info`)을 제공한다(#41773). 이 조회의 성공이 복원 가능성 전체나
+  미디어 파일 실재를 보증하지는 않으며, `core_sha` 필드가 없는 구 저장본은 잘못된 코어가
+  아니라 미기록(`unknown`)으로 취급된다.
+  → [Machine_checkpoint](../../lib/machine_checkpoint/machine_checkpoint.mli) ·
+  [Dos_lane.restore](../../lib/dos_lane/dos_lane.mli) ·
+  [Msx_lane](../../lib/msx_lane/msx_lane.mli)
 
 **슬롯 (Slot)**
 : 기계 체크포인트에 붙이는 이름. 영문자·숫자·`_`·`-` 로 1~64자이고, 경로가 될 수
@@ -1527,6 +1589,18 @@ status: reference
   넣고 화면을 읽는다. DOS Lane과 같은 축의 공유 머신으로, Lane Add-on의
   `msx_capture` 원천이 이 머신을 관측한다.
   → [Msx_lane](../../lib/msx_lane/msx_lane.mli)
+
+**MSX Core Identity (MSX 코어 식별자)**
+: 실행 중인 서버 프로세스가 링크한 `ocaml-msx` 코어의 정체성을 나타내는 식별 계약(#41773).
+  바이너리가 링크한 실제 코어 소스 다이제스트(`source_digest`), CI 고정 핀의 다이제스트
+  (`pinned_source_digest`), 그리고 두 다이제스트의 일치 여부(`matches_pin`)로 구성된다.
+  `Dos_lane.core`와 대칭을 이루며, `masc_msx_meta` 도구를 통해 머신 복원이나 재기동 없이
+  서버의 코어 일치 상태를 조회할 수 있다. 다이제스트는 `ocaml-msx` 빌드 시점에 `lib/` 최상위
+  소스 바이트(dune 및 `*.ml`/`*.mli`)로부터 계산되므로(`Msx_core_identity`), 커밋 이력이
+  없는 opam 릴리스 패키지 환경에서도 대상 소스 불일치를 결정론적으로 감지한다(전체 바이너리
+  무결성이나 하위 디렉터리 변조를 검증하는 것은 아님).
+  → [Msx_lane.core](../../lib/msx_lane/msx_lane.mli) ·
+  [Msx_lane.checkpoint_info](../../lib/msx_lane/msx_lane.mli)
 
 **Browser Lane**
 : 서버가 관리하는 브라우저 세션. Keeper 는 `masc_browser_*` 도구로 탭을 읽고
@@ -2006,8 +2080,8 @@ status: reference
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
-    기록되는 사건은 9종(`HalfLifeSet`·`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Equipped`·`Payout_failed`)이며,
-    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`는 지급액을 더하고, `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
+    기록되는 사건은 12종(`Half_life_set`·`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Granted`·`Gifted`·`Gifted_item`·`Purchased`·`Equipped`·`Payout_failed`)이며,
+    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급, `Granted` 운영자 지급, `Gifted` 키퍼 간 금액 이전, `Gifted_item` 키퍼 간 아이템 이전, `Purchased` 구매를 순서대로 재생하여 계산한다. `Paid`와 `Granted`는 금액을 더하고, `Gifted`는 보내는 키퍼의 잔액을 덜어 받는 키퍼에 더하며(발행량과 소각량은 변하지 않는다), `Gifted_item`은 소유권만 옮기고 착용 중이던 해당 아이템은 보낸 쪽에서 벗겨진다. `Purchased`는 기록된 `amount_milli`를 차감하며 소유권을 부여한다. 소유한 장신구의 슬롯별 착용은
     `keeper_candle_equip` 도구를 통해 `Equipped` 사건(`{keeper; slot; choice}`)으로 원장에 덧붙인다.
     `choice`가 `Default`면 시작 장비를 복원하고, 동일한 선택은 중복 기록하지 않으며 추가 차감도 발생하지 않는다. 헌법·승인·도구 호출 원장이나 `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 지급 의무 보존(Payout Obligation Preservation)·평가 후 채무 지속성(Post-Appraisal Debt Retention):
@@ -2028,7 +2102,7 @@ status: reference
     차단하지 않는다. 서버 대시보드와 원격 TUI는 `Candle_equipment` 투영을 통해 원장의 `Equipped` 사건을 재생하여 최신 착용 상태를 표시한다.
     초상화 캐시는 빈 슬롯을 명시한 정규 캐시 식별자를 쓰며, 장비 변경 시 마운트된 이미지와 렌더러가 즉시 갱신된다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
-    잔액(`Candle_balance.of_events`)은 기록된 `HalfLifeSet` 경계를 따라 정수 연산으로
+    잔액(`Candle_balance.of_events`)은 기록된 `Half_life_set` 경계를 따라 정수 연산으로
     지수 감쇠한다. `"off"`는 감쇠를 끄며, 새 설정은 권한 있는 변경 경로가 정책 사건을
     덧붙인 시점부터 적용된다. 읽기 전용 관측은 정책을 발행하지 않는다.
     감쇠량과 구매 차감은 소각량에 반영하고 발행·소각·유통량을 투영한다.
@@ -2048,7 +2122,7 @@ status: reference
 **Keeper Item & Candle Ledger Supply (키퍼 아이템과 원장 공급량 체계)**
 : 대시보드 Keeper 상세의 전용 읽기 탭인 `Item` 탭과, `candle-ledger.jsonl` 원장에 기반한 거시 공급량(Supply: 총 발행량 `issued`, 감쇠·구매 소각량 `burned`, 실제 유통량 `circulating`) 및 개별 Keeper 지갑 잔액(`wallet balances`)의 가시성·정합성 체계(#40010·#40013·#40024·#40033·#40039). 지갑 잔액은 Keeper별 지급·구매 기록과 그 지갑의 감쇠 구간을 원장 순서로 재생해 계산한다. `issued`·`burned`·`circulating`은 작업공간 전체 합계이므로 한 Keeper의 잔액을 총공급량에서 나누어 구하지 않는다.
   - 대시보드 Item 탭([`keeper-items-panel.ts`](../../dashboard/src/components/keeper-items-panel.ts)): 개별 Keeper의 권위 있는 Candle 잔액, 장신구 카탈로그 가격, 소유한 아이템 목록, 착용 중인 초상화 미리보기를 단일 읽기 표면으로 제공한다. 장신구 구매는 무료 구매 및 가격 변동 시에도 원장 관측 갱신과 함께 최신 소유권·잔액을 게시하여 동기화를 유지한다.
-  - 공급량 투영(Supply Projection): TUI와 대시보드는 원장의 `Paid`·`Purchased`·`HalfLifeSet` 이벤트를 결정론적으로 재생하여 십진 정수 형태의 발행·소각·유통 공급량을 투영한다. UI나 캐시의 임의 추정 수치를 배제한다.
+  - 공급량 투영(Supply Projection): TUI와 대시보드는 원장의 `Paid`·`Granted`·`Purchased`·`Half_life_set` 이벤트를 결정론적으로 재생하여 십진 정수 형태의 발행·소각·유통 공급량을 투영한다. UI나 캐시의 임의 추정 수치를 배제한다.
   - 권위 철회와 캐시 무효화(Authority Withdrawal): 서버 부팅 중, 알 수 없는 작업공간 전환, 연결 해제/재접속, 에포크 무효화(epoch invalidation), 런타임 웜업(warm-up) 시 오래된 잔액·소유권·가격·공급량 관측을 즉시 철회(`withdraw`)한다. 과거 웜업이나 실패 응답이 복구된 정상 상태를 덮어쓰지 못하도록 차단한다.
   - 단축 뷰포트 예산 보호: 15~16행의 짧거나 좁은 터미널 화면에서는 Candle 블록이 여유 행(spare rows)에만 진입하며, 화면이 혼잡할 때는 상태 이름과 요약만 남기고 전체 진단과 정확한 수량은 전역 Help/Info 시트로 접어 다른 핵심 작업(Attention, Task)의 시각 예산을 침범하지 않는다.
   → [keeper-items-panel.ts](../../dashboard/src/components/keeper-items-panel.ts) ·
@@ -2114,6 +2188,13 @@ status: reference
   evidence action이 필요하다.
   → [fusion-compute](../../addons/fusion-compute/README.md),
   [model access boundary](../design/lane-addon-model-boundary.md)
+
+**Fusion Input Lineage (Fusion 입력 계보)**
+: `fusion-compute` Lane Add-on의 조립형 계산에서 모델의 현재 관측 증거와 상속된 이전 입력 참조를 엄격히 분리하는 불변식(#41732). 각 계산의 행 증거(`row evidence`)는 오직 현재 모델 요청과 허용된 결과만을 포함하며, 이전 단계에서 상속된 불변 참조들은 `fields.input_evidence`에 격리되어 모델 요청 내부에 보존된다. 심판(`judge`)은 입력 참조들을 검증하여 후속 단계로 계승하고, 보고서(`fusion-report`)는 현재의 `model_evidence`와 나란히 전체 입력 계보를 노출한다. `input_evidence` 배열은 필수이며 오직 `uri`와 `sha256`만을 갖는 불변 참조만을 허용한다(현재 모델 영수증 주소 검증의 `lane-evidence:<sha256>`는 상속 URI의 한 예시이며, 계보 형식 검증은 정확한 {uri, sha256} 키 집합과 불변 digest를 검사함). 이를 통해 워커는 이전 요청 이력을 안전하게 분석할 수 있으면서도, 호스트가 낡은 영수증을 새 관측 입력의 유효한 결과로 오인하는 재생 취약점을 방지한다.
+  → [fusion_sampling](../../addons/fusion_sampling.py) ·
+  [fusion-compute](../../addons/fusion-compute/server.py) ·
+  [fusion-report](../../addons/fusion-report/server.py) ·
+  [Fusion lane composition](../design/fusion-lane-composition.md)
 
 **Fusion Seat (자리)**
 : Fusion 실행에서 답을 내는 한 자리. panel 한 명과 judge 하나가 각각 한 자리다
@@ -2276,7 +2357,8 @@ status: reference
   명확히 분리된다:
   1. 위임 완료 답변(`Delegate_replied`, `Delegate_failed`): 480 바이트 초과 시 줄임표(`...`)로 끝을
      자르되 결코 침묵 절단(`silent cut`)하지 않고, `masc_keeper_delegate_status` 조회 경로와
-     `operation_id`를 덧붙여 말단에 위치한 아티팩트 객체나 코드 블록을 온전히 복원할 수 있게 한다.
+     `operation_id`를 덧붙여 말단에 위치한 아티팩트 객체나 코드 블록을 복원할 수 있게 한다(단, 조회
+     경로는 operation 기록이 보존되어 있을 때 유효하며, 보존 기간 만료 등으로 기록 부재 시 원문 복원은 불가).
   2. 비동기 컴포지션 완료(`Composition_completed`): 성공 시에는 중복 적재를 막기 위해 본문을 비우고,
      실패나 취소 상세가 480 바이트를 초과하면 `keeper_composition_status` 조회 경로와 `request_id`를
      덧붙여 침묵 절단을 방지한다.
@@ -3183,6 +3265,11 @@ status: reference
 **Selective Source Candidate Validation (질의 매칭 소스 후보 선별 검증)**
 : `keeper_memory_search`는 먼저 쿼리에 맞는 소스 결속 주장과 그 경로·다이제스트를 고른 뒤, 그 후보만 잠금 아래에서 재검증한다. 쿼리에 맞지 않는 소스는 읽거나 무효화하지 않고 저장된 채 미검증으로 둔다. 매칭 후보의 읽기가 끝나지 않으면 본문을 보류하고 `source_verification.status="incomplete"`와 재조회 안내를 돌려준다. 검증된 현재 결과를 가린 뒤가 아니라 후보 검증·제외 후 `limit`을 적용하므로 오래되거나 확인할 수 없는 후보가 유효한 뒤쪽 결과를 밀어내지 않는다.
   → [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.mli) · [keeper_tool_memory_runtime](../../lib/keeper/keeper_tool_memory_runtime.ml)
+
+**Memory Retraction Plan Receipt (기억 철회 계획 영수증)**
+: Memory OS에서 사유(`reason`)를 수반하는 기억 철회(`retract_fact`) 및 대체(`supersede_fact`) 시, 스냅샷 교체 전에 디스크에 사전 기록되는 영구 복구 증거(#41590). 사전 준비(`prepared`) 단계에서 계획 ID(`plan_id`), 이전/목표 리비전(`prior_revision`·`target_revision`), 이전/목표 스냅샷 SHA-256(`prior_snapshot_sha256`·`target_snapshot_sha256`), 철회 문장 목록(`dropped_statements`)을 사이드카 JSON(`.memory-retraction-plan.json`)으로 기록한다. 스냅샷 교체 후 저널 저널링(`append_removal_journal_and_clear_receipt`)이 완료되어야만 영수증이 삭제되며, 만약 저널 확정 전에 프로세스가 중단되더라도 부팅 시 또는 후속 쓰기자가 `reconcile_retraction_plan_receipt`를 통해 스냅샷과 영수증을 대조하여 저널을 확정한다. 정산되지 않은 대기 영수증이 있는 동안에는 `read_dropped` 조회가 명시적 에러를 반환하고, 후속 쓰기자가 제거된 원본을 다른 내용으로 덮어쓰는 것을 차단한다.
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
+  [Keeper_memory_os_types](../../lib/keeper/keeper_memory_os_types.mli)
 
 **Shared Fact (작업공간 기억 원장 행)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.

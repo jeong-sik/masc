@@ -476,8 +476,23 @@ let take ~base_path ~pid ~bidi_url ~client_id ~now =
 let attached held ~now = replace held { held.entry with attached_at = Some now }
 let client_changed held ~client_id = replace held { held.entry with client_id }
 
+(* The most results the record keeps while a host runs. A command that
+   outlasts the server's timeout adds one each time it is sent, so a
+   long-lived host meets the limit through no fault of its own; past it the
+   oldest leave first, and the newest stay whole. The count of what came
+   before the kept ones is not in the layout, and adding a field for it
+   would turn every reader built for this one away (the exact-field check in
+   [entry_of_json]), so a trimmed record is one that counts fewer results,
+   not one this build cannot read. *)
+let unacknowledged_limit = 64
+
 let note_unacknowledged held noted =
-  replace held { held.entry with unacknowledged = held.entry.unacknowledged @ [ noted ] }
+  let kept = held.entry.unacknowledged @ [ noted ] in
+  let unacknowledged =
+    if List.length kept <= unacknowledged_limit then kept
+    else List.drop (List.length kept - unacknowledged_limit) kept
+  in
+  replace held { held.entry with unacknowledged }
 
 (* A reason can quote bytes a peer sent. The record stays ASCII that a reader
    in any language loads: a byte outside printable ASCII, and the backslash

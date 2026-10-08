@@ -94,7 +94,9 @@ type entry =
       (** When Firefox gave the host its session. [None] while the host is
           still connecting, and for good when it never got one. *)
   ; unacknowledged : unacknowledged list
-      (** Oldest first. Nothing is taken off it while the host runs, and each
+      (** Oldest first. [note_unacknowledged] keeps the newest
+          {!unacknowledged_limit} of them; when one more arrives, the oldest
+          leave. Which and how many left is not in the record, and each
           addition writes the whole record again. *)
   ; ended : ending option
   }
@@ -181,6 +183,12 @@ val attached : held -> now:float -> (unit, write_failure) result
 
 (** The host polls under another client ID from here on. *)
 val client_changed : held -> client_id:Browser_lane.client_id -> (unit, write_failure) result
+
+(** The most results {!note_unacknowledged} keeps in the record. When a
+    longer list would be written, the oldest leave and the newest this many
+    stay. A reader that needs every result takes them from the host's log
+    instead; the record says of the kept ones what it always said. *)
+val unacknowledged_limit : int
 
 val note_unacknowledged : held -> unacknowledged -> (unit, write_failure) result
 

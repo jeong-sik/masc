@@ -149,8 +149,11 @@ server:
       result before it answers, so an `unconfirmed` one may have arrived:
       that is also what an answer the host could not read is, and a result
       that went out once and could not be sent again.
-  - The list is not trimmed while the host runs, and each addition writes
-    the record again.
+  - The record keeps the newest 64 results; when one more arrives, the
+    oldest leave. What a reader loses with the older ones is only that a
+    counted total may be smaller than the number of timed-out commands the
+    host met; the list's order and the shape of the kept entries stand.
+    Every addition writes the record again.
   - A host that leaves in order adds `ended`: when, why, and
     `session_in_firefox`. A host that could not attach leaves its reason the
     same way.

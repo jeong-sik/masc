@@ -83,12 +83,20 @@ type approvals_reading =
 
 (* A failed confirm-queue read sets [approval_snapshot] to [None] in the same
    step as it sets [approvals_error], so a snapshot on screen is always the
-   last answer. *)
+   last answer.
+
+   A refresh that confirms the workspace identity withdraws the listing
+   generation in the same pass, so that pass's own answer is refused before
+   it can be drawn. A recovery read ticketed outside the bundle counts as
+   the read in flight: the surface is between two reads, not unread. *)
 let confirm_queue_reading (state : state) =
-  match (state.approval_snapshot, state.approvals_error) with
-  | Some _, _ -> List_read
-  | None, Some cause -> List_not_read (Approval_failed cause)
-  | None, None -> List_not_read Approval_unread
+  if Snapshot_read.in_flight state.approvals_summary_read then
+    List_not_read Approval_unread
+  else
+    match (state.approval_snapshot, state.approvals_error) with
+    | Some _, _ -> List_read
+    | None, Some cause -> List_not_read (Approval_failed cause)
+    | None, None -> List_not_read Approval_unread
 
 let kept_rows_reading ~observed ~error =
   match (observed, error) with

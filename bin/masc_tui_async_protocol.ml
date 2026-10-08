@@ -176,6 +176,17 @@ type async_msg =
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
+  (* The confirm-queue read that rode a refresh was refused because the same
+     pass confirmed the workspace identity first ([Approval.Flow.invalidate]
+     runs inside [apply_server_identity_reading]). The surface that draws the
+     count re-reads it now, on the same ticket-generation terms every other
+     approval listing rides. *)
+  | Approvals_listing_superseded
+  | Approvals_summary_loaded of
+      Masc_tui_types.Snapshot_read.request
+      * Masc_tui_operator_projection.Listing_order.ticket
+      * Masc.Tui_decode.server_identity
+      * (approval_snapshot, string) result
   | Surface_composer_released
   | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
@@ -684,6 +695,7 @@ let rec workspace_message_is_read = function
   | Tools_async_observation_loaded _
   | Runtime_catalog_loaded _
   | Keeper_tool_approvals_loaded _
+  | Approvals_summary_loaded _
   | Sent_image_ready _
   | Keeper_turns_loaded _
   | Gate_snapshot_loaded _
@@ -740,6 +752,10 @@ let rec workspace_message_is_read = function
   | Voice_failed _
   | Http_refresh_done _
   | Http_refresh_failed _
+  (* Not a reply: the refresh that recovered the identity tells the loop to
+     read the confirm queue again. It belongs to that refresh, which is
+     ordered by its own tickets. *)
+  | Approvals_listing_superseded
   | Surface_composer_released
   | Http_scoped_refresh_done _
   | Http_scoped_refresh_failed _

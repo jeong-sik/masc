@@ -419,6 +419,7 @@ let with_server
       ?(first_response_headers = [])
       ?first_stalled_response
       ?(abort_completion = false)
+      ?(on_post = fun () -> ())
       ~response
       f
   =
@@ -434,6 +435,7 @@ let with_server
     let handler _conn _request body =
       ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
       let post_index = Atomic.fetch_and_add completion_posts 1 in
+      on_post ();
       if abort_completion then raise Exit;
       Option.iter (Eio.Time.sleep clock) response_delay_s;
       match first_stalled_response, post_index with
@@ -5327,20 +5329,27 @@ let test_concurrent_duplicate_flow_does_not_double_dispatch () =
 ;;
 
 let test_cancellation_terminalizes_outer_attempt () =
+  (* The cancellation must arrive after the request reached the server. A fixed
+     timeout raced the connection setup: when it fired first, no request had
+     been sent and the dispatch count stayed 0. *)
+  let received, signal_received = Eio.Promise.create () in
+  let on_post () = ignore (Eio.Promise.try_resolve signal_received ()) in
   let (timed_out, replay, evidence), posts =
-    with_server ~response_delay_s:0.1 ~response:(openai_response {|{"name":"accepted"}|})
+    with_server ~on_post ~response_delay_s:0.1 ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog [ catalog_entry ~id:"cancel-flow" ~base_url ~native:true ~json:true () ]
     @@ fun snapshot ->
     let flow = start_flow (frozen_flow snapshot [ "cancel-flow" ]) in
     let timed_out =
-      try
-        ignore
-          (Eio.Time.with_timeout_exn clock 0.01 (fun () -> execute_ok ~net ~clock flow)
-           : (EO.flow_success, _ EO.flow_execution_error) result);
-        false
-      with
-      | Eio.Time.Timeout -> true
+      Eio.Fiber.first
+        (fun () ->
+          ignore
+            (execute_ok ~net ~clock flow
+             : (EO.flow_success, _ EO.flow_execution_error) result);
+          false)
+        (fun () ->
+          Eio.Promise.await received;
+          true)
     in
     let replay = execute_ok ~net ~clock flow in
     timed_out, replay, EO.flow_attempt_evidence flow

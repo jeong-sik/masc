@@ -947,6 +947,12 @@
  (libraries masc masc_tool_blob_store unix yojson))
 
 (library
+ (name masc_tui_browser_rejection)
+ (wrapped false)
+ (modules masc_tui_browser_rejection)
+ (libraries masc.browser_lane yojson))
+
+(library
  (name masc_tui_keeper_chat_diff)
  (wrapped false)
  (modules masc_tui_keeper_chat_diff)
@@ -1432,7 +1438,11 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc.keeper_chat_operations masc_tui_message_input masc_tui_collab masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_memory_usage masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries
+  ;; workspace identity composes the local masc root from the cluster
+  ;; selection with the function the server reports its own root from.
+  masc.config masc.keeper_chat_operations masc_tui_message_input masc_tui_collab
+  masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_memory_usage masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1851,6 +1861,8 @@
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_execute_result
+  masc_tui_browser_rejection
+  masc.browser_lane
   masc_tui_tool_detail
   masc_tui_theme
   masc_tui_gate_text

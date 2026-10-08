@@ -9024,10 +9024,12 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   in
   let pointer_hint = match !image_cell_pixels with
     | Some (width, height) when width > 0 && height > 0 ->
-        (match shot.source with
-         | Browser_lane_view.Live -> "click: link   drag: requires automation"
-         | Browser_lane_view.Automation -> "click: link   drag: move"
-         | Browser_lane_view.Stagehand -> "click: control   drag: move")
+        let click = match shot.source with
+          | Browser_lane_view.Live | Browser_lane_view.Automation -> "click: link"
+          | Browser_lane_view.Stagehand -> "click: control" in
+        (* A view that holds no clients answers "not listed" for a live shot. *)
+        let view = Option.value state.browser_lane ~default:(Browser_lane_view.create ()) in
+        click ^ "   " ^ Browser_lane_view.screenshot_drag_hint view shot
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
@@ -19886,6 +19888,10 @@ and is loaded on demand through keeper_skill.
          minutes apart from another would read as a double press. *)
       if Option.is_some input then begin
         Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+        (* A refused gesture stays on screen until the next input. The input
+           that is refused sets it below, after this. *)
+        state.browser_lane <-
+          Option.map Browser_lane_view.withdraw_unserved_gesture state.browser_lane;
         if Option.is_none state.browser_viewport then
           state.image_request_generation <- state.image_request_generation + 1
         else match state.browser_lane with
@@ -19914,11 +19920,24 @@ and is loaded on demand through keeper_skill.
              close_image state;
              invalidate_frame_for_resize frame_presenter render_schedule
            in
-           (* Viewport keys and wheel notches move by 120 CSS pixels. Inputs during an in-flight request are consumed,
-              never queued or replayed after a possible browser side effect. *)
-           let scroll_at point y = launch_browser_lane state ~mailbox:async_messages
-             (Browser_lane_view.Viewport_pointer {tab_id=shot.tab_id;expected_url=shot.url;
-               action=Browser_lane.Scroll_at {point;viewport=shot.viewport;x=0;y}}) in
+           (* Inputs during an in-flight request are consumed, never queued or
+              replayed after a possible browser side effect. A gesture the
+              screenshot's connection does not serve is not sent: the
+              screenshot closes so the reason and the next step are on screen. *)
+           let pointer action = match state.browser_lane with
+             | None -> ()
+             | Some view ->
+                 (match Browser_lane_view.pointer_decision view shot action with
+                  | Browser_lane_view.Pointer_consumed -> ()
+                  | Browser_lane_view.Pointer_send operation ->
+                      launch_browser_lane state ~mailbox:async_messages operation
+                  | Browser_lane_view.Pointer_unserved unserved ->
+                      close ();
+                      state.browser_lane <-
+                        Some (Browser_lane_view.refuse_gesture unserved view)) in
+           (* Viewport keys and wheel notches move by 120 CSS pixels. *)
+           let scroll_at point y =
+             pointer (Browser_lane.Scroll_at {point;viewport=shot.viewport;x=0;y}) in
            let wheel row column y = match !browser_image_region with
              | Some region -> (match Masc_tui_graphics.image_point region ~row ~column with
                  | Some (x,y_point) -> scroll_at {x;y=y_point} y
@@ -19940,11 +19959,10 @@ and is loaded on demand through keeper_skill.
                  | Some (start_row,start_column,from), Some region ->
                      (match Masc_tui_graphics.image_point region ~row ~column with
                       | Some (x,y) ->
-                          let action = if row=start_row && column=start_column then
-                            Browser_lane.Click_at {point=from;viewport=shot.viewport}
-                          else Browser_lane.Drag {from;to_={x;y};viewport=shot.viewport} in
-                          launch_browser_lane state ~mailbox:async_messages
-                            (Viewport_pointer {tab_id=shot.tab_id;expected_url=shot.url;action})
+                          pointer
+                            (if row=start_row && column=start_column then
+                               Browser_lane.Click_at {point=from;viewport=shot.viewport}
+                             else Browser_lane.Drag {from;to_={x;y};viewport=shot.viewport})
                       | None -> ())
                  | _ -> ())
             | Key ("esc" | "q") -> close ()

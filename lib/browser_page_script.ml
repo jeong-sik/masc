@@ -80,7 +80,7 @@ function name(el) {
 function observe(el) {
   const result = {selector:selector(el),tag:el.localName,
     role:effectiveRole(el),type:el.getAttribute('type'),name:name(el),
-    text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:disabled(el)};
+    text:Array.from(el.innerText || '').slice(0,500).join(''),href:el.href || null,disabled:disabled(el)};
   const target=(el.localName==='label' && el.control) || el;
   if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
     result.checked=!!target.checked;

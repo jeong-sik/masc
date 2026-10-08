@@ -131,3 +131,16 @@ test('live elements retain tab identity and match native control observations', 
   const { tabId, ...page } = result;
   assert.deepEqual(page, runNative(context));
 });
+
+// A cut through a surrogate pair leaves half a character. JSON then carries
+// an escape that a strict reader refuses, and the whole inventory is lost.
+test('element text is cut by code point, never through a surrogate pair', async () => {
+  const { context, text } = fixture();
+  text.innerText = 'a'.repeat(499) + '\u{1F600}' + 'tail';
+  for (const observation of [runNative(context), await runExtension(context)]) {
+    const cut = observation.elements[0].text;
+    assert.equal(cut.isWellFormed(), true);
+    assert.equal(Array.from(cut).length, 500);
+    assert.equal(cut.endsWith('\u{1F600}'), true);
+  }
+});

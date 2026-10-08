@@ -105,14 +105,16 @@ def run(host, firefox, out=None):
         thread.start()
         # Two identical URL tabs are opened by the owned Firefox command line.
         fixture = root / "fixture.html"
-        fixture.write_text('''<!doctype html><title>BiDi native fixture</title>
+        fixture.write_text('''<!doctype html><meta charset="utf-8"><title>BiDi native fixture</title>
 <style>body{margin:0;min-height:2000px}#pad{width:500px;height:300px;background:lightblue}
 #hover-result{display:none;position:fixed;top:0;right:0}#pad:hover+#hover-result{display:block}
 #message{position:fixed;left:600px;top:100px;width:300px;height:60px;background:#eee}
 #react{display:none;position:absolute;left:10px;top:10px;width:140px;height:30px}
-#message:hover #react{display:block}#reactions{position:fixed;left:600px;top:200px}</style>
+#message:hover #react{display:block}#reactions{position:fixed;left:600px;top:200px}
+#long{position:fixed;left:0;top:400px;width:500px;height:20px;overflow:hidden;white-space:nowrap}</style>
 <a href="#followed">Observed destination</a><div id="pad">untouched</div><span id="hover-result"></span>
-<div id="message"><button id="react" type="button">Add reaction</button></div><span id="reactions"></span><script>
+<div id="message"><button id="react" type="button">Add reaction</button></div><span id="reactions"></span>
+<button id="long" type="button">''' + "a" * 499 + "\U0001F600tail" + '''</button><script>
 document.querySelector('#react').addEventListener('click',e=>{
   document.querySelector('#reactions').textContent+=' reaction:'+e.isTrusted});
 const pad=document.querySelector('#pad'); let down=false;
@@ -121,7 +123,7 @@ pad.addEventListener('pointerdown',()=>{presses++});
 pad.addEventListener('pointermove',e=>{document.querySelector('#hover-result').textContent='hover:'+e.isTrusted+':'+presses});
 pad.onpointerdown=e=>{down=e.isTrusted;pad.setPointerCapture(e.pointerId)};
 pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
-</script>''')
+</script>''', encoding="utf-8")
         fixture_url = f"http://127.0.0.1:{server.server_port}/fixture"
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
@@ -241,8 +243,17 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
 
             hidden = inventory()
             assert named(hidden, "Observed destination") and not named(hidden, "Add reaction"), hidden
-            current = scrolled["data"]
-            here, frame = current["url"], current["viewport"]
+            # A control's text is cut at 500 characters. The cut falls inside
+            # an emoji's two UTF-16 units here; the inventory still arrives,
+            # with the whole emoji as its last character.
+            long_text = [element["text"] for element in hidden if element["text"].startswith("aaaa")]
+            assert len(long_text) == 1 and len(long_text[0]) == 500, long_text
+            assert long_text[0].endswith("\U0001F600"), long_text
+            # The wheel above may still be settling, and the pointer guard
+            # compares every viewport value: hover from a capture taken now.
+            settled = call("page.capture", {"tabId": first})
+            assert settled["ok"], settled
+            here, frame = settled["data"]["url"], settled["data"]["viewport"]
             assert frame["width"] >= 900 and frame["height"] >= 220, frame
             reveal = call("page.interact", {"tabId": first, "action": "hover_at", "expectedUrl": here,
                 "viewport": frame, "point": {"x": 880 / frame["width"], "y": 150 / frame["height"]}})

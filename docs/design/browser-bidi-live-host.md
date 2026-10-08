@@ -50,7 +50,8 @@ follow receipt does not guarantee application content is ready; existing guarded
 read recovery remains necessary. A BiDi session enables browser-wide automation
 and must not be exposed beyond loopback.
 
-Validation: `test_browser_bidi_peer` exercises opaque identity and closed verbs.
+Validation: `test_browser_bidi_peer` exercises opaque identity, the element
+inventory, the document source and the lane table against the peer.
 `python3 test/test_browser_bidi_host.py HOST FIREFOX` uses an owned temporary
 profile and actual Firefox to exercise native HTTP poll/result, screenshot,
 trusted drag, stale viewport rejection, and two identical-URL contexts.

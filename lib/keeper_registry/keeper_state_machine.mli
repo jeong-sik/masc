@@ -22,7 +22,7 @@
 type phase =
   | Offline       (** Registered but no heartbeat fiber started *)
   | Running       (** Healthy heartbeat loop executing *)
-  | Failing       (** Any heartbeat/turn failure or archived credential, probing recovery *)
+  | Failing       (** Any heartbeat/turn failure, probing recovery *)
   | Draining      (** Graceful shutdown: completing current turn *)
   | Paused        (** Explicitly operator-paused; fiber sleeping *)
   | Stopped       (** Clean exit, terminal *)
@@ -62,7 +62,6 @@ type conditions = {
   (** Supervisor has requested immediate restart of a stopped fiber. *)
   drain_complete : bool;
   (** Current turn finished, no pending work *)
-  credential_archived : bool;
 }
 
 val default_conditions : conditions

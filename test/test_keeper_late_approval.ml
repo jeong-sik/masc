@@ -565,7 +565,7 @@ let test_malformed_consume_cannot_restore_approval () =
 
 let test_pre_id_journal_fails_closed () =
   with_journal (fun ~clock:_ ~journal ~make ~remove:_ ->
-    Masc.Fs_compat.mkdir_p (Filename.dirname journal);
+    Fs_compat.mkdir_p (Filename.dirname journal);
     Out_channel.with_open_bin journal (fun out ->
       output_string out "{\"op\":\"consume\",\"at\":0}\n");
     let store = make () in

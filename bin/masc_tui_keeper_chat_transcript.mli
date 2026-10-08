@@ -13,7 +13,7 @@ type phase =
   | Waiting  (** The request went out; the run has not started. *)
   | Working  (** The run started and the stream is open. *)
   | Stream_ended  (** The run reported it finished. *)
-  | Stream_failed of string  (** The run reported an error. *)
+  | Stream_failed of string  (** Original reported error; runtime context is separate. *)
 
 (** How a closed {!phase} was learned. *)
 type ending_source =

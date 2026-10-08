@@ -609,7 +609,7 @@ let test_openai_event_edge_branches () =
   let refusal_finish_events, _ =
     S.openai_chunk_to_events
       finish_state
-      (openai_chunk ~finish_reason:"refusal" ~chunk_usage:(usage ()) ())
+      (openai_chunk ~finish_reason:"refusal" ~chunk_usage:(delta_usage_of_api_usage (usage ())) ())
   in
   match refusal_finish_events with
   | [ MessageStart {id="chunk-1";model="model-1";usage=None};

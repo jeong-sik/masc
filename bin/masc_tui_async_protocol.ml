@@ -111,6 +111,12 @@ type currency_authority_request = {
   car_identity : Masc.Tui_decode.server_identity option;
 }
 
+(* What the resume preflight learned about the Keeper's owner before the queue
+   snapshot is read. *)
+type resume_confirmation =
+  | Owner_resumed
+  | Owner_already_active
+
 type async_msg =
   | Workspace_scoped of workspace_authority * unit ref option * async_msg
   | Workspace_operation of async_msg
@@ -123,6 +129,7 @@ type async_msg =
       { action : string; detail : string; workspace : workspace_input_identity option }
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
+  | Keeper_queue_resume_confirmed of string * int * resume_confirmation
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (string list, string) result, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
@@ -613,6 +620,9 @@ let rec workspace_message_is_read = function
     (match action with Masc_tui_queue_inspection.Inspect -> true
      | Pause | Resume | Cancel _ | Move_to_end _ | Edit _
      | Cancel_event _ | Prioritize_event _ -> false)
+  (* The owner's answer to a resume already sent. It releases the retained
+     input, which the Resume reply above did before it was split out. *)
+  | Keeper_queue_resume_confirmed _ -> false
   | Lane_declaration_loaded (_, request, _, _, _) ->
     (match request with Masc_tui_lane_declaration.Read _ -> true | Save _ -> false)
   | Account_login_json (_, _, action, _) -> account_login_action_is_read action

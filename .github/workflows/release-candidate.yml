@@ -30,12 +30,58 @@ jobs:
             *) echo "Full verification belongs to release/vX.Y.Z or a version tag" >&2; exit 1 ;;
           esac
 
-  compile:
+  # The tag is cut on this same frozen head, so the release body and its date are
+  # known before any build starts. This check takes seconds, so it runs first and
+  # the heavy jobs wait for it: a candidate that cannot publish is not built.
+  release-body:
     needs: validate
+    # The RC is the last run before the tag, and a tag push cannot be taken
+    # back. So the RC measures the exact body the tag push would publish and
+    # goes red when GitHub would cut it, before any tag exists.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check the release body and its date before tagging
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="$(sed -n 's/^(version \(.*\))$/\1/p' dune-project)"
+          test -n "$ver"
+          prev="$(TAG="v$ver" gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq '[.[] | select(.draft | not) | .tag_name] | (index(env.TAG)) as $i | if $i == null then .[0] else .[$i + 1] end // empty')"
+          test -n "$prev"
+          printf '**Full changelog**: https://github.com/%s/compare/%s...v%s\n' \
+            "${GITHUB_REPOSITORY}" "$prev" "$ver" > compare-link.md
+          printf '\n**Verified candidate**: https://github.com/%s/actions/runs/%s\n' \
+            "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" >> compare-link.md
+          # The tag is cut on this same frozen head, so its committer date in
+          # UTC is the day the release will carry. The heading was written
+          # before that was known (#37425).
+          tag_day="$(TZ=UTC git log -1 --date=format-local:%Y-%m-%d --format=%cd HEAD)"
+          test -n "$tag_day"
+          # The page lists what a reader acts on and counts the rest; the
+          # counted entries are read in the tagged CHANGELOG.md.
+          python3 scripts/ci/changelog-section.py "$ver" CHANGELOG.md release-body.md \
+            --append compare-link.md --max-chars 125000 --expect-date "$tag_day" \
+            --changelog-url "https://github.com/${GITHUB_REPOSITORY}/blob/v${ver}/CHANGELOG.md"
+
+      - name: Retain the exact release body checked by this RC
+        uses: actions/upload-artifact@v7
+        with:
+          name: rc-release-body-${{ github.sha }}-${{ github.run_id }}
+          path: release-body.md
+          overwrite: true
+          if-no-files-found: error
+
+  compile:
+    needs: [validate, release-body]
     uses: ./.github/workflows/full-check.yml
 
   behavior:
-    needs: validate
+    needs: [validate, release-body]
     uses: ./.github/workflows/test.yml
     with:
       candidate_verification: true
@@ -43,12 +89,12 @@ jobs:
       eio_backend: ""
 
   installation:
-    needs: validate
+    needs: [validate, release-body]
     uses: ./.github/workflows/release-build.yml
 
   evidence:
     name: Record candidate verification
-    needs: [compile, behavior, installation]
+    needs: [release-body, compile, behavior, installation]
     if: always()
     runs-on: ubuntu-24.04
     permissions:
@@ -88,7 +134,7 @@ jobs:
           PYCODE
 
       - name: Preserve the checked release body with successful verification
-        if: needs.installation.result == 'success'
+        if: needs.release-body.result == 'success'
         uses: actions/download-artifact@v8
         with:
           name: rc-release-body-${{ github.sha }}-${{ github.run_id }}

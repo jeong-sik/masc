@@ -377,17 +377,20 @@ let test_inventory_directory_replacement_hides_child_names () =
       ~finally:(fun () -> Fs_compat.remove_tree outside)
       (fun () ->
         write_file (Filename.concat outside "outside-private-name.dat") "private";
-        let moved = game ^ ".moved" in
+        let moved = root ^ ".moved" in
+        let replaced = ref false in
         let result =
           Tool_misc_dos_lane.handle_inventory_with_before_read
             ~before_read:(fun real ->
               Unix.rename real moved;
-              Unix.symlink outside real)
+              Unix.symlink outside real;
+              replaced := true)
             ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path
         in
         let response =
           Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result)
         in
+        check bool "root replacement hook completed" true !replaced;
         check bool "replaced root is refused" false (is_completed result);
         check bool "outside child name is not enumerated" false
           (contains "outside-private-name.dat" response)))

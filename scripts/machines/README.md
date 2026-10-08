@@ -33,7 +33,7 @@ load the game directory with the selected executable from that inventory:
 
 ```json
 {"operation":"inventory","arguments":{}}
-{"operation":"load","arguments":{"program":"samguk3","boot":"RTK3.EXE"}}
+{"operation":"load","arguments":{"program":"samguk3","boot":"KOEI.COM"}}
 {"operation":"screen","arguments":{}}
 ```
 

@@ -416,6 +416,78 @@ function validateDeltaUsage(value: unknown): SafeParseResult<true> {
   return ok(true)
 }
 
+function validateNativeToolObservation(value: Record<string, unknown>): SafeParseResult<true> {
+  const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event.value')
+  if (!occurrence.success) return occurrence
+  for (const field of ['providerMessageId', 'toolCallId', 'toolCallName']) {
+    if (!Object.prototype.hasOwnProperty.call(value, field)) continue
+    const valid = requiredString(value, field)
+    if (!valid.success) return valid
+  }
+  return ok(true)
+}
+
+function validateNativeToolCompletion(payload: unknown): SafeParseResult<true> {
+  const path = 'ag_ui_event.value.completion'
+  if (!isRecord(payload)) return fail(path, 'Expected native completion object')
+  let fields: readonly string[]
+  switch (payload.kind) {
+    case 'end_observed':
+    case 'completion_reported':
+    case 'error_reported':
+    case 'decline_reported':
+      fields = ['kind', 'exit_code']
+      break
+    case 'result_received':
+      fields = ['kind', 'exit_code', 'is_error']
+      if (payload.is_error !== null && typeof payload.is_error !== 'boolean') {
+        return fail(`${path}.is_error`, 'Expected reported native error boolean or null')
+      }
+      break
+    case 'unrecognized_status':
+      fields = ['kind', 'exit_code', 'status']
+      if (typeof payload.status !== 'string') {
+        return fail(`${path}.status`, 'Expected original native status string')
+      }
+      break
+    default:
+      return fail(`${path}.kind`, 'Expected typed native completion kind')
+  }
+  const object = exactCustomObject(payload, 'native completion', fields, path)
+  if (!object.success) return object
+  // Unlike byte counts, a process exit status may be negative. Preserve the
+  // provider fact without interpreting zero, completion, or missing as success.
+  return payload.exit_code === null
+    || (typeof payload.exit_code === 'number' && Number.isSafeInteger(payload.exit_code))
+    ? ok(true)
+    : fail(`${path}.exit_code`, 'Expected native exit code integer or null')
+}
+
+function validateNativeToolProgress(payload: unknown): SafeParseResult<true> {
+  const path = 'ag_ui_event.value.progress'
+  if (!isRecord(payload)) return fail(path, 'Expected native progress object')
+  switch (payload.kind) {
+    case 'output_observed': {
+      const object = exactCustomObject(payload, 'native output observation', ['kind', 'byte_count'], path)
+      if (!object.success) return object
+      return typeof payload.byte_count === 'number'
+        && Number.isSafeInteger(payload.byte_count) && payload.byte_count > 0
+        ? ok(true)
+        : fail(`${path}.byte_count`, 'Expected positive native output byte count')
+    }
+    case 'message_reported': {
+      const object = exactCustomObject(payload, 'native progress message', ['kind', 'message'], path)
+      if (!object.success) return object
+      // Empty messages are valid observations under the OCaml codec too.
+      return typeof payload.message === 'string'
+        ? ok(true)
+        : fail(`${path}.message`, 'Expected native progress message string')
+    }
+    default:
+      return fail(`${path}.kind`, 'Expected typed native progress kind')
+  }
+}
+
 function validateKeeperCustomPayload(
   name: KeeperChatCustomEventName,
   payload: unknown,
@@ -485,6 +557,15 @@ function validateKeeperCustomPayload(
     KEEPER_STREAM_MESSAGE_DELTA: ['stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
     KEEPER_CONTENT_BLOCK_STOP: ['index'],
+    KEEPER_NATIVE_TOOL_START: [
+      'toolStreamScope', 'toolCallBlockIndex', 'providerMessageId', 'toolCallId', 'toolCallName',
+    ],
+    KEEPER_NATIVE_TOOL_END: [
+      'toolStreamScope', 'toolCallBlockIndex', 'providerMessageId', 'toolCallId', 'toolCallName', 'completion',
+    ],
+    KEEPER_NATIVE_TOOL_PROGRESS: [
+      'toolStreamScope', 'toolCallBlockIndex', 'providerMessageId', 'toolCallId', 'toolCallName', 'progress',
+    ],
     KEEPER_MODEL_CONTENT_ACTIVITY: [
       'generation', 'stream_scope', 'block_index', 'provider_message_id', 'channel', 'state',
     ],
@@ -515,6 +596,19 @@ function validateKeeperCustomPayload(
   const value = object.data
 
   switch (name) {
+    case 'KEEPER_NATIVE_TOOL_START':
+      return validateNativeToolObservation(value)
+    case 'KEEPER_NATIVE_TOOL_END': {
+      const observation = validateNativeToolObservation(value)
+      if (!observation.success) return observation
+      return Object.prototype.hasOwnProperty.call(value, 'completion')
+        ? validateNativeToolCompletion(value.completion)
+        : ok(true)
+    }
+    case 'KEEPER_NATIVE_TOOL_PROGRESS': {
+      const observation = validateNativeToolObservation(value)
+      return observation.success ? validateNativeToolProgress(value.progress) : observation
+    }
     case 'KEEPER_STREAM_MESSAGE_START': {
       const provider = requiredString(value, 'provider_message_id')
       if (!provider.success) return provider

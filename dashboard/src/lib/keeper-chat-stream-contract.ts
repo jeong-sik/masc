@@ -24,6 +24,9 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_TOOL_APPROVAL_REQUESTED',
   'KEEPER_TOOL_APPROVAL_SETTLED',
   'KEEPER_TOOL_RESULT_READY',
+  'KEEPER_NATIVE_TOOL_START',
+  'KEEPER_NATIVE_TOOL_END',
+  'KEEPER_NATIVE_TOOL_PROGRESS',
   // #29742 and #29744 both registered the two approval events for the same
   // main-red and both merged, leaving them listed twice. A duplicate entry
   // makes the contract array longer than the OCaml codec's vocabulary and
@@ -111,6 +114,23 @@ type KeeperToolStreamOccurrence = {
   toolCallId?: string
 }
 
+/** Provider observation only: no MASC execution receipt or inferred success. */
+export type KeeperNativeToolObservation = KeeperToolStreamOccurrence & {
+  toolCallName?: string
+}
+
+/** Wire projection of Runtime_native_tools.completion. A reported completion
+ * is not a success verdict; absent is_error and absent exit status stay null. */
+export type KeeperNativeToolCompletion = { exit_code: number | null } & (
+  | { kind: 'end_observed' | 'completion_reported' | 'error_reported' | 'decline_reported' }
+  | { kind: 'result_received'; is_error: boolean | null }
+  | { kind: 'unrecognized_status'; status: string }
+)
+
+export type KeeperNativeToolProgress =
+  | { kind: 'output_observed'; byte_count: number }
+  | { kind: 'message_reported'; message: string }
+
 type KeeperQuarantinedToolOccurrence = {
   toolStreamScope: number
   toolCallBlockIndex: number
@@ -188,6 +208,18 @@ type KeeperChatCustomEvent =
     }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_MESSAGE_STOP'; value: null }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_PING'; value: null }
+  | { type: 'CUSTOM'; name: 'KEEPER_NATIVE_TOOL_START'; value: KeeperNativeToolObservation }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_NATIVE_TOOL_END'
+      // Older streams omit completion: only an end was observed.
+      value: KeeperNativeToolObservation & { completion?: KeeperNativeToolCompletion }
+    }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_NATIVE_TOOL_PROGRESS'
+      value: KeeperNativeToolObservation & { progress: KeeperNativeToolProgress }
+    }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_TOOL_RESULT_READY'

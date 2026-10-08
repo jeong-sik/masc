@@ -1497,12 +1497,18 @@ status: reference
 : 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과
   키 기록(ledger)이 다 들어 있어서, 서버를 다시 켜도 그 순간부터 이어서 할 수 있다.
   게임 메뉴로 하는 저장과 다르다. 게임마다 메뉴가 없어도 되고, 저장한 뒤로 한 일까지
-  남는다. 지금은 DOS Lane 이 `masc_dos_save`·`masc_dos_restore` 로 쓴다.
-  파일 머리에 어느 기계인지, 형식 번호, 만든 코어의 digest 가 적힌다. 기계나 형식
-  번호가 다르면 읽지 않는다. 코어 digest 는 보여 주기만 하고 비교하지 않는다.
-  되살리면 새 incarnation 이 되고, 조종권은 되살린 사람이 쥔다.
-  → [Machine_checkpoint](../../lib/machine_checkpoint/machine_checkpoint.mli),
-  [Dos_lane.restore](../../lib/dos_lane/dos_lane.mli)
+  남는다. DOS Lane(`masc_dos_save`·`masc_dos_restore`)과 MSX Lane(`masc_msx_save`·
+  `masc_msx_restore`·`masc_msx_checkpoint_info`)이 공통으로 쓴다. DOS Lane 파일 머리에는
+  어느 기계인지, 형식 번호, 만든 코어의 digest 가 적히며, 되살리면 새 incarnation 이 되고
+  조종권은 되살린 사람이 쥔다. MSX Lane은 JSON 엔벨로프 형식을 사용하며, 기계를 실제로
+  복원(restore)하지 않고도 슬롯의 형식 버전, 저장 시각(mtime), 저장 코어 식별자(`core_sha`),
+  미디어 이름, 입력 엣지 수, 바이트 크기, sha256을 무부작용으로 검사하는 조회 계약
+  (`masc_msx_checkpoint_info`)을 제공한다(#41773). 이 조회의 성공이 복원 가능성 전체나
+  미디어 파일 실재를 보증하지는 않으며, `core_sha` 필드가 없는 구 저장본은 잘못된 코어가
+  아니라 미기록(`unknown`)으로 취급된다.
+  → [Machine_checkpoint](../../lib/machine_checkpoint/machine_checkpoint.mli) ·
+  [Dos_lane.restore](../../lib/dos_lane/dos_lane.mli) ·
+  [Msx_lane](../../lib/msx_lane/msx_lane.mli)
 
 **슬롯 (Slot)**
 : 기계 체크포인트에 붙이는 이름. 영문자·숫자·`_`·`-` 로 1~64자이고, 경로가 될 수
@@ -1540,6 +1546,18 @@ status: reference
   넣고 화면을 읽는다. DOS Lane과 같은 축의 공유 머신으로, Lane Add-on의
   `msx_capture` 원천이 이 머신을 관측한다.
   → [Msx_lane](../../lib/msx_lane/msx_lane.mli)
+
+**MSX Core Identity (MSX 코어 식별자)**
+: 실행 중인 서버 프로세스가 링크한 `ocaml-msx` 코어의 정체성을 나타내는 식별 계약(#41773).
+  바이너리가 링크한 실제 코어 소스 다이제스트(`source_digest`), CI 고정 핀의 다이제스트
+  (`pinned_source_digest`), 그리고 두 다이제스트의 일치 여부(`matches_pin`)로 구성된다.
+  `Dos_lane.core`와 대칭을 이루며, `masc_msx_meta` 도구를 통해 머신 복원이나 재기동 없이
+  서버의 코어 일치 상태를 조회할 수 있다. 다이제스트는 `ocaml-msx` 빌드 시점에 `lib/` 최상위
+  소스 바이트(dune 및 `*.ml`/`*.mli`)로부터 계산되므로(`Msx_core_identity`), 커밋 이력이
+  없는 opam 릴리스 패키지 환경에서도 대상 소스 불일치를 결정론적으로 감지한다(전체 바이너리
+  무결성이나 하위 디렉터리 변조를 검증하는 것은 아님).
+  → [Msx_lane.core](../../lib/msx_lane/msx_lane.mli) ·
+  [Msx_lane.checkpoint_info](../../lib/msx_lane/msx_lane.mli)
 
 **Browser Lane**
 : 서버가 관리하는 브라우저 세션. Keeper 는 `masc_browser_*` 도구로 탭을 읽고
@@ -2129,7 +2147,7 @@ status: reference
   [model access boundary](../design/lane-addon-model-boundary.md)
 
 **Fusion Input Lineage (Fusion 입력 계보)**
-: `fusion-compute` Lane Add-on의 조립형 계산에서 모델의 현재 관측 증거와 상속된 이전 입력 참조를 엄격히 분리하는 불변식(#41732). 각 계산의 행 증거(`row evidence`)는 오직 현재 모델 요청과 허용된 결과만을 포함하며, 이전 단계에서 상속된 불변 참조들은 `fields.input_evidence`에 격리되어 모델 요청 내부에 보존된다. 심판(`judge`)은 입력 참조들을 검증하여 후속 단계로 계승하고, 보고서(`fusion-report`)는 현재의 `model_evidence`와 나란히 전체 입력 계보를 노출한다. `input_evidence` 배열은 필수이며 오직 `uri`와 `sha256`만을 갖는 불변 참조만을 허용한다(`lane-evidence:<sha256>`). 이를 통해 워커는 이전 요청 이력을 안전하게 분석할 수 있으면서도, 호스트가 낡은 영수증을 새 관측 입력의 유효한 결과로 오인하는 재생 취약점을 방지한다.
+: `fusion-compute` Lane Add-on의 조립형 계산에서 모델의 현재 관측 증거와 상속된 이전 입력 참조를 엄격히 분리하는 불변식(#41732). 각 계산의 행 증거(`row evidence`)는 오직 현재 모델 요청과 허용된 결과만을 포함하며, 이전 단계에서 상속된 불변 참조들은 `fields.input_evidence`에 격리되어 모델 요청 내부에 보존된다. 심판(`judge`)은 입력 참조들을 검증하여 후속 단계로 계승하고, 보고서(`fusion-report`)는 현재의 `model_evidence`와 나란히 전체 입력 계보를 노출한다. `input_evidence` 배열은 필수이며 오직 `uri`와 `sha256`만을 갖는 불변 참조만을 허용한다(현재 모델 영수증 주소 검증의 `lane-evidence:<sha256>`는 상속 URI의 한 예시이며, 계보 형식 검증은 정확한 {uri, sha256} 키 집합과 불변 digest를 검사함). 이를 통해 워커는 이전 요청 이력을 안전하게 분석할 수 있으면서도, 호스트가 낡은 영수증을 새 관측 입력의 유효한 결과로 오인하는 재생 취약점을 방지한다.
   → [fusion_sampling](../../addons/fusion_sampling.py) ·
   [fusion-compute](../../addons/fusion-compute/server.py) ·
   [fusion-report](../../addons/fusion-report/server.py) ·

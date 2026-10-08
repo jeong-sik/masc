@@ -947,24 +947,33 @@ let change_disk ~path ~backup_path =
    lib/ top-level (dune plus *.ml/*.mli, by base name), so an additive-only
    core change in a subdirectory keeps the value. *)
 let pinned_core_source_digest = "cc6489f2ddae4a48596b4879b3c0e368"
+let pinned_core_source_commit = "ab17a2bcd82a3c1cee44121d65e50ccb313e6f22"
 
 type core = {
   source_digest : string;
   pinned_source_digest : string;
+  pinned_source_commit : string;
+  source_commit : string option;
   matches_pin : bool;
 }
 [@@deriving yojson]
 
 let core =
+  let matches_pin =
+    String.equal Msx_core_identity.source_digest pinned_core_source_digest in
   { source_digest = Msx_core_identity.source_digest
   ; pinned_source_digest = pinned_core_source_digest
-  ; matches_pin = String.equal Msx_core_identity.source_digest pinned_core_source_digest
+  ; pinned_source_commit = pinned_core_source_commit
+  ; source_commit = if matches_pin then Some pinned_core_source_commit else None
+  ; matches_pin
   }
 
 type checkpoint_info = {
+  exists : bool;
   version : int;
   frame : int option;
   saved_at_unix : float option;
+  mtime_utc : string;
   core_sha : string option;
   cartridge : string option;
   disk : string option;
@@ -972,6 +981,12 @@ type checkpoint_info = {
   byte_length : int;
   sha256 : string;
 }
+
+let mtime_to_utc timestamp =
+  let tm = Unix.gmtime timestamp in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 let checkpoint_info ~path =
   (* Inspection stays available when execution is disabled, so this is the
@@ -1057,14 +1072,19 @@ let checkpoint_info ~path =
         let* core_sha = optional_string "core_sha" in
         let* cartridge = optional_string "cartridge" in
         let* disk = optional_string "disk" in
-        let saved_at_unix =
+        let* mtime_unix =
           match Unix.stat path with
-          | exception _ -> None
-          | stats -> Some stats.st_mtime in
+          | stats -> Ok stats.st_mtime
+          | exception Unix.Unix_error (error, fn, arg) ->
+            Error (Unreadable (Printf.sprintf "%s: %s (%s)" fn
+                                 (Unix.error_message error) arg)) in
+        let saved_at_unix = Some mtime_unix in
         Ok
-          { version
+          { exists = true
+          ; version
           ; frame
           ; saved_at_unix
+          ; mtime_utc = mtime_to_utc mtime_unix
           ; core_sha
           ; cartridge
           ; disk

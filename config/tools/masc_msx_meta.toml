@@ -2,6 +2,6 @@ name = "masc_msx_meta"
 description = """
 Report which ocaml-msx core this server was built with.
 
-Read-only. Returns the linked core's source digest, the digest at the CI pin, and whether they match. A mismatch means this server runs a different core from the one CI builds against — an older opam install or a vendored checkout on another branch."""
+Read-only. Returns the linked core's source digest and commit, the digest and commit at the CI pin, whether the source digests match, and the linked commit only when they match. The commit is a build-time pin value checked against both the lock file and the linked core digest."""
 additional_properties = false
 defer_loading = true

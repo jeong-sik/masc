@@ -436,10 +436,12 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
         ~data:
           (`Assoc
             ([ ("slot", `String slot)
+             ; ("exists", `Bool info.exists)
              ; ("version", `Int info.version)
              ; ("frame", match info.frame with Some f -> `Int f | None -> `Null)
              ; ( "saved_at_unix"
                , match info.saved_at_unix with Some t -> `Float t | None -> `Null )
+             ; ("mtime_utc", `String info.mtime_utc)
              ; ("core_sha", match info.core_sha with Some s -> `String s | None -> `Null)
              ; ( "core_matches_current"
                , match info.core_sha with

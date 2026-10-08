@@ -1046,6 +1046,11 @@ let test_core_identity_matches_pin () =
   check bool "matches_pin agrees with the two digests"
     core.matches_pin (String.equal core.source_digest core.pinned_source_digest);
   check string "the linked core is the one at the CI pin" core.pinned_source_digest core.source_digest;
+  check bool "linked commit is only reported when the source digest matches the pin"
+    (match core.source_commit with
+     | Some sha -> core.matches_pin && String.equal sha core.pinned_source_commit
+     | None -> not core.matches_pin)
+    true;
   check bool "digest is 32 lowercase hex characters"
     (String.length core.source_digest = 32
     && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) core.source_digest)
@@ -1074,6 +1079,9 @@ let test_pin_table_names_the_same_core () =
        && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) sha
      | None -> false)
     (match script_sha with Some sha -> String.length sha = 40 | None -> false);
+  check string "runtime core commit matches the pin script"
+    (match script_sha with Some sha -> sha | None -> "")
+    Msx_lane.core.pinned_source_commit;
   let lock = In_channel.with_open_text "masc.opam.locked" In_channel.input_all in
   check bool "lock file names the same pin commit" true
     (match script_sha with
@@ -1112,6 +1120,20 @@ let test_checkpoint_info_reads_without_restoring () =
   check bool "checkpoint saved" true (is_completed save);
   let info = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
   check bool "info completes" true (is_completed info);
+  check bool "successful checkpoint inspection reports existence" true
+    (member "exists" (Tool_result.data info) = Some (`Bool true));
+  let saved_mtime =
+    match member "saved_at_unix" (Tool_result.data info) with
+    | Some (`Float timestamp) -> timestamp
+    | _ -> fail "checkpoint mtime is missing" in
+  let tm = Unix.gmtime saved_mtime in
+  check string "checkpoint mtime is UTC ISO-8601"
+    (Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+       (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+       tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec)
+    (match member "mtime_utc" (Tool_result.data info) with
+     | Some (`String timestamp) -> timestamp
+     | _ -> "");
   check bool "no media names on a BIOS-only save" true
     (match (member "cartridge" (Tool_result.data info), member "disk" (Tool_result.data info)) with
      | Some `Null, Some `Null -> true

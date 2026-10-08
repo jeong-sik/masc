@@ -929,6 +929,15 @@ let is_user_row row =
       false
 ;;
 
+(* Legacy history ordinals restart for each page. They identify neither a
+   stored row nor a local input and cannot authorize collapsing observations. *)
+let stable_user_identity row =
+  if not (is_user_row row) then None
+  else match row.me_identity with
+    | (Persisted_row _ | Session_row _) as identity -> Some identity
+    | Persisted_legacy_row _ -> None
+;;
+
 (* Two rows of one turn can disagree about which turn of the conversation it
    was. A disagreement is not a tie to break: the turn stops claiming a
    number rather than picking one of them. *)
@@ -967,17 +976,17 @@ let chat_timeline_slots rows =
             builder.ctb_turn_sequence <-
               merge_turn_sequence builder.ctb_turn_sequence row.me_turn_sequence;
             let folds =
-              is_user_row row && Hashtbl.mem builder.ctb_user_identities row.me_identity
+              Option.exists (Hashtbl.mem builder.ctb_user_identities) (stable_user_identity row)
             in
             if not folds
             then begin
-              if is_user_row row
-              then Hashtbl.replace builder.ctb_user_identities row.me_identity ();
+              Option.iter (fun identity -> Hashtbl.replace builder.ctb_user_identities identity ())
+                (stable_user_identity row);
               builder.ctb_rows_rev <- row :: builder.ctb_rows_rev
             end
         | None ->
             let user_identities = Hashtbl.create 4 in
-            if is_user_row row then Hashtbl.replace user_identities row.me_identity ();
+            Option.iter (fun identity -> Hashtbl.replace user_identities identity ()) (stable_user_identity row);
             let builder =
               { ctb_request_id = row.me_request_id
               ; ctb_rows_rev = [ row ]
@@ -1072,10 +1081,10 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
   List.iter (fun (row : msg_entry) ->
     if is_user_row row && row.me_request_id <> "" then
       match row.me_identity with
-      | Persisted_row _ | Persisted_legacy_row _ ->
+      | Persisted_row _ ->
           Hashtbl.replace persisted_user_slots
             (row.me_keeper_name, row.me_request_id, row.me_turn_phase, row.me_operation_seq) ()
-      | Session_row _ -> ()) loaded;
+      | Persisted_legacy_row _ | Session_row _ -> ()) loaded;
   let session = visible session |> List.filter (fun (row : msg_entry) ->
     match row.me_identity with
     | Session_row {request_id; turn_phase; operation_seq} when is_user_row row && request_id <> "" ->

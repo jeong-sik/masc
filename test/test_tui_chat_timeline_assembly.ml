@@ -156,6 +156,22 @@ let test_identical_user_text_keeps_distinct_origins () =
     (List.length (List.concat_map turn_texts result.ctl_items))
 ;;
 
+let test_legacy_page_ordinals_do_not_identify_user_rows () =
+  let legacy text at = {(user ~request_id:"a" text at) with
+    me_identity=Tui_types.Persisted_legacy_row {request_id="a";operation_seq=0}} in
+  List.iter (fun texts ->
+    let rows = List.mapi (fun index text -> legacy text (float_of_int index)) texts in
+    Alcotest.(check (list string)) "separate pages with the same local ordinal preserve all inputs"
+      texts (List.map (fun (row:Tui_types.msg_entry) -> row.me_text) (sole_turn rows).ct_rows))
+    [["first page";"second page"];["same words";"same words"]];
+  let session = {(user ~request_id:"a" "local input" 3.) with
+    me_identity=Tui_types.Session_row {request_id="a";turn_phase=Turn_input;operation_seq=0}} in
+  let result = Tui_types.chat_timeline ~loaded:[legacy "first page" 1.]
+      ~session:[session] ~queued_request_ids:[] in
+  Alcotest.(check int) "a page-local ordinal cannot suppress a local input" 2
+    (List.length (List.concat_map turn_texts result.ctl_items))
+;;
+
 let test_two_tool_rows_with_one_text_are_two_calls () =
   let rows =
     [ user ~request_id:"a" "ask" 1.0
@@ -441,6 +457,8 @@ let () =
             test_the_same_user_line_appears_once;
           Alcotest.test_case "identical input bytes keep distinct origins" `Quick
             test_identical_user_text_keeps_distinct_origins;
+          Alcotest.test_case "legacy page positions do not identify inputs" `Quick
+            test_legacy_page_ordinals_do_not_identify_user_rows;
           Alcotest.test_case "two tool rows with one text are two calls" `Quick
             test_two_tool_rows_with_one_text_are_two_calls;
           Alcotest.test_case "a turn stops claiming a number when its rows disagree"

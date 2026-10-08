@@ -16082,7 +16082,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             inflight_entry_by_request_id state request.Keeper_chat.request_id
           with
           | Some entry
-            when Keeper_chat.same_request_identity entry.sent_request request ->
+            when server_authority_ready state
+                 && Keeper_chat.same_request_identity entry.sent_request request ->
               (* The first POST may happen once this acknowledgement leaves.
                  A later checkpoint/reconnect must never restore a draft. *)
               entry.phase <- Turn_streaming;

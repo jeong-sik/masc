@@ -727,6 +727,7 @@ let rec workspace_message_is_read = function
   | Observer_opened _
   | Observer_received _
   | Observer_closed _
+  | Keeper_chat_dispatch_started _
     -> true
   | Voice_wizard_saved _
   | Msx_frame_loaded _
@@ -743,7 +744,6 @@ let rec workspace_message_is_read = function
   | Http_scoped_refresh_failed _
   | Approval_decision_done _
   | Ask_answer_done _
-  | Keeper_chat_dispatch_started _
   | Keeper_chat_done _
   | Keeper_chat_stream_deltas _
   | Keeper_chat_stream_unavailable _

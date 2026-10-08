@@ -250,6 +250,7 @@ let entries_of_stable ?(before_read = fun _ -> ()) ~ownership_root dir =
       let names =
         Fs_compat.read_directory_nofollow
           dir dir_before.Unix.st_dev dir_before.Unix.st_ino
+        |> List.sort String.compare
       in
       let root_after = Unix.lstat ownership_root in
       let dir_after = Unix.lstat dir in

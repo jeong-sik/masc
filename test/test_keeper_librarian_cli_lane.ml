@@ -655,8 +655,17 @@ let test_explicit_admission_envelope ~deferred () =
   let initial = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
     ~now:1_000_000. ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
     ~facts:[current_a;current_b] () |> require in
-  ignore (Queue.append ~keepers_dir ~keeper_id ~request_id:"pending-one"
-    (fact ~claim:"A was confirmed again") |> require);
+  let config = Masc.Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name",`String keeper_id;"trace_id",`String "admission-producer"]) |> require in
+  let written = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+    ~config ~meta ~args:(`Assoc ["content",`String "A was confirmed again"]) in
+  let receipt = Yojson.Safe.from_string written.raw_output in
+  check string "actual producer returns pending outcome" "persisted_pending_admission"
+    Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
+  check bool "pending receipt has no current identity" true
+    (Yojson.Safe.Util.member "memory_id" receipt = `Null);
+  let request_id = Yojson.Safe.Util.(receipt |> member "request_id" |> to_string) in
   let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "missing candidate" in
   let requests = ref 0 in
@@ -666,11 +675,11 @@ let test_explicit_admission_envelope ~deferred () =
     check bool "provider schema requires candidate judgments" true
       (Yojson.Safe.Util.member "candidates" properties <> `Null);
     check bool "actual prompt includes pending candidate identity" true
-      (Astring.String.is_infix ~affix:"pending-one" prompt);
+      (Astring.String.is_infix ~affix:request_id prompt);
     let outcome, memory_claim = if deferred then "deferred", `Null
       else "already_represented", `String current_a.claim in
     Ok (Yojson.Safe.to_string (`Assoc ["memory",valid_selection_json;
-      "candidates",`List [`Assoc ["request_id",`String "pending-one";
+      "candidates",`List [`Assoc ["request_id",`String request_id;
         "outcome",`String outcome; "memory_claim",memory_claim;
         "reason",`String "same event; judgment fixture"]]])) in
   let committed = ref 0 and retained = ref 0 in

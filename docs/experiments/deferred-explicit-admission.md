@@ -1,9 +1,9 @@
 # Deferred explicit admission: transaction and judgment boundary
 
-This branch implements the durable candidate store and a standalone Librarian
-admission mode. Ordinary `keeper_memory_write` still writes current Memory.
-The serialized queue worker and startup discovery are connected. Write-tool
-pending receipts are not yet connected. This is not a deployed deferred-write feature.
+This branch connects ordinary observed `keeper_memory_write` calls without
+`source_path` or `supersedes` to durable candidates, a standalone Librarian
+admission mode and the serialized queue worker. Pending receipts acknowledge
+the saved input, not current Memory admission. This is not a deployed feature.
 
 The measured baseline is [explicit-memory-admission-growth.md](explicit-memory-admission-growth.md).
 The same rule with a different observation number grew to 200 current facts;
@@ -76,7 +76,15 @@ batch. Successful prefix consumption schedules the remaining tail. Startup
 also discovers candidate-only files, retaining them if Keeper metadata is absent.
 Whole-Keeper purge owns the queue; checkpoint purge does not discard it.
 
-Before enabling deferred writes, connect the write receipt. Explicit
-source-bound writes, derived facts and superseding writes need their own admission
-semantics. Validate semantic retention with the three baseline cohorts, then
+Source-bound writes, derived facts and superseding writes still use the existing
+current-store path and need their own admission semantics. The pending receipt
+returns a request ID and sequence but no current Memory identity or revision.
+Those scheduling fields do not count as a changed semantic tool answer. Each new
+tool call creates a new candidate; there is no permanent cross-call retry ledger.
+A failed pending save has an unknown effect and names its request ID. Searching
+current Memory cannot prove that no pending input was saved.
+
+After admission, search current Memory for a supported premise identity. The
+existing explicit-supersedes authorship check still applies; a Librarian-generated
+injected claim is not thereby made an authored supersession target. Validate semantic retention with the three baseline cohorts, then
 measure actual Keeper prompts and continuity after deployment.

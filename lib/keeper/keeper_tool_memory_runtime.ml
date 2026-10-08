@@ -1346,10 +1346,10 @@ let memory_write_failure_effect = function
   | Pending_admission_persistence_failed ->
     ( Tool_result.Effect_outcome_unknown
     , "The candidate may or may not have been saved to the pending admission queue. \
-       Current Memory search cannot establish whether it is pending. Inspect the \
-       pending queue using this receipt request_id before retrying; another tool \
-       call creates a new request and may duplicate the candidate. Admission has \
-       not been confirmed." )
+       Current Memory search cannot establish whether it is pending. Retain and \
+       report this request_id for investigation. Do not retry merely because \
+       current search is empty: another tool call creates a new request and may \
+       duplicate the candidate. Admission has not been confirmed." )
   | Persistence_failed Ordinary_current ->
     ( Tool_result.Effect_outcome_unknown
     , "The claim may or may not have been committed. Search memory for it before \
@@ -1984,7 +1984,7 @@ let keeper_memory_write_with_outcome
               Write_receipt_key.store, `String "pending_memory_admission";
               "request_id", `String candidate.request_id;
               "sequence", `Int candidate.sequence;
-              "recorded_at", `Float candidate.fact.last_seen;
+              "recorded_at", `String (Masc_domain.iso8601_of_unix_seconds candidate.fact.last_seen);
               "rows_written", `Int 1;
               Write_receipt_key.basis, memory_write_basis_receipt candidate.fact.basis;
               "what_committed", `String

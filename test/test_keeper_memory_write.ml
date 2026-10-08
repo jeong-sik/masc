@@ -2266,6 +2266,8 @@ let test_absorbed_search_preserves_board_basis source =
          |> fun execution -> Yojson.Safe.from_string execution.raw_output
        in
        Alcotest.(check bool) "public writer succeeded" true (json_field "ok" written = `Bool true);
+       Alcotest.(check bool) "pending receipt preserves the original Board source" true
+         (Yojson.Safe.equal (expected_basis comment_fields) (json_field "basis" written));
        Alcotest.(check string) "Board observations are pending" "persisted_pending_admission"
          (string_field "outcome" written))
     cases;

@@ -123,6 +123,9 @@ let on_tool_stream_observation t observation = with_stream t (fun () -> match ob
   | Keeper_hooks_agent_core.Turn_closed_without_sources {turn} ->
       (match Accum.close_turn_without_sources t.accum ~turn with
        | Ok () -> () | Error detail -> mapping_failed t detail)
+  | Keeper_hooks_agent_core.Native_task_observed _ ->
+      (* Task journal transport is separate from native block progress. *)
+      ()
   | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
       (* This observation updates an existing native row. It is not a model
          content boundary: keep any partial secret held across later deltas. *)

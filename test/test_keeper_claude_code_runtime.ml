@@ -154,6 +154,7 @@ let child_tool_result =
 
 type fixture_step =
   | Emit of string
+  | Emit_with_input of string
   | Emit_and_read of string
   | Close_transport
 
@@ -209,6 +210,11 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   List.iter
     (function
       | Emit line -> output_string output ("emit " ^ shell_quote line ^ "\n")
+      | Emit_with_input line ->
+        let stamp = "import json,sys; frame=json.loads(sys.argv[1]); " ^
+          "frame['user_message_uuid']=json.loads(sys.argv[2])['uuid']; print(json.dumps(frame))" in
+        output_string output ("emit \"$(python3 -c " ^ shell_quote stamp ^ " " ^
+          shell_quote line ^ " \"$user_message\")\"\n")
       | Emit_and_read line ->
         output_string output ("emit " ^ shell_quote line ^ "\n");
         output_string output "IFS= read -r ignored_response\n"
@@ -356,9 +362,9 @@ let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?required_native_posture
-    ?event_capture ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
+    ?event_capture ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
-    ?on_official_client_usage_report
+    ?on_official_client_usage_report ?on_runtime_attempt
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?on_request_attribution ?official_client_continuation ?session_id ~base_path ~cli_path ~goal () =
   Masc_test_deps.declare_fixture_keeper
@@ -402,13 +408,13 @@ let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_mess
                            ~initial_messages
                            ?context
                            ?event_bus
-                           ?on_native_tool_progress ?on_native_tool_completion ?on_event
+                           ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event
                            ?agent_core_checkpoint
                            ?runtime_manifest_context
                            ?runtime_manifest_append
                            ~raw_trace
                            ?on_official_client_native_action
-                           ?on_official_client_usage_report
+                           ?on_official_client_usage_report ?on_runtime_attempt
                            ?on_request_attribution
                            ?official_client_continuation
                            ?session_id
@@ -3010,7 +3016,15 @@ let test_task_callback_keeps_closed_native_owner_and_model_content () =
       let projection = F.create ~redaction () in
       let events = ref [] and snapshots = ref [] in
       let on_event event = events := event :: !events; F.on_event projection event in
-      let on_native_task_observation observation =
+      let on_native_task_observation (bound : Keeper_claude_task_binding.bound) =
+        let observation = bound.observation in
+        check string "input session is the native owner's actual session"
+          observation.owner.session_id bound.ticket.session_id;
+        (match bound.evidence with
+         | Keeper_claude_task_binding.Explicit_group group ->
+             check string "native envelope uses the actual host input UUID"
+               bound.ticket.client_uuid group.primary
+         | Response_inherited _ | Command_inherited _ -> fail "explicit parent evidence required");
         snapshots := (observation, List.rev !events, F.events projection) :: !snapshots in
       let frame event = Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
         "session_id",`String "__SESSION__";"parent_tool_use_id",`Null;"event",event]) in
@@ -3022,7 +3036,7 @@ let test_task_callback_keeps_closed_native_owner_and_model_content () =
           "uuid",`String uuid;"task_id",`String "child-task";"run_id",`String "run-alpha";
           "tool_use_id",`String "parent-agent"] @ fields)) in
       with_fixture [
-        Emit (response_native_tool ~turn_id:"parent" ~message_id:"parent" ~call_id:"parent-agent" ~tool_name:"Agent");
+        Emit_with_input (response_native_tool ~turn_id:"parent" ~message_id:"parent" ~call_id:"parent-agent" ~tool_name:"Agent");
         Emit (native_tool_result ~call_id:"parent-agent" ~content:"background launch");
         Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc ["id",`String "body";"model",`String "claude-fixture"]]));
         Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;"content_block",`Assoc ["type",`String kind;kind,`String ""]]));
@@ -3080,6 +3094,146 @@ let test_task_callback_keeps_closed_native_owner_and_model_content () =
           check bool "safe authored content survives the task interleave" true
             (Astring.String.is_infix ~affix:(Keeper_secret_redaction.redact_text redaction (secret ^ "\n")) body))))
     [false;true]
+;;
+
+let task_binding_frame ~uuid ~task_id ~call_id subtype fields =
+  Yojson.Safe.to_string (`Assoc (["type",`String "system";"subtype",`String subtype;
+    "session_id",`String "__SESSION__";"uuid",`String uuid;
+    "task_id",`String task_id;"run_id",`String "run-alpha";
+    "tool_use_id",`String call_id] @ fields))
+;;
+
+let task_binding_start ~uuid ~task_id ~call_id =
+  task_binding_frame ~uuid ~task_id ~call_id "task_started"
+    ["task_type",`String "local_agent";"spawn_depth",`Int 1;
+     "description",`String "provider task metadata";"is_backgrounded",`Bool true]
+;;
+
+let task_binding_native_result ~uuid ~call_id =
+  Yojson.Safe.to_string (`Assoc ["type",`String "user";"parent_tool_use_id",`Null;
+    "session_id",`String "__SESSION__";"uuid",`String uuid;"message",`Assoc
+      ["role",`String "user";"content",`List [`Assoc ["type",`String "tool_result";
+        "tool_use_id",`String call_id;"content",`String "background launch"]]]])
+;;
+
+let with_fixture_yolo ~keeper_name f =
+  let modes = Keeper_tool_approval_mode.shared () in
+  let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
+  Fun.protect ~finally:(fun () -> Keeper_tool_approval_mode.set modes ~keeper_name previous)
+    (fun () -> Keeper_tool_approval_mode.set modes ~keeper_name Keeper_tool_approval_mode.Yolo; f ())
+;;
+
+let test_task_binding_freezes_exact_envelope_and_dispatch () =
+  let generations = ref [] and dispatches = ref [] in
+  for invocation = 1 to 2 do
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let envelope = Yojson.Safe.to_string (`Assoc ["type",`String "assistant";
+        "parent_tool_use_id",`Null;"session_id",`String "__SESSION__";
+        "uuid",`String "two-agents";"message",`Assoc ["id",`String "task-response";"role",`String "assistant";
+          "model",`String "claude-fixture";"content",`List (List.map (fun id ->
+            `Assoc ["type",`String "tool_use";"id",`String id;"name",`String "Agent";
+              "input",`Assoc ["prompt",`String "Complete the delegated fixture task.";
+                "description",`String "provider task metadata";
+                "subagent_type",`String "general-purpose"]]) ["call-a";"call-b"])]]) in
+      let seen = ref [] and streams = ref [] and admitted = ref None in
+      let parent_frames = if invocation = 1 then [Emit_with_input envelope] else
+        [Emit_with_input (Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+          "uuid",`String "partial-input-stamp";"session_id",`String "__SESSION__";
+          "parent_tool_use_id",`Null;"event",`Assoc ["type",`String "message_start";
+            "message",`Assoc ["id",`String "task-response";"model",`String "claude-fixture"]]]));
+         Emit envelope] in
+      with_fixture (parent_frames @ [
+        Emit (native_tool_result ~call_id:"call-a" ~content:"background launch");
+        Emit (task_binding_start ~uuid:"task-a" ~task_id:"a" ~call_id:"call-a");
+        Emit (task_binding_start ~uuid:"task-b" ~task_id:"b" ~call_id:"call-b");
+        Emit (task_binding_native_result ~uuid:"return-b" ~call_id:"call-b");
+        Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+        Emit (result_text ~turn_id:"final" "Answer")])
+        (fun cli_path ->
+          let result = with_fixture_yolo ~keeper_name:"claude-fixture" (fun () ->
+            run_keeper_turn ~base_path ~cli_path ~goal:"TASK_BINDING" ~tools:[]
+              ~required_native_posture:Runtime_native_tools.Native_full
+              ~on_runtime_attempt:(fun attempt -> admitted := Some attempt)
+              ~on_event:(fun event -> streams := event :: !streams)
+              ~on_native_task_observation:(fun ~attempt bound ->
+                let response_stopped = List.exists
+                    (function Agent_core.Types.MessageStop -> true | _ -> false) !streams in
+                seen := (attempt,bound,response_stopped) :: !seen) ()) in
+          (match result with Error error -> fail (Agent_core.Error.to_string error)
+           | Ok result -> check string "authored final response survives task binding" "Answer" (keeper_response_text result));
+          let observed = List.rev !seen in
+          check (list bool) "both task callbacks precede root response stop"
+            [false;false] (List.map (fun (_,_,stopped) -> stopped) observed);
+          check (list (pair string int)) "two native ordinals share their exact envelope, not a latest call"
+            ["call-a",0;"call-b",1]
+            (List.map (fun (_, (b:Keeper_claude_task_binding.bound), _) ->
+              b.observation.owner.call_id,b.observation.owner.call_ordinal) observed);
+          let admitted = match !admitted with Some value -> value | None -> fail "driver did not report dispatch" in
+          List.iter (fun ((attempt:Runtime_native_tasks.attempt), (b:Keeper_claude_task_binding.bound), _) ->
+            check string "routing run captured by actual dispatch" admitted.routing_run_id attempt.routing_run_id;
+            check string "runtime captured by actual dispatch" admitted.runtime_id attempt.runtime_id;
+            check int "lane captured by actual dispatch" admitted.lane_attempt_index attempt.lane_attempt_index;
+            check string "original envelope survives native closure" "two-agents" b.observation.owner.call_envelope_uuid;
+            check string "ticket/native session match" b.ticket.session_id b.observation.owner.session_id;
+            (match b.evidence with
+             | Keeper_claude_task_binding.Explicit_group group when invocation = 1 ->
+                 check string "actual written input owns both calls" b.ticket.client_uuid group.primary
+             | Response_inherited group when invocation = 2 ->
+                 check string "exact partial response evidence owns the complete envelope" b.ticket.client_uuid group.primary
+             | Explicit_group _ | Response_inherited _ | Command_inherited _ ->
+                 fail "expected explicit then response-inherited envelope evidence")) observed;
+          match observed with
+          | (attempt,bound,_) :: _ ->
+              generations := bound.ticket.receiver_generation :: !generations;
+              dispatches := attempt.routing_run_id :: !dispatches
+          | [] -> fail "missing bound task callback"))
+  done;
+  (match !generations,!dispatches with
+   | [second;first],[second_run;first_run] ->
+       check bool "separate actual CLI invocations retain separate input generations" false (String.equal first second);
+       check bool "another dispatch cannot overwrite the first routed attempt" false (String.equal first_run second_run)
+   | _ -> fail "two actual driver calls required")
+;;
+
+let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let seen = ref [] in
+    let progress ~uuid ~task_id ~call_id = task_binding_frame ~uuid ~task_id ~call_id "task_progress"
+      ["description",`String "not root body";"usage",`Assoc
+        ["total_tokens",`Int 1;"tool_uses",`Int 1;"duration_ms",`Int 1]] in
+    let new_start = task_binding_start ~uuid:"new-start" ~task_id:"new-task" ~call_id:"new-call" in
+    with_fixture [
+      Emit (native_tool_call_block ~turn_id:"unattributed" ~call_id:"old-call" ~tool_name:"Agent");
+      Emit (task_binding_start ~uuid:"old-start" ~task_id:"old-task" ~call_id:"old-call");
+      Emit (task_binding_native_result ~uuid:"old-return" ~call_id:"old-call");
+      Emit_with_input (response_text ~turn_id:"command-stamp" ~message_id:"stamp-message" "Stamp");
+      Emit (progress ~uuid:"old-progress" ~task_id:"old-task" ~call_id:"old-call");
+      Emit (native_tool_call_block ~turn_id:"command-child" ~call_id:"new-call" ~tool_name:"Agent");
+      Emit (native_tool_result ~call_id:"new-call" ~content:"background launch");
+      Emit new_start; Emit new_start;
+      Emit (progress ~uuid:"unknown-progress" ~task_id:"unknown-task" ~call_id:"new-call");
+      Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+      Emit_with_input (result_text ~turn_id:"final" "Answer")]
+      (fun cli_path ->
+        let result = with_fixture_yolo ~keeper_name:"claude-pre-dispatch" (fun () ->
+          run_direct_attempt ~base_path ~cli_path ~goal:"COMMAND_BINDING" ~tools:[]
+            ~required_native_posture:Runtime_native_tools.Native_full
+            ~on_native_task_observation:(fun bound -> seen := bound :: !seen) ()) in
+        (match result.result with Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> ());
+        match List.rev !seen with
+        | [bound] ->
+            check string "unowned old call and unknown task never acquire the later input" "new-task" bound.observation.owner.task_id;
+            check string "complete-only envelope remains original native owner" "assistant-command-child" bound.observation.owner.call_envelope_uuid;
+            check string "exact task replay adds no callback" "new-start" bound.observation.uuid;
+            (match bound.evidence with
+             | Keeper_claude_task_binding.Command_inherited witness ->
+                 check string "command provenance is the real prior root stamp" "assistant-command-stamp" witness.stamp_uuid;
+                 check string "command witness belongs to the actual input" bound.ticket.client_uuid witness.group.primary
+             | Explicit_group _ | Response_inherited _ -> fail "complete-only command inheritance required")
+        | _ -> fail "exactly the witnessed new native owner must bind"))
 ;;
 
 let check_pre_dispatch_attempt label attempt =
@@ -4287,6 +4441,10 @@ let () =
             "every posture names the schema lookup"
             `Quick
             test_every_posture_names_the_schema_lookup
+        ; test_case "task input and routed dispatch retain exact native envelope" `Quick
+            test_task_binding_freezes_exact_envelope_and_dispatch
+        ; test_case "later command witness cannot adopt an unattributed task owner" `Quick
+            test_task_binding_does_not_adopt_an_earlier_unattributed_call
         ; test_case "task metadata retains closed native owner without flushing model content" `Quick
             test_task_callback_keeps_closed_native_owner_and_model_content
         ; test_case

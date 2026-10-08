@@ -2039,6 +2039,9 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
           ~tool_source_map
+      | Keeper_hooks_agent_core.Native_task_observed _ ->
+          (* Task journal transport is separate from native block progress. *)
+          Ok ()
       | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
         push_worker_event (Stream_native_tool_progress
           (Keeper_stream_tool_accum.current_stream_scope worker_tool_accum, block_index, tool_call_id, progress));

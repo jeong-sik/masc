@@ -2775,7 +2775,6 @@ let run_named
           Keeper_muse_runtime.run
             ?on_tool_execution
             ?composed_context:official_client_composed_context
-            ~prompt_capacity:(Runtime_instance.muse_prompt_capacity runtime)
             ~configured_reasoning_effort:runtime.model.reasoning_effort
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ~quota_scope:runtime.quota_scope

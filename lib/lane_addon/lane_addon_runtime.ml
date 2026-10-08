@@ -1298,7 +1298,7 @@ let snapshot m ~access ?instance_id () =
     | _ -> Error "invalid retained instance" in
   let* past = List.fold_right (fun value acc ->
     let* values = acc in let* value = retained value in Ok (value :: values)) past (Ok []) in
-  let output = { rows = List.concat_map (fun e -> e.output.rows) live;
+  let output = { rows = List.concat_map (fun (e : entry) -> e.output.rows) live;
     coverage = List.concat_map (fun e -> status_coverage e :: e.output.coverage) live } in
   let live_json entry = match entry_json entry with
     | `Assoc fields -> `Assoc (("runtime_presence", `String "live") :: fields)
@@ -1373,7 +1373,7 @@ let validate_connection m ~run_id ~configuration_id ~binding =
 let validate_live_connections m candidate =
   let nodes = candidate :: List.filter (fun (e : entry) -> not e.stopping) (entries m) in
   let complete = Hashtbl.create (List.length nodes) in
-  let rec visit trail node =
+  let rec visit trail (node : entry) =
     if List.mem node.instance_id trail then Error "cyclic Lane source connection, including implicit machine inputs"
     else if Hashtbl.mem complete node.instance_id then Ok ()
     else

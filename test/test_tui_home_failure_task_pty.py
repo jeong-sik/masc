@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import signal
 import sys
 import tempfile
 import threading
@@ -298,6 +299,18 @@ class RefreshCompletionGate:
     themselves are still unsent at that return. Read counters cannot
     prove completion at all; a quiet span over them is how the original
     race passed its settle loop with a response still outstanding.
+
+    The wire boundary is the settling stage, not the whole settle: what
+    the client does between the last response and the first missing
+    follow-up -- receiving, applying the last bundle, chaining -- is not
+    observed by the gate and can outrun [span]. So the stage above only
+    opens a settle interval; the receipt window opens from the end of a
+    settle generation that survived a client-freeze contrast: with the
+    TUI stopped for longer than the span, any late receive/apply that
+    the window would have swallowed lands after the resume and resets
+    the gate clock, and the settle test is repeated against the re-read
+    clock ([last_event_time]) instead of being memoized from a stale
+    one. The receipt window then measures the receipt alone.
     """
 
     def __init__(self, span=0.5):
@@ -326,6 +339,14 @@ class RefreshCompletionGate:
     def quiesced(self):
         with self._lock:
             return self.held == 0 and time.monotonic() - self.last_event >= self.span
+
+    def last_event_time(self):
+        """The gate's own clock of the last register/complete, read under the
+        same lock the mutators take: (held, last_event) torn across two
+        calls could mistake a just-registered exchange for a long-clean
+        window."""
+        with self._lock:
+            return self.last_event
 
     def snapshot(self):
         with self._lock:
@@ -458,11 +479,41 @@ def task_cancel_previous_workspace_receipt(executable):
                 state["drill_delay"] = 0.75
                 try:
                     h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
+                    # The gate proves wire completion, not what the client
+                    # does between the last response and the follow-up it
+                    # fires (or fails to fire): the receive, the applied
+                    # bundle, and the chained request all happen after
+                    # [on_sent], and a quiet span can elapse inside that
+                    # gap. So the settle interval below does not trust the
+                    # first clean span: the TUI is stopped for longer than
+                    # the span -- freezing any late receive/apply/follow-up
+                    # exactly where the window would have swallowed it --
+                    # and only after the resume is the settle test
+                    # recomputed. Requests already on the wire are served
+                    # while the client is frozen (the fixture lives in the
+                    # test process), which is the swallow itself: the old
+                    # passive settle would have opened the window over a
+                    # client that had not even resumed. Here the window
+                    # decision happens at a time a whole span after the
+                    # client was last known busy, and a tail that was
+                    # merely slow lands after the resume as a new
+                    # registration, re-arming the settle; only a client
+                    # that stayed alive and wire-silent across the imposed
+                    # delay opens the receipt window. The freeze is not
+                    # proof of absence -- the client could in principle be
+                    # late beyond it -- but with the recomputed check and
+                    # the receipt window's own pair assertions it turns
+                    # "quiet right now" into "quiet across an imposed
+                    # client-side delay", which is the contrast the old
+                    # pass lacked.
+                    os.kill(process.pid, signal.SIGSTOP)
+                    time.sleep(gate.span + 0.25)
+                    os.kill(process.pid, signal.SIGCONT)
                     deadline = time.monotonic() + 15
                     while not gate.quiesced():
                         if time.monotonic() > deadline:
                             raise AssertionError(
-                                "refresh tail did not reach its completion boundary: "
+                                "refresh tail did not settle after the client-freeze contrast: "
                                 + repr(gate.snapshot())
                                 + " reads=" + repr((state["health_reads"], state["history_reads"])))
                         gate.changed.clear()
@@ -470,6 +521,7 @@ def task_cancel_previous_workspace_receipt(executable):
                     assert any(length >= 0.5 for length in gate.durations), (
                         "the completion gate never held the drill's slow exchange: "
                         + repr(gate.durations))
+                    window_opened_at = gate.last_event_time()
                 finally:
                     state["drill_delay"] = 0.0
                 # The gate stays armed through the receipt window: any
@@ -485,6 +537,18 @@ def task_cancel_previous_workspace_receipt(executable):
                 assert before_gate[0] == 0, (
                     "the receipt window opened while an exchange was still running: "
                     + repr(before_gate))
+                # Settle segment and receipt segment are separate: the
+                # settle loop above refused to close until the gate clock
+                # had passed [resumed_at] and then a whole span in silence,
+                # so a window that would have opened before the refresh
+                # tail's late receive/apply landed cannot be reused here --
+                # this window is keyed on the settled clock, not on an
+                # older quiet streak.
+                window_start = time.monotonic()
+                assert window_start - window_opened_at >= gate.span, (
+                    "the receipt window did not open after a settled span: "
+                    + repr({"settled_at": window_opened_at, "opened_at": window_start,
+                            "span": gate.span}))
                 start = len(output)
                 release.set()
                 h.wait_for_output(process, fd, output,

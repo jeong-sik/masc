@@ -1727,17 +1727,21 @@ let test_keeper_adds_no_break_across_a_masc_tool_row () =
            with
            | Error error -> fail (Agent_core.Error.to_string error)
            | Ok turn ->
-             let texts =
+             let indexed_texts =
                List.filter_map
                  (function
                    | Agent_core.Types.ContentBlockDelta
-                       { index = 0; delta = Agent_core.Types.TextDelta text } ->
-                     Some text
+                       { index; delta = Agent_core.Types.TextDelta text } ->
+                     Some (index, text)
                    | _ -> None)
                  (List.rev !events)
              in
              check (list string) "text on each side of the tool row, unbroken"
-               [ "확인할게요."; "완료" ] texts;
+               [ "확인할게요."; "완료" ] (List.map snd indexed_texts);
+             check bool "responses retain separate content identities" true
+               (match indexed_texts with
+                | [ (before, _); (after, _) ] -> before <> after
+                | _ -> false);
              check string "Keeper response" "완료" (keeper_response_text turn)))
 ;;
 

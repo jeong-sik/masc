@@ -28,6 +28,7 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41963](https://github.com/jeong-sik/masc/pull/41963) | Attempt checkpoint projection and validated sink boundary owned separately; unused result copy and testing forwarders removed | `keeper_turn_driver.ml/.mli` |
 | [#41969](https://github.com/jeong-sik/masc/pull/41969) | Blocking orphan inventory/preservation owned separately; pure writer/sweep filename grammar shared; existing public API bound directly | `atomic_write.ml`, `fs_compat.ml` |
 | [#41972](https://github.com/jeong-sik/masc/pull/41972) | Duplicate recovery report types/projections removed; existing consumer reads canonical rich rows and exact operation identities | `atomic_write.ml/.mli`, publication reconciliation tests |
+| [#41974](https://github.com/jeong-sik/masc/pull/41974) | Ordinary atomic replacement effect owner separated; direct public bindings; cancellation docs and cold file-ingestion evidence corrected | `atomic_write.ml/.mli`, `fs_compat.ml/.mli`, blob tests |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -67,6 +68,8 @@ Atomic orphan ownership and its existing isolated filesystem checks are recorded
 in [atomic-orphan-owner/README.md](atomic-orphan-owner/README.md).
 Canonical publication report consumption and removal of duplicate types/projections
 are recorded in [publication-report-types/README.md](publication-report-types/README.md).
+Ordinary replacement ownership, corrected cancellation docs and cold file-ingestion
+proof are recorded in [atomic-replace-owner/README.md](atomic-replace-owner/README.md).
 
 `validation.log` records successful OCaml 5.5.1 parse-only checks on the changed
 source/interface files, combined diff whitespace checking, and validation of

@@ -1,0 +1,58 @@
+name: Explicit single test
+run-name: Explicit test ${{ inputs.suite }} at ${{ inputs.expected_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact commit of the selected ref; mismatch refuses execution
+        type: string
+        required: true
+      suite:
+        description: One declared test suite or runtest alias; no CSV or full-suite selection
+        type: string
+        required: true
+      eio_backend:
+        description: Optional EIO_BACKEND passed through the existing targeted runner
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: targeted-test-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  request:
+    name: Validate explicit draft request
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require the requested exact source
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          python3 - <<'PY'
+          import os
+          if os.environ['EXPECTED_SHA'] != os.environ['GITHUB_SHA']:
+              raise SystemExit('Selected ref no longer matches expected_sha')
+          PY
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Resolve one declared test
+        env:
+          SUITE: ${{ inputs.suite }}
+        run: python3 scripts/ci/validate-single-test.py
+
+  test:
+    needs: request
+    uses: ./.github/workflows/test.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+      candidate_verification: false
+      suite: ${{ inputs.suite }}
+      minimal: true
+      eio_backend: ${{ inputs.eio_backend }}

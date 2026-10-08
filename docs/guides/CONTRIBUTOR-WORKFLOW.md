@@ -200,6 +200,13 @@ Open a draft using [scripts/pr-open.sh](../../scripts/pr-open.sh) or GitHub's fo
 PR flow. Fill the [PR template](../../.github/pull_request_template.md), including
 an issue link. Mark the PR ready when its diff and evidence are ready for review.
 PR creation, pushes and ready transitions do not automatically start CI.
+After the new workflow is integrated into the default branch and available for
+dispatch (with the wrapper also present on the draft ref), an explicitly
+requested single draft test uses
+[`targeted-test.yml`](../../.github/workflows/targeted-test.yml) with the draft
+ref's exact `expected_sha` and one declared suite. It fixes minimal setup and
+reuses the existing targeted runner; it is diagnostic evidence, not an approved
+combination receipt. See [request syntax](../../scripts/review/APPROVED-CI-SELECTION.md#explicit-draft-single-test-requests).
 
 [pr-check.yml](../../.github/workflows/pr-check.yml) provides explicit source,
 configuration and credential checks.

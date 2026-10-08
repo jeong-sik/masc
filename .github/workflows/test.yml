@@ -1,6 +1,6 @@
 name: Test
 
-# Reusable behavior checks for leader-selected candidates and release verification.
+# Reusable behavior checks for explicit single-test requests, leader candidates and releases.
 
 on:
   workflow_call:

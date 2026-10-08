@@ -69,3 +69,30 @@ review guards require current independent source approval; Release admission
 requires its own current-head full verification. A combined result cannot
 replace either authority. Source approval remains independent of compilation
 and test results. No daily schedule is introduced.
+## Explicit draft single-test requests
+
+An operator's explicit request for one draft test does not require an approved
+combined candidate. This new workflow must first be integrated into the default
+branch and available for dispatch in GitHub; the selected draft ref must also
+contain this wrapper and validator. Adding these files to an unmerged PR does
+not make the route immediately callable. Once available, dispatch `targeted-test.yml` on that draft ref with its exact
+40-character `expected_sha` and one `suite`. Repository dispatch permissions
+provide authority for this diagnostic run. It does not issue source approval,
+an approved selection receipt, or release verification.
+
+```sh
+gh workflow run targeted-test.yml --repo OWNER/REPO --ref DRAFT_BRANCH \
+  -f expected_sha=EXACT_40_CHARACTER_COMMIT -f suite=test_keeper_memory_admission_export
+```
+
+The ref must still resolve to `expected_sha`. The wrapper and its local reusable
+`test.yml` come from that same commit; checkout is pinned to that SHA. The
+preflight reuses the existing Dune stanza parser and accepts one declared test
+or `runtest-` alias, rejecting empty/CSV selections, traversal/options and broad
+undeclared aliases such as `all` or `@runtest`. Minimal setup is fixed true;
+there is no full-suite switch. Suite environment, fixture dependency handling,
+actual checkout SHA evidence and capture checks remain in the existing targeted
+runner. Optional `eio_backend` follows that runner's normal environment path.
+Minimal mode does not prepare sandbox/media services: suites requiring those
+resources need the existing leader/release route. The approved combination path
+above remains unchanged and still requires its original selection guards.

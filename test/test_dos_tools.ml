@@ -362,6 +362,38 @@ let test_a_linked_inventory_root_is_readable () =
     check string "linked root program" "hello.com" (string_field "program" loaded))
 ;;
 
+(* Enumerating a directory is part of the boundary too. Replace the validated
+   game directory with a symlink to an outside directory at the deterministic
+   read seam and ensure the response contains neither the outside child name
+   nor a partial files list. *)
+let test_inventory_directory_replacement_hides_child_names () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    let game = Filename.concat root "game" in
+    mkdir_p game;
+    write_file (Filename.concat game "game.com") hello_com;
+    let outside = Filename.temp_dir "masc-dos-outside-dir-" "" in
+    Fun.protect
+      ~finally:(fun () -> Fs_compat.remove_tree outside)
+      (fun () ->
+        write_file (Filename.concat outside "outside-private-name.dat") "private";
+        let moved = game ^ ".moved" in
+        let result =
+          Tool_misc_dos_lane.inventory_program_json
+            ~before_read:(fun real ->
+              Unix.rename real moved;
+              Unix.symlink outside real)
+            ~programs_root:root "game"
+        in
+        let json = Yojson.Safe.to_string result in
+        check bool "replaced directory is unavailable" true
+          (match member "kind" result with
+           | Some (`String "unavailable") -> true
+           | _ -> false);
+        check bool "outside child name is not enumerated" false
+          (contains "outside-private-name.dat" json)))
+;;
+
 let test_load_runs_to_the_first_key_request () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
@@ -1705,6 +1737,8 @@ let () =
         ; test_case "inventory alias selection" `Quick
             test_inventory_and_load_share_alias_selection
         ; test_case "linked inventory root" `Quick test_a_linked_inventory_root_is_readable
+        ; test_case "inventory directory replacement" `Quick
+            test_inventory_directory_replacement_hides_child_names
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
         ; test_case "load and screen name the core" `Quick
             test_load_and_screen_name_the_core

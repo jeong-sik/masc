@@ -223,17 +223,51 @@ let entries_of dir =
 
 let programs_available ~base_path = entries_of (programs_dir ~base_path)
 
+let canonical_root path =
+  match Unix.realpath path with
+  | real -> real
+  | exception Unix.Unix_error _ -> path
+;;
+
+let same_file_identity (left : Unix.stats) (right : Unix.stats) =
+  left.Unix.st_dev = right.Unix.st_dev && left.Unix.st_ino = right.Unix.st_ino
+;;
+
+(* [Sys.readdir] is pathname based. Bind the names it returns to the directory
+   and ownership root observed around the enumeration, so a replacement by an
+   outside directory is reported as unavailable instead of publishing its
+   child names. [before_read] is a deterministic test seam for the same
+   replacement boundary; production callers leave it at its no-op default. *)
+let entries_of_stable ?(before_read = fun _ -> ()) ~ownership_root dir =
+  let ownership_root = canonical_root ownership_root in
+  try
+    let root_before = Unix.lstat ownership_root in
+    let dir_before = Unix.lstat dir in
+    if root_before.Unix.st_kind <> Unix.S_DIR || dir_before.Unix.st_kind <> Unix.S_DIR then
+      Error ()
+    else begin
+      before_read dir;
+      let names = entries_of dir in
+      let root_after = Unix.lstat ownership_root in
+      let dir_after = Unix.lstat dir in
+      if same_file_identity root_before root_after
+         && same_file_identity dir_before dir_after
+         && root_after.Unix.st_kind = Unix.S_DIR
+         && dir_after.Unix.st_kind = Unix.S_DIR
+      then Ok names
+      else Error ()
+    end
+  with
+  | Unix.Unix_error _ | Sys_error _ -> Error ()
+;;
+
 (* A bad inventory entry must become a bounded result rather than a blocking
    open (a FIFO with no writer) or an exception containing the host path.
    Fs_compat binds containment and identity to the descriptor it reads: the
    earlier realpath is only a name check, while lstat/open/fstat and the
    parent-chain revalidation are the actual read boundary. *)
 let read_regular_file ~ownership_root path =
-  let ownership_root =
-    match Unix.realpath ownership_root with
-    | real -> real
-    | exception Unix.Unix_error _ -> ownership_root
-  in
+  let ownership_root = canonical_root ownership_root in
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Ok (Some contents) -> Ok contents
   | Ok None | Error _ -> Error "entry is unavailable"
@@ -287,23 +321,25 @@ let select_executable ?boot ~identity_name ~dir_name files =
 
 (* Returns the executable and the rest of the directory beside it, so its
    caller reads each file exactly once. *)
-let executable_in ?boot ~identity_name dir =
-  let names = entries_of dir in
-  let rec validate = function
-    | [] -> Ok ()
-    | f :: rest ->
-      (match entry_kind (Filename.concat dir f) with
-       | Directory | Regular -> validate rest
-       | Other ->
-         Error
-           (Printf.sprintf
-              "%s is unavailable: inventory entries must be regular files or directories" f)
-       | Unavailable -> Error (Printf.sprintf "%s is unavailable" f))
-  in
-  let files () = List.filter (fun f -> entry_kind (Filename.concat dir f) = Regular) names in
-  let* () = validate names in
-  let files = files () in
-  select_executable ?boot ~identity_name ~dir_name:(Filename.basename identity_name) files
+let executable_in ?boot ~identity_name ~ownership_root dir =
+  match entries_of_stable ~ownership_root dir with
+  | Error () -> Error "directory changed during inventory"
+  | Ok names ->
+    let rec validate = function
+      | [] -> Ok ()
+      | f :: rest ->
+        (match entry_kind (Filename.concat dir f) with
+         | Directory | Regular -> validate rest
+         | Other ->
+           Error
+             (Printf.sprintf
+                "%s is unavailable: inventory entries must be regular files or directories" f)
+         | Unavailable -> Error (Printf.sprintf "%s is unavailable" f))
+    in
+    let files () = List.filter (fun f -> entry_kind (Filename.concat dir f) = Regular) names in
+    let* () = validate names in
+    let files = files () in
+    select_executable ?boot ~identity_name ~dir_name:(Filename.basename identity_name) files
 ;;
 
 (* A program is a name in programs/, never a host path. The machine reads the
@@ -379,7 +415,7 @@ let resolve_program ?boot ~base_path name =
              | Error e -> Error e
              | Ok pair -> gather (pair :: acc) rest)
         in
-        (match executable_in ?boot ~identity_name:trimmed path with
+        (match executable_in ?boot ~identity_name:trimmed ~ownership_root:root path with
          | Error e -> Error e
          | Ok (exe, others) ->
            (match read_one exe with
@@ -653,7 +689,7 @@ let inventory_file_json ~programs_root ~parent path name =
             ]))
 ;;
 
-let inventory_program_json ~programs_root name =
+let inventory_program_json ?(before_read = fun _ -> ()) ~programs_root name =
   let path = Filename.concat programs_root name in
   match within ~root:programs_root path with
   | None -> unavailable_json name "entry leaves the DOS inventory"
@@ -672,33 +708,35 @@ let inventory_program_json ~programs_root name =
             ; ("sha256", `String Digestif.SHA256.(to_hex (digest_string contents)))
             ])
      | Directory ->
-       let names = entries_of real in
-       let executables =
-         List.filter
-           (fun file ->
-             entry_kind (Filename.concat real file) = Regular && is_program_name file)
-           names
-       in
-       let default_boot =
-         match select_executable ~identity_name:name ~dir_name:name executables with
-         | Ok (file, _) -> Some file
-         | Error _ -> None
-       in
-       let files =
-         names
-         |> List.map (fun child ->
-              inventory_file_json ~programs_root ~parent:name (Filename.concat real child)
-                child)
-       in
-       `Assoc
-         [ ("name", `String name)
-         ; ("kind", `String "directory")
-         ; ( "executable_candidates"
-           , `List (List.map (fun file -> `String file) executables) )
-         ; ( "default_boot"
-           , match default_boot with Some file -> `String file | None -> `Null )
-         ; ("files", `List files)
-         ])
+       (match entries_of_stable ~before_read ~ownership_root:programs_root real with
+        | Error () -> unavailable_json name "directory changed during inventory"
+        | Ok names ->
+          let executables =
+            List.filter
+              (fun file ->
+                entry_kind (Filename.concat real file) = Regular && is_program_name file)
+              names
+          in
+          let default_boot =
+            match select_executable ~identity_name:name ~dir_name:name executables with
+            | Ok (file, _) -> Some file
+            | Error _ -> None
+          in
+          let files =
+            names
+            |> List.map (fun child ->
+                 inventory_file_json ~programs_root ~parent:name (Filename.concat real child)
+                   child)
+          in
+          `Assoc
+            [ ("name", `String name)
+            ; ("kind", `String "directory")
+            ; ( "executable_candidates"
+              , `List (List.map (fun file -> `String file) executables) )
+            ; ( "default_boot"
+              , match default_boot with Some file -> `String file | None -> `Null )
+            ; ("files", `List files)
+            ]))
 ;;
 
 let handle_inventory ~tool_name ~start_time ~base_path =

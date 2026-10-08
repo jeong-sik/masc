@@ -943,7 +943,9 @@ let change_disk ~path ~backup_path =
    pinned core, and test_msx_tools checks that the linked digest equals this
    one, so a SHA bumped alone turns that test red with the new digest in its
    message. Read the digest of a commit from its build:
-   _build/default/lib/identity/msx_core_identity.ml. *)
+   _build/default/lib/identity/msx_core_identity.ml. The digest covers only
+   lib/ top-level (dune plus *.ml/*.mli, by base name), so an additive-only
+   core change in a subdirectory keeps the value. *)
 let pinned_core_source_digest = "c4e0ede25fe25a717fc758569a5b2f0c"
 
 type core = {
@@ -967,6 +969,8 @@ type checkpoint_info = {
   cartridge : string option;
   disk : string option;
   ledger_entries : int;
+  byte_length : int;
+  sha256 : string;
 }
 
 let checkpoint_info ~path =
@@ -976,14 +980,21 @@ let checkpoint_info ~path =
   if not (Sys.file_exists path)
   then Error (Invalid_request ("no MSX checkpoint at " ^ path))
   else
-    let json =
-      try Ok (Yojson.Safe.from_string (read_file path)) with
-      | Sys_error message -> Error (Unreadable message)
-      | Yojson.Json_error message ->
-        Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
-    match json with
+    let contents =
+      try Ok (read_file path) with
+      | Sys_error message -> Error (Unreadable message) in
+    match contents with
     | Error e -> Error e
-    | Ok json -> (
+    | Ok contents ->
+      let byte_length = String.length contents in
+      let sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
+      let json =
+        try Ok (Yojson.Safe.from_string contents) with
+        | Yojson.Json_error message ->
+          Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
+      match json with
+      | Error e -> Error e
+      | Ok json -> (
       (* Yojson.Safe.Util shadows [path] with its own JSON-pointer reader, so
          the file name is captured before the [open]. *)
       let file = path in
@@ -1013,6 +1024,8 @@ let checkpoint_info ~path =
           ; cartridge = member_string "cartridge"
           ; disk = member_string "disk"
           ; ledger_entries
+          ; byte_length
+          ; sha256
           }
       with Type_error (message, _) ->
         Error (Invalid_request ("invalid MSX checkpoint: " ^ message)))

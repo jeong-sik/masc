@@ -1132,6 +1132,16 @@ let test_checkpoint_info_reads_without_restoring () =
   check bool "unsafe slot refused" true (rejected unsafe);
   let dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
   let path = Filename.concat (Filename.concat dir "saves") "info-slot.json" in
+  let payload = In_channel.with_open_bin path In_channel.input_all in
+  check int "checkpoint byte length reported" (String.length payload)
+    (match member "byte_length" (Tool_result.data info) with
+     | Some (`Int n) -> n
+     | _ -> -1);
+  check string "checkpoint sha256 reported"
+    Digestif.SHA256.(to_hex (digest_string payload))
+    (match member "sha256" (Tool_result.data info) with
+     | Some (`String s) -> s
+     | _ -> "");
   Out_channel.with_open_bin path (fun oc -> output_string oc "{broken");
   let broken = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
   check bool "unparsable slot refused" true (rejected broken);

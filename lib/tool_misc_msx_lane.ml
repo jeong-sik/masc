@@ -450,6 +450,8 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
                , match info.cartridge with Some c -> `String c | None -> `Null )
              ; ("disk", match info.disk with Some d -> `String d | None -> `Null)
              ; ("ledger_entries", `Int info.ledger_entries)
+             ; ("byte_length", `Int info.byte_length)
+             ; ("sha256", `String info.sha256)
              ]))
         ()
     | Error ((Msx_lane.Invalid_request _ | Msx_lane.No_machine | Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved) as e) ->

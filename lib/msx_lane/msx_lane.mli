@@ -372,6 +372,11 @@ type checkpoint_info = {
   cartridge : string option;  (** file name in the slot, as saved *)
   disk : string option;  (** file name in drive A, as saved *)
   ledger_entries : int;  (** saved input edges *)
+  byte_length : int;
+      (** the checkpoint file's size in bytes, as read. *)
+  sha256 : string;
+      (** hex SHA-256 of the checkpoint file's bytes, as read — the payload
+          identity a readback compares without parsing the envelope. *)
 }
 
 val checkpoint_info : path:string -> (checkpoint_info, error) result

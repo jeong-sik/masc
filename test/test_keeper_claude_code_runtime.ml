@@ -129,7 +129,7 @@ let native_tool_call_block ~turn_id ~call_id ~tool_name =
 
 let native_tool_result ~call_id ~content =
   Printf.sprintf
-    {|{"type":"user","session_id":"__SESSION__","uuid":"user-native-result-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":%S}]}}|}
+    {|{"type":"user","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"user-native-result-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":%S}]}}|}
     call_id
     content
 ;;
@@ -349,7 +349,7 @@ let content_of_wire_message raw =
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
-    ?event_capture ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
+    ?event_capture ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report
     ?(system_prompt = "pre-dispatch fixture system prompt")
@@ -394,7 +394,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ~initial_messages
                            ?context
                            ?event_bus
-                           ?on_native_tool_completion ?on_event
+                           ?on_native_tool_progress ?on_native_tool_completion ?on_event
                            ?agent_core_checkpoint
                            ?runtime_manifest_context
                            ?runtime_manifest_append
@@ -1601,7 +1601,7 @@ let test_native_completion_reaches_tui () =
   List.iter (fun is_error ->
     let base_path = temp_workspace () in
     let fixture = Native_tool_outcome_fixture.create () in
-    let native_result = `Assoc ["type", `String "user";
+    let native_result = `Assoc ["type", `String "user"; "parent_tool_use_id", `Null;
       "session_id", `String "__SESSION__"; "uuid", `String "native-result";
       "message", `Assoc ["role", `String "user"; "content", `List [
         `Assoc (["type", `String "tool_result"; "tool_use_id", `String "native-call";
@@ -1623,6 +1623,114 @@ let test_native_completion_reaches_tui () =
           | Ok _ -> Native_tool_outcome_fixture.check fixture
               ~expected:[{Runtime_native_tools.outcome=Result_received {is_error}; exit_code=None}])))
     [None; Some false; Some true]
+;;
+
+let test_root_heartbeat_reaches_scoped_journal_and_tui () =
+  let module F = Native_tool_outcome_fixture in
+  let module Stream = Keeper_autonomous_stream in
+  let module J = Keeper_chat_event_log in
+  let module E = Keeper_chat_events in
+  let module T = Masc_tui_keeper_chat_transcript in
+  let module Chat_log = Masc_tui_keeper_chat_log in
+  List.iter (fun thinking ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let keeper_name = "heartbeat-fixture" in
+      let secret = "heartbeat-private-cobalt-forest-value" in
+      let prefix = "heartbeat-private-" in
+      let suffix = "cobalt-forest-value\n" in
+      let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+      Fs_compat.mkdir_p (Filename.dirname token_file);
+      Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+      let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let expected = Keeper_secret_redaction.redact_text redaction (secret ^ "\n") in
+      check bool "exact configured secret is masked" false (expected=secret ^ "\n");
+      let direct = F.create ~redaction () in
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"claude-heartbeat" ~absolute_turn:1 in
+      let autonomous = ref None in
+      let stream () = match !autonomous with
+        | Some stream -> stream
+        | None -> let stream = Stream.create ~base_path ~keeper_name ~turn_ref in
+            autonomous := Some stream; stream in
+      let journal_path = J.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
+      let read_journal () = match J.read_journal_path_result journal_path with
+        | Ok lines -> lines | Error _ -> fail "heartbeat journal unreadable" in
+      let fragments events = List.filter_map (function
+        | E.Text_delta value | E.Agent_core_thinking_delta {delta=value;_} -> Some value
+        | _ -> None) events in
+      let failures = ref [] and reports = ref 0 in
+      let verify f = try f () with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> failures := exn :: !failures in
+      let on_event event =
+        F.on_event direct event; Stream.on_event (stream ()) event;
+        match event with
+        | Agent_core.Types.MessageStop -> Stream.finish (stream ())
+            (Stream.Completed {reply="Answer";turn_outcome=Keeper_turn_outcome.Visible_reply})
+        | _ -> () in
+      let on_progress ~block_index ~tool_call_id progress =
+        incr reports;
+        F.on_progress direct ~block_index ~tool_call_id progress;
+        Stream.on_tool_stream_observation (stream ())
+          (Keeper_hooks_agent_core.Native_tool_progress {block_index;tool_call_id;progress});
+        verify (fun () ->
+          List.iter (fun events -> check (list string)
+            "actual heartbeat never flushes a retained model secret prefix" [] (fragments events))
+            [F.events direct; List.map (fun (line:J.journaled_event) -> line.event) (read_journal ())]) in
+      let on_completion ~block_index ~tool_call_id completion =
+        F.on_completion direct ~block_index ~tool_call_id completion;
+        Stream.on_tool_stream_observation (stream ())
+          (Keeper_hooks_agent_core.Native_tool_completion {block_index;tool_call_id;completion}) in
+      let frame event = Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+        "session_id",`String "__SESSION__";"parent_tool_use_id",`Null;"event",event]) in
+      let kind = if thinking then "thinking" else "text" in
+      let piece value = frame (`Assoc ["type",`String "content_block_delta";"index",`Int 0;
+        "delta",`Assoc ["type",`String (kind ^ "_delta");kind,`String value]]) in
+      let heartbeat uuid seconds = Yojson.Safe.to_string (`Assoc ["type",`String "tool_progress";
+        "session_id",`String "__SESSION__";"uuid",`String uuid;"heartbeat",`Bool true;
+        "parent_tool_use_id",`String "native-heartbeat";"tool_use_id",`String "opaque-observation";
+        "tool_name",`String "Read";"elapsed_time_seconds",`Int seconds]) in
+      let first = heartbeat "heartbeat-first" 30 in
+      with_fixture [
+        Emit (response_native_tool ~turn_id:"native" ~message_id:"native" ~call_id:"native-heartbeat" ~tool_name:"Read");
+        Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc ["id",`String "body";"model",`String "claude-fixture"]]));
+        Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;"content_block",`Assoc ["type",`String kind;kind,`String ""]]));
+        Emit (piece prefix); Emit first; Emit first; Emit (heartbeat "heartbeat-second" 3);
+        Emit (piece suffix);
+        Emit (frame (`Assoc ["type",`String "content_block_stop";"index",`Int 0]));
+        Emit (response_frame ~uuid:"body-complete" ~message_id:"body" (`Assoc ["type",`String kind;kind,`String (secret ^ "\n")]));
+        Emit (native_tool_result ~call_id:"native-heartbeat" ~content:"observed");
+        Emit (heartbeat "heartbeat-late" 100);
+        Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+        Emit (result_text ~turn_id:"final" "Answer")]
+        (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"HEARTBEAT"
+          ~on_event ~on_native_tool_progress:on_progress ~on_native_tool_completion:on_completion () with
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ ->
+           List.iter raise (List.rev !failures);
+           check int "actual receiver UUID-deduplicates and rejects late heartbeat" 2 !reports;
+           let lines = read_journal () in
+           let replay = Chat_log.create_for_source ~keeper_name ~source:(Chat_log.Autonomous_turn turn_ref) ~started_at:0. in
+           ignore (Chat_log.add_journaled replay lines);
+           let live,durable = F.snapshots direct in
+           List.iter (fun log ->
+             let t = T.of_log ~now:2000. log in
+             check bool "projection remains readable" true (Option.is_none (T.unreadable t));
+             check bool "model text and thinking never reconstruct the secret" false
+               (Astring.String.is_infix ~affix:secret (T.text t ^ T.thinking t));
+             match T.tool_calls t with
+             | [call] ->
+                 check bool "native end stays an observation" true (call.outcome=T.Native_ended);
+                 check (option string) "heartbeat cannot mint a receipt" None call.execution_id;
+                 check (option int) "decreasing provider elapsed is retained" (Some 3)
+                   (Option.bind call.native_progress (fun p -> p.provider_elapsed_seconds))
+             | _ -> fail "heartbeat did not retain one exact native occurrence") [live;durable;replay];
+           List.iter (fun events ->
+             let body = String.concat "" (fragments events) in
+             check bool "safe model content is retained" true (Astring.String.is_infix ~affix:expected body);
+             check bool "journal never reconstructs the configured secret" false
+               (Astring.String.is_infix ~affix:secret body))
+             [F.events direct; List.map (fun (line:J.journaled_event) -> line.event) lines]))) [false;true]
 ;;
 
 let test_keeper_streams_two_claude_responses_apart () =
@@ -3893,6 +4001,7 @@ let () =
         ; test_case "thinking stays ahead of tools and outside answer text" `Quick
             test_keeper_preserves_claude_thinking_before_tools
         ; test_case "native completion through adapter, journal, SSE and TUI" `Quick test_native_completion_reaches_tui
+        ; test_case "root heartbeat through receiver, scoped redaction, autonomous journal and TUI" `Quick test_root_heartbeat_reaches_scoped_journal_and_tui
         ; test_case
             "no break across a MASC tool row"
             `Quick

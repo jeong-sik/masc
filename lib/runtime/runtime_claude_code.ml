@@ -280,6 +280,10 @@ type stream_event =
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of
+      { identity : Runtime_native_tools.action_identity
+      ; progress : Runtime_native_tools.progress
+      }
   | Usage_windows_reported of Runtime_provider_usage_window.report
   | Conversation_compacted
   | Usage_reported of
@@ -447,8 +451,36 @@ let parse_json ~stage text =
     | Yojson.Json_error detail -> protocol_error stage ("invalid JSON: " ^ detail)
   in
   let* json = parsed in
-  let* () = validate_unique_object_keys ~stage ~path:"$" json in
-  Ok json
+  (* A Claude heartbeat is an observation that must be typed and ignored when
+     malformed. Its decoder performs field-by-field duplicate checks, so let
+     only an unambiguous top-level [type = tool_progress] frame carrying at
+     least one [heartbeat = true] reach it. Every other frame keeps the strict
+     whole-object duplicate-key contract. The discriminant is parsed data,
+     never a substring or a provider-specific identifier convention. *)
+  let heartbeat_observation =
+    match json with
+    | `Assoc fields ->
+      let type_values =
+        List.filter_map
+          (fun (name, value) -> if name = "type" then Some value else None)
+          fields
+      in
+      let heartbeat_values =
+        List.filter_map
+          (fun (name, value) -> if name = "heartbeat" then Some value else None)
+          fields
+      in
+      (match type_values with
+       | [ `String "tool_progress" ] ->
+         List.exists (function `Bool true -> true | _ -> false) heartbeat_values
+       | _ -> false)
+    | _ -> false
+  in
+  if heartbeat_observation
+  then Ok json
+  else
+    let* () = validate_unique_object_keys ~stage ~path:"$" json in
+    Ok json
 ;;
 
 let optional_int stage name fields =
@@ -1030,6 +1062,136 @@ let assistant_origin ~stage fields =
 let non_blank = function
   | Some value when String.trim value <> "" -> Some value
   | Some _ | None -> None
+;;
+
+(* Native observations have the same parent scope as their SDK envelope.
+   Retain closed/ambiguous identities for this invocation so replay cannot
+   reopen an ended call or attach a heartbeat to a reused provider id. *)
+type native_call_owner =
+  { observation : Runtime_native_tools.observation
+  ; scope : assistant_scope
+  ; envelope_uuid : string
+  ; ordinal : int
+  }
+
+type native_call_state =
+  | Native_open of native_call_owner
+  | Native_closed of native_call_owner
+  | Native_ambiguous
+
+type heartbeat =
+  { uuid : string
+  ; progress_id : string
+  ; parent_id : string
+  ; tool_name : string
+  ; elapsed_seconds : int
+  }
+
+type native_call_registry =
+  { calls : (string, native_call_state) Hashtbl.t
+  ; heartbeat_uuids : (string, heartbeat) Hashtbl.t
+  }
+
+type native_start =
+  | Native_start_new
+  | Native_start_active_replay
+  | Native_start_closed_replay
+  | Native_start_conflict
+
+let same_native_owner left right =
+  left.scope=right.scope && left.envelope_uuid=right.envelope_uuid
+  && left.ordinal=right.ordinal && left.observation=right.observation
+;;
+
+let same_heartbeat left right =
+  left.uuid=right.uuid && left.progress_id=right.progress_id
+  && left.parent_id=right.parent_id && left.tool_name=right.tool_name
+  && left.elapsed_seconds=right.elapsed_seconds
+;;
+
+let observe_native_start registry ~scope ~uuid ~ordinal observation =
+  match Runtime_native_tools.call_id observation with
+  | None -> Native_start_new
+  | Some id ->
+    let owner = {observation; scope; envelope_uuid=uuid; ordinal} in
+    match Hashtbl.find_opt registry.calls id with
+    | None -> Hashtbl.add registry.calls id (Native_open owner); Native_start_new
+    | Some (Native_open previous) when same_native_owner previous owner -> Native_start_active_replay
+    | Some (Native_closed previous) when same_native_owner previous owner -> Native_start_closed_replay
+    | Some (Native_open _ | Native_closed _ | Native_ambiguous) ->
+        Hashtbl.replace registry.calls id Native_ambiguous;
+        Native_start_conflict
+;;
+
+let finish_native_call registry ~scope id =
+  match Hashtbl.find_opt registry.calls id with
+  | Some (Native_open owner) when scope=Some owner.scope ->
+      Hashtbl.replace registry.calls id (Native_closed owner);
+      Some owner.observation
+  | Some (Native_open _) when scope=None ->
+      (* An unattributed result cannot certify which call ended, and the
+         remaining open row no longer has authority to receive heartbeats. *)
+      Hashtbl.replace registry.calls id Native_ambiguous;
+      None
+  | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None -> None
+;;
+
+type heartbeat_ignored =
+  | Not_heartbeat
+  | Malformed_heartbeat
+  | Other_session
+  | Replayed_heartbeat
+  | Conflicting_heartbeat
+  | No_active_root_call
+
+type heartbeat_projection =
+  | Heartbeat_observed of Runtime_native_tools.action_identity * int
+  | Heartbeat_ignored of heartbeat_ignored
+
+let parse_native_heartbeat ~expected_session_id fields =
+  let ( let* ) = Result.bind in
+  let malformed = Error Malformed_heartbeat in
+  let unique key = match List.filter (fun (name,_) -> name=key) fields with
+    | [_,value] -> Ok value
+    | [] | _::_ -> malformed in
+  let string key =
+    let* value = unique key in
+    match value with `String value when String.trim value <> "" -> Ok value
+    | _ -> malformed in
+  match List.assoc_opt "heartbeat" fields with
+  | None -> Error Not_heartbeat
+  | Some _ ->
+    let* heartbeat = unique "heartbeat" in
+    let* () = match heartbeat with
+      | `Bool true -> Ok () | `Bool false -> Error Not_heartbeat | _ -> malformed in
+    let* session = string "session_id" in
+    let* () = if session=expected_session_id then Ok () else Error Other_session in
+    let* uuid = string "uuid" in
+    let* progress_id = string "tool_use_id" in
+    let* parent_id = string "parent_tool_use_id" in
+    let* tool_name = string "tool_name" in
+    let* elapsed = unique "elapsed_time_seconds" in
+    let* elapsed_seconds = match elapsed with
+      | `Int seconds when seconds >= 0 -> Ok seconds | _ -> malformed in
+    Ok {uuid; progress_id; parent_id; tool_name; elapsed_seconds}
+;;
+
+let project_native_heartbeat registry ~expected_session_id fields =
+  match parse_native_heartbeat ~expected_session_id fields with
+  | Error reason -> Heartbeat_ignored reason
+  | Ok heartbeat ->
+    match Hashtbl.find_opt registry.heartbeat_uuids heartbeat.uuid with
+    | Some previous when same_heartbeat previous heartbeat -> Heartbeat_ignored Replayed_heartbeat
+    | Some _ -> Heartbeat_ignored Conflicting_heartbeat
+    | None ->
+      Hashtbl.add registry.heartbeat_uuids heartbeat.uuid heartbeat;
+      match Hashtbl.find_opt registry.calls heartbeat.parent_id with
+      | Some (Native_open {scope=Root_response;
+          observation={origin=Runtime_native_tools.Built_in; tool_name=Some name; _}; _})
+        when name=heartbeat.tool_name ->
+          Heartbeat_observed (Runtime_native_tools.Call_id heartbeat.parent_id, heartbeat.elapsed_seconds)
+      | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None ->
+          Heartbeat_ignored No_active_root_call
 ;;
 
 let allowed_tool_name (tool : dynamic_tool) =
@@ -1615,9 +1777,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
                  ~channel:Thinking_content ~message_id ~uuid ~ordinal text)
       | Assistant_native_tool observation ->
           native_tool_attempted := true;
-          Option.iter (fun call_id -> Hashtbl.replace native_tool_calls call_id observation)
-            (Runtime_native_tools.call_id observation);
-          emit_stream_event on_stream_event (Native_tool_started observation);
+          (match observe_native_start native_tool_calls ~scope ~uuid ~ordinal observation with
+           | Native_start_new | Native_start_active_replay ->
+               emit_stream_event on_stream_event (Native_tool_started observation)
+           | Native_start_closed_replay | Native_start_conflict -> ());
           Ok ()) (Ok ()) (List.mapi (fun ordinal block -> ordinal, block) blocks) in
     let texts = List.rev !texts_rev in
     if List.exists (fun text -> String.length text > 0) texts then response_emitted := true;
@@ -1732,14 +1895,11 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       }
   | "user" ->
     let* finished = native_tool_results ~expected_session_id fields in
-    List.iter
-      (fun (call_id, completion) ->
-         match Hashtbl.find_opt native_tool_calls call_id with
-         | None -> ()
-         | Some observation ->
-           Hashtbl.remove native_tool_calls call_id;
-           emit_stream_event on_stream_event (Native_tool_finished {observation; completion}))
-      finished;
+    let scope = Result.to_option (assistant_scope ~stage:"native result scope" fields) in
+    List.iter (fun (call_id, completion) ->
+      Option.iter (fun observation ->
+        emit_stream_event on_stream_event (Native_tool_finished {observation; completion}))
+        (finish_native_call native_tool_calls ~scope call_id)) finished;
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
@@ -1761,12 +1921,14 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
       ~response_emitted
   | "tool_progress" ->
-    (* Claude Code emits [tool_progress] while a built-in tool is still
-       running.  It is observation-only: tool ownership and completion still
-       arrive through assistant/user messages.  Consume it as stream activity
-       without treating an in-flight tool as a protocol failure. How many of
-       these a turn carries says nothing about its health; the declared idle
-       deadline only bounds silence between messages. *)
+    (* An observation cannot fail a healthy turn. Only the exact open root
+       call owns this heartbeat; the progress id is opaque, not a call id. *)
+    (match project_native_heartbeat native_tool_calls ~expected_session_id fields with
+     | Heartbeat_observed (identity, elapsed_seconds) ->
+       emit_stream_event on_stream_event (Native_tool_progress
+         {identity; progress=Runtime_native_tools.Heartbeat_reported {elapsed_seconds}})
+     | Heartbeat_ignored (Not_heartbeat | Malformed_heartbeat | Other_session
+         | Replayed_heartbeat | Conflicting_heartbeat | No_active_root_call) -> ());
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
@@ -2004,7 +2166,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~rate_limit:None
     ~assistant_model:None
     ~assistant_texts:[]
-    ~native_tool_calls:(Hashtbl.create 8)
+    ~native_tool_calls:{calls=Hashtbl.create 8; heartbeat_uuids=Hashtbl.create 8}
     ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event

@@ -45,8 +45,10 @@ type finished = { observation : observation; completion : completion }
 type progress =
   | Output_observed of { byte_count : int }
   | Message_reported of { message : string }
+  | Heartbeat_reported of { elapsed_seconds : int }
 
 let progress_to_json = function
+  | Heartbeat_reported {elapsed_seconds} -> `Assoc ["kind", `String "heartbeat_reported"; "elapsed_seconds", `Int elapsed_seconds]
   | Output_observed {byte_count} -> `Assoc ["kind", `String "output_observed"; "byte_count", `Int byte_count]
   | Message_reported {message} -> `Assoc ["kind", `String "message_reported"; "message", `String message]
 
@@ -61,6 +63,10 @@ let progress_of_json = function
             (match List.assoc_opt "byte_count" fields with
              | Some (`Int byte_count) when byte_count > 0 -> Ok (Output_observed {byte_count})
              | _ -> Error "native output byte_count must be a positive integer")
+        | Some (`String "heartbeat_reported") when sorted = ["elapsed_seconds"; "kind"] ->
+            (match List.assoc_opt "elapsed_seconds" fields with
+             | Some (`Int elapsed_seconds) when elapsed_seconds >= 0 -> Ok (Heartbeat_reported {elapsed_seconds})
+             | _ -> Error "native heartbeat elapsed_seconds must be a nonnegative integer")
         | Some (`String "message_reported") when sorted = ["kind"; "message"] ->
             (match List.assoc_opt "message" fields with
              | Some (`String message) -> Ok (Message_reported {message})
@@ -69,7 +75,7 @@ let progress_of_json = function
   | _ -> Error "native progress must be an object"
 
 let redact_progress redact = function
-  | Output_observed _ as progress -> progress
+  | (Output_observed _ | Heartbeat_reported _) as progress -> progress
   | Message_reported {message} -> Message_reported {message=redact message}
 
 let end_observed = {outcome=End_observed; exit_code=None}

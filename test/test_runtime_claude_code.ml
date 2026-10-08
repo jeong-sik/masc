@@ -22,7 +22,7 @@ let native_tool_assistant =
 ;;
 
 let native_tool_result =
-  {|{"type":"user","session_id":"__SESSION__","uuid":"user-native-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"native-call-1","content":"fixture"}]}}|}
+  {|{"type":"user","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"user-native-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"native-call-1","content":"fixture"}]}}|}
 ;;
 
 (* Claude 2.1.292 forwards child tool envelopes with their own model/usage,
@@ -40,7 +40,7 @@ let child_tool_result =
 ;;
 
 let tool_progress =
-  {|{"type":"tool_progress","session_id":"__SESSION__","uuid":"tool-progress-1","tool_use_id":"native-call-1","tool_name":"Bash","elapsed_time_seconds":240}|}
+  {|{"type":"tool_progress","session_id":"__SESSION__","uuid":"tool-progress-1","parent_tool_use_id":"native-call-1","tool_use_id":"opaque-progress-id","tool_name":"Bash","elapsed_time_seconds":240}|}
 ;;
 
 let result =
@@ -1054,7 +1054,7 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
   let on_stream_event = function
     | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Conversation_compacted
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Conversation_compacted
     | Usage_reported _ | Turn_finished _ -> ()
   in
   with_fixture
@@ -1128,7 +1128,7 @@ let test_quota_refusal_still_reports_the_turns_spend () =
         (turn_id, model, usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens)
         :: !reported
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture
@@ -1157,7 +1157,7 @@ let test_quota_refusal_before_any_response_reports_no_spend () =
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture [ Emit rate_limit_rejected; Emit quota_result_with_usage ] (fun path ->
@@ -1175,7 +1175,7 @@ let test_result_of_another_session_reports_no_spend () =
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture
@@ -1325,7 +1325,7 @@ let test_api_diagnostic_preserves_native_effects () =
                   | Runtime_claude_code.Native_tool_started _ | Native_tool_finished _ ->
                     true
                   | Turn_started _ | Usage_windows_reported _ | Conversation_compacted
-                  | Usage_reported _ -> false
+                  | Native_tool_progress _ | Usage_reported _ -> false
                   | Text_delta _ | Thinking_delta _ | Content_block_stopped _
                   | Dynamic_tool_started _
                   | Dynamic_tool_finished _
@@ -2473,6 +2473,75 @@ let test_unknown_stream_type_fails_closed () =
     | Ok _ -> fail "unknown stream type was silently ignored")
 ;;
 
+let heartbeat_frame ?(uuid="heartbeat-1") ?(parent="native-call-1") ?(session="__SESSION__") ?(tool_name="Bash") ?(seconds=30) () =
+  Yojson.Safe.to_string (`Assoc ["type",`String "tool_progress"; "heartbeat",`Bool true;
+    "session_id",`String session; "uuid",`String uuid; "tool_use_id",`String "opaque-progress-id";
+    "parent_tool_use_id",`String parent; "tool_name",`String tool_name;
+    "elapsed_time_seconds",`Int seconds])
+;;
+
+let test_root_heartbeat_owns_only_current_call () =
+  let heartbeat = heartbeat_frame () in
+  let change key value frame = match Yojson.Safe.from_string frame with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc ((key,value)::List.remove_assoc key fields))
+    | _ -> fail "object fixture expected" in
+  let seen = ref [] in
+  let wrong_parent_result = change "parent_tool_use_id" (`String "child-parent") native_tool_result in
+  let malformed = [change "elapsed_time_seconds" (`Int (-1)) heartbeat;
+    change "parent_tool_use_id" `Null heartbeat;
+    change "heartbeat" (`String "true") heartbeat;
+    change "uuid" (`String "") heartbeat] in
+  let duplicated = List.map (fun (key,value) ->
+    match Yojson.Safe.from_string (heartbeat_frame ~uuid:("duplicate-" ^ key) ()) with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc ((key,value)::fields))
+    | _ -> fail "object fixture expected")
+    ["heartbeat",`Bool false; "parent_tool_use_id",`String "native-call-1";
+     "session_id",`String "__SESSION__"; "uuid",`String "another";
+     "tool_use_id",`String "opaque-progress-id"; "tool_name",`String "Bash";
+     "elapsed_time_seconds",`Int 30] in
+  with_fixture ([Emit (heartbeat_frame ~uuid:"before-start" ()); Emit native_tool_assistant;
+      Emit (heartbeat_frame ~uuid:"before-start" ());
+      Emit (heartbeat_frame ~uuid:"other-session" ~session:"wrong" ());
+      Emit (heartbeat_frame ~uuid:"unknown-parent" ~parent:"missing" ());
+      Emit wrong_parent_result; Emit heartbeat; Emit heartbeat;
+      Emit (heartbeat_frame ~seconds:31 ()); (* same UUID, conflicting payload *)
+      Emit (heartbeat_frame ~uuid:"heartbeat-2" ~seconds:3 ())]
+    @ List.map (fun frame -> Emit frame) (malformed @ duplicated)
+    @ [Emit native_tool_result; Emit (heartbeat_frame ~uuid:"late" ());
+       Emit native_tool_assistant; Emit (heartbeat_frame ~uuid:"replayed-start" ());
+       Emit assistant; Emit result])
+    (fun path -> match run_fixture ~on_stream_event:(fun event -> seen := event :: !seen) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+        let reports = List.rev !seen |> List.filter_map (function
+          | Runtime_claude_code.Native_tool_progress {identity=Call_id id;progress=Heartbeat_reported {elapsed_seconds}} -> Some (id,elapsed_seconds)
+          | _ -> None) in
+        check (list (pair string int)) "UUID replay and scope validation retain only exact root facts"
+          ["native-call-1",30;"native-call-1",3] reports;
+        check int "completed invocation cannot be reopened by replayed assistant" 1
+          (List.length (List.filter (function Runtime_claude_code.Native_tool_started _ -> true | _ -> false) !seen)))
+;;
+
+let test_child_heartbeat_and_unknown_result_scope_are_unowned () =
+  List.iter (fun frames ->
+    let reports = ref [] in
+    with_fixture (frames @ [Emit assistant;Emit result]) (fun path ->
+      match run_fixture ~on_stream_event:(function
+        | Runtime_claude_code.Native_tool_progress report -> reports := report.progress :: !reports
+        | _ -> ()) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> check int "unowned progress neither publishes nor fails the turn" 0 (List.length !reports)))
+    [[Emit child_tool_assistant; Emit (heartbeat_frame ~parent:"child-read" ~tool_name:"Read" ())];
+     [Emit native_tool_assistant;
+      Emit (match Yojson.Safe.from_string native_tool_assistant with
+        | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("uuid",`String "different-owner")::List.remove_assoc "uuid" fields))
+        | _ -> fail "object expected");
+      Emit (heartbeat_frame ())];
+     [Emit native_tool_assistant;
+      Emit (match Yojson.Safe.from_string native_tool_result with `Assoc fields -> Yojson.Safe.to_string (`Assoc (List.remove_assoc "parent_tool_use_id" fields)) | _ -> fail "object expected");
+      Emit (heartbeat_frame ())]]
+;;
+
 let test_tool_progress_keeps_stream_open () =
   with_fixture [ Emit tool_progress; Emit assistant; Emit result ] (fun path ->
     match run_fixture ~timeout_s:window_outlasting_process_start_s path with
@@ -2989,6 +3058,8 @@ let () =
             "tool progress keeps stream open"
             `Quick
             test_tool_progress_keeps_stream_open
+        ; test_case "root heartbeat scope and UUID ownership" `Quick test_root_heartbeat_owns_only_current_call
+        ; test_case "child and missing result scope heartbeat ignored" `Quick test_child_heartbeat_and_unknown_result_scope_are_unowned
         ; test_case
             "unknown stream type fails closed"
             `Quick

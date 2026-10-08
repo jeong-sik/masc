@@ -5233,7 +5233,7 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)

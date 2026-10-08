@@ -857,7 +857,7 @@ let live_exports m access =
     if not e.started || e.stopping || not (can_read access e.visibility) then []
     else match e.phase, e.connection with
       | (Attached | Observing), Some connection ->
-          connection.exported_tools () |> List.filter_map (fun tool ->
+          connection.exported_tools () |> List.filter_map (fun (tool : Mcp_protocol.Mcp_types.tool) ->
             if List.mem tool.Mcp_protocol.Mcp_types.name e.package.exported_tools
             then Some (Lane_addon_tool_export.create ~instance_id:e.instance_id ~tool) else None)
       | (Attached | Observing), None | (Failed _ | Detaching | Detached), _ -> [])

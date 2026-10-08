@@ -76,6 +76,15 @@ val keeper_hitl_thinking_blocks : unit -> int
 
 val keeper_hitl_max_concurrent_per_keeper : unit -> int
 
+(** [keeper.hitl.tool_approval_timeout_sec], default 180.0, clamped to
+    [5.0, 3600.0] (env [MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC]). How long a
+    held tool call waits for an operator before the gate times it out; a
+    later answer still lands through the durable late-approval journal
+    (task-1665 D2). The default and the clamp are not measured values -- the
+    keeper_hitl_gate health section's answered/timed_out counters are the
+    evidence base for any future condition replacement. *)
+val keeper_tool_approval_timeout_sec : unit -> float
+
 (** [keeper.hitl.observation_stderr_bytes], default 4096. How much of a
     refused observe run's stderr tail the Gate keeps on the approval row for
     the judge (RFC-0422 step 3b); the bytes cut are counted on the row. *)

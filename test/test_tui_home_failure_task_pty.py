@@ -470,6 +470,8 @@ def task_cancel_previous_workspace_receipt(executable):
 
         def interact(process, fd, _slave, output, _base):
             local_base = str(Path(_base).resolve())
+            foreign_b = Path(local_base, "task-receipt-foreign-B")
+            foreign_c = Path(local_base, "task-receipt-foreign-C")
             try:
                 h.resize_and_wait(process, fd, output, rows=40, columns=320,
                                   needle=b"MASC Dashboard")
@@ -531,10 +533,12 @@ def task_cancel_previous_workspace_receipt(executable):
                     # 2. http_refresh_inflight has been set to false.
                     # 3. start_scoped_refresh_followup has executed and found No_scoped_followup.
                     # 4. No follow-up refresh intent remains queued before the second press.
-                    h.wait_for_output(process, fd, output, b"task-receipt-foreign-B", timeout=10)
+                    h.wait_for_output(
+                        process, fd, output, b"task-receipt-foreign-B",
+                        start=0, timeout=10)
                     assert h.drain_until_quiet(process, fd, output), (
                         "TUI output did not settle after foreign-B applied: " + repr(bytes(output)))
-                    assert all(e.get("root") == str(foreign_b) or e.get("root") == str(local)
+                    assert all(e.get("root") == str(foreign_b) or e.get("root") == local_base
                                for e in state["exchange_log"][:pre_press_count]), (
                         "pre-press exchange log contaminated with unexpected root: "
                         + repr(state["exchange_log"][:pre_press_count]))
@@ -664,7 +668,7 @@ def task_cancel_previous_workspace_receipt(executable):
         h.run_terminal_scenario(
             executable, description="accepted Task cancel reports previous workspace without refresh",
             interact=interact, http_fixtures=fixtures, http_requests=requests,
-            prepare_workspace=prepare, refresh=3600.0,
+            prepare_workspace=prepare, refresh=60.0,
             extra_env={"EDITOR": f"{shlex.quote(sys.executable)} {shlex.quote(str(editor))}"},
         )
 

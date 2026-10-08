@@ -456,6 +456,39 @@ let test_changes_are_bound_to_the_expected_workspace () =
     check bool "the accepted press advanced the machine" true (current_frame_number () > before))
 ;;
 
+(* The picture read after a change names the workspace it read. A server swapped
+   onto the same port answers 409 instead of serving its picture. *)
+let test_live_read_is_bound_to_the_expected_workspace () =
+  let base_path = Filename.temp_dir "msx-live-bound-" "" in
+  let config = Masc.Workspace.default_config base_path in
+  let masc_root = Masc.Workspace.masc_root_dir config in
+  (try Unix.mkdir masc_root 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let other = Filename.temp_dir "msx-live-other-" "" in
+  let precondition = Server_routes_http_routes_lane_addons.live_workspace_precondition ~config in
+  let fields = [ "source_kind", "msx_capture"; "since", "3" ] in
+  let here =
+    [ "expected_base_path", Unix.realpath base_path
+    ; "expected_masc_root", Unix.realpath masc_root ] in
+  let status = function
+    | Ok _ -> `Served
+    | Error (`Conflict, _) -> `Conflict
+    | Error (`Bad_request, _) -> `Bad_request
+  in
+  check bool "no precondition leaves the query alone" true (precondition fields = Ok fields);
+  check bool "this workspace is served with the fields removed" true
+    (precondition (here @ fields) = Ok fields);
+  check bool "another workspace is a conflict" true
+    (status (precondition ([ "expected_base_path", Unix.realpath other
+                           ; "expected_masc_root", Unix.realpath other ] @ fields))
+     = `Conflict);
+  check bool "one field alone is a bad request" true
+    (status (precondition (("expected_base_path", Unix.realpath base_path) :: fields))
+     = `Bad_request);
+  check bool "a relative path is a bad request" true
+    (status (precondition ([ "expected_base_path", "relative"; "expected_masc_root", "relative" ] @ fields))
+     = `Bad_request)
+;;
+
 let test_press_defaults_and_identity () =
   with_tick_machine (fun () ->
     Eio_main.run @@ fun _env ->
@@ -1059,6 +1092,10 @@ let () =
             "changes are refused unless they name this workspace"
             `Quick
             test_changes_are_bound_to_the_expected_workspace
+        ; test_case
+            "the picture read after a change is refused for another workspace"
+            `Quick
+            test_live_read_is_bound_to_the_expected_workspace
         ; test_case
             "absent fields default and the who is the caller's"
             `Quick

@@ -707,10 +707,49 @@ let test_task_receipts_wait_for_identity_and_roster () =
   Alcotest.(check bool) "A-B-A with unchanged final paths still retires original authority" true
     (take_task_followups state ~ready:(fun _ -> true) = ([], [handoff]))
 
+let test_account_read_intents_survive_repeated_suspension () =
+  let open Masc_tui_types in
+  let module Login = Masc_tui_account_login in
+  let provider : Login.provider = {id="codex"; label="Codex"; client=Login.Codex;
+    origin=Login.Configured; enabled=true; setup_supported=true} in
+  List.iter (fun action ->
+    let state = create_state ~workspace:"a" ~port:0 ~refresh_interval:0. () in
+    let view = Login.create "codex" in
+    view.generation <- 7;
+    view.account_ref <- Some "selected-account";
+    view.login_id <- Some "selected-session";
+    view.provider <- Some provider;
+    state.account_login <- Some view;
+    state.account_login_readings <- [view, 7, action];
+    suspend_workspace_readings state;
+    suspend_workspace_readings state;
+    Alcotest.(check bool) "exact read survives repeated retirement" true
+      (match state.account_login_read_resume with
+       | [(pending, generation, saved_action)] ->
+           pending == view && generation = 7 && saved_action = action
+       | _ -> false);
+    Alcotest.(check (option string)) "selected account is preserved"
+      (Some "selected-account") view.account_ref;
+    Alcotest.(check bool) "selected provider is preserved" true
+      (view.provider = Some provider);
+    let saving = Login.create "codex" in
+    saving.generation <- 8;
+    saving.phase <- Login.Saving;
+    state.account_login_readings <- [saving, 7, Login.Inventory];
+    suspend_workspace_readings state;
+    Alcotest.(check bool) "superseded read cannot retire newer mutation" true
+      (saving.phase = Login.Saving && saving.generation = 8);
+    Alcotest.(check int) "superseded read is not queued" 1
+      (List.length state.account_login_read_resume))
+    [Login.Inventory; Discover; Recover;
+     Preview_removal {provider; refused=Some "retained refusal"}]
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "nested reader intents survive repeated suspension" `Quick
+      , [ Alcotest.test_case "account read intents survive repeated suspension" `Quick
+            test_account_read_intents_survive_repeated_suspension
+        ; Alcotest.test_case "nested reader intents survive repeated suspension" `Quick
             test_pending_nested_reader_intents_survive_repeated_suspension
         ; Alcotest.test_case "task receipts wait for identity and roster" `Quick
             test_task_receipts_wait_for_identity_and_roster

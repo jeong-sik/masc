@@ -5310,7 +5310,8 @@ type state = {
   (* A saved activation may finish while its panel is closed. It belongs to
      this workspace and is cleared when workspace authority is withdrawn. *)
   mutable account_login_detached: Masc_tui_account_login.t list;
-  mutable account_login_readings: (Masc_tui_account_login.t * int) list;
+  mutable account_login_readings: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
+  mutable account_login_read_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -6781,8 +6782,12 @@ let suspend_workspace_readings state =
   state.keeper_queue_inflight <- List.filter
     (fun keeper -> not (List.mem keeper state.keeper_queue_readings)) state.keeper_queue_inflight;
   state.keeper_queue_readings <- [];
-  List.iter (fun ((view : Masc_tui_account_login.t), generation) ->
-    if view.generation = generation then suspend_account_login_read view)
+  List.iter (fun ((view : Masc_tui_account_login.t), generation, action) ->
+    if view.generation = generation then begin
+      state.account_login_read_resume <- (view, generation, action)
+        :: List.filter (fun (pending, _, _) -> pending != view) state.account_login_read_resume;
+      suspend_account_login_read view
+    end)
     state.account_login_readings;
   state.account_login_readings <- [];
   state.tools_evidence_request <- None;
@@ -8968,6 +8973,7 @@ let create_state
   account_login = None;
   account_login_detached = [];
   account_login_readings = [];
+  account_login_read_resume = [];
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;

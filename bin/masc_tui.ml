@@ -3469,8 +3469,15 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
 let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
   let module Login = Masc_tui_account_login in
   let needs_identity = match action with Login.Nothing | Close | Cancel -> false | _ -> true in
-  if needs_identity && not (server_authority_ready state) then begin
-    if account_login_action_is_read action then suspend_account_login_read view
+  if action = Login.Nothing then ()
+  else if needs_identity && not (server_authority_ready state) then begin
+    if account_login_action_is_read action then begin
+      state.account_login_readings <- List.filter (fun (reading, _, _) -> reading != view)
+        state.account_login_readings;
+      state.account_login_read_resume <- (view, view.generation, action)
+        :: List.filter (fun (pending, _, _) -> pending != view) state.account_login_read_resume;
+      suspend_account_login_read view
+    end
     else begin
       view.input_pending <- false;
       view.notice <- "Workspace identity is unconfirmed; account action was not sent."
@@ -3489,9 +3496,10 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
      Option.iter (fun stop -> stop ()) view.cancel_stream;
      view.cancel_stream <- None);
   let generation = view.generation in
-  state.account_login_readings <- List.filter (fun (reading, _) -> reading != view) state.account_login_readings;
+  state.account_login_readings <- List.filter (fun (reading, _, _) -> reading != view) state.account_login_readings;
+  state.account_login_read_resume <- List.filter (fun (pending, _, _) -> pending != view) state.account_login_read_resume;
   if account_login_action_is_read action then
-    state.account_login_readings <- (view, generation) :: state.account_login_readings;
+    state.account_login_readings <- (view, generation, action) :: state.account_login_readings;
   let post path body = Result.bind (check_workspace ()) (fun () ->
     Masc_tui_http.post_json ~host ~port ~path ~body:(Yojson.Safe.to_string body)) in
   let post_setup path body = Result.bind (check_workspace ()) (fun () ->
@@ -11292,6 +11300,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
     view.cancel_stream <- None) state.account_login_detached;
   state.account_login_detached <- [];
   state.account_login_readings <- [];
+  state.account_login_read_resume <- [];
   state.identity_view <- None;
   state.identity_view_error <- None;
   state.identity_logins <- [];
@@ -12431,6 +12440,13 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
+    let account_reads = state.account_login_read_resume in
+    state.account_login_read_resume <- [];
+    List.iter (fun ((view : Masc_tui_account_login.t), generation, action) ->
+      if view.generation = generation && account_login_action_is_read action
+         && List.exists (fun current -> current == view)
+              (Option.to_list state.account_login @ state.account_login_detached) then
+        launch_account_login_action state ~mailbox view action) account_reads;
     if state.msx_open && state.machine_source = Masc.Machine_lane.Msx
        && state.msx_live = Masc_tui_machine_live.Unread
        && Option.is_none state.msx_live_in_flight then
@@ -15990,7 +16006,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Some _ | None -> ())
   | Account_login_json (view, generation, action, result) ->
       state.account_login_readings <- List.filter
-        (fun (held, gen) -> held != view || gen <> generation) state.account_login_readings;
+        (fun (held, gen, _) -> held != view || gen <> generation) state.account_login_readings;
       (* A closed model save or activation still owns its receipt and refresh. Workspace
          withdrawal cancels and drops both the open and detached views. *)
       (match List.find_opt (fun current -> current == view)

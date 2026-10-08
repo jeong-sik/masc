@@ -929,26 +929,6 @@ let clear_current_message_draft state =
   discard_recovered_paste_lock state;
   save_message_draft state
 
-let consume_dispatched_message_draft state request =
-  state.msg_drafts <-
-    List.filter
-      (fun ((workspace, keeper_name), draft) ->
-        not
-          (workspace = workspace_input_identity_of_server state.server_identity
-           && String.equal keeper_name request.Keeper_chat.keeper_name
-           && String.equal draft.kcd_text request.message
-           && draft.kcd_attachments = request.attachments
-           && draft.kcd_references = request.references))
-      state.msg_drafts;
-  match state.msg_target_keeper_name with
-  | Some keeper_name
-    when String.equal keeper_name request.Keeper_chat.keeper_name
-         && String.equal (Masc_tui_message_input.contents state.msg_input) request.message
-         && state.msg_attachments = [] && state.msg_references = []
-         && not (recovered_paste_send_locked state) ->
-      clear_current_message_draft state
-  | Some _ | None -> save_message_draft state
-
 (** Handle local editing keys for message mode. Network submission is injected
     so the input path never owns a blocking HTTP effect. *)
 (* One page of the transcript. Measured from the terminal rather than fixed,
@@ -15338,7 +15318,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               entry.phase <- Turn_streaming;
               append_user_history_once ~submitted_at:entry.submitted_at state
                 request;
-              consume_dispatched_message_draft state request;
+              (* Staging already consumed this request's composer. A late
+                 dispatch owns only its promoted request, never a newer draft,
+                 even when the operator types the same words again. *)
               add_event state "message"
                 (Printf.sprintf "%s Keeper request: %s"
                    (if was_replay then "Replaying exact" else "Dispatching")

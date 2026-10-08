@@ -617,6 +617,7 @@ let rec workspace_message_is_read = function
     (match request with Masc_tui_lane_declaration.Read _ -> true | Save _ -> false)
   | Account_login_json (_, _, action, _) -> account_login_action_is_read action
   | Workspace_identity_unconfirmed _
+  | Keeper_chat_operation_loaded _
   | Lane_application_loaded _
   | Lane_package_catalog_loaded _
   | Lane_package_preview_loaded _
@@ -753,6 +754,7 @@ let rec workspace_message_is_read = function
   | Surface_tool_approval_answered _
   | Keeper_tool_mode_set _
   | Keeper_chat_dispatch_blocked _
+  | Schedule_form_authority_refused _
   | Keeper_deletion_retry_done _
   | Keeper_action_done _
   | Board_new_post_done _

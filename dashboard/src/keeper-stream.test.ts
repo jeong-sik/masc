@@ -60,6 +60,24 @@ describe('Keeper operation stream projection', () => {
     keeperToolApprovals.value = {}
   })
 
+  it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {
+    assistantEntry()
+    for (const hasBody of [false, true]) {
+      if (hasBody) {
+        applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'authored text' })
+      }
+      const before = keeperThreads.value
+      expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+        value: { generation: 17, stream_scope: 0, block_index: 2, channel: 'text', state },
+      })).toBeNull()
+      // This view does not draw the side metadata. It must neither announce
+      // model progress nor finalize a live response or append authored bytes.
+      expect(keeperThreads.value).toBe(before)
+    }
+  })
+
   it('streams text into the selected assistant entry', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

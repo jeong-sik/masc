@@ -3039,6 +3039,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Runtime_attempt_started _
   | Masc_tui_keeper_chat_live.Stream_model_started _
   | Masc_tui_keeper_chat_live.Stream_details _
+  | Masc_tui_keeper_chat_live.Model_content_activity _
   | Masc_tui_keeper_chat_live.Stream_model_stopped
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add ~at:now turn_log.tl_log ~seq delta

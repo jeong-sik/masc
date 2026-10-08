@@ -135,7 +135,10 @@ Ctrl-F 는 `Origin_bare → Origin_inline → Origin_row → Origin_bare` 으로
 Thinking은 기본적으로 접어서 표시한다. `Ctrl-R`은 접힘 → 전체 → 숨김 순서로 돈다.
 Working은 턴이 진행 중이라는 뜻이다. Thinking·답변 델타를 실제로 받으면 진행줄에
 `THINKING`·`STREAMING`을 표시한다. 모델 응답 종료 이벤트가 오면 이 활동 표시를
-끝내고 `model response ended`로 표시한다. Keeper 턴과 대기 중 도구는 계속 진행될 수 있다.
+끝내고 `model response ended`로 표시한다. 개별 본문 조각의 종료가 확인되면
+아직 열린 Text·Thinking 조각 중 마지막으로 관측한 조각의 활동을 표시한다. 모두 닫혔으면
+`model content ended`로 표시하며, 이 말은 전체 모델 응답의 종료를 뜻하지 않는다.
+Keeper 턴과 대기 중 도구는 계속 진행될 수 있다.
 
 ## 끝난 일은 접힌다
 

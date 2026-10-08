@@ -84,6 +84,9 @@ type delta =
           producer suppresses exact replays within one open stream scope;
           every published start opens a new response even when a later scope
           reuses [message_id]. The id is optional correlation data. *)
+  | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
+      (** Exact run generation/scope/index metadata, separate from body bytes.
+          Ended closes only the named Text/Thinking occurrence. *)
   | Stream_model_stopped
       (** The provider response ended; the Keeper turn may still be running. *)
   | Stream_details of

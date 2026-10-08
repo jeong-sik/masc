@@ -408,6 +408,42 @@ describe('SSEMessageSchema', () => {
     },
   })
 
+  it.each([
+    ['text', 'observed'], ['thinking', 'observed'], ['text', 'ended'], ['thinking', 'ended'],
+  ])('accepts exact %s content %s metadata with or without provider correlation', (channel, state) => {
+    const activity = { generation: 17, stream_scope: 0, block_index: 2, channel, state }
+    for (const value of [activity, { ...activity, provider_message_id: 'reused-id' }]) {
+      const event = customEvent('KEEPER_MODEL_CONTENT_ACTIVITY', value)
+      const result = SSEMessageSchema.safeParse(event)
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.data.ag_ui_event).toEqual(event.ag_ui_event)
+    }
+  })
+
+  it('rejects malformed model activity without weakening the shared payload contract', () => {
+    const valid = { generation: 17, stream_scope: 0, block_index: 2, channel: 'text', state: 'observed' }
+    const malformed: unknown[] = [
+      null, [], 'observed',
+      { ...valid, generation: -1 }, { ...valid, stream_scope: -1 }, { ...valid, block_index: -1 },
+      { ...valid, generation: 1.5 }, { ...valid, stream_scope: '0' }, { ...valid, block_index: null },
+      { ...valid, generation: Number.MAX_SAFE_INTEGER + 1 },
+      { ...valid, generation: undefined }, { ...valid, stream_scope: undefined },
+      { ...valid, block_index: undefined },
+      { ...valid, channel: 'tool' }, { ...valid, state: 'success' },
+      { ...valid, channel: undefined }, { ...valid, state: undefined },
+      { ...valid, provider_message_id: '' }, { ...valid, provider_message_id: '  ' },
+      { ...valid, provider_message_id: null }, { ...valid, provider_message_id: 4 },
+      { ...valid, provider_message_id: undefined }, { ...valid, delta: 'not body text' },
+    ]
+    for (const value of malformed) {
+      expect(SSEMessageSchema.safeParse(customEvent('KEEPER_MODEL_CONTENT_ACTIVITY', value)).success).toBe(false)
+    }
+    for (const field of ['generation', 'stream_scope', 'block_index', 'channel', 'state']) {
+      const value = Object.fromEntries(Object.entries(valid).filter(([key]) => key !== field))
+      expect(SSEMessageSchema.safeParse(customEvent('KEEPER_MODEL_CONTENT_ACTIVITY', value)).success).toBe(false)
+    }
+  })
+
   it('accepts the null runtime-attempt boundary event', () => {
     const r = SSEMessageSchema.safeParse(
       customEvent('KEEPER_RUNTIME_ATTEMPT_STARTED', null),

@@ -55,6 +55,19 @@ type tool_stream_occurrence =
     live row authority. Provider message/call ids are optional correlation
     data and may be blank or reused. *)
 
+type model_content_channel = Model_text | Model_thinking
+
+type model_content_state = Content_observed | Content_ended
+
+type model_content_activity =
+  { content_generation : int
+  ; content_scope : int
+  ; content_index : int
+  ; content_provider_message_id : string option
+  ; channel : model_content_channel
+  ; state : model_content_state
+  }
+
 type stream_protocol_error = {
   kind : stream_protocol_error_kind;
   quarantined_occurrence : tool_stream_occurrence option;
@@ -134,6 +147,7 @@ type keeper_chat_event =
       ; tool_call_name : string option
       }
   | Agent_core_content_block_stop of { index : int }
+  | Model_content_activity of model_content_activity
   | Agent_core_thinking_delta of { index : int; delta : string }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
   | Agent_core_media_delta of
@@ -344,3 +358,17 @@ val stream_protocol_error_kind_of_string :
   string -> stream_protocol_error_kind option
 val stream_protocol_error_summary : stream_protocol_error -> string
 val stream_protocol_error_to_json : stream_protocol_error -> Yojson.Safe.t
+
+(** Exact run generation, server stream scope and content index own model activity. Provider
+    message ids are optional correlation only. Observed requires a nonempty
+    accepted payload; Ended closes only that occurrence, not the response,
+    tool, or Keeper turn. The strict shared codec rejects duplicate/unknown
+    keys, invalid indices and unknown channels/states. *)
+val model_content_activity_to_json : model_content_activity -> Yojson.Safe.t
+val model_content_activity_of_json : Yojson.Safe.t -> (model_content_activity, string) result
+
+(** Publish and return the actual sequence assigned to this event. The same
+    single-publisher/backpressure contract as [publish] applies. Run publishers
+    use their Run_started sequence as the content generation, so worker-local
+    scope counters can restart without colliding in an appended journal. *)
+val publish_with_sequence : t -> keeper_chat_event -> int

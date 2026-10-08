@@ -35,6 +35,7 @@ type delta =
       ; model : string
       ; usage : stream_usage option
       }
+  | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
   | Stream_model_stopped
   | Stream_details of
       { usage : stream_usage option
@@ -279,6 +280,13 @@ let custom_deltas_unvalidated fields =
               } ]
         | _ -> [])
      | None -> [])
+  | Some "KEEPER_MODEL_CONTENT_ACTIVITY" ->
+    (match List.assoc_opt "value" fields with
+     | None -> [Undecodable "KEEPER_MODEL_CONTENT_ACTIVITY requires value"]
+     | Some json ->
+       match Masc.Keeper_chat_events.model_content_activity_of_json json with
+       | Ok activity -> [Model_content_activity activity]
+       | Error detail -> [Undecodable detail])
   | Some "KEEPER_STREAM_MESSAGE_STOP" ->
     (match List.assoc_opt "value" fields with
      | Some `Null -> [ Stream_model_stopped ]

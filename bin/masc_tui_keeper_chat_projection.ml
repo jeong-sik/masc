@@ -765,7 +765,7 @@ let current_custom_names =
   ; "KEEPER_STREAM_MESSAGE_START"
   ; "KEEPER_STREAM_MESSAGE_DELTA"; "KEEPER_STREAM_MESSAGE_STOP"
   ; "KEEPER_STREAM_PING"; "KEEPER_CONTENT_BLOCK_START"
-  ; "KEEPER_CONTENT_BLOCK_STOP"; "KEEPER_THINKING_DELTA"
+  ; "KEEPER_CONTENT_BLOCK_STOP"; "KEEPER_THINKING_DELTA"; "KEEPER_MODEL_CONTENT_ACTIVITY"
   ; "KEEPER_THINKING_SIGNATURE_DELTA"; "KEEPER_MEDIA_DELTA"
   ; "KEEPER_STREAM_PROTOCOL_ERROR"; "KEEPER_CONTINUATION_CHECKPOINT"
   ; "KEEPER_CHAT_BATCH_BOUND"; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
@@ -785,6 +785,10 @@ let null_custom_names =
 let validate_custom_value ~name value =
   if String.equal name "KEEPER_CHAT_OPERATION_ACCEPTED" then
     Result.map (fun _ -> ()) (decode_acceptance value)
+  else if String.equal name "KEEPER_MODEL_CONTENT_ACTIVITY" then
+    Masc.Keeper_chat_events.model_content_activity_of_json value
+    |> Result.map (fun _ -> ())
+    |> Result.map_error (fun detail -> Malformed_event detail)
   else if String.equal name "KEEPER_RUNTIME_ATTEMPT_STARTED" then
     match value with
     | `Null -> Ok ()

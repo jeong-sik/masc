@@ -1,4 +1,4 @@
-"""Actual TUI: provider stop ends activity, while the Keeper turn stays open."""
+"""Actual TUI with controlled SSE: content, response and turn ends stay distinct."""
 import json
 import os
 import sys
@@ -14,6 +14,8 @@ def run(executable):
     stop_answer = threading.Event()
     resume_reasoning = threading.Event()
     stop_reasoning = threading.Event()
+    content_gates = {stage: threading.Event() for stage in (
+        "overlap", "thinking-ended", "text-ended", "native-start", "native-end")}
 
     def stream(body):
         request = json.loads(body)
@@ -26,6 +28,16 @@ def run(executable):
                 "timestamp": time.time(), "name": name, "value": value,
             }) + "\n\n").encode()
 
+        def activity(scope, index, channel, state, provider_message_id=None):
+            value = {"generation": 0, "stream_scope": scope,
+                     "block_index": index, "channel": channel, "state": state}
+            if provider_message_id is not None:
+                value["provider_message_id"] = provider_message_id
+            return event("KEEPER_MODEL_CONTENT_ACTIVITY", value)
+
+        def content_gate(stage):
+            assert content_gates[stage].wait(timeout=15), f"{stage} was not released"
+
         def chunks():
             original = response.chunks()
             try:
@@ -35,13 +47,30 @@ def run(executable):
                         value = json.loads(block.removeprefix(b"data: "))
                         value["timestamp"] = time.time()
                         prefix.append(("data: " + json.dumps(value)).encode())
-                yield b"\n\n".join(prefix) + b"\n\n"
+                yield (b"\n\n".join(prefix) + b"\n\n"
+                       + activity(0, 0, "text", "observed"))
+                content_gate("overlap")
+                yield (event("KEEPER_THINKING_DELTA", {"index": 1, "delta": "checking alongside the answer"})
+                       + activity(0, 1, "thinking", "observed"))
+                content_gate("thinking-ended")
+                yield activity(0, 1, "thinking", "ended")
+                content_gate("text-ended")
+                yield activity(0, 0, "text", "ended")
+                # Native activity owns the leading status clause while open.
+                # Its end must reveal the retained content-ended state again.
+                native = {"toolStreamScope": 0, "toolCallBlockIndex": 2,
+                          "toolCallId": "native-phase-read", "toolCallName": "Read"}
+                content_gate("native-start")
+                yield event("KEEPER_NATIVE_TOOL_START", native)
+                content_gate("native-end")
+                yield event("KEEPER_NATIVE_TOOL_END", native)
                 assert stop_answer.wait(timeout=15), "answer stop was not released"
                 yield event("KEEPER_STREAM_MESSAGE_STOP", None)
                 assert resume_reasoning.wait(timeout=15), "next response was not released"
                 yield event("KEEPER_STREAM_MESSAGE_START", {
                     "provider_message_id": "next-response", "model": "observed-model"})
-                yield event("KEEPER_THINKING_DELTA", {"index": 0, "delta": "considering next step"})
+                yield (event("KEEPER_THINKING_DELTA", {"index": 0, "delta": "considering next step"})
+                       + activity(1, 0, "thinking", "observed", "next-response"))
                 assert stop_reasoning.wait(timeout=15), "reasoning stop was not released"
                 yield event("KEEPER_STREAM_MESSAGE_STOP", None)
                 yield from original
@@ -74,6 +103,21 @@ def run(executable):
             os.write(fd, b"\r")
             observe("answering", b"STREAMING")
             start = len(output)
+            content_gates["overlap"].set()
+            observe("content-overlap", b"THINKING", (b"model content ended", b"model response ended"), start=start)
+            start = len(output)
+            content_gates["thinking-ended"].set()
+            observe("thinking-content-ended", b"STREAMING", (b"THINKING", b"model content ended"), start=start)
+            start = len(output)
+            content_gates["text-ended"].set()
+            observe("content-ended", b"model content ended", (b"STREAMING", b"THINKING", b"model response ended"), start=start)
+            start = len(output)
+            content_gates["native-start"].set()
+            observe("native-after-content", b"native running", (b"STREAMING", b"THINKING", b"model response ended"), start=start)
+            start = len(output)
+            content_gates["native-end"].set()
+            observe("native-ended", b"model content ended", (b"native running", b"STREAMING", b"THINKING", b"model response ended"), start=start)
+            start = len(output)
             stop_answer.set()
             observe("answer-ended", b"model response ended", (b"STREAMING", b"THINKING"), start=start)
             start = len(output)
@@ -92,11 +136,13 @@ def run(executable):
             stop_answer.set()
             resume_reasoning.set()
             stop_reasoning.set()
+            for gate in content_gates.values():
+                gate.set()
             fixture.release.set()
             fixture.release_interrupt.set()
 
     h.run_terminal_scenario(executable,
-        description="Provider response stop clears activity without ending the Keeper turn",
+        description="Content identities and provider response stop preserve the open Keeper turn",
         interact=interact, http_fixtures=fixture.fixtures, refresh=0.2)
 
 

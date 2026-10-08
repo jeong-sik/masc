@@ -53,17 +53,21 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
   (* This producer has no channel adapter: its only reader is the authenticated
      journal endpoint. Disable queue backpressure while retaining the hook. *)
   Option.iter Events.reader_gone events;
+  let run_id = Ids.Turn_ref.to_string turn_ref in
+  let content_generation = match events with
+    | Some events -> Events.publish_with_sequence events
+        (Events.Run_started {run_id; thread_id="keeper:" ^ keeper_name})
+    | None -> 0 (* No journal or publication exists in this branch. *) in
   let t =
     { base_path; keeper_name; turn_ref; events; accum = Accum.create ();
       text = Keeper_stream_text_redaction.Scoped.create redaction;
       redact_text = Keeper_secret_redaction.redact_text redaction;
-      mutex = Eio.Mutex.create (); bridge = Bridge.empty_state (); closed = false }
+      mutex = Eio.Mutex.create (); bridge = Bridge.empty_state
+        ~generation:content_generation (); closed = false }
   in
   Option.iter (fun _ -> with_current (fun () ->
     Hashtbl.replace current_turns (base_path, keeper_name) turn_ref)) events;
-  let run_id = Ids.Turn_ref.to_string turn_ref in
   Option.iter (fun events ->
-    Events.publish events (Events.Run_started { run_id; thread_id = "keeper:" ^ keeper_name });
     Events.publish events (Events.Text_message_start { message_id = run_id ^ ":assistant"; role = Events.Assistant })) events;
   t)
 

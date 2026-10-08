@@ -29,7 +29,9 @@ type translated_event = {
 }
 (** Result of translating one typed AGENT_CORE stream event. *)
 
-val empty_state : unit -> state
+(** [generation] is the seq of this run's Run_started, assigned by its single
+    journal publisher. The default 0 is for an isolated standalone stream. *)
+val empty_state : ?generation:int -> unit -> state
 
 val start_runtime_attempt
   :  ?runtime_id:string

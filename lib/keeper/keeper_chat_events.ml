@@ -37,6 +37,19 @@ type tool_stream_occurrence =
   ; block_index : int
   }
 
+type model_content_channel = Model_text | Model_thinking
+
+type model_content_state = Content_observed | Content_ended
+
+type model_content_activity =
+  { content_generation : int
+  ; content_scope : int
+  ; content_index : int
+  ; content_provider_message_id : string option
+  ; channel : model_content_channel
+  ; state : model_content_state
+  }
+
 type stream_protocol_error = {
   kind : stream_protocol_error_kind;
   quarantined_occurrence : tool_stream_occurrence option;
@@ -99,6 +112,7 @@ type keeper_chat_event =
       ; tool_call_name : string option
       }
   | Agent_core_content_block_stop of { index : int }
+  | Model_content_activity of model_content_activity
   | Agent_core_thinking_delta of { index : int; delta : string }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
   | Agent_core_media_delta of
@@ -240,7 +254,7 @@ let create ?(first_seq = 0) ?(now = Time_compat.now) ?on_publish () =
    (Eio_unix.run_in_systhread when called from an Eio fiber), which suspends
    only the calling fiber — that keeps sibling fibers responsive but is not
    what makes the ordering safe. *)
-let publish t event =
+let publish_with_sequence t event =
   if t.closed
   then invalid_arg "Keeper_chat_events.publish: the turn's event bus is closed";
   let seq = t.next_seq in
@@ -264,11 +278,15 @@ let publish t event =
           "keeper_chat_events: on_publish hook failed seq=%d: %s"
           seq
           (Printexc.to_string exn)));
-  match t.reader with
+  (match t.reader with
   (* The hook above already recorded this event and the bus is only the live
      projection, so a departed reader costs the turn nothing from here. *)
   | Ended | Gone -> ()
-  | Reading -> Eio.Stream.add t.stream (Item { seq; ts; event })
+  | Reading -> Eio.Stream.add t.stream (Item { seq; ts; event }));
+  seq
+;;
+
+let publish t event = ignore (publish_with_sequence t event : int)
 ;;
 
 let close t =
@@ -475,3 +493,49 @@ let stream_protocol_error_to_json error =
     @ json_opt "raw_bytes" (Option.map (fun value -> `Int value) error.raw_bytes)
   in
   `Assoc fields
+
+let model_content_activity_to_json (activity : model_content_activity) =
+  `Assoc
+    ([ "generation", `Int activity.content_generation
+     ; "stream_scope", `Int activity.content_scope
+     ; "block_index", `Int activity.content_index
+     ; "channel", `String (match activity.channel with Model_text -> "text" | Model_thinking -> "thinking")
+     ; "state", `String (match activity.state with Content_observed -> "observed" | Content_ended -> "ended")
+     ] @ match activity.content_provider_message_id with
+       | None -> []
+       | Some id -> ["provider_message_id", `String id])
+;;
+
+let model_content_activity_of_json json =
+  let error detail = Error ("model content activity: " ^ detail) in
+  match json with
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    let allowed = ["generation"; "stream_scope"; "block_index"; "provider_message_id"; "channel"; "state"] in
+    if List.length (List.sort_uniq String.compare keys) <> List.length keys then
+      error "duplicate field"
+    else if List.exists (fun key -> not (List.mem key allowed)) keys then
+      error "unknown field"
+    else
+      let ( let* ) = Result.bind in
+      let index key = match List.assoc_opt key fields with
+        | Some (`Int value) when value >= 0 -> Ok value
+        | _ -> error (key ^ " must be a nonnegative integer") in
+      let* content_generation = index "generation" in
+      let* stream_scope = index "stream_scope" in
+      let* block_index = index "block_index" in
+      let* provider_message_id = match List.assoc_opt "provider_message_id" fields with
+        | None -> Ok None
+        | Some (`String id) when String.trim id <> "" -> Ok (Some id)
+        | _ -> error "provider_message_id must be a nonblank string when present" in
+      let* channel = match List.assoc_opt "channel" fields with
+        | Some (`String "text") -> Ok Model_text
+        | Some (`String "thinking") -> Ok Model_thinking
+        | _ -> error "unknown channel" in
+      let* state = match List.assoc_opt "state" fields with
+        | Some (`String "observed") -> Ok Content_observed
+        | Some (`String "ended") -> Ok Content_ended
+        | _ -> error "unknown state" in
+      Ok {content_generation; content_scope=stream_scope; content_index=block_index; content_provider_message_id=provider_message_id; channel; state}
+  | _ -> error "expected object"
+;;

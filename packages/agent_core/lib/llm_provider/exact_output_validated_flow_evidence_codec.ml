@@ -332,6 +332,9 @@ let parse_failure ~path json =
        let* fields = exact_assoc ~path [ "kind"; "http_status" ] json in
        let* http_status = int_field ~path fields "http_status" in
        Ok (Server_error { http_status })
+     | Some (`String "output_limit_reached") ->
+       let* _ = exact_assoc ~path [ "kind" ] json in
+       Ok Output_limit_reached
      | Some (`String "invalid_json_output") ->
        let* _ = exact_assoc ~path [ "kind" ] json in
        Ok Invalid_json_output

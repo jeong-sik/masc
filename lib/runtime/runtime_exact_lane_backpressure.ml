@@ -81,6 +81,7 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
   | Exact.Provider_response_refused _
   | Exact.Completion_failed _
   | Exact.Response_body_deadline_exceeded
+  | Exact.Output_limit_reached
   | Exact.Incomplete_output
   | Exact.Missing_output
   | Exact.Ambiguous_output _

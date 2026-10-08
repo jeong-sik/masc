@@ -1,5 +1,4 @@
 import { signal } from '@preact/signals'
-import { formatKeeperVisibleReply } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isInFlightDelivery } from './lib/keeper-delivery'
 import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './components/common/normalize'
@@ -697,8 +696,7 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
 export function attachKeeperAudioClip(name: string, rawAudio: unknown): boolean {
   const clip = normalizeAudioClip(rawAudio)
   if (!clip) return false
-  const targetText = formatKeeperVisibleReply(clip.messageText).trim()
-  const rawTarget = clip.messageText.trim()
+  const targetText = clip.messageText.trim()
   const existing = keeperThreads.value[name] ?? []
   let updated = false
   const next = existing.map((entry) => {
@@ -707,8 +705,7 @@ export function attachKeeperAudioClip(name: string, rawAudio: unknown): boolean 
     const entryText = entry.text.trim()
     const entryRawText = (entry.rawText ?? entry.text).trim()
     if (
-      (targetText && entryText === targetText)
-      || (rawTarget && entryRawText === rawTarget)
+      targetText && (entryText === targetText || entryRawText === targetText)
     ) {
       updated = true
       return { ...entry, audio: clip }
@@ -898,7 +895,7 @@ function normalizeHistoryEntry(
   const id = asString(raw.id)?.trim() ?? ''
   if (!id) return null
   const role = normalizeRole(raw.role)
-  const rawText = asString(raw.content) ?? asString(raw.preview) ?? ''
+  const rawText = asString(raw.content, asString(raw.preview, ''))
   const attachments = normalizeAttachments(raw.attachments)
   const audio = normalizeAudioClip(raw.audio) ?? null
   const serverBlocks = normalizeBlocks(raw.blocks, role)
@@ -915,8 +912,8 @@ function normalizeHistoryEntry(
     !!attachments?.length || !!audio || hasRenderableBlocks || approvalLifecycle != null
   if (!rawText && !carriesOwnRendering) return null
   const source = normalizeConversationSource(raw.source, role, rawText, previousSource)
-  const text = formatKeeperVisibleReply(rawText)
-  if (!text && !carriesOwnRendering) return null
+  const text = rawText
+  if (!text.trim() && !carriesOwnRendering) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = normalizeSurfaceRef(raw.surface)
@@ -1125,7 +1122,7 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
   updateThreadEntry(name, entryId, entry => ({
     ...entry,
     rawText: `${entry.rawText ?? entry.text}${delta}`,
-    text: formatKeeperVisibleReply(`${entry.rawText ?? entry.text}${delta}`),
+    text: `${entry.rawText ?? entry.text}${delta}`,
     streamState: 'streaming',
     delivery: 'streaming',
     streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {

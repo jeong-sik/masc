@@ -13,6 +13,7 @@ type get_route =
       ; raw_operation_id : string
       }
   | Chat_events of { keeper_name : string }
+  | Turn_events of { keeper_name : string; raw_turn_ref : string }
 
 (* Operation reads carry state and input the dashboard already shows. The
    event log carries the turn's reasoning in full, which /raw-trace and
@@ -20,7 +21,7 @@ type get_route =
    gate (server_dashboard_http_keeper_api_types.ml, keeper_get_permission). *)
 let get_permission = function
   | Operation_list _ | Operation_exact _ -> Masc_domain.CanReadState
-  | Chat_events _ -> Masc_domain.CanAdmin
+  | Chat_events _ | Turn_events _ -> Masc_domain.CanAdmin
 ;;
 
 type mutation =
@@ -56,6 +57,8 @@ let get_route path =
     Some (Operation_exact { keeper_name; raw_operation_id })
   | [ "api"; "v1"; "keepers"; keeper_name; "chat"; "events" ] ->
     Some (Chat_events { keeper_name })
+  | [ "api"; "v1"; "keepers"; keeper_name; "turns"; raw_turn_ref; "events" ] ->
+    Some (Turn_events { keeper_name; raw_turn_ref })
   | _ -> None
 ;;
 
@@ -274,7 +277,7 @@ let no_journal_for_settled_operation_message ~operation_id =
   "no journal exists for Keeper chat operation " ^ operation_id ^ ", which has ended"
 ;;
 
-let chat_events_page ~operation_id ~since_seq ~redact_json (page : Keeper_chat_event_log.page) =
+let journal_events_page ~schema ~identity ~since_seq ~redact_json (page : Keeper_chat_event_log.page) =
   (* The position to feed back: after the last event served, or the caller's
      own position when the page is empty — [null] when that was the whole
      journal, since a response field cannot be absent the way a request field
@@ -286,8 +289,8 @@ let chat_events_page ~operation_id ~since_seq ~redact_json (page : Keeper_chat_e
       Keeper_chat_event_log.After_seq last.seq
   in
   `Assoc
-    [ "schema", `String "masc.keeper_chat_events.v2"
-    ; "operation_id", `String operation_id
+    [ "schema", `String schema
+    ; identity
     ; ( "events"
       , `List
           (List.map
@@ -297,6 +300,16 @@ let chat_events_page ~operation_id ~since_seq ~redact_json (page : Keeper_chat_e
     ; "next_since_seq", Keeper_chat_event_log.replay_position_to_yojson next_since_seq
     ; "next_since_offset", `Int page.next_offset
     ]
+;;
+
+let chat_events_page ~operation_id ~since_seq ~redact_json page =
+  journal_events_page ~schema:"masc.keeper_chat_events.v2"
+    ~identity:("operation_id", `String operation_id) ~since_seq ~redact_json page
+;;
+
+let turn_events_page ~turn_ref ~since_seq ~redact_json page =
+  journal_events_page ~schema:"masc.keeper_turn_events.v1"
+    ~identity:("turn_ref", `String (Ids.Turn_ref.to_string turn_ref)) ~since_seq ~redact_json page
 ;;
 
 (* Everything the events route reads off the query, parsed once. The handler
@@ -339,6 +352,44 @@ let events_page_of_rows ~path ~redact_json query rows =
 ;;
 
 let handle_get state request reqd = function
+  | Turn_events { keeper_name; raw_turn_ref } ->
+    let query =
+      let ( let* ) = Result.bind in
+      let* turn_ref = match Ids.Turn_ref.of_string raw_turn_ref with
+        | Some turn_ref -> Ok turn_ref
+        | None -> Error (invalid_input "turn_ref must identify a durable Keeper turn") in
+      let* since_seq = parse_since_seq request in
+      let* start = parse_since_offset request in
+      let* limit = parse_limit request in
+      Ok (turn_ref, since_seq, start, limit)
+    in
+    (match query with
+     | Error error -> respond_error request reqd error
+     | Ok (turn_ref, since_seq, start, limit) ->
+       let base_path = base_path state in
+       let path = Keeper_chat_event_log.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
+       let rows = match Keeper_chat_event_log.read_journal_rows_path path with
+         | Ok rows -> Ok rows
+         | Error Keeper_chat_event_log.Journal_missing ->
+             (match Keeper_autonomous_stream.current ~base_path ~keeper_name with
+              | Some current when Ids.Turn_ref.equal current turn_ref -> Ok ""
+              | Some _ | None -> Error {status=`Not_found; code="journal_missing";
+                  message="No autonomous event journal exists for this turn"})
+         | Error (Journal_unreadable detail) -> Error (unavailable "journal_unreadable" detail)
+         | Error (Journal_corrupt detail) -> Error (unavailable "journal_corrupt" detail)
+       in
+       (match rows with
+        | Error error -> respond_error request reqd error
+        | Ok rows ->
+          let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+          let page = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit rows
+            |> Result.map (turn_events_page ~turn_ref ~since_seq
+                 ~redact_json:(Keeper_secret_redaction.redact_json redaction))
+            |> Result.map_error page_failure_error) in
+          (match page with
+           | Ok body -> Server_auth.respond_json_value_with_cors request reqd body
+           | Error error -> respond_error request reqd error)))
   | Chat_events { keeper_name } ->
     (match parse_events_request request with
      | Error error -> respond_error request reqd error

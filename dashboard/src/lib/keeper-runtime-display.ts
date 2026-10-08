@@ -398,7 +398,6 @@ const runtimeBlockerLabels = {
   provider_runtime_error: '런타임 호출 오류',
   official_client_recovery_required: '공식 클라이언트 세션 복구 필요',
   fiber_unresolved: 'Fiber 미해결',
-  stale_termination_storm: 'Stale 종료 폭주',
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',
   exception: '런타임 예외',
@@ -440,9 +439,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'fiber_unresolved') {
     return 'Keeper fiber가 종료 상태를 확정하지 못해 supervisor 확인이 필요합니다.'
-  }
-  if (blockerClass === 'stale_termination_storm') {
-    return 'Stale watchdog 종료가 반복되어 restart 전에 원인 확인이 필요합니다.'
   }
   if (blockerClass === 'heartbeat_failures') {
     return '하트비트 실패가 누적되어 keeper 생존 상태 확인이 필요합니다.'

@@ -77,6 +77,13 @@ assert.equal((await command({...observed,action:'click_at'})).ok,true);
 assert.equal(clicked,2);
 assert.equal((await command({...observed,action:'click_at',viewport:{...viewport,height:700}})).error,'observed_viewport_changed');
 assert.equal((await command({...observed,action:'drag',from:point,to:point})).error,'trusted_drag_requires_automation');
+const beforeHoverExecutions = executions;
+const unsupportedHover = await command({...observed,action:'hover_at'});
+assert.equal(unsupportedHover.ok,false);
+assert.equal(unsupportedHover.error,'trusted_hover_requires_live_bidi_connection');
+assert.equal(unsupportedHover.effectPhase,'not_started');
+assert.equal(executions,beforeHoverExecutions,'unsupported hover never injects page input');
+assert.equal(clicked,2,'hover rejection does not click');
 const pane = {scrollTop:0,scrollLeft:0,scrollHeight:1000,clientHeight:200,scrollWidth:100,clientWidth:100,
   parentElement:null,getRootNode:()=>({}),scrollBy({top}) {this.scrollTop=Math.max(-800,Math.min(0,this.scrollTop+top));}};
 button.parentElement=pane;

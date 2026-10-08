@@ -77,7 +77,6 @@ let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepal
 
 let should_run_turn_after_event_intake
       ~scheduled
-      ~consumed_stimulus_count
       ~event_queue_intake_error
   =
   scheduled
@@ -85,7 +84,6 @@ let should_run_turn_after_event_intake
   match event_queue_intake_error with
   | None | Some (Stimulus_intake.Connector_read_failed _)
   | Some (Stimulus_intake.Connector_item_missing _) -> true
-  | Some (Stimulus_intake.Transient_board_read _) -> consumed_stimulus_count > 0
   | Some (Stimulus_intake.Pending_selection_failed _) -> false
 ;;
 
@@ -756,13 +754,11 @@ let failure_reason_after_turn_status ~turn_fail_count current =
     | Some
         ( Keeper_registry.Heartbeat_consecutive_failures _
           (* Phase 1 records this while workspace I/O is failing now. *)
-        | Keeper_registry.Stale_termination_storm _
         | Keeper_registry.Provider_runtime_error _
         | Keeper_registry.Turn_configuration_error _
         | Keeper_registry.Official_client_recovery_required _
         | Keeper_registry.Fiber_unresolved _
         | Keeper_registry.Exception _
-        | Keeper_registry.Turn_overflow_failure
         | Keeper_registry.Operator_interrupt ) -> current
 ;;
 
@@ -1021,7 +1017,6 @@ let run_keepalive_unified_turn
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn
-          ~consumed_stimulus_count:(Keeper_heartbeat_source_batch.count event_intake.source_batch)
           ~event_queue_intake_error:event_intake.event_queue_intake_error
       in
       let verdict_strs =

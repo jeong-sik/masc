@@ -11,18 +11,14 @@
    heartbeat forever.
 
    These tests pin:
-   1. [disposition_of_error] classifies every [Board.board_error] variant —
-      the compiler enforces exhaustiveness, this test pins the actual table.
-   2. the incident's exact shape (a stimulus naming a post_id that was never
-      created) no longer raises, is reported as [Error unavailable]
-      classified [Permanent], and the stimulus-intake layer consumes it
-      without crashing — stable across a second pass, unlike the old
-      exception-based loop.
-   3. a transient read failure is not collapsed into the permanent-consume
-      path: the exact queue selection remains pending and provider dispatch
-      is blocked until a later intake can render it.
-   4. a queued comment keeps its own author and body after later replies.
-   5. Board replay routes exact replies instead of historical participation. *)
+   1. the incident's exact shape (a stimulus naming a post_id that was never
+      created) does not raise, is reported as [Error unavailable] naming the
+      missing post, and the stimulus-intake layer consumes it without
+      crashing — stable across a second pass.
+   2. a source that renders no observation still spends an admission slot,
+      and a missing post does not.
+   3. a queued comment keeps its own author and body after later replies.
+   4. Board replay routes exact replies instead of historical participation. *)
 
 open Alcotest
 open Masc
@@ -65,42 +61,7 @@ let test_meta name =
   | Error message -> Alcotest.failf "test meta failed: %s" message
 ;;
 
-(* (1) Exhaustive classification, pinned. A future new [Board.board_error]
-   variant forces [disposition_of_error] to grow (compiler-enforced); this
-   test pins today's actual poison/transient split so a change to the table
-   is a deliberate, reviewed diff rather than a silent behavior change. *)
-let test_disposition_of_error_classifies_every_variant () =
-  let module BS = Keeper_world_observation_board_signal in
-  let is_permanent err = BS.disposition_of_error err = BS.Permanent in
-  let is_transient err = BS.disposition_of_error err = BS.Transient in
-  check bool "Post_not_found is permanent (post swept, never resolves on retry)" true
-    (is_permanent (Board.Post_not_found "p"));
-  check bool "Comment_not_found is permanent (same argument, for a comment id)" true
-    (is_permanent (Board.Comment_not_found "c"));
-  check bool "Invalid_id is permanent (malformed id string never becomes valid)" true
-    (is_permanent (Board.Invalid_id "bad id"));
-  check bool "Io_error is transient (store/disk hiccup, retry may succeed)" true
-    (is_transient (Board.Io_error "disk hiccup"));
-  check bool "Validation_error is permanent (deterministic input-validation failure)" true
-    (is_permanent (Board.Validation_error "x"));
-  check bool "Already_voted is permanent (deterministic action conflict)" true
-    (is_permanent (Board.Already_voted "x"));
-  check bool "Already_exists is permanent (deterministic conflict)" true
-    (is_permanent (Board.Already_exists "x"));
-  check bool "Unauthorized is permanent (deterministic identity rejection)" true
-    (is_permanent (Board.Unauthorized "x"))
-;;
-
 let poison_post_id = "nonexistent-post-poison-test"
-
-let transient_unavailable post_id :
-  Keeper_world_observation_board_signal.board_unavailable
-  =
-  { operation = Keeper_world_observation_board_signal.Get_post
-  ; post_id
-  ; error = Board.Io_error "forced transient board read failure"
-  }
-;;
 
 (* A [Board_signal] stimulus naming a post_id that was never created in this
    test's isolated JSONL store — the exact shape of the reported incident
@@ -122,9 +83,9 @@ let poison_board_signal_stimulus () : Keeper_event_queue.stimulus =
   }
 ;;
 
-(* (2) [pending_board_event_of_stimulus] must report the failed board read
-   as [Error unavailable] — never raise — and it must classify [Permanent],
-   the dominant real crash-loop cause. *)
+(* (1) [pending_board_event_of_stimulus] must report the failed board read
+   as [Error unavailable] — never raise — naming the missing post, the
+   dominant real crash-loop cause. *)
 let test_poison_stimulus_reports_permanent_error () =
   let meta = test_meta "poison-report" in
   match
@@ -143,13 +104,13 @@ let test_poison_stimulus_reports_permanent_error () =
          poison_post_id);
     check
       bool
-      "classifies Permanent (masc keeper-cycle-exception incident cause)"
+      "answers that the post is missing (masc keeper-cycle-exception incident cause)"
       true
-      (Keeper_world_observation_board_signal.disposition_of_unavailable unavailable
-       = Keeper_world_observation_board_signal.Permanent)
+      (unavailable.Keeper_world_observation_board_signal.error
+       = Board.Read_post_not_found poison_post_id)
 ;;
 
-(* (3) The stimulus-intake layer is where the crash actually happened:
+(* (1) The stimulus-intake layer is where the crash actually happened:
    [Board_signal.raise_unavailable] propagated past every catch site up to
    [keeper_heartbeat_loop.ml]'s generic exception handler, which requeued
    the lease as [Cycle_crashed] — so the SAME poisoned stimulus re-crashed
@@ -175,11 +136,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
        (List.length events)
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _ ->
-     fail "Board source reported a connector read failure"
-   | Keeper_heartbeat_stimulus_intake.Stimulus_retry_later unavailable ->
-     failf
-       "permanent poison stimulus was incorrectly retained: %s"
-       (Keeper_world_observation_board_signal.unavailable_to_string unavailable));
+     fail "Board source reported a connector read failure");
   let second_pass =
     Keeper_heartbeat_stimulus_intake.pending_board_events_of_stimulus_result
       ~meta_after_triage:meta
@@ -195,10 +152,6 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
   | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _ ->
     fail "Board source reported a connector read failure"
-  | Keeper_heartbeat_stimulus_intake.Stimulus_retry_later unavailable ->
-    failf
-      "permanent poison stimulus was incorrectly retained on repeat: %s"
-      (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
 ;;
 
 let test_poison_durable_source_is_retired_during_intake () =
@@ -259,174 +212,9 @@ let test_poison_durable_source_is_retired_during_intake () =
     (Keeper_event_queue.length queued)
 ;;
 
-let test_transient_result_is_retryable () =
-  let unavailable = transient_unavailable "transient-classification" in
-  match
-    Keeper_heartbeat_stimulus_intake.classify_pending_board_event_result
-      (Error unavailable)
-  with
-  | Keeper_heartbeat_stimulus_intake.Stimulus_retry_later actual ->
-    check
-      string
-      "retry retains exact post id"
-      unavailable.post_id
-      actual.post_id
-  | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _
-   | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _ ->
-    fail "Board source reported a connector read failure"
-  | Keeper_heartbeat_stimulus_intake.Stimulus_consumed _ ->
-    fail "transient board read was collapsed into consumed"
-;;
-
-let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio.Switch.run
-  @@ fun sw ->
-  let base_path = fresh_test_base_path () in
-  Board.reset_global_for_test ();
-  Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
-  Keeper_registry.For_testing.clear ();
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 0;
-      Keeper_registry.For_testing.clear ())
-  @@ fun () ->
-  let meta = test_meta "transient-intake" in
-  let config = Workspace.default_config base_path in
-  let ctx : _ Keeper_types_profile.context =
-    { config
-    ; agent_name = "board-unavailable-test"
-    ; sw
-    ; clock = Eio.Stdenv.clock env
-    ; proc_mgr = None
-    ; net = None
-    ; publication_recovery_provider =
-        Masc_test_deps.non_runtime_publication_recovery_provider
-    }
-  in
-  ignore
-    (Keeper_registry.For_testing.register
-       ~base_path
-       meta.name
-       meta);
-  let post =
-    match
-      Board_dispatch.create_post
-        ~author:"external-author"
-        ~content:"transient source remains available after retry"
-        ~post_kind:Board.Human_post
-        ~visibility:Board.Internal
-        ()
-    with
-    | Ok post -> post
-    | Error error ->
-      failf "failed to create retryable Board source: %s" (Board.show_board_error error)
-  in
-  let stimulus =
-    { (poison_board_signal_stimulus ()) with
-      post_id = Board.Post_id.to_string post.id
-    }
-  in
-  (match
-     Keeper_registry_event_queue.enqueue_durable_result
-       ~base_path
-       meta.name
-       stimulus
-   with
-   | Ok () -> ()
-   | Error message -> failf "failed to seed durable stimulus: %s" message);
-  Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
-  let intake =
-    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
-      ~ctx
-      ~meta_after_triage:meta
-      ~pending_board_events:[]
-  in
-  check int "transient source is not counted consumed" 0 (Keeper_heartbeat_source_batch.count intake.source_batch);
-  check int "transient source is not exposed as consumed" 0
-    (List.length (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
-  check bool "exact pending selection remains attached" true
-    (Option.is_some intake.diagnostic_selection);
-  let diagnostic_input = Keeper_heartbeat_source_batch.for_turn ~reactive:true intake.source_batch in
-  check bool "diagnostic is not transported as admitted work" true
-    (Keeper_heartbeat_source_batch.selections
-       (Keeper_heartbeat_source_batch.sources diagnostic_input) = []);
-  (match Keeper_heartbeat_source_batch.wake diagnostic_input with
-   | Keeper_registry.Woken [] -> ()
-   | _ -> fail "withdrawn diagnostic became an admitted wake payload");
-  (match Keeper_heartbeat_source_batch.wake
-           (Keeper_heartbeat_source_batch.for_turn ~reactive:false intake.source_batch) with
-   | Keeper_registry.Proactive_tick -> ()
-   | _ -> fail "empty cadence input became reactive");
-  (match intake.event_queue_intake_error with
-   | Some
-       (Keeper_heartbeat_stimulus_intake.Transient_board_read unavailable) ->
-     check string "retry retains the exact source post id" stimulus.post_id
-       unavailable.post_id;
-     check bool "transient retry is not a crashed cycle" false
-       (Keeper_heartbeat_stimulus_intake
-        .event_queue_intake_error_counts_as_cycle_failure
-          (Keeper_heartbeat_stimulus_intake.Transient_board_read unavailable))
-   | Some error ->
-     failf
-       "expected transient Board retry, got %s"
-       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_to_string
-          error)
-   | None -> fail "transient intake error was lost");
-  check
-    bool
-    "provider dispatch is blocked while source rendering is transiently unavailable"
-    false
-    (Keeper_heartbeat_loop.should_run_turn_after_event_intake
-       ~scheduled:true
-       ~consumed_stimulus_count:(Keeper_heartbeat_source_batch.count intake.source_batch)
-       ~event_queue_intake_error:intake.event_queue_intake_error);
-  let queued =
-    match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with
-    | Ok queue -> queue
-    | Error message -> failf "failed to reload durable queue: %s" message
-  in
-  check int "durable source remains pending for the next heartbeat" 1
-    (Keeper_event_queue.length queued);
-  let retry_intake =
-    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
-      ~ctx
-      ~meta_after_triage:meta
-      ~pending_board_events:[]
-  in
-  check int "later successful read consumes the retained source" 1
-    (Keeper_heartbeat_source_batch.count retry_intake.source_batch);
-  check int "later successful read renders the exact Board event" 1
-    (List.length retry_intake.pending_board_events);
-  check bool "retry clears the typed intake error" true
-    (Option.is_none retry_intake.event_queue_intake_error);
-  (match Keeper_heartbeat_source_batch.first retry_intake.source_batch with
-   | None -> fail "successful retry lost its exact pending selection"
-   | Some selection ->
-     (match
-        Keeper_registry_event_queue.ack_pending_result
-          ~base_path
-          meta.name
-          ~selection
-      with
-      | Ok () -> ()
-      | Error message -> failf "failed to acknowledge successful retry: %s" message));
-  let settled =
-    match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with
-    | Ok queue -> queue
-    | Error message -> failf "failed to reload settled queue: %s" message
-  in
-  check int "successful retry can settle the exact source" 0
-    (Keeper_event_queue.length settled)
-;;
-
-(* Actual Board and durable queue stores, with only transient reads controlled.
-   The configured admission limit bounds the sources carried by one turn. Explicit
-   ACKs below settle the selected source between ticks; these cases do not run
-   a provider or claim that a full Keeper turn completed. *)
+(* Actual Board and durable queue stores. The configured admission limit bounds
+   the sources carried by one turn; these cases do not run a provider or claim
+   that a full Keeper turn completed. *)
 let with_intake_sources ~max_events f =
   Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS"
     (Some (string_of_int max_events))
@@ -442,11 +230,9 @@ let with_intake_sources ~max_events f =
   Board_dispatch.init_jsonl ();
   Keeper_registry.For_testing.clear ();
   Fun.protect
-    ~finally:(fun () ->
-      Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 0;
-      Keeper_registry.For_testing.clear ())
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
   @@ fun () ->
-  let meta = test_meta "transient-head" in
+  let meta = test_meta "intake-sources" in
   let config = Workspace.default_config base_path in
   let ctx : _ Keeper_types_profile.context =
     { config
@@ -498,88 +284,6 @@ let with_intake_sources ~max_events f =
 let admitted_ids intake =
   Keeper_heartbeat_source_batch.stimuli intake.Keeper_heartbeat_stimulus_intake.source_batch
   |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
-;;
-
-let check_withdrawn_head expected intake =
-  match intake.Keeper_heartbeat_stimulus_intake.event_queue_intake_error with
-  | Some (Keeper_heartbeat_stimulus_intake.Transient_board_read unavailable) ->
-    check string "the first transient source stays diagnostic" expected unavailable.post_id
-  | Some error ->
-    failf "expected transient Board retry, got %s"
-      (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_to_string error)
-  | None -> fail "the transient head error disappeared"
-;;
-
-let test_transient_head_does_not_block_the_entry_behind_it () =
-  with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack ->
-  let head = seed_board "head source, read fails transiently" in
-  let second = seed_board "second source, read succeeds" in
-  let third = seed_board "third source waits for the next admission" in
-  let read_behind_head expected =
-    Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
-    let selected = intake () in
-    check (list string) "only the next readable source is admitted under limit1"
-      [ expected ] (admitted_ids selected);
-    check (list string) "unadmitted sources are not projected"
-      [ expected ]
-      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.post_id)
-         selected.pending_board_events);
-    check_withdrawn_head head selected;
-    check bool "the readable source permits provider dispatch" true
-      (Keeper_heartbeat_loop.should_run_turn_after_event_intake ~scheduled:true
-         ~consumed_stimulus_count:(Keeper_heartbeat_source_batch.count selected.source_batch)
-         ~event_queue_intake_error:selected.event_queue_intake_error);
-    selected
-  in
-  let first_tick = read_behind_head second in
-  check int "intake leaves every source durable" 3 (List.length (pending ()));
-  List.iter ack (Keeper_heartbeat_source_batch.selections first_tick.source_batch);
-  let second_tick = read_behind_head third in
-  check int "only the explicit first ACK removed a source" 2 (List.length (pending ()));
-  List.iter ack (Keeper_heartbeat_source_batch.selections second_tick.source_batch);
-  let third_tick = intake () in
-  check (list string) "the recovered head is still available on the next tick"
-    [ head ] (admitted_ids third_tick);
-  check bool "recovery clears the diagnostic" true
-    (Option.is_none third_tick.event_queue_intake_error)
-;;
-
-let test_all_transient_reads_finish_without_changing_pending () =
-  with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
-  let first = seed_board "first unavailable source" in
-  let (_ : string) = seed_board "second unavailable source" in
-  let (_ : string) = seed_board "third unavailable source" in
-  let before = pending () in
-  Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 3;
-  let failed = intake () in
-  check (list string) "all unavailable sources return without admission" [] (admitted_ids failed);
-  check_withdrawn_head first failed;
-  check bool "every exact pending selection is unchanged" true (before = pending ());
-  (* All three forced failures were consumed by one finite snapshot walk.
-     The next call can render the first source, without resetting the hook. *)
-  let recovered = intake () in
-  check (list string) "a later tick starts again at the retained head"
-    [ first ] (admitted_ids recovered);
-  check bool "the later tick has no remaining forced failure" true
-    (Option.is_none recovered.event_queue_intake_error)
-;;
-
-let test_transient_sources_do_not_spend_the_admission_limit () =
-  with_intake_sources ~max_events:2 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
-  let first = seed_board "first source unavailable" in
-  let second = seed_board "second source readable" in
-  let third = seed_board "third source readable" in
-  let (_ : string) = seed_board "fourth source waits for the next admission" in
-  Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
-  let selected = intake () in
-  check (list string) "readable sources fill the existing admission limit"
-    [ second; third ] (admitted_ids selected);
-  check (list string) "only admitted sources are projected"
-    [ second; third ]
-    (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.post_id)
-       selected.pending_board_events);
-  check_withdrawn_head first selected;
-  check int "all four sources remain pending until their own ACK" 4 (List.length (pending ()))
 ;;
 
 let test_empty_observation_source_still_spends_an_admission_slot () =
@@ -860,15 +564,9 @@ let test_malformed_queued_comment_identity_is_a_failed_read () =
 let () =
   run
     "keeper_board_unavailable"
-    [ ( "disposition"
+    [ ( "poison stimulus (masc keeper-cycle-exception incident)"
       , [ test_case
-            "disposition_of_error classifies every board_error variant"
-            `Quick
-            test_disposition_of_error_classifies_every_variant
-        ] )
-    ; ( "poison stimulus (masc keeper-cycle-exception incident)"
-      , [ test_case
-            "pending_board_event_of_stimulus reports Permanent, does not raise"
+            "pending_board_event_of_stimulus names the missing post, does not raise"
             `Quick
             (with_eio test_poison_stimulus_reports_permanent_error)
         ; test_case
@@ -880,24 +578,8 @@ let () =
             `Quick
             test_poison_durable_source_is_retired_during_intake
         ] )
-    ; ( "transient stimulus"
-      , [ test_case
-            "Io_error is a typed retry, not consumed"
-            `Quick
-            test_transient_result_is_retryable
-        ; test_case
-            "pending source is retained and provider dispatch is blocked"
-            `Quick
-            test_transient_intake_retains_pending_source_and_blocks_dispatch
-        ; test_case
-            "a transient head does not block the entry behind it"
-            `Quick
-            test_transient_head_does_not_block_the_entry_behind_it
-        ; test_case "all transient reads finish and retain exact pending sources" `Quick
-            test_all_transient_reads_finish_without_changing_pending
-        ; test_case "transient sources do not spend the admission limit" `Quick
-            test_transient_sources_do_not_spend_the_admission_limit
-        ; test_case "an empty-observation source still spends an admission slot" `Quick
+    ; ( "admission"
+      , [ test_case "an empty-observation source still spends an admission slot" `Quick
             test_empty_observation_source_still_spends_an_admission_slot
         ; test_case "permanent absence does not spend an admission slot" `Quick
             test_permanent_absence_does_not_spend_an_admission_slot

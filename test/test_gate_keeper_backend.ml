@@ -243,6 +243,18 @@ discord.binding_via_parent: true
 hello from a thread|}
     rendered
 
+let test_contextualize_message_preserves_content () =
+  let content = "    첫 줄\n    둘째 줄  \n\n" in
+  let rendered =
+    Gate_keeper_backend.contextualize_message
+      ~channel:"discord" ~channel_user_id:"user-42" ~channel_user_name:"Alice"
+      ~channel_workspace_id:"thread-9" ~metadata:[] ~content
+  in
+  check string "context remains separate from verbatim message"
+    ("[External channel context]\nchannel: discord\nworkspace_id: thread-9\n"
+     ^ "user_id: user-42\nuser_name: Alice\n\n[User message]\n" ^ content)
+    rendered
+
 let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   let body =
     {|{"request_id":"kmsg-connector","name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
@@ -254,6 +266,53 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
       check string "user name" "Alice" payload.channel_user_name;
       check string "workspace id" "workspace-9" payload.channel_workspace_id
   | Error err -> fail ("expected connector context to parse: " ^ err)
+
+let test_chat_input_preserves_text_whitespace () =
+  let text = "    첫 줄\n    둘째 줄  \n\n" in
+  let blocks = [ Keeper_multimodal_input.User_text text ] in
+  let request ~message ~user_blocks =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "request_id", `String "kmsg-whitespace"
+         ; "name", `String "luna"
+         ; "message", `String message
+         ; "user_blocks", Keeper_multimodal_input.user_blocks_to_yojson user_blocks
+         ])
+  in
+  List.iter
+    (fun body ->
+       match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+       | Error detail -> fail detail
+       | Ok payload ->
+           check string "chat message retained" text payload.message;
+           check string "invocation prompt retained" text
+             (Keeper_invocation_contract.direct_message_prompt payload.direct_message))
+    [ request ~message:text ~user_blocks:[]
+    ; request ~message:" \n " ~user_blocks:blocks ];
+  let input =
+    Keeper_chat_operation_payload.input_to_json ~message:text ~user_blocks:blocks
+      ~turn_instructions:None ~surface_context:None ~attachments:[]
+  in
+  match Keeper_chat_operation_payload.input_of_json input with
+  | Error detail -> fail detail
+  | Ok decoded ->
+      check string "durable message retained" text decoded.message;
+      check bool "durable block retained" true (decoded.user_blocks = blocks);
+      (match Keeper_multimodal_input.to_agent_core_blocks ~attachments:[] decoded.user_blocks with
+       | Ok [ Agent_core.Types.Text actual ] ->
+           check string "model input retained" text actual
+       | Ok _ -> fail "expected one text block"
+       | Error detail -> fail detail)
+
+let test_blank_chat_input_still_rejected () =
+  let body = {|{"request_id":"kmsg-blank","name":"luna","message":"  \n\t "}|} in
+  (match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+   | Error _ -> ()
+   | Ok _ -> fail "blank message without media should be rejected");
+  match Keeper_multimodal_input.parse_user_blocks
+      (`Assoc [ "user_blocks", `List [ `Assoc [ "type", `String "text"; "text", `String " \n\t " ] ] ]) with
+  | Error _ -> ()
+  | Ok _ -> fail "blank text block should be rejected"
 
 let test_parse_keeper_chat_stream_request_rejects_unknown_field () =
   let body = {|{"request_id":"kmsg-unknown","name":"luna","message":"hello","unexpected":true}|} in
@@ -3477,13 +3536,13 @@ let test_canonical_reply_payload_redacts_reply_and_preserves_evidence () =
           ("runtime_class", `String "keeper");
           ("turn_outcome", `String "visible_reply");
           ("turn_ref", Ids.Turn_ref.to_yojson turn_ref);
-          ("reply", `String "api_key=secret Done.");
+          ("reply", `String "    api_key=secret Done.  \n\n");
           ("tool_call_evidence", tool_evidence);
           ("runtime_note", `String "must not be user-visible");
         ])
   in
   let redact_text = function
-    | "api_key=secret Done." -> "api_key=[redacted] Done."
+    | "    api_key=secret Done.  \n\n" -> "    api_key=[redacted] Done.  \n\n"
     | text -> text
   in
   match
@@ -3495,8 +3554,16 @@ let test_canonical_reply_payload_redacts_reply_and_preserves_evidence () =
       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
          error)
   | Ok canonical ->
-    check string "visible reply is redacted once" "api_key=[redacted] Done."
+    check string "visible reply is redacted without changing whitespace"
+      "    api_key=[redacted] Done.  \n\n"
       canonical.visible_reply;
+    check string "poll reply keeps the same redacted text"
+      canonical.visible_reply
+      (json_string_field "reply" (Some (Yojson.Safe.from_string canonical.poll_body)));
+    check string "stream chunk reassembly keeps the same redacted text"
+      canonical.visible_reply
+      (String.concat "" (Server_routes_http_keeper_stream.split_keeper_reply_chunks
+         canonical.visible_reply));
     check bool "turn_ref identity is preserved" true
       (Ids.Turn_ref.equal turn_ref canonical.turn_ref);
     check string "turn outcome label is unchanged" "visible_reply"
@@ -4164,6 +4231,12 @@ let () =
             test_contextualize_message_sanitizes_context_lines;
           test_case "context envelope includes channel metadata" `Quick
             test_contextualize_message_includes_channel_metadata;
+          test_case "context envelope preserves message whitespace" `Quick
+            test_contextualize_message_preserves_content;
+          test_case "chat input preserves text whitespace" `Quick
+            test_chat_input_preserves_text_whitespace;
+          test_case "blank chat input remains rejected" `Quick
+            test_blank_chat_input_still_rejected;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
           test_case "stream request rejects unknown fields" `Quick

@@ -1,11 +1,16 @@
 module Current = Keeper_memory_os_current
 module Limits = Keeper_memory_limits
 
+type review_result =
+  | Limits_reached
+  | Progress_with_excess
+  | Excess_retained
+
 type outcome =
   | Disabled
   | Within_limits
   | Already_reviewed
-  | Reviewed of { remaining_excess : bool }
+  | Reviewed of review_result
   | Unavailable of string
 
 (* A successful no-change decision is still a decision. Reconsider when its
@@ -79,7 +84,17 @@ let run_with ~execute ~base_path ~keeper_name =
               | Error detail -> Unavailable detail
               | Ok None -> Unavailable "Memory snapshot disappeared after cleanup"
               | Ok (Some after) ->
-                Reviewed { remaining_excess = Limits.exceeded (Limits.current after.facts) })
+                let after_limits = Limits.measure after.facts
+                    ~category_cap:limits.category_cap
+                    ~facts_per_category_cap:limits.facts_per_category_cap in
+                if not (Limits.exceeded after_limits) then Reviewed Limits_reached
+                else if Limits.excess_reduced ~before:limits ~after:after_limits then (
+                  (* A sleeping Keeper may have no other wake. Continue only
+                     saved count progress on the existing serialized lane;
+                     rewrites and retained excess cannot create a spin. *)
+                  Keeper_librarian_queue_signal.changed ~base_path ~keeper_name;
+                  Reviewed Progress_with_excess)
+                else Reviewed Excess_retained)
 ;;
 
 let run ~base_path ~keeper_name =

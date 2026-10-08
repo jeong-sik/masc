@@ -101,6 +101,8 @@ type transport_failure =
   | Rate_limited of { http_status : int }
   | Overloaded of { http_status : int }
   | Server_error of { http_status : int }
+  | Output_limit_reached
+      (** A complete response body reports the provider's output token limit. *)
   | Invalid_json_output
 
 type advance =

@@ -266,25 +266,11 @@ let observe_task_transition
     ~details
 ;;
 
-(** Transition log event taxonomy. Variant instead of free-form string
-    (#7520 Step 4) so typos at call-sites fail to compile. The two
-    values correspond to the current fire points in this module — add
-    a variant when a new transition event is introduced. *)
-type transition_event_type =
-  | Task_transition
-  | Task_cancelled
-
-let transition_event_type_to_string = function
-  | Task_transition -> "task_transition"
-  | Task_cancelled -> "task_cancelled"
-;;
-
 (** SSOT structured event for [log_event] sink. Wraps [task_transition_details]
     with an envelope (type/agent/actor_kind/task/from_status/to_status/ts) so
     every transition log line carries the same schema. Optional [?action]
     carries the typed transition label used by the unified transition path. *)
 let transition_log_event
-      ~(event_type : transition_event_type)
       ?(actor_kind = Agent)
       ~agent_name
       ~task_id
@@ -305,7 +291,7 @@ let transition_log_event
     | None -> []
   in
   `Assoc
-    ([ "type", `String (transition_event_type_to_string event_type)
+    ([ "type", `String "task_transition"
      ; "agent", `String agent_name
      ; "actor_kind", `String (task_actor_kind_to_string actor_kind)
      ; "task", `String task_id

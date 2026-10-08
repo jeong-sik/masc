@@ -110,13 +110,21 @@ module For_testing : sig
     -> string list
 
   val normalize_response_text_for_finalization
-    :  runtime_id:string
+    :  ?response_policy:Keeper_tooling.Response.completion_policy
+    -> runtime_id:string
     -> initial_messages:Agent_core.Types.message list
     -> run_result:Runtime_agent.run_result
     -> text:string
     -> tool_names:string list
     -> unit
     -> (string, Agent_core.Error.t) result
+
+  val response_policy_for_turn
+    : turn_kind:Turn_record.turn_kind
+    -> input_speaker:Keeper_input_speaker.t
+    -> world_observation:Keeper_world_observation.world_observation option
+    -> hitl_resolution:Keeper_event_queue.hitl_resolution option
+    -> Keeper_tooling.Response.completion_policy
 
   (** AGENT_CORE raw-trace sink for keeper turns: a fresh per-turn file under
       [Keeper_types_support.keeper_raw_trace_dir]. The dispatch section passes
@@ -285,6 +293,7 @@ val run_turn
   -> ?on_tool_stream_observation:
        (Keeper_hooks_agent_core.tool_stream_observation -> unit)
   -> ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit)
+  -> ?tool_result_commit_policy:Keeper_hooks_agent_core.tool_result_commit_policy
   -> ?approval_gate:Keeper_tool_approval_gate.t
   -> ?trajectory_acc:Trajectory.accumulator
      (* The receipt's degraded-retry report takes no caller argument. A caller

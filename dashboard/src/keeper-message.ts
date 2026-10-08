@@ -5,20 +5,6 @@ import type {
   KeeperTurnOutcome,
 } from './types'
 
-function stripSkillRouteLines(text: string): string {
-  return text
-    .split('\n')
-    .filter(line => {
-      const trimmed = line.trim()
-      return !trimmed.startsWith('SKILL')
-    })
-    .join('\n')
-}
-
-export function formatKeeperVisibleReply(reply: string): string {
-  return stripSkillRouteLines(reply).replace(/\n{3,}/g, '\n\n').trim()
-}
-
 // RFC-0232 P2: closed decode of the producer-typed `turn_outcome` label.
 // Missing field (older server) or unknown label decodes to null, which
 // consumers treat as a visible reply — the bitten failure mode (#20870)
@@ -98,7 +84,7 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
   })()
   if (!payload) return null
 
-  const reply = asString(payload.reply) ?? ''
+  const reply = asString(payload.reply, '')
   const usage = normalizeKeeperUsage(payload.usage)
 
   return {
@@ -110,7 +96,7 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
     latencyMs: asNumber(payload.latency_ms) ?? null,
     costUsd: asNumber(payload.cost_usd) ?? usage?.costUsd ?? null,
     usage,
-    replyText: reply || null,
+    replyText: reply.trim() ? reply : null,
     turnOutcome: normalizeKeeperTurnOutcome(payload.turn_outcome),
     externalEffectTarget: normalizeKeeperExternalEffectTarget(
       payload.external_effect_target,
@@ -126,7 +112,7 @@ export function normalizeKeeperToolResponse(raw: string): {
   const trimmed = raw.trim()
   if (!trimmed.startsWith('{')) {
     return {
-      text: formatKeeperVisibleReply(trimmed),
+      text: raw,
       details: null,
     }
   }
@@ -134,14 +120,14 @@ export function normalizeKeeperToolResponse(raw: string): {
   try {
     const payload = JSON.parse(trimmed) as unknown
     const details = normalizeKeeperConversationDetails(payload)
-    const parsed = isRecord(payload) ? (asString(payload.reply) ?? trimmed) : trimmed
+    const parsed = isRecord(payload) ? asString(payload.reply, raw) : raw
     return {
-      text: formatKeeperVisibleReply(parsed),
+      text: parsed,
       details,
     }
   } catch {
     return {
-      text: formatKeeperVisibleReply(trimmed),
+      text: raw,
       details: null,
     }
   }

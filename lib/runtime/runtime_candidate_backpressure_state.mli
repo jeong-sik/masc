@@ -19,12 +19,21 @@ type attempt_failure =
 (** The failure routes that say the candidate did not answer, and that are
     neither the candidate's rate limit nor MASC's own capacity. *)
 
+val attempt_failure_to_wire_name : attempt_failure -> string
+(** The name [/api/v1/runtime/resolved] carries. *)
+
+val attempt_failure_of_wire_name : string -> attempt_failure option
+(** The inverse of {!attempt_failure_to_wire_name}; [None] for a name this
+    build does not know. *)
+
 type recorder
 (** The Keeper whose walk recorded a failed attempt. Compared only for
     identity: the recorder's next cycle walks the head again, every other
     walk keeps it behind (RFC-0458 §3.4, 2026-09-23). *)
 
 val keeper_recorder : keeper_name:string -> recorder
+
+val recorder_keeper_name : recorder -> string
 
 val same_recorder : recorder -> recorder -> bool
 

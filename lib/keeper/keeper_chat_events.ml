@@ -58,6 +58,12 @@ type continuation_checkpoint =
   ; request_id : string option
   }
 
+type native_tool =
+  { occurrence : tool_stream_occurrence
+  ; tool_call_id : string option
+  ; tool_call_name : string option
+  }
+
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
@@ -125,6 +131,8 @@ type keeper_chat_event =
       { occurrence : tool_stream_occurrence
       ; tool_call_id : string option
       }
+  | Native_tool_start of native_tool
+  | Native_tool_end of native_tool
   | Tool_approval_requested of
       { tool_call_id : string
       ; tool_call_name : string

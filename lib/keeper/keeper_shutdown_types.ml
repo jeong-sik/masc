@@ -57,6 +57,7 @@ type dashboard_purge_artifact =
   | Keeper_working_context_recall_artifact
   | Keeper_working_context_artifact
   | Keeper_memory_journal_artifact
+  | Keeper_memory_journal_lock_artifact
   | Keeper_memory_absorbed_artifact
   | Keeper_memory_events_artifact
   | Keeper_turn_boundaries_artifact
@@ -613,6 +614,9 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_working_context_recall_artifact
   ; Keeper_working_context_artifact
   ; Keeper_memory_journal_artifact
+    (* The journal's stable sibling remains for every append/recovery. Only
+       the quiesced purge may remove it, after its writers have stopped. *)
+  ; Keeper_memory_journal_lock_artifact
   ; Keeper_memory_absorbed_artifact
   ; Keeper_memory_events_artifact
     (* The turn boundary log and progress sit in the selected cluster's

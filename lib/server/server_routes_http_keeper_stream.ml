@@ -494,6 +494,8 @@ let handle_keeper_turns_list state request reqd =
             in
             `Assoc
               [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))
+              ; ("turn_ref", match Keeper_autonomous_stream.current ~base_path:config.base_path ~keeper_name with
+                   | None -> `Null | Some turn_ref -> Ids.Turn_ref.to_yojson turn_ref)
               ; ("started_at_unix", `Float turn.started_at)
               ; ("interrupt_token", `String (Keeper_interrupt_token.to_string turn.interrupt_token))
               ; ("preview", preview_json)
@@ -908,7 +910,7 @@ let parse_keeper_chat_stream_request body_str =
     let* request_id = required_string "request_id" in
     let* request_id = Keeper_owner.Chat_operation.Operation_id.of_string request_id in
     let* name = required_string "name" |> Result.map String.trim in
-    let* raw_message = optional_string "message" |> Result.map String.trim in
+    let* raw_message = optional_string "message" in
     let* channel = optional_string "channel" |> Result.map String.trim in
     let* channel_user_id =
       optional_string "channel_user_id" |> Result.map String.trim
@@ -960,7 +962,7 @@ let parse_keeper_chat_stream_request body_str =
         user_blocks
     in
     let message =
-      if String.equal raw_message ""
+      if String.equal (String.trim raw_message) ""
       then Keeper_multimodal_input.fallback_message ~attachments user_blocks
       else raw_message
     in
@@ -1069,9 +1071,9 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
   let ( let* ) = Result.bind in
   let* source = Keeper_chat_operation_payload.source_of_json source in
   let* input = Keeper_chat_operation_payload.input_of_json input in
-  let raw_message = String.trim input.message in
+  let raw_message = input.message in
   let message =
-    if String.equal raw_message ""
+    if String.equal (String.trim raw_message) ""
     then
       Keeper_multimodal_input.fallback_message
         ~attachments:input.attachments
@@ -1130,9 +1132,6 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
   in
   Ok { payload; source }
 ;;
-
-let strip_keeper_visible_reply (reply : string) =
-  String.trim reply
 
 let split_keeper_reply_chunks (text : string) : string list =
   let len = String.length text in
@@ -1499,7 +1498,7 @@ let canonical_reply_payload_of_body ~redact_text body =
   let visible_reply =
     match public_reply_of_outcome ~turn_outcome ~reply:reply_raw with
     | None -> "" (* The public wire requires a reply string beside its typed outcome. *)
-    | Some reply -> strip_keeper_visible_reply reply |> redact_text |> String.trim
+    | Some reply -> redact_text reply
   in
   let payload_json =
     `Assoc (assoc_replace "reply" (`String visible_reply) fields)
@@ -2347,7 +2346,10 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                    | Error detail -> Error detail
                    | Ok (Some _) -> persist_tool_calls_only () |> delivered_after_persist
                    | Ok None ->
-                   match turn_outcome, String_util.trim_nonempty visible_reply with
+                   let spoken =
+                     if String.trim visible_reply = "" then None else Some visible_reply
+                   in
+                   match turn_outcome, spoken with
                    | ( ( Keeper_turn_outcome.Continuation_checkpoint
                        | Keeper_turn_outcome.Awaiting_gate_approval
                        | Keeper_turn_outcome.Terminal_effect_settled ) as
@@ -3276,33 +3278,14 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   | execution -> execution
 ;;
 
-type settled_error_receipt =
-  | Recorded_error of int * float * string
-  | Existing_error of int * float * string
-
 (* The child and its journal publisher have ended before the Owner invokes
    this hook; no successor can claim until the hook returns. A prior segment's
    Run_finished is a continuation boundary, not evidence of this failure. *)
 let record_settled_error ~base_path ~keeper_name ~operation_id ~message =
-  let module Journal = Keeper_chat_event_log in
-  let ( let* ) = Result.bind in
-  let read_error = function
-    | Journal.Journal_missing -> "operation journal disappeared during settlement"
-    | Journal_unreadable detail | Journal_corrupt detail -> detail in
-  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
-  let* seq = Journal.next_sequence journal |> Result.map_error read_error in
-  let* entries = match Journal.read_journal journal with
-    | Ok entries -> Ok entries
-    | Error Journal.Journal_missing -> Ok []
-    | Error error -> Error (read_error error) in
-  match List.rev entries with
-  | { Journal.event = Keeper_chat_events.Event_error { message }; seq; ts } :: _ ->
-    Ok (Existing_error (seq, ts, message))
-  | _ ->
-    let entry = Journal.{ seq; ts = Time_compat.now ();
-      event = Keeper_chat_events.Event_error { message } } in
-    let* () = Journal.append_result journal ~seq ~ts:entry.ts entry.event in
-    Ok (Recorded_error (entry.seq, entry.ts, message))
+  let journal =
+    Keeper_chat_event_log.open_journal ~base_dir:base_path ~keeper_name ~operation_id ()
+  in
+  Keeper_chat_event_log.record_terminal_error journal ~ts:(Time_compat.now ()) ~message
 
 let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~execution =
   let wire = take_operation_wire_stream ~operation_id in
@@ -3315,11 +3298,14 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
          "keeper chat terminal journal failed keeper=%s operation=%s: %s"
          keeper_name operation_id error);
     (match wire, receipt with
-     | Some Wire_terminal_sent, _ | None, Ok (Existing_error _) -> ()
+     | Some Wire_terminal_sent, _
+     | None, Ok (Keeper_chat_event_log.Existing_terminal_error _) -> ()
      | (Some Wire_started | None), (Ok _ | Error _) ->
        let seq, timestamp, message = match receipt with
-         | Ok (Recorded_error (seq, ts, message) | Existing_error (seq, ts, message)) ->
+         | Ok (Keeper_chat_event_log.Existing_terminal_error { seq; ts; message }) ->
            Some seq, ts, message
+         | Ok (Keeper_chat_event_log.Recorded_terminal_error { seq; ts }) ->
+           Some seq, ts, detail
          | Error _ -> None, Time_compat.now (), detail in
        let event = Ag_ui.make_event ~timestamp
          ~thread_id:("keeper:" ^ keeper_name)

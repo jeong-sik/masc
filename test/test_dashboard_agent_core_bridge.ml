@@ -161,7 +161,7 @@ let test_summary_status_counts () =
   setup ();
   DOB.record (make_sample ~status:DOB.Success ());
   DOB.record (make_sample ~status:(DOB.Error { transient = true }) ());
-  DOB.record (make_sample ~status:DOB.Timeout ());
+  DOB.record (make_sample ~status:(DOB.Error { transient = false }) ());
   DOB.record (make_sample ~status:(DOB.Cancelled { reason = "user" }) ());
   let r = DOB.summary () in
   Alcotest.(check (float 1e-9)) "error_ratio" 0.5 r.DOB.error_ratio;
@@ -278,7 +278,7 @@ let test_recent_json_provider_filter_is_runtime_alias () =
 let test_summary_json_contains_aggregate () =
   setup ();
   DOB.record (make_sample ~cache:true ~status:DOB.Success ());
-  DOB.record (make_sample ~cache:false ~status:DOB.Timeout ());
+  DOB.record (make_sample ~cache:false ~status:(DOB.Error { transient = false }) ());
   let json = DOB.summary_json ~provider:"anthropic" ~limit:10 () in
   Alcotest.(check string)
     "dashboard surface"

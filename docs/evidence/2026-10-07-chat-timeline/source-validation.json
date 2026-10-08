@@ -1,0 +1,332 @@
+{
+  "checked_at": "2026-10-07T09:32:39.602670+00:00",
+  "base_sha": "8fa67783cb55b91a1d32f5012d5187d12153d98e",
+  "scope": "syntax parsing only; no typecheck, build, behavior test, vendor runtime, PTY or deployment verification",
+  "ocaml_version": "5.5.1",
+  "syntax_results": [
+    {
+      "file": "bin/masc_tui.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_acting.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_async_protocol.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_async_protocol.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_http.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_log.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_log.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_observer.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_observer.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_render.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_render_chat.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_types.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_agent_run.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_agent_run.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_autonomous_stream.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_autonomous_stream.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_chat_discord.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_chat_slack.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_hooks_agent_core.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_hooks_agent_core.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools_setup.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/keeper/keeper_unified_turn_execution.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/runtime/runtime_claude_code.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/runtime/runtime_claude_code.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/runtime/runtime_codex_app_server.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/runtime/runtime_codex_app_server.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/server/server_dashboard_http_keeper_chat_operations.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/server/server_dashboard_http_keeper_chat_operations.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/server/server_keeper_chat_agui_projection.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/server/server_routes_http_keeper_stream.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/server/server_runtime_startup_maintenance.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/tui_decode.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/tui_decode.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_keeper_chat_event_log.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_keeper_chat_operation_http.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_keeper_claude_code_runtime.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_runtime_antigravity.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_runtime_claude_code.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_runtime_codex_app_server.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_answering.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_autonomous_journal.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_chat_activity.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_chat_queue_wiring.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_decode.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_keeper_chat_live.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_keeper_chat_log.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_keeper_chat_transcript.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_keeper_mark.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_observer.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_render_metrics.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    }
+  ],
+  "diff_check": {
+    "exit_code": 0,
+    "diagnostics": ""
+  }
+}

@@ -121,8 +121,8 @@ type keeper_chat_stream_request = {
           or an integer [>= 0]; anything else fails the parse. *)
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
-    [message] is the text fallback used by the existing direct keeper
-    path; [user_blocks] preserves semantic text/media input for the
+    [message] retains the nonblank request text verbatim, or uses a text fallback
+    when it is blank; [user_blocks] preserves semantic text/media input for the
     block-aware runtime path. [turn_instructions] and [surface_context]
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]

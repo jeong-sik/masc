@@ -167,8 +167,6 @@ let test_finalize () =
 let test_outcome_to_string () =
   Alcotest.(check string) "completed" "completed"
     (Trajectory.outcome_to_string Trajectory.Completed);
-  Alcotest.(check string) "cost_exceeded" "cost_exceeded"
-    (Trajectory.outcome_to_string Trajectory.CostExceeded);
   Alcotest.(check string) "failed" "failed: oops"
     (Trajectory.outcome_to_string (Trajectory.Failed "oops"));
   Alcotest.(check string) "gated" "gated: blocked"

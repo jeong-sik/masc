@@ -8,8 +8,8 @@ let pending keeper claim : Ledger.pending_fact =
 let sourced keeper path claim : Ledger.pending_fact =
   { fact = Ledger.Source_bound { keeper_id = keeper; path; claim_sha256 = sha claim }; claim }
 let render json = Ok ("Curate changed facts:\n" ^ Yojson.Safe.to_string json)
-let request ~limit ~neighbors ~current pending =
-  Request.prepare ~max_input_bytes:limit ~neighbor_limit:neighbors ~render
+let request ~neighbors ~current pending =
+  Request.prepare ~neighbor_limit:neighbors ~render
     ~ledger:Ledger.empty ~current ~pending
 
 let get = function
@@ -17,58 +17,62 @@ let get = function
   | Ok None -> Alcotest.fail "expected a request"
   | Error error -> Alcotest.fail (Request.error_to_string error)
 
-let test_changed_facts_are_bounded_and_preserve_remainder () =
+let test_changed_facts_are_complete_and_refusals_preserve_remainder () =
   let first = pending "writer" "The report has twelve pages" in
   let second = sourced "writer" "notes/b.md" "Deployment finished on Friday" in
   let other = pending "reviewer" "The report has ten pages" in
   let current = [first; second; other] in
-  let full = get (request ~limit:100_000 ~neighbors:1 ~current [first; second]) in
-  Alcotest.(check int) "all new facts fit at large limit" 2 (List.length full.selected);
-  let first_only = get (request ~limit:100_000 ~neighbors:1 ~current [first]) in
-  let limit = String.length first_only.rendered_prompt in
-  let bounded = get (request ~limit ~neighbors:1 ~current [first; second]) in
-  Alcotest.(check int) "one selected" 1 (List.length bounded.selected);
-  Alcotest.(check int) "one remains" 1 (List.length bounded.remaining);
-  Alcotest.(check bool) "first is selected" true (List.hd bounded.selected = first);
-  Alcotest.(check bool) "source-bound identity remains" true (List.hd bounded.remaining = second);
-  Alcotest.(check bool) "complete rendered prompt fits" true
-    (String.length bounded.rendered_prompt <= limit);
-  Alcotest.(check int) "one index for the selected request" 1
-    bounded.index_stats.index_builds;
-  Alcotest.(check int) "all current facts entered once" 3
-    bounded.index_stats.indexed_rows;
-  let neighbors = match bounded.input with
+  let renders = ref 0 in
+  let full = get (Request.prepare ~neighbor_limit:1
+    ~render:(fun json -> incr renders; render json) ~ledger:Ledger.empty
+    ~current ~pending:[first; second]) in
+  Alcotest.(check int) "all pending facts are selected" 2 (List.length full.selected);
+  Alcotest.(check int) "complete input rendered once" 1 !renders;
+  Alcotest.(check int) "no omitted evidence before provider refusal" 0 (List.length full.remaining);
+  let narrowed = get (Request.narrow ~render full) in
+  Alcotest.(check bool) "first whole row selected" true (narrowed.selected = [first]);
+  Alcotest.(check bool) "source-bound suffix retained" true (narrowed.remaining = [second]);
+  Alcotest.(check int) "one index for all pending queries" 1 narrowed.index_stats.index_builds;
+  Alcotest.(check int) "all current facts entered once" 3 narrowed.index_stats.indexed_rows;
+  Alcotest.(check int) "every pending query searched" 2 narrowed.index_stats.queries_executed;
+  let neighbors = match narrowed.input with
     | `Assoc ["new_facts", `List [`Assoc fields]] ->
       (match List.assoc_opt "neighbors" fields with Some (`List values) -> values | _ -> [])
     | _ -> Alcotest.fail "request input shape" in
   Alcotest.(check int) "other Keeper is the only neighbor" 1 (List.length neighbors);
-  let tiny = request ~limit:1 ~neighbors:1 ~current [first] in
-  (match tiny with Error (Request.Fact_exceeds_limit fact) ->
-     Alcotest.(check bool) "first oversized fact is named" true (fact = first.fact)
-   | _ -> Alcotest.fail "oversized first fact was silently skipped")
+  (match Request.narrow ~render:(fun _ -> Alcotest.fail "single row rendered again") narrowed with
+   | Ok None -> () | _ -> Alcotest.fail "indivisible fact was dropped or truncated");
+  (match Request.narrow ~render { full with selected = List.rev full.selected } with
+   | Error (Request.Invalid_batch _) -> () | _ -> Alcotest.fail "mismatched public batch was accepted");
+  (match Request.narrow ~render { full with input = `Assoc ["new_facts", `List []] } with
+   | Error (Request.Invalid_batch _) -> () | _ -> Alcotest.fail "missing rows were accepted");
+  (match Request.narrow ~render:(fun _ -> Error "render unavailable") full with
+   | Error (Request.Render_failed _) -> () | _ -> Alcotest.fail "narrow render failure hidden")
 
 let test_no_change_does_not_render_or_search () =
   let render_calls = ref 0 in
-  let result = Request.prepare ~max_input_bytes:1024 ~neighbor_limit:2
+  let result = Request.prepare ~neighbor_limit:2
       ~render:(fun json -> incr render_calls; render json)
       ~ledger:Ledger.empty ~current:[pending "writer" "a fact"] ~pending:[] in
   (match result with Ok None -> () | _ -> Alcotest.fail "no change built a request");
   Alcotest.(check int) "render was not called" 0 !render_calls
 
-let test_many_facts_drain_in_bounded_requests () =
+let test_many_facts_drain_after_repeated_size_refusals () =
   let facts = List.init 100 (fun i -> pending ("keeper-" ^ string_of_int i)
       ("A changed claim number " ^ string_of_int i)) in
+  let rec narrow_to_single batch =
+    match Request.narrow ~render batch with
+    | Ok None -> batch
+    | Ok (Some smaller) -> narrow_to_single smaller
+    | Error error -> Alcotest.fail (Request.error_to_string error) in
   let rec drain selected remaining =
     match remaining with
     | [] -> selected
     | _ ->
-      let batch = get (request ~limit:430 ~neighbors:0 ~current:facts remaining) in
-      Alcotest.(check bool) "batch has an admitted fact" true (batch.selected <> []);
-      Alcotest.(check bool) "rendered request stays bounded" true
-        (String.length batch.rendered_prompt <= 430);
-      drain (selected @ batch.selected) batch.remaining
-  in
-  Alcotest.(check bool) "every fact is eventually selected in order" true
+      let batch = narrow_to_single (get (request ~neighbors:0 ~current:facts remaining)) in
+      Alcotest.(check int) "provider-refused batch reaches one complete fact" 1 (List.length batch.selected);
+      drain (selected @ batch.selected) batch.remaining in
+  Alcotest.(check bool) "every split suffix is eventually selected in original order" true
     (drain [] facts = facts)
 
 let test_model_answer_applies_only_to_selected_facts () =
@@ -99,7 +103,7 @@ let test_model_answer_applies_only_to_selected_facts () =
   refused "missing fact" (answer [row first "exclude" "one"]);
   refused "unknown action" (answer [row first "magic" "one"; row second "exclude" "two"])
 
-let test_related_ledger_context_is_trimmed_with_its_neighbor () =
+let test_related_ledger_context_remains_in_the_whole_row () =
   let open Yojson.Safe.Util in
   let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal in
   let changed = pending "writer" "Release evidence is ready" in
@@ -123,8 +127,8 @@ let test_related_ledger_context_is_trimmed_with_its_neighbor () =
       `Assoc ["kind", `String kind; id_field, `String id]]) in
   let shared = `Assoc ["claim_id", `String "c-release";
                        "claim", `String "The release evidence is ready"] in
-  (* The neighbor's ledger description, not only its short claim, must be
-     charged to the full rendered byte bound. *)
+  (* Related ledger prose stays with the complete row even when a provider
+     refuses it. Narrowing cannot discard a conflicting source. *)
   let conflict = `Assoc ["conflict_id", `String "x-release";
     "description", `String ("Conflicting release evidence: " ^ String.make 2048 'x')] in
   let ledger_json = `Assoc [
@@ -139,10 +143,10 @@ let test_related_ledger_context_is_trimmed_with_its_neighbor () =
   let ledger = match Ledger.of_json ledger_json with
     | Ok ledger -> ledger
     | Error detail -> Alcotest.fail detail in
-  let current = [changed; left; right; disputed; unrelated] in
-  let prepare ~limit ~neighbors =
-    get (Request.prepare ~max_input_bytes:limit ~neighbor_limit:neighbors
-           ~render ~ledger ~current ~pending:[changed]) in
+  let second = pending "writer" "A second changed fact" in
+  let current = [changed; left; right; disputed; unrelated; second] in
+  let prepare pending =
+    get (Request.prepare ~neighbor_limit:3 ~render ~ledger ~current ~pending) in
   let only_row (batch : Request.batch) =
     match batch.input |> member "new_facts" |> to_list with
     | [row] -> row
@@ -150,7 +154,7 @@ let test_related_ledger_context_is_trimmed_with_its_neighbor () =
   let neighbor (fact : Ledger.pending_fact) =
     `Assoc ["id", `String (Request.fact_id fact.fact);
             "fact", `Assoc (fact_fields fact); "claim", `String fact.claim] in
-  let full = prepare ~limit:100_000 ~neighbors:3 in
+  let full = prepare [changed] in
   let full_row = only_row full in
   Alcotest.check json "both source paths and the conflicting fact remain attributed"
     (`List [neighbor left; neighbor right; neighbor disputed]) (member "neighbors" full_row);
@@ -158,33 +162,30 @@ let test_related_ledger_context_is_trimmed_with_its_neighbor () =
     (`List [shared]) (member "related_claims" full_row);
   Alcotest.check json "conflict description accompanies its member"
     (`List [conflict]) (member "related_conflicts" full_row);
-  let two_neighbors = prepare ~limit:100_000 ~neighbors:2 in
-  let limit = String.length two_neighbors.rendered_prompt in
-  Alcotest.(check bool) "third neighbor's related context exceeds the tighter limit" true
-    (String.length full.rendered_prompt > limit);
-  let bounded = prepare ~limit ~neighbors:3 in
-  Alcotest.check json "trimming removes the last neighbor and only its ledger context"
-    two_neighbors.input bounded.input;
-  Alcotest.(check string) "rendered prompt matches the retained attributed input"
-    (match render bounded.input with
+  let combined = prepare [changed; second] in
+  let narrowed = get (Request.narrow ~render combined) in
+  Alcotest.check json "whole row retains neighbors, shared claim, and conflict"
+    full.input narrowed.input;
+  Alcotest.(check string) "rendered prompt matches the complete attributed row"
+    (match render narrowed.input with
      | Ok rendered -> rendered
-     | Error detail -> Alcotest.fail detail) bounded.rendered_prompt;
-  Alcotest.(check bool) "whole prompt including ledger context fits" true
-    (String.length bounded.rendered_prompt <= limit);
-  Alcotest.(check bool) "oversized neighbor does not drop the changed fact" true
-    (bounded.selected = [changed] && bounded.remaining = []);
-  Alcotest.(check int) "trimming does not rebuild the current-fact index" 1
-    bounded.index_stats.index_builds
+     | Error detail -> Alcotest.fail detail) narrowed.rendered_prompt;
+  Alcotest.(check bool) "changed fact and untouched suffix remain attributed" true
+    (narrowed.selected = [changed] && narrowed.remaining = [second]);
+  Alcotest.(check int) "narrowing does not rebuild the current-fact index" 1
+    narrowed.index_stats.index_builds;
+  (match Request.narrow ~render narrowed with
+   | Ok None -> () | _ -> Alcotest.fail "single row lost related ledger context")
 
 let () =
   Alcotest.run "Workspace memory request"
-    [ "bounded change", [Alcotest.test_case "neighbors and remainder" `Quick
-                            test_changed_facts_are_bounded_and_preserve_remainder
+    [ "provider refusal", [Alcotest.test_case "neighbors and remainder" `Quick
+                            test_changed_facts_are_complete_and_refusals_preserve_remainder
                           ; Alcotest.test_case "no change is silent" `Quick
                             test_no_change_does_not_render_or_search
                           ; Alcotest.test_case "many changes drain" `Quick
-                            test_many_facts_drain_in_bounded_requests
+                            test_many_facts_drain_after_repeated_size_refusals
                           ; Alcotest.test_case "model answer changes selected facts only" `Quick
                             test_model_answer_applies_only_to_selected_facts
-                          ; Alcotest.test_case "ledger context follows bounded neighbors" `Quick
-                            test_related_ledger_context_is_trimmed_with_its_neighbor] ]
+                          ; Alcotest.test_case "whole rows preserve all related context" `Quick
+                            test_related_ledger_context_remains_in_the_whole_row] ]

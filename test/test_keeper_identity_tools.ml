@@ -802,18 +802,18 @@ let test_the_policy_can_place_an_attached_tool () =
      it cannot place asks its operator a question with no reason they can act
      on, which is what four composition tools did before they were
      classified. *)
-  Index.forget_all (Index.shared ());
   let base_path = temp_base () in
-  let _ = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
+  let offering = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
+  let identity_tool_index = Index.of_tools offering.offered in
   check Alcotest.bool "classifiable" true
-    (Policy.classifies ~composition_plan_index:None ~tool_name:"atlassian_getJiraIssue")
+    (Policy.classifies ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_getJiraIssue")
 
 let test_a_read_only_tool_runs_unasked () =
-  Index.forget_all (Index.shared ());
   let base_path = temp_base () in
-  let _ = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
+  let offering = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
+  let identity_tool_index = Index.of_tools offering.offered in
   match
-    Policy.verdict_for ~composition_plan_index:None ~tool_name:"atlassian_getJiraIssue" ~input:(`Assoc [])
+    Policy.verdict_for ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_getJiraIssue" ~input:(`Assoc [])
   with
   | Policy.Run _ -> ()
   | Policy.Ask { because } ->
@@ -825,11 +825,11 @@ let test_a_writing_tool_belongs_to_the_durable_gate () =
      one holds nothing on the lanes that cannot ask — where the 2026-08-27
      incident ran. The tool itself defers to the durable Gate
      ({!Keeper_identity_gate}); what this policy owes the call is passage. *)
-  Index.forget_all (Index.shared ());
   let base_path = temp_base () in
-  let _ = offer ~base_path [ tool ~read_only:false "editJiraIssue" ] in
+  let offering = offer ~base_path [ tool ~read_only:false "editJiraIssue" ] in
+  let identity_tool_index = Index.of_tools offering.offered in
   match
-    Policy.verdict_for ~composition_plan_index:None ~tool_name:"atlassian_editJiraIssue" ~input:(`Assoc [])
+    Policy.verdict_for ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_editJiraIssue" ~input:(`Assoc [])
   with
   | Policy.Run { because } ->
       check Alcotest.bool "and the reason names the durable Gate" true
@@ -843,11 +843,11 @@ let test_silence_is_not_permission () =
   (* Still true — enforced by the durable Gate now, which treats an
      unannotated tool as a write and defers it. This policy's half is to
      pass the call through to that Gate rather than answer first. *)
-  Index.forget_all (Index.shared ());
   let base_path = temp_base () in
-  let _ = offer ~base_path [ tool "somethingUnannotated" ] in
+  let offering = offer ~base_path [ tool "somethingUnannotated" ] in
+  let identity_tool_index = Index.of_tools offering.offered in
   match
-    Policy.verdict_for ~composition_plan_index:None ~tool_name:"atlassian_somethingUnannotated"
+    Policy.verdict_for ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_somethingUnannotated"
       ~input:(`Assoc [])
   with
   | Policy.Run { because } ->
@@ -862,9 +862,52 @@ let test_a_name_from_no_service_stays_unknown () =
   (* The index answering "never recorded" must not read as "may write". A
      name masc has never heard of is still the unclassifiable case, and
      folding the two would let this arm swallow every unknown tool. *)
-  Index.forget_all (Index.shared ());
   check Alcotest.bool "not classifiable" false
-    (Policy.classifies ~composition_plan_index:None ~tool_name:"atlassian_neverOffered")
+    (Policy.classifies ~identity_tool_index:Index.empty ~composition_plan_index:None ~tool_name:"atlassian_neverOffered")
+
+let test_turn_declarations_are_isolated () =
+  let base_path = temp_base () in
+  let first = offer ~base_path [tool ~read_only:true "sharedTool"] in
+  let first_index = Index.of_tools first.offered in
+  let second = offer ~base_path [tool ~read_only:false "sharedTool"] in
+  let second_index = Index.of_tools second.offered in
+  let tool_name = "atlassian_sharedTool" in
+  check (Alcotest.option (Alcotest.option Alcotest.bool))
+    "first turn retains its declaration" (Some (Some true))
+    (Index.read_only first_index ~tool_name);
+  check (Alcotest.option (Alcotest.option Alcotest.bool))
+    "second turn has its own declaration" (Some (Some false))
+    (Index.read_only second_index ~tool_name);
+  check Alcotest.bool "catalog projection cannot register a tool in another turn" false
+    (Policy.classifies ~identity_tool_index:Index.empty
+       ~composition_plan_index:None ~tool_name);
+  let verdict identity_tool_index =
+    Policy.verdict_for ~identity_tool_index ~composition_plan_index:None
+      ~tool_name ~input:(`Assoc []) in
+  check Alcotest.bool "different declarations retain different policy reasons" false
+    (String.equal (Policy.verdict_because (verdict first_index))
+       (Policy.verdict_because (verdict second_index)));
+  Eio_main.run (fun env ->
+    let module Gate = Masc.Keeper_tool_approval_gate in
+    let gate = Gate.create
+      ~registry:(Masc.Keeper_tool_approval_registry.create ())
+      ~late_approvals:(Masc.Keeper_late_approval.create ())
+      ~publish:(fun _ -> ()) ~redact_text:Fun.id ~clock:env#clock
+      ~keeper_name:"isolated-identity-turn" ~timeout_sec:1.0 in
+    let bound = { gate with Gate.identity_tool_index = first_index } in
+    let invocation = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"isolated-call" ~turn:1
+      ~schedule:{ Agent_core.Tool_contract.planned_index = 0; batch_index = 0;
+        batch_size = 1; execution_mode = Agent_core.Tool_contract.Serial }
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+    let event = Agent_core.Hooks.PreToolUse
+      { invocation; tool_name; input = `Assoc []; accumulated_cost_usd = 0.0 } in
+    (match bound.pre_tool_use ~identity_tool_index:bound.identity_tool_index event with
+     | Agent_core.Hooks.Continue -> ()
+     | _ -> Alcotest.fail "the admitted turn should classify its attached read");
+    match gate.pre_tool_use ~identity_tool_index:gate.identity_tool_index event with
+    | Agent_core.Hooks.ElicitToolApproval _ -> ()
+    | _ -> Alcotest.fail "binding one turn must not register tools on another gate")
 
 (* ── renewal ─────────────────────────────────────────────────────────── *)
 
@@ -1142,6 +1185,7 @@ let () =
             test_silence_is_not_permission;
           Alcotest.test_case "a name from no service stays unknown" `Quick
             test_a_name_from_no_service_stays_unknown;
+      Alcotest.test_case "turn declarations are isolated" `Quick test_turn_declarations_are_isolated;
         ] );
       ( "the tool surface",
         [ Alcotest.test_case "names are namespaced by provider" `Quick

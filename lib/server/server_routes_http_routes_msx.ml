@@ -114,6 +114,18 @@ let parse_keys names =
         | Error message -> Error message))
     (Ok []) names
 
+(* A change from the terminal names the workspace it read. A server swapped
+   onto the same port after that read answers 409 and applies nothing; a body
+   without the field (a keeper's tool, a script) is not bound to one. The field
+   is removed before the body reaches the strict per-route decoders. *)
+let admit_expected_workspace ~(config : Workspace.config) args =
+  match Workspace.validate_expected_workspace ~config args with
+  | Ok args -> Ok args
+  | Error Workspace.Invalid_workspace_precondition ->
+    Error (`Bad_request, "invalid expected_workspace precondition")
+  | Error Workspace.Workspace_precondition_failed ->
+    Error (`Conflict, "workspace precondition failed")
+
 (* The press body decoded and applied under [who], the identity the route's
    actor auth resolved. The route test drives it with its own workspace. *)
 let press_response ~config ~who ~body =
@@ -121,6 +133,9 @@ let press_response ~config ~who ~body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error message -> error `Bad_request ("invalid JSON: " ^ message)
   | json -> (
+    match admit_expected_workspace ~config json with
+    | Error (status, message) -> error status message
+    | Ok json ->
     let ( let* ) = Result.bind in
     let decoded =
       let* names = string_list_field "keys" json in
@@ -197,6 +212,9 @@ let load_response ~(config : Workspace.config) ~agent_name ~body =
   | exception Yojson.Json_error message ->
     `Bad_request, load_result_json ~ok:false ~message:("invalid JSON: " ^ message)
   | args ->
+    match admit_expected_workspace ~config args with
+    | Error (status, message) -> status, load_result_json ~ok:false ~message
+    | Ok args ->
     let result =
       (* Tool_timing.start is the one tool-start stamp Tool_misc.dispatch
          also uses; it reads Time_compat.now, the clock accessor the
@@ -346,10 +364,25 @@ let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
                 "frames_ago", `Int (frame.number - last)])
           (recent_players_of ~now:frame.number entries))] @ pixel_fields)
 
-let tick_response ~body =
+(* With [config] the body may name the workspace the terminal read, and a
+   different one is a 409 before the tick decoder or the machine runs. The
+   field is removed before the strict tick decoder sees the body. *)
+let admit_tick_workspace ~config body =
+  match config with
+  | None -> Ok body
+  | Some config ->
+    (match Yojson.Safe.from_string body with
+     | exception Yojson.Json_error _ -> Ok body
+     | json ->
+       Result.map Yojson.Safe.to_string (admit_expected_workspace ~config json))
+
+let tick_response_in (config : Workspace.config option) body =
   let error status message =
     status, `Assoc [ "ok", `Bool false; "message", `String message ]
   in
+  match admit_tick_workspace ~config body with
+  | Error (status, message) -> error status message
+  | Ok body ->
   match decode_tick body with
   | Error detail -> error `Bad_request detail
   | Ok (frames, pixel_response) ->
@@ -378,14 +411,19 @@ let tick_response ~body =
       error `Internal_server_error "MSX tick failed; read the current frame before retrying"
 ;;
 
+let tick_response ~body = tick_response_in None body
+
+let tick_response_bound ~config ~body = tick_response_in (Some config) body
+
+
 (* The realtime driver (RFC-0439 §3.2, poll-cadence tick). The spectating TUI
    posts this a few times a second to advance the shared machine, so a game
    flows even when no keeper is pressing a key. Body: {frames:N}, clamped to
    1..max_frames_per_call; the answer is the advanced frame, so one call both
    steps and reads. A write, gated like press. *)
-let handle_tick request reqd =
+let handle_tick ~config request reqd =
   Http.Request.read_body_async reqd (fun body ->
-      let status, json = tick_response ~body in
+      let status, json = tick_response_bound ~config ~body in
       Http.Response.json_value_on_cpu ~status ~request
         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
 ;;
@@ -399,6 +437,9 @@ let checkpoint_response ~(config : Workspace.config) ~restore ~body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error message -> error `Bad_request message
   | args ->
+    match admit_expected_workspace ~config args with
+    | Error (status, message) -> error status message
+    | Ok args ->
     (match Tool_misc_msx_lane.checkpoint_slot args with
      | Error message -> error `Bad_request message
      | Ok _ ->
@@ -433,6 +474,9 @@ let handle_change_disk ~(config : Workspace.config) request reqd =
     let status, json = match Yojson.Safe.from_string body with
       | exception Yojson.Json_error message -> error `Bad_request message
       | args -> (
+        match admit_expected_workspace ~config args with
+        | Error (status, message) -> error status message
+        | Ok args ->
         match Executor_pool_ref.submit_strict (fun () ->
           let result = Tool_misc_msx_lane.handle_change_disk ~tool_name:"masc_msx_change_disk"
               ~start_time:(Tool_timing.start ()) ~base_path:config.base_path args in
@@ -505,6 +549,7 @@ let add_routes router =
          request reqd)
   |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_step"
-         (fun _state _req reqd -> handle_tick request reqd)
+         (fun state _req reqd ->
+           handle_tick ~config:(Mcp_server.workspace_config state) request reqd)
          request reqd)
 ;;

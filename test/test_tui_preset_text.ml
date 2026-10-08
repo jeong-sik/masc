@@ -82,7 +82,7 @@ let test_restore_lines_show_skips_and_the_runtime_outcome () =
     ; "prompt overrides (immediate): applied 1, skipped 0"
     ; "keeper instructions (keeper_restart): applied 2, skipped 0"
     ; "runtime: committed — runtime.toml rewritten, assignments and exact lanes live"
-    ; "Default prompts: saved baseline unknown"
+    ; "기본 프롬프트 · 저장된 비교 기준 없음"
     ]
     (Text.restore_lines clean);
   check bool "clean is clean" true (Text.restore_is_clean clean);
@@ -97,7 +97,7 @@ let test_restore_lines_show_skips_and_the_runtime_outcome () =
     ; "  - stale: contract revision mismatch"
     ; "keeper instructions (keeper_restart): applied 2, skipped 0"
     ; "runtime: failed — invalid runtime TOML"
-    ; "Default prompts: saved baseline unknown"
+    ; "기본 프롬프트 · 저장된 비교 기준 없음"
     ]
     (Text.restore_lines dirty);
   check bool "dirty is not clean" false (Text.restore_is_clean dirty);
@@ -164,7 +164,7 @@ let test_pane_row_and_detail () =
     ; ""
     ; "Preset directory: /fixture/presets/morning"
     ; "Matches saved workspace settings (Keeper reload timing still applies)"
-    ; "Default prompts: match saved baseline"
+    ; "기본 프롬프트 · 저장 당시와 동일"
     ; "Prompt keeper · current effective override · Markdown /fixture/prompts/keeper.md"
     ; "override keeper(4431B)"
     ; "지시문 analyst.toml(812B), spruce.toml(640B)"
@@ -273,7 +273,7 @@ let test_default_drift_is_visible_without_failing_restore () =
   check bool "default drift leaves restore successful" true (Text.restore_is_clean report);
   let lines = Text.restore_lines report in
   List.iter (fun line -> check bool "changed prompt is visible" true (List.mem line lines))
-    ["  - keeper: changed"; "  - judge: added"; "  - removed: removed or unreadable"];
+    ["기본 프롬프트 · 차이 3건"; "  변경 · keeper"; "  추가 · judge"; "  없음 · removed"];
   let part = `Assoc ["effect", `String "immediate"; "applied", `List []; "skipped", `List []] in
   let comparison = Masc.Prompt_preset.default_comparison_to_json report.D.prr_default_prompts in
   let payload defaults = `Assoc ["ok", `Bool true; "report", `Assoc

@@ -84,17 +84,19 @@ let runtime_line = function
 ;;
 
 let default_prompt_lines = function
-  | Masc.Prompt_preset.Defaults_unknown -> [ "Default prompts: saved baseline unknown" ]
-  | Masc.Prompt_preset.Defaults_match -> [ "Default prompts: match saved baseline" ]
+  | Masc.Prompt_preset.Defaults_unknown -> [ "기본 프롬프트 · 저장된 비교 기준 없음" ]
+  | Masc.Prompt_preset.Defaults_match -> [ "기본 프롬프트 · 저장 당시와 동일" ]
   | Masc.Prompt_preset.Defaults_differ changes ->
-      "Default prompts: differ from saved baseline (current Markdown stays in use)"
-      :: List.map (fun (key, saved, current) ->
+      [ Printf.sprintf "기본 프롬프트 · 차이 %d건" (List.length changes)
+      ; "  복원 후에도 현재 기본값을 사용합니다"
+      ]
+      @ List.map (fun (key, saved, current) ->
            let change = match saved, current with
-             | None, Some _ -> "added"
-             | Some _, None -> "removed or unreadable"
-             | Some _, Some _ -> "changed"
-             | None, None -> "unavailable" in
-           Printf.sprintf "  - %s: %s" key change) changes
+             | None, Some _ -> "추가"
+             | Some _, None -> "없음"
+             | Some _, Some _ -> "변경"
+             | None, None -> "확인 불가" in
+           Printf.sprintf "  %s · %s" change key) changes
 ;;
 
 let restore_lines (report : D.preset_restore_report) =

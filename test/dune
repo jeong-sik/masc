@@ -7026,7 +7026,7 @@
 (test
  (name test_tui_browser_lane)
  (modules test_tui_browser_lane)
- (libraries masc.browser_lane masc_tui_types))
+ (libraries masc.browser_lane masc_tui_frame masc_tui_types))
 
 (test
  (name test_tui_browser_lane_text)
@@ -7055,6 +7055,8 @@
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
+
+(include stanzas/test_tui_browser_rejection.inc)
 
 (include stanzas/test_browser_lane_name.inc)
 

@@ -933,6 +933,12 @@
  (libraries masc masc_tool_blob_store unix yojson))
 
 (library
+ (name masc_tui_browser_rejection)
+ (wrapped false)
+ (modules masc_tui_browser_rejection)
+ (libraries masc.browser_lane yojson))
+
+(library
  (name masc_tui_keeper_chat_diff)
  (wrapped false)
  (modules masc_tui_keeper_chat_diff)
@@ -1835,6 +1841,8 @@
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_execute_result
+  masc_tui_browser_rejection
+  masc.browser_lane
   masc_tui_tool_detail
   masc_tui_theme
   masc_tui_gate_text

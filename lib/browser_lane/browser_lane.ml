@@ -211,6 +211,12 @@ let live_capability_to_wire = function
   | Tab_activation -> "tab_activation"
 ;;
 
+let live_capability_of_wire raw =
+  List.find_opt
+    (fun capability -> String.equal (live_capability_to_wire capability) raw)
+    all_of_live_capability
+;;
+
 let live_capability_of_interaction = function
   | Activate_tab -> Tab_activation
   | Click _ | Fill _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
@@ -347,14 +353,20 @@ let live_transports_serving capability =
   List.filter (fun transport -> live_transport_serves transport capability) all_of_live_transport
 ;;
 
+(* Where the steps for attaching a connection of this transport are written. *)
+let live_transport_setup_doc = function
+  | Web_extension -> "connectors/browser/host/README.md"
+  | Webdriver_bidi -> "docs/design/browser-bidi-live-host.md"
+;;
+
 (* What adds a connection of each kind. Both are the operator's to do. *)
-let live_transport_setup = function
-  | Web_extension ->
-    "the operator loads the browser-lane extension and its native host in that browser \
-     (connectors/browser)"
-  | Webdriver_bidi ->
-    "the operator attaches that browser's Remote Agent with masc-browser-host --bidi-url \
-     (docs/design/browser-bidi-live-host.md)"
+let live_transport_setup transport =
+  let steps = match transport with
+    | Web_extension ->
+      "the operator loads the browser-lane extension and its native host in that browser"
+    | Webdriver_bidi ->
+      "the operator attaches that browser's Remote Agent with masc-browser-host --bidi-url" in
+  Printf.sprintf "%s (%s)" steps (live_transport_setup_doc transport)
 ;;
 
 type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string;
@@ -416,8 +428,10 @@ let route_lane_name = function
 (* What an absent backend means on each lane, and where the operator looks. *)
 let lane_absent_message = function
   | Lane_name.Live ->
-    "no browser lane connected: the live lane needs the operator's browser \
-     running with the browser-lane extension and host (connectors/browser)"
+    Printf.sprintf
+      "no browser lane connected: the live lane needs the operator's browser running with the \
+       browser-lane extension and host (%s)"
+      (live_transport_setup_doc Web_extension)
   | Lane_name.Automation ->
     "the automation lane has no WebDriver: configure browser.automation.geckodriver, or \
      read the server log for why it did not start"
@@ -439,13 +453,37 @@ type selection_error =
   | Transport_unsupported of
       { client_id : client_id; transport : live_transport; capability : live_capability }
 
-let selection_error_code = function
-  | Activity_rejected (Lane_off _) -> "browser_lane_off"
-  | Activity_rejected Activity_unavailable -> "browser_activity_unavailable"
-  | No_live_client -> "no_live_client"
-  | Selected_client_disconnected _ -> "selected_client_disconnected"
-  | Ambiguous_clients _ -> "ambiguous_browser_clients"
-  | Transport_unsupported _ -> "live_transport_unsupported"
+(* The refusal's name without its details: what a reader of a recorded
+   rejection recovers from the code. *)
+type selection_case =
+  | Lane_off_case
+  | Activity_unavailable_case
+  | No_live_client_case
+  | Selected_client_disconnected_case
+  | Ambiguous_clients_case
+  | Transport_unsupported_case
+[@@deriving enumerate]
+
+let selection_case = function
+  | Activity_rejected (Lane_off _) -> Lane_off_case
+  | Activity_rejected Activity_unavailable -> Activity_unavailable_case
+  | No_live_client -> No_live_client_case
+  | Selected_client_disconnected _ -> Selected_client_disconnected_case
+  | Ambiguous_clients _ -> Ambiguous_clients_case
+  | Transport_unsupported _ -> Transport_unsupported_case
+
+let selection_case_code = function
+  | Lane_off_case -> "browser_lane_off"
+  | Activity_unavailable_case -> "browser_activity_unavailable"
+  | No_live_client_case -> "no_live_client"
+  | Selected_client_disconnected_case -> "selected_client_disconnected"
+  | Ambiguous_clients_case -> "ambiguous_browser_clients"
+  | Transport_unsupported_case -> "live_transport_unsupported"
+
+let selection_case_of_code code =
+  List.find_opt (fun case -> String.equal (selection_case_code case) code) all_of_selection_case
+
+let selection_error_code error = selection_case_code (selection_case error)
 
 let selection_error_message = function
   | Activity_rejected rejection -> activity_rejection_message rejection

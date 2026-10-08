@@ -90,6 +90,14 @@ The mapper pin from MASC PR #34167 was already included in server source
 `5ebfc257c55a6a771ace0ab412051a3d5e5cce44`; the older “redeploy pending”
 report must not be used as current deployment status.
 
+On 2026-10-08 the merged `ocaml-msx` core at
+`eb0410eab4abe81c1300e0f7debd20fc298d2055` built successfully and was exercised
+with the real C-BIOS ROM set. Sangokushi II reached a rendered GRAPHIC6 opening
+after 3,000 frames (`pc=0b2e`, 28,258 non-black pixels, 99 disk calls). The
+same 1,200-frame probe produced rendered output for L'Empereur, Europa Sensen,
+Genghis Khan, Rune Master and Super Daisenryaku. These are media-load and
+rendering checks; they do not promote those games to campaign-complete.
+
 Campaign acceptance still requires readable interactive menus, starting a
 scenario, taking turns, completing a battle, saving progress, restarting and
 restoring that progress, and an observed ending. Record source/binary identity,

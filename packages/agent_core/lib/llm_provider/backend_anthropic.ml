@@ -472,6 +472,15 @@ let build_request_payload
       projection.messages
   in
   let messages = Api_common.merge_tool_result_followup_user_messages projected_messages in
+  (match config.kind, caps.supports_assistant_prefill, List.rev messages with
+   | Provider_config.Anthropic, false, { role = Assistant; _ } :: _ ->
+     invalid_arg
+       (Printf.sprintf
+          "Backend_anthropic.build_request: model %S does not accept a final assistant prefill; end messages with a user turn"
+          config.model_id)
+   | Provider_config.Anthropic, (true | false), _
+   | (Provider_config.Kimi | Provider_config.OpenAI_compat | Provider_config.Ollama
+     | Provider_config.Gemini | Provider_config.Glm), _, _ -> ());
   let message_to_json =
     match config.kind with
     | Provider_config.Anthropic -> anthropic_message_to_json

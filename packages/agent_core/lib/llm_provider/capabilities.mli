@@ -174,6 +174,11 @@ type capabilities =
   ; (* Protocol *)
     supports_native_streaming : bool
   ; supports_system_prompt : bool
+  ; supports_assistant_prefill : bool
+    (** Whether Anthropic Messages accepts a final assistant continuation.
+        Enforced only on the Anthropic wire; Kimi retains its own contract.
+        Model-catalog and explicit capability declarations override the provider
+        default, which preserves existing continuation behavior. *)
   ; supports_prompt_caching : bool
   ; (* Sampling parameters *)
     supports_top_k : bool

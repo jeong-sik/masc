@@ -1144,6 +1144,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     ; "supports-response-format-json"
     ; "supports-structured-output"
     ; "supports-system-prompt"
+    ; "supports-assistant-prefill"
     ; "supports-prompt-caching"
     ; "supports-top-k"
     ; "supports-min-p"
@@ -1240,6 +1241,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   let* supports_response_format_json = b "supports-response-format-json" in
   let* supports_structured_output = b "supports-structured-output" in
   let* supports_system_prompt = b "supports-system-prompt" in
+  let* supports_assistant_prefill = b "supports-assistant-prefill" in
   let* supports_prompt_caching = b "supports-prompt-caching" in
   let* supports_top_k = b "supports-top-k" in
   let* supports_min_p = b "supports-min-p" in
@@ -1264,6 +1266,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     ; supports_response_format_json
     ; supports_structured_output
     ; supports_system_prompt
+    ; supports_assistant_prefill
     ; supports_prompt_caching
     ; supports_top_k
     ; supports_min_p

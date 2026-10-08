@@ -494,6 +494,7 @@ let capability_fields =
   ; "modality_priority"
   ; "supports_native_streaming"
   ; "supports_system_prompt"
+  ; "supports_assistant_prefill"
   ; "supports_prompt_caching"
   ; "supports_top_k"
   ; "supports_min_p"

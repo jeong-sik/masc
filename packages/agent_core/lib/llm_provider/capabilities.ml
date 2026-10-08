@@ -218,6 +218,7 @@ type capabilities =
   ; (* ── Protocol ──────────────────────────────────────── *)
     supports_native_streaming : bool
   ; supports_system_prompt : bool
+  ; supports_assistant_prefill : bool
   ; supports_prompt_caching : bool
   ; (* ── Sampling parameters ───────────────────────────── *)
     supports_top_k : bool
@@ -272,6 +273,7 @@ let default_capabilities =
   ; task = None
   ; supports_native_streaming = false
   ; supports_system_prompt = true
+  ; supports_assistant_prefill = true
   ; supports_prompt_caching = false
   ; supports_top_k = false
   ; supports_min_p = false
@@ -998,6 +1000,7 @@ type declarative_capability_overrides =
   ; task : Capability_vocab.task option
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
+  ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
@@ -1041,6 +1044,7 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
     task = None
   ; supports_native_streaming = entry.supports_native_streaming
   ; supports_system_prompt = entry.supports_system_prompt
+  ; supports_assistant_prefill = entry.supports_assistant_prefill
   ; supports_prompt_caching = entry.supports_prompt_caching
   ; supports_top_k = entry.supports_top_k
   ; supports_min_p = entry.supports_min_p
@@ -1186,6 +1190,8 @@ let apply_declarative_capability_overrides overrides =
       override_bool base.supports_native_streaming overrides.supports_native_streaming
   ; supports_system_prompt =
       override_bool base.supports_system_prompt overrides.supports_system_prompt
+  ; supports_assistant_prefill =
+      override_bool base.supports_assistant_prefill overrides.supports_assistant_prefill
   ; supports_prompt_caching =
       override_bool base.supports_prompt_caching overrides.supports_prompt_caching
   ; supports_top_k = override_bool base.supports_top_k overrides.supports_top_k
@@ -1367,6 +1373,7 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; task = entry.task
   ; supports_native_streaming = entry.supports_native_streaming
   ; supports_system_prompt = entry.supports_system_prompt
+  ; supports_assistant_prefill = entry.supports_assistant_prefill
   ; supports_prompt_caching = entry.supports_prompt_caching
   ; supports_top_k = entry.supports_top_k
   ; supports_min_p = entry.supports_min_p
@@ -1691,6 +1698,7 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
   ; supported_models = None
   ; supports_native_streaming = None
   ; supports_system_prompt = None
+  ; supports_assistant_prefill = None
   ; supports_prompt_caching = None
   ; supports_top_k = None
   ; supports_min_p = None
@@ -1735,6 +1743,7 @@ let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   ; modality_priority = None
   ; supports_native_streaming = None
   ; supports_system_prompt = None
+  ; supports_assistant_prefill = None
   ; supports_prompt_caching = None
   ; supports_top_k = None
   ; supports_min_p = None

@@ -279,6 +279,8 @@ cache_read_multiplier = 0.1
 [[models]]
 id_prefix = "claude-haiku-5-5"
 base = "anthropic"
+# Even thinking=disabled rejects a final assistant continuation (migration guide).
+supports_assistant_prefill = false
 anthropic_thinking_control = "adaptive_default"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000

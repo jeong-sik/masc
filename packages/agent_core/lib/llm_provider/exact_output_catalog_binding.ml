@@ -272,6 +272,8 @@ let merge_exact_model_entry
       prefer_overlay overlay.supports_native_streaming base.supports_native_streaming
   ; supports_system_prompt =
       prefer_overlay overlay.supports_system_prompt base.supports_system_prompt
+  ; supports_assistant_prefill =
+      prefer_overlay overlay.supports_assistant_prefill base.supports_assistant_prefill
   ; supports_prompt_caching =
       prefer_overlay overlay.supports_prompt_caching base.supports_prompt_caching
   ; supports_top_k = prefer_overlay overlay.supports_top_k base.supports_top_k
@@ -400,6 +402,7 @@ let functional_capability_projection
     ; "document=" ^ bool_string caps.supports_document_input
     ; "modality_priority=" ^ modality_priority_string caps.modality_priority
     ; "system_prompt=" ^ bool_string caps.supports_system_prompt
+    ; "assistant_prefill=" ^ bool_string caps.supports_assistant_prefill
     ; "task=" ^ task_string caps.task
     ; "supported_models=" ^ supported_models_string caps.supported_models
     ; "anthropic_thinking=" ^ anthropic_thinking_control_string anthropic_thinking_control
@@ -590,6 +593,8 @@ let capabilities_of_catalog_binding
       bool_or base.supports_system_prompt model.supports_system_prompt
   ; supports_native_streaming =
       bool_or base.supports_native_streaming model.supports_native_streaming
+  ; supports_assistant_prefill =
+      bool_or base.supports_assistant_prefill model.supports_assistant_prefill
   ; supports_prompt_caching =
       bool_or base.supports_prompt_caching model.supports_prompt_caching
   ; supports_top_k = bool_or base.supports_top_k model.supports_top_k
@@ -775,6 +780,7 @@ let%test "exact functional capability projection has a stable golden" =
     ; "document=1"
     ; "modality_priority=visual_first"
     ; "system_prompt=1"
+    ; "assistant_prefill=1"
     ; "task=none"
     ; "supported_models=some:model-a,model-b"
     ; "anthropic_thinking=adaptive_preferred"
@@ -799,6 +805,7 @@ let%test "exact functional capability projection is field-sensitive" =
     ; { base with supports_document_input = true }
     ; { base with modality_priority = Modality.Visual_first }
     ; { base with supports_system_prompt = not base.supports_system_prompt }
+    ; { base with supports_assistant_prefill = not base.supports_assistant_prefill }
     ; { base with task = Some Caps.Transcription }
     ; { base with supported_models = Some [ "one" ] }
     ]

@@ -98,7 +98,7 @@ let test_overflow_drops_and_counts () =
     check int "reported total stays stable" 808 last_reported_drops)
 ;;
 
-let test_writer_and_observer_exception_contract () =
+let test_writer_and_observer_failure_isolation () =
   with_clean_sink (fun () ->
     let observed = ref 0 in
     Console_sink.set_after_write_observer (Some (fun () -> incr observed));
@@ -114,11 +114,16 @@ let test_writer_and_observer_exception_contract () =
     let synchronous_observed = ref 0 in
     Console_sink.set_after_write_observer
       (Some (fun () -> incr synchronous_observed));
-    check_raises "synchronous writer exception remains visible"
-      (Failure "fd broken")
-      (fun () -> Console_sink.write "line c");
+    Console_sink.write "line c";
     check int "failed synchronous attempt still notifies" 1
       !synchronous_observed;
+    Log.emit Log.Warn ~module_name:"ConsoleSinkFailureTest"
+      "record survives a failing console mirror";
+    (match Log.Ring.recent ~limit:5 ~module_filter:"ConsoleSinkFailureTest" () with
+     | entry :: _ ->
+       check string "ring records survive a failing console mirror"
+         "record survives a failing console mirror" entry.Log.Ring.message
+     | [] -> fail "log record was lost with a failing console mirror");
     Console_sink.For_testing.set_writer (Some (fun _ -> ()));
     Console_sink.set_after_write_observer
       (Some (fun () -> failwith "observer broken"));
@@ -134,8 +139,8 @@ let () =
         ; test_case "enqueue mode defers fd write" `Quick
             test_enqueue_mode_defers_fd_write
         ; test_case "overflow drops and counts" `Quick test_overflow_drops_and_counts
-        ; test_case "writer and observer exception contract" `Quick
-            test_writer_and_observer_exception_contract
+        ; test_case "writer failure isolation" `Quick
+            test_writer_and_observer_failure_isolation
         ] )
     ]
 ;;

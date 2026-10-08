@@ -13,8 +13,8 @@
    - The console is a convenience MIRROR. The JSONL file sink
      ([Log.Persist.write_to_sink]) and the in-memory ring stay
      authoritative and lossless.
-   - Before [start] (tests, CLI one-shots, pre-boot), [write] stays
-     synchronous — identical to the historical behavior.
+   - Before [start] (tests, CLI one-shots, pre-boot), [write] attempts the
+     mirror synchronously, but a failed mirror must not stop the log caller.
    - After [start], [write] enqueues into a bounded queue drained by a
      dedicated OS thread; the thread alone performs the possibly-blocking
      fd write. When the writer is blocked long enough to fill the queue,
@@ -119,7 +119,13 @@ let write line =
      [Log] hands it the raw pre-[Ring.push] line. *)
   let line = Secret_patterns.redact_text line in
   if not (Atomic.get enqueue_active)
-  then write_line line
+  then begin
+    try write_line line with
+    | _ ->
+      (* The mirror is best-effort; the caller records the entry in the ring
+         and file sink after this returns. *)
+      ()
+  end
   else begin
     Mutex.lock mu;
     let full = Queue.length queue >= capacity in

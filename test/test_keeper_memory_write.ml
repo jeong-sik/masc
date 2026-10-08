@@ -1099,21 +1099,67 @@ let test_late_pin_retirement_preserves_new_same_artifact_publication () =
   let config = Masc.Workspace.default_config base_path in
   let module Pin = Masc.Keeper_recall_artifact in
   let ok = function Ok value -> value | Error detail -> Alcotest.fail detail in
-  let artifact = Tool_blob_store.put_durable_reuse (Tool_blob_store.create ~base_path)
+  let store = Tool_blob_store.create ~base_path in
+  let artifact = Tool_blob_store.put_durable_reuse store
       ~bytes:"same memory snapshot" ~mime:"text/plain" in
   let retain () = ok (Pin.retain ~config ~keeper_id:"keeper" ~kind:Memory_os ~now:1. artifact) in
+  let keeper_dir = Filename.concat (Masc.Workspace.keepers_runtime_dir config) "keeper" in
+  let pin = Filename.concat keeper_dir "memory-recall-current.json" in
+  let generation () = string_field "generation" (Yojson.Safe.from_string (Fs_compat.load_file pin)) in
   retain ();
+  let first_generation = generation () in
   let observed = ok (Pin.observe_current ~config ~keeper_id:"keeper" ~kind:Memory_os) in
   retain ();
-  let pin = Filename.concat (Filename.concat (Masc.Workspace.keepers_runtime_dir config) "keeper")
-      "memory-recall-current.json" in
+  let second_generation = generation () in
+  retain ();
+  let third_generation = generation () in
+  Alcotest.(check bool) "identical publications have independent persisted generations" true
+    (first_generation <> second_generation && second_generation <> third_generation
+     && first_generation <> third_generation);
   let newer = Fs_compat.load_file pin in
   ok (Pin.retire_current ~config ~keeper_id:"keeper" ~kind:Memory_os observed);
   Alcotest.(check string) "late retirement cannot release newer same-hash publication" newer (Fs_compat.load_file pin);
+  let history_dir = Filename.concat keeper_dir
+      (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
+  ignore (Dated_jsonl.prune (Dated_jsonl.create ~base_dir:history_dir ()) ~days:1);
+  let sweep () = List.iter (fun mode -> match Tool_blob_maintenance.run ~base_path
+        ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+    | Ok _ -> () | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error))
+      [Tool_blob_maintenance.Observe_only; Delete_previous_candidates] in
+  let present () = match Tool_blob_store.fetch store ~sha256:artifact.sha256 with
+    | Ok value -> Option.is_some value
+    | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error) in
+  sweep ();
+  Alcotest.(check bool) "actual maintenance sees nested current artifact without dated history" true (present ());
   let current = ok (Pin.observe_current ~config ~keeper_id:"keeper" ~kind:Memory_os) in
   ok (Pin.retire_current ~config ~keeper_id:"keeper" ~kind:Memory_os current);
-  Alcotest.(check bool) "current owner can retire its exact pin" true
-    (Yojson.Safe.from_string (Fs_compat.load_file pin) = `Null)
+  Alcotest.(check bool) "current owner can retire its exact generation" true
+    (Yojson.Safe.from_string (Fs_compat.load_file pin) = `Null);
+  let snapshot () = match Fs_compat.load_owned_regular_file_with_snapshot
+      ~ownership_root:(Masc.Workspace.keepers_runtime_dir config) pin with
+    | Ok (Some contents) -> contents.snapshot
+    | Ok None -> Alcotest.fail "retired pin is absent"
+    | Error error -> Alcotest.fail (Fs_compat.owned_regular_file_read_error_to_string error) in
+  let retired_snapshot = snapshot () in
+  let retired = ok (Pin.observe_current ~config ~keeper_id:"keeper" ~kind:Memory_os) in
+  ok (Pin.retire_current ~config ~keeper_id:"keeper" ~kind:Memory_os retired);
+  ok (Pin.retire_current ~config ~keeper_id:"keeper" ~kind:Memory_os current);
+  Alcotest.(check bool) "retired observation and stale generation never rewrite null" true
+    (Fs_compat.equal_owned_regular_file_snapshot retired_snapshot (snapshot ()));
+  sweep ();
+  Alcotest.(check bool) "retired generation becomes collectable through normal maintenance" false (present ());
+  (* Unversioned roots do not carry publication identity. No observation
+     fabricates a generation or rewrites these roots as a hidden migration. *)
+  let unversioned = Yojson.Safe.to_string (Tool_output.normalized_artifact_ref_to_json artifact) in
+  Fs_compat.save_file pin unversioned;
+  Alcotest.(check bool) "unversioned pin is a conservative read error" true
+    (Result.is_error (Pin.observe_current ~config ~keeper_id:"keeper" ~kind:Memory_os));
+  let meta = make_meta "keeper" in
+  ignore (Masc.Keeper_memory_os_recall.render_if_enabled ~config ~meta
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      ~keeper_id:meta.name ~now:1. ());
+  Alcotest.(check string) "authoritative demand does not silently stamp or retire unversioned roots"
+    unversioned (Fs_compat.load_file pin)
 ;;
 
 let test_source_bound_write_discards_stale_claim_and_recreates () =

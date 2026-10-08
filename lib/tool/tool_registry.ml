@@ -2,7 +2,7 @@
 
     Provides fast O(1) in-memory tracking of tool call frequency.
     Complements Telemetry_eio's JSONL-based persistence with
-    zero-allocation atomic counters for hot-path performance.
+    immutable per-tool observations published atomically.
 
     Usage:
     - record_call is called on every tools/call dispatch
@@ -23,28 +23,25 @@ let string_of_source = function
 
 (** Per-tool call statistics *)
 type call_stats =
-  { call_count : int Atomic.t
-  ; success_count : int Atomic.t
-  ; deferred_count : int Atomic.t
-  ; failure_count : int Atomic.t
-  ; last_called_at : float Atomic.t (** Unix timestamp, 0.0 = never *)
-  ; total_duration_ms : int Atomic.t
-  ; external_mcp_count : int Atomic.t
-  ; agent_internal_count : int Atomic.t
-  ; last_assignment_id : string option Atomic.t
+  { call_count : int
+  ; success_count : int
+  ; deferred_count : int
+  ; failure_count : int
+  ; last_called_at : float (** Unix timestamp, 0.0 = never *)
+  ; total_duration_ms : int
+  ; external_mcp_count : int
+  ; agent_internal_count : int
+  ; last_assignment_id : string option
   }
 
 (** Global registry — process-lifetime. Protected by [registry_mu] against
     concurrent access from tool dispatch (write path via [record_call]) and
     HTTP dashboard handlers (read path via [get_stats]).
 
-    Within a single Eio domain the RMW in [record_call] (find_opt → replace
-    → mutate fields) happens to be atomic today only because none of the
-    steps yield, but that is an implicit contract on the scheduler, not on
-    this module. The mutex makes the contract explicit so the invariant
-    survives future code changes (e.g. a yielding telemetry callback) and
-    any future cross-domain use. *)
-let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
+    The registry lock owns table membership. Each value is an atomic cell
+    holding one immutable per-tool observation; recording publishes all related
+    counters in one CAS, while readers retain the observation they acquired. *)
+let registry : (string, call_stats Atomic.t) Hashtbl.t = Hashtbl.create 128
 
 let registry_mu = Eio.Mutex.create ()
 let with_registry_rw f = Eio_guard.with_mutex registry_mu f
@@ -70,13 +67,7 @@ let is_stats_known_tool tool_name =
 
 let is_known_tool = is_stats_known_tool
 
-(** Record a tool call with source attribution.
-
-    The whole find-or-create + accumulator mutation runs under
-    [with_registry_rw] so two concurrent calls cannot both observe [None]
-    for the same [tool_name] and both install a fresh [call_stats] record
-    (which would drop one increment). Re-entry is not possible because
-    the body performs only non-yielding computation. *)
+(** Find or install the per-tool publication cell under the registry lock. *)
 let get_or_create_stats tool_name =
   match with_registry_ro (fun () -> Hashtbl.find_opt registry tool_name) with
   | Some s -> s
@@ -86,15 +77,15 @@ let get_or_create_stats tool_name =
       | Some s -> s
       | None ->
         let s =
-          { call_count = Atomic.make 0
-          ; success_count = Atomic.make 0
-          ; deferred_count = Atomic.make 0
-          ; failure_count = Atomic.make 0
-          ; last_called_at = Atomic.make 0.0
-          ; total_duration_ms = Atomic.make 0
-          ; external_mcp_count = Atomic.make 0
-          ; agent_internal_count = Atomic.make 0
-          ; last_assignment_id = Atomic.make None
+          Atomic.make { call_count = 0
+          ; success_count = 0
+          ; deferred_count = 0
+          ; failure_count = 0
+          ; last_called_at = 0.0
+          ; total_duration_ms = 0
+          ; external_mcp_count = 0
+          ; agent_internal_count = 0
+          ; last_assignment_id = None
           }
         in
         Hashtbl.replace registry tool_name s;
@@ -109,20 +100,31 @@ let record_call
       ~duration_ms
       ()
   =
-  let stats = get_or_create_stats tool_name in
-  Atomic.incr stats.call_count;
-  (match source with
-   | External_mcp -> Atomic.incr stats.external_mcp_count
-   | Agent_internal -> Atomic.incr stats.agent_internal_count);
-  (match disposition with
-   | Tool_result.Completed _ -> Atomic.incr stats.success_count
-   | Tool_result.Deferred _ -> Atomic.incr stats.deferred_count
-   | Tool_result.Failed _ -> Atomic.incr stats.failure_count);
-  Atomic.set stats.last_called_at (Time_compat.now ());
-  ignore (Atomic.fetch_and_add stats.total_duration_ms duration_ms);
-  match assignment_id with
-  | Some _ as aid -> Atomic.set stats.last_assignment_id aid
-  | None -> ()
+  let cell = get_or_create_stats tool_name in
+  let now = Time_compat.now () in
+  let rec publish () =
+    let previous = Atomic.get cell in
+    let next =
+      { call_count = previous.call_count + 1
+      ; success_count = previous.success_count +
+          (match disposition with Tool_result.Completed _ -> 1 | Deferred _ | Failed _ -> 0)
+      ; deferred_count = previous.deferred_count +
+          (match disposition with Tool_result.Deferred _ -> 1 | Completed _ | Failed _ -> 0)
+      ; failure_count = previous.failure_count +
+          (match disposition with Tool_result.Failed _ -> 1 | Completed _ | Deferred _ -> 0)
+      ; last_called_at = now
+      ; total_duration_ms = previous.total_duration_ms + duration_ms
+      ; external_mcp_count = previous.external_mcp_count +
+          (match source with External_mcp -> 1 | Agent_internal -> 0)
+      ; agent_internal_count = previous.agent_internal_count +
+          (match source with Agent_internal -> 1 | External_mcp -> 0)
+      ; last_assignment_id =
+          (match assignment_id with Some _ -> assignment_id | None -> previous.last_assignment_id)
+      }
+    in
+    if not (Atomic.compare_and_set cell previous next) then publish ()
+  in
+  publish ()
 ;;
 
 let record_call_if_known
@@ -137,20 +139,13 @@ let record_call_if_known
   then record_call ~source ?assignment_id ~tool_name ~disposition ~duration_ms ()
 ;;
 
-(** Get all stats as a sorted list (by call_count descending).
-
-    The [Hashtbl.fold] happens under [with_registry_ro] so the snapshot of
-    bindings is consistent with the concurrent [record_call] writer. The
-    returned list still points at the mutable [call_stats] records, so
-    callers that format fields immediately see the current values; that
-    matches the pre-existing API contract (callers already have no
-    transactional guarantee across fields, only that the hashtable itself
-    is not corrupted). *)
+(** Freeze each per-tool observation before sorting. The comparator and
+    downstream renderers cannot observe subsequent counter updates. *)
 let get_stats () : (string * call_stats) list =
   with_registry_ro (fun () ->
-    Hashtbl.fold (fun name stats acc -> (name, stats) :: acc) registry [])
+    Hashtbl.fold (fun name stats acc -> (name, Atomic.get stats) :: acc) registry [])
   |> List.sort (fun (_, a) (_, b) ->
-    compare (Atomic.get b.call_count) (Atomic.get a.call_count))
+    Int.compare b.call_count a.call_count)
 ;;
 
 (** Get top N tools by call count *)
@@ -175,7 +170,7 @@ let get_never_called (all_tool_names : string list) : string list =
 (** Total calls across all tools *)
 let total_calls () : int =
   with_registry_ro (fun () ->
-    Hashtbl.fold (fun _ stats acc -> acc + Atomic.get stats.call_count) registry 0)
+    Hashtbl.fold (fun _ stats acc -> acc + (Atomic.get stats).call_count) registry 0)
 ;;
 
 (** Number of distinct tools that have been called *)

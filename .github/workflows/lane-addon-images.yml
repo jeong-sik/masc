@@ -142,7 +142,17 @@ jobs:
               receipt['worker'] = worker_receipt
           (proof / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PY
+      - uses: actions/checkout@v7
+        if: matrix.worker_target != ''
+        with:
+          ref: ${{ github.sha }}
+          path: .image-ci
+          persist-credentials: false
+      - name: Verify machine stdio and persistent checkpoint replacement
+        if: matrix.worker_target != ''
+        run: python3 .image-ci/scripts/ci/verify-machine-worker-image.py image-proof
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: lane-addon-image-${{ matrix.package }}-${{ matrix.arch }}-${{ needs.packages.outputs.source_sha }}
           path: image-proof/

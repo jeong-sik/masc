@@ -990,6 +990,25 @@ let list_prompts () =
       resolved)
   |> List.sort compare_prompt_items
 
+let default_revisions () =
+  let (_ : string option) = effective_markdown_dir () in
+  let keys =
+    with_mutex (fun () -> Hashtbl.fold (fun key _ acc -> key :: acc) meta_tbl [])
+  in
+  keys
+  |> List.filter_map (fun key ->
+       (* Baseline hashes are informational. A registered file can become
+          unreadable after registration; omit only that default, without
+          aborting capture or the restore's pre-autosave comparison. *)
+       let body =
+         try file_value_of_key key with
+         | Sys_error _ | Unix.Unix_error _ -> None
+       in
+       Option.map
+         (fun body -> key, Prompt_override_persistence.default_revision ~body)
+         body)
+  |> List.sort Stdlib.compare
+
 (** JSON export of all prompts for API *)
 let prompts_json () =
   `Assoc [

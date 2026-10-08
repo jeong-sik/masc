@@ -60,16 +60,26 @@
  (modules test_typesafeai_destinations)
  (libraries alcotest masc masc_test_deps eio_main))
 
+; What the Lanes screen reads for one Librarian run. The three Librarian
+; runtime suites pass each run they record through it.
+(library
+ (name librarian_run_tui_reading)
+ (wrapped false)
+ (modules librarian_run_tui_reading)
+ (libraries alcotest masc masc_test_deps))
+
 (test
  (name test_keeper_librarian_absorb_gate)
  (modules test_keeper_librarian_absorb_gate)
  (deps fixtures/librarian_statements_golden.json)
- (libraries alcotest masc masc_test_deps exact_output_fixture eio_main mtime.clock.os))
+ (libraries alcotest masc masc_test_deps exact_output_fixture
+  librarian_run_tui_reading eio_main mtime.clock.os))
 
 (test
  (name test_keeper_librarian_cancellation)
  (modules test_keeper_librarian_cancellation)
- (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
+ (libraries alcotest masc masc_test_deps exact_output_fixture
+  librarian_run_tui_reading eio_main))
 
 ; The reference cut (scripts/librarian/statements.py, the scorer of issue
 ; #37079) must still write the golden the OCaml test above reads.
@@ -1910,6 +1920,9 @@
   ; test_compression decodes its own gzip output with the library's reader
   decompress.de
   decompress.gz
+  ; test_goal_store and test_goal_tools freeze the creation clock
+  ptime
+  eio.mock
   masc.tool_metrics_store)
  (deps ../bin/main_eio.exe))
 
@@ -3591,7 +3604,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries alcotest masc masc_tui_types unix))
+ (libraries alcotest masc masc_tui_types masc_workspace unix))
 
 (test
  (name test_tool_transport_prefix)
@@ -6468,7 +6481,6 @@
 (include stanzas/test_tui_runtime_account_form_pty.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
-(include stanzas/test_tui_librarian_absorb_gate.inc)
 (include stanzas/test_tui_skill_create.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
@@ -7023,7 +7035,7 @@
 (test
  (name test_tui_browser_lane)
  (modules test_tui_browser_lane)
- (libraries masc.browser_lane masc_tui_types))
+ (libraries masc.browser_lane masc_tui_frame masc_tui_types))
 
 (test
  (name test_tui_browser_lane_text)
@@ -7052,6 +7064,8 @@
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
+
+(include stanzas/test_tui_browser_rejection.inc)
 
 (include stanzas/test_browser_lane_name.inc)
 
@@ -8531,9 +8545,8 @@
 (test
  (name test_keeper_librarian_context_review)
  (modules test_keeper_librarian_context_review)
- (libraries alcotest masc masc_test_deps exact_output_fixture eio_main))
-
-(include stanzas/test_tui_librarian_context_review.inc)
+ (libraries alcotest masc masc_test_deps exact_output_fixture
+  librarian_run_tui_reading eio_main))
 
 (include stanzas/test_keeper_continuity_request_view.inc)
 
@@ -9164,6 +9177,16 @@
 (include stanzas/test_tui_code_diff_pan_pty.inc)
 
 (rule
+ (alias runtest-test_tui_preset_baseline_pty)
+ (deps test_tui_preset_baseline_pty.py tui_keyboard_harness.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_preset_baseline_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_preset_baseline_pty)))
+
+(rule
  (alias runtest-test_tui_preset_viewport_pty)
  (deps test_tui_preset_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe
   tui_keyboard_approvals.py
@@ -9756,3 +9779,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_chat_progress_clock_pty)))
+
+(executable
+ (name test_h3_working_state_meaning)
+ (modules test_h3_working_state_meaning)
+ (libraries masc_test_deps))

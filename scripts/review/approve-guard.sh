@@ -5,7 +5,7 @@ GH="${GUARD_GH:-gh}"
 here="$(cd "$(dirname "$0")" && pwd)"
 repo=""; pr=""; head=""; body=""; run=""; replace_cr=""
 review_base=""; review_diff=""
-check_only=0; merge_check=0; receipt_json=0
+check_only=0; merge_check=0; receipt_json=0; print_footer=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo|--pr|--head|--body|--run|--replace-own-cr|--review-base|--review-diff)
@@ -17,7 +17,7 @@ while [ $# -gt 0 ]; do
     --run) run="$2"; shift 2;; --replace-own-cr) replace_cr="$2"; shift 2;;
     --review-base) review_base="$2"; shift 2;; --review-diff) review_diff="$2"; shift 2;;
     --check) check_only=1; shift;; --merge-check) merge_check=1; shift;;
-    --receipt-json) receipt_json=1; shift;;
+    --receipt-json) receipt_json=1; shift;; --print-footer) print_footer=1; shift;;
     *) echo "approve-guard: unknown argument $1" >&2; exit 1;;
   esac
 done
@@ -26,8 +26,20 @@ done
 [ -z "$replace_cr" ] || [[ "$replace_cr" =~ ^[1-9][0-9]*$ ]] || exit 2
 [ "$check_only" -eq 0 ] || [ "$merge_check" -eq 0 ] || exit 2
 [ "$receipt_json" -eq 0 ] || [ "$merge_check" -eq 1 ] || exit 2
+# Read-only helper mode: print the exact footer tail a reviewer should append,
+# computed from the PR's live base/head. Mutually exclusive with every mode.
+[ "$print_footer" -eq 0 ] || { [ "$check_only" -eq 0 ] && [ "$merge_check" -eq 0 ] && [ -z "$body" ] && [ -z "$run" ] && [ -z "$replace_cr" ] && [ -z "$review_base" ] && [ -z "$review_diff" ]; } || exit 2
 source "$here/ci-checks.sh"
 source "$here/review-verdict.sh"
+# Read-only helper: print the exact footer line a reviewer should append,
+# computed from the PR's live base/head. Posts nothing and approves nothing.
+if [ "$print_footer" -eq 1 ]; then
+  read_current_pr || exit $?
+  current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || exit 1
+  printf 'approve-guard: head `%s` · %s review · reviewed base `%s` · diff sha256 `%s`\n' \
+    "$head" "$review_policy" "$pr_base_sha" "$current_diff"
+  exit 0
+fi
 refuse() { echo "REFUSED #$pr head $head: $*" >&2; exit 2; }
 # Diagnostic detail for refusals: one line per failed test, never consulted for admission.
 refusal_detail=""

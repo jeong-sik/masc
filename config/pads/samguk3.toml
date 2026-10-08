@@ -1,0 +1,47 @@
+[BTN_SOUTH]
+keys = ["return"]
+label = "결정·뒤로"
+
+[BTN_EAST]
+keys = ["backspace"]
+label = "지우기"
+
+[BTN_NORTH]
+keys = ["y"]
+label = "예 (Y)"
+
+[BTN_WEST]
+keys = ["n"]
+label = "아니오 (N)"
+
+[BTN_DPAD_UP]
+keys = ["8"]
+label = "위 (8)"
+
+[BTN_DPAD_DOWN]
+keys = ["2"]
+label = "아래 (2)"
+
+[BTN_DPAD_LEFT]
+keys = ["7"]
+label = "왼쪽 위 (7)"
+
+[BTN_DPAD_RIGHT]
+keys = ["9"]
+label = "오른쪽 위 (9)"
+
+[BTN_TL]
+keys = ["1"]
+label = "왼쪽 아래 (1)"
+
+[BTN_TR]
+keys = ["3"]
+label = "오른쪽 아래 (3)"
+
+[BTN_START]
+keys = ["space"]
+label = "아무 키"
+
+[BTN_SELECT]
+keys = ["0"]
+label = "0 입력 (배치)"

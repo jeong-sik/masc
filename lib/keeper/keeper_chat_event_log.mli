@@ -143,10 +143,27 @@ type terminal_error_receipt =
       (** The journal already ended in an [Event_error]; nothing was written
           and [message] is the one it carries. *)
 
+type restart_settlement =
+  { operation_id : Keeper_chat_operation.Operation_id.t
+  ; completed_at : float
+  }
+(** Identity of the immutable restart failure in the operation store. *)
+
+type terminal_error_segment = Existing_segment | Restart_settlement of restart_settlement
+(** A restart terminal stores its exact settlement identity in the journal
+    envelope. Earlier segment errors cannot acknowledge it; retrying the same
+    durable settlement reuses its terminal even after another process exit. *)
+
+val find_restart_terminal :
+  journal -> settlement:restart_settlement -> (terminal_error_receipt option, string) result
+(** Read the matching final restart terminal. Missing or different settlement
+    metadata returns [None]; malformed metadata is an error. *)
+
 val record_terminal_error :
-  journal -> ts:float -> message:string -> (terminal_error_receipt, string) result
-(** Ends a settled operation's journal with an [Event_error] unless it already
-    ends in one. A [Run_finished] earlier in the journal is a continuation
+  ?segment:terminal_error_segment -> journal -> ts:float -> message:string -> (terminal_error_receipt, string) result
+(** Ends a settled operation's journal with an [Event_error] unless [Existing_segment] already
+    ends in one. [Restart_settlement] appends unless that exact durable
+    settlement already owns the last error. A [Run_finished] earlier in the journal is a continuation
     boundary, not a record of this failure, so it does not stop the append.
     Every settlement path that has no live stream to carry its terminal
     (Owner settlement, restart recovery) records it here, so a reader that

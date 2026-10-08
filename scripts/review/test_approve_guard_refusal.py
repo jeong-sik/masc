@@ -40,7 +40,7 @@ def footer_line(head=HEAD, diff=DIFF, tail=True):
     return line + (f" · reviewed base `{BASE}` · diff sha256 `{diff}`" if tail else "")
 
 
-class Case(unittest.TestCase):
+class GuardHarness(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="guard-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
@@ -77,6 +77,10 @@ class Case(unittest.TestCase):
         return subprocess.run(
             ["bash", str(self.scripts / "approve-guard.sh"), "--repo", "o/r", "--pr", "41487",
              "--head", HEAD, *extra], env=env, capture_output=True, text=True)
+
+
+class Case(GuardHarness):
+    pass
 
     def test_exact_footer_still_passes_merge_check(self):
         self.review(footer_line())
@@ -160,6 +164,46 @@ class Case(unittest.TestCase):
         self.assertEqual(r.stderr, "")
         calls = (self.data / "calls.log").read_text().splitlines()
         self.assertFalse(any("/compare/" in path for path in calls))
+
+
+class PrintFooterCase(GuardHarness):
+    def setUp(self):
+        super().setUp()
+        # Same fixture the diff helper returns; the expected footer must name it.
+        self.expected = (f"approve-guard: head `{HEAD}` · source review · "
+                         f"reviewed base `{BASE}` · diff sha256 `{DIFF}`")
+
+    def test_print_footer_outputs_exact_tail_for_live_pr(self):
+        r = self.run_guard("--print-footer")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, self.expected + "\n")
+        self.assertEqual(r.stderr, "")
+
+    def test_print_footer_names_release_policy_for_release_branch(self):
+        pr = json.loads((self.data / "pr.json").read_text())
+        pr["head"]["ref"] = "release/v0.50.0"
+        (self.data / "pr.json").write_text(json.dumps(pr))
+        r = self.run_guard("--print-footer")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(" · release review · ", r.stdout)
+
+    def test_print_footer_refuses_when_pr_is_not_on_head(self):
+        pr = json.loads((self.data / "pr.json").read_text())
+        pr["head"]["sha"] = "a" * 40
+        (self.data / "pr.json").write_text(json.dumps(pr))
+        r = self.run_guard("--print-footer")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("require open, ready PR on exact head", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_print_footer_refuses_mutation_flags(self):
+        for extra in (["--check"], ["--merge-check"], ["--receipt-json"],
+                      ["--body", "b"], ["--run", "1"], ["--replace-own-cr", "7"],
+                      ["--review-base", BASE], ["--review-diff", DIFF]):
+            with self.subTest(extra=extra):
+                r = self.run_guard("--print-footer", *extra)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertEqual(r.stdout, "")
 
 
 if __name__ == "__main__":

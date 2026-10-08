@@ -156,15 +156,18 @@ server:
     same way.
     - `none`: nothing of this host's is left. Firefox confirmed the end or
       said the connection has no session (`invalid session id`), or the host
-      never had one. A host Firefox refused because of another host's
-      session ends with `none` and that refusal as its reason.
+      never got as far as asking for one.
+    - `refused`: Firefox refused the host a session with `session not
+      created`. It does that while it holds one: another host's that is
+      attached, or one a host that died left there. The next host meets the
+      same session.
     - `left`: Firefox was asked and did not confirm: it answered with
       another error, or not in time. It is taken to keep the session, and
       then refuses the next host until it is restarted.
     - `unknown`: the connection was gone before the host could ask. A
       Firefox that quit took the session along; one still running keeps it.
 
-Read together they say one of four things:
+Read together they say one of these:
 
 | Record | Lock | Meaning |
 |---|---|---|
@@ -172,6 +175,7 @@ Read together they say one of four things:
 | no ending | held | A host is running. It is attached once the record has its session time; a server that is down does not change this. |
 | an ending | | The host left in order and said why. |
 | no ending | free | The host was killed or crashed, or it left in order and could not write its ending. Its BiDi session may be left in Firefox. |
+| unreadable | | The record is not one the reader takes. The reader still says whether a host holds the lock: one that does refuses the next host, which then cannot replace the record. |
 
 A reader looks at the record and then at the lock, so it can be wrong for
 as long as one write of the record takes: while a starting host has the
@@ -187,32 +191,73 @@ as unnamed and the rest of the record as it is. The reason for ending is the
 one free sentence, and it is written as printable ASCII: other bytes appear
 as `\xNN`, and a reason longer than 512 bytes is cut.
 
+A reader takes only what a host writes: a reason that is printable ASCII
+within that length, an address in the form a host records it, and a client
+ID the lane would take. Anything else makes the record unreadable to it,
+because what it reads is said on to an operator, a terminal and a model.
+Times are written to the nearest millisecond, and one that was read is
+written back as the same text.
+
 The host does not start when it cannot take the lock or write its first
 record: a host that held the lock under its predecessor's record would be
 read as that predecessor. A record that could not be written later does not
 stop a serving host; the next write that succeeds carries it.
 
-Four places read the record and say what it says, with how a host is
-attached:
+Four places read the record and say what it says, with what the operator
+does next:
 
 - `masc doctor` prints a `browser_bidi_host` line. It reads the files, so it
-  answers with no server running. A host that is attached is `satisfied`,
-  one still connecting `needs_verification`, none running `needs_setup`, and
-  a record that cannot be read `invalid`. A workspace with no browser lane
-  installed and no record has no such line.
+  answers with no server running. The dashboard's setup check
+  (`GET /api/v1/setup/status`) is the same check inside a server.
+  - `satisfied`: a host runs and the server that answers lists its client.
+    That is where hover and drag are served.
+  - `needs_verification`: a host runs and that is all that is known. It is
+    still connecting, the check runs outside a server as `masc doctor` does,
+    or the answering server does not list the host's client.
+  - `needs_setup`: none runs.
+  - `invalid`: the record or its lock cannot be read.
+
+  A workspace with no browser lane installed and no record has no such line.
 - `GET /api/v1/dashboard/browser-lane/clients` adds `bidiHost` beside
-  `clients`: `state` (`never_started`, `running`, `ended`, `died`,
-  `unreadable`), the `record`, why it is unreadable as `detail`, the host
-  command as `attach` (`launcher` and `arguments`), and the same sentence as
-  `message`. A server also says whether its own client list has the host the
-  record names.
+  `clients`:
+  - `state`: `never_started`, `running`, `ended`, `died` or `unreadable`.
+  - What the state was read from: the `record`, whether the host's lock was
+    held as `lock_held`, and why either cannot be read as `detail`. A reader
+    works the state out again from these and refuses a report whose `state`
+    is another.
+  - `attach`: the host command as `launcher` and `arguments`, and
+    `launcher_state` (`installed`, `not_installed`, `needs_reinstall`).
+  - `message`: the paragraph the doctor prints.
 - A Keeper whose hover or drag is refused as `live_transport_unsupported`
-  with no BiDi connection to offer gets the same `bidiHost` in the answer,
-  to pass on to the operator.
+  while no connected browser serves it gets `bidiHost` in the answer, with
+  `state` and `message` only, to pass on to the operator. An answer that
+  offers a connection in `servingClients` has no `bidiHost`.
 - The TUI's Browser Lane picker draws it from the server's `bidiHost`:
-  whether a host runs, why the last one ended, what stands in the way of the
-  next, the results the server did not acknowledge, and the command that
-  starts one ([the rows](../guides/tui-browser-lanes.md)).
+  whether a host runs and whether the server lists it, why the last one
+  ended, what comes before the next, the results the host holds no
+  acknowledgement for, and the command that starts one
+  ([the rows](../guides/tui-browser-lanes.md)).
+
+The paragraph says what comes before the next host. That follows what became
+of the last one's session:
+
+| The last host | Before the next one |
+|---|---|
+| ended, session `none` | Nothing: the host command alone, while that Firefox still runs. |
+| ended, session `left` | Restart that Firefox. |
+| ended, session `unknown` | Start that Firefox again, restarting it if it still runs. |
+| ended, session `refused` | Stop the other host attached to that Firefox or, when none is, restart that Firefox. |
+| died | Run the host. When Firefox refuses it a session, restart that Firefox and run it again. |
+
+When the workspace has no launcher, or one that is not as an installation
+wrote it, the paragraph says to install the lane first.
+
+A host can run and be attached while the answering server does not list its
+client. Then hover and drag are refused on that server, and the paragraph
+names what makes the two differ: the host polls another server (an exported
+`MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT` in its shell), it has not polled
+for 120 seconds and the server ended its connection, or the server started
+moments ago.
 
 Attaching again is the host command alone. A host that is stopped, or ends
 by itself, first ends the BiDi session it asked for; Firefox keeps running

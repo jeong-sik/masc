@@ -1,6 +1,6 @@
 let ( let* ) = Result.bind
 
-type session = No_session_left | Session_left | Session_unknown
+type session = No_session_left | Session_left | Session_unknown | Session_refused
 
 type ending = { at : float; reason : string; session : session }
 
@@ -29,7 +29,7 @@ type entry =
   { pid : int
   ; started_at : float
   ; bidi_url : string
-  ; client_id : string
+  ; client_id : Browser_lane.client_id
   ; attached_at : float option
   ; unacknowledged : unacknowledged list
   ; ended : ending option
@@ -40,7 +40,7 @@ type state =
   | Running of entry
   | Ended of entry * ending
   | Died of entry
-  | Unreadable of string
+  | Unreadable of { detail : string; held : bool option }
 
 let record_name = "bidi-host.json"
 let lock_name = "bidi-host.lock"
@@ -55,7 +55,12 @@ let directory base_path =
 
 let path base_path name = Filename.concat (directory base_path) name
 
-let time at = `String (Time_codec.rfc3339_of_unix_ms at)
+(* The codec cuts a time to the millisecond below it, and a time read back
+   from its text sits a hair under that millisecond as often as not. Half a
+   millisecond is added first, so a time is written to the nearest one and a
+   time that was read is written back as the text it was read from. *)
+let half_millisecond = 0.0005
+let time at = `String (Time_codec.rfc3339_of_unix_ms (at +. half_millisecond))
 
 let time_of name = function
   | `String raw ->
@@ -68,11 +73,13 @@ let session_to_wire = function
   | No_session_left -> "none"
   | Session_left -> "left"
   | Session_unknown -> "unknown"
+  | Session_refused -> "refused"
 
 let session_of_wire = function
   | "none" -> Some No_session_left
   | "left" -> Some Session_left
   | "unknown" -> Some Session_unknown
+  | "refused" -> Some Session_refused
   | _ -> None
 
 let outcome_to_wire = function
@@ -97,6 +104,12 @@ let cause_of_wire = function
   | "unconfirmed" -> Some Unconfirmed
   | _ -> None
 
+(* The address as a reader may be shown it. [Browser_bidi_downloads.endpoint]
+   has refused userinfo and a fragment; the query goes here. *)
+let recorded_address bidi_url =
+  let* (_ : string * int * string) = Browser_bidi_downloads.endpoint bidi_url in
+  Ok (Uri.to_string (Uri.with_query (Uri.of_string bidi_url) []))
+
 let ending_to_json { at; reason; session } =
   `Assoc
     [ "at", time at; "reason", `String reason; "session_in_firefox", `String (session_to_wire session) ]
@@ -120,7 +133,7 @@ let entry_to_json entry =
     ; "pid", `Int entry.pid
     ; "started_at", time entry.started_at
     ; "bidi_url", `String entry.bidi_url
-    ; "client_id", `String entry.client_id
+    ; "client_id", `String (Browser_lane.client_id_to_string entry.client_id)
     ; "attached_at", optional time entry.attached_at
     ; "unacknowledged", `List (List.map unacknowledged_to_json entry.unacknowledged)
     ; "ended", optional ending_to_json entry.ended
@@ -154,10 +167,27 @@ let nullable read = function
   | `Null -> Ok None
   | json -> Result.map Option.some (read json)
 
+(* How much of a reason the record keeps. The longest the host writes itself
+   is under 200 bytes; the rest of the room is for a peer's own words. *)
+let reason_limit_bytes = 512
+let cut_mark = "..."
+let printable_byte byte = byte >= ' ' && byte <= '~'
+
+(* A reason as the writer leaves it: printable ASCII, no longer than a cut
+   one. The reader takes no other, because what it reads is said on to an
+   operator and to a model. *)
+let written_reason raw =
+  if String.length raw <= reason_limit_bytes + String.length cut_mark && String.for_all printable_byte raw
+  then Ok raw
+  else Error "ended.reason is not what a host writes"
+
 let ending_of_json json =
   let* fields = fields_of ~names:[ "at"; "reason"; "session_in_firefox" ] json in
   let* at = Result.bind (field fields "at") (time_of "ended.at") in
-  let* reason = Result.bind (field fields "reason") (string_of "ended.reason") in
+  let* reason =
+    let* raw = Result.bind (field fields "reason") (string_of "ended.reason") in
+    written_reason raw
+  in
   let* session =
     Result.bind (field fields "session_in_firefox") (named "ended.session_in_firefox" session_of_wire)
   in
@@ -208,8 +238,16 @@ let entry_of_json json =
     | Some _ | None -> Error "pid is not a process ID"
   in
   let* started_at = Result.bind (field fields "started_at") (time_of "started_at") in
-  let* bidi_url = Result.bind (field fields "bidi_url") (string_of "bidi_url") in
-  let* client_id = Result.bind (field fields "client_id") (string_of "client_id") in
+  let* bidi_url =
+    let* raw = Result.bind (field fields "bidi_url") (string_of "bidi_url") in
+    match recorded_address raw with
+    | Ok written when String.equal written raw -> Ok raw
+    | Ok _ | Error _ -> Error "bidi_url is not what a host writes"
+  in
+  let* client_id =
+    let* raw = Result.bind (field fields "client_id") (string_of "client_id") in
+    Result.map_error (fun _ -> "client_id is not a lane client ID") (Browser_lane.client_id_of_string raw)
+  in
   let* attached_at = Result.bind (field fields "attached_at") (nullable (time_of "attached_at")) in
   let* unacknowledged =
     match List.assoc_opt "unacknowledged" fields with
@@ -226,7 +264,7 @@ let entry_of_json json =
   Ok { pid; started_at; bidi_url; client_id; attached_at; unacknowledged; ended }
 
 let state_of ~lock_held = function
-  | Error detail -> Unreadable detail
+  | Error detail -> Unreadable { detail; held = Some lock_held }
   | Ok None -> Never_started
   | Ok (Some ({ ended = Some ending; _ } as entry)) -> Ended (entry, ending)
   | Ok (Some ({ ended = None; _ } as entry)) -> if lock_held then Running entry else Died entry
@@ -296,7 +334,7 @@ let observe ~base_path =
   let entry = read_entry base_path in
   match lock_held base_path with
   | Ok lock_held -> state_of ~lock_held entry
-  | Error detail -> Unreadable detail
+  | Error detail -> Unreadable { detail; held = None }
 
 type held =
   { base_path : string
@@ -356,12 +394,6 @@ let release held =
       match Unix.close held.lock with
       | () -> Ok ()
       | exception Unix.Unix_error (error, call, _) -> Error (unix_failure error call)))
-
-(* The address as a reader may be shown it. [Browser_bidi_downloads.endpoint]
-   has refused userinfo and a fragment; the query goes here. *)
-let recorded_address bidi_url =
-  let* (_ : string * int * string) = Browser_bidi_downloads.endpoint bidi_url in
-  Ok (Uri.to_string (Uri.with_query (Uri.of_string bidi_url) []))
 
 type lock_attempt =
   | Locked of lock_identity * Unix.file_descr
@@ -447,11 +479,6 @@ let client_changed held ~client_id = replace held { held.entry with client_id }
 let note_unacknowledged held noted =
   replace held { held.entry with unacknowledged = held.entry.unacknowledged @ [ noted ] }
 
-(* How much of a reason the record keeps. The longest the host writes itself
-   is under 200 bytes; the rest of the room is for a peer's own words. *)
-let reason_limit_bytes = 512
-let cut_mark = "..."
-
 (* A reason can quote bytes a peer sent. The record stays ASCII that a reader
    in any language loads: a byte outside printable ASCII, and the backslash
    that marks one, is written as [\xNN]. What would pass the limit is left
@@ -463,7 +490,7 @@ let printable reason =
     else (
       let byte = reason.[index] in
       let piece =
-        if byte >= ' ' && byte <= '~' && byte <> '\\' then String.make 1 byte
+        if printable_byte byte && byte <> '\\' then String.make 1 byte
         else Printf.sprintf "\\x%02X" (Char.code byte)
       in
       if Buffer.length written + String.length piece > reason_limit_bytes

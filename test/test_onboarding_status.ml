@@ -198,16 +198,30 @@ let bidi_check observed =
   List.find_opt (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_bidi_host)
     observed.Onboarding_status.checks
 
-let says observed fragments =
+let bidi_message observed = message Onboarding_status.Browser_bidi_host observed
+
+let has text fragments =
   List.iter (fun fragment ->
-      check bool ("the doctor says: " ^ fragment) true
-        (String_util.contains_substring (message Onboarding_status.Browser_bidi_host observed) fragment))
+      check bool ("said: " ^ fragment) true (String_util.contains_substring text fragment))
     fragments
+
+let lacks text fragments =
+  List.iter (fun fragment ->
+      check bool ("not said: " ^ fragment) false (String_util.contains_substring text fragment))
+    fragments
+
+let says observed fragments = has (bidi_message observed) fragments
+
+let lane_client raw =
+  match Browser_lane.client_id_of_string raw with Ok id -> id | Error detail -> fail detail
+
+let host_client = lane_client "0199c0de-0000-7000-8000-000000000001"
+let bidi_address = "ws://127.0.0.1:9222/session"
 
 let take_record base =
   match
-    Record.take ~base_path:base ~pid:4242 ~bidi_url:"ws://127.0.0.1:9222/session"
-      ~client_id:"0199c0de-0000-7000-8000-000000000001" ~now:1_791_000_000.
+    Record.take ~base_path:base ~pid:4242 ~bidi_url:bidi_address ~client_id:host_client
+      ~now:1_791_000_000.
   with
   | Ok { held; not_synced = None } -> held
   | Ok { not_synced = Some detail; _ } -> fail detail
@@ -221,6 +235,19 @@ let unacknowledged : Record.unacknowledged =
   ; verb = Some Masc.Browser_bidi_peer.Page_interact; outcome = Record.Unknown
   ; cause = Record.Unconfirmed; at = 1_791_000_030. }
 
+let host_entry : Record.entry =
+  { pid = 4242; started_at = 1_791_000_000.; bidi_url = bidi_address; client_id = host_client
+  ; attached_at = Some 1_791_000_002.; unacknowledged = []; ended = None }
+
+(* An observation as a caller holds it, for what no workspace on disk and no
+   server in this process can be made to say. *)
+let observation ?(launcher = Launcher.Follows_workspace) ?(server = Launcher.Not_serving) bidi_host
+  : Launcher.t =
+  { base_path = "/workspace"; launcher; workspace_port = Ok 8935; server; bidi_host }
+
+let launch_command base =
+  Filename.concat base ".masc/browser-lane/host/launch" ^ " --bidi-url ws://127.0.0.1:PORT/session"
+
 let a_workspace_without_a_browser_lane_says_nothing_of_a_bidi_host () = with_workspace @@ fun base ->
   Unix.mkdir (Filename.concat base ".masc") 0o700;
   check bool "no lane and no host record: no BiDi check" true
@@ -233,11 +260,48 @@ let a_lane_with_no_bidi_host_says_how_one_is_attached () =
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Needs_setup);
   says observed
     [ "No BiDi browser host has run for this workspace"
-    ; "--remote-debugging-port"
-    ; Filename.concat base ".masc/browser-lane/host/launch" ^ " --bidi-url"
-    ; "docs/design/browser-bidi-live-host.md" ]
+    ; "starts Firefox on a profile kept for this with --remote-debugging-port PORT"
+    ; "then runs " ^ launch_command base
+    ; "docs/design/browser-bidi-live-host.md" ];
+  lacks (bidi_message observed) [ "install-host.sh" ]
 
-let a_bidi_host_that_ended_says_when_and_why () =
+(* The command is only good where its launcher is. The line above this one
+   says to install the lane again when the launcher is not as an
+   installation wrote it; this one may not say to run that launcher as it
+   is. *)
+let a_launcher_that_cannot_be_run_as_it_is_is_installed_first () =
+  (browser_lane_fixture ~declared:false ~connection_port:"64850" () @@ fun base ->
+   let observed = Onboarding_status.inspect ~base_path:(Some base) in
+   says observed
+     [ "then runs " ^ launch_command base
+     ; "The launcher there is not as an installation wrote it: the operator first installs the \
+        lane again by running the MASC browser host installer, install-host.sh" ]);
+  (* A host started from an executable on the PATH leaves a record in a
+     workspace that has no launcher. *)
+  (with_workspace @@ fun base ->
+   let held = take_record base in
+   written (Record.ended held ~reason:"stopped by SIGINT" ~session:Record.No_session_left
+              ~now:1_791_000_060.);
+   released held;
+   says (Onboarding_status.inspect ~base_path:(Some base))
+     [ "so the operator only runs " ^ launch_command base
+     ; "No browser lane is installed in this workspace, so that launcher is not there yet: the \
+        operator first installs the lane by running the MASC browser host installer, \
+        install-host.sh" ]);
+  List.iter (fun (name, launcher, standing) ->
+      check bool name true
+        ((Launcher.bidi_host_report (observation ~launcher Record.Never_started)).attach.standing
+         = standing))
+    [ "installed", Launcher.Follows_workspace, Launcher.Launcher_installed
+    ; "not installed", Launcher.Not_installed, Launcher.Launcher_not_installed
+    ; "undeclared", Launcher.Undeclared, Launcher.Launcher_needs_reinstall
+    ; "unreadable", Launcher.Unreadable, Launcher.Launcher_needs_reinstall
+    ; "declared for another", Launcher.Describes_another_launcher, Launcher.Launcher_needs_reinstall ]
+
+(* What the operator does next follows what became of the last host's
+   session: a Firefox that holds one refuses every host until it is
+   restarted, and one that holds none takes the next host as it is. *)
+let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
   let held = take_record base in
   written (Record.attached held ~now:1_791_000_002.);
@@ -245,28 +309,54 @@ let a_bidi_host_that_ended_says_when_and_why () =
     written (Record.ended held ~reason ~session ~now:1_791_000_060.);
     Onboarding_status.inspect ~base_path:(Some base)
   in
+  let run = "runs " ^ launch_command base in
   let observed = ended_with ~reason:"stopped by SIGINT" Record.No_session_left in
   check bool "a host that ended is something to set up again" true
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Needs_setup);
   says observed
-    [ "No BiDi browser host is running"; "(pid 4242)"; "ended at 2026-10-03T"; "stopped by SIGINT"
-    ; "To attach again" ];
-  List.iter (fun fragment ->
-      check bool ("a session that was ended is not spoken of: " ^ fragment) false
-        (String_util.contains_substring (message Onboarding_status.Browser_bidi_host observed) fragment))
-    [ "BiDi session"; "acknowledge" ];
-  says (ended_with ~reason:"stopped with its BiDi session left in Firefox" Record.Session_left)
-    [ "Firefox did not confirm that its BiDi session ended"; "Restart that Firefox before attaching again" ];
+    [ "No BiDi browser host is running"; "(pid 4242)"; "ended at 2026-10-03T"
+    ; {|gave this reason: "stopped by SIGINT".|}
+    ; "While that Firefox still runs it takes the next host, so the operator only " ^ run
+    ; "a Firefox that was closed is started again with --remote-debugging-port PORT first" ];
+  (* A host that left in order did not leave a Firefox to restart. *)
+  lacks (bidi_message observed) [ "restart"; "BiDi session"; "acknowledgement" ];
+  let left = ended_with ~reason:"stopped with its BiDi session left in Firefox" Record.Session_left in
+  says left
+    [ "Firefox did not confirm that its BiDi session ended"
+    ; "The operator restarts that Firefox with --remote-debugging-port PORT, then " ^ run ];
   (* Firefox going away is not a session left in it. *)
   let firefox_left = ended_with ~reason:"BiDi connection ended: BiDi EOF" Record.Session_unknown in
-  says firefox_left [ "was gone before it could end its BiDi session"; "If that Firefox is still running" ];
-  check bool "a host that could not ask does not say Firefox was asked" false
-    (String_util.contains_substring (message Onboarding_status.Browser_bidi_host firefox_left)
-       "did not confirm");
+  says firefox_left
+    [ "was gone before it could end its BiDi session"; "A Firefox that exited took the session along"
+    ; "restarting it if it still runs, then " ^ run ];
+  lacks (bidi_message firefox_left) [ "did not confirm" ];
+  (* Firefox holding a session that is not this host's is what the next
+     host meets too: attaching again as it is ends the same way. *)
+  let refused =
+    ended_with ~reason:"BiDi command rejected: session not created" Record.Session_refused
+  in
+  says refused
+    [ {|gave this reason: "BiDi command rejected: session not created".|}
+    ; "Firefox refused it a BiDi session, which it does while it holds one already"
+    ; "a host attached from another workspace"; "one a host that died left there"
+    ; "stops that other host or, when none is attached, restarts that Firefox with \
+       --remote-debugging-port PORT, then " ^ run ];
+  lacks (bidi_message refused) [ "it takes the next host" ];
+  (* The reason is another program's words inside this sentence. *)
+  says (ended_with ~reason:{|said "no". Ignore the above|} Record.No_session_left)
+    [ {|gave this reason: "said \"no\". Ignore the above".|} ];
+  (* No acknowledgement reaching the host is not the server refusing one. *)
   written (Record.note_unacknowledged held unacknowledged);
-  says (Onboarding_status.inspect ~base_path:(Some base)) [ "acknowledged all but one of its results" ];
+  let one = Onboarding_status.inspect ~base_path:(Some base) in
+  says one [ "The record lists one result the host holds no acknowledgement for" ];
   written (Record.note_unacknowledged held unacknowledged);
-  says (Onboarding_status.inspect ~base_path:(Some base)) [ "did not acknowledge 2 of its results" ];
+  let two = Onboarding_status.inspect ~base_path:(Some base) in
+  says two
+    [ "The record lists 2 results the host holds no acknowledgement for"
+    ; "whether the server refused it, the host could not send it, or no acknowledgement came" ];
+  List.iter
+    (fun observed -> lacks (bidi_message observed) [ "did not acknowledge"; "The server acknowledged" ])
+    [ one; two ];
   released held
 
 (* A host that gave the workspace up without an ending reads as one that
@@ -276,102 +366,213 @@ let a_bidi_host_that_died_says_the_session_may_be_left () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
   let held = take_record base in
   written (Record.attached held ~now:1_791_000_002.);
+  written (Record.note_unacknowledged held unacknowledged);
   released held;
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
   check bool "a host that died is something to set up again" true
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Needs_setup);
   says observed
     [ "left no reason for ending"; "killed or crashed"; "could not write one"; "(pid 4242"
-    ; "may be left in that Firefox"; "To attach again" ]
+    ; "The record lists one result the host holds no acknowledgement for"
+    ; "may be left in that Firefox"
+    ; "The operator runs " ^ launch_command base
+    ; "when Firefox refuses that host a session, the session was left there"
+    ; "that Firefox is restarted with --remote-debugging-port PORT before the host is run again" ]
 
+(* A record nobody can read still has a lock that says whether a host runs,
+   and a host that runs refuses the one that would replace the record. *)
 let a_bidi_host_record_that_cannot_be_read_is_invalid () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
-  write (Filename.concat base ".masc/browser-lane/bidi-host.json") "{\"pid\": 1";
+  let record = Filename.concat base ".masc/browser-lane/bidi-host.json" in
+  write record "{\"pid\": 1";
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
   check bool "a record that is not one is invalid" true
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Invalid);
-  says observed [ "cannot be read"; "A host that starts replaces it" ]
+  says observed
+    [ "record cannot be read"; "No host holds this workspace's lock, so none is running"
+    ; "the next host replaces the record"; "then runs " ^ launch_command base ];
+  let held = take_record base in
+  write record "{\"pid\": 1";
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "it is invalid while a host runs too" true
+    (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Invalid);
+  says observed
+    [ "A BiDi browser host holds this workspace's lock, so one is running"
+    ; "its record cannot be read"; "A second host is refused while that one runs"
+    ; "Once the operator stops it, the next host replaces the record" ];
+  lacks (bidi_message observed) [ "then runs" ];
+  released held;
+  let unasked =
+    Launcher.bidi_host_message
+      (observation (Record.Unreadable { detail = "Too many open files"; held = None }))
+  in
+  has unasked [ "could not be checked (Too many open files)" ];
+  lacks unasked [ "replaces the record"; "runs /workspace" ]
 
 (* What a running server adds: whether its own client list has the host the
-   record names. *)
-let a_server_says_whether_the_attached_host_polls_it () =
-  let entry : Record.entry =
-    { pid = 4242; started_at = 1_791_000_000.; bidi_url = "ws://127.0.0.1:9222/session"
-    ; client_id = "0199c0de-0000-7000-8000-000000000001"; attached_at = Some 1_791_000_002.
-    ; unacknowledged = []; ended = None }
+   record names. A host serves hover and drag only on the server that lists
+   it, so that is what the doctor is satisfied by. *)
+let a_running_host_is_rated_by_the_server_that_lists_it () =
+  let client transport client_id : Browser_lane.client_info =
+    { client_id; browser = Browser_lane.Firefox; version = "157.0"; engine_version = "157.0"; transport }
   in
-  let client transport id : Browser_lane.client_info =
-    { client_id = (match Browser_lane.client_id_of_string id with Ok id -> id | Error detail -> fail detail)
-    ; browser = Browser_lane.Firefox; version = "157.0"; engine_version = "157.0"; transport }
-  in
-  let observation server : Launcher.t =
-    { base_path = "/workspace"; launcher = Launcher.Follows_workspace
-    ; workspace_port = Ok 8935; server; bidi_host = Record.Running entry }
-  in
-  let said server = Launcher.bidi_host_message (observation server) in
-  let says_of server fragment =
-    check bool fragment true (String_util.contains_substring (said server) fragment)
-  in
-  says_of Launcher.Not_serving "is attached to ws://127.0.0.1:9222/session";
-  says_of Launcher.Not_serving "whether it polls one is not observed here";
-  says_of
-    (Launcher.Serving
-       { port = 8935; polling = [ client Browser_lane.Webdriver_bidi entry.client_id ] })
-    "It polls this server.";
+  let serving polling = Launcher.Serving { port = 8935; polling } in
+  let listing = serving [ client Browser_lane.Webdriver_bidi host_client ] in
   (* The same ID over the extension is another connection, and another BiDi
      client is another host. *)
-  List.iter (fun polling ->
-      says_of (Launcher.Serving { port = 8935; polling })
-        "This server does not list that client now")
-    [ []
-    ; [ client Browser_lane.Web_extension entry.client_id ]
-    ; [ client Browser_lane.Webdriver_bidi "0199c0de-0000-7000-8000-000000000002" ] ];
-  check bool "a host still connecting is not called attached" true
-    (String_util.contains_substring
-       (Launcher.bidi_host_message
-          { (observation Launcher.Not_serving) with
-            bidi_host = Record.Running { entry with attached_at = None } })
-       "is connecting to ws://127.0.0.1:9222/session")
-
-(* What the server writes of the host, a reader of the same build reads back. *)
-let a_bidi_host_report_reads_back_as_written () =
-  let entry : Record.entry =
-    { pid = 4242; started_at = 1_791_000_000.; bidi_url = "ws://127.0.0.1:9222/session"
-    ; client_id = "0199c0de-0000-7000-8000-000000000001"; attached_at = Some 1_791_000_002.
-    ; unacknowledged = [ unacknowledged ]; ended = None }
+  let not_listing =
+    [ serving []
+    ; serving [ client Browser_lane.Web_extension host_client ]
+    ; serving [ client Browser_lane.Webdriver_bidi (lane_client "0199c0de-0000-7000-8000-000000000002") ]
+    ]
   in
+  let connecting = { host_entry with attached_at = None } in
+  let said server entry = Launcher.bidi_host_message (observation ~server (Record.Running entry)) in
+  let rated name server entry verdict =
+    check bool name true (Launcher.bidi_host_verdict (observation ~server (Record.Running entry)) = verdict)
+  in
+  has (said Launcher.Not_serving host_entry)
+    [ "is attached to ws://127.0.0.1:9222/session since 2026-10-03T"
+    ; "as client 0199c0de-0000-7000-8000-000000000001"
+    ; "whether it polls one is not observed here"; "a running server's own check reports it" ];
+  rated "outside a server an attached host is still to be verified" Launcher.Not_serving host_entry
+    Launcher.Bidi_unverified;
+  has (said listing host_entry) [ "It polls this server." ];
+  rated "a host this server lists serves here" listing host_entry Launcher.Bidi_serving;
+  List.iter (fun server ->
+      has (said server host_entry)
+        [ "This server does not list that client, so hover and drag are refused here"
+        ; "the host polls another server"; "MASC_HTTP_BASE_URL or MASC_HTTP_PORT"
+        ; "it has not polled for 120 seconds"; "this server started moments ago"
+        ; "the operator stops that host and starts it again from a shell without those variables" ];
+      rated "a host this server does not list is still to be verified" server host_entry
+        Launcher.Bidi_unverified)
+    not_listing;
+  (* Only a host with its session polls. A record that has not caught up
+     does not make a listed host a connecting one. *)
+  has (said listing connecting)
+    [ "is attached to ws://127.0.0.1:9222/session and polls this server as client"
+    ; "Its record does not say since when" ];
+  lacks (said listing connecting) [ "is connecting" ];
+  rated "a listed host whose record is behind serves here" listing connecting Launcher.Bidi_serving;
+  List.iter (fun server ->
+      has (said server connecting)
+        [ "started at 2026-10-03T"; "is connecting to ws://127.0.0.1:9222/session" ];
+      rated "a host still connecting is still to be verified" server connecting Launcher.Bidi_unverified)
+    (Launcher.Not_serving :: not_listing);
+  has (said listing { host_entry with unacknowledged = [ unacknowledged ] })
+    [ "The record lists one result the host holds no acknowledgement for" ];
+  List.iter (fun (name, launcher, bidi_host, verdict) ->
+      check bool name true (Launcher.bidi_host_verdict (observation ~launcher bidi_host) = verdict))
+    [ "nothing installed and nothing run", Launcher.Not_installed, Record.Never_started, Launcher.Bidi_absent
+    ; "a lane and no host", Launcher.Follows_workspace, Record.Never_started, Launcher.Bidi_not_running
+    ; "a lane to reinstall and no host", Launcher.Undeclared, Record.Never_started, Launcher.Bidi_not_running
+    ; "a record and no lane", Launcher.Not_installed, Record.Died host_entry, Launcher.Bidi_not_running
+    ; ( "an unreadable record", Launcher.Follows_workspace
+      , Record.Unreadable { detail = "torn"; held = Some false }, Launcher.Bidi_unreadable ) ]
+
+(* What the server writes of the host, a reader of the same build reads
+   back, and it reads nothing else as a report. *)
+let a_bidi_host_report_reads_back_as_written () =
+  let entry = { host_entry with unacknowledged = [ unacknowledged ] } in
   let ending : Record.ending =
     { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.Session_unknown }
   in
   let ended = { entry with ended = Some ending } in
-  let report bidi_host : Launcher.bidi_host_report =
-    Launcher.bidi_host_report
-      { base_path = "/workspace"; launcher = Launcher.Follows_workspace; workspace_port = Ok 8935
-      ; server = Launcher.Not_serving; bidi_host }
-  in
-  List.iter (fun (name, state) ->
-      let written = report state in
+  let refused_ending = { ending with session = Record.Session_refused } in
+  let report ?launcher bidi_host = Launcher.bidi_host_report (observation ?launcher bidi_host) in
+  List.iter (fun (name, written) ->
       check bool name true
         (Launcher.bidi_host_report_of_json (Launcher.bidi_host_report_to_json written) = Ok written))
-    [ "never started", Record.Never_started
-    ; "connecting", Record.Running { entry with attached_at = None }
-    ; "attached", Record.Running entry
-    ; "ended", Record.Ended (ended, ending)
-    ; "died", Record.Died entry
-    ; "unreadable", Record.Unreadable "bidi-host.json is not JSON" ];
+    [ "never started", report Record.Never_started
+    ; "connecting", report (Record.Running { entry with attached_at = None })
+    ; "attached", report (Record.Running entry)
+    ; "ended", report (Record.Ended (ended, ending))
+    ; ( "refused a session"
+      , report (Record.Ended ({ entry with ended = Some refused_ending }, refused_ending)) )
+    ; "died", report (Record.Died entry)
+    ; ( "unreadable, no host"
+      , report (Record.Unreadable { detail = "bidi-host.json is not JSON"; held = Some false }) )
+    ; ( "unreadable, a host runs"
+      , report (Record.Unreadable { detail = "written as layout 2"; held = Some true }) )
+    ; ( "unreadable, lock unasked"
+      , report (Record.Unreadable { detail = "Too many open files"; held = None }) )
+    ; "no launcher", report ~launcher:Launcher.Not_installed (Record.Died entry)
+    ; "a launcher to reinstall", report ~launcher:Launcher.Undeclared Record.Never_started ];
+  (* Times on disk are not whole seconds; one that was read is written and
+     read again as it was. *)
+  let on_disk = { entry with started_at = 1_791_000_000.123; attached_at = Some 1_791_000_002.457 } in
+  let once = Launcher.bidi_host_report_to_json (report (Record.Running on_disk)) in
+  (match Launcher.bidi_host_report_of_json once with
+   | Ok read ->
+     check bool "a report that was read is written as it was" true
+       (Yojson.Safe.equal once (Launcher.bidi_host_report_to_json read))
+   | Error detail -> fail detail);
+  (* The ending a report writes is the one its state carries. *)
+  (match
+     Launcher.bidi_host_report_of_json
+       (Launcher.bidi_host_report_to_json (report (Record.Ended ({ entry with ended = None }, ending))))
+   with
+   | Ok { state = Record.Ended (read, _); _ } ->
+     check bool "the state's ending is the record's" true (read.ended = Some ending)
+   | Ok _ -> fail "an ended host was read as another state"
+   | Error detail -> fail detail);
   check string "the launcher is this workspace's" "/workspace/.masc/browser-lane/host/launch"
     (report Record.Never_started).attach.launcher;
+  let fields_of written =
+    match Launcher.bidi_host_report_to_json written with
+    | `Assoc fields -> fields
+    | _ -> fail "not an object"
+  in
   let refused name json =
     check bool name true (Result.is_error (Launcher.bidi_host_report_of_json json))
   in
-  let fields = match Launcher.bidi_host_report_to_json (report (Record.Ended (ended, ending))) with
-    | `Assoc fields -> fields | _ -> fail "not an object" in
-  let with_field name value = `Assoc ((name, value) :: List.remove_assoc name fields) in
-  refused "a state this reader does not know" (with_field "state" (`String "paused"));
-  refused "an ended host whose record has no ending"
-    (with_field "record" (Record.entry_to_json entry));
-  refused "no way to attach" (`Assoc (List.remove_assoc "attach" fields));
-  refused "not an object" (`String "running")
+  let with_field fields name value = `Assoc ((name, value) :: List.remove_assoc name fields) in
+  let without fields name = `Assoc (List.remove_assoc name fields) in
+  let ended_fields = fields_of (report (Record.Ended (ended, ending))) in
+  let running_fields = fields_of (report (Record.Running entry)) in
+  let never_fields = fields_of (report Record.Never_started) in
+  let unreadable_fields =
+    fields_of (report (Record.Unreadable { detail = "torn"; held = Some false }))
+  in
+  refused "not an object" (`String "running");
+  refused "a state this reader does not know" (with_field ended_fields "state" (`String "paused"));
+  (* The name has to be the state the record and the lock make. *)
+  refused "running, of a record that has its ending" (with_field ended_fields "state" (`String "running"));
+  refused "died, of a record that has its ending" (with_field ended_fields "state" (`String "died"));
+  refused "ended, of a record without an ending" (with_field running_fields "state" (`String "ended"));
+  refused "died, of a host whose lock is held" (with_field running_fields "state" (`String "died"));
+  refused "running, with the lock free" (with_field running_fields "lock_held" (`Bool false));
+  refused "running, without a word of the lock" (with_field running_fields "lock_held" `Null);
+  refused "ended, with a word of the lock" (with_field ended_fields "lock_held" (`Bool false));
+  refused "never started, with a record" (with_field never_fields "record" (Record.entry_to_json entry));
+  refused "never started, with a word of the lock" (with_field never_fields "lock_held" (`Bool true));
+  refused "running, with no record" (with_field running_fields "record" `Null);
+  refused "unreadable, with a record"
+    (with_field unreadable_fields "record" (Record.entry_to_json entry));
+  refused "unreadable, with no reason" (with_field unreadable_fields "detail" `Null);
+  refused "a reason that is no string" (with_field unreadable_fields "detail" (`Int 3));
+  refused "a lock that is neither held nor free"
+    (with_field running_fields "lock_held" (`String "yes"));
+  List.iter (fun name -> refused ("no " ^ name) (without ended_fields name))
+    [ "state"; "record"; "lock_held"; "detail"; "attach"; "message" ];
+  refused "a message that is no string" (with_field ended_fields "message" (`Int 3));
+  let attach_fields =
+    match List.assoc "attach" ended_fields with
+    | `Assoc fields -> fields
+    | _ -> fail "attach is not an object"
+  in
+  refused "a launcher state this reader does not know"
+    (with_field ended_fields "attach" (with_field attach_fields "launcher_state" (`String "broken")));
+  refused "no launcher state" (with_field ended_fields "attach" (without attach_fields "launcher_state"));
+  refused "an attach that is no object" (with_field ended_fields "attach" (`String "launch"));
+  (* A Keeper is sent the state and the paragraph, not the record. *)
+  let ended_observation = observation (Record.Ended (ended, ending)) in
+  check bool "the summary is the state and its message" true
+    (Launcher.bidi_host_summary_to_json ended_observation
+     = `Assoc
+         [ "state", `String "ended"
+         ; "message", `String (Launcher.bidi_host_message ended_observation) ])
 
 (* The front door opened imp's history only when no check at all was Invalid, so
    a browser lane launcher left on an old port sent an operator with a working
@@ -521,13 +722,15 @@ let () = run "Onboarding observations"
                    a_workspace_without_a_browser_lane_says_nothing_of_a_bidi_host;
                  test_case "a lane with no BiDi host says how one is attached" `Quick
                    a_lane_with_no_bidi_host_says_how_one_is_attached;
-                 test_case "a BiDi host that ended says when and why" `Quick
-                   a_bidi_host_that_ended_says_when_and_why;
+                 test_case "a launcher that cannot be run as it is is installed first" `Quick
+                   a_launcher_that_cannot_be_run_as_it_is_is_installed_first;
+                 test_case "a BiDi host that ended says why and what comes first" `Quick
+                   a_bidi_host_that_ended_says_why_and_what_comes_first;
                  test_case "a BiDi host that died says the session may be left" `Quick
                    a_bidi_host_that_died_says_the_session_may_be_left;
                  test_case "a BiDi host record that cannot be read is invalid" `Quick
                    a_bidi_host_record_that_cannot_be_read_is_invalid;
+                 test_case "a running host is rated by the server that lists it" `Quick
+                   a_running_host_is_rated_by_the_server_that_lists_it;
                  test_case "a BiDi host report reads back as written" `Quick
-                   a_bidi_host_report_reads_back_as_written;
-                 test_case "a server says whether the attached host polls it" `Quick
-                   a_server_says_whether_the_attached_host_polls_it]]
+                   a_bidi_host_report_reads_back_as_written]]

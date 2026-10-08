@@ -253,8 +253,10 @@ WebExtension 은 지금처럼 "설치만 하면 읽는" 연결로 둔다.
      이 문서는 그 파일들을 host 기록이라 부른다. 서버, TUI, `masc doctor` 가 읽는다.
      host 는 뜨자마자 자기 pid, 뜬 시각, `client_id`, BiDi 주소를 적는다(`bidi-host.json`).
      Firefox 가 세션을 주면 그 시각을 더하고, 끝나면서 끝난 시각과 이유, 세션이 Firefox 에 남았는지를 적는다.
-     세션은 셋 가운데 하나다.
-     - 남지 않음: Firefox 가 끝났다고 답했거나, 이 연결에는 세션이 없다고 답했거나(`invalid session id`), 세션을 받은 적이 없다.
+     세션은 넷 가운데 하나다.
+     - 남지 않음: Firefox 가 끝났다고 답했거나, 이 연결에는 세션이 없다고 답했거나(`invalid session id`), 세션을 청하기 전에 끝났다.
+     - 거절당함: Firefox 가 `session not created` 로 세션을 주지 않았다. Firefox 는 세션을 하나 쥐고 있는 동안 이렇게 답한다.
+       붙어 있는 다른 host 의 것이거나, 죽은 host 가 남긴 것이다. 다음 host 도 같은 세션을 만난다.
      - 남음: 끝내 달라고 했는데 끝냈다는 답을 못 받았다. 다른 오류로 답했거나 시간 안에 답이 없었다. 남아 있는 것으로 본다.
      - 모름: 물어볼 연결이 이미 끊겼다. Firefox 가 꺼졌으면 세션도 없고, 살아 있으면 남아 있다.
      host 는 떠 있는 동안 잠금 파일(`bidi-host.lock`)을 쥐고 있다. host 가 어떻게 죽든 커널이 그 잠금을 푼다.
@@ -388,8 +390,11 @@ B 의 순서:
   host 기록은 #41919 에서 host 가 쓰게 했다.
   그 기록을 읽어 말하는 것은 #41971 에서 했다: `masc doctor` 의 `browser_bidi_host` 줄,
   서버 연결 목록의 `bidiHost`, Keeper 가 받는 거절 답의 `bidiHost`.
+  doctor 는 host 가 붙어 있어도 답하는 서버의 연결 목록에 그 host 가 있을 때만 `satisfied` 로 판정한다.
+  서버 밖에서 도는 `masc doctor` 는 "붙어 있음"을 말하고 `needs_verification` 으로 판정한다.
+  세 곳이 말하는 문장은 마지막 host 의 세션이 어떻게 됐는지에 따라 다음 host 앞에 할 일을 달리 말한다.
   TUI 의 표시는 #41973 에서 했다: 브라우저 고르기 목록 아래의 BiDi host 줄들과,
-  보내지 않은 hover·drag 아래의 host 상태 줄. 서버가 연결 목록과 함께 주는 `bidiHost` 를 읽는다.
+  보내지 않은 hover·drag 아래의 host 상태 줄 하나. 서버가 연결 목록과 함께 주는 `bidiHost` 를 읽는다.
   남은 것은 설정 명령의 확인 단계다.
   설정 명령의 단계는 RFC `setup-web-search-and-browser-lane` 의 명령(`masc browser-lane-setup`)에 더하는 것인데,
   그 RFC 는 Draft 이고 명령이 아직 없다. 명령이 생긴 뒤에 더한다. 그 단계가 말할 내용 가운데

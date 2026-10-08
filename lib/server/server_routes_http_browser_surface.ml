@@ -44,21 +44,23 @@ let goto = function
         | _ -> Error "url must be an absolute HTTP(S) URL")
      | Ok _, _ -> Error "url is required")
   | _ -> Error "body must be an object"
+(* What the connection list answers. The connected clients are this server's
+   own list. The BiDi host's state is that host's record on disk, which also
+   says why a host that is not in the list ended. *)
+let clients_listing ~base_path =
+  let host = Browser_lane_launcher.observe ~base_path ~server:Browser_lane_launcher.current_server in
+  (* Listed with nothing in between that lets another fiber run, so the list
+     and what the report says of it are of one moment. *)
+  let clients = Browser_lane.active_clients () in
+  `Assoc
+    [ "clients", `List (List.map Browser_lane.client_json clients)
+    ; "bidiHost", Browser_lane_launcher.bidi_host_to_json host ]
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/dashboard/browser-lane/clients"
       (with_permission_auth ~permission:Masc_domain.CanReadState (fun state request reqd ->
-         (* The connected clients are this server's own list. The BiDi host's
-            state is that host's record on disk, which also says why a host
-            that is not in the list ended. *)
-         let host =
-           Browser_lane_launcher.observe
-             ~base_path:(Mcp_server.workspace_config state).base_path
-             ~server:(Browser_lane_launcher.current_server ())
-         in
-         reply request reqd (Ok (`Assoc
-           [ "clients", `List (List.map Browser_lane.client_json (Browser_lane.active_clients ()))
-           ; "bidiHost", Browser_lane_launcher.bidi_host_to_json host ]))))
+         reply request reqd
+           (Ok (clients_listing ~base_path:(Mcp_server.workspace_config state).base_path))))
   |> Http.Router.post "/api/v1/dashboard/browser-lane/read"
       (with_permission_auth ~permission:Masc_domain.CanReadState (fun _state request reqd ->
          read_body request reqd (fun json ->

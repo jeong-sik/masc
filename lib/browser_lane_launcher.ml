@@ -82,8 +82,10 @@ let observe ~base_path ~server =
     Workspace_connection.resolve ~base_path:(Some base_path) ~cli:None ~environment:None
     |> Result.map Workspace_connection.to_int
   in
-  { base_path; launcher; workspace_port; server
-  ; bidi_host = Browser_bidi_host_record.observe ~base_path }
+  (* Reading the record can let other fibers run. The server is asked after
+     it, so the client list here is as new as one the caller reads next. *)
+  let bidi_host = Browser_bidi_host_record.observe ~base_path in
+  { base_path; launcher; workspace_port; server = server (); bidi_host }
 
 let verdict t =
   match t.server, t.launcher, t.workspace_port with
@@ -165,96 +167,209 @@ let message t =
          here; a running server's own check reports it. %s"
         port environment_note
 
-type bidi_attach = { launcher : string; arguments : string }
+type bidi_launcher = Launcher_installed | Launcher_not_installed | Launcher_needs_reinstall
+
+type bidi_attach = { launcher : string; arguments : string; standing : bidi_launcher }
 
 (* What the launcher is given to attach to a Firefox the operator started
-   with --remote-debugging-port PORT. *)
+   with [firefox_flag]. *)
 let bidi_host_arguments = "--bidi-url ws://127.0.0.1:PORT/session"
+let firefox_flag = "--remote-debugging-port PORT"
 
-let bidi_attach ~base_path =
-  { launcher = Filename.concat (host_directory base_path) launcher_name
+let bidi_attach t =
+  { launcher = Filename.concat (host_directory t.base_path) launcher_name
   ; arguments = bidi_host_arguments
+  ; standing =
+      (match t.launcher with
+       | Follows_workspace -> Launcher_installed
+       | Not_installed -> Launcher_not_installed
+       | Undeclared | Unreadable | Describes_another_launcher -> Launcher_needs_reinstall)
   }
 
-(* How a BiDi connection is added. *)
-let attach_bidi ~base_path =
-  let { launcher; arguments } = bidi_attach ~base_path in
-  Printf.sprintf
-    "the operator starts Firefox on a profile kept for this with --remote-debugging-port PORT, \
-     then runs %s %s (%s)"
-    launcher arguments
+(* What the operator does to start a host. *)
+let run_host t =
+  let { launcher; arguments; standing = _ } = bidi_attach t in
+  Printf.sprintf "runs %s %s" launcher arguments
+
+(* What closes a paragraph that named the host command: the installation the
+   launcher needs when it is not there or not as one wrote it, and where the
+   steps are written. *)
+let bidi_steps t =
+  let installer = install ~base_path:t.base_path in
+  let launcher_first =
+    match (bidi_attach t).standing with
+    | Launcher_installed -> ""
+    | Launcher_not_installed ->
+        Printf.sprintf
+          " No browser lane is installed in this workspace, so that launcher is not there yet: \
+           the operator first installs the lane by running %s."
+          installer
+    | Launcher_needs_reinstall ->
+        Printf.sprintf
+          " The launcher there is not as an installation wrote it: the operator first installs \
+           the lane again by running %s."
+          installer
+  in
+  Printf.sprintf "%s The steps are in %s." launcher_first
     (Browser_lane.live_transport_setup_doc Browser_lane.Webdriver_bidi)
 
 let at seconds = Time_codec.rfc3339_of_unix seconds
 
-(* Whether the host the record names polls the server this process is. The
-   record is the host's own word; the lane's client list is the server's. *)
-let bidi_host_polls t (entry : Browser_bidi_host_record.entry) =
-  match t.server with
-  | Not_serving ->
-      " No MASC server runs in this process, so whether it polls one is not observed here."
-  | Serving { polling; _ } ->
-      if List.exists
-           (fun (info : Browser_lane.client_info) ->
-              info.transport = Browser_lane.Webdriver_bidi
-              && String.equal (Browser_lane.client_id_to_string info.client_id) entry.client_id)
-           polling
-      then " It polls this server."
-      else
-        " This server does not list that client now. The host asks again after a request \
-         that failed, so a server that only just started lists it within seconds."
+let bidi_host_listed ~polling (entry : Browser_bidi_host_record.entry) =
+  List.exists
+    (fun (info : Browser_lane.client_info) ->
+       info.transport = Browser_lane.Webdriver_bidi
+       && String.equal
+            (Browser_lane.client_id_to_string info.client_id)
+            (Browser_lane.client_id_to_string entry.client_id))
+    polling
 
-(* The host's results that got no acknowledgement are in the record; the
-   sentence only says there are some. *)
+type bidi_host_poll = Poll_unobserved | Polls_here | Not_listed_here
+
+let bidi_host_poll t entry =
+  match t.server with
+  | Not_serving -> Poll_unobserved
+  | Serving { polling; _ } -> if bidi_host_listed ~polling entry then Polls_here else Not_listed_here
+
+type bidi_host_verdict =
+  | Bidi_absent
+  | Bidi_serving
+  | Bidi_unverified
+  | Bidi_not_running
+  | Bidi_unreadable
+
+let bidi_host_verdict t =
+  match t.bidi_host, t.launcher with
+  | Browser_bidi_host_record.Never_started, Not_installed -> Bidi_absent
+  | ( Browser_bidi_host_record.Never_started
+    , (Undeclared | Unreadable | Describes_another_launcher | Follows_workspace) )
+  | (Browser_bidi_host_record.Ended _ | Browser_bidi_host_record.Died _), _ -> Bidi_not_running
+  | Browser_bidi_host_record.Running entry, _ ->
+      (match bidi_host_poll t entry with
+       | Polls_here -> Bidi_serving
+       | Poll_unobserved | Not_listed_here -> Bidi_unverified)
+  | Browser_bidi_host_record.Unreadable _, _ -> Bidi_unreadable
+
+(* The record is the host's own word; the lane's client list is the
+   server's. A host the list lacks serves nothing here, whatever its record
+   says, so the sentence names what makes the two differ. *)
+let bidi_host_poll_sentence = function
+  | Poll_unobserved ->
+      " No MASC server runs in this process, so whether it polls one is not observed here; a \
+       running server's own check reports it."
+  | Polls_here -> " It polls this server."
+  | Not_listed_here ->
+      Printf.sprintf
+        " This server does not list that client, so hover and drag are refused here. One of \
+         these holds: the host polls another server (MASC_HTTP_BASE_URL or MASC_HTTP_PORT \
+         exported in the shell that started it outranks this workspace's port); it has not \
+         polled for %.0f seconds, after which this server ends a connection, and registers \
+         again with its next poll; or this server started moments ago and the host has not \
+         reached it yet. If the client stays unlisted, the operator stops that host and starts \
+         it again from a shell without those variables."
+        Browser_lane.lane_connected_window_sec
+
+(* The results are in the record; the sentence says how many and that the
+   record tells them apart. No acknowledgement reaching the host is not the
+   server refusing one. *)
 let bidi_host_unacknowledged (entry : Browser_bidi_host_record.entry) =
+  let listed what =
+    Printf.sprintf
+      " The record lists %s the host holds no acknowledgement for, and says of each whether the \
+       server refused it, the host could not send it, or no acknowledgement came."
+      what
+  in
   match List.length entry.unacknowledged with
   | 0 -> ""
-  | 1 -> " The server acknowledged all but one of its results; the record lists that one."
-  | count ->
-      Printf.sprintf " The server did not acknowledge %d of its results; the record lists them." count
+  | 1 -> listed "one result"
+  | count -> listed (Printf.sprintf "%d results" count)
 
-let bidi_host_session (ending : Browser_bidi_host_record.ending) =
-  match ending.session with
-  | No_session_left -> ""
+(* What became of the last host's session decides what the operator does
+   before the next one: a Firefox that holds a session refuses every host
+   until it is restarted, and one that holds none needs only the host. *)
+let bidi_host_next t (session : Browser_bidi_host_record.session) =
+  let run = run_host t in
+  match session with
+  | No_session_left ->
+      Printf.sprintf
+        " While that Firefox still runs it takes the next host, so the operator only %s; a \
+         Firefox that was closed is started again with %s first."
+        run firefox_flag
   | Session_left ->
-      " Firefox did not confirm that its BiDi session ended. Restart that Firefox before \
-       attaching again: while it holds the session it refuses the next host."
+      Printf.sprintf
+        " Firefox did not confirm that its BiDi session ended, and while it holds that session \
+         it refuses the next host. The operator restarts that Firefox with %s, then %s."
+        firefox_flag run
   | Session_unknown ->
-      " Its connection to Firefox was gone before it could end its BiDi session. If that Firefox \
-       is still running, it holds the session and refuses the next host until it is restarted."
+      Printf.sprintf
+        " Its connection to Firefox was gone before it could end its BiDi session. A Firefox \
+         that exited took the session along; one that still runs holds it and refuses the next \
+         host. The operator starts that Firefox again with %s, restarting it if it still runs, \
+         then %s."
+        firefox_flag run
+  | Session_refused ->
+      Printf.sprintf
+        " Firefox refused it a BiDi session, which it does while it holds one already: that of \
+         a host attached from another workspace, or one a host that died left there. The \
+         operator stops that other host or, when none is attached, restarts that Firefox with \
+         %s, then %s."
+        firefox_flag run
 
 let bidi_host_message t =
-  let attach = attach_bidi ~base_path:t.base_path in
+  let run = run_host t in
   match t.bidi_host with
   | Browser_bidi_host_record.Never_started ->
       Printf.sprintf
-        "No BiDi browser host has run for this workspace. Hover and drag on the live lane \
-         need one: %s."
-        attach
-  | Browser_bidi_host_record.Running ({ attached_at = None; _ } as entry) ->
-      Printf.sprintf "A BiDi browser host (pid %d) started at %s and is connecting to %s."
-        entry.pid (at entry.started_at) entry.bidi_url
-  | Browser_bidi_host_record.Running ({ attached_at = Some attached; _ } as entry) ->
-      Printf.sprintf "A BiDi browser host (pid %d) is attached to %s since %s, as client %s.%s%s"
-        entry.pid entry.bidi_url (at attached) entry.client_id (bidi_host_polls t entry)
-        (bidi_host_unacknowledged entry)
+        "No BiDi browser host has run for this workspace. Hover and drag on the live lane need \
+         one. The operator starts Firefox on a profile kept for this with %s, then %s.%s"
+        firefox_flag run (bidi_steps t)
+  | Browser_bidi_host_record.Running entry ->
+      let client = Browser_lane.client_id_to_string entry.client_id in
+      (match entry.attached_at, bidi_host_poll t entry with
+       | Some attached, poll ->
+           Printf.sprintf "A BiDi browser host (pid %d) is attached to %s since %s, as client %s.%s%s"
+             entry.pid entry.bidi_url (at attached) client (bidi_host_poll_sentence poll)
+             (bidi_host_unacknowledged entry)
+       (* Only a host that has its session polls, so a listed client is an
+          attached host whose record is behind. *)
+       | None, Polls_here ->
+           Printf.sprintf
+             "A BiDi browser host (pid %d) is attached to %s and polls this server as client \
+              %s. Its record does not say since when: the host could not write that.%s"
+             entry.pid entry.bidi_url client (bidi_host_unacknowledged entry)
+       | None, (Poll_unobserved | Not_listed_here) ->
+           Printf.sprintf "A BiDi browser host (pid %d) started at %s and is connecting to %s."
+             entry.pid (at entry.started_at) entry.bidi_url)
   | Browser_bidi_host_record.Ended (entry, ending) ->
       Printf.sprintf
-        "No BiDi browser host is running. The last one (pid %d) ended at %s: %s.%s%s To attach \
-         again, %s."
-        entry.pid (at ending.at) ending.reason (bidi_host_session ending)
-        (bidi_host_unacknowledged entry) attach
+        "No BiDi browser host is running. The last one (pid %d) ended at %s and gave this \
+         reason: %S.%s%s%s"
+        entry.pid (at ending.at) ending.reason (bidi_host_unacknowledged entry)
+        (bidi_host_next t ending.session) (bidi_steps t)
   | Browser_bidi_host_record.Died entry ->
       Printf.sprintf
         "No BiDi browser host is running. The last one (pid %d, started at %s) left no reason \
-         for ending: it was killed or crashed, or could not write one. Its BiDi session may be \
-         left in that Firefox, which then refuses the next host until it is restarted.%s To \
-         attach again, %s."
-        entry.pid (at entry.started_at) (bidi_host_unacknowledged entry) attach
-  | Browser_bidi_host_record.Unreadable detail ->
+         for ending: it was killed or crashed, or could not write one.%s Its BiDi session may be \
+         left in that Firefox. The operator %s; when Firefox refuses that host a session, the \
+         session was left there, and that Firefox is restarted with %s before the host is run \
+         again.%s"
+        entry.pid (at entry.started_at) (bidi_host_unacknowledged entry) run firefox_flag (bidi_steps t)
+  | Browser_bidi_host_record.Unreadable { detail; held = Some true } ->
       Printf.sprintf
-        "The BiDi browser host's record cannot be read (%s). A host that starts replaces it: %s."
-        detail attach
+        "A BiDi browser host holds this workspace's lock, so one is running, and its record \
+         cannot be read (%s): another build of MASC wrote it, or it was changed. A second host \
+         is refused while that one runs. Once the operator stops it, the next host replaces the \
+         record."
+        detail
+  | Browser_bidi_host_record.Unreadable { detail; held = Some false } ->
+      Printf.sprintf
+        "The BiDi browser host's record cannot be read (%s). No host holds this workspace's \
+         lock, so none is running, and the next host replaces the record. The operator starts \
+         Firefox on a profile kept for this with %s, unless it runs already, then %s.%s"
+        detail firefox_flag run (bidi_steps t)
+  | Browser_bidi_host_record.Unreadable { detail; held = None } ->
+      Printf.sprintf
+        "Whether a BiDi browser host runs for this workspace could not be checked (%s)." detail
 
 type bidi_host_report =
   { state : Browser_bidi_host_record.state
@@ -263,32 +378,59 @@ type bidi_host_report =
   }
 
 let bidi_host_report t =
-  { state = t.bidi_host
-  ; attach = bidi_attach ~base_path:t.base_path
-  ; message = bidi_host_message t
-  }
+  { state = t.bidi_host; attach = bidi_attach t; message = bidi_host_message t }
 
+let bidi_host_state_name = function
+  | Browser_bidi_host_record.Never_started -> "never_started"
+  | Browser_bidi_host_record.Running _ -> "running"
+  | Browser_bidi_host_record.Ended _ -> "ended"
+  | Browser_bidi_host_record.Died _ -> "died"
+  | Browser_bidi_host_record.Unreadable _ -> "unreadable"
+
+let bidi_launcher_to_wire = function
+  | Launcher_installed -> "installed"
+  | Launcher_not_installed -> "not_installed"
+  | Launcher_needs_reinstall -> "needs_reinstall"
+
+let bidi_launcher_of_wire = function
+  | "installed" -> Some Launcher_installed
+  | "not_installed" -> Some Launcher_not_installed
+  | "needs_reinstall" -> Some Launcher_needs_reinstall
+  | _ -> None
+
+(* The state is written as what it was read from: the record and whether
+   the lock was held. [lock_held] is null where the state does not turn on
+   it, and for a lock that could not be asked. *)
 let bidi_host_report_to_json { state; attach; message } =
-  let name, record, detail =
+  let entry_json = Browser_bidi_host_record.entry_to_json in
+  let record, lock_held, detail =
     match state with
-    | Browser_bidi_host_record.Never_started -> "never_started", `Null, `Null
-    | Browser_bidi_host_record.Running entry ->
-        "running", Browser_bidi_host_record.entry_to_json entry, `Null
-    | Browser_bidi_host_record.Ended (entry, _) ->
-        "ended", Browser_bidi_host_record.entry_to_json entry, `Null
-    | Browser_bidi_host_record.Died entry -> "died", Browser_bidi_host_record.entry_to_json entry, `Null
-    | Browser_bidi_host_record.Unreadable detail -> "unreadable", `Null, `String detail
+    | Browser_bidi_host_record.Never_started -> `Null, `Null, `Null
+    | Browser_bidi_host_record.Running entry -> entry_json entry, `Bool true, `Null
+    | Browser_bidi_host_record.Ended (entry, ending) ->
+        entry_json { entry with ended = Some ending }, `Null, `Null
+    | Browser_bidi_host_record.Died entry -> entry_json entry, `Bool false, `Null
+    | Browser_bidi_host_record.Unreadable { detail; held } ->
+        `Null, Option.fold ~none:`Null ~some:(fun held -> `Bool held) held, `String detail
   in
   `Assoc
-    [ "state", `String name
+    [ "state", `String (bidi_host_state_name state)
     ; "record", record
+    ; "lock_held", lock_held
     ; "detail", detail
     ; ( "attach"
-      , `Assoc [ "launcher", `String attach.launcher; "arguments", `String attach.arguments ] )
+      , `Assoc
+          [ "launcher", `String attach.launcher
+          ; "arguments", `String attach.arguments
+          ; "launcher_state", `String (bidi_launcher_to_wire attach.standing)
+          ] )
     ; "message", `String message
     ]
 
 let bidi_host_to_json t = bidi_host_report_to_json (bidi_host_report t)
+
+let bidi_host_summary_to_json t =
+  `Assoc [ "state", `String (bidi_host_state_name t.bidi_host); "message", `String (bidi_host_message t) ]
 
 let bidi_host_report_of_json json =
   let ( let* ) = Result.bind in
@@ -307,23 +449,48 @@ let bidi_host_report_of_json json =
     | _ -> Error "the BiDi host report is not an object"
   in
   let* name = text fields "state" in
-  let entry () =
+  let* record =
     let* record = field fields "record" in
-    Browser_bidi_host_record.entry_of_json record
+    match record with
+    | `Null -> Ok None
+    | record -> Result.map Option.some (Browser_bidi_host_record.entry_of_json record)
   in
+  let* lock_held =
+    let* lock_held = field fields "lock_held" in
+    match lock_held with
+    | `Null -> Ok None
+    | `Bool held -> Ok (Some held)
+    | _ -> Error "the BiDi host report's lock_held is neither true, false nor null"
+  in
+  let* detail =
+    let* detail = field fields "detail" in
+    match detail with
+    | `Null -> Ok None
+    | `String detail -> Ok (Some detail)
+    | _ -> Error "the BiDi host report's detail is neither a string nor null"
+  in
+  (* The state is worked out again from what it was read from, by the rule
+     the record's own reader uses, and has to be the one the report names. *)
   let* state =
-    match name with
-    | "never_started" -> Ok Browser_bidi_host_record.Never_started
-    | "running" -> Result.map (fun entry -> Browser_bidi_host_record.Running entry) (entry ())
-    | "ended" ->
-        let* entry = entry () in
-        (match entry.ended with
-         | Some ending -> Ok (Browser_bidi_host_record.Ended (entry, ending))
-         | None -> Error "the BiDi host report calls a record without an ending ended")
-    | "died" -> Result.map (fun entry -> Browser_bidi_host_record.Died entry) (entry ())
-    | "unreadable" ->
-        Result.map (fun detail -> Browser_bidi_host_record.Unreadable detail) (text fields "detail")
-    | _ -> Error "the BiDi host report names a state this reader does not know"
+    match record, detail, lock_held with
+    | None, Some detail, held -> Ok (Browser_bidi_host_record.Unreadable { detail; held })
+    | Some _, Some _, (Some _ | None) ->
+        Error "the BiDi host report has a record and a reason it cannot be read"
+    | None, None, None -> Ok (Browser_bidi_host_record.state_of ~lock_held:false (Ok None))
+    | None, None, Some _ -> Error "the BiDi host report says of a lock with no record beside it"
+    | Some ({ ended = Some _; _ } as entry), None, None ->
+        Ok (Browser_bidi_host_record.state_of ~lock_held:false (Ok (Some entry)))
+    | Some { ended = Some _; _ }, None, Some _ ->
+        Error "the BiDi host report says of a lock beside a record that has its ending"
+    | Some ({ ended = None; _ } as entry), None, Some lock_held ->
+        Ok (Browser_bidi_host_record.state_of ~lock_held (Ok (Some entry)))
+    | Some { ended = None; _ }, None, None ->
+        Error "the BiDi host report does not say whether the host's lock is held"
+  in
+  let* () =
+    if String.equal (bidi_host_state_name state) name
+    then Ok ()
+    else Error "the BiDi host report names a state its record and lock do not make"
   in
   let* attach =
     let* attach = field fields "attach" in
@@ -331,7 +498,13 @@ let bidi_host_report_of_json json =
     | `Assoc attach ->
         let* launcher = text attach "launcher" in
         let* arguments = text attach "arguments" in
-        Ok { launcher; arguments }
+        let* standing =
+          let* raw = text attach "launcher_state" in
+          Option.to_result
+            ~none:"the BiDi host report names a launcher state this reader does not know"
+            (bidi_launcher_of_wire raw)
+        in
+        Ok { launcher; arguments; standing }
     | _ -> Error "the BiDi host report's attach is not an object"
   in
   let* message = text fields "message" in
@@ -361,5 +534,4 @@ let to_json t =
         | Absent -> "absent" | Connected -> "connected" | Aligned -> "aligned"
         | Unverified -> "unverified" | Misconfigured -> "misconfigured")
     ; "message", `String (message t)
-    ; "bidi_host", bidi_host_to_json t
     ]

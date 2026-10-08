@@ -113,21 +113,24 @@ let selection_error ~base_path ~tool_name ~start_time error =
     Tool_result.make_err ~tool_name ~start_time
       ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
       ~data (Yojson.Safe.to_string data) in
+  (* Reading the launcher and the host's record can let other fibers run.
+     The connection lists of an answer are read after it, so they and what
+     the observation says of the server are of one moment. *)
   let observe () =
-    Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
+    Browser_lane_launcher.observe ~base_path ~server:Browser_lane_launcher.current_server in
   match error with
   | Browser_lane.Activity_rejected refusal ->
     rejection ~deciding:["message", `String (Browser_lane.activity_rejection_message refusal)]
       ~listing:[]
   | Browser_lane.No_live_client ->
-    let clients = clients () in
     let host = observe () in
+    let clients = clients () in
     rejection ~deciding:["retry", `String (no_client_retry host);
                          "host", Browser_lane_launcher.to_json host]
       ~listing:["clients", `List clients]
   | Browser_lane.Selected_client_disconnected client_id ->
-    let clients = clients () in
     let host = observe () in
+    let clients = clients () in
     let retry = match clients with
       | _ :: _ -> "That browser is no longer connected. Choose a browser from clients and retry \
                    with its clientId. No browser command was dispatched."
@@ -141,10 +144,25 @@ let selection_error ~base_path ~tool_name ~start_time error =
       ~listing:["clients", `List (clients ())]
   | Browser_lane.Transport_unsupported { client_id; transport; capability } ->
     let serving_transports = Browser_lane.live_transports_serving capability in
-    let serving_clients =
+    let serving () =
       Browser_lane.active_clients ()
       |> List.filter (fun (info : Browser_lane.client_info) ->
            Browser_lane.live_transport_serves info.transport capability) in
+    (* With no connection that serves work BiDi does, the answer says what
+       the BiDi host's own record says: whether one runs and why the last
+       one ended. The operator acts on it, not the Keeper. A connection that
+       serves the work makes that beside the point: the Keeper retries
+       there. The record is read first and the connections listed after, so
+       a host that attached meanwhile is offered and not reported on. *)
+    let serving_clients, bidi_host =
+      match serving () with
+      | _ :: _ as serving_clients -> serving_clients, None
+      | [] when List.mem Browser_lane.Webdriver_bidi serving_transports ->
+        let host = observe () in
+        (match serving () with
+         | _ :: _ as serving_clients -> serving_clients, None
+         | [] -> [], Some host)
+      | [] -> [], None in
     (* A connection of the other kind may belong to another browser profile,
        and its tab IDs are its own, so the retry starts from its tabs. *)
     let retry = match serving_clients with
@@ -157,13 +175,13 @@ let selection_error ~base_path ~tool_name ~start_time error =
         ^ String.concat "; or " (List.map Browser_lane.live_transport_setup serving_transports)
         ^ ". The same request returns the same answer until then; other work this \
            connection serves is unaffected. No browser command was dispatched." in
-    (* What only a BiDi connection serves is refused for want of one, so the
-       answer carries what that host's own record says: whether one runs and
-       why the last one ended. The operator acts on it, not the Keeper. *)
+    (* The host's state and its paragraph for the operator are short and
+       fixed in size, so they sit with the fields that decide. The record
+       itself is not sent: its list of results grows while a host runs. *)
     let bidi_host =
-      if List.mem Browser_lane.Webdriver_bidi serving_transports
-      then ["bidiHost", Browser_lane_launcher.bidi_host_to_json (observe ())]
-      else [] in
+      Option.fold ~none:[]
+        ~some:(fun host -> ["bidiHost", Browser_lane_launcher.bidi_host_summary_to_json host])
+        bidi_host in
     rejection
       ~deciding:(["capability", `String (Browser_lane.live_capability_to_wire capability);
                  "transport", `String (Browser_lane.live_transport_to_string transport);

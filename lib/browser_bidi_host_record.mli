@@ -25,10 +25,8 @@
 type session =
   | No_session_left
       (** Nothing of this host's is left in Firefox: Firefox confirmed the
-          end or said this connection has no session, or the host never had
-          one. A session another host left there is not this host's to know;
-          a host Firefox refused for it ends with this and that refusal as
-          its reason. *)
+          end or said this connection has no session, or the host never got
+          as far as asking for one. *)
   | Session_left
       (** The host asked Firefox to end it and Firefox did not confirm: it
           answered with an error other than having no session, or did not
@@ -37,6 +35,11 @@ type session =
   | Session_unknown
       (** The connection was gone before the host could ask. A Firefox that
           exited took the session along; one still running keeps it. *)
+  | Session_refused
+      (** Firefox refused the host a session with "session not created". It
+          does that while it holds one: another host's that is attached, or
+          one a host that died left there. That session is not this host's,
+          and it is still there for the next host to meet. *)
 
 type ending =
   { at : float
@@ -84,9 +87,9 @@ type entry =
   ; bidi_url : string
       (** The address the host was given, without its query. Its path is kept
           as given. *)
-  ; client_id : string  (** The ID the host polls as now. It changes when the
-                            server ended the connection and the host registered
-                            again. *)
+  ; client_id : Browser_lane.client_id
+      (** The ID the host polls as now. It changes when the server ended the
+          connection and the host registered again. *)
   ; attached_at : float option
       (** When Firefox gave the host its session. [None] while the host is
           still connecting, and for good when it never got one. *)
@@ -108,8 +111,11 @@ type state =
       (** No ending, and nobody holds the lock: the host was killed or
           crashed, or it left in order and could not write its ending. Its
           BiDi session may be left in Firefox. *)
-  | Unreadable of string
-      (** The record is not one this reader understands, or cannot be read. *)
+  | Unreadable of { detail : string; held : bool option }
+      (** The record is not one this reader understands, or cannot be read.
+          [held] says whether a host holds the lock all the same, and is
+          [None] when the lock could not be asked either. A host that holds
+          it refuses the next one, which then cannot replace the record. *)
 
 (** What [bidi-host.json] and the lock say now. The two are read one after
     the other, the record first, so a reader can be wrong for as long as one
@@ -166,7 +172,7 @@ val take
   :  base_path:string
   -> pid:int
   -> bidi_url:string
-  -> client_id:string
+  -> client_id:Browser_lane.client_id
   -> now:float
   -> (taken, refusal) result
 
@@ -174,7 +180,7 @@ val take
 val attached : held -> now:float -> (unit, write_failure) result
 
 (** The host polls under another client ID from here on. *)
-val client_changed : held -> client_id:string -> (unit, write_failure) result
+val client_changed : held -> client_id:Browser_lane.client_id -> (unit, write_failure) result
 
 val note_unacknowledged : held -> unacknowledged -> (unit, write_failure) result
 
@@ -188,5 +194,11 @@ val ended : held -> reason:string -> session:session -> now:float -> (unit, writ
     what [Error] says. *)
 val release : held -> (unit, string) result
 
+(** Times are written to the nearest millisecond. *)
 val entry_to_json : entry -> Yojson.Safe.t
+
+(** Takes what {!entry_to_json} writes and nothing else: the fields of this
+    layout, an address and a client ID in the form a host records them, and
+    a reason that is printable ASCII within the length a host keeps. A time
+    it read is written back as the same text. *)
 val entry_of_json : Yojson.Safe.t -> (entry, string) result

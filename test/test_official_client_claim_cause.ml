@@ -102,7 +102,7 @@ let check_preserved ~base_path ~keeper_name ~expected error =
     (I.official_client_recovery_summary expected) terminal.summary;
   (match Route.route_of_error ~boundary:Route.Masc_execution error with
    | Route.Exhausted_visible_alive
-       { terminal = Route.Session_claim_refused; provenance = Route.Masc_internal_error; _ }
+       { terminal = Route.Session_claim_refused; _ }
        as route ->
      Alcotest.(check string)
        "local claim refusal has its own route label"

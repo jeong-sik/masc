@@ -534,6 +534,30 @@ describe('sendKeeperThreadMessage operation stream', () => {
     }
   }
 
+  it('preserves authored request blocks and the completed reply', async () => {
+    const text = '    첫 줄\nSKILL.md 설명\n\n\n끝  \n\n'
+    streamKeeperMessage.mockImplementation(completeStream(text))
+
+    await sendKeeperThreadMessage('echo', text)
+
+    expect(streamKeeperMessage).toHaveBeenCalledWith('echo', text, expect.objectContaining({
+      userBlocks: [{ type: 'text', text }],
+    }))
+    expect(keeperThreads.value.echo?.filter(entry => entry.role === 'user').at(-1)?.text).toBe(text)
+    expect(keeperThreads.value.echo?.filter(entry => entry.role === 'assistant').at(-1)?.text).toBe(text)
+  })
+
+  it('preserves text when user blocks supply the message fallback', async () => {
+    const text = '    블록의 첫 줄\n\n끝  '
+    streamKeeperMessage.mockImplementation(completeStream('ok'))
+
+    await sendKeeperThreadMessage('echo', '  ', { userBlocks: [{ type: 'text', text }] })
+
+    expect(streamKeeperMessage).toHaveBeenCalledWith('echo', text, expect.objectContaining({
+      userBlocks: [{ type: 'text', text }],
+    }))
+  })
+
   it('submits repeated messages as distinct durable operation ids', async () => {
     streamKeeperMessage.mockImplementation(completeStream('ok'))
 
@@ -896,12 +920,12 @@ describe('dispatchKeeperInterjectAction', () => {
     ).rejects.toThrow('INTERJECT send requires a message.')
   })
 
-  it('dispatches kind=send through the thread-message path with trimmed values', async () => {
+  it('trims the keeper name while preserving the interject message', async () => {
     streamKeeperMessage.mockResolvedValue({ terminal: true })
 
     await dispatchKeeperInterjectAction({ kind: 'send', keeperName: '  echo  ', message: '  hi  ' })
 
-    expect(streamKeeperMessage).toHaveBeenCalledWith('echo', 'hi', expect.objectContaining({
+    expect(streamKeeperMessage).toHaveBeenCalledWith('echo', '  hi  ', expect.objectContaining({
       onEvent: expect.any(Function),
     }))
   })

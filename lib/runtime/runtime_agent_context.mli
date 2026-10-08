@@ -135,8 +135,17 @@ type config = {
           reject the field, so leave [None] unless explicitly needed. *)
   on_run_complete : (bool -> unit) option;
   checkpoint_sink : Agent_core.Agent.checkpoint_sink option;
+  execution_store : Agent_core.Agent.execution_store option;
+      (** Optional durable scope forwarded to the selected native Agent API
+          call. [None] leaves scope selection to Core, including ambient
+          child execution. Core rejects an explicit store together with an
+          ambient child scope. Use one store/directory per API call; a
+          cooperative yield terminates that call's scope. The host owns
+          locator persistence, terminal disposition handling and checkpoint
+          recovery; this bridge neither reuses a completed scope nor selects
+          a recovery locator. *)
 }
-(** Per-worker configuration.  60 fields — concrete record because
+(** Per-worker configuration. Concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

@@ -41,16 +41,24 @@ type section = {
   empty_msg: string;
 }
 
-(* The schema enum and this parser used to spell the same vocabulary
-   separately, on opposite sides of the cut that keeps the descriptor
-   generator out of its own consumer (#27069). Tool_schemas_specs_types is on
-   the generator's side and depends on nothing here, so both can take it. *)
-type scope = Tool_schemas_specs_types.dashboard_scope =
+(* The [scope] enum in config/tools/masc_dashboard.toml spells this same
+   vocabulary. test_tools_coverage checks the two against each other (#27069). *)
+type scope =
   | Dashboard_scope_all
   | Dashboard_scope_current
 
-let valid_scope_strings = Tool_schemas_specs_types.dashboard_scope_strings
-let scope_of_string_opt = Tool_schemas_specs_types.dashboard_scope_of_string_opt
+let scope_to_string = function
+  | Dashboard_scope_all -> "all"
+  | Dashboard_scope_current -> "current"
+
+let scope_of_string_opt = function
+  | "all" -> Some Dashboard_scope_all
+  | "current" -> Some Dashboard_scope_current
+  | _ -> None
+
+(* Order is the enum order in the published schema. *)
+let valid_scope_strings =
+  List.map scope_to_string [ Dashboard_scope_all; Dashboard_scope_current ]
 
 (** Re-export shared types from Dashboard_labels to avoid breaking existing callers *)
 type workspace_snapshot = Dashboard_labels.workspace_snapshot = {

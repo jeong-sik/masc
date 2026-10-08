@@ -100,6 +100,7 @@ type t = private
   ; current_sources : source_member list
   ; frame : Keeper_repetition_snapshot.t
   ; phase : phase
+  ; native_call : Keeper_native_call.state
   ; created_at : float
   ; updated_at : float
   }
@@ -157,6 +158,10 @@ val apply : now:float -> action -> t -> (t, error) result
     That future transition needs an actual adapter-owned witness. Repeated
     identical Require_reconciliation preserves origin and returns the same
     record without spending a revision. *)
+val update_native_call : now:float -> expected:Keeper_native_call.state ->
+  replacement:Keeper_native_call.state -> t -> (t, error) result
+(** Direct-operation-only CAS. A terminal call remains evidence until the
+    Owner acknowledges retirement. Unknown effects cannot be acknowledged. *)
 val same_admission : t -> t -> bool
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, error) result

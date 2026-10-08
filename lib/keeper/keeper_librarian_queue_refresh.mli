@@ -38,7 +38,9 @@ val submit_durable : base_path:string -> keeper_name:string -> unit
     did not launch. After catch-up it reviews an over-limit current Memory
     working set even if there were no unread turns. A successful decision
     on unchanged input is remembered until the input changes or the process
-    restarts; a failed pass can retry on a later wake. *)
+    restarts. Saved cleanup progress that leaves excess requests another unit
+    on the same lane; neither category nor item excess may worsen. A retained
+    excess or failed pass waits for a later external wake. *)
 
 val with_purge_then_catch_up
   :  base_path:string

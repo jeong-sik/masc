@@ -50,7 +50,7 @@ val parse : string -> (layout, string) result
 
 type source =
   | Workspace  (** [<.masc>/dos/pads/<saves name>.toml] *)
-  | Builtin  (** shipped with masc *)
+  | Builtin  (** embedded [config/pads/<saves name>.toml] *)
 
 val source_to_string : source -> string
 
@@ -61,7 +61,8 @@ val pads_dir : base_path:string -> string
 
 val load : base_path:string -> saves_name:string -> ((source * layout) option, string) result
 (** The layout for the program loaded under [saves_name]: the workspace file
-    when there is one, else the builtin one, else [None]. Only a genuinely
+    when there is one, else the embedded [config/pads/*.toml] asset whose
+    basename is [saves_name], else [None]. Only a genuinely
     absent workspace path permits fallback. An unreadable path, dangling link,
     non-regular file or malformed layout is an error. A symlink to a readable
     regular file remains a workspace override. The opened descriptor is checked

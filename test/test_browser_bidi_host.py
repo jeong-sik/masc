@@ -75,7 +75,8 @@ def run(host, firefox, out=None):
                 else:
                     body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 assert self.headers["x-lane-token"] == token
-                metadata.append((self.headers["x-browser-client-id"], self.headers["x-browser-version"]))
+                metadata.append((self.headers["x-browser-client-id"], self.headers["x-browser-version"],
+                                 self.headers["x-browser-transport"]))
                 if self.path.endswith("/poll"):
                     ready.set()
                     try:
@@ -105,9 +106,13 @@ def run(host, firefox, out=None):
         # Two identical URL tabs are opened by the owned Firefox command line.
         fixture = root / "fixture.html"
         fixture.write_text('''<!doctype html><title>BiDi native fixture</title>
-<style>body{margin:0;min-height:2000px}#pad{width:500px;height:300px;background:lightblue}</style>
-<a href="#followed">Observed destination</a><div id="pad">untouched</div><script>
+<style>body{margin:0;min-height:2000px}#pad{width:500px;height:300px;background:lightblue}
+#hover-result{display:none;position:fixed;top:0;right:0}#pad:hover+#hover-result{display:block}</style>
+<a href="#followed">Observed destination</a><div id="pad">untouched</div><span id="hover-result"></span><script>
 const pad=document.querySelector('#pad'); let down=false;
+let presses=0;
+pad.addEventListener('pointerdown',()=>{presses++});
+pad.addEventListener('pointermove',e=>{document.querySelector('#hover-result').textContent='hover:'+e.isTrusted+':'+presses});
 pad.onpointerdown=e=>{down=e.isTrusted;pad.setPointerCapture(e.pointerId)};
 pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
 </script>''')
@@ -151,6 +156,16 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             before = call("page.read", {"tabId": second})
             shot = call("page.capture", {"tabId": first})
             assert shot["ok"] and base64.b64decode(shot["data"]["data"]).startswith(b"\x89PNG")
+            unhovered = call("page.read", {"tabId": first})
+            assert "hover:true:0" not in unhovered["data"]["text"], unhovered
+            hover = call("page.interact", {"tabId": first, "action": "hover_at",
+                "expectedUrl": fixture_url, "viewport": shot["data"]["viewport"],
+                "point": {"x": .05, "y": .05}})
+            assert hover["ok"], hover
+            hovered = call("page.read", {"tabId": first})
+            assert "hover:true:0" in hovered["data"]["text"], hovered
+            hover_shot = call("page.capture", {"tabId": first})
+            assert hover_shot["ok"], hover_shot
             args = {"tabId": first, "action": "drag", "expectedUrl": fixture_url,
                 "viewport": shot["data"]["viewport"], "from": {"x": .05, "y": .05}, "to": {"x": .2, "y": .2}}
             stale = {**args, "viewport": {**args["viewport"], "documentId": "stale"}}
@@ -207,6 +222,7 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             unsupported = call("page.elements", {"tabId": first})
             assert not unsupported["ok"] and unsupported["effectPhase"] == "not_started"
             assert len({row[0] for row in metadata}) == 1 and all(row[1] for row in metadata)
+            assert all(row[2] == "webdriver_bidi" for row in metadata), metadata
             outcome.update(passed=True, tabs=matching, version=metadata[0][1])
         except BaseException:
             outcome["error"] = traceback.format_exc()

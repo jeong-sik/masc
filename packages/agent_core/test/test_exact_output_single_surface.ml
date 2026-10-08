@@ -314,11 +314,12 @@ type capture =
   ; headers : (string * string) list
   }
 
-let openai_response content =
+let openai_response ?(finish_reason = "stop") content =
   let encoded_content = Yojson.Safe.to_string (`String content) in
   Printf.sprintf
-    {|{"id":"resp-surface","model":"surface","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+    {|{"id":"resp-surface","model":"surface","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":%s}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
     encoded_content
+    (Yojson.Safe.to_string (`String finish_reason))
 ;;
 
 let ollama_response content =
@@ -1385,13 +1386,18 @@ let test_normalization_error_classes () =
     | Ok _ | Error _ -> fail (label ^ " lost response-received evidence")
   in
   run
-    "incomplete"
+    "output limit"
     (anthropic_response
        ~stop_reason:"max_tokens"
        {|[{"type":"text","text":"{\"name\":\"accepted\"}"}]|})
     (function
-    | EO.Incomplete_output -> true
+    | EO.Output_limit_reached -> true
     | _ -> false);
+  List.iter (fun stop_reason ->
+    run stop_reason
+      (anthropic_response ~stop_reason {|[{"type":"text","text":"{}"}]|})
+      (function EO.Incomplete_output -> true | _ -> false))
+    ["refusal"; "unrecognized-fixture-stop"];
   run "missing" (anthropic_response "[]") (function
     | EO.Missing_output -> true
     | _ -> false);
@@ -1408,6 +1414,39 @@ let test_normalization_error_classes () =
     (function
     | EO.Unexpected_output_content -> true
     | _ -> false)
+;;
+
+let test_empty_output_limit_classes () =
+  List.iter (fun kind ->
+    List.iter (fun finish_reason ->
+      let body = openai_response ~finish_reason "" in
+      let result, posts, _, _ =
+        with_server ~response:body @@ fun ~sw:_ ~net ~clock ~base_url ->
+        let entry = catalog_entry ~id:"empty-limit" ~kind ~base_url
+          ~request_path:"/v1/chat/completions"
+          ~capabilities:(capabilities ~native:true ~json:true) () in
+        with_catalog [entry] @@ fun snapshot ->
+        execute_once ~net ~clock (attempt (flow snapshot "empty-limit" EO.Json_syntax)) in
+      check int "empty response is one real HTTP dispatch" 1 posts;
+      match result with
+      | Error { EO.receipt; cause; raw_response = Some raw; _ } ->
+        check_receipt "empty output" ~phase:EO.Response_received ~dispatch_count:1
+          ~http_status:(Some 200) receipt;
+        check string "empty content retains its complete response envelope" body raw.body;
+        check bool "empty content retains provider trace" true
+          (Option.is_some (EO.receipt_provider_trace receipt));
+        let expected = Types.stop_reason_of_string finish_reason in
+        (match expected, cause with
+         | Types.MaxTokens, EO.Output_limit_reached -> ()
+         | (Types.Refusal | Types.Unknown _), EO.Completion_failed
+             { error = Http_client.ProviderFailure
+                 { kind = Http_client.Empty_completion { stop_reason }; _ }
+             ; dispatch = EO.Generation_dispatch_started } ->
+           check bool "non-limit empty stop reason remains intact" true (stop_reason = expected)
+         | _ -> fail "empty output stop reason was collapsed or misclassified")
+      | Ok _ | Error _ -> fail "empty output lost received response evidence")
+      ["length"; "refusal"; "unknown-fixture-stop"])
+    [Provider_config.OpenAI_compat; Provider_config.Glm]
 ;;
 
 let test_attempt_rejects_concurrent_duplicate_before_second_dispatch () =
@@ -2226,7 +2265,9 @@ let () =
   run
     "exact-output-single-surface"
     [ ( "surface"
-      , [ test_case "GLM HTTP capacity classification" `Quick test_glm_http_capacity_classification
+      , [ test_case "empty OpenAI and GLM output preserves typed stop cause" `Quick
+            test_empty_output_limit_classes
+        ; test_case "GLM HTTP capacity classification" `Quick test_glm_http_capacity_classification
         ; test_case
             "capability tier table"
             `Quick

@@ -112,7 +112,7 @@ def run(binary):
             "viewport": {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0}}}
 
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {
-        "clients": [{"clientId": client, "browser": "zen"}]}})
+        "clients": [{"clientId": client, "browser": "zen", "transport": "web_extension"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = h.RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/scene"] = h.RequestHttpResponse(scene)
 

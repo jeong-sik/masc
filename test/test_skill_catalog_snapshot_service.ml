@@ -71,7 +71,7 @@ let refresh base_path config_text =
   Service.refresh
     ~workspace:(workspace base_path)
     ~user_home:None
-    ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text })
+    ~read_config:(fun () -> { Service.path = "/fixture/runtime.toml"; source_text = config_text })
 ;;
 
 let test_valid_and_malformed_sources_coexist () =
@@ -200,6 +200,7 @@ let test_rejected_config_replaces_previous_snapshot () =
 let test_refresh_is_serialized_and_latest_call_wins () =
   with_workspace @@ fun base_path ->
   let workspace = workspace base_path in
+  let rejected_text = "[skills]\nactivation-lifetme = \"turn\"\n" in
   let mutex = Mutex.create () in
   let condition = Condition.create () in
   let old_reader_started = ref false in
@@ -217,7 +218,7 @@ let test_refresh_is_serialized_and_latest_call_wins () =
             Condition.wait condition mutex
           done;
           Mutex.unlock mutex;
-          Service.Config_unreadable { path = "/fixture/runtime.toml"; detail = "old read failed" }))
+          { Service.path = "/fixture/runtime.toml"; source_text = rejected_text }))
   in
   Mutex.lock mutex;
   while not !old_reader_started do
@@ -230,7 +231,7 @@ let test_refresh_is_serialized_and_latest_call_wins () =
       Service.refresh
         ~workspace
         ~user_home:None
-        ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = valid_text }))
+        ~read_config:(fun () -> { Service.path = "/fixture/runtime.toml"; source_text = valid_text }))
   in
   Mutex.lock mutex;
   release_old_reader := true;
@@ -243,7 +244,7 @@ let test_refresh_is_serialized_and_latest_call_wins () =
     (match Snapshot.config_state current with
      | Snapshot.Configured _ -> ()
      | Config_rejected _ | Config_unreadable _ ->
-       fail "older unreadable observation replaced the newer config")
+       fail "older rejected observation replaced the newer config")
   | None -> fail "serialized refresh did not publish"
 ;;
 
@@ -260,7 +261,7 @@ let test_workspace_alias_and_retirement () =
        ~workspace:direct
        ~user_home:None
        ~read_config:(fun () ->
-         Service.Config_text { path = "/fixture/runtime.toml"; source_text = config (source_row "skills" "skills") }));
+         { Service.path = "/fixture/runtime.toml"; source_text = config (source_row "skills" "skills") }));
   check bool
     "canonical alias shares current snapshot"
     true
@@ -284,7 +285,7 @@ let test_current_and_retire_do_not_wait_for_refresh_io () =
        ~workspace
        ~user_home:None
        ~read_config:(fun () ->
-         Service.Config_text { path = "/fixture/runtime.toml"; source_text = config (source_row "skills" "skills") }));
+         { Service.path = "/fixture/runtime.toml"; source_text = config (source_row "skills" "skills") }));
   let mutex = Mutex.create () in
   let condition = Condition.create () in
   let reader_started = ref false in
@@ -302,7 +303,7 @@ let test_current_and_retire_do_not_wait_for_refresh_io () =
             Condition.wait condition mutex
           done;
           Mutex.unlock mutex;
-          Service.Config_unreadable { path = "/fixture/runtime.toml"; detail = "refresh completed after retirement" }))
+          { Service.path = "/fixture/runtime.toml"; source_text = config (source_row "skills" "skills") }))
   in
   Mutex.lock mutex;
   while not !reader_started do

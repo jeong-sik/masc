@@ -136,9 +136,9 @@ let disposition_of_runtime_blocker_class raw_blocker_class =
   | None ->
     (* Keep the class that did not decode. Replacing it with "unknown_error"
        made every unrecognised blocker look alike on the alert and in the
-       operator broadcast, and [Keeper_status_bridge_blocker] emits three
-       classes this decoder does not know -- heartbeat_failures, turn_failures,
-       stale_termination_storm -- so the erasure is what production hits, not a
+       operator broadcast, and [Keeper_status_bridge_blocker] emits classes
+       this decoder does not know -- heartbeat_failures, turn_failures --
+       so the erasure is what production hits, not a
        corrupt-state edge (#25797). [Unknown] carries no typed authority either
        way; what it carries is the string a reader needs to see. *)
     Keeper_turn_disposition.Unknown { raw_error = raw_blocker_class }

@@ -354,6 +354,7 @@ let seed_tool_calls_from_ledger
      a seed that cannot be written degrades like one that cannot be read
      instead of failing the turn. *)
   match (try Ok (Keeper_tool_call_log.flush_now ()) with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn -> Error (Printexc.to_string exn)) with
   | Error detail ->
     Log.Keeper.warn
@@ -434,6 +435,7 @@ let prepare_agent_setup
       ?continuation_channel
       ?on_tool_stream_observation
       ?on_tool_result_ready
+      ?(tool_result_commit_policy = Keeper_hooks_agent_core.Require_commit)
       ?hitl_resolution
       ?on_gate_deferred
       ?composition_plan_index
@@ -447,10 +449,11 @@ let prepare_agent_setup
   let active_runtime_id = Atomic.make None in
   let receipt_lane_attempt_index_ref : int ref = ref 0 in
   let tool_result_commit_required () =
-    match on_tool_result_ready, !active_checkpoint_owner with
-    | None, _ -> false
-    | Some _, Some Runtime_execution.Official_client -> false
-    | Some _, (Some Runtime_execution.Masc_agent_core | None) -> true
+    match tool_result_commit_policy, on_tool_result_ready, !active_checkpoint_owner with
+    | Keeper_hooks_agent_core.Observe_commit, _, _ -> false
+    | Require_commit, None, _ -> false
+    | Require_commit, Some _, Some Runtime_execution.Official_client -> false
+    | Require_commit, Some _, (Some Runtime_execution.Masc_agent_core | None) -> true
   in
   let on_runtime_attempt
         (attempt : Keeper_turn_driver.runtime_attempt)

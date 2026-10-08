@@ -8,7 +8,7 @@ let info browser : Lane.client_info =
   incr serial;
   let raw = Printf.sprintf "00000000-0000-4000-8000-%012d" !serial in
   let client_id = match Lane.client_id_of_string raw with Ok id -> id | Error error -> fail error in
-  {client_id; browser; version="1.0"; engine_version="155.0.1"}
+  {client_id; browser; version="1.0"; transport=Browser_lane.Web_extension; engine_version="155.0.1"}
 let target id = match Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some id)) with
   | Ok value -> value | Error error -> fail (Lane.selection_error_code error)
 let with_clients f = Eio_main.run (fun env ->
@@ -103,6 +103,30 @@ let test_sources_and_live_policy () = with_clients (fun _ connect ->
   check bool "automation still needs its native executor" true
     (Lane.issue_automation ~verb:Lane.Tabs_list ~timeout_sec:0.1 = Lane.Lane_absent))
 
+let test_hover_uses_bidi_transport () = with_clients (fun sw connect ->
+  let extension = connect Lane.Firefox in
+  let extension_target = target extension.client_id in
+  let client = match extension_target with Lane.Live_client client -> client
+    | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
+  let viewport : Lane.Pointer.viewport =
+    {document_id="observed-page"; width=800.; height=600.; scroll_x=0.; scroll_y=0.} in
+  let verb = Lane.Page_interact {tab_id=2; expected_url=Some "https://example.org";
+    action=Lane.Hover_at {point={x=0.5;y=0.5};viewport}} in
+  check bool "extension hover is refused before dispatch" true
+    (Lane.issue_for ~target:extension_target ~verb ~timeout_sec:1.
+       = Ok (Lane.Rejected_before_effect "trusted_hover_requires_live_bidi_connection"));
+  check int "no extension waiter" 0 (Hashtbl.length client.waiters);
+  check int "no extension command" 0 (Eio.Stream.length client.commands);
+  let bidi = { (info Lane.Firefox) with transport=Lane.Webdriver_bidi } in
+  ignore (Lane.take_command ~client_info:bidi ~window_sec:0.001);
+  Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:bidi.client_id));
+  let result = Eio.Fiber.fork_promise ~sw (fun () ->
+    Lane.issue_for ~target:(target bidi.client_id) ~verb ~timeout_sec:1.) in
+  let command = take bidi in
+  check bool "BiDi receives the requested hover" true (command.verb_json = Lane.verb_json verb);
+  ignore (Lane.deliver_result ~client_id:bidi.client_id ~id:command.id ~payload:(payload "hovered"));
+  answered result "hovered")
+
 let test_optional_document_preserves_existing_work () = with_clients (fun sw connect ->
   let info = connect Lane.Firefox in
   let selected = target info.client_id in
@@ -152,6 +176,7 @@ let test_inventory_does_not_prune () = with_clients (fun sw connect ->
   | _ -> fail "explicit disconnect must still settle the request")
 
 let () = run "browser client routing" ["ownership", [
+  test_case "hover requires BiDi before queue admission" `Quick test_hover_uses_bidi_transport;
   test_case "inventory observes without pruning a pending client" `Quick test_inventory_does_not_prune;
   test_case "optional document preserves existing work" `Quick test_optional_document_preserves_existing_work;
   test_case "colliding tab IDs and spoofed results" `Quick test_colliding_tabs_are_isolated;

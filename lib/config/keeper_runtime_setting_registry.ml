@@ -17,10 +17,7 @@ type value_range =
       }
 
 type reload_class =
-  | Hot
   | Next_turn
-  | Next_cycle
-  | Fiber_restart
   | Process_restart
 
 type exposure =
@@ -915,17 +912,14 @@ let value_range_label = function
 ;;
 
 let reload_class_label = function
-  | Hot -> "hot"
   | Next_turn -> "next_turn"
-  | Next_cycle -> "next_cycle"
-  | Fiber_restart -> "fiber_restart"
   | Process_restart -> "process_restart"
 ;;
 
 let requires_restart setting =
   match setting.reload_class with
-  | Hot | Next_turn | Next_cycle -> false
-  | Fiber_restart | Process_restart -> true
+  | Next_turn -> false
+  | Process_restart -> true
 ;;
 
 let duplicates ~identity rows =

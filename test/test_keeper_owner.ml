@@ -3060,6 +3060,68 @@ let test_pause_rechecks_pending_claim_admission () =
   check int "pending child was admitted once before pause" 1 !execution_count
 ;;
 
+let test_startup_requeues_exact_native_call () =
+  Eio_main.run @@ fun _env ->
+  let path = Filename.temp_file "keeper-owner-native-" ".sqlite3" in
+  Unix.unlink path;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path) (fun () ->
+    let operation_id = operation_id "kmsg-native-restart" in
+    let seed = Keeper_chat_operation_store.open_or_create ~path |> Result.get_ok in
+    ignore (Keeper_chat_operation_store.submit seed ~now:10. ~operation_id
+      ~source:operation_source ~input:(operation_input "retain original native input") |> Result.get_ok);
+    let operation = Keeper_chat_operation_store.claim_next seed ~now:11. |> Result.get_ok |> Option.get in
+    let checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:(Keeper_id.Trace_id.of_string "native-owner-trace" |> Result.get_ok)
+      ~turn_count:1 ~canonical_checkpoint_bytes:"exact owner seed" |> Result.get_ok in
+    let locator = Agent_core.Agent.execution_locator_of_yojson
+      (`Assoc ["version", `Int 1; "run_id", `String "execution-run-native-owner"]) |> Result.get_ok in
+    let call = Keeper_native_call.create
+      ~call_id:"019a0010-1000-7000-8000-000000000010" ~runtime_id:"native.primary"
+      ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
+      ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
+    Keeper_chat_operation_store.update_direct_native_call seed ~now:12. ~operation_id
+      ~execution_digest:operation.execution_digest
+      (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call}) |> Result.get_ok;
+    Keeper_chat_operation_store.close seed |> Result.get_ok;
+    Eio.Switch.run @@ fun sw ->
+    let owner = Owner.start ~sw
+      ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      ~operation_store_path:path ~now:(fun () -> 20.) ~operation_runner:None
+      ~on_turn_slot_released:None ~keeper_name:"native-restart"
+      ~initial_meta:(Some (make_meta "native-restart")) |> owner_ok in
+    check int "witnessed native operation not interrupted" 0 (List.length (Owner.restart_interrupted_operations owner));
+    let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+    check bool "Owner claims original operation" true (Chat_operation.Operation_id.equal operation_id resumed.operation_id);
+    check bool "Owner preserves input" true (operation.input = resumed.input);
+    let observed = Owner.direct_native_call owner ~operation_id |> owner_ok in
+    check bool "Owner restores exact native witness" true
+      (Keeper_native_call.equal_state observed (Keeper_native_call.Active call));
+    Owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~observed ~call |> owner_ok;
+    let advanced_checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:checkpoint.trace_id ~turn_count:2
+      ~canonical_checkpoint_bytes:"native progress after restart" |> Result.get_ok in
+    Owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~call_id:call.call_id ~observed:checkpoint ~checkpoint:advanced_checkpoint |> owner_ok;
+    (match Owner.checkpoint_direct_native_call owner ~operation_id
+       ~execution_digest:operation.execution_digest ~call_id:call.call_id
+       ~observed:checkpoint ~checkpoint:advanced_checkpoint with
+     | Error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _)) -> ()
+     | Error error -> fail ("stale callback fenced Owner: " ^ Owner.error_to_string error)
+     | Ok () -> fail "stale callback was accepted");
+    (match Owner.direct_native_call owner ~operation_id |> owner_ok with
+     | Keeper_native_call.Active current ->
+       check bool "stale callback keeps committed checkpoint" true
+         (Keeper_checkpoint_ref.equal current.checkpoint advanced_checkpoint)
+     | _ -> fail "stale callback changed active native state");
+    Owner.terminal_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+      ~call_id:call.call_id ~disposition:{Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;
+        recovery=Agent_core.Agent.Retire} |> owner_ok;
+    ignore (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"native-owner-receipt" |> owner_ok);
+    check bool "Owner receipt retires native witness" true
+      (Keeper_native_call.equal_state Keeper_native_call.No_native_call (Owner.direct_native_call owner ~operation_id |> owner_ok)))
+;;
+
 let test_startup_interrupts_running_without_requeue () =
   Eio_main.run @@ fun _env ->
   let path = Filename.temp_file "keeper-owner-restart-" ".sqlite3" in
@@ -3148,6 +3210,7 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
        (match Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
         | Ok () -> ()
         | Error detail -> fail ("persist keeper meta: " ^ detail));
+       let member_id = operation_id "kmsg-restart-row-member" in
        let operation_id = operation_id "kmsg-restart-row" in
        let source =
          Keeper_chat_operation_payload.source_to_json
@@ -3189,8 +3252,196 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
          ~input:(operation_input "running at crash")
        |> Result.get_ok
        |> ignore;
-       Keeper_chat_operation_store.claim_next seed ~now:11.0 |> Result.get_ok |> ignore;
+       Keeper_chat_operation_store.submit seed ~now:10.5 ~operation_id:member_id
+         ~source ~input:(operation_input "second input at crash")
+       |> Result.get_ok |> ignore;
+       let batch _ candidates =
+         Ok (Some { Keeper_chat_operation_store.members =
+           List.map (fun (op : Chat_operation.t) -> op.operation_id) candidates;
+           input = operation_input "combined request" }) in
+       Keeper_chat_operation_store.claim_next ~batch seed ~now:11.0 |> Result.get_ok |> ignore;
        Keeper_chat_operation_store.close seed |> Result.get_ok;
+       (* The run the crash cut off had journaled its start and nothing after. *)
+       let journal =
+         Keeper_chat_event_log.open_journal
+           ~base_dir:base_path
+           ~keeper_name
+           ~operation_id:(Chat_operation.Operation_id.to_string operation_id)
+           ()
+       in
+       (match
+          Keeper_chat_event_log.append_result journal ~seq:0 ~ts:10.0
+            (Keeper_chat_events.Run_started
+               { run_id = "restart-row-run"; thread_id = "keeper:" ^ keeper_name })
+        with
+        | Ok () -> ()
+        | Error detail -> fail ("seed journal: " ^ detail));
+       (* The next member resumed after an earlier segment error, then the
+          process died while writing its next row. Neither that error nor the
+          incomplete bytes acknowledge the newly interrupted segment. *)
+       let member_operation_id = Chat_operation.Operation_id.to_string member_id in
+       let member_journal = Keeper_chat_event_log.open_journal ~base_dir:base_path
+           ~keeper_name ~operation_id:member_operation_id () in
+       (match Keeper_chat_event_log.append_result member_journal ~seq:0 ~ts:9.0
+           (Keeper_chat_events.Event_error { message = "previous segment failure" }) with
+        | Ok () -> () | Error detail -> fail detail);
+       let member_path = Keeper_chat_event_log.journal_path ~base_dir:base_path
+           ~keeper_name ~operation_id:member_operation_id in
+       let torn = open_out_gen [Open_wronly; Open_append; Open_binary] 0o600 member_path in
+       output_string torn "{\"incomplete\":";
+       close_out torn;
+       let start_and_check journals = Eio.Switch.run (fun sw ->
+       (match
+          Owner_registry.install_from_store
+            ~sw
+            ~operation_runner:None
+            ~on_turn_slot_released:None
+            config
+        with
+        | Ok count -> check int "one owner installed" 1 count
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       (* A subscriber that reopens the operation replays this journal, so a
+          journal that stops at [Run_started] leaves it waiting on a terminal
+          the settled operation will never send. *)
+       List.iter (fun journal ->
+       (match Keeper_chat_event_log.read_journal journal with
+        | Ok entries ->
+          (match List.rev entries with
+           | { Keeper_chat_event_log.event =
+                 Keeper_chat_events.Event_error { message }
+             ; _ } :: _ ->
+             check string "the journal ends with the restart cause"
+               "the server restarted before this request finished." message;
+             check int "one terminal was appended after the run start" 2
+               (List.length entries)
+           | _ -> fail "the restart-interrupted journal does not end with a terminal error")
+        | Error _ -> fail "the restart-interrupted journal could not be read");
+       (match Keeper_chat_event_log.next_sequence journal with
+        | Ok seq -> check int "restart terminal follows complete rows with no torn tail" 2 seq
+        | Error _ -> fail "restart left a torn or corrupt journal")) journals;
+       let rows = Keeper_chat_store.load ~base_dir:base_path ~keeper_name in
+       let failure_rows =
+         List.filter
+           (fun (row : Keeper_chat_store.chat_message) ->
+              Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Assistant
+              && Keeper_chat_store.Row_kind.equal row.kind Keeper_chat_store.Row_kind.Transport_failure)
+           rows
+       in
+       check int "each batch member has a failure row" 2 (List.length failure_rows);
+       List.iter (fun (row : Keeper_chat_store.chat_message) ->
+         check string "the row says what happened"
+           "Keeper request failed: the server restarted before this request finished."
+           row.content) failure_rows) in
+       (* Fail one member's journal after the operation store commits Failed.
+          The leader succeeds; a later startup must retry the missing member
+          without duplicating the leader's already appended terminal. *)
+       let held_path = member_path ^ ".held" in
+       Unix.rename member_path held_path;
+       Unix.mkdir member_path 0o700;
+       start_and_check [journal];
+       Unix.rmdir member_path;
+       Unix.rename held_path member_path;
+       start_and_check [journal;member_journal];
+       (* There is no separate recovery acknowledgment to lose: the terminal's
+          durable settlement identity itself makes another startup a no-op. *)
+       start_and_check [journal;member_journal])
+;;
+
+(* A shared chat batch runs once and journals to every member. The restart
+   settles the whole batch, so every member's journal needs the terminal, not
+   only the execution leader's. *)
+let test_registry_start_ends_every_batch_member_journal_after_a_restart () =
+  let base_path = Filename.temp_dir "keeper-owner-restart-batch" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      remove_tree base_path)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "restart-batch-owner" in
+       (match Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
+        | Ok () -> ()
+        | Error detail -> fail ("persist keeper meta: " ^ detail));
+       let leader = operation_id "kmsg-restart-batch-leader" in
+       let follower = operation_id "kmsg-restart-batch-follower" in
+       let source =
+         Keeper_chat_operation_payload.source_to_json
+           ~submitted_by:"masc-tui"
+           ~thread_id:("keeper:" ^ keeper_name)
+           ~continuation_channel:
+             (Keeper_continuation_channel.dashboard ~thread_id:("keeper:" ^ keeper_name)
+              |> Result.get_ok)
+           ~surface:(Surface_ref.Dashboard { session_id = None })
+           ~channel:""
+           ~channel_user_id:""
+           ~channel_user_name:""
+           ~channel_workspace_id:""
+           ~conversation_id:None
+           ~external_message_id:None
+           ~workspace_id:None
+           ~extra_mentions:[]
+           ~sender_keeper:None
+           ~user_row_origin:Keeper_chat_store.Needs_append
+         |> Result.get_ok
+       in
+       let store_path =
+         Keeper_chat_operation_store.path_for_keeper
+           ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+           ~keeper_name
+       in
+       (try Unix.mkdir (Filename.dirname store_path) 0o755 with
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+       let seed =
+         Keeper_chat_operation_store.open_or_create ~path:store_path
+         |> Result.map_error Keeper_chat_operation_store.error_to_string
+         |> Result.get_ok
+       in
+       List.iter
+         (fun (operation_id, text) ->
+            Keeper_chat_operation_store.submit
+              seed
+              ~now:10.0
+              ~operation_id
+              ~source
+              ~input:(operation_input text)
+            |> Result.get_ok
+            |> ignore)
+         [ leader, "first of the batch"; follower, "second of the batch" ];
+       let batch _head _candidates =
+         Ok
+           (Some
+              { Keeper_chat_operation_store.members = [ leader; follower ]
+              ; input = operation_input "shared batch"
+              })
+       in
+       Keeper_chat_operation_store.claim_next ~batch seed ~now:11.0
+       |> Result.get_ok
+       |> ignore;
+       check int "the batch has two members" 2
+         (List.length
+            (Keeper_chat_operation_store.batch_operations seed ~operation_id:leader
+             |> Result.get_ok));
+       Keeper_chat_operation_store.close seed |> Result.get_ok;
+       let journal_of operation_id =
+         Keeper_chat_event_log.open_journal
+           ~base_dir:base_path
+           ~keeper_name
+           ~operation_id:(Chat_operation.Operation_id.to_string operation_id)
+           ()
+       in
+       List.iter
+         (fun operation_id ->
+            match
+              Keeper_chat_event_log.append_result (journal_of operation_id) ~seq:0 ~ts:10.0
+                (Keeper_chat_events.Run_started
+                   { run_id = "restart-batch-run"; thread_id = "keeper:" ^ keeper_name })
+            with
+            | Ok () -> ()
+            | Error detail -> fail ("seed journal: " ^ detail))
+         [ leader; follower ];
        Eio.Switch.run @@ fun sw ->
        (match
           Owner_registry.install_from_store
@@ -3201,20 +3452,15 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
         with
         | Ok count -> check int "one owner installed" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
-       let rows = Keeper_chat_store.load ~base_dir:base_path ~keeper_name in
-       let failure_rows =
-         List.filter
-           (fun (row : Keeper_chat_store.chat_message) ->
-              Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Assistant
-              && Keeper_chat_store.Row_kind.equal row.kind Keeper_chat_store.Row_kind.Transport_failure)
-           rows
-       in
-       (match failure_rows with
-        | [ row ] ->
-          check string "the row says what happened"
-            "Keeper request failed: the server restarted before this request finished."
-            row.content
-        | rows -> failf "expected one transport-failure row, got %d" (List.length rows)))
+       List.iter
+         (fun (label, operation_id) ->
+            match Keeper_chat_event_log.read_journal (journal_of operation_id) with
+            | Ok entries ->
+              (match List.rev entries with
+               | { Keeper_chat_event_log.event = Keeper_chat_events.Event_error _; _ } :: _ -> ()
+               | _ -> failf "the %s journal does not end with a terminal error" label)
+            | Error _ -> failf "the %s journal could not be read" label)
+         [ "leader", leader; "follower", follower ])
 ;;
 
 let test_startup_queued_waits_for_runner_readiness () =
@@ -5201,10 +5447,15 @@ let () =
             "startup interrupts Running without requeue"
             `Quick
             test_startup_interrupts_running_without_requeue
+        ; test_case "native restart and stale callback preserve Owner progress" `Quick test_startup_requeues_exact_native_call
         ; test_case
             "registry start leaves a failure row for a restart-interrupted request"
             `Quick
             test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request
+        ; test_case
+            "registry start ends every batch member journal after a restart"
+            `Quick
+            test_registry_start_ends_every_batch_member_journal_after_a_restart
         ; test_case
             "startup Queued waits for runner readiness"
             `Quick

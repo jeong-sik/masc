@@ -463,6 +463,8 @@ type try_provider_ctx =
   ; preserve_thinking : bool option
   ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
   ; agent_core_checkpoint : Agent_core.Checkpoint.t option
+  ; native_binding : Keeper_direct_native_continuation.binding option
+  ; native_retired_history_cut : Keeper_direct_native_continuation.retired_history_cut option
   ; (* Eio concurrency *)
     sw : Eio.Switch.t
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -2085,8 +2087,30 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
       Eio.Switch.run (fun attempt_sw ->
         let run_fn () =
           Eio_guard.check_if_ready ();
-          match continuation_checkpoint, ctx.goal_blocks with
-          | Some checkpoint, _ ->
+          let module Native = Keeper_direct_native_continuation in
+          let input, checkpoint = match continuation_checkpoint with
+            | Some checkpoint -> Native.Continue_from_checkpoint, Some checkpoint
+            | None ->
+              let blocks = match ctx.goal_blocks with
+                | Some blocks -> blocks
+                | None -> [Agent_core.Types.Text ctx.goal] in
+              Native.New_input { blocks; metadata = ctx.goal_metadata }, ctx.agent_core_checkpoint in
+          let prepared = match ctx.native_binding with
+            | None -> Ok (config, checkpoint, input)
+            | Some binding ->
+              Native.prepare ~binding ~runtime_id:ctx.runtime_id ~config
+                ~agent_core_checkpoint:checkpoint ~input ~agent_ref:attempt_agent_ref
+                ?retired_history_cut:ctx.native_retired_history_cut ()
+              |> Result.map (fun prepared ->
+                Native.config prepared, Native.prepared_checkpoint prepared,
+                Native.prepared_input prepared)
+              |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
+          match prepared with
+          | Error _ as error -> error
+          | Ok (config, checkpoint, Native.Continue_from_checkpoint) ->
+            (match checkpoint with
+             | None -> Error (Agent_core.Error.Internal "native continuation has no exact checkpoint")
+             | Some checkpoint ->
               Runtime_agent.continue_from_checkpoint
                 ~sw:attempt_sw
                 ~net:ctx.net
@@ -2097,33 +2121,20 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
-                ()
-          | None, Some blocks ->
+                ())
+          | Ok (config, checkpoint, Native.New_input { blocks; metadata }) ->
               Runtime_agent.run_blocks
                 ~sw:attempt_sw
                 ~net:ctx.net
                 ~config
-                ?agent_core_checkpoint:ctx.agent_core_checkpoint
+                ?agent_core_checkpoint:checkpoint
                 ?on_event:ctx.on_event
                 ~on_yield
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
-                ~input_metadata:ctx.goal_metadata
+                ~input_metadata:metadata
                 blocks
-          | None, None ->
-              Runtime_agent.run
-                ~sw:attempt_sw
-                ~net:ctx.net
-                ~config
-                ?agent_core_checkpoint:ctx.agent_core_checkpoint
-                ?on_event:ctx.on_event
-                ~on_yield
-                ~on_resume
-                ~agent_ref:attempt_agent_ref
-                ?cooperative_yield_probe:ctx.cooperative_yield_probe
-                ~input_metadata:ctx.goal_metadata
-                ctx.goal
         in
         run_fn ())
     in
@@ -2273,10 +2284,12 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
 ;;
 
 (* #27320: same-runtime retry stage for a typed provider context overflow on
-   the official-client lanes, whose seed history is cut against a declared
-   prompt byte cap ([Keeper_claude_code_runtime], [Keeper_codex_runtime]).
-   A ContextOverflow there means the cap over-states what the client
-   carries, not that the request was malformed: a smaller view of the SAME
+   the official-client lanes ([Keeper_claude_code_runtime],
+   [Keeper_codex_runtime]). Their first request carries the whole windowed
+   history, or the start-prompt ceiling a Muse or Antigravity runtime derives
+   from its declared window ([Runtime_instance.prompt_capacity_bytes]).
+   A ContextOverflow there means that view is more than the client carries,
+   not that the request was malformed: a smaller view of the SAME
    conversation can still answer the same turn, so the lane retries the same
    candidate rather than rotating runtimes immediately. The Agent Core lane
    answers the same refusal by moving the carried front instead
@@ -2735,6 +2748,14 @@ let evict_at_turn_boundary ~keeper_name ~runtime_id ~context_marks ledger =
             (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
 ;;
 
+let native_retry_allowed (ctx : try_provider_ctx) =
+  match ctx.native_binding with
+  | None -> true
+  | Some binding ->
+    Keeper_direct_native_continuation.binding_effect_observation ~binding
+    |> Keeper_provider_attempt_effect.allows_same_turn_retry
+;;
+
 let run_try_provider_with_carried_range_eviction
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
@@ -2755,7 +2776,8 @@ let run_try_provider_with_carried_range_eviction
     success_sample := attempt_success_sample;
     attempt_result
   in
-  let same_run_retry_authorized () = same_run_retry_allowed ctx.checkpoint_progress in
+  let same_run_retry_authorized () =
+    same_run_retry_allowed ctx.checkpoint_progress && native_retry_allowed ctx in
   (* The lane's own answer to a size refusal, which depends on where the
      range started; what is left after it is the current turn's demotion. *)
   let boundary_resend ?(on_turn_start_extra = fun (_ : Keeper_carried_front.seed) -> ()) ~source () =
@@ -3061,7 +3083,8 @@ let run_try_provider_with_truncation_recovery
     run_try_provider_with_carried_range_eviction ?continuation_checkpoint ctx candidate
   in
   let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
-  match
+  if not (native_retry_allowed ctx) then first_result, checkpoint_after, success_sample
+  else match
     truncation_recovery
       ~enable_thinking:ctx.enable_thinking
       ~thinking_can_be_disabled
@@ -3070,6 +3093,14 @@ let run_try_provider_with_truncation_recovery
   with
   | Recovery_not_applicable -> first_result, checkpoint_after, success_sample
   | Retry_without_thinking continuation_checkpoint ->
+    let cut = match ctx.native_binding with
+      | None -> Ok None
+      | Some binding ->
+        Keeper_direct_native_continuation.authorize_incomplete_response_cut
+          ~binding ~checkpoint:continuation_checkpoint () |> Result.map Option.some in
+    (match cut with
+     | Error detail -> Error (Agent_core.Error.Internal detail), checkpoint_after, success_sample
+     | Ok native_retired_history_cut ->
     emit_runtime_manifest ctx
       ~status:"max_tokens_continuation"
       ~decision:
@@ -3080,8 +3111,9 @@ let run_try_provider_with_truncation_recovery
       Keeper_runtime_manifest.Provider_lane_resolved;
     run_try_provider
       ~continuation_checkpoint
-      { ctx with enable_thinking = Some false; preserve_thinking = Some false }
-      (candidate_without_reasoning_effort candidate)
+      { ctx with enable_thinking = Some false; preserve_thinking = Some false;
+                 native_retired_history_cut }
+      (candidate_without_reasoning_effort candidate))
   | Drop_rejected_response cut ->
     let persisted =
       persist_dropped_response

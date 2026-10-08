@@ -189,39 +189,23 @@ module Shell_timeout = struct
   type bucket =
     | Io
     | Read
-    | User_max
     | Cleanup_rm
-    | Unknown of string
 
   let global_default_sec = 30.0
 
   let bucket_key = function
     | Io -> "io"
     | Read -> "read"
-    | User_max -> "user_max"
     | Cleanup_rm -> "cleanup_rm"
-    | Unknown s -> s
 
-  let known_default_sec = function
-    | Io -> Some 30.0
-    | Read -> Some 15.0
-    | User_max -> Some 180.0
-    | Cleanup_rm -> Some 10.0
-    | Unknown _ -> None
-
-  let upper_case s =
-    s
-    |> String.map (fun c ->
-         if c >= 'a' && c <= 'z' then
-           Char.chr (Char.code c - 32)
-         else if c = '-' then '_'
-         else c)
+  let bucket_default_sec = function
+    | Io -> 30.0
+    | Read -> 15.0
+    | Cleanup_rm -> 10.0
 
   let per_bucket_env_var ~bucket =
     Printf.sprintf "MASC_KEEPER_SHELL_TIMEOUT_%s_SEC"
-      (upper_case (bucket_key bucket))
-
-  let global_env_var = "MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC"
+      (String.uppercase_ascii (bucket_key bucket))
 
   (** Empty-string env vars (used by test clearing patterns) must NOT
       be treated as "set". *)
@@ -238,13 +222,5 @@ module Shell_timeout = struct
     | Some v ->
       Safe_ops.float_of_string_with_default
         ~default:global_default_sec v
-    | None ->
-      (match known_default_sec bucket with
-       | Some d -> d
-       | None ->
-         match trimmed_value_opt global_env_var with
-         | Some v ->
-           Safe_ops.float_of_string_with_default
-             ~default:global_default_sec v
-         | None -> global_default_sec)
+    | None -> bucket_default_sec bucket
 end

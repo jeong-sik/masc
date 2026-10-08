@@ -253,6 +253,16 @@ let keeper_chat_event_to_json event =
       "tool_call_end"
       ([ "occurrence", occurrence_to_json occurrence ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Native_tool_start tool ->
+    type_tag "native_tool_start"
+      ([ "occurrence", occurrence_to_json tool.occurrence ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
+  | Native_tool_end tool ->
+    type_tag "native_tool_end"
+      ([ "occurrence", occurrence_to_json tool.occurrence ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
   | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
     type_tag
       "tool_approval_requested"
@@ -460,6 +470,15 @@ let keeper_chat_event_of_json json =
            { occurrence
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            })
+    | ("native_tool_start" | "native_tool_end") as tag ->
+      let* occurrence = occurrence_of_json (json |> member "occurrence") in
+      let tool =
+        { occurrence
+        ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+        ; tool_call_name = json |> member "tool_call_name" |> to_string_option
+        }
+      in
+      Ok (if String.equal tag "native_tool_start" then Native_tool_start tool else Native_tool_end tool)
     | "tool_approval_requested" ->
       Ok
         (Tool_approval_requested
@@ -535,6 +554,30 @@ type journaled_event =
   ; event : keeper_chat_event
   }
 
+type restart_settlement =
+  { operation_id : Keeper_chat_operation.Operation_id.t
+  ; completed_at : float
+  }
+
+let restart_settlement_to_json settlement =
+  `Assoc ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string settlement.operation_id);
+    "completed_at", `Float settlement.completed_at]
+;;
+
+let restart_settlement_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = ["completed_at";"operation_id"] ->
+      let ( let* ) = Result.bind in
+      let* operation_id = match List.assoc "operation_id" fields with
+        | `String id -> Keeper_chat_operation.Operation_id.of_string id
+        | _ -> Error "restart settlement operation_id is not a string" in
+      let* completed_at = match List.assoc "completed_at" fields with
+        | `Float value when Float.is_finite value && value >= 0. -> Ok value
+        | `Int value when value >= 0 -> Ok (float_of_int value)
+        | _ -> Error "restart settlement completed_at is not a finite nonnegative timestamp" in
+      Ok {operation_id;completed_at}
+  | _ -> Error "restart settlement has an invalid shape"
+;;
+
 let journaled_event_to_json { seq; ts; event } =
   `Assoc
     [ "v", `Int codec_version
@@ -544,7 +587,7 @@ let journaled_event_to_json { seq; ts; event } =
     ]
 ;;
 
-let journaled_event_of_json json =
+let journaled_event_payload_of_json json =
   let open Yojson.Safe.Util in
   try
     let version = json |> member "v" |> to_int in
@@ -566,6 +609,23 @@ let journaled_event_of_json json =
   with
   | Type_error (message, _) -> Error ("journaled_event: " ^ message)
 ;;
+
+let journaled_envelope_of_json json =
+  let ( let* ) = Result.bind in
+  let* entry = journaled_event_payload_of_json json in
+  let* settlement = match json with
+    | `Assoc fields ->
+        (match List.filter (fun (name, _) -> name = "restart_settlement") fields with
+         | [] -> Ok None
+         | [(_, value)] -> Result.map Option.some (restart_settlement_of_json value)
+         | _ -> Error "duplicate restart settlement")
+    | _ -> Error "journaled event is not an object" in
+  match settlement, entry.event with
+  | Some _, Event_error _ | None, _ -> Ok (entry, settlement)
+  | Some _, _ -> Error "restart settlement must identify an error terminal"
+;;
+
+let journaled_event_of_json json = Result.map fst (journaled_envelope_of_json json)
 
 (* String-level framing: the single place where JSONL line conversion and
    [Yojson.Json_error] handling live. *)
@@ -590,6 +650,7 @@ let sanitize_segment = Workspace_utils_backend_setup.sanitize_namespace_segment
    consistency audit's sweep, and the retention pruner all derive their paths
    from it. *)
 let events_dirname = "keeper_chat_events"
+let turn_events_dirname = "keeper_turn_events"
 
 let events_dir ~base_dir =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) events_dirname
@@ -603,8 +664,7 @@ let journal_path ~base_dir ~keeper_name ~operation_id =
 
 (* Fail-open at construction too: a directory we cannot create must not abort
    the turn; the per-event append below then logs each failure. *)
-let open_journal ~base_dir ~keeper_name ~operation_id () =
-  let path = journal_path ~base_dir ~keeper_name ~operation_id in
+let open_path path =
   (try Fs_compat.mkdir_p (Filename.dirname path) with
    | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
    | exn ->
@@ -613,6 +673,22 @@ let open_journal ~base_dir ~keeper_name ~operation_id () =
        path
        (Printexc.to_string exn));
   { path }
+;;
+
+let open_journal ~base_dir ~keeper_name ~operation_id () =
+  open_path (journal_path ~base_dir ~keeper_name ~operation_id)
+;;
+
+let turn_journal_path ~base_dir ~keeper_name ~turn_ref =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) turn_events_dirname)
+       (sanitize_segment keeper_name))
+    (sanitize_segment (Ids.Turn_ref.to_string turn_ref) ^ ".jsonl")
+;;
+
+let open_turn_journal ~base_dir ~keeper_name ~turn_ref () =
+  open_path (turn_journal_path ~base_dir ~keeper_name ~turn_ref)
 ;;
 
 (* A non-finite float (NaN/inf) would serialize to a bare NaN/Infinity token —
@@ -634,14 +710,20 @@ let event_floats_are_finite = function
 
 (* The result covers raw filesystem exceptions too: mkdir/open/lock failures
    can occur before the Fs_compat transaction produces its typed outcome. *)
-let append_result journal ~seq ~ts event =
+let append_journaled_result ?restart_settlement journal ~seq ~ts event =
   try
     if (not (float_is_finite ts)) || not (event_floats_are_finite event)
     then
       Error (Printf.sprintf
         "refusing to journal non-finite float path=%s seq=%d" journal.path seq)
     else begin
-      let line = journaled_event_to_string { seq; ts; event } ^ "\n" in
+      let envelope = journaled_event_to_json {seq;ts;event} in
+      let envelope = match restart_settlement, envelope with
+        | Some settlement, `Assoc fields ->
+            `Assoc (fields @ ["restart_settlement", restart_settlement_to_json settlement])
+        | None, _ -> envelope
+        | Some _, _ -> assert false in
+      let line = Yojson.Safe.to_string envelope ^ "\n" in
       match Fs_compat.append_private_jsonl_durable_locked_result journal.path line with
       | Fs_compat.Private_file_succeeded () -> Ok ()
       | Fs_compat.Private_file_succeeded_with_cleanup_failure
@@ -663,6 +745,8 @@ let append_result journal ~seq ~ts event =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
+let append_result journal ~seq ~ts event = append_journaled_result journal ~seq ~ts event
+
 let append journal ~seq ~ts event =
   match append_result journal ~seq ~ts event with
   | Ok () -> ()
@@ -682,14 +766,14 @@ type read_failure =
 (* Strict decode of the complete rows: the first line that is not an envelope
    makes the whole read [Journal_corrupt]. Blank rows are skipped, as the
    writer never emits one and a reader must not invent an event for one. *)
-let decode_rows ~path rows =
+let decode_rows_with decode ~path rows =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | line :: rest ->
       if String.equal (String.trim line) ""
       then loop acc rest
       else begin
-        match journaled_event_of_string line with
+        match decode line with
         | Ok journaled -> loop (journaled :: acc) rest
         | Error detail ->
           Error
@@ -702,6 +786,8 @@ let decode_rows ~path rows =
   in
   loop [] (String.split_on_char '\n' rows)
 ;;
+
+let decode_rows ~path rows = decode_rows_with journaled_event_of_string ~path rows
 
 let log_settlement_failure ~path cleanup_failure =
   Log.Keeper.error
@@ -758,8 +844,22 @@ let read_journal_rows_path path = read_complete_rows ~allow_torn_tail:true path
 let read_journal_path_result path = read_journal_path ~allow_torn_tail:true path
 let read_journal journal = read_journal_path_result journal.path
 
-let next_sequence ?(require_existing = false) journal =
-  match read_journal_path ~allow_torn_tail:false journal.path with
+let read_journal_envelopes journal =
+  let decode line =
+    try journaled_envelope_of_json (Yojson.Safe.from_string line) with
+    | Yojson.Json_error detail -> Error detail in
+  Result.bind (read_complete_rows ~allow_torn_tail:true journal.path)
+    (decode_rows_with decode ~path:journal.path)
+;;
+
+(* [allow_torn_tail] only changes which bytes count as rows: a fragment after
+   the last newline is not one either way. A producer resuming a segment must
+   refuse it (the cursor may sit past a frame a live reader already holds), so
+   [next_sequence] keeps it false. Recovery that ends the journal after a
+   crash passes true and derives the cursor from the complete rows; the append
+   that follows cuts the fragment. *)
+let sequence_after_complete_rows ~allow_torn_tail ~require_existing journal =
+  match read_journal_path ~allow_torn_tail journal.path with
   | Error Journal_missing when not require_existing -> Ok 0
   | Error (Journal_missing | Journal_unreadable _ | Journal_corrupt _) as error -> error
   | Ok entries ->
@@ -782,6 +882,60 @@ let next_sequence ?(require_existing = false) journal =
          let highest = Option.fold ~none:(-1) ~some:(fun entry -> entry.seq) latest in
          if highest = max_int then Error (Journal_corrupt "journal sequence space exhausted")
          else Ok (highest + 1))
+;;
+
+let next_sequence ?(require_existing = false) journal =
+  sequence_after_complete_rows ~allow_torn_tail:false ~require_existing journal
+;;
+
+type terminal_error_receipt =
+  | Recorded_terminal_error of { seq : int; ts : float }
+  | Existing_terminal_error of { seq : int; ts : float; message : string }
+
+type terminal_error_segment = Existing_segment | Restart_settlement of restart_settlement
+
+let same_restart_settlement left right =
+  Keeper_chat_operation.Operation_id.equal left.operation_id right.operation_id
+  && Float.equal left.completed_at right.completed_at
+;;
+
+let existing_restart_terminal settlement = function
+  | ({event=Event_error {message};seq;ts}, Some recorded) :: _
+    when same_restart_settlement settlement recorded -> Some (Existing_terminal_error {seq;ts;message})
+  | _ -> None
+;;
+
+let find_restart_terminal journal ~settlement =
+  match read_journal_envelopes journal with
+  | Ok entries -> Ok (existing_restart_terminal settlement (List.rev entries))
+  | Error Journal_missing -> Ok None
+  | Error (Journal_unreadable detail | Journal_corrupt detail) -> Error detail
+;;
+
+let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
+  let ( let* ) = Result.bind in
+  let read_error = function
+    | Journal_missing -> "operation journal disappeared during settlement"
+    | Journal_unreadable detail | Journal_corrupt detail -> detail in
+  let* seq =
+    sequence_after_complete_rows ~allow_torn_tail:true ~require_existing:false journal
+    |> Result.map_error read_error in
+  let* entries = match read_journal_envelopes journal with
+    | Ok entries -> Ok entries
+    | Error Journal_missing -> Ok []
+    | Error error -> Error (read_error error) in
+  match segment, List.rev entries with
+  | Existing_segment, ({ event = Keeper_chat_events.Event_error { message }; seq; ts }, _) :: _ ->
+    Ok (Existing_terminal_error { seq; ts; message })
+  | Restart_settlement settlement, entries ->
+    (match existing_restart_terminal settlement entries with
+     | Some receipt -> Ok receipt
+     | None ->
+         let* () = append_journaled_result ~restart_settlement:settlement journal ~seq ~ts (Event_error {message}) in
+         Ok (Recorded_terminal_error {seq;ts}))
+  | Existing_segment, _ ->
+    let* () = append_result journal ~seq ~ts (Event_error {message}) in
+    Ok (Recorded_terminal_error {seq;ts})
 ;;
 
 (** {1 Replay position} *)

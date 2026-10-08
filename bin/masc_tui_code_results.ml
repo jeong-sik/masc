@@ -54,6 +54,7 @@ let apply_file ?(intent = Open_code_file) (state : state) request result = (
   else
   match result with
   | Ok content ->
+      state.code_file_resume_intent <- Refresh_code_file;
       (* Recovery retains the selected file even if its first read did not
          finish. Its sibling reads restart independently; this completion
          must preserve their owners and any answers that arrived first. *)
@@ -123,6 +124,7 @@ let apply_file ?(intent = Open_code_file) (state : state) request result = (
       state.code_focus_file <- Right_pane;
       (* A new file starts on its content; the old file's history or
          diff would caption the wrong bytes. *)
+      state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
       state.code_history <- Masc_tui_fetched.clear state.code_history;
       state.code_history_open <- false;
       state.code_history_scroll <- 0;

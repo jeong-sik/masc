@@ -394,6 +394,38 @@ let test_lsp_replies_belong_to_their_source_reading () =
     state.code_lsp_note
 ;;
 
+let test_interrupted_new_file_open_resets_old_readers () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let old, old_request = start_read ~equal:String.equal state.code_file "old.ml" in
+  state.code_file <- old;
+  Code_results.apply_file state old_request (Ok "let old = 1");
+  let history, _ = start_read ~equal:code_scope_path_equal state.code_history
+      (state.code_scope, "old.ml") in
+  state.code_history <- history;
+  state.code_history_open <- true;
+  let diff, _ = start_read ~equal:String.equal state.code_diff "old.ml" in
+  state.code_diff <- diff;
+  state.code_diff_open <- true;
+  state.code_file_cursor <- 5;
+  state.code_file_scroll <- 5;
+  state.code_focus_file <- Left_pane;
+  let next, _ = start_read ~equal:String.equal state.code_file "new.ml" in
+  state.code_file <- next;
+  state.code_file_resume_intent <- Open_code_file;
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "retired new selection keeps open intent" true
+    (state.code_file_resume_intent = Open_code_file);
+  let reading, request = start_read ~equal:String.equal state.code_file "new.ml" in
+  state.code_file <- reading;
+  Code_results.apply_file ~intent:state.code_file_resume_intent state request (Ok "let new_value = 2");
+  Alcotest.(check bool) "new content closes previous file readers and resets navigation" true
+    (not state.code_history_open && not state.code_diff_open
+     && state.code_file_cursor = 0 && state.code_file_scroll = 0
+     && state.code_focus_file = Right_pane);
+  Alcotest.(check bool) "later recovery refreshes completed file" true
+    (state.code_file_resume_intent = Refresh_code_file)
+;;
+
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
@@ -410,6 +442,8 @@ let () =
     ; ( "reply navigation"
       , [ Alcotest.test_case "late reply and definitions preserve current content" `Quick
             test_file_reply_and_lsp_navigation_share_current_content
+        ; Alcotest.test_case "interrupted new file opens reset old readers" `Quick
+            test_interrupted_new_file_open_resets_old_readers
         ; Alcotest.test_case "file recovery preserves nested readers" `Quick
             test_file_recovery_preserves_nested_readers
         ; Alcotest.test_case "LSP replies belong to their source reading" `Quick

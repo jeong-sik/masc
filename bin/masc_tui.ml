@@ -4942,6 +4942,7 @@ let open_repository_change_in_code state ~mailbox ~scope
   state.code_cursor <- 0;
   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_resume_intent <- Refresh_code_file;
   state.code_focus_file <- Left_pane;
   close_repository_changes state;
   state.view <- Code;
@@ -11384,6 +11385,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.changes_tree_diff_path <- None;
   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_resume_intent <- Refresh_code_file;
   state.code_history <- Masc_tui_fetched.clear state.code_history;
   state.code_diff <- Masc_tui_fetched.clear state.code_diff;
   state.code_blame <- Masc_tui_fetched.clear state.code_blame;
@@ -12583,8 +12585,10 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
          let deliver = workspace_enqueue state mailbox in
          let host = server_peer_host in
          let lsp = Masc_tui_fetched.current_key state.code_lsp_query in
-         Option.iter (fun path -> Masc_tui_code_requests.launch_file_load ~intent:Refresh_code_file
+         let intent = state.code_file_resume_intent in
+         Option.iter (fun path -> Masc_tui_code_requests.launch_file_load ~intent
            state ~host ~deliver ~path) (Masc_tui_fetched.current_key state.code_file);
+         if intent = Refresh_code_file then begin
          if state.code_history_open then Option.iter (fun (_,path) ->
            Masc_tui_code_requests.launch_history_load state ~host ~deliver ~path)
            (Masc_tui_fetched.current_key state.code_history);
@@ -12597,6 +12601,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
            if query.clq_scope = state.code_scope then
              Masc_tui_code_requests.start_lsp_question ~line:query.clq_line state ~host ~deliver
                ~report:(report_action state) ~question:query.clq_question ~symbol:query.clq_symbol) lsp
+         end
      | Keepers Keeper_runtime_pick -> launch_runtime_catalog_load state ~mailbox
      | Keepers Keeper_calls -> Option.iter (fun keeper ->
          launch_keeper_calls_load ~force:true state ~mailbox keeper.Tui_decode.k_name) (selected_keeper state)
@@ -24916,6 +24921,7 @@ and is loaded on demand through keeper_skill.
                 (match file with
                  | None ->
                      state.code_file <- Masc_tui_fetched.clear state.code_file;
+                     state.code_file_resume_intent <- Refresh_code_file;
                      state.code_focus_file <- Left_pane
                  | Some path -> (
                      match Masc_tui_fetched.current state.code_file with
@@ -27260,6 +27266,7 @@ and is loaded on demand through keeper_skill.
                         state.code_cursor <- 0;
                         state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
+                        state.code_file_resume_intent <- Refresh_code_file;
                         state.code_focus_file <- Left_pane;
                         state.view <- Code;
                         Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)))
@@ -27621,6 +27628,7 @@ and is loaded on demand through keeper_skill.
                         state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         state.code_cursor <- 0;
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
+                        state.code_file_resume_intent <- Refresh_code_file;
                         state.code_focus_file <- Left_pane;
                         state.code_target_line <-
                           Some (Masc.Tui_decode.file_change_target_line change);

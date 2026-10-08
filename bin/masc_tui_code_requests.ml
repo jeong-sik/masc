@@ -55,6 +55,7 @@ let launch_file_load ?(intent = Open_code_file) state ~host ~deliver ~path =
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
     state.code_file <- next;
+    state.code_file_resume_intent <- intent;
     let port = state.port in
     Masc_tui_async_read.launch
       ~deliver:(fun result -> deliver (Code_file_loaded (intent, request, result)))

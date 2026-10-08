@@ -6312,6 +6312,7 @@ type state = {
      that row's line number in the whole file, so the lookups are scattered
      rather than sequential and a list walked from the front on every one. *)
   mutable code_file: (string, (string * string) list array) Masc_tui_fetched.t;
+  mutable code_file_resume_intent: code_file_load_intent;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -8634,6 +8635,7 @@ let set_code_scope state scope =
   if state.code_scope <> scope then begin
     state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
     state.code_file <- Masc_tui_fetched.clear state.code_file;
+    state.code_file_resume_intent <- Refresh_code_file;
     state.code_lsp_note <- None;
     state.code_target_line <- None
   end;
@@ -8647,6 +8649,7 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_cursor <- 0;
   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_resume_intent <- Refresh_code_file;
   state.code_file_cursor <- 0;
   state.code_file_scroll <- 0;
   state.code_file_hscroll <- 0;
@@ -9488,6 +9491,7 @@ let create_state
   code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
+  code_file_resume_intent = Refresh_code_file;
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;

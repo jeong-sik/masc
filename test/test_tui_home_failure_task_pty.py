@@ -290,10 +290,12 @@ class RefreshCompletionGate:
     lost to a dropped peer, which also ends the exchange. [quiesced] --
     nothing held and nothing registered for [span] seconds -- is then a
     completion boundary: the refresh chain's last identity exchange has
-    been answered on the wire and none is still running. Keying the
-    boundary on the fixture callable's own exit would leave a gap: the
-    response bytes, the client receive, and the applied bundle that fires
-    the next request all happen after that return. Read counters cannot
+    been answered on the wire and none is still running. The span is an
+    observation guard over what remains after that handoff, not a proven
+    bound on the client: the receive, the applied bundle, and the chained
+    next request all still happen after the write. Keying the boundary on
+    the fixture callable's own exit would leave a wider gap -- the bytes
+    themselves are still unsent at that return. Read counters cannot
     prove completion at all; a quiet span over them is how the original
     race passed its settle loop with a response still outstanding.
     """
@@ -476,6 +478,13 @@ def task_cancel_previous_workspace_receipt(executable):
                 h.drain_until_quiet(process, fd, output)
                 before = (state["health_reads"], state["history_reads"])
                 before_gate = gate.snapshot()
+                # The window must not open over a still-running exchange:
+                # an exchange that registered but has not completed yet
+                # leaves held > 0, and an equal (held, exchanges) snapshot
+                # later could not distinguish it from a clean window.
+                assert before_gate[0] == 0, (
+                    "the receipt window opened while an exchange was still running: "
+                    + repr(before_gate))
                 start = len(output)
                 release.set()
                 h.wait_for_output(process, fd, output,

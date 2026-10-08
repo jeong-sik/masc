@@ -356,6 +356,12 @@ def test_http_endpoint(
                     pass
                 return
             extra_headers: tuple[tuple[str, str], ...] = ()
+            # Assigned only on the RawHttpResponse branch: a tuple response
+            # has no on_sent observer, and the finally block below must see
+            # None rather than an unbound name -- an unbound read would kill
+            # this connection thread after the bytes were already written,
+            # failing the exchange silently on the client's side.
+            sent: Callable[[], None] | None = None
             if isinstance(resolved, RawHttpResponse):
                 status = resolved.status
                 body = resolved.body

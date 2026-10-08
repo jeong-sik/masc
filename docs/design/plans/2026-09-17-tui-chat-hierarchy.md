@@ -356,8 +356,16 @@ cp /tmp/masc_tui_capture/chat_main.styles.txt artifacts/tui-chat-hierarchy/pr1-a
 
 ```bash
 git push -u origin tui-chat-hierarchy
-gh workflow run test.yml --ref tui-chat-hierarchy -f suite=test_tui_keyboard_input-chat-clarity
-gh workflow run test.yml --ref tui-chat-hierarchy -f suite=test_tui_keyboard_input-memory-journal
+```
+
+**후속 작업 — 지금 실행하지 않는다.** 아래 Step 5에서 PR을 생성하고 독립 승인을 받은 뒤 [승인된 조합 후보 절차](../../../scripts/review/APPROVED-CI-SELECTION.md)로
+`SELECTION.json`을 준비하고 다음 최소 suite를 요청한다.
+
+```bash
+gh workflow run leader-ci.yml --repo jeong-sik/masc --ref main \
+  -f candidate="$(jq -r .candidate SELECTION.json)" \
+  -F selection=@SELECTION.json \
+  -F tests=true -f suites=test_tui_keyboard_input-chat-clarity,test_tui_keyboard_input-memory-journal
 ```
 
 - [ ] **Step 5: PR 1 생성**
@@ -537,8 +545,22 @@ cp /tmp/masc_tui_capture/chat_main.txt artifacts/tui-chat-hierarchy/pr2-after.tx
 
 ```bash
 git push -u origin tui-chat-work-fold
-gh workflow run test.yml --ref tui-chat-work-fold -f suite=test_tui_keyboard_input-chat-clarity
-gh workflow run test.yml --ref tui-chat-work-fold -f suite=test_tui_keyboard_input
+```
+
+**후속 작업 — 지금 실행하지 않는다.** 아래 Step 5에서 PR 2를 stacked로 생성하고 Step 6의 독립 리뷰를 진행한다.
+조합 준비 도구는 `main`을 base로 둔 열린 Ready PR만 받으므로, PR 2가
+`tui-chat-hierarchy`를 base로 두는 동안에는 `SELECTION.json`을 준비하지 않는다.
+먼저 [스택 통합 절차](../../guides/NATIVE-GITHUB-STACKS.md)에 따라 PR 1만 통합하고,
+열린 PR 2의 실제 REST base가 `main`인지 확인한다. Native Stack의 자동 재배치가
+끝난 뒤 새 head·base·전체 diff를 다시 리뷰하여 그 범위의 독립 승인 증거를 확보한다.
+이전 stacked 범위의 승인을 재사용하지 않는다. 그다음 [승인된 조합 후보 절차](../../../scripts/review/APPROVED-CI-SELECTION.md)로
+PR 2의 현재 승인된 head를 선택해 `SELECTION.json`을 준비하고 다음 최소 suite를 요청한다.
+
+```bash
+gh workflow run leader-ci.yml --repo jeong-sik/masc --ref main \
+  -f candidate="$(jq -r .candidate SELECTION.json)" \
+  -F selection=@SELECTION.json \
+  -F tests=true -f suites=test_tui_keyboard_input-chat-clarity,test_tui_keyboard_input
 ```
 
 - [ ] **Step 5: PR 2 생성 (stacked)**

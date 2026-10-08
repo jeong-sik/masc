@@ -1,21 +1,8 @@
 name: Test
 
-# Explicit full or targeted behavior checks on the selected ref.
+# Reusable behavior checks for leader-selected candidates and release verification.
 
 on:
-  workflow_dispatch:
-    inputs:
-      suite:
-        description: 'Comma-separated suites; empty runs the full regression suite'
-        type: string
-        default: ''
-      minimal:
-        description: 'Skip broad sandbox and presentation setup; requires explicit suites'
-        type: boolean
-        default: false
-      eio_backend:
-        type: string
-        default: ''
   workflow_call:
     inputs:
       candidate_sha:
@@ -183,6 +170,9 @@ jobs:
         # to find config/ and prompts/ from inside _build.
         run: |
           set -euo pipefail
+          # Reusable workflows retain the caller SHA; evidence names this checkout.
+          MASC_TEST_CANDIDATE_SHA="$(git rev-parse HEAD)"
+          export MASC_TEST_CANDIDATE_SHA
           # Four suites read a file through a Keeper's sandbox, and on this
           # runner the read answers "image_not_found: keeper sandbox image
           # masc-sandbox-test:ci is not available" -- 14 assertions counted

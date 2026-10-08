@@ -30,17 +30,25 @@ report interrupted delivery without dispatching the operation again.
 
 ## Running and reading evidence
 
-Use the repository's explicit focused workflow on the candidate branch:
+Use the [approved leader-selected CI procedure](../../scripts/review/APPROVED-CI-SELECTION.md)
+to prepare a candidate containing the current reviewed harness and its prerequisites.
+A feature branch or an earlier successful head does not supply the selection receipt.
+After the workflow changes are integrated into main, dispatch the selected suite
+through the trusted main workflow using the actual prepared `SELECTION.json`:
 
 ```sh
-gh workflow run test.yml --repo jeong-sik/masc \
-  --ref test/keeper-ingress-native-restart-20261007 \
-  -f minimal=true -f suite=test_keeper_ingress_native_restart
+gh workflow run leader-ci.yml --repo jeong-sik/masc --ref main \
+  -f candidate="$(jq -r .candidate SELECTION.json)" \
+  -F selection=@SELECTION.json \
+  -F tests=true -f suites=test_keeper_ingress_native_restart
 ```
 
-Read the completed run's actual suite log and exact checkout SHA. Each successful
+Read the completed run's actual suite log, exact candidate checkout SHA and selected scope. Each successful
 scenario emits a JSON receipt with the test executable's SHA-256 and observed
-counters. The workflow uploads the suite runner log. A failed or unexecuted case
+counters. The Test step sets `MASC_TEST_CANDIDATE_SHA` from the checked-out
+`HEAD`; receipts use this value, not the reusable workflow caller's `GITHUB_SHA`.
+Outside that step, an unset candidate value is recorded as null. The workflow
+uploads the suite runner log. A failed or unexecuted case
 is not acceptance evidence, and a previous head's result does not certify a new
 integration candidate.
 

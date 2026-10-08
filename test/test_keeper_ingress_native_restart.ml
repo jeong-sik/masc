@@ -60,7 +60,7 @@ let emit_evidence ~root ~cut ~executable_sha256 ~note_rows ~target_tool_log_rows
   let json = `Assoc [
     "evidence", `String "keeper-ingress-native-restart";
     "case", `String (cut_name cut);
-    "candidate_sha", (match Sys.getenv_opt "GITHUB_SHA" with
+    "candidate_sha", (match Sys.getenv_opt "MASC_TEST_CANDIDATE_SHA" with
       | None -> `Null | Some sha -> `String sha);
     "executable_sha256", `String executable_sha256;
     "runtime_id", `String runtime_id;

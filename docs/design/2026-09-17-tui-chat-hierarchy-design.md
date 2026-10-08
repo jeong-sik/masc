@@ -146,7 +146,16 @@
   기본 화면 / 라이브 턴 진행→완료 접힘 / 실패 독립 줄 / `NO_COLOR` / 좁은 폭.
 - `SKILL`·`TOOLS` 라벨 삭제와 문구 변화로 `test/*.py` 의 needle(기다리는 바이트열)을
   같이 고친다. 렌더 파일만 고친 PR 의 초록은 산책의 증거가 아니다.
-- 렌더 폭이 바뀌면 Linux 에서 해당 가족을 돌린다 (`gh workflow run test.yml -f suite=…`).
+- 렌더 폭이 바뀌면 Linux 에서 해당 가족을 돌린다 ([승인된 조합 후보 절차](../../scripts/review/APPROVED-CI-SELECTION.md)로 `SELECTION.json`을 준비한 뒤 아래 명령을 사용한다).
+
+  ```sh
+  gh workflow run leader-ci.yml --repo jeong-sik/masc --ref main \
+    -f candidate="$(jq -r .candidate SELECTION.json)" \
+    -F selection=@SELECTION.json \
+    -F tests=true -f suites=SELECTED_SUITE
+  ```
+
+  `SELECTED_SUITE`는 변경한 렌더러를 검증하는 실제 suite 이름으로 바꾼다.
 - 증거: 전후 PTY 캡처(보이는 텍스트 + SGR 요약)를 PR 에 첨부한다 (constitution 의
   evidence 요구).
 

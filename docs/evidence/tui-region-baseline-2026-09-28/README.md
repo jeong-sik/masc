@@ -113,7 +113,8 @@ changes.
 - Passing run: Test workflow run
   [36431311636](https://github.com/jeong-sik/masc/actions/runs/36431311636) on
   `4f174c5bdb4491164b0629d99ef89bcf5f2a6dd0`: `region baseline: PASS` in 47
-  seconds, dispatched with
+  seconds, dispatched with the historical command below (the direct Test dispatch
+  route has since been removed; new checks use [leader-selected CI](../../../scripts/review/APPROVED-CI-SELECTION.md))
 
   ```sh
   gh workflow run test.yml --ref test/tui-region-baseline \

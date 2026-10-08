@@ -6,7 +6,7 @@
 
 **Architecture:** RFC-0412 §3.3 (`docs/rfc/RFC-0412-chat-is-one-canonical-event-log.md`), stage 3. Stage 3 is split: **3a (this plan)** replaces the live representation and the settle/reload/retry transitions around it; **3b** collapses `msg_history`/`msg_loaded` into the same log and replaces the physical-identity memo chain; **3c** makes the Memory-OS journal a typed lane and folds Ctrl-R / Ctrl-N into one projection parameter. 3b and 3c get their own plan documents after 3a lands; §3.3 bullets are mapped to sub-stages in the appendix.
 
-**Tech Stack:** OCaml 5.5 / Eio / Alcotest, Python PTY suites. No local dune (constitution execution protocol) — static review + CI (`gh workflow run ci.yml --ref <branch>` for `@check`, `gh workflow run test.yml --ref <branch>` for the behavioural suite; the two lanes have different concurrency groups and can run together).
+**Tech Stack:** OCaml 5.5 / Eio / Alcotest, Python PTY suites. No local dune (constitution execution protocol). Use independent source review; when a focused behavior check is needed, prepare the approved candidate and selection receipt using [leader-selected CI](../../../scripts/review/APPROVED-CI-SELECTION.md), then dispatch `leader-ci.yml` on main with `tests=true` and explicit `suites`. Release-wide verification belongs to the release candidate workflow.
 
 ---
 
@@ -267,7 +267,7 @@ only operations the session does not already hold.
 
 ## Verification (stage-level)
 
-- CI `@check` per task (`ci.yml`); `test.yml` at the end of each task that touches `bin/masc_tui.ml` (the behavioural suite is the only lane that runs Alcotest).
+- Obtain independent source review for each task. When focused behavior verification is needed, prepare the approved candidate and selection receipt through [leader-selected CI](../../../scripts/review/APPROVED-CI-SELECTION.md), then dispatch `leader-ci.yml` on main with `tests=true` and explicit `suites` covering the affected TUI behavior. The leader invokes the reusable test workflow; record results for that exact candidate. Release-wide verification belongs to the release candidate workflow.
 - PTY: `test/test_capture_tui_keeper_chat.py` / `test_tui_keyboard_input.py` scenarios that touch settle (`reasoning`, `THINKING`, `Ctrl-R` needles) — rewrite per Appendix B; confirm their lane is wired in `test/dune` before claiming them verified.
   - Done 2026-09-05 (branch `fix/tui-chat-capture-meta-fields`, script at `12607064d4`): the ttyd/Chromium proof `scripts/capture-tui-keeper-chat.py` had been failing on main since 2026-09-02 for reasons outside this stage (keeper meta v2 fields, the `(sending …)` row folded into the ACTIVE TURN line by #32957, eight read routes a refresh polls, the observer feed's MCP initialize). Brought current; both scenarios pass on this stage's head and on the head just before #33133, with the same settled order. 10 frames, `status: passed`.
 - Manual on the live server after merge: send a turn with a reasoning-capable Agent_core runtime, watch settle keep the THINKING block; kill the TUI's connection mid-turn (`kill -STOP` the server for 3 s) and confirm resume without duplicate rows; restart the TUI and confirm the last turns show reasoning.

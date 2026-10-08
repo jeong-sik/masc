@@ -34,7 +34,6 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#42003](https://github.com/jeong-sik/masc/pull/42003) | Ignored fallback cwd repaired through owned directory FD; native/Eio refusal authority, shared path rule and redundant spawn forwarder removal | `process_eio.ml/.mli`, foreground owner and shared spawn C |
 | [#42013](https://github.com/jeong-sik/masc/pull/42013) | Eio foreground capture/cleanup effect owner; duplicate two-stream and pipeline drains removed; callback dispatch simplified and grace docs corrected | `process_eio.ml/.mli`, Eio capture owner, direct consumers |
 | [#42016](https://github.com/jeong-sik/masc/pull/42016) | Pure tool-schema contract owns strict decoding, projection and private construction; public signature and direct provider/MCP consumers preserved | `llm_provider/types.ml`, schema contract owner |
-
 | [#42021](https://github.com/jeong-sik/masc/pull/42021) | Existing approval projection owner receives chat writes, replay reconciliation, broadcasts and failed logs; pure readiness and distinct native admission preserved | `keeper_approval_queue.ml/.mli`, projection/result owners |
 
 The declared branch dependencies follow that order, starting at `main`.

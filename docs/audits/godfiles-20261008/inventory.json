@@ -570,7 +570,9 @@
       "status": "partial: pure tool-schema validation/projection/construction contract isolated with unchanged public signature; remaining message, provenance, hashing, telemetry and streaming responsibilities need full semantic assessment",
       "current_lines": 1252,
       "validation_artifact": "tool-schema-contract/README.md",
-      "prs": []
+      "prs": [
+        42016
+      ]
     },
     {
       "path": "packages/agent_core/test/test_backend_openai_codec.ml",

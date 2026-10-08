@@ -2941,6 +2941,9 @@ let test_keeper_stream_bridge_preserves_native_tool_origin () =
       events
   in
   check bool "native observation is not a MASC tool call" false has_dynamic_tool_event;
+  (* The bridge pairs each native content block with a typed native tool
+     event, so a start and a stop yield four events. Neither is a MASC tool
+     call. *)
   match events with
   | [ Keeper_chat_events.Agent_core_content_block_start
         { index = 7
@@ -2948,7 +2951,17 @@ let test_keeper_stream_bridge_preserves_native_tool_origin () =
         ; tool_call_id = Some "native-1"
         ; tool_call_name = Some "commandExecution"
         }
+    ; Native_tool_start
+        { occurrence = { block_index = 7; _ }
+        ; tool_call_id = Some "native-1"
+        ; tool_call_name = Some "commandExecution"
+        }
     ; Agent_core_content_block_stop { index = 7 }
+    ; Native_tool_end
+        { occurrence = { block_index = 7; _ }
+        ; tool_call_id = Some "native-1"
+        ; _
+        }
     ] ->
     check string
       "typed native content origin"

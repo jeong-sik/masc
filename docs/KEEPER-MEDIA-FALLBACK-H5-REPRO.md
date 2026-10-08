@@ -68,11 +68,19 @@ The observation to make, with real readers:
    `<base_path>/media-readings/<keeper>/` is reused, with no reader call
    (observe by making the reader unavailable, e.g. PATH without Poppler).
 4. Restart the keeper process and repeat (3).
-5. Negative (H5-S3): same turn with Poppler absent or a corrupt PDF: the block
-   must say `status=unavailable`, name the reason, keep the original in
-   history, and contain no text derived from the PDF.
-The same sequence applies to the audio fixture with the STT endpoint stopped
-for (5). Do not count (5) as a substitute for (2).
+5. Negative (H5-S3), kept apart from 2-4. A stored reading is looked up before
+   any reader runs, so for the same keeper, bytes and MIME that already have a
+   stored reading, hiding Poppler or the STT endpoint yields a normal `read`
+   reuse. That is the behaviour 3-4 observe, not a failure. The negative run
+   therefore uses a new keeper/base path, or new source bytes (a corrupt or
+   different PDF has another sha256), and records at its start that no durable
+   reading exists for that key. Keep the earlier successful readings; do not
+   delete them. Then, with the reader failing (Poppler absent, or a corrupt
+   PDF, or the STT endpoint stopped), the block must say `status=unavailable`,
+   name the reason, keep the original in history, and contain no text derived
+   from the PDF or audio.
+The same sequence applies to the audio fixture, with the STT endpoint stopped
+for (5) on a new key. Do not count (5) as a substitute for (2).
 
 ## 5. What is still unmeasured
 Real PDF extraction at a CI head until the run in section 1 reports the H5 real

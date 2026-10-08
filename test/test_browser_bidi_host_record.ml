@@ -630,6 +630,50 @@ let test_the_kept_results_stop_at_the_limit () =
     (Record.entry_of_json (Record.entry_to_json record) = Ok record);
   released held
 
+let archived_results base =
+  In_channel.with_open_bin (Record.unacknowledged_archive_path ~base_path:base)
+    In_channel.input_lines
+  |> List.map (fun line ->
+       let json = Yojson.Safe.from_string line in
+       let open Yojson.Safe.Util in
+       check int "archive row schema" 1 (json |> member "schema" |> to_int);
+       check int "archive keeps host identity" 100 (json |> member "pid" |> to_int);
+       json |> member "result")
+
+let result_json noted =
+  let open Yojson.Safe.Util in
+  Record.entry_to_json { entry with unacknowledged = [noted] }
+  |> member "unacknowledged" |> to_list |> List.hd
+
+let test_archival_precedes_eviction_and_failure_retains_evidence () =
+  with_workspace @@ fun ~base ~lane ->
+  let held = taken ~pid:100 base in
+  let rows = List.init (Record.unacknowledged_limit + 2)
+      (fun n -> { noted with at = noted.at +. float_of_int n }) in
+  let initial = List.take Record.unacknowledged_limit rows in
+  List.iter (fun row -> written (Record.note_unacknowledged held row)) initial;
+  let archive = Record.unacknowledged_archive_path ~base_path:base in
+  Unix.mkdir archive 0o700;
+  let next = List.nth rows Record.unacknowledged_limit in
+  (match Record.note_unacknowledged held next with
+   | Error _ -> () | Ok () -> fail "unwritable archive authorized eviction");
+  check bool "archive failure preserves all evidence on disk" true
+    ((on_disk lane).unacknowledged = initial @ [next]);
+  Unix.rmdir archive;
+  written (Record.note_unacknowledged held (List.nth rows (Record.unacknowledged_limit + 1)));
+  let archived = archived_results base in
+  check bool "exact evicted metadata is durable" true
+    (archived = List.map result_json (List.take 2 rows));
+  check bool "archive plus snapshot retains the complete history" true
+    (archived @ List.map result_json (on_disk lane).unacknowledged
+     = List.map result_json rows);
+  check int "successful retry restores bounded snapshot" Record.unacknowledged_limit
+    (List.length (on_disk lane).unacknowledged);
+  released held;
+  (match Record.note_unacknowledged held noted with
+   | Error _ -> () | Ok () -> fail "released host appended a result");
+  check bool "released host leaves archive unchanged" true (archived_results base = archived)
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; argument; base ] when String.equal argument holder_argument -> hold base
@@ -663,4 +707,6 @@ let () =
           ; test_case "a host that cannot write its record leaves the last one" `Quick
               test_a_host_that_cannot_write_its_record_leaves_the_last_one
           ; test_case "the kept results stop at the limit" `Quick
-              test_the_kept_results_stop_at_the_limit ] ) ]
+              test_the_kept_results_stop_at_the_limit
+          ; test_case "archival precedes eviction and failure retains evidence" `Quick
+              test_archival_precedes_eviction_and_failure_retains_evidence ] ) ]

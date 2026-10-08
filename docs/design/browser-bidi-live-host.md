@@ -149,14 +149,23 @@ server:
       result before it answers, so an `unconfirmed` one may have arrived:
       that is also what an answer the host could not read is, and a result
       that went out once and could not be sent again.
-  - The record keeps the newest 64 results; when one more arrives, the
-    oldest leave. What a reader loses with the older ones is only that a
-    counted total may be smaller than the number of timed-out commands the
-    host met; the list's order and the shape of the kept entries stand.
-    Every addition writes the record again. A count at 64 in a status
-    sentence is the record's limit, not the host's whole history: the
-    sentence then says the record keeps the newest 64 and that what left
-    before them is not in the record.
+  - After successful archival, the snapshot keeps the newest 64 results.
+    Before removing older entries, the host durably appends their complete
+    metadata to the private `browser-lane/bidi-host-unacknowledged.jsonl`
+    beneath the workspace `.masc` directory. Each schema-1 archive row names
+    the host pid, start time and client ID alongside the unchanged result
+    fields. This archive is append-only; the ordinary diagnostic log is not
+    a durable backup. Archive rows may repeat after uncertain writes.
+  - If archival fails, the host reports the failure and retains every
+    unarchived entry in its snapshot, even above the normal window, then
+    retries on a later addition. A snapshot write failure retains its state
+    in memory for the next write; it does not undo a committed archive.
+    The archive and snapshot together carry the metadata; archived entries
+    are diagnostic receipts and are never replayed as commands.
+  - Readers report the actual snapshot count, including longer schema-1
+    records. Reaching 64 alone does not prove whether older entries exist
+    or archival succeeded; the status names the archive without claiming
+    that it exists or succeeded from the count alone.
   - A host that leaves in order adds `ended`: when, why, and
     `session_in_firefox`. A host that could not attach leaves its reason the
     same way.

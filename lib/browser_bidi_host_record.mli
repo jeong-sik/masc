@@ -99,8 +99,9 @@ type entry =
   ; unacknowledged : unacknowledged list
       (** Oldest first. [note_unacknowledged] keeps the newest
           {!unacknowledged_limit} of them; when one more arrives, the oldest
-          leave. Which and how many left is not in the record, and each
-          addition writes the whole record again. *)
+          leave only after their metadata is durably appended to
+          {!unacknowledged_archive_path}. Archive failure keeps the longer
+          list and reports an error. Each addition writes the whole record. *)
   ; ended : ending option
   }
 
@@ -195,10 +196,15 @@ val attached : held -> now:float -> (unit, write_failure) result
 (** The host polls under another client ID from here on. *)
 val client_changed : held -> client_id:Browser_lane.client_id -> (unit, write_failure) result
 
-(** The most results {!note_unacknowledged} keeps in the record. When a
-    longer list would be written, the oldest leave and the newest this many
-    stay. A reader that needs every result takes them from the host's log
-    instead; the record says of the kept ones what it always said. *)
+(** Path of the private append-only JSONL archive. Each schema-1 row contains
+    [pid], [started_at], the client ID at archival time in [client_id], and [result] in the snapshot's existing
+    unacknowledged-result shape. Rows can repeat after an uncertain append or
+    a snapshot write failure; this is evidence, not an execution queue.
+    Ordinary diagnostic logs are not a durable substitute for this archive. *)
+val unacknowledged_archive_path : base_path:string -> string
+
+(** The snapshot window after successful archival. On archive failure the
+    snapshot retains the unarchived entries even when this limit is exceeded. *)
 val unacknowledged_limit : int
 
 val note_unacknowledged : held -> unacknowledged -> (unit, write_failure) result

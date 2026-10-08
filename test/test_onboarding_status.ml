@@ -395,28 +395,31 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   List.iter
     (fun observed -> lacks (bidi_message observed) [ "did not acknowledge"; "The server acknowledged" ])
     [ one; two ];
-  (* Once the count reaches the record's limit, the sentence says the record
-     keeps only the newest ones: an operator reading "64 results" must not
-     take it for the whole history, and the record itself does not say how
-     many older ones already left. *)
+  (* A short snapshot makes no inference about earlier archived results. *)
   lacks (bidi_message one)
-    [ "The record keeps the newest 64"; "any result older than those has already left it" ];
-  lacks (bidi_message two) [ "The record keeps the newest 64" ];
+    [ "snapshot window"; "Archived result metadata" ];
+  lacks (bidi_message two) [ "snapshot window" ];
   released held
 
-(* A count that has reached the record's limit is not the host's whole
-   history: the sentence then says the record keeps only the newest ones and
-   that which and how many already left is not in the record. *)
+(* At the limit, earlier history is unknown. A valid longer record retains
+   all listed results; the reader must not pretend it was already trimmed. *)
 let a_record_at_the_limit_says_the_newest_are_kept () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
   let held = take_record base in
   written (Record.attached held ~now:1_791_000_002.);
-  repeat_note held 65;
+  repeat_note held Record.unacknowledged_limit;
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
   says observed
     [ "lists 64 results the host holds no acknowledgement for"
-    ; "The record keeps the newest 64 of them; any result older than those has already left it, \
-       and which and how many left is not in the record." ];
+    ; "at the 64-result snapshot window; it may omit older results"
+    ; "this count does not establish whether archival succeeded" ];
+  let longer = { host_entry with unacknowledged = List.init 65 (fun _ -> unacknowledged) } in
+  let json = Record.entry_to_json longer in
+  let decoded = match Record.entry_of_json json with
+    | Ok record -> record | Error detail -> fail detail in
+  let message = Status.message (observation (Record.Running decoded)) in
+  has message [ "lists 65 results"; "All 65 listed results remain in the record" ];
+  lacks message [ "keeps the newest 64"; "older than those has already left" ];
   released held
 
 (* A host that never reached Firefox left no session there, and what kept it

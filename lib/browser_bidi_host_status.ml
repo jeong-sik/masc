@@ -158,12 +158,8 @@ let listed_beside (t : Launcher.t) =
               can poll this server."
              Browser_lane.lane_connected_window_sec)
 
-(* The results are in the record; the sentence says how many, where, and
-   that the record tells them apart. A count that has reached the record's
-   limit says so too: the record keeps only the newest of them, anything
-   older has already left it, and which and how many left is not in the
-   record. No acknowledgement reaching the host is not the server refusing
-   one. *)
+(* Count the actual decoded record, including a longer record from another
+   writer or an archive failure. A count alone cannot prove archival. *)
 let unacknowledged (t : Launcher.t) (entry : Record.entry) =
   let listed what each trim =
     Printf.sprintf
@@ -179,10 +175,17 @@ let unacknowledged (t : Launcher.t) (entry : Record.entry) =
       let trim =
         if count < Record.unacknowledged_limit then ""
         else
-          Printf.sprintf
-            " The record keeps the newest %d of them; any result older than those has already \
-             left it, and which and how many left is not in the record."
-            Record.unacknowledged_limit
+          let window =
+            if count = Record.unacknowledged_limit then
+              Printf.sprintf " The record is at the %d-result snapshot window; it may omit older results."
+                Record.unacknowledged_limit
+            else
+              Printf.sprintf " All %d listed results remain in the record, exceeding the %d-result snapshot window."
+                count Record.unacknowledged_limit
+          in
+          window ^ Printf.sprintf
+            " Archived result metadata is read from %s; this count does not establish whether archival succeeded or how many earlier results exist."
+            (Record.unacknowledged_archive_path ~base_path:t.base_path)
       in
       listed (Printf.sprintf "%d results" count) "for each " trim
 

@@ -55,6 +55,7 @@ let directory base_path =
 
 let path base_path name = Filename.concat (directory base_path) name
 let record_path ~base_path = path base_path record_name
+let unacknowledged_archive_path ~base_path = path base_path "bidi-host-unacknowledged.jsonl"
 
 (* The codec cuts a time to the millisecond below it, and a time read back
    from its text sits a hair under that millisecond as often as not. Half a
@@ -347,6 +348,7 @@ type held =
   { base_path : string
   ; identity : lock_identity
   ; lock : Unix.file_descr
+  ; mutation : Cross_context_mutex.t
   ; mutable entry : entry
   ; mutable released : bool
   }
@@ -393,6 +395,7 @@ let replace held entry =
   write held
 
 let release held =
+  Cross_context_mutex.with_durable_lock held.mutation (fun () ->
   Mutex.protect held_here_mu (fun () ->
     if held.released then Ok ()
     else (
@@ -400,7 +403,7 @@ let release held =
       Hashtbl.remove held_here held.identity;
       match Unix.close held.lock with
       | () -> Ok ()
-      | exception Unix.Unix_error (error, call, _) -> Error (unix_failure error call)))
+      | exception Unix.Unix_error (error, call, _) -> Error (unix_failure error call))))
 
 type lock_attempt =
   | Locked of lock_identity * Unix.file_descr
@@ -460,6 +463,7 @@ let take ~base_path ~pid ~bidi_url ~client_id ~now =
          { base_path
          ; identity
          ; lock
+         ; mutation = Cross_context_mutex.create ()
          ; released = false
          ; entry =
              { pid; started_at = now; bidi_url; client_id; attached_at = None; unacknowledged = []
@@ -480,26 +484,46 @@ let take ~base_path ~pid ~bidi_url ~client_id ~now =
           ignore (release held : (unit, string) result);
           Printexc.raise_with_backtrace exn backtrace))
 
-let attached held ~now = replace held { held.entry with attached_at = Some now }
-let client_changed held ~client_id = replace held { held.entry with client_id }
+let attached held ~now =
+  Cross_context_mutex.with_durable_lock held.mutation (fun () ->
+    replace held { held.entry with attached_at = Some now })
+let client_changed held ~client_id =
+  Cross_context_mutex.with_durable_lock held.mutation (fun () ->
+    replace held { held.entry with client_id })
 
-(* The most results the record keeps while a host runs. A command that
-   outlasts the server's timeout adds one each time it is sent, so a
-   long-lived host meets the limit through no fault of its own; past it the
-   oldest leave first, and the newest stay whole. The count of what came
-   before the kept ones is not in the layout, and adding a field for it
-   would turn every reader built for this one away (the exact-field check in
-   [entry_of_json]), so a trimmed record is one that counts fewer results,
-   not one this build cannot read. *)
+(* Bound snapshot rewrites without discarding unacknowledged evidence. *)
 let unacknowledged_limit = 64
 
 let note_unacknowledged held noted =
+  Cross_context_mutex.with_durable_lock held.mutation (fun () ->
+  if held.released then Error (Not_written "this host gave the workspace up")
+  else
   let kept = held.entry.unacknowledged @ [ noted ] in
-  let unacknowledged =
-    if List.length kept <= unacknowledged_limit then kept
-    else List.drop (List.length kept - unacknowledged_limit) kept
+  let excess = List.length kept - unacknowledged_limit in
+  if excess <= 0 then replace held { held.entry with unacknowledged = kept }
+  else
+  let archive_row result =
+    `Assoc [ "schema", `Int 1; "pid", `Int held.entry.pid
+           ; "started_at", time held.entry.started_at
+           ; "client_id", `String (Browser_lane.client_id_to_string held.entry.client_id)
+           ; "result", unacknowledged_to_json result ]
   in
-  replace held { held.entry with unacknowledged }
+  let suffix = List.take excess kept
+    |> List.map (fun result -> Yojson.Safe.to_string (archive_row result) ^ "\n")
+    |> String.concat "" in
+  match Fs_compat.append_private_jsonl_durable_stable_result
+      (unacknowledged_archive_path ~base_path:held.base_path) suffix with
+  | Ok _ ->
+      replace held { held.entry with unacknowledged = List.drop excess kept }
+  | Error error ->
+      let detail = "unacknowledged archive: "
+        ^ Fs_compat.private_jsonl_transaction_error_to_string error in
+      (* Preserve the new result as well as every unarchived predecessor.
+         A later note retries archival; failure never authorizes eviction. *)
+      (match replace held { held.entry with unacknowledged = kept } with
+       | Ok () -> Error (Not_written detail)
+       | Error failure -> Error (Not_written (detail ^ "; snapshot "
+                                              ^ write_failure_message failure))))
 
 (* A reason can quote bytes a peer sent. The record stays ASCII that a reader
    in any language loads: a byte outside printable ASCII, and the backslash
@@ -524,4 +548,5 @@ let printable reason =
   add 0
 
 let ended held ~reason ~session ~now =
-  replace held { held.entry with ended = Some { at = now; reason = printable reason; session } }
+  Cross_context_mutex.with_durable_lock held.mutation (fun () ->
+    replace held { held.entry with ended = Some { at = now; reason = printable reason; session } })

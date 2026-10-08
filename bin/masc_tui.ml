@@ -11022,6 +11022,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_async_observation <- None;
   state.tools_async_observation_error <- None;
   state.tools_skill_evidence <- None;
+  state.tools_evidence_reference <- None;
   state.tools_skill_cursor <- 0;
   state.tools_scroll <- 0;
   state.msg_loaded_pages <- [];
@@ -12276,6 +12277,48 @@ let resume_task_followups state ~mailbox ~refresh_inflight
           ~intent:Revalidate ~refresh_inflight ~scoped_refresh_inflight
           ~scoped_refresh_followup ~mailbox) run
 
+(* A proof read is separate from the confirmation key: recovery must never
+   replay the key's second-press mutation. *)
+let launch_goal_confirmation_read state ~mailbox ~goal_id =
+  if server_authority_ready state then
+    match state.goal_confirmation with
+    | Goal_confirmation.Submitting _ -> ()
+    | Goal_confirmation.Inspecting read ->
+        (match Goal_confirmation_read.start ~equal:String.equal read ~key:goal_id with
+         | Already_loading -> ()
+         | Started (loading, request) ->
+             state.goal_confirmation <- Goal_confirmation.Inspecting loading;
+             state.goal_confirmation_presented <- None;
+             state.goal_action_error <- None;
+             let host = server_peer_host and port = state.port in
+             launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+               ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
+               (fun () ->
+                 let ( let* ) = Result.bind in
+                 let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
+                 let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
+                 match confirmation.phase with
+                 | Goal_phase.Awaiting_confirmation -> Ok confirmation
+                 | _ -> Error "goal is not awaiting confirmation"))
+
+let launch_skill_evidence_read state ~mailbox reference =
+  if server_authority_ready state then begin
+    let key = Skill_reference.to_yojson reference |> Yojson.Safe.to_string in
+    let request = ref () in
+    state.tools_evidence_request <- Some request;
+    state.tools_evidence_reference <- Some reference;
+    let check = capture_workspace_check state ~mailbox in
+    let host = server_peer_host and port = state.port in
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Skill_evidence_loaded (request, key, result))
+      (fun () ->
+        let ( let* ) = Result.bind in
+        let* () = check () in
+        let* json = Masc_tui_http.post_skill_evidence ~host ~port reference in
+        let* () = check () in
+        Ok json)
+  end
+
 (* The two tokens a read is admitted under. Applying a server identity
    reading moves the workspace one when the workspace changes (the first
    reading at boot is one) and cancels every read it admitted; it revokes
@@ -12346,8 +12389,19 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
           | _ -> ())
      | Planning ->
          (match state.planning_mode with
-          | Planning_detail goal_id -> launch_goal_timeline_load state ~mailbox goal_id
+          | Planning_detail goal_id ->
+              launch_goal_timeline_load state ~mailbox goal_id;
+              (match state.goal_confirmation with
+               | Goal_confirmation.Inspecting read
+                 when Goal_confirmation_read.current_key read = Some goal_id ->
+                   launch_goal_confirmation_read state ~mailbox ~goal_id
+               | Goal_confirmation.Inspecting _ | Goal_confirmation.Submitting _ -> ())
           | _ -> ())
+     | Tools ->
+         (match state.tools_evidence_reference, selected_tools_skill_profile state with
+          | Some reference, Some profile when Skill_reference.equal reference profile.esp_reference ->
+              launch_skill_evidence_read state ~mailbox reference
+          | _ -> state.tools_evidence_reference <- None)
      | Code ->
          let deliver = workspace_enqueue state mailbox in
          let host = server_peer_host in
@@ -13237,24 +13291,8 @@ let handle_goal_confirmation_key state ~mailbox =
           current state; confirming it would act on what the server no longer
           answered. Ask again. *)
        | Absent | Stale _ | Failed _ ->
-           (match Goal_confirmation_read.start ~equal:String.equal
-                    read ~key:goal_id with
-            | Already_loading -> ()
-            | Started (loading, request) ->
-                state.goal_confirmation <- Goal_confirmation.Inspecting loading;
-                state.goal_confirmation_presented <- None;
-                state.goal_action_error <- None;
-                state.planning_scroll <- 0;
-                launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-                  ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
-                  (fun () ->
-                    let ( let* ) = Result.bind in
-                    let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
-                    let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
-                    match confirmation.phase with
-                    | Goal_phase.Awaiting_confirmation -> Ok confirmation
-                    | _ -> Error "goal is not awaiting confirmation"
-                  )))
+           state.planning_scroll <- 0;
+           launch_goal_confirmation_read state ~mailbox ~goal_id)
 
 (* The lifecycle keys on a goal detail. The first press names the action, the
    same press again submits it, and any other key disarms. A drop opens its
@@ -17105,6 +17143,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Skill_evidence_loaded (request, key, result) ->
       if Option.exists (fun held -> held == request) state.tools_evidence_request then (
         state.tools_evidence_request <- None;
+        state.tools_evidence_reference <- None;
         match result with
         | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
         | Ok json -> state.tools_skill_evidence <- Some (key, json))
@@ -19548,19 +19587,7 @@ and is loaded on demand through keeper_skill.
     else match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
-      let key = Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string in
-      let request = ref () in
-      state.tools_evidence_request <- Some request;
-      let check = capture_workspace_check state ~mailbox:async_messages in
-      let host = server_peer_host and port = state.port in
-      launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id
-        ~deliver:(fun result -> Skill_evidence_loaded (request, key, result))
-        (fun () ->
-          let ( let* ) = Result.bind in
-          let* () = check () in
-          let* json = Masc_tui_http.post_skill_evidence ~host ~port profile.esp_reference in
-          let* () = check () in
-          Ok json)
+        launch_skill_evidence_read state ~mailbox:async_messages profile.esp_reference
   in
   let handle_skill_edit () =
     let check = capture_workspace_check state ~mailbox:async_messages in

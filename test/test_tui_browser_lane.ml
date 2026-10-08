@@ -195,7 +195,7 @@ let test_connection_facts () =
      = "  Live Firefox · WebExtension: no hover, drag • b:choose browser • a:automation • c:stagehand");
   expect "and what BiDi leaves out"
     (live_connection_row on_bidi
-     = "  Live Firefox · BiDi: no HTML, tab switch • b:choose browser • a:automation • c:stagehand");
+     = "  Live Firefox · BiDi: no tab switch • b:choose browser • a:automation • c:stagehand");
   expect "a server-owned browser has no live transport to name"
     (connection_label on_automation = Some "browser" && connection_summary on_automation = Some "browser");
   expect "live with no browser chosen names none"
@@ -205,7 +205,7 @@ let test_connection_facts () =
     (browser_choice_detail (Connected_browser firefox)
        = Some "WebExtension: no hover, drag · BiDi serves them"
      && browser_choice_detail (Connected_browser bidi)
-       = Some "BiDi: no HTML, tab switch · WebExtension serves them");
+       = Some "BiDi: no tab switch · WebExtension serves it");
   expect "the server's own browsers are described by their row"
     (browser_choice_detail Stagehand_browser = None && browser_choice_detail Automation_browser = None);
   List.iter (fun transport ->

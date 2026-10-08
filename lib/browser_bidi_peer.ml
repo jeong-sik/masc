@@ -62,7 +62,10 @@ let read t context args =
   let* cap = match field "maxChars" args with None -> Ok 50000
     | Some (`Int n) when n > 0 && n <= 100000 -> Ok n | _ -> Error "invalid maxChars" in
   match field "includeHtml" args with
-  | Some (`Bool true) -> Error "BiDi page.read does not support includeHtml; use a bounded scene read"
+  (* The automation lane's document helper: it drops HTML over 1 MiB and says
+     so, instead of returning a cut document. *)
+  | Some (`Bool true) ->
+    script t context (Browser_lane.Document.runtime ^ "\nreturn browserDocument();") (obj [])
   | None | Some (`Bool false) -> script t context
       "const chars=Array.from(document.body?.innerText??''); const cap=arguments[0].cap; return {url:location.href,title:document.title,text:chars.slice(0,cap).join(''),chars:chars.length,truncated:chars.length>cap};" (obj ["cap",`Int cap])
   | _ -> Error "invalid includeHtml"

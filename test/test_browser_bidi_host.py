@@ -187,8 +187,11 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert other["ok"] and other["data"] == before["data"]
             bounded = call("page.read", {"tabId": first, "maxChars": 5})
             assert bounded["ok"] and len(bounded["data"]["text"]) == 5 and bounded["data"]["truncated"]
-            html = call("page.read", {"tabId": first, "includeHtml": True, "maxChars": 5})
-            assert html["ok"] is False and html["effectPhase"] == "not_started"
+            source = call("page.read", {"tabId": first, "includeHtml": True})
+            assert source["ok"] and source["data"]["tabId"] == first, source
+            assert source["data"]["htmlComplete"] is True and source["data"]["htmlUnavailableReason"] is None
+            assert "<title>BiDi native fixture</title>" in source["data"]["html"], source
+            assert source["data"]["documentId"] == shot["data"]["viewport"]["documentId"], source
             observed = call("page.scene", {"tabId": first, "view": "content", "maxChars": 50000})
             assert observed["ok"], observed
             scene = observed["data"]

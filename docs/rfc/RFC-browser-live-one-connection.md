@@ -19,7 +19,7 @@ Slack 로그인은 운영자의 Firefox 에만 있다.
 
 live 레인에는 연결 방식이 둘 있다.
 WebExtension 연결은 페이지를 읽고 DOM 으로 누른다. 마우스를 올리지는 못한다.
-WebDriver BiDi 연결은 마우스를 올리고 끈다. 요소 목록을 못 읽고 탭을 앞으로 가져오지 못한다.
+WebDriver BiDi 연결은 마우스를 올리고 끈다. 탭을 앞으로 가져오지 못한다.
 `Browser_lane.live_transport_serves` 가 이 표다.
 
 Keeper 가 한 가지 일을 하려면 지금은 두 연결을 오가야 할 수 있다.
@@ -32,7 +32,7 @@ Keeper 가 한 가지 일을 하려면 지금은 두 연결을 오가야 할 수
 ## 2. 확인한 사실
 
 2026-10-08 에 소스, 공식 문서, 운영 중인 서버로 확인했다.
-소스는 origin/main `c8e8125b03` 에 #41795 와 #41802 를 올린 것이다.
+소스는 origin/main `c8e8125b03` 에 #41795, #41802, #41813 을 올린 것이다.
 `live_transport_serves` 표와 TUI 의 연결 표시는 그 두 PR 에서 들어온다.
 실제 Firefox 로 돌려 본 것은 §2.2 의 한 가지다.
 
@@ -44,8 +44,8 @@ Keeper 가 한 가지 일을 하려면 지금은 두 연결을 오가야 할 수
 | `click`·`fill`·`scroll`·`follow_link` | 됨 | 됨 |
 | `click_at`·`scroll_at` | 됨 (요소의 `click()`) | 됨 (trusted 포인터·휠) |
 | `hover_at`·`drag` | 안 됨 | 됨 |
-| `mode=elements` 읽기 | 됨 | 안 됨 |
-| `browser_document` 원천 (HTML 포함 읽기) | 됨 | 안 됨 |
+| `mode=elements` 읽기 | 됨 | 됨 (#41813) |
+| `browser_document` 원천 (HTML 포함 읽기) | 됨 | 됨 (#41813) |
 | `activate_tab` | 됨 | 안 됨 |
 
 근거: `lib/browser_lane/browser_lane.ml` 의 `live_transport_serves`,
@@ -61,7 +61,8 @@ Keeper 가 한 가지 일을 하려면 지금은 두 연결을 오가야 할 수
 BiDi 연결의 `hover_at` 과 `drag` 는 실제 Firefox 157.0.1 에서 확인했다.
 `test/test_browser_bidi_host.py` 를 임시 프로필의 headless Firefox 로 돌렸다(로컬 실행, 결과는 #41795 본문).
 마우스를 올린 뒤 fixture 페이지가 `hover:true:0` 을 적었다. trusted 이벤트였고 버튼은 눌리지 않았다.
-이 실행에 `click_at` 은 없다. 올린 뒤 나타난 버튼을 누르는 데까지는 #41813 이 같은 테스트에 더한다.
+#41813 이 같은 테스트에 리액션 모양의 흐름을 더했다. 마우스를 올려야 나타나는 버튼이 올리기 전에는 요소 목록에 없고,
+`hover_at` 뒤에는 있고, scene 이 알려 준 위치를 `click_at` 하면 페이지가 `reaction:true` 를 적는다(trusted 클릭).
 운영 중인 Firefox 와 실제 Slack 에서 해 본 사람은 아직 없다.
 
 ### 2.3 두 연결을 잇는 정보가 없다
@@ -114,8 +115,8 @@ BiDi 연결의 `hover_at` 과 `drag` 는 실제 Firefox 157.0.1 에서 확인했
 
 | 빠진 것 | 채우는 길 | 걸리는 점 |
 |---|---|---|
-| 요소 목록 | automation·stagehand 가 쓰는 `Browser_page_script.elements` 를 그대로 실행 | 없음. 작다 |
-| HTML 포함 읽기 | automation 이 쓰는 `Browser_lane.Document.runtime` 을 그대로 실행 | 없음. 작다. helper 는 결과가 1 MiB 를 넘으면 HTML 을 빼고 이유를 적는다. 호출자가 정하는 상한만 없다 |
+| 요소 목록 | automation·stagehand 가 쓰는 `Browser_page_script.elements` 를 그대로 실행 | 채웠다 (#41813) |
+| HTML 포함 읽기 | automation 이 쓰는 `Browser_lane.Document.runtime` 을 그대로 실행. helper 는 결과가 1 MiB 를 넘으면 HTML 을 빼고 이유를 적는다 | 채웠다 (#41813) |
 | 탭 앞으로 가져오기 | BiDi `browsingContext.activate` | 탭을 앞으로 가져오면서 포커스도 준다 ([MDN](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/browsingContext/activate)). W3C 명세는 그 창에 시스템 포커스를 준다고 적는다. `activate_tab` 은 "창 포커스 없이"를 약속한다 |
 | 링크를 따라간 뒤 새 문서가 뜰 때까지 기다리기 | BiDi `browsingContext` 이벤트를 구독 | peer 가 지금은 이벤트를 버린다 |
 
@@ -154,7 +155,7 @@ WebExtension 은 지금처럼 "설치만 하면 읽는" 연결로 둔다.
 
 필요한 것:
 
-1. BiDi peer 가 요소 목록을 읽는다 (§2.6 첫 줄).
+1. BiDi peer 가 요소 목록과 HTML 포함 읽기를 한다 (§2.6 첫 두 줄). #41813 에서 했다.
 2. BiDi 를 붙이는 명령 하나와 그 상태를 TUI·`masc doctor` 에 보여 준다.
    Firefox 를 플래그로 띄우는 것은 운영자가 한다. MASC 는 띄우지 않는다.
    RFC `setup-web-search-and-browser-lane` 이 제안한 "다시 열리는 설정 명령"에 이 단계를 더하는 모양이 맞다.
@@ -201,8 +202,8 @@ B 의 순서:
 1. BiDi 붙이기. 지금 막힌 일을 푸는 것은 이 단계다. 리액션에 필요한 동작은 이미 BiDi 가 다 하고(§2.2),
    없는 것은 붙어 있는 BiDi 연결이다(§2.5). 운영자 결정(§7 의 1)이 먼저고, 그 뒤에 붙이는 명령,
    TUI 의 "BiDi: 붙음 / 안 붙음 · 붙이는 법", host 가 끝난 이유 보고를 만든다.
-2. BiDi 의 빈칸 채우기: 요소 목록과 HTML 포함 읽기. 운영자 결정이 필요 없고 작다.
-   표의 칸이 바뀌고 `test_browser_bidi_peer` 가 그 칸을 확인한다.
+2. BiDi 의 빈칸 채우기: 요소 목록과 HTML 포함 읽기. 운영자 결정이 필요 없고 작아서 #41813 에서 먼저 했다.
+   표의 칸이 바뀌었고 `test_browser_bidi_peer` 가 그 칸을 확인한다. 남은 빈칸은 탭 앞으로 가져오기(§7 의 2)다.
 3. README·스킬 문서.
 
 하지 않는 것:
@@ -218,8 +219,9 @@ B 의 순서:
 
 1. 소유한 임시 프로필의 Firefox 와 fixture 페이지(마우스를 올려야 버튼이 보이는 페이지)로,
    BiDi 연결 하나에서 `hover_at` → 스크린샷 → `click_at` → 상태 변화까지 확인한다.
-   `test/test_browser_bidi_host.py` 가 hover 표시와 trusted 이벤트까지는 이미 본다.
+   `test/test_browser_bidi_host.py` 가 이 흐름을 본다 (#41813). 스크린샷 대신 scene 읽기로 버튼 위치를 얻는다.
 2. 요소 목록: 같은 fixture 에서 BiDi 와 automation 의 `mode=elements` 결과가 같은지 본다.
+   두 레인이 같은 스크립트를 실행한다는 것은 단위 테스트가 확인한다. 나란히 돌려 보는 것은 geckodriver 가 있는 곳에서 한다.
 3. 붙이기 명령: 포트가 닫힌 상태, 열린 상태, host 가 끝난 뒤 상태에서 TUI 문구를 PTY 로 확인한다.
 4. 받는 쪽 확인: `kidsnote-incoming-dd-manager` 가 실제 Slack 에서 리액션 하나를 달고,
    다시 찍은 화면에서 그 리액션을 확인한다. 이것이 #41594 의 완료 조건이다.

@@ -15,6 +15,33 @@ let test_context_identity () =
   check (list int) "same URL does not merge opaque contexts" [1;2] (ids ());
   contexts:=["b"];check (list int) "remaining context keeps identity" [2] (ids ());
   contexts:=["b";"c"];check (list int) "closed context ID never reused" [2;3] (ids ())
+(* A document-source read is the automation lane's document helper, which
+   reports HTML it had to leave out instead of cutting it. *)
+let test_document_source () =
+  let ran=ref [] in
+  let page=obj ["documentId",`String "observed";"url",`String "https://example.test/";
+    "title",`String "fixture";"observedAt",`Float 1.;"html",`String "<html></html>";
+    "htmlComplete",`Bool true;"htmlUnavailableReason",`Null] in
+  let command method_ args = match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction" ->
+      ran:=Yojson.Safe.Util.(args |> member "functionDeclaration" |> to_string) :: !ran;
+      Ok (script_value page)
+    | other -> failf "unexpected document command: %s" other in
+  let peer=Peer.create ~command in
+  match Peer.dispatch peer ~verb:Peer.Page_read (obj ["tabId",`Int 1;"includeHtml",`Bool true]) with
+  | Ok data ->
+    let open Yojson.Safe.Util in
+    check int "the document names the tab it read" 1 (data |> member "tabId" |> to_int);
+    check string "and carries the source" "<html></html>" (data |> member "html" |> to_string);
+    (match !ran with
+     | [declaration] ->
+       check bool "one script, the shared document helper" true
+         (String_util.contains_substring declaration Browser_lane.Document.runtime
+          && String_util.contains_substring declaration "return browserDocument();")
+     | _ -> fail "the document read ran other than one script")
+  | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail) ->
+    failf "the peer refused a document-source read: %s" detail
 (* The inventory is the automation lane's own page script, run in the tab the
    request names and returned with that tab's ID. *)
 let test_element_inventory () =
@@ -220,5 +247,6 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
     test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error];
-  "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory; test_case "parsed pointer boundary" `Quick test_pointer_validation;
+  "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
+    test_case "document source is the shared document helper" `Quick test_document_source; test_case "parsed pointer boundary" `Quick test_pointer_validation;
     test_case "the peer serves what the lane table says" `Quick test_peer_serves_what_the_lane_table_says]]

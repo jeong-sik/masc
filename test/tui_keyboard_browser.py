@@ -513,7 +513,7 @@ def run_browser_unserved_gesture_regression(executable: str, *, bidi_listed: boo
             start = len(output)
             os.write(master, b"\r")
             require(settled_screen(b"bidi fixture", start),
-                "Live Firefox · BiDi: no HTML, tab switch • b:choose browser".encode())
+                "Live Firefox · BiDi: no tab switch • b:choose browser".encode())
             read_available(master, output)
             start = len(output)
             os.write(master, b"b")

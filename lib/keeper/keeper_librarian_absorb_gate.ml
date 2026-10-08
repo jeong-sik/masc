@@ -978,8 +978,9 @@ let log_copy_checks ~keeper_id checks =
     in
     Log.Keeper.info
       ~keeper_name:keeper_id
-      "librarian absorb gate reverse: %d claim(s) absorbed nothing; %d copy (not applied), \
-       %d carry a new statement, %d not judged (applied); %d request(s)"
+      "librarian absorb gate reverse: %d claim(s) without accepted absorptions; %d copy proposals excluded, \
+       %d proposals carry a new statement, %d proposals not judged; %d request(s); \
+       these are gate decisions, not store commits"
       (List.length checks)
       (count is_copy)
       (count carries)
@@ -991,7 +992,7 @@ let log_copy_checks ~keeper_id checks =
          | Copy { statements } ->
            Log.Keeper.info
              ~keeper_name:keeper_id
-             "librarian absorb gate reverse: claim %s not applied, sources %s convey \
+             "librarian absorb gate reverse: claim %s excluded from the candidate set, sources %s convey \
               every statement: %s"
              check.claim_id
              (String.concat "," check.sources)
@@ -999,7 +1000,7 @@ let log_copy_checks ~keeper_id checks =
          | Not_judged (Request_failed detail) ->
            Log.Keeper.warn
              ~keeper_name:keeper_id
-             "librarian absorb gate reverse: claim %s applied unjudged, request failed: %s"
+             "librarian absorb gate reverse: claim %s remains a proposal, unjudged, request failed: %s"
              check.claim_id
              detail
          | Not_judged
@@ -1010,7 +1011,7 @@ let log_copy_checks ~keeper_id checks =
               | No_statement) as reason) ->
            Log.Keeper.info
              ~keeper_name:keeper_id
-             "librarian absorb gate reverse: claim %s applied unjudged (%s)"
+             "librarian absorb gate reverse: claim %s remains a proposal, unjudged (%s)"
              check.claim_id
              (copy_not_judged_to_string reason)
          | Carries_new_statement _ -> ())
@@ -1161,8 +1162,9 @@ let run
         | Judged judged ->
           Log.Keeper.info
             ~keeper_name:keeper_id
-            "librarian absorb gate: %d absorbed, %d kept current (context preservation \
-             not established), %d unjudged, %d too large to judge (kept current), %d request(s) %s"
+            "librarian absorb gate: %d source absorptions accepted for commit, %d refused \
+             (context preservation not established), %d unjudged, %d too large to judge, \
+             %d request(s) %s; current snapshot changes only after store commit"
             (List.length judged.conveyed)
             (List.length judged.left)
             (List.length judged.unjudged)

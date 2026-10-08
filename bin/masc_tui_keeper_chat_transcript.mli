@@ -466,6 +466,7 @@ type reply =
   ; reply_at : float (** Recorded observation time, including checkpoints. *)
   ; reply_outcome : Masc.Keeper_turn_outcome.t
   ; reply_turn_ref : string
+  ; reply_stream_scope : int option
   }
 
 val reply : t -> reply option
@@ -536,10 +537,12 @@ val drawn : t -> drawn_item list
     drawn as that record, unless the item is [Skill_failed]: the server
     records a composition's delivery from an error tool result too, so a
     record cannot turn a call the stream saw fail into a finished read.
-    Records no skill item carries form one more [Drawn_skill] after the
-    observed trail and before the appended reply or status. Their position
-    relative to streamed text is unknown, so that text is preserved rather
-    than treated as the terminal reply's stretch. *)
+    Records no skill item carries form one more [Drawn_skill] before the
+    terminal stretch when its observed stream scope matches the recorded
+    reply's terminal scope. That stretch is reconciled once. Without this
+    provenance their position relative to streamed text is unknown: they
+    follow the observed trail and its text is preserved before the appended
+    reply or status. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** Replays entries in journal order using each recorded event time. [now]

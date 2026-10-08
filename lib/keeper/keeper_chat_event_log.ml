@@ -117,6 +117,21 @@ let opt_member json key decode =
   | value -> Result.map (fun decoded -> Some decoded) (decode value)
 ;;
 
+let stream_scope_of_json = function
+  | `Int scope when scope >= 0 -> Ok scope
+  | _ -> Error "stream scope must be a nonnegative integer"
+;;
+
+let optional_stream_scope json field =
+  match json with
+  | `Assoc fields ->
+      (match List.filter (fun (key, _) -> key = field) fields with
+       | [] -> Ok None
+       | [(_, value)] -> Result.map Option.some (stream_scope_of_json value)
+       | _ -> Error ("duplicate " ^ field))
+  | _ -> Error "stream scope requires an event object"
+;;
+
 let stream_protocol_error_of_json json =
   let open Yojson.Safe.Util in
   try
@@ -168,13 +183,13 @@ let keeper_chat_event_to_json event =
       [ "target", Keeper_surface_post.delivery_target_to_yojson target ]
   | Run_finished { run_id } -> type_tag "run_finished" [ "run_id", `String run_id ]
   | Event_error { message } -> type_tag "event_error" [ "message", `String message ]
-  | Reply_details { reply; turn_outcome; turn_ref } ->
+  | Reply_details { reply; turn_outcome; turn_ref; terminal_stream_scope } ->
     type_tag
       "reply_details"
-      [ "reply", `String reply
+      ([ "reply", `String reply
       ; "turn_outcome", `String (Keeper_turn_outcome.to_label turn_outcome)
       ; "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)
-      ]
+      ] @ json_opt "terminal_stream_scope" (Option.map (fun scope -> `Int scope) terminal_stream_scope))
   | Continuation_checkpoint { message; request_id } ->
     type_tag
       "continuation_checkpoint"
@@ -372,9 +387,10 @@ let keeper_chat_event_of_json json =
         | None ->
           Error (Printf.sprintf "reply_details: malformed turn_ref %S" turn_ref_raw)
       in
+      let* terminal_stream_scope = optional_stream_scope json "terminal_stream_scope" in
       Ok
         (Reply_details
-           { reply = json |> member "reply" |> to_string; turn_outcome; turn_ref })
+           { reply = json |> member "reply" |> to_string; turn_outcome; turn_ref; terminal_stream_scope })
     | "batch_bound" ->
       let* operation_id = Keeper_chat_operation.Operation_id.of_string (json |> member "operation_id" |> to_string) in
       let* execution_id = Keeper_chat_operation.Operation_id.of_string (json |> member "execution_id" |> to_string) in

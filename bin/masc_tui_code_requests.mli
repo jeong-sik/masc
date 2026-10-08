@@ -19,7 +19,8 @@ val launch_file_load
   -> unit
 
 (** Capture the workspace scope and activity address, then combine stable git and
-    Keeper history with the existing durable coverage note. *)
+    Keeper history. A failed source leaves the other source visible, with its
+    failure reported in the listing. *)
 val launch_history_load
   :  Masc_tui_types.state
   -> host:string

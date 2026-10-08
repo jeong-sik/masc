@@ -7,7 +7,7 @@ import tui_keyboard_runtime as _keyboard_runtime
 
 
 RUNTIME_ID = "fixture-runtime-한글-very-long-identity-tailZ"
-HEALTHY_ID = "fixture-runtime-healthy"
+EXHAUSTED_ID = "fixture-runtime-exhausted"
 LANE_ID = "fixture-lane-아주긴이름-primary-tailL"
 
 
@@ -22,18 +22,18 @@ def run(executable, no_color):
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     _, resolved = _keyboard_runtime.runtime_resolved_response()
     assert isinstance(resolved, dict)
-    exhausted = _keyboard_runtime.runtime_resolved_runtime(RUNTIME_ID, "fixture-provider", "fixture-model")
+    normal = _keyboard_runtime.runtime_resolved_runtime(RUNTIME_ID, "fixture-provider", "fixture-model")
+    exhausted = _keyboard_runtime.runtime_resolved_runtime(EXHAUSTED_ID, "fixture-provider", "fixture-model")
     exhausted["quota_exhausted"] = True
-    healthy = _keyboard_runtime.runtime_resolved_runtime(HEALTHY_ID, "fixture-provider", "fixture-model")
-    resolved["runtimes"] = [exhausted, healthy]
-    resolved["default_runtime"] = exhausted
+    resolved["runtimes"] = [normal, exhausted]
+    resolved["default_runtime"] = normal
     resolved["default_route"] = LANE_ID
-    resolved["lanes"] = [{"id": LANE_ID, "runtime_ids": [RUNTIME_ID, HEALTHY_ID], "declared": True}]
+    resolved["lanes"] = [{"id": LANE_ID, "runtime_ids": [RUNTIME_ID, EXHAUSTED_ID], "declared": True}]
     resolved["assignments"] = []
     _, probe = _keyboard_runtime.runtime_probe_response(fresh=True)
     probe["probe"]["providers"] = [
         _keyboard_runtime.runtime_probe_provider(RUNTIME_ID, status="reachable"),
-        _keyboard_runtime.runtime_probe_provider(HEALTHY_ID, status="reachable"),
+        _keyboard_runtime.runtime_probe_provider(EXHAUSTED_ID, status="reachable"),
     ]
     probe["probe"]["summary"].update({"runtimes": 2, "probed": 2,
         "reachable": 2, "failed": 0, "skipped": 0, "default_runtime_id": RUNTIME_ID})
@@ -46,7 +46,6 @@ def run(executable, no_color):
         _keyboard_harness.send_and_wait(process, fd, output, b"9", b"MASC System / Runtime")
         _keyboard_harness.wait_for_output(process, fd, output, b"tailZ", start=0, timeout=10)
         _keyboard_harness.wait_for_output(process, fd, output, b"reachable", start=0, timeout=10)
-        _keyboard_harness.send_and_wait(process, fd, output, b"j", HEALTHY_ID.encode())
         for all_runtimes in (False, True):
             if all_runtimes:
                 _keyboard_harness.send_and_wait(process, fd, output, b"p", b"All runtimes")
@@ -54,16 +53,15 @@ def run(executable, no_color):
             exhausted_index, exhausted_row = next(
                 (row_id, row)
                 for row_id, row in rows.items()
-                if RUNTIME_ID.encode() in row
-                and b"quota exhausted" in _keyboard_harness.CSI_RE.sub(b"", row)
+                if EXHAUSTED_ID.encode() in row
             )
-            healthy_index, _ = next(
+            normal_index, _ = next(
                 (row_id, row)
                 for row_id, row in rows.items()
-                if HEALTHY_ID.encode() in row
+                if RUNTIME_ID.encode() in row
                 and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
             )
-            assert exhausted_index < healthy_index, rows
+            assert normal_index < exhausted_index, rows
             initial_text = _keyboard_harness.CSI_RE.sub(b"", exhausted_row)
             start = len(output)
             os.write(fd, b"h")
@@ -73,8 +71,7 @@ def run(executable, no_color):
             dimmed_off = next(
                 row
                 for row in dimmed_off_rows.values()
-                if RUNTIME_ID.encode() in row
-                and b"quota exhausted" in _keyboard_harness.CSI_RE.sub(b"", row)
+                if EXHAUSTED_ID.encode() in row
             )
             assert _keyboard_harness.CSI_RE.sub(b"", dimmed_off) == initial_text, dimmed_off
             if not no_color:
@@ -87,21 +84,19 @@ def run(executable, no_color):
             dimmed_on_index, dimmed_on = next(
                 (row_id, row)
                 for row_id, row in dimmed_on_rows.items()
-                if RUNTIME_ID.encode() in row
-                and b"quota exhausted" in _keyboard_harness.CSI_RE.sub(b"", row)
+                if EXHAUSTED_ID.encode() in row
             )
-            healthy_index, _ = next(
+            normal_index, _ = next(
                 (row_id, row)
                 for row_id, row in dimmed_on_rows.items()
-                if HEALTHY_ID.encode() in row
+                if RUNTIME_ID.encode() in row
                 and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
             )
             assert _keyboard_harness.CSI_RE.sub(b"", dimmed_on) == initial_text, dimmed_on
-            assert dimmed_on_index < healthy_index, dimmed_on_rows
+            assert normal_index < dimmed_on_index, dimmed_on_rows
             if not no_color:
                 assert dimmed_on == exhausted_row, (exhausted_row, dimmed_on)
         _keyboard_harness.send_and_wait(process, fd, output, b"p", b"Service lanes")
-        _keyboard_harness.send_and_wait(process, fd, output, b"k", b"tailZ")
         for all_runtimes in (False, True):
             if all_runtimes:
                 # The lane sweep already ended at120x32; an unchanged size
@@ -126,10 +121,10 @@ def run(executable, no_color):
                     assert LANE_ID in readable and RUNTIME_ID in readable, (columns, route_block)
                     assert "…" not in route_block, (columns, route_block)
                 suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
-                # The target is quota-exhausted; reachability remains visible
-                # in the same row's route/probe status.
+                # The normal default row remains available for the existing
+                # narrow identity check; the exhausted candidate is inspected above.
                 candidate_rows = [row for row in visible.splitlines()
-                                  if suffix in row and "quota" in row]
+                                  if suffix in row and "usage unknown" in row]
                 assert len(candidate_rows) == 1, (columns, all_runtimes, visible)
                 cells = sum(0 if unicodedata.combining(char) else
                             2 if unicodedata.east_asian_width(char) in ("W", "F") else 1

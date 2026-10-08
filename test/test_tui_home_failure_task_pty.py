@@ -386,7 +386,11 @@ def task_cancel_previous_workspace_receipt(executable):
                 if gate is not None:
                     entered = time.monotonic()
                     gate.register()
-                    entry = {"registered": entered, "completed": None}
+                    entry = {
+                        "registered": entered,
+                        "completed": None,
+                        "post_press": state.get("post_press", False),
+                    }
                     state["exchange_log"].append(entry)
                     try:
                         drill = state["drill_delay"]
@@ -538,29 +542,48 @@ def task_cancel_previous_workspace_receipt(executable):
                     os.kill(process.pid, signal.SIGSTOP)
                     time.sleep(gate.span + 0.25)
                     os.kill(process.pid, signal.SIGCONT)
-                    h.drain_until_quiet(process, fd, output)
+                    resumed_at = time.monotonic()
+                    assert h.drain_until_quiet(process, fd, output), (
+                        "TUI output did not settle after resume: " + repr(bytes(output)))
+                    # Settle any in-flight or delayed exchanges from before/during
+                    # the freeze: wait until no exchange is held and a full quiet
+                    # span has elapsed since resume and the latest prior event.
+                    prior_settle_deadline = time.monotonic() + 10
+                    while (
+                        gate.held > 0
+                        or (time.monotonic() - max(resumed_at, gate.last_event_time()) < gate.span)
+                    ):
+                        if time.monotonic() > prior_settle_deadline:
+                            raise AssertionError(
+                                "prior refresh tail did not settle after resume: "
+                                + repr(state["exchange_log"])
+                                + f" held={gate.held} reads="
+                                + repr((state["health_reads"], state["history_reads"])))
+                        gate.changed.clear()
+                        h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
+                    assert gate.held == 0, f"exchange still held before second press: {gate.snapshot()}"
+                    pre_press_count = len(state["exchange_log"])
+                    assert all(e["completed"] is not None for e in state["exchange_log"]), (
+                        "pre-press exchange is still running before second press: "
+                        + repr(state["exchange_log"]))
+
+                    state["post_press"] = True
                     os.write(fd, b"r")
                     pressed_at = time.monotonic()
                     deadline = time.monotonic() + 15
                     # The boundary is "the press produced an exchange and
                     # that exchange has completed". Registration and
-                    # completion are tracked per request, because
-                    # complete() also moves the gate clock: an older
-                    # exchange that registered between the drain and the
-                    # press (a straggler) can complete after pressed_at
-                    # and sweep last_event past it, so quiescence plus
-                    # last_event >= pressed_at would pass with zero
-                    # post-press registrations. Only a fixture log entry
-                    # that registered after the press counts as the
-                    # client's response to it, the entry's own completion
-                    # stamp proves that exchange finished, and the
-                    # quiesced() check adds the whole span of silence
-                    # over that boundary.
+                    # completion are tracked per request, and only entries
+                    # registered after the second press (post_press=True)
+                    # count toward this boundary. An older exchange from
+                    # the first pass was already drained above, and any
+                    # post-press registration is keyed on the fresh press.
                     def pressed_receipt_done():
                         return any(
-                            entry["registered"] >= pressed_at
+                            entry.get("post_press")
+                            and entry["registered"] >= pressed_at
                             and entry["completed"] is not None
-                            for entry in state["exchange_log"])
+                            for entry in state["exchange_log"][pre_press_count:])
                     while not (pressed_receipt_done() and gate.quiesced()):
                         if time.monotonic() > deadline:
                             raise AssertionError(
@@ -569,8 +592,8 @@ def task_cancel_previous_workspace_receipt(executable):
                                 + " reads=" + repr((state["health_reads"], state["history_reads"])))
                         gate.changed.clear()
                         h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
-                    boundary = [entry for entry in state["exchange_log"]
-                                if entry["registered"] >= pressed_at]
+                    boundary = [entry for entry in state["exchange_log"][pre_press_count:]
+                                if entry.get("post_press") and entry["registered"] >= pressed_at]
                     assert boundary, (
                         "settled without any post-press registration: "
                         + repr(state["exchange_log"]))
@@ -586,7 +609,8 @@ def task_cancel_previous_workspace_receipt(executable):
                 # The gate stays armed through the receipt window: any
                 # exchange that arrives or completes there still registers
                 # and completes on the wire, so the assertions below see it.
-                h.drain_until_quiet(process, fd, output)
+                assert h.drain_until_quiet(process, fd, output), (
+                    "TUI output did not settle after refresh applied: " + repr(bytes(output)))
                 before = (state["health_reads"], state["history_reads"])
                 before_gate = gate.snapshot()
                 # The window must not open over a still-running exchange:

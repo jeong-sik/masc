@@ -16,8 +16,12 @@ intent that receives Running/Settled admission retains its existing “no other
 turn was interrupted” feedback in a separate scalar flag. This flag records the
 callback decision, not a fabricated server event or an execution result.
 
-The transcript projects this metadata as an `Admission_of_request` STATUS
-prelude. It has the receipt's source timestamp, no execution rail, and no effect
+The transcript projects this metadata as an `Admission_of_request` status
+prelude. The renderer labels it `RECEIPT` and prefixes its status body with
+`접수 당시: `, distinguishing the historical receipt from current queue/control
+state even when a narrow gutter or continued heading hides its label. Other
+execution statuses retain `STATUS`. The original transcript notice is preserved.
+The prelude has the receipt's source timestamp, no execution rail, and no effect
 on authored USER/keeper text, execution phase, or continuation/retry segments.
 Pending input remains in the pending region until execution or persisted input
 provides the existing consumption evidence.

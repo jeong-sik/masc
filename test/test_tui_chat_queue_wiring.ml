@@ -1539,9 +1539,10 @@ let receive_chat_wire log wire =
         log ~seq:item.seq item.delta)
 ;;
 
+(* Exact rendered receipt bodies; the transcript retains the original notice. *)
 let stale_admission_notice =
-  "Message queued: chat controls changed after this input; the newer stop or resume remains in effect"
-let paused_admission_notice = "Message queued: Keeper remains paused; inspect with /queue"
+  "접수 당시: Message queued: chat controls changed after this input; the newer stop or resume remains in effect"
+let paused_admission_notice = "접수 당시: Message queued: Keeper remains paused; inspect with /queue"
 
 let test_admission_notice_precedes_earlier_buffered_reply () =
   let module Layout = Masc_tui_message_layout in

@@ -181,6 +181,41 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
   ignore (Lane.deliver_result ~client_id:bidi.client_id ~id:command.id ~payload:(payload "document"));
   answered document "document")
 
+(* Every successful answer states its connection through one function: a
+   live browser's client ID and transport, a null client for the server's own
+   browsers, and never a value a page or backend supplied under those names. *)
+let test_answers_state_their_connection () = with_clients (fun sw connect ->
+  let extension = connect Lane.Firefox in
+  let bidi = { (info Lane.Firefox) with transport=Lane.Webdriver_bidi } in
+  ignore (Lane.take_command ~client_info:bidi ~window_sec:0.001);
+  Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:bidi.client_id));
+  let stated (client : Lane.client_info) = Lane.target_connection_fields (target client.client_id) in
+  let expected (client : Lane.client_info) transport =
+    ["clientId", `String (Lane.client_id_to_string client.client_id); "transport", `String transport] in
+  check bool "an extension answer names its client and its transport" true
+    (stated extension = expected extension "web_extension");
+  check bool "a BiDi answer names its own" true (stated bidi = expected bidi "webdriver_bidi");
+  check bool "the server's own browsers have no client and no transport" true
+    (Lane.target_connection_fields Lane.Automation = ["clientId", `Null]
+     && Lane.target_connection_fields Lane.Stagehand = ["clientId", `Null]);
+  let supplied = ["transport", `String "carrier_pigeon"; "tabId", `Int 2; "clientId", `String "forged"] in
+  check bool "a value supplied under those names is replaced, not kept beside the route's" true
+    (Lane.with_connection_fields (target bidi.client_id) supplied = expected bidi "webdriver_bidi" @ ["tabId", `Int 2]);
+  check bool "also for the server's own browsers" true
+    (Lane.with_connection_fields Lane.Automation supplied = ["clientId", `Null; "tabId", `Int 2]);
+  (* The optional document read attaches the same fields. *)
+  let document = Eio.Fiber.fork_promise ~sw (fun () ->
+    Lane.issue_document_if_idle ~target:(target bidi.client_id) ~tab_id:2 ~timeout_sec:1.) in
+  let command = take bidi in
+  ignore (Lane.deliver_result ~client_id:bidi.client_id ~id:command.id
+    ~payload:(`Assoc ["ok", `Bool true; "data", `Assoc ["html", `String "<html></html>"; "transport", `String "forged"]]));
+  match Eio.Promise.await document with
+  | Ok (Ok (Lane.Answered (`Assoc fields))) ->
+    check bool "the document answer states the BiDi connection once" true
+      (List.assoc_opt "data" fields
+       = Some (`Assoc (expected bidi "webdriver_bidi" @ ["html", `String "<html></html>"])))
+  | _ -> fail "the document read did not answer")
+
 let test_unsupported_message_names_the_serving_transport () =
   let client_id = (info Lane.Firefox).client_id in
   check string "hover on the extension points at BiDi"
@@ -253,4 +288,5 @@ let () = run "browser client routing" ["ownership", [
   test_case "resolved target expires before dispatch" `Quick test_expired_resolved_target_is_pre_dispatch;
   test_case "expired queued actions do not execute" `Quick test_timed_out_queue_is_not_executed;
   test_case "disconnect releases pending caller" `Quick test_disconnect_releases_waiter;
-  test_case "source and live command policy" `Quick test_sources_and_live_policy]]
+  test_case "source and live command policy" `Quick test_sources_and_live_policy;
+  test_case "answers state their connection" `Quick test_answers_state_their_connection]]

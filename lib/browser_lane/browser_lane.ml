@@ -408,6 +408,21 @@ let client_json info = `Assoc ["clientId", `String (client_id_to_string info.cli
   "engineVersion", `String info.engine_version;
   "transport", `String (live_transport_to_string info.transport)]
 let target_client_id = function Automation | Stagehand -> None | Live_client client -> Some client.info.client_id
+(* Where an answer came from, as every successful answer states it: a live
+   connection's ID and how its browser is reached. The server's own browsers
+   have no client, and no transport to name. *)
+let connection_field_names = ["clientId"; "transport"]
+let target_connection_fields = function
+  | Live_client client ->
+    ["clientId", `String (client_id_to_string client.info.client_id);
+     "transport", `String (live_transport_to_string client.info.transport)]
+  | Automation | Stagehand -> ["clientId", `Null]
+(* The route's own values replace anything a page or backend supplied under
+   the same names, so a reader that takes the first key and one that takes the
+   last see the same connection. *)
+let with_connection_fields target fields =
+  target_connection_fields target
+  @ List.filter (fun (key, _) -> not (List.mem key connection_field_names)) fields
 let target_lane = function
   | Automation -> Lane_name.Automation
   | Live_client _ -> Lane_name.Live
@@ -764,8 +779,7 @@ let issue_document_if_idle ~target ~tab_id ~timeout_sec =
      | Ok (Answered (`Assoc fields)) ->
        (match List.assoc_opt "data" fields with
         | Some (`Assoc data) ->
-          let data = `Assoc (("clientId", `String (client_id_to_string client.info.client_id))
-                            :: List.remove_assoc "clientId" data) in
+          let data = `Assoc (with_connection_fields target data) in
           Ok (Answered (`Assoc (("data", data) :: List.remove_assoc "data" fields)))
         | Some _ | None -> Ok (Answered (`Assoc fields)))
      | answer -> answer)

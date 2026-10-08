@@ -78,8 +78,8 @@ let tool_request args =
 let add_client target = function
   | Browser_lane.Answered (`Assoc envelope) ->
     let data = match List.assoc_opt "data" envelope with
-      | Some (`Assoc fields) -> `Assoc (("clientId", Browser_surface.client_id_json target) :: fields)
-      | Some (`List tabs) -> `Assoc ["tabs", `List tabs; "clientId", Browser_surface.client_id_json target]
+      | Some (`Assoc fields) -> `Assoc (Browser_lane.with_connection_fields target fields)
+      | Some (`List tabs) -> `Assoc (("tabs", `List tabs) :: Browser_lane.target_connection_fields target)
       | Some other -> other | None -> `Null in
     Browser_lane.Answered (`Assoc (("data", data) :: List.remove_assoc "data" envelope))
   | other -> other

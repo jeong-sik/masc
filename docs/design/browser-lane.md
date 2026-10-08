@@ -209,9 +209,14 @@ change either side, so the retry text names what the operator does.
 
 Tab IDs belong to their selected client. The operator read resolves that client
 once before listing tabs and keeps it for the subsequent page request. Successful
-read and screenshot replies include `clientId`; Keeper BrowserTabs returns an
-object containing `tabs` and `clientId`, and BrowserRead/Interact also preserve
-the selected identity. Carry that ID into subsequent operations.
+read and screenshot replies include `clientId` and, for a live browser, its
+`transport`; Keeper BrowserTabs returns an object containing `tabs`, `clientId`
+and `transport`, and BrowserRead/Interact also preserve the selected identity.
+Both come from the resolved route (`Browser_lane.target_connection_fields`) and
+replace anything a page or backend answered under those names. Carry that ID
+into subsequent operations; the transport says which
+[live work](#what-each-live-connection-serves) the connection serves before a
+request is refused for it.
 
 Native transport requires `x-lane: live`, the lane token, and the identity
 headers: `x-browser-client-id`, `x-browser-name`, `x-browser-version`, and

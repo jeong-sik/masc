@@ -75,8 +75,6 @@ let exchange ~admission ~command =
   match Browser_lane.Read_admission.issue admission command ~timeout_sec:20. with
   | Error error -> Error (Unselected error)
   | Ok answer -> decode_answer ~lane:(Browser_lane.target_lane target) answer |> unobserved
-let client_id_json target = match Browser_lane.target_client_id target with
-  | None -> `Null | Some id -> `String (Browser_lane.client_id_to_string id)
 let read request =
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.route in
@@ -103,9 +101,9 @@ let read request =
            "text",`String text;"chars",`Int chars;"truncated",`Bool truncated])
        | _ -> Error (Unobserved "browser page lacks URL/title/text/length metadata; update the browser connector")) in
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
-  Ok (`Assoc ["tabs",`List (List.map tab_json tabs);"selection",selection_json selection;"page",page;
-    "source",`String lane_name; "clientId", client_id_json target;
-    "elapsed_ms",`Float elapsed_ms])
+  Ok (`Assoc (["tabs",`List (List.map tab_json tabs);"selection",selection_json selection;"page",page;
+    "source",`String lane_name] @ Browser_lane.target_connection_fields target
+    @ ["elapsed_ms",`Float elapsed_ms]))
 
 (* Captures always name a tab. An absent/closed target must never capture the
    operator's newly active tab instead. The image is a viewport observation,
@@ -143,8 +141,9 @@ let capture request =
     if String.length bytes = 0 then Error "empty screenshot"
     else
       let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
-      Ok (`Assoc ["source", `String lane_name; "clientId", client_id_json target; "tabId", `Int tab_id;
-        "title", `String title; "url", `String url; "mimeType", `String "image/png";
-        "data", `String image; "viewport", Browser_lane.Pointer.viewport_to_json viewport;
-        "elapsed_ms", `Float elapsed_ms])
+      Ok (`Assoc (["source", `String lane_name] @ Browser_lane.target_connection_fields target
+        @ ["tabId", `Int tab_id;
+           "title", `String title; "url", `String url; "mimeType", `String "image/png";
+           "data", `String image; "viewport", Browser_lane.Pointer.viewport_to_json viewport;
+           "elapsed_ms", `Float elapsed_ms]))
   | _ -> Error "screenshot response does not match the requested tab or PNG contract"

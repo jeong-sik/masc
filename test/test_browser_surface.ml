@@ -85,7 +85,35 @@ let test_tool_input_recovery () =
       check bool "correcting the argument succeeds without reconnecting or changing the page" true
         (match result with Tool_result.Completed _ -> true | _ -> false);
       check string "corrected response retains the observed connection" valid_id
-        Yojson.Safe.Util.(Tool_result.data result |> member "clientId" |> to_string)))
+        Yojson.Safe.Util.(Tool_result.data result |> member "clientId" |> to_string);
+      check string "and says how that browser is reached" "web_extension"
+        Yojson.Safe.Util.(Tool_result.data result |> member "transport" |> to_string);
+      (* A tab list is a bare array from the browser; an object answer may carry
+         fields under the route's names. Either way the Keeper sees one
+         connection, the route's. *)
+      let forged = Eio.Fiber.fork_promise ~sw (fun () ->
+        Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())
+          (`Assoc ["lane",`String "live";"clientId",`String valid_id;"tabId",`Int 1;"mode",`String "elements"])) in
+      let command = match Browser_lane.take_command ~client_info:info ~window_sec:1. with
+        | Ok (Some command) -> command | _ -> fail "the element read did not reach the browser" in
+      ignore (Browser_lane.deliver_result ~client_id ~id:command.id
+        ~payload:(`Assoc ["ok",`Bool true;"data",`Assoc ["tabId",`Int 1;"elements",`List [];
+          "clientId",`String "forged";"transport",`String "carrier_pigeon"]]));
+      let data = Tool_result.data (Eio.Promise.await_exn forged) in
+      check string "a supplied client is replaced by the route's" valid_id
+        Yojson.Safe.Util.(data |> member "clientId" |> to_string);
+      check string "and a supplied transport by the route's" "web_extension"
+        Yojson.Safe.Util.(data |> member "transport" |> to_string);
+      let occurrences needle text =
+        let limit = String.length text - String.length needle in
+        let rec count index found =
+          if index > limit then found
+          else count (index + 1)
+            (if String.sub text index (String.length needle) = needle then found + 1 else found) in
+        count 0 0 in
+      let recorded = Yojson.Safe.to_string data in
+      check int "each name appears once in what the Keeper is told" 2
+        (occurrences {|"clientId":|} recorded + occurrences {|"transport":|} recorded)))
 let test_remote_failure () =
   match Surface.decode_answer ~lane:Browser_lane.Lane_name.Live (Browser_lane.Answered
     (`Assoc ["ok",`Bool false;"error",`String "tab closed"])) with
@@ -245,6 +273,9 @@ let test_live_read_pins_client_between_hops () =
           (Result.is_error (Surface.read {route=Browser_lane.Live_route (Some first.client_id);tab_id=Some 1}));
         check bool "reply identifies the original single client" true
           (Yojson.Safe.Util.member "clientId" data = `String (Browser_lane.client_id_to_string first.client_id));
+        check bool "and how that browser is reached" true
+          (Yojson.Safe.Util.member "transport" data
+           = `String (Browser_lane.live_transport_to_string first.transport));
         check bool "page belongs to the pinned browser" true
           (Yojson.Safe.Util.(data |> member "page" |> member "text") = `String "first-owned")
       | _ -> fail "second connection disrupted the once-resolved read"))

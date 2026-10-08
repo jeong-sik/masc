@@ -2859,8 +2859,12 @@ let test_memory_capacity_reprojection_reaches_cli_input () =
         match attempt.result with
         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
     let read path = In_channel.with_open_bin path In_channel.input_all in
-    let first = read first_prompt_marker and second = read second_prompt_marker in
-    check bool "the CLI received a strictly smaller retry" true (String.length second < String.length first);
+    (* Start transmits composed context through --system-prompt-file.
+       Stdin carries the current goal, which must stay unchanged. *)
+    let first = read first_system_marker and second = read second_system_marker in
+    let first_input = read first_prompt_marker and second_input = read second_prompt_marker in
+    check string "memory-only retry preserves the exact stdin input" first_input second_input;
+    check bool "the CLI received a strictly smaller system context" true (String.length second < String.length first);
     List.iter (fun id -> check bool (id ^ " originally transmitted") true
       (String_util.contains_substring first ("MEMORY-" ^ id ^ "-"))) ["A";"B";"C";"D"];
     List.iter (fun id -> check bool (id ^ " retained whole on the wire") true
@@ -2870,7 +2874,7 @@ let test_memory_capacity_reprojection_reaches_cli_input () =
     check bool "the retry tells the model evidence is incomplete" true
       (String_util.contains_substring second "capacity_deferred_count");
     check bool "the user's goal survives memory reduction" true
-      (String_util.contains_substring second "MEMORY_CAPACITY_GOAL");
+      (String_util.contains_substring second_input "MEMORY_CAPACITY_GOAL");
     let receipts = read (IO.journal_path adapter) |> String.split_on_char '\n'
       |> List.filter (fun row -> row<>"") |> List.map Yojson.Safe.from_string in
     check (list string) "one retained memory projection, no new Jev evaluation"

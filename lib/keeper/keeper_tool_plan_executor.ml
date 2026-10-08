@@ -183,6 +183,82 @@ type node_settlement =
   ; cause : cause option
   }
 
+type wave_outcome =
+  | Wave_settled of node_settlement * int
+  (* A settled node carries its completion ticket: a global sequence number
+     taken when the node finished dispatching. *)
+  | Wave_skipped
+
+(* Readers-writer gate for one plan run: concurrent nodes hold the shared
+   side together while a serial or terminal node holds the exclusive side
+   alone. Waiting fibers suspend on a condition instead of spinning, and new
+   shared arrivals queue behind a waiting writer so the writer cannot starve.
+   The gate is local to one execution; once the run aborts it is dropped. *)
+module Exclusive_gate = struct
+  type t =
+    { mutex : Eio.Mutex.t
+    ; changed : Eio.Condition.t
+    ; mutable readers : int
+    ; mutable writer : bool
+    ; mutable waiting_writers : int
+    }
+
+  let create () =
+    { mutex = Eio.Mutex.create ()
+    ; changed = Eio.Condition.create ()
+    ; readers = 0
+    ; writer = false
+    ; waiting_writers = 0
+    }
+  ;;
+
+  let acquire_shared gate =
+    Eio.Mutex.use_rw ~protect:false gate.mutex (fun () ->
+      while gate.writer || gate.waiting_writers > 0 do
+        Eio.Condition.await gate.changed gate.mutex
+      done;
+      gate.readers <- gate.readers + 1)
+  ;;
+
+  let release_shared gate =
+    let underflow =
+      Eio.Mutex.use_rw ~protect:false gate.mutex (fun () ->
+        gate.readers <- gate.readers - 1;
+        if gate.readers = 0 then Eio.Condition.broadcast gate.changed;
+        gate.readers < 0)
+    in
+    if underflow then invalid_arg "tool plan gate released without a reader"
+  ;;
+
+  let acquire_exclusive gate =
+    Eio.Mutex.use_rw ~protect:false gate.mutex (fun () ->
+      gate.waiting_writers <- gate.waiting_writers + 1;
+      (try
+         while gate.writer || gate.readers > 0 do
+           Eio.Condition.await gate.changed gate.mutex
+         done;
+         gate.writer <- true;
+         gate.waiting_writers <- gate.waiting_writers - 1
+       with
+       | Eio.Cancel.Cancelled _ as exn ->
+         gate.waiting_writers <- gate.waiting_writers - 1;
+         Eio.Condition.broadcast gate.changed;
+         raise exn))
+  ;;
+
+  let release_exclusive gate =
+    let released_without_writer =
+      Eio.Mutex.use_rw ~protect:false gate.mutex (fun () ->
+        let missing = not gate.writer in
+        gate.writer <- false;
+        Eio.Condition.broadcast gate.changed;
+        missing)
+    in
+    if released_without_writer
+    then invalid_arg "tool plan gate released without a writer"
+  ;;
+end
+
 let execute_one
       ~plan
       ~run_id
@@ -342,50 +418,271 @@ let execute_with_tool_use_id
       Tool_result.Proven_pre_effect
       settled
   in
-  let rec run_batches ~prepared_inputs settled outputs = function
-    | [] -> Ok settled
-    | batch :: rest ->
-      let execute scheduled =
-        execute_one
-          ~plan
-          ~run_id
-          ~prepared_inputs
-          ~outputs
-          ~tool_use_id_for_node
-          ~dispatch
-          ?observe_node_result
-          scheduled
+  (* Dynamic ready-wave runner: every node owns one fiber that starts when all
+     of its dependencies have settled, instead of waiting for a static batch
+     barrier. Serial and terminal nodes additionally follow the static
+     schedule order and run alone behind [Exclusive_gate]. A node whose
+     dependency failed or was skipped never dispatches; under [Fail_fast] no
+     new node dispatches once any node is blocked, while under
+     [Continue_independent] only the failed branch's descendants are blocked.
+     Settled results are reported in canonical plan order and the cause is
+     the lowest planned index, matching the static runner's contract. *)
+  let run_wave ~prepared_inputs batches =
+    let policy = Keeper_tool_plan.branch_failure_policy plan in
+    let nodes = Keeper_tool_plan.nodes plan in
+    let scheduled_nodes =
+      List.concat_map
+        (fun batch ->
+          match batch with
+          | Serial_batch scheduled -> [ scheduled ]
+          | Concurrent_batch scheduled -> scheduled)
+        batches
+    in
+    let find_scheduled node_id =
+      match
+        List.find_opt
+          (fun (scheduled : scheduled_node) ->
+            Keeper_tool_plan.Node_id.equal scheduled.node.Keeper_tool_plan.id node_id)
+          scheduled_nodes
+      with
+      | Some scheduled -> scheduled
+      | None ->
+        invalid_arg
+          (Printf.sprintf
+             "validated composition plan lost the schedule of node %s"
+             (Keeper_tool_plan.Node_id.to_string node_id))
+    in
+    let serial_chain =
+      List.filter_map
+        (fun batch ->
+          match batch with
+          | Serial_batch scheduled -> Some scheduled.node.Keeper_tool_plan.id
+          | Concurrent_batch _ -> None)
+        batches
+    in
+    let serial_predecessor node_id =
+      let rec previous predecessor = function
+        | [] -> None
+        | candidate :: rest ->
+          if Keeper_tool_plan.Node_id.equal candidate node_id
+          then predecessor
+          else previous (Some candidate) rest
       in
-      let settlements =
-        match batch with
-        | Serial_batch scheduled -> [ execute scheduled ]
-        | Concurrent_batch scheduled -> Eio.Fiber.List.map execute scheduled
+      previous None serial_chain
+    in
+    let outcomes =
+      List.map
+        (fun node ->
+          let promise, resolve = Eio.Promise.create () in
+          (node.Keeper_tool_plan.id, promise, resolve))
+        nodes
+    in
+    let find_outcome node_id =
+      match
+        List.find_opt (fun (id, _, _) -> Keeper_tool_plan.Node_id.equal id node_id) outcomes
+      with
+      | Some (_, promise, resolve) -> (promise, resolve)
+      | None ->
+        invalid_arg
+          (Printf.sprintf
+             "validated composition plan lost the wave outcome of node %s"
+             (Keeper_tool_plan.Node_id.to_string node_id))
+    in
+    let blocked = Atomic.make [] in
+    let failures : (Keeper_tool_plan.Node_id.t * int) list Atomic.t = Atomic.make [] in
+    let tick = Atomic.make 0 in
+    let is_blocked id =
+      List.exists (Keeper_tool_plan.Node_id.equal id) (Atomic.get blocked)
+    in
+    let mark_blocked id =
+      let rec loop () =
+        let current = Atomic.get blocked in
+        if List.exists (Keeper_tool_plan.Node_id.equal id) current
+        then ()
+        else if Atomic.compare_and_set blocked current (id :: current)
+        then ()
+        else loop ()
       in
-      let batch_results = List.filter_map (fun settlement -> settlement.result) settlements in
-      let settled = settled @ batch_results in
-      (match List.find_map (fun settlement -> settlement.cause) settlements with
-       | Some cause ->
-         Error
-           { settled
-           ; cause
-           ; effect_disposition = aggregate_effect_disposition settled
-           }
-       | None ->
-         let outputs =
-           List.fold_left
-             (fun outputs settlement ->
-                match settlement.output with
-                | None -> outputs
-                | Some output ->
-                  (Keeper_tool_plan.output_node_id output, output) :: outputs)
-             outputs
-             settlements
-         in
-         run_batches ~prepared_inputs settled outputs rest)
+      loop ()
+    in
+    let mark_failed id ticket =
+      let rec loop () =
+        let current = Atomic.get failures in
+        if List.exists (fun (failed, _) -> Keeper_tool_plan.Node_id.equal failed id) current
+        then ()
+        else if Atomic.compare_and_set failures current ((id, ticket) :: current)
+        then ()
+        else loop ()
+      in
+      loop ()
+    in
+    let gate = Exclusive_gate.create () in
+    let run_node node =
+      let node_id = node.Keeper_tool_plan.id in
+      let scheduled = find_scheduled node_id in
+      let exclusive =
+        match scheduled.schedule.execution_mode with
+        | Agent_core.Tool_contract.Serial -> true
+        | Agent_core.Tool_contract.Concurrent -> false
+      in
+      let dependency_outcomes =
+        List.map
+          (fun dependency ->
+            let promise, _ = find_outcome dependency in
+            (dependency, Eio.Promise.await promise))
+          (Keeper_tool_plan.dependencies node)
+      in
+      let skip () =
+        mark_blocked node_id;
+        let _, resolve = find_outcome node_id in
+        Eio.Promise.resolve resolve Wave_skipped
+      in
+      (* Serial and terminal nodes follow the static schedule order, so a serial
+         chain stands down as a chain: when the serial predecessor failed or
+         deferred (cause <> None) or was skipped, this node dispatches no tool
+         under either branch failure policy — a serial slot never waits on a
+         predecessor whose effect never landed. The failed predecessor itself
+         still carries the plan cause through planned_index ordering. *)
+      let serial_predecessor_stopped =
+        match serial_predecessor node_id with
+        | None -> false
+        | Some predecessor ->
+          let promise, _ = find_outcome predecessor in
+          match Eio.Promise.await promise with
+          | Wave_skipped -> true
+          | Wave_settled (settlement, _) -> Option.is_some settlement.cause
+      in
+      if serial_predecessor_stopped
+      then skip ()
+      else (
+        (* A node commits once every dependency has settled: its commit ticket
+           is the latest dependency completion. Under [Fail_fast] a node stops
+           only when a failure completed before that commit, so siblings that
+           were already unblocked still settle exactly like one static batch.
+           Later or concurrent failures never retroactively stop a committed
+           node. *)
+        let commit_ticket, dependency_blocked =
+          List.fold_left
+            (fun (latest, blocked_found) (dependency, outcome) ->
+              match outcome with
+              | Wave_skipped -> (latest, true)
+              | Wave_settled (_, ticket) ->
+                ((if ticket > latest then ticket else latest), blocked_found || is_blocked dependency))
+            (-1, false)
+            dependency_outcomes
+        in
+        let failure_before_ready =
+          List.exists
+            (fun (_, failure_ticket) -> failure_ticket < commit_ticket)
+            (Atomic.get failures)
+        in
+        let halted =
+          match policy with
+          | Keeper_tool_plan.Fail_fast -> failure_before_ready
+          | Keeper_tool_plan.Continue_independent -> false
+        in
+        if dependency_blocked || halted
+        then skip ()
+        else (
+          if exclusive
+          then Exclusive_gate.acquire_exclusive gate
+          else Exclusive_gate.acquire_shared gate;
+          let release () =
+            if exclusive
+            then Exclusive_gate.release_exclusive gate
+            else Exclusive_gate.release_shared gate
+          in
+          let halted_after_gate =
+            match policy with
+            | Keeper_tool_plan.Fail_fast ->
+              List.exists
+                (fun (_, failure_ticket) -> failure_ticket < commit_ticket)
+                (Atomic.get failures)
+            | Keeper_tool_plan.Continue_independent -> false
+          in
+          if halted_after_gate
+          then (
+            release ();
+            skip ())
+          else (
+            let outputs =
+              List.filter_map
+                (fun (dependency, outcome) ->
+                  match outcome with
+                  | Wave_settled (settlement, _) ->
+                    Option.map
+                      (fun output -> (dependency, output))
+                      settlement.output
+                  | Wave_skipped -> None)
+                dependency_outcomes
+            in
+            let settlement =
+              execute_one
+                ~plan
+                ~run_id
+                ~prepared_inputs
+                ~outputs
+                ~tool_use_id_for_node
+                ~dispatch
+                ?observe_node_result
+                scheduled
+            in
+            let ticket = Atomic.fetch_and_add tick 1 in
+            release ();
+            (match settlement.cause with
+             | Some _ ->
+               mark_blocked node_id;
+               mark_failed node_id ticket
+             | None -> ());
+            let _, resolve = find_outcome node_id in
+            Eio.Promise.resolve resolve (Wave_settled (settlement, ticket)))))
+    in
+    Eio.Fiber.all (List.map (fun node () -> run_node node) nodes);
+    let wave_results =
+      List.map
+        (fun node ->
+          let promise, _ = find_outcome node.Keeper_tool_plan.id in
+          (match Eio.Promise.peek promise with
+           | Some outcome -> outcome
+           | None ->
+             invalid_arg
+               (Printf.sprintf
+                  "tool plan wave finished without settling node %s"
+                  (Keeper_tool_plan.Node_id.to_string node.Keeper_tool_plan.id))))
+        nodes
+    in
+    let settled =
+      List.filter_map
+        (fun outcome ->
+          match outcome with
+          | Wave_settled (settlement, _) -> settlement.result
+          | Wave_skipped -> None)
+        wave_results
+    in
+    let causes =
+      List.filter_map
+        (fun (node, outcome) ->
+          match outcome with
+          | Wave_settled (settlement, _) ->
+            (match settlement.cause with
+             | Some cause ->
+               let scheduled = find_scheduled node.Keeper_tool_plan.id in
+               Some (scheduled.schedule.planned_index, cause)
+             | None -> None)
+          | Wave_skipped -> None)
+        (List.combine nodes wave_results)
+    in
+    let ordered_causes =
+      List.sort (fun (left, _) (right, _) -> Int.compare left right) causes
+    in
+    (match ordered_causes with
+     | [] -> Ok settled
+     | (_, cause) :: _ ->
+       Error { settled; cause; effect_disposition = aggregate_effect_disposition settled })
   in
   let batches = schedule plan in
   match Keeper_tool_plan.prepare_inputs plan with
-  | Ok prepared_inputs -> run_batches ~prepared_inputs [] [] batches
+  | Ok prepared_inputs -> run_wave ~prepared_inputs batches
   | Error (node_id, error) ->
     let scheduled =
       List.find_map

@@ -720,6 +720,14 @@ let test_boot_catchup_submits_one_unit_per_unlaunched_keeper () =
        Config_dir_resolver.reset ();
        Eio.Switch.run @@ fun sw ->
        Lane.init ~sw;
+       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:root in
+       let candidate = Masc.Keeper_memory_os_types.observed
+         ~claim:"pending explicit observation" ~category:Fact ~now:100.
+         ~origin:{kind=Authored;trace_id="boot"} in
+       List.iter (fun keeper_id ->
+         match Masc.Keeper_memory_admission_queue.append ~keepers_dir ~keeper_id
+           ~request_id:"boot-candidate" candidate with
+         | Ok _ -> () | Error detail -> Alcotest.fail detail) ["a";"queue-only"];
        let submitted =
          Queue_refresh.submit_durable_for_unlaunched
            ~base_path:root
@@ -728,7 +736,7 @@ let test_boot_catchup_submits_one_unit_per_unlaunched_keeper () =
        in
        Alcotest.(check (list string))
          "submitted for the unlaunched"
-         [ "a"; "c" ]
+         [ "a"; "c"; "queue-only" ]
          submitted;
        (* A unit that finds nothing unread ends at once, so the entry, not
           the count, is the evidence that a submission reached the lane. *)
@@ -738,8 +746,14 @@ let test_boot_catchup_submits_one_unit_per_unlaunched_keeper () =
        Alcotest.(check bool) "a reached the lane" true (reached_lane "a");
        Alcotest.(check bool) "b was launched: nothing submitted" false (reached_lane "b");
        Alcotest.(check bool) "c reached the lane" true (reached_lane "c");
+       Alcotest.(check bool) "candidate-only keeper reached the lane" true (reached_lane "queue-only");
        Lane.For_testing.await_idle ~base_path:root ~keeper_name:"a";
-       Lane.For_testing.await_idle ~base_path:root ~keeper_name:"c")
+       Lane.For_testing.await_idle ~base_path:root ~keeper_name:"c";
+       Lane.For_testing.await_idle ~base_path:root ~keeper_name:"queue-only";
+       match Masc.Keeper_memory_admission_queue.read_pending ~keepers_dir ~keeper_id:"queue-only" with
+       | Ok (Some _) -> ()
+       | Ok None -> Alcotest.fail "missing metadata consumed pending input"
+       | Error detail -> Alcotest.fail detail)
 ;;
 
 (* The purge cancels the running catch-up and discards wakes while it runs.

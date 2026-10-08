@@ -2,8 +2,8 @@
 
 This branch implements the durable candidate store and a standalone Librarian
 admission mode. Ordinary `keeper_memory_write` still writes current Memory.
-The queue worker, startup discovery and write-tool pending receipts are not yet
-connected. This is not a deployed deferred-write feature.
+The serialized queue worker and startup discovery are connected. Write-tool
+pending receipts are not yet connected. This is not a deployed deferred-write feature.
 
 The measured baseline is [explicit-memory-admission-growth.md](explicit-memory-admission-growth.md).
 The same rule with a different observation number grew to 200 current facts;
@@ -69,8 +69,14 @@ queue tests. Later judgment/runtime changes are outside that execution result.
 The runtime fixtures use an injected exact-lane runner, not a live provider or
 CLI subprocess.
 
-Before enabling deferred writes, connect the write receipt, serialized worker,
-startup recovery, purge ownership and capacity-driven batch handling. Explicit
+The worker restores committed ranges before judging input and runs even below
+the current-Memory count targets. Only the runtime's typed range-sizing signal
+permits retrying a smaller prefix of whole candidates; uncertainty retains the
+batch. Successful prefix consumption schedules the remaining tail. Startup
+also discovers candidate-only files, retaining them if Keeper metadata is absent.
+Whole-Keeper purge owns the queue; checkpoint purge does not discard it.
+
+Before enabling deferred writes, connect the write receipt. Explicit
 source-bound writes, derived facts and superseding writes need their own admission
 semantics. Validate semantic retention with the three baseline cohorts, then
 measure actual Keeper prompts and continuity after deployment.

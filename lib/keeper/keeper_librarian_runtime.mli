@@ -167,6 +167,8 @@ type continuity_answer =
 type accepted =
   { selection : Keeper_librarian.selection
   ; continuity_answer : continuity_answer
+  ; required_memory_ids : string list
+      (** Admission destinations that must survive the locked disposition. *)
   }
 
 module For_testing : sig

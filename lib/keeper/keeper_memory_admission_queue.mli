@@ -14,6 +14,10 @@ val candidates : batch -> candidate list
 val range_id : batch -> Keeper_memory_os_current.explicit_write_range_id
 (** Digest covers the exact ordered candidate payloads, including provenance. *)
 
+val smaller_prefix : batch -> batch option
+(** After a size refusal, select the first half of complete candidates. A
+    singleton has no smaller nonempty prefix. Nothing is consumed or clipped. *)
+
 val append :
   keepers_dir:string -> keeper_id:string -> request_id:string ->
   Keeper_memory_os_types.fact -> (candidate, string) result

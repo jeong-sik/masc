@@ -1498,12 +1498,14 @@ status: reference
   키 기록(ledger)이 다 들어 있어서, 서버를 다시 켜도 그 순간부터 이어서 할 수 있다.
   게임 메뉴로 하는 저장과 다르다. 게임마다 메뉴가 없어도 되고, 저장한 뒤로 한 일까지
   남는다. DOS Lane(`masc_dos_save`·`masc_dos_restore`)과 MSX Lane(`masc_msx_save`·
-  `masc_msx_restore`·`masc_msx_checkpoint_info`)이 공통으로 쓴다. 파일 머리에 어느
-  기계인지, 형식 번호, 만든 코어의 digest 가 적힌다. 기계나 형식 번호가 다르면 읽지
-  않는다. 되살리면 새 incarnation 이 되고, 조종권은 되살린 사람이 쥔다. MSX Lane에서는
-  기계를 실제로 복원하지 않고도 슬롯의 형식 버전, 저장 시각(mtime), 저장 코어의
-  식별자(`core_sha`), 미디어 이름, 입력 엣지 수, 바이트 크기, sha256을 무부작용으로
-  검사하는 조회 계약(`masc_msx_checkpoint_info`)을 제공한다(#41773).
+  `masc_msx_restore`·`masc_msx_checkpoint_info`)이 공통으로 쓴다. DOS Lane 파일 머리에는
+  어느 기계인지, 형식 번호, 만든 코어의 digest 가 적히며, 되살리면 새 incarnation 이 되고
+  조종권은 되살린 사람이 쥔다. MSX Lane은 JSON 엔벨로프 형식을 사용하며, 기계를 실제로
+  복원(restore)하지 않고도 슬롯의 형식 버전, 저장 시각(mtime), 저장 코어 식별자(`core_sha`),
+  미디어 이름, 입력 엣지 수, 바이트 크기, sha256을 무부작용으로 검사하는 조회 계약
+  (`masc_msx_checkpoint_info`)을 제공한다(#41773). 이 조회의 성공이 복원 가능성 전체나
+  미디어 파일 실재를 보증하지는 않으며, `core_sha` 필드가 없는 구 저장본은 잘못된 코어가
+  아니라 미기록(`unknown`)으로 취급된다.
   → [Machine_checkpoint](../../lib/machine_checkpoint/machine_checkpoint.mli) ·
   [Dos_lane.restore](../../lib/dos_lane/dos_lane.mli) ·
   [Msx_lane](../../lib/msx_lane/msx_lane.mli)
@@ -1550,9 +1552,10 @@ status: reference
   바이너리가 링크한 실제 코어 소스 다이제스트(`source_digest`), CI 고정 핀의 다이제스트
   (`pinned_source_digest`), 그리고 두 다이제스트의 일치 여부(`matches_pin`)로 구성된다.
   `Dos_lane.core`와 대칭을 이루며, `masc_msx_meta` 도구를 통해 머신 복원이나 재기동 없이
-  서버의 코어 일치 상태를 조회할 수 있다. 다이제스트는 `ocaml-msx` 빌드 시점에 `lib/` 소스로부터
-  직접 계산되므로(`Msx_core_identity`), 커밋 이력이 없는 opam 릴리스 패키지 환경에서도
-  코어 변조 및 불일치를 결정론적으로 감지한다.
+  서버의 코어 일치 상태를 조회할 수 있다. 다이제스트는 `ocaml-msx` 빌드 시점에 `lib/` 최상위
+  소스 바이트(dune 및 `*.ml`/`*.mli`)로부터 계산되므로(`Msx_core_identity`), 커밋 이력이
+  없는 opam 릴리스 패키지 환경에서도 대상 소스 불일치를 결정론적으로 감지한다(전체 바이너리
+  무결성이나 하위 디렉터리 변조를 검증하는 것은 아님).
   → [Msx_lane.core](../../lib/msx_lane/msx_lane.mli) ·
   [Msx_lane.checkpoint_info](../../lib/msx_lane/msx_lane.mli)
 

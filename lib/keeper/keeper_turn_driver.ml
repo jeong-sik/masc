@@ -1462,16 +1462,31 @@ let project_input_for_attempt
       match project_media with
       | Some project -> project
       | None ->
-        fun ~needs_projection blocks ->
+        (* No reader is wired for a caller that supplied none: attachments are
+           marked unavailable rather than read. The production walk below
+           passes the real readers. *)
+        fun ~needs_projection ~deadline blocks ->
           Keeper_media_reading.project_blocks
             ~keeper_name
             ~needs_projection
-            ~read:Keeper_media_reading.production_reader
+            ~deadline
+            ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> Error "no_reader")
             blocks
+    in
+    (* One wall-clock deadline for every attachment this projection reads, built
+       from the operator's existing [turn.provider_call_deadline_sec]. That
+       setting is the per-attempt no-progress ceiling of a provider call;
+       here it only caps this pre-provider step. It is not a turn-wide
+       deadline and reserves nothing for the fallback provider call. Attachments
+       share it, so the total wait does not grow with their number. *)
+    let media_deadline =
+      Monotonic_deadline.after ~seconds:(Keeper_runtime_resolved.provider_call_deadline_sec ())
     in
     let media_projected = ref [] in
     let project_media_blocks blocks =
-      let projected, counts = project_media ~needs_projection:needs_media_projection blocks in
+      let projected, counts =
+        project_media ~needs_projection:needs_media_projection ~deadline:media_deadline blocks
+      in
       media_projected := Runtime_agent.merge_modality_counts !media_projected counts;
       projected
     in
@@ -2418,12 +2433,16 @@ let run_named
            attempt_replay_prefix_projection=Keeper_replay_prefix.unchanged}
         | None, None -> project_input_for_attempt
           ~project_media:
-            (fun ~needs_projection blocks ->
+            (fun ~needs_projection ~deadline blocks ->
               Keeper_media_reading.project_blocks
                 ~base_path
                 ~keeper_name
                 ~needs_projection
-                ~read:Keeper_media_reading.production_reader
+                ~deadline
+                ~read:
+                  (Keeper_media_reading.production_reader
+                     ~base_path
+                     ~budget_sec:(Keeper_runtime_resolved.provider_call_deadline_sec ()))
                 blocks)
           ~project_images
           ~keeper_name

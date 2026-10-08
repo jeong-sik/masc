@@ -230,3 +230,25 @@ That `inspect` still gets the same 60 s deadline, the same error variants
 (`Poppler_budget_spent`, `Too_many_pages`, `Rendered_bytes_exceeded`,
 `Image_policy_rejected`, `Payload_budget_exceeded`, `Storage_failed`) and the
 same `Fs_compat.remove_tree` on release after `extract_text` is factored out.
+
+## Implementation of the accepted budget (leader c-e3614999a360e1d946bad3981df63479)
+- Meaning of the value: `turn.provider_call_deadline_sec` keeps its original
+  meaning, the no-progress ceiling of one provider attempt. For the H5 reader
+  step it is **also** used as a wall-clock cap for the pre-provider projection.
+  It is not a turn-wide deadline and reserves nothing for the fallback provider
+  call. No new constant was added.
+- One deadline per projection: `project_input_for_attempt` builds a single
+  `Monotonic_deadline.t` and passes it to every attachment of that projection
+  (goal, history, checkpoint). Attachments do not restart the clock; a
+  reading that must still be read after the deadline is spent is not started and
+  is marked `unavailable: budget_spent` (original kept). A stored reading needs
+  no budget.
+- `Verification_pdf_inspection.extract_text ~deadline ~budget_sec` is the text
+  half of `inspect`; `inspect` now reuses the same internals (`with_source`,
+  `make_runner`) and still builds its own 60 s deadline.
+- Open gap, not closed: `Voice_bridge.transcribe_audio` has no deadline
+  parameter. The STT chain runs each endpoint under its own transport timeout
+  (voice_bridge_transport.ml, `Env_config_runtime.Voice.http_request_timeout_sec`,
+  curl `--max-time 30`) and can spend several. The audio reader refuses to
+  start after the deadline but cannot stop a running STT call at it. H5-S1's
+  time bound is therefore not measured.

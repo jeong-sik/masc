@@ -20,16 +20,28 @@ type kind =
   | Document
 
 type reader =
-  kind:kind -> media_type:string -> bytes:string -> (string, string) result
-(** [Error reason] is a closed, short reason; it is shown to the model. *)
+  deadline:Monotonic_deadline.t ->
+  kind:kind ->
+  media_type:string ->
+  bytes:string ->
+  (string, string) result
+(** [Error reason] is a closed, short reason; it is shown to the model. The
+    [deadline] is shared by every reader call of one projection: a reader that
+    can stop must stop at it, and it must not start a clock of its own. *)
 
 val reader_version : string
 (** Part of the stored record; bump when reading semantics change. *)
 
-val production_reader : reader
+val production_reader : base_path:string -> budget_sec:float -> reader
 (** Audio goes through {!Voice_bridge.transcribe_audio} (the configured STT
-    endpoint chain) from a temporary file. Documents have no reader wired on
-    the keeper turn path yet and answer [Error "no_document_reader"]. *)
+    endpoint chain) from a temporary file. The STT chain takes no deadline: it
+    is not started once [deadline] has passed, but an STT call already running
+    is bounded only by its own per-endpoint transport timeouts, and the chain
+    can spend several of them. That is an open gap, not a bound.
+
+    A PDF goes through {!Verification_pdf_inspection.extract_text} with the
+    shared [deadline]; [budget_sec] is only what its budget error reports. Other
+    document types answer [Error "no_document_reader"]. *)
 
 val source_sha256 : string -> string
 (** Lowercase hex sha256 of the decoded payload bytes. *)
@@ -38,6 +50,7 @@ val project_blocks :
   ?base_path:string ->
   keeper_name:string ->
   needs_projection:(kind -> bool) ->
+  deadline:Monotonic_deadline.t ->
   read:reader ->
   Agent_core.Types.content_block list ->
   Agent_core.Types.content_block list * (string * int) list
@@ -45,4 +58,7 @@ val project_blocks :
     [needs_projection] returns [true] for. Returns the projected list and the
     count of blocks replaced per modality name (audio, document). Blocks of other kinds, and nested tool-result
     content, are returned unchanged. Within one call, one reader invocation
-    serves repeated occurrences of the same payload. *)
+    serves repeated occurrences of the same payload. A stored reading is used
+    without consulting [deadline]; when the reader would have to run and
+    [deadline] has passed, the reader is not called and the attachment is
+    marked unavailable with reason [budget_spent]. *)

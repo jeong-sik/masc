@@ -3,7 +3,11 @@ type kind =
   | Document
 
 type reader =
-  kind:kind -> media_type:string -> bytes:string -> (string, string) result
+  deadline:Monotonic_deadline.t ->
+  kind:kind ->
+  media_type:string ->
+  bytes:string ->
+  (string, string) result
 
 let reader_version = "1"
 
@@ -52,10 +56,43 @@ let transcribe_bytes ~media_type ~bytes =
               | None, _ -> Error "stt_status_missing")))
 ;;
 
-let production_reader ~kind ~media_type ~bytes =
+let pdf_reason = function
+  | Verification_pdf_inspection.Dependency_unavailable _ -> "dependency_unavailable"
+  | Verification_pdf_inspection.Poppler_budget_spent _ -> "budget_spent"
+  | Verification_pdf_inspection.Payload_budget_exceeded _ -> "payload_too_large"
+  | Verification_pdf_inspection.Too_many_pages _ -> "too_many_pages"
+  | Verification_pdf_inspection.Command_failed _
+  | Verification_pdf_inspection.Invalid_output _
+  | Verification_pdf_inspection.Image_policy_rejected _
+  | Verification_pdf_inspection.Rendered_bytes_exceeded _
+  | Verification_pdf_inspection.Storage_failed _ -> "extraction_failed"
+;;
+
+let extract_pdf ~base_path ~budget_sec ~deadline ~bytes =
+  match
+    Verification_pdf_inspection.extract_text ~deadline ~budget_sec ~base_path ~bytes ()
+  with
+  | Error error -> Error (pdf_reason error)
+  | Ok pages ->
+    let numbered =
+      List.mapi (fun index text -> Printf.sprintf "[page %d]\n%s" (index + 1) text) pages
+    in
+    let joined = String.concat "\n" numbered in
+    if List.for_all (fun text -> String.trim text = "") pages
+    then Error "empty_extraction"
+    else Ok joined
+;;
+
+let production_reader ~base_path ~budget_sec ~deadline ~kind ~media_type ~bytes =
   match kind with
-  | Audio -> transcribe_bytes ~media_type ~bytes
-  | Document -> Error "no_document_reader"
+  | Audio ->
+    if Monotonic_deadline.passed deadline
+    then Error "budget_spent"
+    else transcribe_bytes ~media_type ~bytes
+  | Document ->
+    if String.lowercase_ascii media_type = "application/pdf"
+    then extract_pdf ~base_path ~budget_sec ~deadline ~bytes
+    else Error "no_document_reader"
 ;;
 
 (* --- durable store ------------------------------------------------------- *)
@@ -164,7 +201,7 @@ let reference_text ~kind ~media_type ~source =
     source
 ;;
 
-let project_blocks ?base_path ~keeper_name ~needs_projection ~read blocks =
+let project_blocks ?base_path ~keeper_name ~needs_projection ~deadline ~read blocks =
   let memo : (kind * string, string) Hashtbl.t = Hashtbl.create 4 in
   let replaced : (string * int) list ref = ref [] in
   let project_one ~kind ~media_type ~data ~source_type block =
@@ -194,7 +231,11 @@ let project_blocks ?base_path ~keeper_name ~needs_projection ~read blocks =
                  match load_reading ~base_path ~keeper_name ~kind ~media_type ~sha with
                  | Some reading -> read_text ~kind ~media_type ~sha ~text:reading
                  | None ->
-                   (match read ~kind ~media_type ~bytes with
+                   (match
+                      if Monotonic_deadline.passed deadline
+                      then Error "budget_spent"
+                      else read ~deadline ~kind ~media_type ~bytes
+                    with
                     | Ok reading when String.trim reading <> "" ->
                       store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~text:reading;
                       read_text ~kind ~media_type ~sha ~text:reading

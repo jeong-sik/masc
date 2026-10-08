@@ -1063,11 +1063,12 @@ let h5_text_of_blocks blocks =
   |> String.concat "\n"
 
 let h5_projector ?base_path ~read =
-  fun ~needs_projection blocks ->
+  fun ~needs_projection ~deadline blocks ->
     Masc.Keeper_media_reading.project_blocks
       ?base_path
       ~keeper_name:"h5-media-fallback"
       ~needs_projection
+      ~deadline
       ~read
       blocks
 
@@ -1117,11 +1118,11 @@ let h5_fresh_dir () =
   Sys.mkdir dir 0o755;
   dir
 
-let h5_reader_counting calls ~answer ~kind:_ ~media_type:_ ~bytes:_ =
+let h5_reader_counting calls ~answer ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ =
   incr calls;
   answer
 
-let h5_reader_forbidden ~kind:_ ~media_type:_ ~bytes:_ =
+let h5_reader_forbidden ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ =
   Alcotest.fail "a stored reading must be reused without calling the reader"
 
 (* H5-S1: a fact only the audio holds. The text-only candidate's input names the
@@ -1213,6 +1214,66 @@ let test_h5_s3_unreadable_attachment_is_marked_unavailable () =
   in
   Alcotest.(check bool) "an unavailable result is retried, not remembered" true
     (contains ~needle:"the vault code is 4172" recovered)
+
+(* H5 time budget: a stored reading needs no budget; a missing one is not read
+   once the shared deadline is spent; and the deadline is one clock for every
+   attachment of a projection. *)
+let h5_project_direct ?base_path ~deadline ~read blocks =
+  Masc.Keeper_media_reading.project_blocks
+    ?base_path ~keeper_name:"h5-media-fallback"
+    ~needs_projection:(fun _ -> true) ~deadline ~read blocks
+
+let h5_texts blocks =
+  List.filter_map (function Agent_core.Types.Text t -> Some t | _ -> None) blocks
+
+let test_h5_spent_deadline_does_not_call_the_reader () =
+  let blocks, replaced =
+    h5_project_direct
+      ~deadline:(Monotonic_deadline.after ~seconds:0.)
+      ~read:h5_reader_forbidden
+      [ h5_audio_block () ]
+  in
+  Alcotest.(check int) "the block was projected" 1 (List.length replaced);
+  let text = String.concat "\n" (h5_texts blocks) in
+  Alcotest.(check bool) "marked unavailable" true (contains ~needle:"status=unavailable" text);
+  Alcotest.(check bool) "with the budget reason" true (contains ~needle:"budget_spent" text)
+
+let test_h5_stored_reading_is_used_after_the_deadline_is_spent () =
+  let dir = h5_fresh_dir () in
+  let live = Monotonic_deadline.after ~seconds:30. in
+  ignore
+    (h5_project_direct ~base_path:dir ~deadline:live
+       ~read:(h5_reader_counting (ref 0) ~answer:(Ok ("transcript: " ^ h5_fact_audio)))
+       [ h5_audio_block () ]);
+  let blocks, _ =
+    h5_project_direct ~base_path:dir
+      ~deadline:(Monotonic_deadline.after ~seconds:0.)
+      ~read:h5_reader_forbidden [ h5_audio_block () ]
+  in
+  Alcotest.(check bool) "the stored reading answers without a budget" true
+    (contains ~needle:"the vault code is 4172" (String.concat "\n" (h5_texts blocks)))
+
+let test_h5_attachments_share_one_deadline () =
+  let calls = ref 0 in
+  let slow_then_forbidden ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ =
+    incr calls;
+    if !calls > 1 then Alcotest.fail "the second attachment must not start a fresh budget";
+    Unix.sleepf 0.2;
+    Ok "first reading"
+  in
+  let blocks, _ =
+    h5_project_direct
+      ~deadline:(Monotonic_deadline.after ~seconds:0.05)
+      ~read:slow_then_forbidden
+      [ h5_audio_block (); h5_document_block () ]
+  in
+  let texts = h5_texts blocks in
+  Alcotest.(check int) "two attachments, two blocks" 2 (List.length texts);
+  Alcotest.(check bool) "the first was read" true
+    (contains ~needle:"first reading" (List.nth texts 0));
+  Alcotest.(check bool) "the second ran out of the shared budget" true
+    (contains ~needle:"budget_spent" (List.nth texts 1));
+  Alcotest.(check int) "the reader ran once" 1 !calls
 
 let synthetic_image () =
   Agent_core.Types.image_block
@@ -6478,6 +6539,18 @@ let () =
             "H5-S3 unreadable attachment is marked unavailable"
             `Quick
             test_h5_s3_unreadable_attachment_is_marked_unavailable;
+          Alcotest.test_case
+            "H5 spent deadline does not call the reader"
+            `Quick
+            test_h5_spent_deadline_does_not_call_the_reader;
+          Alcotest.test_case
+            "H5 stored reading is used after the deadline is spent"
+            `Quick
+            test_h5_stored_reading_is_used_after_the_deadline_is_spent;
+          Alcotest.test_case
+            "H5 attachments share one deadline"
+            `Quick
+            test_h5_attachments_share_one_deadline;
           Alcotest.test_case
             "media rows keep their fields in the public view"
             `Quick

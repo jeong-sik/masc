@@ -172,21 +172,28 @@ let nullable read = function
    is under 200 bytes; the rest of the room is for a peer's own words. *)
 let reason_limit_bytes = 512
 let cut_mark = "..."
-let printable_byte byte = byte >= ' ' && byte <= '~'
-let upper_hex byte = (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'F')
+(* The bytes a reason keeps as they are: printable ASCII. Any other byte,
+   and the backslash that marks one, is written as [\xNN]. *)
+let written_as_is byte = byte >= ' ' && byte <= '~' && byte <> '\\'
 
-(* The pieces the writer leaves: a printable byte other than the backslash,
-   and [\xNN] with two upper-case hex digits for any other byte. A cut falls
-   between pieces, so the mark after it is three more printable bytes. *)
+let hex_value byte =
+  if byte >= '0' && byte <= '9' then Some (Char.code byte - Char.code '0')
+  else if byte >= 'A' && byte <= 'F' then Some (Char.code byte - Char.code 'A' + 10)
+  else None
+
+(* The pieces the writer leaves: a byte written as it is, and [\xNN] with
+   two upper-case hex digits for one that is not. A cut falls between
+   pieces, so the mark after it is three more bytes written as they are. *)
 let rec written_pieces raw index =
   if index = String.length raw then true
   else if raw.[index] = '\\' then
     index + 4 <= String.length raw
     && raw.[index + 1] = 'x'
-    && upper_hex raw.[index + 2]
-    && upper_hex raw.[index + 3]
+    && (match hex_value raw.[index + 2], hex_value raw.[index + 3] with
+        | Some high, Some low -> not (written_as_is (Char.chr ((16 * high) + low)))
+        | Some _, None | None, (Some _ | None) -> false)
     && written_pieces raw (index + 4)
-  else printable_byte raw.[index] && written_pieces raw (index + 1)
+  else written_as_is raw.[index] && written_pieces raw (index + 1)
 
 (* A reason in the bytes and at the length the writer leaves one: its pieces,
    within the limit, or cut there and marked. The reader takes no other, so
@@ -512,7 +519,7 @@ let printable reason =
     else (
       let byte = reason.[index] in
       let piece =
-        if printable_byte byte && byte <> '\\' then String.make 1 byte
+        if written_as_is byte then String.make 1 byte
         else Printf.sprintf "\\x%02X" (Char.code byte)
       in
       if Buffer.length written + String.length piece > reason_limit_bytes

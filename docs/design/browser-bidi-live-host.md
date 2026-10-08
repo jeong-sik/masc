@@ -196,8 +196,8 @@ one free sentence, and it is written as printable ASCII: other bytes appear
 as `\xNN`, and a reason longer than 512 bytes is cut.
 
 A reader takes these three only in the form a host writes them: a reason in
-printable ASCII, with a backslash only where it starts `\xNN`, that is
-within that length or cut there and marked, an
+printable ASCII, with `\xNN` only for a byte a host does not write as it
+is, that is within that length or cut there and marked, an
 address as a host records it, and a client ID the lane would take. Anything
 else makes the record unreadable to it. What a reader passes on to an
 operator, a terminal and a model is then one line of known bytes and length;
@@ -237,9 +237,7 @@ does next:
 - A Keeper whose hover or drag is refused as `live_transport_unsupported`
   while no connected browser serves it gets `bidiHost` in the answer, with
   `state` and `message` only, to pass on to the operator. An answer that
-  offers a connection in `servingClients` has no `bidiHost`. The connection
-  of a host whose record says it ended or died is not offered there: the
-  server lists it until its lease ends, and nothing polls it.
+  offers a connection in `servingClients` has no `bidiHost`.
 - The TUI's Browser Lane picker draws it from the server's `bidiHost`:
   whether a host runs and whether the server lists it, why the last one
   ended, what comes before the next, the results the host holds no

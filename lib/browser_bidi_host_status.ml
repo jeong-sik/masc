@@ -19,24 +19,6 @@ let listed_clients { lane; record = _ } =
   | Launcher.Serving { polling; _ } -> polling
   | Launcher.Not_serving -> Browser_lane.active_clients ()
 
-let same_client left right =
-  String.equal (Browser_lane.client_id_to_string left) (Browser_lane.client_id_to_string right)
-
-(* The BiDi client a host that no longer runs had. The server lists it until
-   its lease ends, and nothing polls it. *)
-let gone_client record =
-  match record with
-  | Record.Ended (entry, _) | Record.Died entry -> Some entry.client_id
-  | Record.Never_started | Record.Running _ | Record.Unreadable _ -> None
-
-let is_gone record (info : Browser_lane.client_info) =
-  match gone_client record with
-  | Some gone -> info.transport = Browser_lane.Webdriver_bidi && same_client gone info.client_id
-  | None -> false
-
-let live_clients ({ lane = _; record } as observation) =
-  List.filter (fun info -> not (is_gone record info)) (listed_clients observation)
-
 type launcher_standing = Launcher_installed | Launcher_not_installed | Launcher_needs_reinstall
 
 type attach = { launcher : string; arguments : string; standing : launcher_standing }
@@ -118,9 +100,11 @@ let poll_of (t : Launcher.t) (entry : Record.entry) =
   match t.server with
   | Launcher.Not_serving -> Poll_unobserved
   | Launcher.Serving { polling; _ } ->
+      let named = Browser_lane.client_id_to_string entry.client_id in
       (match
          List.partition
-           (fun (info : Browser_lane.client_info) -> same_client info.client_id entry.client_id)
+           (fun (info : Browser_lane.client_info) ->
+              String.equal (Browser_lane.client_id_to_string info.client_id) named)
            (bidi_clients polling)
        with
        | _ :: _, _ -> Polls_here
@@ -164,34 +148,19 @@ let poll_sentence = function
 
 (* What is said, besides, of a host that does not run while the server lists
    a BiDi connection: the record and the list are two words, and for a while
-   they can differ. The connection of the host the record names is that
-   host's lease and serves nothing; another may be another workspace's. *)
-let listed_beside (t : Launcher.t) record =
+   they can differ. *)
+let listed_beside (t : Launcher.t) =
   match t.server with
   | Launcher.Not_serving -> ""
   | Launcher.Serving { polling; _ } ->
-      let gone, others = List.partition (is_gone record) (bidi_clients polling) in
-      let gone_sentence =
-        match gone with
-        | [] -> ""
-        | _ :: _ ->
-            Printf.sprintf
-              " This server still lists the BiDi connection that host had. Nothing polls it, \
-               so it serves nothing, and the server ends it once %.0f seconds pass without a \
-               poll."
-              Browser_lane.lane_connected_window_sec
-      in
-      let others_sentence =
-        match others with
-        | [] -> ""
-        | _ :: _ ->
-            Printf.sprintf
-              " This server lists a BiDi connection all the same: a host that died stays listed \
-               until %.0f seconds pass without a poll, and a host started for another workspace \
-               can poll this server."
-              Browser_lane.lane_connected_window_sec
-      in
-      gone_sentence ^ others_sentence
+      (match bidi_clients polling with
+       | [] -> ""
+       | _ :: _ ->
+           Printf.sprintf
+             " This server lists a BiDi connection all the same: a host that died stays listed \
+              until %.0f seconds pass without a poll, and a host started for another workspace \
+              can poll this server."
+             Browser_lane.lane_connected_window_sec)
 
 (* The results are in the record; the sentence says how many, where, and
    that the record tells them apart. No acknowledgement reaching the host is
@@ -262,7 +231,7 @@ let message { lane = t; record } =
       Printf.sprintf
         "No BiDi browser host has run for this workspace. Hover and drag on the live lane need \
          one. The operator starts Firefox on a profile kept for this with %s PORT, then %s.%s%s"
-        firefox_flag (run_host t ~address:None) (listed_beside t record) (steps t)
+        firefox_flag (run_host t ~address:None) (listed_beside t) (steps t)
   | Record.Running entry ->
       let client = Browser_lane.client_id_to_string entry.client_id in
       (match entry.attached_at, poll_of t entry with
@@ -286,7 +255,7 @@ let message { lane = t; record } =
         "No BiDi browser host is running. The last one (pid %d, given %s) ended at %s with this \
          reason: %s.%s%s%s%s"
         entry.pid entry.bidi_url (at ending.at) (quoted ending.reason)
-        (unacknowledged t entry) (next_host t entry ending) (listed_beside t record)
+        (unacknowledged t entry) (next_host t entry ending) (listed_beside t)
         (steps t)
   | Record.Died entry ->
       Printf.sprintf
@@ -296,13 +265,14 @@ let message { lane = t; record } =
          host a session, the session was left there, and that Firefox is restarted with %s \
          before the host is run again.%s%s"
         entry.pid entry.bidi_url (at entry.started_at) (unacknowledged t entry)
-        (run_host t ~address:(Some entry.bidi_url)) (firefox_at entry.bidi_url) (listed_beside t record)
+        (run_host t ~address:(Some entry.bidi_url)) (firefox_at entry.bidi_url) (listed_beside t)
         (steps t)
   | Record.Unreadable { detail; held = Some true } ->
       Printf.sprintf
         "A BiDi browser host holds this workspace's lock, so one is running, and its record \
          cannot be read (%s). A second host is refused while that one runs. Once the operator \
-         stops it, the next host writes a new record in its place."
+         stops it, the next host writes a new record in its place, and does not start when it \
+         cannot."
         detail
   | Record.Unreadable { detail; held = Some false } ->
       Printf.sprintf
@@ -310,7 +280,7 @@ let message { lane = t; record } =
          lock, so none is running. The next host writes a new record in its place, and does not \
          start when it cannot. The operator starts Firefox on a profile kept for this with %s \
          PORT, unless it runs already, then %s.%s%s"
-        detail firefox_flag (run_host t ~address:None) (listed_beside t record) (steps t)
+        detail firefox_flag (run_host t ~address:None) (listed_beside t) (steps t)
   | Record.Unreadable { detail; held = None } ->
       Printf.sprintf
         "Whether a BiDi browser host runs for this workspace could not be checked (%s)." detail

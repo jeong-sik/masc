@@ -24,8 +24,7 @@
     `died`·`unreadable`)다. `message`는 host가 지금 떠 있는지, 마지막 host가 언제 왜
     끝났는지, 다음 host를 띄우기 전에 운영자가 할 일(예: 그 Firefox를 다시 띄우기)을
     말한다. 이 `message`도 운영자에게 그대로 전한다. host를 띄우는 일은 운영자가 한다.
-    `servingClients`에 연결이 있으면 `bidiHost`는 없다. 끝났거나 죽은 host 의 연결은
-    서버 목록(`clients`)에 잠시 남지만 `servingClients`에는 없다. 그 연결로는 다시 하지 않는다.
+    `servingClients`에 연결이 있으면 `bidiHost`는 없다.
 - live 응답은 성공했을 때도 `clientId` 옆에 `transport`를 싣는다. hover나 drag가 필요한
   일이면 시작할 때 이 값을 본다. `web_extension`이면 그 연결로는 못 하므로, 연결 목록에
   `webdriver_bidi` 연결이 있는지 먼저 확인한다. automation과 stagehand 응답에는

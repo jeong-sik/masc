@@ -543,6 +543,7 @@ let test_keeper_hears_which_connection_serves_the_work () =
   let workspace = Filename.temp_dir "masc-browser-surface-bidi-" "" in
   let lane_directory = List.fold_left Filename.concat workspace [".masc"; "browser-lane"] in
   Fun.protect ~finally:(fun () ->
+      Browser_lane.withdraw_serving_port ();
       if Sys.file_exists lane_directory then
         Array.iter (fun name -> Sys.remove (Filename.concat lane_directory name))
           (Sys.readdir lane_directory);
@@ -687,18 +688,7 @@ let test_keeper_hears_which_connection_serves_the_work () =
       let data = interact extension hover in
       check (list string) "the running host's connection is offered" [id host] (ids "servingClients" data);
       check bool "with no host remedy" false (List.mem_assoc "bidiHost" U.(data |> to_assoc));
-      (* Killed, it leaves no ending, and the server lists its connection
-         until the lease ends. Nothing polls that connection, so it is not
-         offered, and the Keeper hears why the work waits for the operator. *)
       released held;
-      let data = interact extension hover in
-      check (list string) "a killed host's connection is not offered" [] (ids "servingClients" data);
-      check (list string) "though the server still lists it" [id extension; id host] (ids "clients" data);
-      check string "the host is read as dead" "died" U.(data |> member "bidiHost" |> member "state" |> to_string);
-      check bool "and the connection it left is said to serve nothing" true
-        (String_util.contains_substring (host_said data)
-           "This server still lists the BiDi connection that host had. Nothing polls it, so it \
-            serves nothing");
       ignore (Lane.disconnect_client ~client_id:host.client_id);
       (* Work no BiDi connection does is refused without a word of the BiDi
          host, also when nothing connected serves it. *)

@@ -153,16 +153,9 @@ let selection_error ~base_path ~tool_name ~start_time error =
       match host with
       | Some host -> Browser_bidi_host_status.listed_clients host
       | None -> Browser_lane.active_clients () in
-    (* A connection whose host the record says no longer runs is still
-       listed for as long as its lease lasts, and serves nothing: it is not
-       offered. *)
-    let live =
-      match host with
-      | Some host -> Browser_bidi_host_status.live_clients host
-      | None -> listed in
     let serving_clients =
       List.filter (fun (info : Browser_lane.client_info) ->
-        Browser_lane.live_transport_serves info.transport capability) live in
+        Browser_lane.live_transport_serves info.transport capability) listed in
     (* A connection of the other kind may belong to another browser profile,
        and its tab IDs are its own, so the retry starts from its tabs. *)
     let retry = match serving_clients with

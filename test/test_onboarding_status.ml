@@ -450,7 +450,8 @@ let a_bidi_host_record_that_cannot_be_read_is_invalid () =
   says observed
     [ "A BiDi browser host holds this workspace's lock, so one is running"
     ; "its record cannot be read"; "A second host is refused while that one runs"
-    ; "Once the operator stops it, the next host writes a new record in its place." ];
+    ; "Once the operator stops it, the next host writes a new record in its place, and does not \
+       start when it cannot." ];
   (* Why it cannot be read is the reader's own word; nothing is guessed
      beside it. *)
   lacks (bidi_message observed) [ "then runs" ];
@@ -524,42 +525,25 @@ let a_running_host_is_rated_by_the_server_that_lists_it () =
     [ "Its record, /workspace/.masc/browser-lane/bidi-host.json, lists one result the host holds \
        no acknowledgement for" ];
   (* The record says no host runs and the server lists a BiDi connection:
-     the two are told apart and neither is taken for the other. The
-     connection of the host the record names is that host's lease, which
-     serves nothing; another may be another workspace's. *)
+     the two are told apart and neither is taken for the other. *)
   let ending : Record.ending =
     { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.No_session_left }
   in
-  let its_lease =
-    "This server still lists the BiDi connection that host had. Nothing polls it, so it serves \
-     nothing, and the server ends it once 120 seconds pass without a poll."
-  in
-  let all_the_same =
-    [ "This server lists a BiDi connection all the same"
-    ; "a host that died stays listed until 120 seconds pass without a poll"
-    ; "a host started for another workspace can poll this server" ]
-  in
-  List.iter (fun (record, the_hosts_own) ->
-      let message server = Status.message (observation ~server record) in
-      if the_hosts_own then (
-        has (message listing) [ its_lease ];
-        lacks (message listing) [ "all the same" ];
-        has (message lists_another) all_the_same;
-        lacks (message lists_another) [ "that host had" ])
-      else (
-        has (message listing) all_the_same;
-        lacks (message listing) [ "that host had" ]);
-      List.iter (fun server -> lacks (message server) [ "all the same"; "that host had" ])
-        (Launcher.Not_serving :: lists_no_bidi);
+  List.iter (fun record ->
+      has (Status.message (observation ~server:listing record))
+        [ "This server lists a BiDi connection all the same"
+        ; "a host that died stays listed until 120 seconds pass without a poll"
+        ; "a host started for another workspace can poll this server" ];
       List.iter (fun server ->
-          check bool "a listed connection does not make a host that does not run a running one" true
-            (match Status.verdict (observation ~server record) with
-             | Status.Host_not_running | Status.Host_unreadable -> true
-             | Status.Host_absent | Status.Host_serving | Status.Host_unverified -> false))
-        [ listing; lists_another ])
-    [ Record.Never_started, false; Record.Died host_entry, true
-    ; Record.Ended ({ host_entry with ended = Some ending }, ending), true
-    ; Record.Unreadable { detail = "torn"; held = Some false }, false ];
+          lacks (Status.message (observation ~server record)) [ "all the same" ])
+        (Launcher.Not_serving :: lists_no_bidi);
+      check bool "a listed connection does not make a host that does not run a running one" true
+        (match Status.verdict (observation ~server:listing record) with
+         | Status.Host_not_running | Status.Host_unreadable -> true
+         | Status.Host_absent | Status.Host_serving | Status.Host_unverified -> false))
+    [ Record.Never_started; Record.Died host_entry
+    ; Record.Ended ({ host_entry with ended = Some ending }, ending)
+    ; Record.Unreadable { detail = "torn"; held = Some false } ];
   List.iter (fun (name, launcher, record, verdict) ->
       check bool name true (Status.verdict (observation ~launcher record) = verdict))
     [ "nothing installed and nothing run", Launcher.Not_installed, Record.Never_started, Status.Host_absent

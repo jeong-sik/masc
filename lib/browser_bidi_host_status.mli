@@ -23,11 +23,6 @@ val observe : base_path:string -> observation
     listed by this call. *)
 val listed_clients : observation -> Browser_lane.client_info list
 
-(** {!listed_clients} without the BiDi connection of a host the record says
-    no longer runs. The server lists that connection until its lease ends,
-    and nothing polls it, so a command sent there is never taken. *)
-val live_clients : observation -> Browser_lane.client_info list
-
 (** What the record, the lock and the observed server say together. *)
 type verdict =
   | Host_absent
@@ -59,8 +54,8 @@ val verdict : observation -> verdict
       and the Firefox is restarted when that host is refused a session.
     The command names the address the last host was given. With a server
     observed it also says whether that server lists a running host's client,
-    when it still lists the connection of a host that no longer runs, and
-    when it lists a BiDi connection that is not the host the record names.
+    and when it lists a BiDi connection that is not the host the record
+    names.
 
     A path, an address and the reason for ending come from files and from
     the host. In a command the operator runs, a path and an address are

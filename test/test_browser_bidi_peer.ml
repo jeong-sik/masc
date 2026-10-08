@@ -1,5 +1,8 @@
 open Alcotest
 module Peer = Masc.Browser_bidi_peer
+(* The session request's failure as the sentence the host logs. Which kind of
+   failure it was is asked where a case is about that. *)
+let metadata peer = Result.map_error Peer.session_failure_message (Peer.metadata peer)
 let obj xs = `Assoc xs
 (* The session's end, with a failure as its sentence. *)
 let ended_session peer =
@@ -280,7 +283,7 @@ let test_the_session_is_ended_after_a_command_got_no_reply () =
   let outcome=with_scripted_firefox script (fun ~ended peer ->
     check (result unit string) "nothing to end before a session exists" (Ok ()) (ended_session peer);
     check bool "and nothing was sent for it" true (!seen=[]);
-    (match Peer.metadata peer with
+    (match metadata peer with
      | Ok version -> check string "the session was created" "157.0-scripted" version
      | Error detail -> fail detail);
     (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
@@ -305,7 +308,7 @@ let test_a_session_that_cannot_be_ended_is_an_error () =
   let closed_under_it=with_scripted_firefox (fun flow ->
       send_server_message flow (session_created (read_client_message flow)))
     (fun ~ended peer ->
-      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       (* The script returned after its one answer, which closed the socket.
          The session is ended only once this side has seen that. *)
       let closed=Eio.Promise.await ended in
@@ -318,7 +321,7 @@ let test_a_session_that_cannot_be_ended_is_an_error () =
       (* Held open without an answer until the client is done. *)
       try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
     (fun ~ended:_ peer ->
-      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       match ended_session peer with
       | Ok () -> Ok ()
       | Error detail -> Error detail) in
@@ -333,7 +336,7 @@ let test_a_socket_closing_under_session_end_is_told_at_once () =
       (* Returning after session.end arrived closes the socket under it. *)
       ignore (read_client_message flow : Yojson.Safe.t))
     (fun ~ended:_ peer ->
-      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
        | Error (Peer.Before_effect _) -> ()
        | Error (Peer.Outcome_unknown detail) -> fail detail
@@ -351,7 +354,7 @@ let test_why_a_session_was_not_ended_says_whether_firefox_could_be_asked () =
   let ending script =
     let seen=ref "not reached" in
     let finished=with_scripted_firefox script (fun ~ended:_ peer ->
-      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       seen:=kind (Peer.end_session peer);
       Ok ()) in
     check (result unit string) "the connection finished" (Ok ()) finished;
@@ -387,7 +390,7 @@ let test_a_session_nobody_confirmed_is_ended () =
       send_server_message flow (reply_to ending (obj [])))
     (fun ~ended:_ peer ->
       check (result string string) "no answer to session.new"
-        (Error "BiDi transport deadline exceeded") (Peer.metadata peer);
+        (Error "BiDi transport deadline exceeded") (metadata peer);
       ended_session peer) in
   check (result unit string) "the session is ended all the same" (Ok ()) unanswered;
   check (list string) "what Firefox was sent, in order" ["session.new";"session.end"] (List.rev !seen)
@@ -403,8 +406,13 @@ let test_a_refused_session_leaves_none_to_end () =
       | further -> seen:=method_of further :: !seen
       | exception End_of_file -> ())
     (fun ~ended peer ->
-      check (result string string) "Firefox's refusal is the error"
-        (Error "BiDi command rejected: session not created") (Peer.metadata peer);
+      (* Firefox says this while it holds a session, so the host is told it
+         was refused one, apart from every other way of getting none. *)
+      (match Peer.metadata peer with
+       | Error (Peer.Session_refused said) ->
+         check string "Firefox's refusal is the error" "BiDi command rejected: session not created" said
+       | Error (Peer.Session_failed said) -> failf "a refused session was read as a failed one: %s" said
+       | Ok version -> failf "a refused session answered a version: %s" version);
       check bool "and the connection is not ended by it" true (Eio.Promise.peek ended=None);
       ended_session peer) in
   check (result unit string) "nothing to end" (Ok ()) refused;
@@ -421,7 +429,7 @@ let test_an_unreadable_refusal_leaves_a_session_to_end () =
       seen:=method_of ending :: !seen;
       send_server_message flow (reply_to ending (obj [])))
     (fun ~ended:_ peer ->
-      check (result string string) "the answer has no code" (Error "BiDi missing error") (Peer.metadata peer);
+      check (result string string) "the answer has no code" (Error "BiDi missing error") (metadata peer);
       ended_session peer) in
   check (result unit string) "the session is ended" (Ok ()) outcome;
   check (list string) "what Firefox was sent, in order" ["session.new";"session.end"] (List.rev !seen)
@@ -436,7 +444,7 @@ let test_a_session_is_there_to_end_once_asked_for () =
         | "session.new" -> answer ()
         | other -> failf "unexpected command: %s" other) in
     let abandoned=asking (fun () -> Eio.Fiber.await_cancel ()) in
-    Eio.Fiber.first (fun () -> ignore (Peer.metadata abandoned : (string,string) result)) (fun () -> ());
+    Eio.Fiber.first (fun () -> ignore (metadata abandoned : (string,string) result)) (fun () -> ());
     check (result unit string) "a request the caller gave up on" (Ok ()) (ended_session abandoned);
     check int "is ended" 1 !ended;
     check (result unit string) "once" (Ok ()) (ended_session abandoned);
@@ -444,12 +452,12 @@ let test_a_session_is_there_to_end_once_asked_for () =
     let other_browser=asking (fun () -> Ok (obj ["sessionId",`String "scripted";"capabilities",
       obj ["browserName",`String "chromium";"browserVersion",`String "1"]])) in
     check (result string string) "a browser that is not Firefox is turned down"
-      (Error "BiDi peer must be Firefox") (Peer.metadata other_browser);
+      (Error "BiDi peer must be Firefox") (metadata other_browser);
     check (result unit string) "with the session it created" (Ok ()) (ended_session other_browser);
     check int "ended" 2 !ended;
     let never_written=asking (fun () -> Error (Peer.Unsent "BiDi EOF")) in
     check (result string string) "a request the connection never carried"
-      (Error "BiDi EOF") (Peer.metadata never_written);
+      (Error "BiDi EOF") (metadata never_written);
     check (result unit string) "asked Firefox for nothing" (Ok ()) (ended_session never_written);
     check int "so nothing is ended" 2 !ended)
 (* A peer that refuses the WebSocket upgrade. ws-direct raises [Failure] for

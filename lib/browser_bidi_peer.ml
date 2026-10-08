@@ -22,6 +22,13 @@ let verb_of_wire = function
   | _ -> None
 type session_end_failure = Connection_gone of string | Not_confirmed of string
 let session_end_failure_message = function Connection_gone why | Not_confirmed why -> why
+type session_failure = Session_refused of string | Session_failed of string
+let session_failure_message = function Session_refused why | Session_failed why -> why
+(* Firefox's error for a [session.new] it will not serve. It takes one session
+   at a time, and 157.0.1 answers a second connection's request with this
+   ("Maximum number of active sessions") for as long as the first is there,
+   also after the socket that asked for it has closed. *)
+let session_not_created_error = "session not created"
 type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
   mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option }
@@ -40,13 +47,17 @@ let metadata t =
      the request was never written. *)
   t.session_may_exist <- true;
   match t.ask "session.new" (obj ["capabilities",obj []]) with
-  | Error (Rejected _ | Unsent _ as refused) -> t.session_may_exist <- false; Error (refusal_message refused)
-  | Error (Unanswered _ as unanswered) -> Error (refusal_message unanswered)
+  | Error (Rejected code as refused) when String.equal code session_not_created_error ->
+    t.session_may_exist <- false; Error (Session_refused (refusal_message refused))
+  | Error (Rejected _ | Unsent _ as refused) ->
+    t.session_may_exist <- false; Error (Session_failed (refusal_message refused))
+  | Error (Unanswered _ as unanswered) -> Error (Session_failed (refusal_message unanswered))
   | Ok result ->
-    let* caps = required "capabilities" result in
-    let* name = string "browserName" caps in
-    if name <> "firefox" then Error "BiDi peer must be Firefox"
-    else let* version=string "browserVersion" caps in t.version<-Some version;Ok version
+    Result.map_error (fun detail -> Session_failed detail)
+      (let* caps = required "capabilities" result in
+       let* name = string "browserName" caps in
+       if name <> "firefox" then Error "BiDi peer must be Firefox"
+       else let* version=string "browserVersion" caps in t.version<-Some version;Ok version)
 (* The socket takes one message of at most this many bytes; a larger one ends
    the connection, and with it this client. *)
 let reply_limit_bytes = 8 * 1024 * 1024

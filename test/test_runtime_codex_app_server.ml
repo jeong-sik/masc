@@ -4308,6 +4308,57 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       selected.Keeper_turn_driver.run_result))))))
 ;;
 
+let test_blank_completion_rejected_without_losing_session () =
+  let blank_item =
+    {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"blank","text":"","phase":"final_answer"}}}|} in
+  let empty_terminal =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|} in
+  let blank_terminal =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","text":" ","phase":"final_answer"}],"status":"completed"}}}|} in
+  let handshake = [init_result; account_chatgpt; thread_result; turn_result] in
+  List.iter (fun frames ->
+    let base_path = temp_workspace "masc-codex-blank-settlement-" in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture (handshake @ frames) (fun cli_path ->
+        (match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture"
+            ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
+         | Error error ->
+             (match Keeper_internal_error.classify_masc_internal_error error with
+              | Some (Keeper_internal_error.Accept_rejected _) -> ()
+              | _ -> fail ("blank completion was not an acceptance rejection: "
+                           ^ Agent_core.Error.to_string error))
+         | Ok _ -> fail "blank completion was accepted as progress");
+        let module Store = Keeper_official_client_session_store in
+        let binding = match Store.load ~base_path ~keeper_name:"codex-fixture" with
+          | Ok (Some binding) -> binding
+          | _ -> fail "completed blank turn lost its durable session" in
+        (match binding.phase with
+         | Store.Settled {session_id = "thread-1"; turn_id = "turn-1"} -> ()
+         | _ -> fail "blank response was misclassified as protocol recovery");
+        match Store.plan_claim ~expected:(Some binding) ~client_kind:Codex
+                ~runtime_id:"codex.codex" with
+        | Ok {previous_settlement = Some {session_id = "thread-1"; _}; _} -> ()
+        | _ -> fail "next turn would abandon the resumable thread")))
+    [[blank_terminal]; [blank_item; empty_terminal]];
+  with_fixture (handshake @
+      [{|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","text":"visible commentary","phase":"commentary"}}}|};
+       blank_item; blank_terminal]) (fun path ->
+    match run_fixture path with
+    | Ok turn -> check string "blank final does not erase visible fallback"
+        "visible commentary" turn.text
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error));
+  (* Neither a terminal frame without a message nor an unfinished blank delta
+     is evidence of a completed assistant message. *)
+  List.iter (fun frames ->
+    with_fixture (handshake @ frames) (fun path ->
+      match run_fixture path with
+      | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "missing completed message was accepted"))
+    [[empty_terminal];
+     [{|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"blank","delta":""}}|}; empty_terminal]]
+;;
+
 let test_keeper_maps_official_context_error_to_typed_core_error () =
   let failed =
     {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
@@ -7705,6 +7756,8 @@ let () =
             "Keeper maps official context error to typed core error"
             `Quick
             test_keeper_maps_official_context_error_to_typed_core_error
+        ; test_case "blank completion rejects progress but preserves session" `Quick
+            test_blank_completion_rejected_without_losing_session
         ; test_case
             "Keeper does not retry context error after tool effect"
             `Quick

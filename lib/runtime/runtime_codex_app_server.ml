@@ -998,13 +998,6 @@ let agent_message_content_of_item ~stage item =
   | None -> protocol_error stage "item is missing type"
 ;;
 
-let agent_message_of_item ~stage item =
-  let* message = agent_message_content_of_item ~stage item in
-  match message with
-  | Some (_, text) when String.trim text = "" -> Ok None
-  | _ -> Ok message
-;;
-
 (* Model items and host-owned dynamic calls do not prove a native effect.
    Every other item remains effect-possible, including protocol additions.
    The installed 0.156.1 ThreadItem schema also names collabAgentToolCall and
@@ -1092,16 +1085,17 @@ let active_turn_item ~stage ~thread_id ~turn_id params =
 
 let messages_of_items ~stage = function
   | `List items ->
-    let rec loop final fallback = function
-      | [] -> Ok (final, fallback)
+    let rec loop final fallback completed = function
+      | [] -> Ok (final, fallback, completed)
       | item :: rest ->
-        let* message = agent_message_of_item ~stage item in
+        let* message = agent_message_content_of_item ~stage item in
         (match message with
-         | Some (Some "final_answer", text) -> loop (Some text) fallback rest
-         | Some (_, text) -> loop final (Some text) rest
-         | None -> loop final fallback rest)
+         | Some (_, text) when String.trim text = "" -> loop final fallback true rest
+         | Some (Some "final_answer", text) -> loop (Some text) fallback true rest
+         | Some (_, text) -> loop final (Some text) true rest
+         | None -> loop final fallback completed rest)
     in
-    loop None None items
+    loop None None false items
   | _ -> protocol_error stage "turn items must be an array"
 ;;
 
@@ -1219,6 +1213,7 @@ let turn_error ~tool_effect_attempted fields =
 ;;
 
 let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
+    ~assistant_message_completed
     ~tool_calls_observed ~tool_effect_attempted params =
   let stage = "turn/completed" in
   let* fields = assoc_at stage params in
@@ -1239,7 +1234,8 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
       | "inProgress" -> protocol_error stage "terminal notification carried inProgress status"
       | "completed" ->
         let* items = required_member stage "items" turn_fields in
-        let* terminal_final, terminal_fallback = messages_of_items ~stage items in
+        let* terminal_final, terminal_fallback, terminal_message_completed =
+          messages_of_items ~stage items in
         let visible_text = function
           | Some text when String.trim text <> "" -> Some text
           | Some _ | None -> None
@@ -1257,7 +1253,8 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
         in
         (match text with
          | Some text -> Ok text
-         | None when tool_calls_observed -> Ok ""
+         | None when tool_calls_observed || assistant_message_completed
+                     || terminal_message_completed -> Ok ""
          | None -> protocol_error stage "completed turn has no assistant message")
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
@@ -1479,6 +1476,7 @@ type streamed_texts =
   { buffers : (string option, Buffer.t) Hashtbl.t
   ; reasoning_buffers : (string * reasoning_part, Buffer.t) Hashtbl.t
   ; mutable current_item : string option
+  ; mutable assistant_message_completed : bool
   }
 
 let complete_reasoning_item ~stage ~on_stream_event streamed_texts item =
@@ -1751,6 +1749,11 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
             Ok ()
           end else protocol_error stage "completed agent message conflicts with streamed text"
     in
+    (* A completed blank message is valid transport evidence, not visible
+       progress. Keep it separate from deltas and final-answer selection so
+       ordinary Keeper acceptance rejects the turn without discarding its
+       resumable provider session. *)
+    if Option.is_some message then streamed_texts.assistant_message_completed <- true;
     let message = match message with
       | Some (_, text) when String.trim text = "" -> None
       | _ -> message in
@@ -1813,6 +1816,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         ~turn_id
         ~seen_final
         ~seen_fallback
+        ~assistant_message_completed:streamed_texts.assistant_message_completed
         ~tool_calls_observed:(!tool_call_count > 0)
         ~tool_effect_attempted:!tool_effect_attempted
         params
@@ -2179,7 +2183,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
       ~seen_fallback:None
       ~seen_usage:None
       ~open_tool_call_ids:[]
-      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8; current_item=None}
+      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8; current_item=None; assistant_message_completed=false}
       ~on_stream_event)
   in
   emit_stream_event on_stream_event (Turn_finished { text });

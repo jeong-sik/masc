@@ -347,7 +347,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report
     ?(system_prompt = "pre-dispatch fixture system prompt")
-    ?on_request_attribution ?official_client_continuation ?session_id ~base_path ~cli_path ~goal () =
+    ?on_request_attribution ?official_client_continuation ?session_id ?accept ~base_path ~cli_path ~goal () =
   Masc_test_deps.declare_fixture_keeper
     ~base_path ~sandbox_profile:None "claude-fixture";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -398,6 +398,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ?on_request_attribution
                            ?official_client_continuation
                            ?session_id
+                           ?accept
                            ~sw
                            ~net:(Eio.Stdenv.net env)
                            ())
@@ -2041,6 +2042,47 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
                  Keeper_official_client_session_store
                  .recovery_failure_to_string failure
                | _ -> "not-in-recovery")))
+;;
+
+let test_blank_completion_rejected_without_losing_session () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [Emit (assistant ~turn_id:"blank" ""); Emit (result ~turn_id:"blank" "")]
+      (fun cli_path ->
+        (match run_keeper_turn ~base_path ~cli_path ~goal:"Reply to this request"
+            ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
+         | Error error ->
+             (match Keeper_internal_error.classify_masc_internal_error error with
+              | Some (Keeper_internal_error.Accept_rejected _) -> ()
+              | _ -> fail ("blank completion was not an acceptance rejection: "
+                           ^ Agent_core.Error.to_string error))
+         | Ok _ -> fail "blank completion was accepted as progress");
+        let module Store = Keeper_official_client_session_store in
+        let binding = load_state base_path in
+        let settled_session = match binding.phase with
+          | Store.Settled {session_id; turn_id = "blank"} -> session_id
+          | _ -> fail "blank response was misclassified as protocol recovery" in
+        match Store.plan_claim ~expected:(Some binding) ~client_kind:Claude_code
+                ~runtime_id:"claude.claude" with
+        | Ok {previous_settlement = Some previous; _} ->
+            check string "next turn resumes the completed session"
+              settled_session previous.session_id
+        | _ -> fail "next turn would abandon the resumable session"));
+  List.iter (fun result_field ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let fields = result ~turn_id:"missing" "" |> Yojson.Safe.from_string
+        |> Yojson.Safe.Util.to_assoc |> List.remove_assoc "result" in
+      let terminal = Yojson.Safe.to_string (`Assoc (fields @ result_field)) in
+      with_fixture [Emit (assistant ~turn_id:"missing" ""); Emit terminal]
+        (fun cli_path ->
+          check bool "missing or malformed result still fails" true
+            (Result.is_error (run_keeper_turn ~base_path ~cli_path ~goal:"Reply" ()));
+          match (load_state base_path).phase with
+          | Recovery_required {failure = Protocol_failed; _} -> ()
+          | _ -> fail "missing or malformed completion lost its protocol classification")))
+    [[]; ["result", `Null]; ["result", `Int 7]]
 ;;
 
 let test_keeper_settles_and_resumes () =
@@ -3765,6 +3807,8 @@ let () =
         ] )
     ; ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
+        ; test_case "blank completion rejects progress but preserves session" `Quick
+            test_blank_completion_rejected_without_losing_session
         ; test_case "resume prompt carries the task reference" `Quick
             test_resume_prompt_carries_the_task_reference
         ; test_case "resume prompt sends only changed blocks" `Quick

@@ -570,9 +570,13 @@ let test_deferred_notice_is_not_available_to_other_flushers () =
     auth_ok (Auth.with_credential_transaction config.base_path (fun _ ->
       announce ~author:"operator" "deferred handoff fixture" ();
       (* Another request's drain must leave this notice queued while Auth is held. *)
-      Tool_misc_dos_lane.flush_announcements ();
-      check int "flusher cannot remove a notice inside admission" 1
-        (Queue.length Tool_misc_dos_lane.announcements))));
+      let flushed, signal_flushed = Eio.Promise.create () in
+      Eio.Switch.run @@ fun sw ->
+        Eio.Fiber.fork ~sw (fun () ->
+          Tool_misc_dos_lane.flush_announcements ();
+          Eio.Promise.resolve signal_flushed (Queue.length Tool_misc_dos_lane.announcements));
+        check int "flusher cannot remove a notice inside admission" 1
+          (Eio.Promise.await flushed))));
   let notice = Queue.take Tool_misc_dos_lane.announcements in
   check bool "notice becomes publishable after admission" true (Atomic.get notice.ready)
 

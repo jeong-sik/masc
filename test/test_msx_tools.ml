@@ -178,6 +178,22 @@ let test_load_and_clock () =
   check int "step moves the clock" (Msx_lane.boot_frames + 10) (frame_of r);
   let r = dispatch ~base_path "masc_msx_screen" [] in
   check int "screen does not move the clock" (Msx_lane.boot_frames + 10) (frame_of r);
+  let byte_field name result =
+    match member name (Tool_result.data result) with
+    | Some (`Int value) when 0 <= value && value <= 255 -> Some value
+    | _ -> None in
+  check bool "screen reports both slot-selection bytes" true
+    (Option.is_some (byte_field "ppi_a" r)
+     && Option.is_some (byte_field "slot3_sel" r));
+  let incarnation_before = incarnation () in
+  let reread = dispatch ~base_path "masc_msx_screen" [] in
+  let slots_are_stable =
+    member "ppi_a" (Tool_result.data r) = member "ppi_a" (Tool_result.data reread)
+    && member "slot3_sel" (Tool_result.data r) = member "slot3_sel" (Tool_result.data reread) in
+  check bool "screen reads preserve slot-selection bytes" true slots_are_stable;
+  check string "screen reads preserve machine incarnation"
+    incarnation_before (incarnation ());
+  check int "repeated screen read does not move the clock" (frame_of r) (frame_of reread);
   let r = dispatch ~base_path "masc_msx_step" [ ("frames", `Int 301) ] in
   check bool "a step over the cap is refused" true (rejected r);
   let r = dispatch ~base_path "masc_msx_step" [ ("frames", `Int 0) ] in

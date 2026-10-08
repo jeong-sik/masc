@@ -1524,6 +1524,8 @@ let msx_screen_output_schema =
       ; "mode", string_schema
       ; "pc", string_schema
       ; "halted", `Assoc [ "type", `String "boolean" ]
+      ; "ppi_a", integer_schema
+      ; "slot3_sel", integer_schema
       ; "cartridge", nullable_string
       ; "disk", nullable_string
       ; "screen_text", string_schema
@@ -1538,9 +1540,9 @@ let msx_screen_output_schema =
       ]
     ~required:
       (* [sprites] rides the response only when the call asked for it. *)
-      [ "frame"; "mode"; "pc"; "halted"; "cartridge"; "disk"
-      ; "screen_text"; "screen_view"; "tiles"; "artifact"
-      ; "media_type"; "width"; "height"; "bytes" ]
+      [ "frame"; "mode"; "pc"; "halted"; "ppi_a"; "slot3_sel"
+      ; "cartridge"; "disk"; "screen_text"; "screen_view"
+      ; "tiles"; "artifact"; "media_type"; "width"; "height"; "bytes" ]
 ;;
 
 let portrait_read_output_schema =

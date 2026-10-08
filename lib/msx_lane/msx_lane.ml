@@ -12,6 +12,8 @@ type observation = {
   mode : string;
   pc : int;
   halted : bool;
+  ppi_a : int;
+  slot3_sel : int;
   screen_text : string;
   screen_view : string;
   tiles : string list;
@@ -298,6 +300,8 @@ let observe st =
   ; mode = Msx.display_mode_to_string mode
   ; pc = Msx.dump_pc st.m
   ; halted = Msx.cpu_halted st.m
+  ; ppi_a = Msx.ppi_a st.m
+  ; slot3_sel = Msx.slot3_sel st.m
   ; screen_text = (if is_bitmap_mode mode then "" else Msx.screen_text st.m)
   ; tiles = tiles_of st.m mode
   ; sprites = sprites_of st.m mode

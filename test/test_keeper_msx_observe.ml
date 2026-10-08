@@ -25,6 +25,7 @@ let plan () =
 let capture_result ~frame ~artifact =
   let observation : Msx_lane.observation =
     { frame; mode = "GRAPHIC6"; pc = 0xdbac; halted = false
+    ; ppi_a = 0; slot3_sel = 0
     ; screen_text = ""; screen_view = "pixels"; tiles = []
     ; sprites = [{ index = 0; x = 1; y = 2; pattern = 3; color = 4 }]
     ; cartridge = None; disk = Some "synthetic.dsk" } in
@@ -54,6 +55,11 @@ let test_snapshot_binding () =
   Eio_main.run (fun _env ->
     List.iter (fun (frame, artifact) ->
       let capture = capture_result ~frame ~artifact in
+      check bool "captured screen carries the slot-selection bytes" true
+        (match member "ppi_a" (Tool_result.data capture),
+               member "slot3_sel" (Tool_result.data capture) with
+         | Some (`Int 0), Some (`Int 0) -> true
+         | _ -> false);
       let reading = Tool_result.make_ok ~tool_name:"keeper_analyze_image" ~start_time:(Tool_timing.start ())
           ~data:(`Assoc ["text", `String "visible prompt"]) () in
       let dispatched, result = execute ~capture ~reader:(fun input ->

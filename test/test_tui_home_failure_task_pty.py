@@ -313,6 +313,9 @@ class RefreshCompletionGate:
     refresh press is delivered, and the exchange it fires can only
     register after the client read the key and sent -- completing into
     a whole span of silence is the boundary the receipt window keys on.
+    Registrations are logged per request: complete() moves the gate
+    clock too, so the boundary is recognized by a post-press log entry
+    and its own completion stamp, never by clock movement alone.
     """
 
     def __init__(self, span=0.5):
@@ -362,7 +365,8 @@ def task_cancel_previous_workspace_receipt(executable):
     accepted = threading.Event()
     release = threading.Event()
     state = {"foreign": False, "health_reads": 0, "history_reads": 0,
-             "health_gate": None, "drill_delay": 0.0}
+             "health_gate": None, "drill_delay": 0.0,
+             "exchange_log": []}
     transitions = []
     with tempfile.TemporaryDirectory(prefix="masc-task-cancel-receipt-") as directory:
         editor = Path(directory, "editor.py")
@@ -378,9 +382,12 @@ def task_cancel_previous_workspace_receipt(executable):
             def health():
                 state["health_reads"] += 1
                 gate = state["health_gate"]
+                entry = None
                 if gate is not None:
                     entered = time.monotonic()
                     gate.register()
+                    entry = {"registered": entered, "completed": None}
+                    state["exchange_log"].append(entry)
                     try:
                         drill = state["drill_delay"]
                         if drill:
@@ -401,7 +408,9 @@ def task_cancel_previous_workspace_receipt(executable):
                         "effective_has_masc_dir": True,
                     },
                 }).encode(), content_type="application/json",
-                    on_sent=(lambda: gate.complete(time.monotonic() - entered))
+                    on_sent=(lambda: (gate.complete(time.monotonic() - entered),
+                                      state["exchange_log"][-1].__setitem__(
+                                          "completed", time.monotonic())))
                     if gate is not None else None)
 
             def rpc(body):
@@ -507,51 +516,63 @@ def task_cancel_previous_workspace_receipt(executable):
                     # delivered to the resumed client, and the exchange it
                     # fires can only register after the client has read
                     # the key, processed it, and sent -- the settle closes
-                    # on that client-observed exchange completing into a
-                    # whole span of silence. Keying the loop on [pressed_at]
-                    # -- not on the post-drain baseline -- also absorbs a
-                    # straggler that registers between the drain and the
-                    # press: it is client speech, but not the boundary, and
-                    # the loop keeps waiting for an exchange the client
-                    # produced after the press. The receipt window is then
-                    # keyed on a client event that postdates the imposed
-                    # delay, and its pair assertions measure the receipt
-                    # in isolation.
+                    # on that exchange completing into a whole span of
+                    # silence. The straggler an older tail registers
+                    # between the drain and the press is client speech,
+                    # but not the boundary: its completion can still move
+                    # the gate clock past [pressed_at], so the loop
+                    # recognizes the boundary from the fixture's
+                    # per-request log -- a post-press registration and its
+                    # own completion stamp -- never from clock movement
+                    # alone. The receipt window is then keyed on a client
+                    # event that postdates the imposed delay, and its pair
+                    # assertions measure the receipt in isolation.
                     os.kill(process.pid, signal.SIGSTOP)
                     time.sleep(gate.span + 0.25)
                     os.kill(process.pid, signal.SIGCONT)
                     h.drain_until_quiet(process, fd, output)
-                    base_exchanges = gate.snapshot()[1]
                     os.write(fd, b"r")
                     pressed_at = time.monotonic()
                     deadline = time.monotonic() + 15
-                    # The boundary is "an exchange the client produced
-                    # after the press has completed", not "any exchange
-                    # arrived": a straggler that registers between the
-                    # drain and the press satisfies the raw arrival parts
-                    # of this predicate, but its completion predates
-                    # [pressed_at], so the pressed_at part keeps the loop
-                    # waiting for a genuinely post-resume exchange.
-                    while not (gate.snapshot()[1] > base_exchanges
-                               and gate.quiesced()
-                               and gate.last_event_time() >= pressed_at):
+                    # The boundary is "the press produced an exchange and
+                    # that exchange has completed". Registration and
+                    # completion are tracked per request, because
+                    # complete() also moves the gate clock: an older
+                    # exchange that registered between the drain and the
+                    # press (a straggler) can complete after pressed_at
+                    # and sweep last_event past it, so quiescence plus
+                    # last_event >= pressed_at would pass with zero
+                    # post-press registrations. Only a fixture log entry
+                    # that registered after the press counts as the
+                    # client's response to it, the entry's own completion
+                    # stamp proves that exchange finished, and the
+                    # quiesced() check adds the whole span of silence
+                    # over that boundary.
+                    def pressed_receipt_done():
+                        return any(
+                            entry["registered"] >= pressed_at
+                            and entry["completed"] is not None
+                            for entry in state["exchange_log"])
+                    while not (pressed_receipt_done() and gate.quiesced()):
                         if time.monotonic() > deadline:
                             raise AssertionError(
-                                "refresh tail did not settle past a client-observed "
-                                "post-resume exchange: "
-                                + repr(gate.snapshot())
+                                "refresh tail did not settle past the pressed exchange: "
+                                + repr(state["exchange_log"])
                                 + " reads=" + repr((state["health_reads"], state["history_reads"])))
                         gate.changed.clear()
                         h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
-                    assert gate.last_event_time() >= pressed_at, (
-                        "the boundary exchange predates the press: "
-                        + repr({"last_event": gate.last_event_time(),
-                                "pressed_at": pressed_at,
-                                "snapshot": gate.snapshot()}))
+                    boundary = [entry for entry in state["exchange_log"]
+                                if entry["registered"] >= pressed_at]
+                    assert boundary, (
+                        "settled without any post-press registration: "
+                        + repr(state["exchange_log"]))
+                    assert all(entry["completed"] is not None for entry in boundary), (
+                        "a post-press exchange is still running at settle time: "
+                        + repr(boundary))
                     assert any(length >= 0.5 for length in gate.durations), (
                         "the completion gate never held the drill's slow exchange: "
                         + repr(gate.durations))
-                    window_opened_at = gate.last_event_time()
+                    window_opened_at = boundary[0]["completed"]
                 finally:
                     state["drill_delay"] = 0.0
                 # The gate stays armed through the receipt window: any

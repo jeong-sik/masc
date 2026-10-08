@@ -35,16 +35,12 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
   let stats_json = match info.call_stats with
     | None -> `Null
     | Some s ->
-      (* #10730 changed [Tool_registry.call_stats] fields from plain
-         scalars to [Atomic.t] cells but missed two consumer sites
-         here.  Read each cell once at JSON build time so the report
-         sees a consistent snapshot. *)
       `Assoc [
-        ("call_count", `Int (Atomic.get s.call_count));
-        ("success_count", `Int (Atomic.get s.success_count));
-        ("failure_count", `Int (Atomic.get s.failure_count));
-        ("last_called_at", `Float (Atomic.get s.last_called_at));
-        ("total_duration_ms", `Int (Atomic.get s.total_duration_ms));
+        ("call_count", `Int (s.call_count));
+        ("success_count", `Int (s.success_count));
+        ("failure_count", `Int (s.failure_count));
+        ("last_called_at", `Float (s.last_called_at));
+        ("total_duration_ms", `Int (s.total_duration_ms));
       ]
   in
   `Assoc [

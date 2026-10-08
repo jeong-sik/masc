@@ -314,12 +314,11 @@ def run_browser_bidi_host_short_terminal_regression(executable: str) -> None:
         # The last choice is reached with the cursor, and the host's first
         # row is still there when it is.
         read_available(master, output)
-        start = len(output)
-        os.write(master, b"jjjjj")
-        wait_for_terminal_input_consumed(slave)
-        wait_for_output(process, master, output, b"Independent Firefox/Zen", start=start, timeout=5)
-        wait_for_output(process, master, output, FRAME_END,
-            start=end_of_needle(output, b"Independent Firefox/Zen", start), timeout=3)
+        for _ in range(5):
+            start = len(output)
+            os.write(master, b"j")
+            wait_for_terminal_input_consumed(slave)
+            wait_for_output(process, master, output, FRAME_END, start=start, timeout=3)
         require(screen_text(bytes(output)), b"Independent Firefox/Zen", BIDI_HOST_ENDED_ROW,
             b"rows not shown")
         # A host that is attached and not listed: the two rows that are kept

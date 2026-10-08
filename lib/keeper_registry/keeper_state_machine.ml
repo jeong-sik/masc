@@ -61,7 +61,6 @@ let derive_phase (c : conditions) : phase =
   else if
     (not c.heartbeat_healthy)
     || (not c.turn_healthy)
-    || c.credential_archived
   then Failing (* 10. Healthy running *)
   (* [fiber_alive] is guaranteed here: branch 3 routes a dead fiber to
      Crashed, so the fallthrough can only be Running. *)

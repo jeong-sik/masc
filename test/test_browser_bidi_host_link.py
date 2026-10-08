@@ -402,7 +402,7 @@ class BidiHostLink(unittest.TestCase):
         self.assert_ends("BiDi connection ended: BiDi EOF")
         # The host does not wait out a server that is not answering once the
         # browser is gone, and it says what became of the result.
-        self.assertIn("result not delivered: the browser connection ended before the server took the result",
+        self.assertIn("result not delivered: the browser connection ended before the server acknowledged the result",
                       self.host_log())
 
     def test_a_command_firefox_left_under_is_answered_before_the_host_ends(self):

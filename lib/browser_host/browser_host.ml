@@ -15,9 +15,9 @@ let reply_frame_limit = 8 * 1024 * 1024
 let http_timeout_sec = 55.
 let extension_timeout_sec = 20.
 let reconnect_delay_sec = 5.
-(* How long a host that is ending waits for the server to take its
-   disconnect. *)
-let disconnect_window_sec = 0.25
+(* How long a host that is leaving waits on the server for a request already
+   in flight: its disconnect, and a result the server is acknowledging. *)
+let leaving_window_sec = 0.25
 
 type verb = Masc.Browser_bidi_peer.verb =
   | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
@@ -278,7 +278,7 @@ let result_undelivered_message = function
   | Token_unreadable detail -> detail
   | Unreached_as_host_ended error ->
       "the host was ending and its one attempt did not reach the server (" ^ http_error_message error ^ ")"
-  | Browser_left_first -> "the browser connection ended before the server took the result"
+  | Browser_left_first -> "the browser connection ended before the server acknowledged the result"
   | Stopped_first -> "the host was stopped before the server acknowledged the result"
 
 (* A transport step under its deadline. The step's outcome stands when the
@@ -505,7 +505,7 @@ let disconnect link =
   | Ok token ->
       Eio.Fiber.first
         (fun () -> ignore (ask link ~server:link.server ~token "disconnect" (`Assoc [])))
-        (fun () -> Eio.Time.sleep link.clock disconnect_window_sec)
+        (fun () -> Eio.Time.sleep link.clock leaving_window_sec)
 
 let run env config =
   let clock = Eio.Stdenv.clock env in
@@ -609,18 +609,21 @@ let run_bidi env config url ~stop =
             | None, None -> None
           in
           (* A wait on the server lasts only while Firefox is attached and
-             nobody asked the host to stop. What the server handed over as the
-             wait ended stands. *)
-          let while_serving wait =
+             nobody asked the host to stop, and [grace_sec] past that. What
+             the server handed over as the wait ended stands. *)
+          let while_serving ?(grace_sec = 0.) wait =
             match leaving () with
             | Some leaving -> Error leaving
             | None ->
                 Watched_work.run
                   ~watcher:(fun () ->
-                    Error
-                      (Eio.Fiber.first
-                         (fun () -> Browser_gone (Eio.Promise.await ended))
-                         (fun () -> Stop_asked (Eio.Promise.await stopping))))
+                    let leaving =
+                      Eio.Fiber.first
+                        (fun () -> Browser_gone (Eio.Promise.await ended))
+                        (fun () -> Stop_asked (Eio.Promise.await stopping))
+                    in
+                    Eio.Time.sleep clock grace_sec;
+                    Error leaving)
                   (fun () -> Ok (wait ()))
           in
           let left = function
@@ -637,10 +640,13 @@ let run_bidi env config url ~stop =
                   ; "effectPhase", `String "not_started" ]
             | Error (Masc.Browser_bidi_peer.Outcome_unknown message) -> failure id message
           in
-          (* A result is sent again for as long as the host is serving. One
-             cut short is recorded like any other undelivered one. *)
+          (* A result is sent again for as long as the host is serving. When
+             it leaves, an attempt already in flight gets a moment for the
+             server's acknowledgement, so a result the server is taking is not
+             reported lost; one cut short is recorded like any other
+             undelivered one. *)
           let publish_while_serving payload =
-            match while_serving (fun () -> publish link payload) with
+            match while_serving ~grace_sec:leaving_window_sec (fun () -> publish link payload) with
             | Ok delivery -> record_delivery delivery; Ok ()
             | Error leaving ->
                 record_delivery

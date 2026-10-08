@@ -15,13 +15,18 @@ The operator does both steps. Nothing in MASC starts this Firefox or this host.
 
    ```sh
    FIREFOX=/Applications/Firefox.app/Contents/MacOS/firefox
-   PROFILE="$HOME/.masc/keeper-firefox-profile"
+   PROFILE="$HOME/masc-keeper-firefox-profile"
    mkdir -p "$PROFILE"
    "$FIREFOX" --no-remote --profile "$PROFILE" --remote-debugging-port 9222
    ```
 
    `FIREFOX` is the Firefox executable. The path above is the macOS one, the
    only platform this was run on. On Linux it is the `firefox` on the `PATH`.
+   `PROFILE` is any directory kept for this. It is not under a hidden
+   directory because a Firefox installed as a Snap reaches only non-hidden
+   files in the home directory
+   ([Snap home interface](https://snapcraft.io/docs/reference/interfaces/home-interface/),
+   read 2026-10-08).
 
    This is a second Firefox beside the one in everyday use, which keeps
    running without the flag. Log in there once, only to the sites a Keeper
@@ -35,19 +40,28 @@ The operator does both steps. Nothing in MASC starts this Firefox or this host.
 
    ```sh
    BASE_PATH="$HOME/masc-workspace"
-   masc-browser-host --base-path "$BASE_PATH" --bidi-url ws://127.0.0.1:9222/session
+   "$BASE_PATH/.masc/browser-lane/host/launch" --bidi-url ws://127.0.0.1:9222/session
    ```
 
    `BASE_PATH` is the directory that holds that workspace's `.masc`; the path
-   above is an example. Set it before the command: an empty `--base-path` is
-   taken as the current directory, not as "use the default". Leaving the
-   option out uses `MASC_BASE_PATH`.
+   above is an example.
 
-   The browser lane has to be installed for that workspace first:
+   The browser lane has to be installed for that workspace first.
    `connectors/browser/install-host.sh` writes the lane token the host and the
-   server share (`<base-path>/.masc/browser-lane/token`). The host finds the
-   server's port in the workspace's `connection.toml`; `--server` names one
-   explicitly.
+   server share (`<base-path>/.masc/browser-lane/token`), a copy of the host
+   executable, and the `launch` script used here. The launcher runs that copy
+   with this workspace's `--base-path` and token file and passes on what
+   follows it, so it does not depend on the `PATH`.
+
+   `masc-browser-host --base-path "$BASE_PATH" --bidi-url ...` is the same
+   host when the executable is on the `PATH`. Set `BASE_PATH` before it: an
+   empty `--base-path` is taken as the current directory, not as "use the
+   default". Leaving the option out uses `MASC_BASE_PATH`.
+
+   The host finds the server's port in the workspace's `connection.toml`. An
+   exported `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT` outranks that file: with
+   either set, the host polls that server with this workspace's token. Unset
+   both in the shell that runs the host, or name the server with `--server`.
 
 The connection is attached when the TUI's Browser Lane picker (`b`) lists a
 `Firefox · BiDi` row, and `/api/v1/dashboard/browser-lane/clients` reports a

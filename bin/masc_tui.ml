@@ -5049,25 +5049,12 @@ let launch_workspace_activity state ~mailbox ~repo_id =
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
       state.workspace_activity <- next;
-      let assigned_keepers =
-        match state.repositories with
-        | None -> []
-        | Some snap ->
-            match List.find_opt (fun (r : Tui_decode.repository) -> String.equal r.rp_id repo_id) snap.rs_repositories with
-            | None -> []
-            | Some r -> r.rp_keepers
-      in
-      let fleet_keepers =
+      (* Assignment describes responsibility, not who has written this repo.
+         Read the loaded roster and filter each recorded address by repo_id in
+         workspace_activity_rows; unassigned writers remain visible. *)
+      let keepers =
         List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
         |> List.sort_uniq String.compare
-      in
-      let keepers =
-        match assigned_keepers with
-        | [] -> fleet_keepers
-        | ks ->
-            let active = List.filter (fun name -> List.mem name fleet_keepers) ks in
-            if active = [] then fleet_keepers
-            else List.sort_uniq String.compare active
       in
       let run () =
         let reads = Eio.Fiber.List.map ~max_fibers:4 (fun keeper_name ->

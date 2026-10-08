@@ -251,9 +251,6 @@ def run(executable):
         h.select_keeper_row(process, fd, output, b"alpha")
         # Open by identity to keep this case independent of roster navigation.
         h.palette_go(process, fd, output, b"keeper alpha", CHAT)
-        # The roster is closed until Ctrl-B, and the menu offset below assumes it is open.
-        h.send_and_wait(process, fd, output, b"\x02", b"KEEPERS")
-        h.drain_until_quiet(process, fd, output)
         h.send_and_wait(process, fd, output, b"/", b"Commands  1/")
         rows = screen(process, fd, output)
         assert_menu_selection(output, rows, selected_offset=1)

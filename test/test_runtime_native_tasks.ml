@@ -25,7 +25,7 @@ let terminal = Task_terminal_reported
    skip_transcript=Some true;ambient=None}
 
 let same label expected actual =
-  Alcotest.check bool label true (expected=actual)
+  Alcotest.(check bool) label true (expected=actual)
 
 let rec at path change json = match path,json with
   | [],_ -> change json
@@ -69,7 +69,7 @@ let test_numeric_contract () =
       |> at ["origin";"native_call"] (replace "call_ordinal" (`Float 2.0)) in
     let value=Tasks.of_json json |> get in
     match value.event with
-    | Task_progress_reported {usage;_} -> Alcotest.check int "integer value" 1 usage.total_tokens
+    | Task_progress_reported {usage;_} -> Alcotest.(check int) "integer value" 1 usage.total_tokens
     | _ -> Alcotest.fail "progress changed kind") [`Int 1;`Float 1.0;Yojson.Safe.from_string "1e0"];
   List.iter (fun value ->
     let event=Task_progress_reported {usage={total_tokens=value;tool_uses=value;duration_ms=value};last_tool_name=None} in

@@ -379,7 +379,7 @@ let test_inventory_directory_replacement_hides_child_names () =
         write_file (Filename.concat outside "outside-private-name.dat") "private";
         let moved = game ^ ".moved" in
         let result =
-          Tool_misc_dos_lane.handle_inventory
+          Tool_misc_dos_lane.handle_inventory_with_before_read
             ~before_read:(fun real ->
               Unix.rename real moved;
               Unix.symlink outside real)

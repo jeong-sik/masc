@@ -739,7 +739,7 @@ let inventory_program_json ?(before_read = fun _ -> ()) ~programs_root name =
             ]))
 ;;
 
-let handle_inventory ?(before_read = fun _ -> ()) ~tool_name ~start_time ~base_path =
+let handle_inventory_with_before_read ~before_read ~tool_name ~start_time ~base_path =
   let root = programs_dir ~base_path in
   try
     let result =
@@ -764,6 +764,10 @@ let handle_inventory ?(before_read = fun _ -> ()) ~tool_name ~start_time ~base_p
   | Sys_error _ ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
       "DOS inventory is unavailable"
+;;
+
+let handle_inventory ~tool_name ~start_time ~base_path =
+  handle_inventory_with_before_read ~before_read:(fun _ -> ()) ~tool_name ~start_time ~base_path
 ;;
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =

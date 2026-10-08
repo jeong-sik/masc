@@ -95,7 +95,7 @@ let api_usage_of_json json =
   | Type_error (message, _) -> Error ("api_usage: " ^ message)
 ;;
 
-let delta_usage_of_json json =
+let delta_usage_of_json json : (Agent_core.Types.delta_usage, string) result =
   let open Yojson.Safe.Util in
   try
     Ok

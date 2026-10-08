@@ -241,7 +241,7 @@ let test_acc_message_delta_none_stop_reason () =
 
 let test_acc_message_delta_with_usage () =
   let acc = Streaming.create_stream_acc () in
-  let usage =
+  let usage : Types.delta_usage option =
     Some
       { Types.input_tokens = Some 0
       ; output_tokens = Some 200
@@ -262,7 +262,7 @@ let test_acc_message_delta_with_usage () =
 
 let test_acc_message_delta_with_zero_cache () =
   let acc = Streaming.create_stream_acc () in
-  let usage =
+  let usage : Types.delta_usage option =
     Some
       { Types.input_tokens = Some 0
       ; output_tokens = Some 100

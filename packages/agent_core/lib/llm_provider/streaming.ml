@@ -123,7 +123,7 @@ let parse_sse_event event_type data_str =
            |> to_string_option
            |> Option.map stop_reason_of_string
          in
-         let usage =
+         let usage : Types.delta_usage option =
            let u = json |> member "usage" in
            if u = `Null
            then None

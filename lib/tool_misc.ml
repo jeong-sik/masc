@@ -298,6 +298,10 @@ let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args
            ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
   | Some Tool_schemas_misc.Misc_dos_meta ->
       Some (Tool_misc_dos_lane.handle_meta ~tool_name:name ~start_time:start)
+  | Some Tool_schemas_misc.Misc_dos_inventory ->
+      Some
+        (Tool_misc_dos_lane.handle_inventory ~tool_name:name ~start_time:start
+           ~base_path:ctx.config.base_path)
   | Some Tool_schemas_misc.Misc_dos_eject ->
       Some
         (Tool_misc_dos_lane.handle_eject ~tool_name:name ~start_time:start
@@ -384,7 +388,8 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_msx_meta
   | Tool_schemas_misc.Misc_msx_checkpoint_info ->
     true
-  | Tool_schemas_misc.Misc_dos_meta -> true
+  | Tool_schemas_misc.Misc_dos_meta
+  | Tool_schemas_misc.Misc_dos_inventory -> true
   (* Loading, ejecting, pressing and stepping change the shared machine. *)
   | Tool_schemas_misc.Misc_msx_load
   | Tool_schemas_misc.Misc_msx_eject

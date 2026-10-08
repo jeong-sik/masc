@@ -567,6 +567,15 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
          (of_lane_run ~base_path ~extra:[ core_field ] ~tool_name ~start_time loaded))
 ;;
 
+(* masc_dos_meta — the linked core identity is a read-only lane fact. It does
+   not require a machine, activity admission, or a controller, so an operator
+   can verify the emulator before loading a game. *)
+let handle_meta ~tool_name ~start_time =
+  Tool_result.make_ok ~tool_name ~start_time
+    ~data:(`Assoc [ core_field ])
+    ()
+;;
+
 let handle_eject ~tool_name ~start_time ~agent_name _args =
   after_announcing
     (match

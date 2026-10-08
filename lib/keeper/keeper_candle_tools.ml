@@ -61,6 +61,7 @@ let operation_of_misc : Tool_schemas_misc.misc_operation -> operation option = f
   | Tool_schemas_misc.Misc_msx_checkpoint_info
   | Tool_schemas_misc.Misc_portrait_read
   | Tool_schemas_misc.Misc_dos_load
+  | Tool_schemas_misc.Misc_dos_meta
   | Tool_schemas_misc.Misc_dos_eject
   | Tool_schemas_misc.Misc_dos_screen
   | Tool_schemas_misc.Misc_dos_step

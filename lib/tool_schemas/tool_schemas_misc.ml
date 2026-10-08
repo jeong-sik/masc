@@ -53,6 +53,7 @@ let msx_schemas : tool_schema list =
    guessing a settled screen. *)
 let dos_schemas : tool_schema list =
   [ Tool_schemas_misc_toml.dos_load
+  ; Tool_schemas_misc_toml.dos_meta
   ; Tool_schemas_misc_toml.dos_eject
   ; Tool_schemas_misc_toml.dos_screen
   ; Tool_schemas_misc_toml.dos_step
@@ -245,7 +246,7 @@ let dos_controller_need = function
   | Misc_msx_restore | Misc_msx_change_disk | Misc_msx_screen | Misc_msx_meta
   | Misc_msx_checkpoint_info | Misc_msx_press
   | Misc_msx_step | Misc_msx_step_until_change | Misc_msx_peek | Misc_msx_ram_diff
-  | Misc_dos_screen | Misc_dos_peek | Misc_dos_save | Misc_portrait_read
+  | Misc_dos_meta | Misc_dos_screen | Misc_dos_peek | Misc_dos_save | Misc_portrait_read
   | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase | Misc_candle_equip | Misc_candle_gift ->
     No_controller
 
@@ -298,6 +299,7 @@ let misc_tool_name = function
   | Misc_candle_equip -> "keeper_candle_equip"
   | Misc_candle_gift -> "keeper_candle_gift"
   | Misc_dos_load -> "masc_dos_load"
+  | Misc_dos_meta -> "masc_dos_meta"
   | Misc_dos_eject -> "masc_dos_eject"
   | Misc_dos_screen -> "masc_dos_screen"
   | Misc_dos_step -> "masc_dos_step"
@@ -359,6 +361,7 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_candle_equip
   | Misc_candle_gift
   | Misc_dos_load
+  | Misc_dos_meta
   | Misc_dos_eject
   | Misc_dos_screen
   | Misc_dos_step

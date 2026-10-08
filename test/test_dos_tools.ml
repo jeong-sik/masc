@@ -206,6 +206,20 @@ let test_load_and_screen_name_the_core () =
       Dos_core_identity.source_digest Dos_lane.core.Dos_lane.source_digest)
 ;;
 
+let test_meta_names_the_core_without_a_machine () =
+  with_workspace (fun base_path ->
+    let result = dispatch ~base_path "masc_dos_meta" [] in
+    check bool "meta succeeds without a loaded game" true (is_completed result);
+    let actual =
+      match member "core" (Tool_result.data result) with
+      | Some value -> value
+      | None -> fail "meta carries no core"
+    in
+    check string "meta returns the linked core"
+      (Yojson.Safe.to_string (Dos_lane.core_to_yojson Dos_lane.core))
+      (Yojson.Safe.to_string actual))
+;;
+
 (* CI links the core at OCAML_DOS_SHA. This fails when the SHA moved without
    Dos_lane's pinned digest, and locally when the build linked another core
    (an older opam install, a vendored checkout on another branch). *)
@@ -965,6 +979,7 @@ let test_read_only_classification () =
        | None -> fail (name ^ " declares no readonly flag"))
   in
   check bool "screen reads" true (read_only "masc_dos_screen");
+  check bool "meta reads" true (read_only "masc_dos_meta");
   check bool "peek reads" true (read_only "masc_dos_peek");
   check bool "load changes the machine" false (read_only "masc_dos_load");
   check bool "press changes the machine" false (read_only "masc_dos_press");
@@ -984,7 +999,7 @@ let test_every_tool_is_declared () =
          | Some (schema : Masc_domain.tool_schema) ->
            check string "schema name" name schema.name
          | None -> fail (name ^ " registers no schema")))
-    [ "masc_dos_load"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
+    [ "masc_dos_load"; "masc_dos_meta"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
       "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek";
       "masc_dos_pass"; "masc_dos_save"; "masc_dos_restore" ]
 ;;
@@ -1455,6 +1470,8 @@ let () =
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
         ; test_case "load and screen name the core" `Quick
             test_load_and_screen_name_the_core
+        ; test_case "meta names the core without a machine" `Quick
+            test_meta_names_the_core_without_a_machine
         ; test_case "linked core is the pinned one" `Quick
             test_the_linked_core_is_the_pinned_one
         ; test_case "press" `Quick test_press_reaches_the_guest_and_the_ledger

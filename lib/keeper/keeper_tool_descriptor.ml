@@ -3078,6 +3078,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "msx_peek" "masc_msx_peek" ~readonly:true
   ; masc_misc_descriptor "msx_ram_diff" "masc_msx_ram_diff" ~readonly:true
   ; masc_misc_descriptor "dos_load" "masc_dos_load" ~readonly:false
+  ; masc_misc_descriptor "dos_meta" "masc_dos_meta" ~readonly:true
   ; masc_misc_descriptor "dos_eject" "masc_dos_eject" ~readonly:false
   ; masc_misc_descriptor "dos_screen" "masc_dos_screen" ~readonly:true
   ; masc_misc_descriptor "dos_step" "masc_dos_step" ~readonly:false

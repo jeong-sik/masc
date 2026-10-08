@@ -759,6 +759,39 @@ let test_keeper_hears_why_the_bidi_host_is_gone () =
       let data = rejected (tabs ()) in
       check string "a running host is named" "running"
         U.(bidi data |> member "state" |> to_string);
+      (* A record no reader knows still says whether a host holds the lock,
+         and one that does is running: the paragraph says so, and choosing
+         among connections is not the remedy for a running host. Reported
+         2026-10-08 (review of PR #42006): only `Running` counted as running,
+         so this answer lost its host word while a connection remained. *)
+      let record_file = Record.record_path ~base_path:workspace in
+      let original = In_channel.with_open_bin record_file In_channel.input_all in
+      Out_channel.with_open_bin record_file
+        (fun ch -> output_string ch {|{"not":"a record this reader knows"}|});
+      let data = rejected (tabs ()) in
+      check string "an unreadable record under a held lock is named by its state" "unreadable"
+        U.(bidi data |> member "state" |> to_string);
+      List.iter (fun fragment ->
+          check bool "with what its paragraph stands on" true
+            (String_util.contains_substring (said data) fragment))
+        [ "holds this workspace's lock"; "cannot be read" ];
+      let onlooker : Lane.client_info =
+        {client_id=(match Lane.client_id_of_string "70000000-0000-4000-8000-000000000009" with
+            | Ok id -> id | Error detail -> fail detail);
+         browser=Lane.Firefox;version="fixture";transport=Lane.Web_extension;engine_version="fixture"} in
+      ignore (Lane.take_command ~client_info:onlooker ~window_sec:0.001);
+      Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:onlooker.client_id));
+      (* The chosen browser is the gone host connection, so the answer is a
+         selection problem while another connection remains: the running
+         host's word is due beside it, not swallowed by the choice. *)
+      let data = rejected (Tools.handle_tabs ~base_path:workspace ~tool_name:"BrowserTabs"
+          ~start_time:(Tool_timing.start ()) (`Assoc selected)) in
+      check string "a connection left does not hide a host that runs" "selected_client_disconnected"
+        U.(data |> member "error" |> to_string);
+      check bool "the host's word is there beside the connection offered" true
+        (List.mem_assoc "bidiHost" U.(data |> to_assoc));
+      ignore (Lane.disconnect_client ~client_id:onlooker.client_id);
+      Out_channel.with_open_bin record_file (fun ch -> output_string ch original);
       (match Record.release held with Ok () -> () | Error detail -> fail detail);
       (* No ending, nobody holds the lock: the host was killed or crashed.
          The answer does not dress that up as an ending. *)

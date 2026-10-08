@@ -125,9 +125,19 @@ let selection_error ~base_path ~tool_name ~start_time error =
      choosing among them is the remedy, and the ending says nothing about
      that. *)
   let bidi_host_field (observation : Browser_bidi_host_status.observation) ~remaining =
+    (* Every state answers here, no catch-all: a record the reader cannot
+       make out still says whether a host holds the workspace's lock, and
+       one that does is running — the paragraph says so, and the remedy is
+       not choosing among connections. A lock that could not be asked is
+       carried by the no-connection arm, where the host's word is due
+       whatever it would have said. *)
     let running = match observation.record with
-      | Browser_bidi_host_record.Running _ -> true
-      | _ -> false in
+      | Browser_bidi_host_record.Running _
+      | Browser_bidi_host_record.Unreadable { held = Some true; _ } -> true
+      | Browser_bidi_host_record.Unreadable { held = Some false | None; _ }
+      | Browser_bidi_host_record.Never_started
+      | Browser_bidi_host_record.Ended _
+      | Browser_bidi_host_record.Died _ -> false in
     if running || remaining = [] then
       ["bidiHost", Browser_bidi_host_status.summary_to_json observation]
     else []

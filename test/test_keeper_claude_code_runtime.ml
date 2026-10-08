@@ -1530,6 +1530,7 @@ let test_keeper_preserves_claude_thinking_before_tools () =
             "signature", `String "opaque-signature"]));
        Emit (response_native_tool ~turn_id:"thinking-turn" ~message_id:"thinking-message"
           ~call_id:"thinking-tool" ~tool_name:"Read");
+       (* The same envelope again while the call is open: still one start. *)
        Emit (response_native_tool ~turn_id:"thinking-turn" ~message_id:"thinking-message"
           ~call_id:"thinking-tool" ~tool_name:"Read");
        Emit (native_tool_result ~call_id:"thinking-tool" ~content:"observed");
@@ -1544,8 +1545,6 @@ let test_keeper_preserves_claude_thinking_before_tools () =
              | [Agent_core.Types.MessageStart _;
                 ContentBlockDelta {index=1; delta=ThinkingDelta "Inspect the state"};
                 ContentBlockStop {index=1};
-                ContentBlockStart {index=2; content_type="native_tool_use";
-                  tool_id=Some "thinking-tool"; tool_name=Some "Read"};
                 ContentBlockStart {index=2; content_type="native_tool_use";
                   tool_id=Some "thinking-tool"; tool_name=Some "Read"};
                 ContentBlockStop {index=2};

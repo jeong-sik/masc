@@ -4,14 +4,15 @@ module Late = Keeper_late_approval
 module Mode = Keeper_tool_approval_mode
 
 type t =
-  { pre_tool_use : Agent_core.Hooks.hook
+  { pre_tool_use : identity_tool_index:Keeper_identity_tool_index.t -> Agent_core.Hooks.hook
   ; tool_approval : Agent_core.Hooks.tool_approval_callback
+  ; identity_tool_index : Keeper_identity_tool_index.t
   ; composition_plan_index : Keeper_tool_composition_plan_index.t
   }
 
 let create ~registry ~late_approvals ~publish ~redact_text ~clock ~keeper_name ~timeout_sec =
   let composition_plan_index = Keeper_tool_composition_plan_index.create () in
-  let pre_tool_use (event : Agent_core.Hooks.hook_event) =
+  let pre_tool_use ~identity_tool_index (event : Agent_core.Hooks.hook_event) =
     match event with
     | Agent_core.Hooks.PreToolUse { tool_name; input; _ } -> (
         (* Consulted per call, not captured at gate construction: the stance
@@ -22,6 +23,7 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~keeper_name ~
         | Mode.Auto -> (
             match
               Policy.verdict_for
+                ~identity_tool_index
                 ~composition_plan_index:(Some composition_plan_index)
                 ~tool_name ~input
             with
@@ -117,4 +119,5 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~keeper_name ~
          { tool_call_id; outcome = label });
     decision
   in
-  { pre_tool_use; tool_approval; composition_plan_index }
+  { pre_tool_use; tool_approval; composition_plan_index;
+    identity_tool_index = Keeper_identity_tool_index.empty }

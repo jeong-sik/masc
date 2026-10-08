@@ -2525,6 +2525,7 @@ let test_root_heartbeat_owns_only_current_call () =
      "tool_use_id",`String "opaque-progress-id"; "tool_name",`String "Bash";
      "elapsed_time_seconds",`Int 30] in
   with_fixture ([Emit (heartbeat_frame ~uuid:"before-start" ()); Emit native_tool_assistant;
+      Emit native_tool_assistant; (* active replay must not repeat observer/trace events *)
       Emit (heartbeat_frame ~uuid:"before-start" ());
       Emit (heartbeat_frame ~uuid:"other-session" ~session:"wrong" ());
       Emit (heartbeat_frame ~uuid:"unknown-parent" ~parent:"missing" ());
@@ -2543,8 +2544,36 @@ let test_root_heartbeat_owns_only_current_call () =
           | _ -> None) in
         check (list (pair string int)) "UUID replay and scope validation retain only exact root facts"
           ["native-call-1",30;"native-call-1",3] reports;
-        check int "completed invocation cannot be reopened by replayed assistant" 1
-          (List.length (List.filter (function Runtime_claude_code.Native_tool_started _ -> true | _ -> false) !seen)))
+        check int "active and completed replays emit only one native start" 1
+          (List.length (List.filter (function Runtime_claude_code.Native_tool_started _ -> true | _ -> false) !seen));
+        check int "active replay keeps the real completion observable exactly once" 1
+          (List.length (List.filter (function Runtime_claude_code.Native_tool_finished _ -> true | _ -> false) !seen)))
+;;
+
+let test_distinct_native_calls_are_not_replay () =
+  let second = match Yojson.Safe.from_string native_tool_assistant with
+    | `Assoc fields ->
+        let message = match List.assoc "message" fields with
+          | `Assoc message ->
+              let content = match List.assoc "content" message with
+                | `List [`Assoc tool] -> `List [`Assoc (("id", `String "native-call-2") :: List.remove_assoc "id" tool)]
+                | _ -> fail "native fixture content" in
+              `Assoc (("content", content) :: List.remove_assoc "content" message)
+          | _ -> fail "native fixture message" in
+        Yojson.Safe.to_string (`Assoc (("uuid", `String "assistant-native-2") ::
+          ("message", message) :: List.remove_assoc "uuid" (List.remove_assoc "message" fields)))
+    | _ -> fail "native fixture envelope" in
+  let seen = ref [] in
+  with_fixture [Emit native_tool_assistant; Emit native_tool_assistant;
+    Emit second; Emit second; Emit assistant; Emit result]
+    (fun path -> match run_fixture ~on_stream_event:(fun event -> seen := event :: !seen) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+          let calls = List.rev !seen |> List.filter_map (function
+            | Runtime_claude_code.Native_tool_started observation -> Runtime_native_tools.call_id observation
+            | _ -> None) in
+          check (list string) "equal tool/input with distinct occurrence emits both starts"
+            ["native-call-1"; "native-call-2"] calls)
 ;;
 
 let test_heartbeat_exception_cannot_relax_auth_json () =
@@ -3704,6 +3733,7 @@ let () =
             test_rejected_rate_limit_overrides_success_flag
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case "duplicate keys fail closed" `Quick test_duplicate_keys_fail_closed
+        ; test_case "distinct native starts survive replay suppression" `Quick test_distinct_native_calls_are_not_replay
         ; test_case "task identities and counters reject malformed telemetry" `Quick
             test_task_telemetry_identity_and_counter_validation
         ; test_case "task signed clocks preserve values and UUID replay" `Quick

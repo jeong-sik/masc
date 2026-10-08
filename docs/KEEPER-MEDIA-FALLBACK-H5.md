@@ -112,3 +112,63 @@ separately and never substituted for the fixtures.
   mechanism, not to a number here.
 - Reuse is keyed by payload sha256, media type and reader version; the first
   version is `1`.
+
+## Document reader: what `Verification_pdf_inspection` is, and a minimal share
+Read at main 5d0f1558 (lib/verification_pdf_inspection.ml, lib/pdf_runtime_dependencies.ml,
+callers: lib/verification_media_inspection.ml, lib/verification_authority_tools.ml).
+Nothing below is adopted yet; it is the proposal the leader asked for
+(c-9ac508438a0b501a4495a01acaf7923e). No code in this commit uses it.
+
+### Facts from the source
+1. `inspect` is one function that does three things in one pass: runs
+   `pdftotext -bbox-layout` into an XHTML file, parses it into per-page text
+   (`parsed_pages`), then renders **every** page to PNG with `pdftoppm` and
+   returns text and images together. Text-only use is not possible today; a
+   caller always pays for the render.
+2. Its failure set is review-shaped. `Image_policy_rejected`,
+   `Rendered_bytes_exceeded` (24 MiB of PNG across pages) and `Too_many_pages`
+   (64) are refusals of the image half; a PDF whose text is readable but whose
+   page render is over the image policy still comes back `Error`.
+3. The "review slot" is **not** in this module. The code holds no semaphore and
+   takes no approval. The slot limit (four global) appears only in comments
+   (lines ~97 and ~134) and is held by the review caller around
+   `inspect`; I did not find the semaphore itself in the files read. What the
+   module does own is an inspection-wide 60 s wall clock
+   (`Monotonic_deadline`) shared by all Poppler calls, a 64 MiB source cap, a
+   2 MiB extracted-text cap, a scrubbed environment (`Env_keeper_scrub`), and a
+   private 0o700 directory under
+   `Keeper_execute_output_files.capture_directory ~base_path`, removed on
+   release.
+4. Dependencies: `pdftotext` and `pdftoppm` must be installed
+   (`Pdf_runtime_dependencies.missing`). The module's own doc says bundled
+   release archives do not provide Poppler. A missing tool is an explicit
+   `Dependency_unavailable`, so the keeper path can show it as unavailable.
+
+### Minimal share (proposal)
+Factor the text half out as `Verification_pdf_inspection.extract_text ?max_extracted_bytes
+~base_path ~bytes ()` returning page texts only. It would keep the same
+safety: source cap, owned private directory, scrubbed env, one shared
+deadline, extracted-text cap, and the same dependency check. `inspect` would
+call it first and then render, so the review path's behavior is unchanged. No
+rendering, no image policy, no review slot, no approval is reachable from
+`extract_text`.
+
+### Who owns what on the keeper turn
+- The call site is `Keeper_media_reading.production_reader` (Document,
+  `application/pdf` only; other document types stay
+  `unavailable: no_document_reader`).
+- The keeper turn does not take a review slot and does not use the review
+  approval. It owns: calling, mapping every error to a closed reason
+  (`dependency_unavailable`, `budget_spent`, `payload_too_large`,
+  `extraction_failed`), and storing nothing when it fails.
+- Time budget: the 60 s wall clock exists to protect review slots; a fallback
+  attempt that blocks a turn for up to a minute is a different trade. The
+  deadline should be a parameter of `extract_text`. Its value for the turn path
+  is an open decision for the leader/operator; this record does not pick one.
+- Cancellation: `Process_eio` runs the child under Eio, so a cancelled turn
+  cancels the extraction; the owned directory is removed on release.
+
+### Not done / not claimed
+No `extract_text`, no wiring, and no PDF run yet. H5-S2 stays `not_measured`
+for real extraction. Until this proposal is accepted, document projection in
+production stays `unavailable: no_document_reader`.

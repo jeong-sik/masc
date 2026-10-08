@@ -2,7 +2,7 @@ name = "masc_msx_checkpoint_info"
 description = """
 Read a checkpoint slot's metadata without restoring it.
 
-Read-only. Restoring replaces the shared machine every spectator watches, so asking what a slot holds must not restore. A successful read reports `exists: true`, the envelope version, file modification time in UTC (`mtime_utc`), the compatibility Unix timestamp, the core digest that saved it, media names, input edge count, byte length and SHA-256. Missing and invalid slots return typed refusals. `core_sha` is null for checkpoints saved before the field existed — an unknown core, not a wrong one. `core_matches_current` is null for that unknown case, and a boolean only when the saved core can be compared."""
+Read-only. Restoring replaces the shared machine every spectator watches, so asking what a slot holds must not restore. A successful read reports `exists: true`, the envelope version, file modification time in UTC (`mtime_utc`), the compatibility Unix timestamp, the core digest that saved it, media names, input edge count, byte length and SHA-256. `state_format_version` is the embedded version accepted by the core's state-envelope and checksum decoder, or null if that decoder rejects it; inspection does not validate the entire machine payload or prove it can be restored. Missing and invalid checkpoint envelopes return typed refusals. `core_sha` is null for checkpoints saved before the field existed — an unknown core, not a wrong one. `core_matches_current` is null for that unknown case, and a boolean only when the saved core can be compared."""
 additional_properties = false
 defer_loading = true
 

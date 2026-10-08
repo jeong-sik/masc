@@ -1062,11 +1062,10 @@ let test_core_identity_matches_pin () =
   check bool "matches_pin agrees with the two digests"
     core.matches_pin (String.equal core.source_digest core.pinned_source_digest);
   check string "the linked core is the one at the CI pin" core.pinned_source_digest core.source_digest;
-  check bool "linked commit is only reported when the source digest matches the pin"
-    (match core.source_commit with
-     | Some sha -> core.matches_pin && String.equal sha core.pinned_source_commit
-     | None -> not core.matches_pin)
-    true;
+  check bool "digest equality does not manufacture a linked commit" false
+    (match Msx_lane.core_to_yojson core with
+     | `Assoc fields -> List.mem_assoc "source_commit" fields
+     | _ -> fail "core metadata must be an object");
   check bool "digest is 32 lowercase hex characters"
     (String.length core.source_digest = 32
     && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) core.source_digest)
@@ -1171,22 +1170,36 @@ let test_checkpoint_info_reads_without_restoring () =
   let dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
   let path = Filename.concat (Filename.concat dir "saves") "info-slot.json" in
   let payload = In_channel.with_open_bin path In_channel.input_all in
-  let expected_state_format_version =
-    match Yojson.Safe.from_string payload with
+  check bool "pinned core writes state format 3" true
+    (member "state_format_version" (Tool_result.data info) = Some (`Int 3));
+  let saved_fields, machine = match Yojson.Safe.from_string payload with
     | `Assoc fields ->
       (match List.assoc_opt "machine" fields with
        | Some (`String encoded) ->
          (match Base64.decode encoded with
-          | Ok bytes when String.length bytes >= 11 && String.sub bytes 0 10 = "OCAML-MSX\000" ->
-            Some (Char.code bytes.[10])
-          | Ok _ | Error _ -> None)
-       | Some _ | None -> None)
-    | _ -> None in
-  check bool "embedded state format marker reported" true
-    (match member "state_format_version" (Tool_result.data info), expected_state_format_version with
-     | Some (`Int actual), Some expected -> actual = expected
-     | Some `Null, None -> true
-     | _ -> false);
+          | Ok bytes -> fields, bytes
+          | Error detail -> fail detail)
+       | _ -> fail "saved checkpoint machine missing")
+    | _ -> fail "saved checkpoint must be an object" in
+  let corrupted = Bytes.of_string machine in
+  let last = Bytes.length corrupted - 1 in
+  Bytes.set corrupted last (Char.chr (Char.code (Bytes.get corrupted last) lxor 1));
+  List.iter (fun (label, bytes) ->
+    let fields = ("machine", `String (Base64.encode_string bytes))
+      :: List.remove_assoc "machine" saved_fields in
+    Out_channel.with_open_bin path (fun oc ->
+      output_string oc (Yojson.Safe.to_string (`Assoc fields)));
+    let inspected = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
+    check bool (label ^ " keeps inspection available") true (is_completed inspected);
+    check bool (label ^ " cannot claim an embedded format version") true
+      (member "state_format_version" (Tool_result.data inspected) = Some `Null);
+    check string (label ^ " leaves the running machine untouched") before_incarnation
+      (match Msx_lane.capture_with_identity () with
+       | Ok captured -> captured.incarnation
+       | Error error -> fail (Msx_lane.error_to_string error)))
+    ["truncated header", String.sub machine 0 1;
+     "corrupted checksum", Bytes.to_string corrupted];
+  Out_channel.with_open_bin path (fun oc -> output_string oc payload);
   check int "checkpoint byte length reported" (String.length payload)
     (match member "byte_length" (Tool_result.data info) with
      | Some (`Int n) -> n

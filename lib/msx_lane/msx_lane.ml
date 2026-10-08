@@ -957,7 +957,6 @@ type core = {
   source_digest : string;
   pinned_source_digest : string;
   pinned_source_commit : string;
-  source_commit : string option;
   matches_pin : bool;
 }
 [@@deriving yojson]
@@ -968,7 +967,6 @@ let core =
   { source_digest = Msx_core_identity.source_digest
   ; pinned_source_digest = pinned_core_source_digest
   ; pinned_source_commit = pinned_core_source_commit
-  ; source_commit = if matches_pin then Some pinned_core_source_commit else None
   ; matches_pin
   }
 
@@ -1068,10 +1066,11 @@ let checkpoint_info ~path =
         | Ok _ | Error _ -> None in
       let state_format_version =
         match decoded_machine with
-        | Some bytes
-          when String.length bytes >= 11 && String.sub bytes 0 10 = "OCAML-MSX\000" ->
-          Some (Char.code bytes.[10])
-        | _ -> None in
+        | Some bytes ->
+          (match State_codec.reader bytes with
+           | reader -> Some (State_codec.version reader)
+           | exception State_codec.Invalid_state _ -> None)
+        | None -> None in
       if Option.is_none decoded_machine
       then invalid "machine must be nonempty base64"
       else if not (List.for_all valid_ledger_entry ledger)

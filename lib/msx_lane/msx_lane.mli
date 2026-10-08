@@ -329,7 +329,7 @@ val ram_diff : unit -> (ram_diff, error) result
 
 (** {b Core identity} — the linked ocaml-msx source digest, the exact commit
     at the build-time CI pin, and whether the linked digest matches that pin.
-    The linked commit is reported only when the digest agrees with the pin. *)
+    Digest equality does not establish the linked source commit. *)
 
 type core = {
   source_digest : string;
@@ -340,10 +340,8 @@ type core = {
       (** the digest of the core at the CI pin, [OCAML_MSX_SHA] in
           [scripts/opam-pin-external-deps.sh]. *)
   pinned_source_commit : string;
-      (** the exact ocaml-msx commit used as the build input. *)
-  source_commit : string option;
-      (** the linked core commit when its build-time digest matches the pin;
-          absent when the linked source differs from that build input. *)
+      (** the ocaml-msx commit declared by the CI pin, not an observation of
+          the linked core's commit. *)
   matches_pin : bool;
       (** the two digests are equal. [false] means this server runs a
           different core from the one CI builds against — an older opam
@@ -366,7 +364,9 @@ type checkpoint_info = {
       (** true for a successfully inspected slot; missing slots return a typed error. *)
   version : int;  (** the checkpoint envelope version, currently 1 *)
   state_format_version : int option;
-      (** the embedded ocaml-msx state format marker; [None] if unrecognized. *)
+      (** the embedded format version after the core validates its state
+          envelope and checksum; [None] when the core rejects that envelope.
+          This does not deserialize or validate the complete machine payload. *)
   frame : int option;
       (** the saved frame counter. Checkpoint version 1 does not record it —
           reading it would mean decoding the machine — so [None] until a

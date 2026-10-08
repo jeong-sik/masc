@@ -126,11 +126,9 @@ readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # 052f50b reverts ocaml-msx #41 (#44): 0x0024 is BIOS ENASLT, not SNSMAT, and
 # serving it as an implicit CALSLT restored ppi_a after every slot switch, so
 # a Sangokushi II warm-boot drew only black from #41 through #43.
-# ab17a2b is the squash merge of ocaml-msx #47. It persists the WD2793
-# drive state in save-state format v3, including in-flight sector reads, so
-# restoring a live disk campaign does not cold-reset the FDC. The core's
-# top-level lib source digest at this pin is cc6489f2ddae4a48596b4879b3c0e368.
-readonly OCAML_MSX_SHA="ab17a2bcd82a3c1cee44121d65e50ccb313e6f22"
+# b3808bc is ocaml-msx #48. It embeds the exact clean source commit in the
+# linked core identity alongside the source digest.
+readonly OCAML_MSX_SHA="b3808bccf376c54bf7d78b176d4d178022a1487b"
 # DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
 # Path-pinned locally for core development; SHA-pinned here for CI.
 # d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and

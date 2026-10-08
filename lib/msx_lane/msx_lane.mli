@@ -327,15 +327,17 @@ val ram_diff : unit -> (ram_diff, error) result
     survives machine swaps — a reload after a peek reads as wholesale change,
     which it is. *)
 
-(** {b Core identity} — the linked ocaml-msx source digest, the exact commit
-    at the build-time CI pin, and whether the linked digest matches that pin.
-    Digest equality does not establish the linked source commit. *)
+(** {b Core identity} — the linked ocaml-msx source digest and exact source
+    commit embedded by the linked core build, the exact commit at the build-time
+    CI pin, and whether the linked digest matches that pin. *)
 
 type core = {
   source_digest : string;
       (** the linked ocaml-msx core's own identity: a digest of its [lib/]
-          sources, computed by its build ([Msx_core_identity]). Not a
-          commit — an opam install has no history to ask. *)
+          sources, computed by its build ([Msx_core_identity]). *)
+  source_commit : string option;
+      (** the exact commit embedded by the linked core build, or [None] for
+          dirty or archive builds. *)
   pinned_source_digest : string;
       (** the digest of the core at the CI pin, [OCAML_MSX_SHA] in
           [scripts/opam-pin-external-deps.sh]. *)

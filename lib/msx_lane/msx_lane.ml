@@ -943,18 +943,15 @@ let change_disk ~path ~backup_path =
 ;;
 
 (* The digest ocaml-msx reports for the sources at OCAML_MSX_SHA in
-   scripts/opam-pin-external-deps.sh. Bump the two together: CI links the
-   pinned core, and test_msx_tools checks that the linked digest equals this
-   one, so a SHA bumped alone turns that test red with the new digest in its
-   message. Read the digest of a commit from its build:
-   _build/default/lib/identity/msx_core_identity.ml. The digest covers only
-   lib/ top-level (dune plus *.ml/*.mli, by base name), so an additive-only
-   core change in a subdirectory keeps the value. *)
+   scripts/opam-pin-external-deps.sh. CI tests compare both the linked
+   core's embedded commit and digest with this table; a declared pin cannot
+   stand in for the linked build identity. *)
 let pinned_core_source_digest = "cc6489f2ddae4a48596b4879b3c0e368"
-let pinned_core_source_commit = "ab17a2bcd82a3c1cee44121d65e50ccb313e6f22"
+let pinned_core_source_commit = "b3808bccf376c54bf7d78b176d4d178022a1487b"
 
 type core = {
   source_digest : string;
+  source_commit : string option;
   pinned_source_digest : string;
   pinned_source_commit : string;
   matches_pin : bool;
@@ -965,6 +962,7 @@ let core =
   let matches_pin =
     String.equal Msx_core_identity.source_digest pinned_core_source_digest in
   { source_digest = Msx_core_identity.source_digest
+  ; source_commit = Msx_core_identity.source_commit
   ; pinned_source_digest = pinned_core_source_digest
   ; pinned_source_commit = pinned_core_source_commit
   ; matches_pin

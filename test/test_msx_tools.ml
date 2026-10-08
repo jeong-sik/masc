@@ -1062,7 +1062,10 @@ let test_core_identity_matches_pin () =
   check bool "matches_pin agrees with the two digests"
     core.matches_pin (String.equal core.source_digest core.pinned_source_digest);
   check string "the linked core is the one at the CI pin" core.pinned_source_digest core.source_digest;
-  check bool "digest equality does not manufacture a linked commit" false
+  check string "the linked core is the exact commit at the CI pin"
+    core.pinned_source_commit
+    (match core.source_commit with Some sha -> sha | None -> "no clean source commit embedded");
+  check bool "commit is surfaced in runtime metadata" true
     (match Msx_lane.core_to_yojson core with
      | `Assoc fields -> List.mem_assoc "source_commit" fields
      | _ -> fail "core metadata must be an object");

@@ -71,6 +71,11 @@ each of the four native targets still builds and verifies its shipped binaries
 and installation. Native files are uploaded after installation validation;
 early unverified duplicates and the separate fixture-preview bundle are omitted.
 The release behavior selection uses isolated fixtures; full regression builds its own sandbox image where required.
+The behavior lane prepares its sandbox image directly from the checked-in recipe
+before testing; it does not build the server just to print that recipe. The
+installation lane still tests the embedded recipe through the release CLI.
+The dashboard build helper owns dependency installation, so its caller does not
+install the same dependencies a second time.
 TLA model checks run explicitly through `model-check.yml` when state-machine
 specifications change; they are not a prerequisite for shipping a binary.
 Specialized host and packaging proofs remain manual.

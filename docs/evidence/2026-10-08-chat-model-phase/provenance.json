@@ -1,0 +1,60 @@
+{
+  "provenance": "xterm replay of CI fixture PTY frames",
+  "run": {
+    "id": 37723000966,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/37723000966",
+    "head": "ccf863dc991fe20d197472579350f592a154cede",
+    "observed_status": "completed",
+    "observed_conclusion": "success",
+    "status_at_original_capture": "in_progress_at_capture"
+  },
+  "binary_sha256": [
+    "9be9e5d2e00e7eae5095085eaf8989c21170f0381745fb203fee8920808e5778"
+  ],
+  "suite": "test_tui_model_response_phase_pty",
+  "suite_pass_seen": true,
+  "runner_log_sha256": "f088ef2be64bcca43968fb5d5dbe102753f75f490ee038526e35b38ebbe8824e",
+  "exported_frames": [
+    {
+      "name": "02-late-runtime-counter",
+      "columns": 140,
+      "rows": 30,
+      "actual_columns": 140,
+      "actual_rows": 30,
+      "frame_sha256": "a15b30dd5d28c935ce57417d8dc6c6fbd490800dc0e25cf5160f694d36c9f4e9",
+      "screenshot_sha256": "3057197722b74a943dab34506022eb9db96975b498903f55df38fe7fd5d134ef",
+      "captured_counter_rows": [
+        "alpha · ● healthy AUTO · gate: not loaded · running · turn: run · configured: cfg · tokens: out 1  Context unavailable · Ctrl-X"
+      ],
+      "original_and_replayed_cells_equal": true
+    },
+    {
+      "name": "04-repeated-runtime-counter",
+      "columns": 140,
+      "rows": 30,
+      "actual_columns": 140,
+      "actual_rows": 30,
+      "frame_sha256": "db83e6e58a374d4a5e2fe11a2a2b7a73801ada93eecf69ed0b32d2f469cb3801",
+      "screenshot_sha256": "7687736347169e9dc3ccc04562748cdbefb1c3a5fe76e6051f471d666bdb01db",
+      "captured_counter_rows": [
+        "alpha · ● healthy AUTO · gate: not loaded · running · turn: run · configured: cfg · tokens: out 2  Context unavailable · Ctrl-X"
+      ],
+      "original_and_replayed_cells_equal": true
+    }
+  ],
+  "all_15_frame_hashes_geometry_and_replay_verified": true,
+  "model_phase_pty_pass_seen": true,
+  "native_progress_test_count": 9,
+  "source_equivalence": {
+    "compared_parent": "415eb22e1c85af9c5121a6935b27adf9379b562f",
+    "diff_paths": [
+      "changelog.d/41798.md",
+      "changelog.d/41799.md",
+      "changelog.d/41804.md"
+    ],
+    "non_documentation_tree_equal": true,
+    "new_parent_build_or_binary_equivalence_claim": false
+  },
+  "new_receipt_label_included": false,
+  "live_provider_or_installed_binary_claim": false
+}

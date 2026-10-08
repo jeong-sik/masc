@@ -24230,7 +24230,7 @@ and is loaded on demand through keeper_skill.
                 report_action state "system" "Select a Keeper record with a Task to inspect"
             | Some (Hist_keeper_change change) ->
                 (match change.Masc.Tui_decode.fc_task_id with
-                 | None -> report_action state "system" "This recorded change has no Task link"
+                 | None -> report_action state "system" "No Task link on this record"
                  | Some task_id ->
                      (* The current domain read owns the destination. An absent
                         row must not turn into an unrelated Tasks list, and an
@@ -24247,7 +24247,7 @@ and is loaded on demand through keeper_skill.
                            match Masc_tui_task_selection.detail_row
                              ~detail_id:(Some task_id) ~tasks:state.tasks_domain with
                            | None -> report_action state "system"
-                               ("Task " ^ task_id ^ " is not in the current backlog reading")
+                               ("Task not in backlog: " ^ task_id)
                            | Some _ ->
                                state.followed_from <- Some (Code, None);
                                goto_surface ~from_reference:true state

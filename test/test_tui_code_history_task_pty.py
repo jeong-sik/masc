@@ -69,7 +69,9 @@ def run(executable, columns, mode):
             h.send_and_wait(process, fd, output, b"\x1b", b"history:")
             assert history.window(output, columns) == before
         else:
-            needle = {"unlinked": b"no Task link", "missing": b"not in the current",
+            # The reason leads the footer notice so it survives narrow-width
+            # clipping even when the selected Task has a long identifier.
+            needle = {"unlinked": b"No Task link", "missing": b"Task not in backlog",
                       "unavailable": b"Tasks unavailable"}[mode]
             h.send_and_wait(process, fd, output, b"t", needle)
             assert history.window(output, columns) == before

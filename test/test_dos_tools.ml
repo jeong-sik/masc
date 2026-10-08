@@ -449,7 +449,7 @@ let test_inventory_temporary_swap_cannot_publish_foreign_names () =
               Unix.unlink target;
               Unix.rename moved target
             end)
-          ~tool_name:"masc_dos_inventory" ~start_time:0.0 ~base_path in
+          ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path in
         check bool "the actual enumeration crossed the swap" true !swapped;
         check bool "bound original inventory remains readable" true (is_completed result);
         let response = Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result) in

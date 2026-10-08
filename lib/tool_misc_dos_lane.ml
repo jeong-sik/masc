@@ -16,6 +16,8 @@
 
 open Tool_args
 
+let ( let* ) = Result.bind
+
 let reject ?(data = `Null) ~tool_name ~start_time message =
   Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection ~start_time ~data message
 ;;
@@ -220,7 +222,36 @@ let entries_of dir =
 ;;
 
 let programs_available ~base_path = entries_of (programs_dir ~base_path)
-let read_file path = In_channel.with_open_bin path In_channel.input_all
+
+(* A bad inventory entry must become a bounded result rather than a blocking
+   open (a FIFO with no writer) or an exception containing the host path. *)
+let read_regular_file path =
+  try
+    let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0 in
+    match (Unix.fstat fd).Unix.st_kind with
+    | Unix.S_REG ->
+      let ic = Unix.in_channel_of_descr fd in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () -> Ok (In_channel.input_all ic))
+    | _ ->
+      Unix.close fd;
+      Error "entry is not a regular file"
+  with
+  | Unix.Unix_error _ | Sys_error _ -> Error "entry is unavailable"
+;;
+
+type entry_kind = Directory | Regular | Other | Unavailable
+
+let entry_kind path =
+  try
+    match (Unix.stat path).Unix.st_kind with
+    | Unix.S_DIR -> Directory
+    | Unix.S_REG -> Regular
+    | _ -> Other
+  with
+  | Unix.Unix_error _ | Sys_error _ -> Unavailable
+;;
 
 let is_program_name name =
   let lower = String.lowercase_ascii name in
@@ -228,44 +259,53 @@ let is_program_name name =
 ;;
 
 (* Inside a directory the executable is the one the caller named with
-   [boot], else the one named after the directory, else the only .exe/.com
-   there. Two candidates and no name match is a question for the caller, not
-   a guess: DOS game directories carry installers and setup programs beside
-   the game, and a loader chain such as 삼국지3's KOEI.COM -> MAIN.EXE shares
-   its directory with both. Returns the executable and the rest of the
-   directory beside it, so its caller reads each file exactly once. *)
-let executable_in ?boot dir =
-  let files =
-    List.filter (fun f -> not (Sys.is_directory (Filename.concat dir f))) (entries_of dir)
-  in
+   [boot], else the one named after the inventory entry, else the only
+   .exe/.com there. The same selector feeds inventory and load so a caller
+   sees the file that the loader will actually run. *)
+let select_executable ?boot ~identity_name ~dir_name files =
   let beside one = List.filter (fun f -> not (String.equal f one)) files in
   let folded = String.lowercase_ascii in
   match boot with
   | Some wanted ->
-    (* DOS folds case, so BOOT and boot name one file; [files] cannot hold
-       both, because the load refuses a directory where two names fold
-       together. *)
     (match List.filter (fun f -> String.equal (folded f) (folded wanted)) files with
      | one :: _ when is_program_name one -> Ok (one, beside one)
      | one :: _ ->
        Error (Printf.sprintf "%s is not a .exe or .com: boot names the program to run" one)
-     | [] ->
-       Error
-         (Printf.sprintf "%s holds no file named %s" (Filename.basename dir) wanted))
+     | [] -> Error (Printf.sprintf "%s holds no file named %s" dir_name wanted))
   | None ->
     let programs = List.filter is_program_name files in
-    let stem = folded (Filename.basename dir) in
+    let stem = folded (Filename.basename identity_name) in
     let named =
       List.filter (fun f -> String.equal (folded (Filename.remove_extension f)) stem) programs
     in
     (match (named, programs) with
      | [ one ], _ | [], [ one ] -> Ok (one, beside one)
-     | [], [] -> Error (Printf.sprintf "%s holds no .exe or .com" (Filename.basename dir))
+     | [], [] -> Error (Printf.sprintf "%s holds no .exe or .com" dir_name)
      | _, many ->
        Error
          (Printf.sprintf "%s holds several programs (%s); name the one to boot with boot"
-            (Filename.basename dir)
-            (String.concat ", " many)))
+            dir_name (String.concat ", " many)))
+;;
+
+(* Returns the executable and the rest of the directory beside it, so its
+   caller reads each file exactly once. *)
+let executable_in ?boot ~identity_name dir =
+  let names = entries_of dir in
+  let rec validate = function
+    | [] -> Ok ()
+    | f :: rest ->
+      (match entry_kind (Filename.concat dir f) with
+       | Directory | Regular -> validate rest
+       | Other ->
+         Error
+           (Printf.sprintf
+              "%s is unavailable: inventory entries must be regular files or directories" f)
+       | Unavailable -> Error (Printf.sprintf "%s is unavailable" f))
+  in
+  let files () = List.filter (fun f -> entry_kind (Filename.concat dir f) = Regular) names in
+  let* () = validate names in
+  let files = files () in
+  select_executable ?boot ~identity_name ~dir_name:(Filename.basename identity_name) files
 ;;
 
 (* A program is a name in programs/, never a host path. The machine reads the
@@ -296,8 +336,8 @@ let within ~root path =
 ;;
 
 let left_inventory ~root shown =
-  Printf.sprintf "%s leaves the inventory: this lane reads only what lives under %s"
-    shown root
+  let _ = root in
+  Printf.sprintf "%s leaves the DOS inventory" shown
 ;;
 
 let resolve_program ?boot ~base_path name =
@@ -313,19 +353,25 @@ let resolve_program ?boot ~base_path name =
       (Printf.sprintf "%S is not a name in the inventory: no paths, drives, or leading dots"
          trimmed)
   else if not (Sys.file_exists (Filename.concat root trimmed)) then
-    Error (Printf.sprintf "no program named %S: put it under %s" trimmed root)
+    Error (Printf.sprintf "no program named %S: put it under the DOS inventory" trimmed)
   else
     match within ~root (Filename.concat root trimmed) with
     | None -> Error (left_inventory ~root (Printf.sprintf "%S" trimmed))
     | Some path ->
-      if Sys.is_directory path then
+      (match entry_kind path with
+       | Unavailable -> Error "program is unavailable"
+       | Other -> Error "program is unavailable: entry is not a regular file or directory"
+       | Directory ->
         (* Each mounted file is read once, here. Reading the executable again
            while building the mount list would let a replacement landing
            between the two reads give the guest one image to run and a
            different one to open. *)
         let read_one f =
           match within ~root (Filename.concat path f) with
-          | Some real -> Ok (f, read_file real)
+          | Some real ->
+            (match read_regular_file real with
+             | Ok bytes -> Ok (f, bytes)
+             | Error reason -> Error (Printf.sprintf "%s is unavailable: %s" f reason))
           | None -> Error (left_inventory ~root (trimmed ^ "/" ^ f))
         in
         let rec gather acc = function
@@ -335,7 +381,7 @@ let resolve_program ?boot ~base_path name =
              | Error e -> Error e
              | Ok pair -> gather (pair :: acc) rest)
         in
-        (match executable_in ?boot path with
+        (match executable_in ?boot ~identity_name:trimmed path with
          | Error e -> Error e
          | Ok (exe, others) ->
            (match read_one exe with
@@ -351,17 +397,17 @@ let resolve_program ?boot ~base_path name =
                       (fun (a, _) (b, _) -> String.compare a b)
                       ((exe, exe_bytes) :: mounted) ))
                 (gather [] others)))
-      else if Option.is_some boot then
+       | Regular when Option.is_some boot ->
         Error
           (Printf.sprintf "%s is one file, not a directory: boot names a file inside a game directory"
              trimmed)
-      else begin
+       | Regular ->
         (* One file boots alone, and is mounted under its own name too — a
            program that opens itself (overlays, self-reading installers)
            finds it. *)
-        let bytes = read_file path in
-        Ok (trimmed, bytes, [ (trimmed, bytes) ])
-      end
+        (match read_regular_file path with
+         | Ok bytes -> Ok (trimmed, bytes, [ (trimmed, bytes) ])
+         | Error reason -> Error (Printf.sprintf "%s is unavailable: %s" trimmed reason)))
 ;;
 
 (* The board hears what happens on the shared machine, the way the MSX lane
@@ -538,9 +584,7 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
       ~data:
         (`Assoc
           ([ ( "programs_available"
-             , `List (List.map (fun n -> `String n) (programs_available ~base_path)) )
-           ; ("programs_dir", `String (programs_dir ~base_path))
-           ]
+             , `List (List.map (fun n -> `String n) (programs_available ~base_path)) ) ]
            @ autosave))
       ()
   | Some name ->
@@ -574,6 +618,107 @@ let handle_meta ~tool_name ~start_time =
   Tool_result.make_ok ~tool_name ~start_time
     ~data:(`Assoc [ core_field ])
     ()
+;;
+
+(* [masc_dos_inventory] inspects only the operator-owned program inventory.
+   It deliberately does not parse a game's executable or name any title: the
+   DOS Lane mounts the direct files beside whichever executable the caller
+   selects, and this read-only view makes that generic boundary visible before
+   a load. Names and byte lengths are enough to catch an incomplete asset
+   directory without exposing file contents or requiring a machine. *)
+let unavailable_json name reason =
+  `Assoc
+    [ ("name", `String name)
+    ; ("kind", `String "unavailable")
+    ; ("reason", `String reason)
+    ]
+;;
+
+let inventory_file_json ~programs_root ~parent path name =
+  let shown_name = if parent = "" then name else parent ^ "/" ^ name in
+  match within ~root:programs_root path with
+  | None -> unavailable_json shown_name "entry leaves the DOS inventory"
+  | Some real ->
+    (match entry_kind real with
+     | Directory -> `Assoc [ ("name", `String shown_name); ("kind", `String "directory") ]
+     | Other -> unavailable_json shown_name "entry is not a regular file or directory"
+     | Unavailable -> unavailable_json shown_name "entry is unavailable"
+     | Regular ->
+       (match read_regular_file real with
+        | Error reason -> unavailable_json shown_name reason
+        | Ok contents ->
+          `Assoc
+            [ ("name", `String shown_name)
+            ; ("kind", `String "file")
+            ; ("bytes", `Int (String.length contents))
+            ; ("sha256", `String Digestif.SHA256.(to_hex (digest_string contents)))
+            ]))
+;;
+
+let inventory_program_json ~programs_root name =
+  let path = Filename.concat programs_root name in
+  match within ~root:programs_root path with
+  | None -> unavailable_json name "entry leaves the DOS inventory"
+  | Some real ->
+    (match entry_kind real with
+     | Unavailable -> unavailable_json name "entry is unavailable"
+     | Other -> unavailable_json name "entry is not a regular file or directory"
+     | Regular ->
+       (match read_regular_file real with
+        | Error reason -> unavailable_json name reason
+        | Ok contents ->
+          `Assoc
+            [ ("name", `String name)
+            ; ("kind", `String "file")
+            ; ("bytes", `Int (String.length contents))
+            ; ("sha256", `String Digestif.SHA256.(to_hex (digest_string contents)))
+            ])
+     | Directory ->
+       let names = entries_of real in
+       let executables =
+         List.filter
+           (fun file ->
+             entry_kind (Filename.concat real file) = Regular && is_program_name file)
+           names
+       in
+       let default_boot =
+         match select_executable ~identity_name:name ~dir_name:name executables with
+         | Ok (file, _) -> Some file
+         | Error _ -> None
+       in
+       let files =
+         names
+         |> List.map (fun child ->
+              inventory_file_json ~programs_root ~parent:name (Filename.concat real child)
+                child)
+       in
+       `Assoc
+         [ ("name", `String name)
+         ; ("kind", `String "directory")
+         ; ( "executable_candidates"
+           , `List (List.map (fun file -> `String file) executables) )
+         ; ( "default_boot"
+           , match default_boot with Some file -> `String file | None -> `Null )
+         ; ("files", `List files)
+         ])
+;;
+
+let handle_inventory ~tool_name ~start_time ~base_path =
+  let root = programs_dir ~base_path in
+  try
+    let programs =
+      off_domain (fun () ->
+        entries_of root |> List.map (inventory_program_json ~programs_root:root))
+    in
+    Tool_result.make_ok ~tool_name ~start_time
+      ~data:
+        (`Assoc
+          [ ("programs", `List programs) ])
+      ()
+  with
+  | Sys_error _ ->
+    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+      "DOS inventory is unavailable"
 ;;
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =

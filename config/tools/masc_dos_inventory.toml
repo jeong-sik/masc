@@ -1,0 +1,12 @@
+name = "masc_dos_inventory"
+description = """
+List the DOS program inventory without loading or changing the shared machine.
+
+Each top-level entry is either a standalone .exe/.com file or a directory;
+directories include the direct files that masc_dos_load would mount beside the
+selected executable. The result exposes names, kinds, byte lengths and
+SHA-256 digests, so an operator can check that a user-owned game asset set is
+complete before boot.
+"""
+additional_properties = false
+defer_loading = true

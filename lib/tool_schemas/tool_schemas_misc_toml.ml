@@ -48,6 +48,7 @@ let msx_ram_diff = schema_of_name "masc_msx_ram_diff"
 
 let dos_load = schema_of_name "masc_dos_load"
 let dos_meta = schema_of_name "masc_dos_meta"
+let dos_inventory = schema_of_name "masc_dos_inventory"
 let dos_eject = schema_of_name "masc_dos_eject"
 let dos_screen = schema_of_name "masc_dos_screen"
 let dos_step = schema_of_name "masc_dos_step"

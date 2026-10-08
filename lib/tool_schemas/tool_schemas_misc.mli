@@ -128,6 +128,7 @@ type misc_operation =
   | Misc_candle_gift
   | Misc_dos_load
   | Misc_dos_meta
+  | Misc_dos_inventory
   | Misc_dos_eject
   | Misc_dos_screen
   | Misc_dos_step

@@ -130,6 +130,12 @@ let install_program ~base_path name contents =
   write_file (Filename.concat dir name) contents
 ;;
 
+let install_program_file ~base_path program name contents =
+  let dir = Filename.concat (programs_dir ~base_path) program in
+  mkdir_p dir;
+  write_file (Filename.concat dir name) contents
+;;
+
 let load ~base_path name = dispatch ~base_path "masc_dos_load" [ ("program", `String name) ]
 
 (* Setup for the tests that are about what happens after a load. The load's
@@ -165,6 +171,176 @@ let test_inventory_when_unnamed () =
     match member "programs_available" (Tool_result.data result) with
     | Some (`List [ `String name ]) -> check string "the inventory" "hello.com" name
     | _ -> fail "no programs_available")
+;;
+
+let test_inventory_describes_mountable_assets_without_a_machine () =
+  with_workspace (fun base_path ->
+    install_program_file ~base_path "sg3" "KOEI.COM" hello_com;
+    install_program_file ~base_path "sg3" "END.EXE" "end";
+    install_program ~base_path "solo.com" hello_com;
+    let result = dispatch ~base_path "masc_dos_inventory" [] in
+    check bool "inventory succeeds without a loaded game" true (is_completed result);
+    check bool "inventory does not expose a host path" true
+      (member "programs_dir" (Tool_result.data result) = None);
+    let programs =
+      match member "programs" (Tool_result.data result) with
+      | Some (`List entries) -> entries
+      | _ -> fail "no structured programs inventory"
+    in
+    let entry name =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              (match List.assoc_opt "name" fields with
+               | Some (`String actual) -> String.equal actual name
+               | _ -> false)
+            | _ -> false)
+          programs
+      with
+      | Some (`Assoc fields) -> fields
+      | Some _ -> fail (name ^ " is not an object")
+      | None -> fail (name ^ " is absent")
+    in
+    let sg3 = entry "sg3" in
+    check string "directory kind" "directory"
+      (match List.assoc_opt "kind" sg3 with Some (`String value) -> value | _ -> "");
+    check bool "both executables are advertised" true
+      (match List.assoc_opt "executable_candidates" sg3 with
+       | Some (`List [ `String "END.EXE"; `String "KOEI.COM" ]) -> true
+       | _ -> false);
+    check bool "ambiguous boot is explicit" true
+      (List.assoc_opt "default_boot" sg3 = Some `Null);
+    let files =
+      match List.assoc_opt "files" sg3 with
+      | Some (`List values) -> values
+      | _ -> fail "directory has no files"
+    in
+    let file_name value =
+      match value with
+      | `Assoc fields ->
+        (match List.assoc_opt "name" fields with Some (`String name) -> name | _ -> "")
+      | _ -> ""
+    in
+    check bool "the executable is listed" true (List.exists (fun value -> file_name value = "sg3/KOEI.COM") files);
+    check bool "the companion file is listed" true (List.exists (fun value -> file_name value = "sg3/END.EXE") files);
+    let solo = entry "solo.com" in
+    check string "standalone file kind" "file"
+      (match List.assoc_opt "kind" solo with Some (`String value) -> value | _ -> "");
+    check bool "standalone file reports bytes" true
+      (match List.assoc_opt "bytes" solo with Some (`Int value) -> value > 0 | _ -> false);
+    check bool "standalone file reports sha256" true
+      (match List.assoc_opt "sha256" solo with
+       | Some (`String value) -> String.length value = 64
+       | _ -> false);
+    check string "sha256 matches the mounted bytes"
+      Digestif.SHA256.(to_hex (digest_string hello_com))
+      (match List.assoc_opt "sha256" solo with
+       | Some (`String value) -> value
+       | _ -> ""))
+;;
+
+(* FIFO entries must be reported without opening them. In particular, a
+   writer-free FIFO must never hold the inventory worker, and no error result
+   may disclose the resolved host path. *)
+let test_inventory_rejects_special_files_without_host_paths () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    mkdir_p root;
+    let top_fifo = Filename.concat root "pipe.com" in
+    Unix.mkfifo top_fifo 0o600;
+    let game = Filename.concat root "pipe-game" in
+    mkdir_p game;
+    write_file (Filename.concat game "pipe-game.com") hello_com;
+    Unix.mkfifo (Filename.concat game "asset.fifo") 0o600;
+    let inventory = dispatch ~base_path "masc_dos_inventory" [] in
+    check bool "special files do not block inventory" true (is_completed inventory);
+    let programs =
+      match member "programs" (Tool_result.data inventory) with
+      | Some (`List values) -> values
+      | _ -> fail "no inventory programs"
+    in
+    let entry name =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              List.assoc_opt "name" fields = Some (`String name)
+            | _ -> false)
+          programs
+      with
+      | Some (`Assoc fields) -> fields
+      | _ -> fail (name ^ " is absent")
+    in
+    let kind fields =
+      match List.assoc_opt "kind" fields with Some (`String value) -> value | _ -> ""
+    in
+    check string "top-level FIFO is unavailable" "unavailable" (kind (entry "pipe.com"));
+    let child_files =
+      match List.assoc_opt "files" (entry "pipe-game") with
+      | Some (`List values) -> values
+      | _ -> fail "pipe-game has no files"
+    in
+    let child_fifo =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              List.assoc_opt "name" fields = Some (`String "pipe-game/asset.fifo")
+            | _ -> false)
+          child_files
+      with
+      | Some (`Assoc fields) -> fields
+      | _ -> fail "child FIFO is absent"
+    in
+    check string "child FIFO is unavailable" "unavailable" (kind child_fifo);
+    let top_load = load ~base_path "pipe.com" in
+    let child_load = load ~base_path "pipe-game" in
+    List.iter
+      (fun result ->
+        check bool "special-file load is refused" false (is_completed result);
+        check bool "special-file error has no host path" false
+          (contains (Common.masc_dir_from_base_path ~base_path) (Tool_result.message result)))
+      [ top_load; child_load ])
+;;
+
+(* Inventory names are the caller-visible identity. A symlink alias and its
+   target may contain different conventional executables; inventory and load
+   must choose from the same identity so the advertised default is the one
+   that actually boots. *)
+let test_inventory_and_load_share_alias_selection () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    mkdir_p root;
+    let real = Filename.concat root "real-game" in
+    mkdir_p real;
+    write_file (Filename.concat real "alias.com") hello_com;
+    write_file (Filename.concat real "real-game.com") spinner_com;
+    Unix.symlink real (Filename.concat root "alias");
+    let inventory = dispatch ~base_path "masc_dos_inventory" [] in
+    let programs =
+      match member "programs" (Tool_result.data inventory) with
+      | Some (`List values) -> values
+      | _ -> fail "no inventory programs"
+    in
+    let alias =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              List.assoc_opt "name" fields = Some (`String "alias")
+            | _ -> false)
+          programs
+      with
+      | Some (`Assoc fields) -> fields
+      | _ -> fail "alias is absent"
+    in
+    check bool "alias advertises the alias-named executable" true
+      (List.assoc_opt "default_boot" alias = Some (`String "alias.com"));
+    let loaded = load ~base_path "alias" in
+    check bool "alias load succeeds" true (is_completed loaded);
+    check string "load follows the advertised default" "alias.com"
+      (string_field "program" loaded))
 ;;
 
 let test_load_runs_to_the_first_key_request () =
@@ -980,6 +1156,7 @@ let test_read_only_classification () =
   in
   check bool "screen reads" true (read_only "masc_dos_screen");
   check bool "meta reads" true (read_only "masc_dos_meta");
+  check bool "inventory reads" true (read_only "masc_dos_inventory");
   check bool "peek reads" true (read_only "masc_dos_peek");
   check bool "load changes the machine" false (read_only "masc_dos_load");
   check bool "press changes the machine" false (read_only "masc_dos_press");
@@ -999,7 +1176,7 @@ let test_every_tool_is_declared () =
          | Some (schema : Masc_domain.tool_schema) ->
            check string "schema name" name schema.name
          | None -> fail (name ^ " registers no schema")))
-    [ "masc_dos_load"; "masc_dos_meta"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
+    [ "masc_dos_load"; "masc_dos_meta"; "masc_dos_inventory"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
       "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek";
       "masc_dos_pass"; "masc_dos_save"; "masc_dos_restore" ]
 ;;
@@ -1457,7 +1634,8 @@ let test_activity_refusal_is_proven_pre_effect () =
        "masc_dos_press", ["keys", `List [`String "space"]]];
     List.iter (fun name ->
       check bool "inventory inspection remains available" true
-        (is_completed (dispatch ~base_path name []))) ["masc_dos_load"; "masc_dos_restore"])
+        (is_completed (dispatch ~base_path name [])))
+      ["masc_dos_load"; "masc_dos_inventory"; "masc_dos_restore"])
     [Machine_configuration.Disabled; Unobserved]
 ;;
 
@@ -1467,6 +1645,12 @@ let () =
       , [ test_case "no machine" `Quick test_no_machine
         ; test_case "click no machine" `Quick test_click_without_a_machine_is_refused
         ; test_case "inventory" `Quick test_inventory_when_unnamed
+        ; test_case "inventory describes assets" `Quick
+            test_inventory_describes_mountable_assets_without_a_machine
+        ; test_case "inventory special files" `Quick
+            test_inventory_rejects_special_files_without_host_paths
+        ; test_case "inventory alias selection" `Quick
+            test_inventory_and_load_share_alias_selection
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
         ; test_case "load and screen name the core" `Quick
             test_load_and_screen_name_the_core

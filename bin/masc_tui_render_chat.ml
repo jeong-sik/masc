@@ -1233,8 +1233,6 @@ let clip_tool_result ~max_cells text =
     | prefix :: _ -> prefix ^ "…"
 
 
-(* [failed] is the row's own verdict. A browser refusal is read back only from
-   a failed call, so the rows of calls that returned are never parsed for one. *)
 let tool_result_preview ~failed (activity : Keeper_chat_transcript.tool_activity) value =
   match Keeper_chat_transcript.descriptor_of_tool_name activity.Keeper_chat_transcript.tool_name with
   | Some descriptor
@@ -1253,14 +1251,10 @@ let tool_result_preview ~failed (activity : Keeper_chat_transcript.tool_activity
                 [ Masc_tui_execute_result.status_text result; output ])
        | None -> value)
   | Some _ | None ->
-      if not failed then value
-      else
-        (match Masc_tui_browser_rejection.of_result value with
-         | Some rejection ->
-             Masc_tui_browser_rejection.line
-               ~transport_label:Browser_lane_view.transport_label
-               ~capability_word:Browser_lane_view.capability_word rejection
-         | None -> value)
+      Masc_tui_browser_rejection.preview ~failed
+        ~lacking:(fun transport capability ->
+          Browser_lane_view.lacking_clause transport [capability])
+        value
 
 
 let tool_result_rows state ~keeper_name ~max_cells projection =

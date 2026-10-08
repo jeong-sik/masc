@@ -103,8 +103,13 @@ let no_client_retry host =
    and a browser that leaves after resolution is answered the same way. *)
 let selection_error ~base_path ~tool_name ~start_time error =
   let clients () = Browser_lane.active_clients () |> List.map Browser_lane.client_json in
-  let rejection fields =
-    let data = `Assoc (("error", `String (Browser_lane.selection_error_code error)) :: fields) in
+  (* [deciding] are the short fields that say what was refused and what to do
+     next; [listing] are the connection lists, which grow with the number of
+     browsers. The lists go last because several readers of a recorded
+     rejection keep only its beginning. *)
+  let rejection ~deciding ~listing =
+    let data =
+      `Assoc ((("error", `String (Browser_lane.selection_error_code error)) :: deciding) @ listing) in
     Tool_result.make_err ~tool_name ~start_time
       ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
       ~data (Yojson.Safe.to_string data) in
@@ -112,12 +117,14 @@ let selection_error ~base_path ~tool_name ~start_time error =
     Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
   match error with
   | Browser_lane.Activity_rejected refusal ->
-    rejection ["message", `String (Browser_lane.activity_rejection_message refusal)]
+    rejection ~deciding:["message", `String (Browser_lane.activity_rejection_message refusal)]
+      ~listing:[]
   | Browser_lane.No_live_client ->
     let clients = clients () in
     let host = observe () in
-    rejection ["clients", `List clients; "host", Browser_lane_launcher.to_json host;
-               "retry", `String (no_client_retry host)]
+    rejection ~deciding:["retry", `String (no_client_retry host);
+                         "host", Browser_lane_launcher.to_json host]
+      ~listing:["clients", `List clients]
   | Browser_lane.Selected_client_disconnected client_id ->
     let clients = clients () in
     let host = observe () in
@@ -125,12 +132,13 @@ let selection_error ~base_path ~tool_name ~start_time error =
       | _ :: _ -> "That browser is no longer connected. Choose a browser from clients and retry \
                    with its clientId. No browser command was dispatched."
       | [] -> "That browser is no longer connected and none is. " ^ no_client_retry host in
-    rejection ["clients", `List clients; "clientId", `String (Browser_lane.client_id_to_string client_id);
-               "host", Browser_lane_launcher.to_json host; "retry", `String retry]
+    rejection ~deciding:["clientId", `String (Browser_lane.client_id_to_string client_id);
+                         "retry", `String retry; "host", Browser_lane_launcher.to_json host]
+      ~listing:["clients", `List clients]
   | Browser_lane.Ambiguous_clients _ ->
-    rejection ["clients", `List (clients ());
-               "retry", `String "Choose a connected browser and retry with its clientId. No \
-                                 browser command was dispatched."]
+    rejection ~deciding:["retry", `String "Choose a connected browser and retry with its clientId. \
+                                           No browser command was dispatched."]
+      ~listing:["clients", `List (clients ())]
   | Browser_lane.Transport_unsupported { client_id; transport; capability } ->
     let serving_transports = Browser_lane.live_transports_serving capability in
     let serving_clients =
@@ -149,16 +157,15 @@ let selection_error ~base_path ~tool_name ~start_time error =
         ^ String.concat "; or " (List.map Browser_lane.live_transport_setup serving_transports)
         ^ ". The same request returns the same answer until then; other work this \
            connection serves is unaffected. No browser command was dispatched." in
-    (* The short deciding fields come first: several readers of a recorded
-       rejection keep only its beginning. *)
-    rejection ["capability", `String (Browser_lane.live_capability_to_wire capability);
-               "transport", `String (Browser_lane.live_transport_to_string transport);
-               "clientId", `String (Browser_lane.client_id_to_string client_id);
-               "retry", `String retry;
-               "servingTransports", `List (List.map (fun transport ->
-                 `String (Browser_lane.live_transport_to_string transport)) serving_transports);
-               "servingClients", `List (List.map Browser_lane.client_json serving_clients);
-               "clients", `List (clients ())]
+    rejection
+      ~deciding:["capability", `String (Browser_lane.live_capability_to_wire capability);
+                 "transport", `String (Browser_lane.live_transport_to_string transport);
+                 "clientId", `String (Browser_lane.client_id_to_string client_id);
+                 "retry", `String retry;
+                 "servingTransports", `List (List.map (fun transport ->
+                   `String (Browser_lane.live_transport_to_string transport)) serving_transports)]
+      ~listing:["servingClients", `List (List.map Browser_lane.client_json serving_clients);
+                "clients", `List (clients ())]
 
 let read_failure ~base_path ~tool_name ~start_time = function
   | Browser_surface.Unselected error -> selection_error ~base_path ~tool_name ~start_time error

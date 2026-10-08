@@ -18,7 +18,22 @@ let recorded result =
   | Error error -> error.message
   | Ok _ -> fail "a refused browser call was projected as success"
 
-let line = Rejection.line ~transport_label:View.transport_label ~capability_word:View.capability_word
+let lacking transport capability = View.lacking_clause transport [capability]
+let line = Rejection.line ~lacking
+
+(* The deciding fields come before every connection list, so a reader that
+   keeps only the beginning of a recorded refusal still has them. *)
+let lists_come_last text =
+  let position needle =
+    let limit = String.length text - String.length needle in
+    let rec find index =
+      if index > limit then None
+      else if String.sub text index (String.length needle) = needle then Some index
+      else find (index + 1) in
+    find 0 in
+  match position {|"retry":|}, position {|"clients":|} with
+  | Some retry, Some clients -> retry < clients
+  | Some _, None | None, Some _ | None, None -> false
 
 let test_refusals_read_back () =
   Eio_main.run (fun env ->
@@ -42,7 +57,12 @@ let test_refusals_read_back () =
             "point",`Assoc ["x",`Float 0.5;"y",`Float 0.5];
             "viewport",`Assoc ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
               "scrollX",`Int 0;"scrollY",`Int 0]]))) in
-      (match Rejection.of_result (tabs ()) with
+      let tabs_of client_id =
+        recorded (Tools.handle_tabs ~base_path:no_workspace ~tool_name:"BrowserTabs"
+          ~start_time:(Tool_timing.start ()) (`Assoc ["clientId", `String client_id])) in
+      let unconnected = tabs () in
+      check bool "no connected browser: the next step precedes the list" true (lists_come_last unconnected);
+      (match Rejection.of_result unconnected with
        | Some {case=Lane.No_live_client_case; detail=Rejection.Next_step sentence} ->
          check bool "no connected browser carries its next step" true (sentence <> "")
        | Some _ | None -> fail "a call with no browser connected did not read back as no_live_client");
@@ -54,25 +74,41 @@ let test_refusals_read_back () =
       check bool "the deciding fields lead the recorded text" true
         (String.starts_with text
            ~prefix:{|{"error":"live_transport_unsupported","capability":"trusted_hover","transport":"web_extension",|});
+      check bool "an unserved request: the next step precedes the lists" true (lists_come_last text);
       (match Rejection.of_result text with
        | Some ({case=Lane.Transport_unsupported_case;
                 detail=Rejection.Unserved {transport=Lane.Web_extension; capability=Lane.Trusted_hover; serving_clients=0}}
                as rejection) ->
-         check string "the row says what was asked of which connection"
-           "live_transport_unsupported · this WebExtension connection does not serve hover · no connected browser does"
+         check string "the row says what the connection leaves out"
+           "live_transport_unsupported · WebExtension: no hover · 0 connections serve it"
            (line rejection)
        | Some _ | None -> fail "an unserved hover did not read back");
+      check string "a failed call's refusal shows as its row"
+        "live_transport_unsupported · WebExtension: no hover · 0 connections serve it"
+        (Rejection.preview ~failed:true ~lacking text);
+      check string "a call that returned is shown as recorded, whatever its text"
+        text (Rejection.preview ~failed:false ~lacking text);
+      check string "a failed call with other text is shown as recorded"
+        "the browser lane did not answer in time"
+        (Rejection.preview ~failed:true ~lacking "the browser lane did not answer in time");
       let bidi = info 2 Lane.Webdriver_bidi in
       connect bidi;
       (match Rejection.of_result (hover extension) with
        | Some ({detail=Rejection.Unserved {serving_clients=1; _}; _} as rejection) ->
          check string "a connected browser that serves it is counted"
-           "live_transport_unsupported · this WebExtension connection does not serve hover · 1 connected browser does"
+           "live_transport_unsupported · WebExtension: no hover · 1 connection serves it"
            (line rejection)
        | Some _ | None -> fail "the serving browser was not counted");
-      (match Rejection.of_result (tabs ()) with
+      let ambiguous = tabs () in
+      check bool "two connected browsers: the next step precedes the list" true (lists_come_last ambiguous);
+      (match Rejection.of_result ambiguous with
        | Some {case=Lane.Ambiguous_clients_case; detail=Rejection.Next_step _} -> ()
        | Some _ | None -> fail "two connected browsers did not read back as ambiguous");
+      let gone = tabs_of (Lane.client_id_to_string (info 3 Lane.Web_extension).client_id) in
+      check bool "a browser that left: the next step precedes the list" true (lists_come_last gone);
+      (match Rejection.of_result gone with
+       | Some {case=Lane.Selected_client_disconnected_case; detail=Rejection.Next_step _} -> ()
+       | Some _ | None -> fail "a browser that left did not read back as disconnected");
       Lane.install_activity_observer (Some (fun _ -> Lane.Disabled));
       Eio.Switch.on_release sw (fun () -> Lane.install_activity_observer (Some (fun _ -> Lane.Enabled)));
       match Rejection.of_result (tabs ()) with

@@ -1,7 +1,8 @@
-(** Console_sink — the console mirror must never block log producers.
+(** Console_sink — isolate console I/O from log producers after start.
 
     Contract under test (issue #20684):
-    - synchronous before enqueue mode (historical behavior)
+    - synchronous before enqueue mode: channel I/O failures are isolated,
+      while other writer exceptions propagate after observer notification
     - enqueue mode: write returns without touching the fd writer
     - bounded queue: overflow drops incoming mirror lines and counts them
     - drain writes queued lines in order and reports drops once *)
@@ -98,11 +99,11 @@ let test_overflow_drops_and_counts () =
     check int "reported total stays stable" 808 last_reported_drops)
 ;;
 
-let test_writer_and_observer_exception_contract () =
+let test_writer_and_observer_failure_isolation () =
   with_clean_sink (fun () ->
     let observed = ref 0 in
     Console_sink.set_after_write_observer (Some (fun () -> incr observed));
-    Console_sink.For_testing.set_writer (Some (fun _ -> failwith "fd broken"));
+    Console_sink.For_testing.set_writer (Some (fun _ -> raise (Sys_error "fd broken")));
     Console_sink.For_testing.set_enqueue_active true;
     Console_sink.write "line a";
     Console_sink.write "line b";
@@ -114,15 +115,32 @@ let test_writer_and_observer_exception_contract () =
     let synchronous_observed = ref 0 in
     Console_sink.set_after_write_observer
       (Some (fun () -> incr synchronous_observed));
-    check_raises "synchronous writer exception remains visible"
-      (Failure "fd broken")
-      (fun () -> Console_sink.write "line c");
+    Console_sink.write "line c";
     check int "failed synchronous attempt still notifies" 1
       !synchronous_observed;
+    Log.emit Log.Warn ~module_name:"ConsoleSinkFailureTest"
+      "record survives a failing console mirror";
+    (match Log.Ring.recent ~limit:5 ~module_filter:"ConsoleSinkFailureTest" () with
+     | entry :: _ ->
+       check string "ring records survive a failing console mirror"
+         "record survives a failing console mirror" entry.Log.Ring.message
+     | [] -> fail "log record was lost with a failing console mirror");
     Console_sink.For_testing.set_writer (Some (fun _ -> ()));
     Console_sink.set_after_write_observer
       (Some (fun () -> failwith "observer broken"));
     Console_sink.write "line d")
+;;
+
+let test_synchronous_control_exception_propagates () =
+  with_clean_sink (fun () ->
+    let observed = ref 0 in
+    Console_sink.set_after_write_observer (Some (fun () -> incr observed));
+    Console_sink.For_testing.set_writer (Some (fun _ -> raise Sys.Break));
+    check_raises "synchronous interruption reaches the caller" Sys.Break
+      (fun () -> Console_sink.write "interrupted line");
+    check int "interrupted attempt still notifies the observer" 1 !observed;
+    check int "interrupted synchronous write is not queued" 0
+      (Console_sink.For_testing.queued_count ()))
 ;;
 
 let () =
@@ -134,8 +152,10 @@ let () =
         ; test_case "enqueue mode defers fd write" `Quick
             test_enqueue_mode_defers_fd_write
         ; test_case "overflow drops and counts" `Quick test_overflow_drops_and_counts
-        ; test_case "writer and observer exception contract" `Quick
-            test_writer_and_observer_exception_contract
+        ; test_case "writer failure isolation" `Quick
+            test_writer_and_observer_failure_isolation
+        ; test_case "synchronous control exception propagates" `Quick
+            test_synchronous_control_exception_propagates
         ] )
     ]
 ;;

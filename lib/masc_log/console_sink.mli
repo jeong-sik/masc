@@ -2,7 +2,8 @@
     stream; the JSONL file sink and in-memory ring are authoritative.
 
     Before {!start}, {!write} performs the write synchronously on the
-    caller (historical behavior — tests and CLI one-shots unchanged).
+    caller. Channel I/O failures ([Sys_error]) are ignored so the log caller
+    can continue recording; other writer exceptions propagate unchanged.
     After {!start}, {!write} enqueues into a bounded queue drained by a
     dedicated OS thread, so a blocked console fd (full pty buffer:
     terminal scrollback, copy-mode, slow renderer) can no longer halt
@@ -15,7 +16,8 @@
 val start : unit -> unit
 
 (** Emit one console line (no trailing newline). Never blocks after
-    {!start}; synchronous before. *)
+    {!start}; synchronous before. Before {!start}, [Sys_error] from the writer
+    is ignored; other writer exceptions propagate after observer notification. *)
 val write : string -> unit
 
 (** Replace the single process-wide callback invoked after every console writer

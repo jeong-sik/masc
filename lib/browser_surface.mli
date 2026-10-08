@@ -31,4 +31,3 @@ val capture : request -> (Yojson.Safe.t, failure) result
 val parse_client_id : Yojson.Safe.t -> (Browser_lane.client_id option, string) result
 val source_name : Browser_lane.route -> string
 (** The lane name ({!Browser_lane.Lane_name.to_wire}) a result carries as [source]. *)
-val client_id_json : Browser_lane.target -> Yojson.Safe.t

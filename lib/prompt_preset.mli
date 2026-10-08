@@ -21,6 +21,8 @@ type snapshot =
   ; instructions : (string * string) list  (** keeper TOML file name, instructions *)
   ; assignments : (string * string) list  (** keeper name, runtime id *)
   ; lanes : lane list
+  ; default_revisions : (string * string) list option
+      (** Default body SHA-256 by prompt key. [None] means no recorded baseline. *)
   }
 
 type manifest =
@@ -50,12 +52,22 @@ type runtime_result =
   | Runtime_committed  (** runtime.toml committed through [Runtime.save_config_text] *)
   | Runtime_failed of string
 
+type default_comparison =
+  | Defaults_unknown
+  | Defaults_match
+  | Defaults_differ of (string * string option * string option) list
+      (** Prompt key, saved revision, current revision; absent means no default body. *)
+
+val compare_defaults : snapshot -> default_comparison
+val default_comparison_to_json : default_comparison -> Yojson.Safe.t
+
 type restore_report =
   { restored : string
   ; autosave : string  (** the preset holding the state from before the restore *)
   ; prompt_overrides_result : part_result  (** takes effect at once *)
   ; instructions_result : part_result  (** takes effect at each keeper's next up *)
   ; runtime_result : runtime_result
+  ; default_comparison : default_comparison
   }
 
 val autosave_name : string

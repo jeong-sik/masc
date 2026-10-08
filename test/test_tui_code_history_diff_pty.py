@@ -183,7 +183,9 @@ def run_duplicate_records(executable, columns):
 
         # Switch to the equal first occurrence, then back to the second.
         select(process, fd, output, first_owner)
-        h.send_and_wait(process, fd, output, b"d", f"rows {first_owner}-".encode())
+        # Equal-size expansions leave the window counter unchanged. The moved
+        # change block is the new output; its owner is checked below.
+        h.send_and_wait(process, fd, output, b"d", b"Recorded change")
         expanded = read_document(process, fd, output)
         owners = [row for row, text in expanded.items() if text == "Keeper: same"]
         change_rows = [row for row, text in expanded.items() if text.startswith("Recorded change")]
@@ -193,7 +195,10 @@ def run_duplicate_records(executable, columns):
         assert history.window(output, columns)[0] == second_owner
         # A fresh listing must drop the old occurrence's expansion.
         select_row(process, fd, output, columns, 1)
-        h.send_and_wait(process, fd, output, b"r", b"Keeper: same")
+        # apply_history clears expansion only after the refreshed list lands.
+        # The unchanged Keeper label need not be repainted, but the restored
+        # baseline document height must be.
+        h.send_and_wait(process, fd, output, b"r", f"of {len(baseline)}".encode())
         refreshed = read_document(process, fd, output)
         assert list(refreshed.values()) == list(baseline.values()), (baseline, refreshed)
         os.write(fd, b"q")

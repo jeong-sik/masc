@@ -142,6 +142,7 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
        | Ok () ->
          (match
             Server_mcp_transport_ws.upgrade_connection
+              ~runtime_authority:(Sse.runtime_authority_exn ~base_path)
               ?sw
               ?clock
               ~on_message:Server_mcp_transport_ws.dispatch_inbound_message

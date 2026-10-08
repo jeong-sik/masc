@@ -1035,7 +1035,9 @@ let prepare_agent_setup
   in
 
   let ctx : Keeper_run_tools_hooks.ctx =
-    { acc
+    { identity_tool_index = Keeper_identity_tool_index.of_tools
+        identity_allow.Keeper_identity_tool_allow.kept
+    ; acc
     ; agent_cell
     ; agent_name
     ; all_tool_names

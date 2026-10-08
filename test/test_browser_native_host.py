@@ -151,7 +151,13 @@ class Peer(http.server.BaseHTTPRequestHandler):
             if self.server.result_refused.is_set():
                 self.server.polls_after_result_refused.set()
             if self.server.reject_client:
-                self.send_error(400)
+                # What the lane answers a client it has ended.
+                refusal = json.dumps({"ok": False, "error": "client_disconnected"}).encode()
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(refusal)))
+                self.end_headers()
+                self.wfile.write(refusal)
                 return
             if self.server.fail_next_poll.is_set():
                 self.server.fail_next_poll.clear()
@@ -328,6 +334,8 @@ class NativeHost(unittest.TestCase):
         self.assertFalse(self.server.ping_seen.is_set(), "a fixed address has nothing to compare")
 
     def test_retired_client_exits_for_fresh_identity(self):
+        # The extension starts the next host, which has the new identity;
+        # this process does not take one itself.
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
         self.assertNotEqual(self.process.wait(timeout=5), 0)
         self.assertTrue(self.server.disconnected.is_set())

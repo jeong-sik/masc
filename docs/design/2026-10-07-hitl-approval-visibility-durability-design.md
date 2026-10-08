@@ -105,9 +105,9 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
   확인이다. fingerprint 만 같은 다른 workspace 의 같은 식별자에는 결정을 배분하지 않고, 이 경우
   `late_uncertain` 로 분류해 operator 확인을 요구한다(§7 열린 질문에서 제거됨).
 - 쓰기: `note_timed_out`(expired 기록)과 `remember_late`(remembered 확정) 시각에
-  `{op, keeper, tool_call_id, tool, args_fingerprint, decision, actor, at}` 레코드를 fsync append.
-  기존 `reap_locked` 는 메모리 view 만 걷고 저널은 지우지 않는다(크래시 안전, won-chik 이 지적한
-  full-replace 위험을 처음부터 만들지 않는다).
+  `{op, base_path, keeper, tool_call_id, tool, args_fingerprint, decision, actor, at}` 레코드를
+  fsync append. 기존 `reap_locked` 는 메모리 view 만 걷고 저널은 지우지 않는다(크래시 안전, won-chik
+  이 지적한 full-replace 위험을 처음부터 만들지 않는다).
 - 복원: `create ()` 시점에 저널을 읽어 expired/remembered 를 재구성한다. 재시작 직후
   `take` 가 바로 동작하려면 이 복원이 부팅 동기 경로여야 한다(주석으로 근거 명시).
 - 소비(reviewer 경계 2 반영, 성공 경계를 순서 계약으로 고정):
@@ -115,13 +115,17 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
      반환한다. append/fsync 가 실패하면 decision 을 반환하지 않고 메모리 항목도 제거하지 않는다 —
      재시작 뒤 복원 시 같은 결정이 다시 제공될 수 있다(중복 인가보다 안전한 쪽으로 무릅니다).
   2. caller 반환에 성공하면 `op=deliver` 레코드를 붙인다. 저널에 `consume` 만 있고 `deliver` 가 없는
-     꼬리 레코드는 "결과 불명" 창이다: 복원 시 자동 재적용하지 않고 health `late_uncertain` 카운트로
-     노출하며, operator 확인(`ack`)으로만 닫는다.
-  3. 이 창에서 외부 효과는 아직 없다 — gate 는 dispatch 앞에서 막는 지점이고, tool 실행은 decision 이
+     꼬리 레코드는 **전달·실행 결과 불명** 창이다 — consume fsync 와 caller 반환 사이의 중단만
+     미전달이고, 반환 이후에는 caller 가 tool dispatch 를 진행할 수 있으므로 consume-only 상태에서
+     외부 효과의 부재를 단정할 수 없다. 복원 시 자동 재적용하지 않고 health `late_uncertain` 카운트로
+     노출하며, operator 확인(`ack`)으로만 닫는다. `ack` 는 경고 확인이지 재인가가 아니어서, 실행 원장의
+     결과 또는 비실행 증거 없이 새 attempt 를 허가하지 않는다.
+  3. 보장 창과 불명 창을 구분한다 — gate 는 dispatch 앞에서 막는 지점이고, tool 실행은 decision 이
      caller(스트림 핸들러)에게 돌아간 뒤 정상 턴 흐름에서 새 attempt identity 로 일어난다. 따라서
-     "consume 내구화 직후 프로세스 사망"은 미전달·무효과 상태이며 위 2의 계약으로 멈춘다. tombstone
-     하나만으로 end-to-end 단 한 번을 주장하지 않는다(단 한 번의 보증은 consume/deliver 순서 계약 +
-     실행 원장의 attempt identity 로 나눠 근거를 둔다).
+     무효과가 확실한 것은 **consume 내구화 후 caller 반환 전** 중단뿐이다. 반환 이후 deliver
+     append/fsync 전 중단은 consume-only 저널과 실제 효과가 공존할 수 있는 결과 불명 상태이며, 위 2의
+     `late_uncertain` 계약으로 멈춘다. tombstone 하나만으로 end-to-end 단 한 번을 주장하지 않는다(단
+     한 번의 보증은 consume/deliver 순서 계약 + 실행 원장의 attempt identity 로 나눠 근거를 둔다).
 - TTL 900s 는 **유지**한다. 이것은 wall-clock 자동 만료(금지)가 아니라 "인간 결정 하나가 인가할 수 있는
   시간"의 안전 상계이고, 기존 주석(`keeper_late_approval.ml:60~79`)의 논리 — yolo 전환 시 과거 기억
   발화 차단 포함 — 가 그대로 성립하기 때문이다. TTL 이 "만료"가 아니라 "인가 상계"임을 주석에
@@ -210,7 +214,13 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
    routes 테스트. `measured_since` 가 부팅 시각과 같은지 확인.
 3. **저널 경계(reviewer 표 반영)** —
    - consume append/fsync 실패: decision 미반환, 메모리 항목 보존, 재시도 시 재배분 가능 확인.
-   - consume 후 deliver 전 중단: 복원 시 `late_uncertain` 분류, 자동 재적용 없음.
+   - consume 후 caller 반환 전 중단: 복원 시 미전달로 분류, 자동 재적용 없음.
+   - caller 반환 후 deliver 기록 전 중단: 복원 시 `late_uncertain` 분류, 자동 재적용 없음 —
+     저널만으로 미전달과 dispatch 후 중단을 구분할 수 없음을 단정문으로 확인.
+   - deliver 기록 후 dispatch 전 중단: deliver 가 전달 기록이지 tool 실행 완료 증거가 아님을
+     확인하고, 이후 처분은 실행 원장 readback 으로 간다.
+   - `ack` 는 재인가가 아님: 실행 원장의 결과·비실행 증거 없는 ack 뒤 새 attempt 허가가 없음을
+     stub 수준에서 확인.
    - workspace 교차: 같은 keeper/call/fingerprint 의 A·B 결정이 서로 적용되지 않음(배분 키에
      base_path 포함).
 4. **recover 엔드포인트** — typed 전제 충족 row 만 rearm 되고, `Exact_completed` 등은
@@ -234,7 +244,8 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
 - D1 `oldest` 임계(attention 전환)의 초기값: `timeout_sec * 2`(360s) 제안 — 근거는 없고, D3 카운터가
   쌓인 뒤 재조정한다. 상수의 근거 부재를 숨기지 않기 위해 주석에 동일하게 명시한다(§4b 표 참조).
 - `late_uncertain`(consume/deliver 사이 결과 불명)의 operator `ack` 표면을 dashboard 어디에 둘지 —
-  D1 health 섹션에 카운트로 먼저 노출하고, ack 엔드포인트는 D4 recover 와 같은 PR 에 넣는다.
+  D1 health 섹션에 카운트로 먼저 노출하고, ack 엔드포인트는 D4 recover 와 같은 PR 에 넣는다. ack 의
+  의미는 §D2 에서 경고 확인(재인가 아님)으로 확정했다.
 
 ## 8. 개정 이력
 
@@ -242,3 +253,8 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
 - 2026-10-07 개정(anyang-keepers COMMENTED 리뷰 반영, head eaf9fbb669+): D2 저장 권위 확정(전역+
   base_path 결속), consume/deliver 성공 경계와 late_uncertain 계약, D4 CAS+재실행 범위 명시,
   §4b 숫자 정책의 계약 범위 구분, 테스트 계획에 저널 경계 4케이스 추가.
+- 2026-10-08 개정(code-reviewer FAIL P2 + context-reviewer 2차 지적 반영): consume-only 꼬리를
+  "미전달·무효과"에서 "전달·실행 결과 불명"으로 재분류(반환 후 dispatch 뒤 deliver 기록 전 중단에서
+  저널과 효과가 공존 가능), 무효과 단정을 consume 내구화 후 caller 반환 전 창으로 한정, ack 를
+  경고 확인으로 확정(재인가 아님, 원장 증거 없는 재인가 금지), 쓰기 레코드 예시에 base_path 정렬,
+  테스트 계획을 중단 지점 4케이스+ack 재인가 부정으로 보강.

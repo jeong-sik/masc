@@ -555,6 +555,10 @@ module For_testing : sig
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
 
   val project_input_for_attempt :
+    ?project_media:
+      (needs_projection:(Keeper_media_reading.kind -> bool) ->
+       Agent_core.Types.content_block list ->
+       Agent_core.Types.content_block list * (string * int) list) ->
     project_images:
       (mode:Keeper_vision_ingest.mode ->
        Agent_core.Types.content_block list -> Keeper_vision_ingest.image_projection) ->

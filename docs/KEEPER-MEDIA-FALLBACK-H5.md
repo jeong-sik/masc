@@ -92,3 +92,23 @@ Reader calls are injected at the module boundary (as
 red/green result is deterministic and does not depend on an STT service.
 A real-endpoint run, if an STT endpoint is available in the lane, is recorded
 separately and never substituted for the fixtures.
+
+## Implementation notes (first wiring)
+- `Keeper_media_reading` (new) owns identity, store and projection;
+  `Keeper_turn_driver.project_input_for_attempt` calls it for the goal, the
+  pre-turn history and the resumed checkpoint before the generic strip, and
+  gains an optional `?project_media` seam for tests. The manifest row keeps the
+  `media_degraded_to_text` action and adds `media_projected_*` fields.
+- Audio uses the configured STT chain; **no document reader is wired**, so a
+  document is projected as `unavailable: no_document_reader`. H5-S2 therefore
+  only proves the projection and reuse with an injected reader. It does not
+  prove a real PDF extraction. That stays `not_measured` until a reader is
+  chosen (open question: reuse the Poppler path from
+  `Verification_pdf_inspection` after checking its slot/budget behavior off the
+  review path).
+- A reading is stored without a byte cap, following the rule against numeric
+  size caps. A very long transcript therefore reaches the fallback input
+  unabridged; if that proves a problem it belongs to the token-budget
+  mechanism, not to a number here.
+- Reuse is keyed by payload sha256, media type and reader version; the first
+  version is `1`.

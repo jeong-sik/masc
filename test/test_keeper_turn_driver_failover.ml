@@ -1062,7 +1062,16 @@ let h5_text_of_blocks blocks =
   |> List.filter_map (function Agent_core.Types.Text t -> Some t | _ -> None)
   |> String.concat "\n"
 
-let h5_project_for_text_only ~goal_blocks =
+let h5_projector ?base_path ~read =
+  fun ~needs_projection blocks ->
+    Masc.Keeper_media_reading.project_blocks
+      ?base_path
+      ~keeper_name:"h5-media-fallback"
+      ~needs_projection
+      ~read
+      blocks
+
+let h5_project_for_text_only ?project_media ~goal_blocks () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
     let runtime =
       match Runtime.get_runtime_by_id "primary.text_model" with
@@ -1071,6 +1080,7 @@ let h5_project_for_text_only ~goal_blocks =
     in
     let projected =
       Driver.For_testing.project_input_for_attempt
+        ?project_media
         ~project_images:
           (Masc.Keeper_vision_ingest.fallback_projector
              ~keeper_name:"h5-media-fallback" ())
@@ -1087,70 +1097,122 @@ let h5_project_for_text_only ~goal_blocks =
     | Some blocks -> h5_text_of_blocks blocks
     | None -> Alcotest.fail "the degraded goal must stay present")
 
-(* H5-S1: a fact only the audio holds. The text-only candidate's input must
-   name the attachment by the identity of its payload. *)
+let h5_audio_block () =
+  Agent_core.Types.audio_block
+    ~media_type:"audio/wav"
+    ~data:(Base64.encode_string h5_fact_audio)
+    ~source_type:Agent_core.Types.Base64
+    ()
+
+let h5_document_block () =
+  Agent_core.Types.document_block
+    ~media_type:"application/pdf"
+    ~data:(Base64.encode_string h5_fact_document)
+    ~source_type:Agent_core.Types.Base64
+    ()
+
+let h5_fresh_dir () =
+  let dir = Filename.temp_file "h5-media-readings-" "" in
+  Sys.remove dir;
+  Sys.mkdir dir 0o755;
+  dir
+
+let h5_reader_counting calls ~answer ~kind:_ ~media_type:_ ~bytes:_ =
+  incr calls;
+  answer
+
+let h5_reader_forbidden ~kind:_ ~media_type:_ ~bytes:_ =
+  Alcotest.fail "a stored reading must be reused without calling the reader"
+
+(* H5-S1: a fact only the audio holds. The text-only candidate's input names the
+   attachment by the identity of its payload and carries the reading; a second
+   projection that shares only the store (a restart) reuses it without reading
+   again. *)
 let test_h5_s1_audio_fact_reaches_text_only_fallback () =
-  let audio =
-    Agent_core.Types.audio_block
-      ~media_type:"audio/wav"
-      ~data:(Base64.encode_string h5_fact_audio)
-      ~source_type:Agent_core.Types.Base64
-      ()
-  in
+  let dir = h5_fresh_dir () in
+  let calls = ref 0 in
+  let reader = h5_reader_counting calls ~answer:(Ok ("transcript: " ^ h5_fact_audio)) in
+  let goal = [ Agent_core.Types.Text "what is the vault code?"; h5_audio_block () ] in
   let text =
     h5_project_for_text_only
-      ~goal_blocks:[ Agent_core.Types.Text "what is the vault code?"; audio ]
+      ~project_media:(h5_projector ~base_path:dir ~read:reader)
+      ~goal_blocks:goal
+      ()
   in
   Alcotest.(check bool)
     "projection binds the audio by source sha256"
     true
-    (contains ~needle:("sha256:" ^ h5_source_sha256_prefix h5_fact_audio) text)
+    (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_fact_audio) text);
+  Alcotest.(check bool) "projection carries the audio-only fact" true
+    (contains ~needle:"the vault code is 4172" text);
+  Alcotest.(check int) "the reader ran once" 1 !calls;
+  let restarted =
+    h5_project_for_text_only
+      ~project_media:(h5_projector ~base_path:dir ~read:h5_reader_forbidden)
+      ~goal_blocks:goal
+      ()
+  in
+  Alcotest.(check bool) "a restart reuses the stored reading" true
+    (contains ~needle:"the vault code is 4172" restarted)
 
 (* H5-S2: the same for a document-only fact. *)
 let test_h5_s2_document_fact_reaches_text_only_fallback () =
-  let document =
-    Agent_core.Types.document_block
-      ~media_type:"application/pdf"
-      ~data:(Base64.encode_string h5_fact_document)
-      ~source_type:Agent_core.Types.Base64
-      ()
-  in
+  let dir = h5_fresh_dir () in
+  let calls = ref 0 in
+  let reader = h5_reader_counting calls ~answer:(Ok ("extracted: " ^ h5_fact_document)) in
+  let goal = [ Agent_core.Types.Text "what is the ledger year?"; h5_document_block () ] in
   let text =
     h5_project_for_text_only
-      ~goal_blocks:[ Agent_core.Types.Text "what is the ledger year?"; document ]
+      ~project_media:(h5_projector ~base_path:dir ~read:reader)
+      ~goal_blocks:goal
+      ()
   in
   Alcotest.(check bool)
     "projection binds the document by source sha256"
     true
-    (contains ~needle:("sha256:" ^ h5_source_sha256_prefix h5_fact_document) text)
-
-(* H5-S3 (negative, never a substitute for S1/S2): when no reader can read the
-   attachment, the projection says so, keeps the original identity, and carries
-   nothing derived from the media. *)
-let test_h5_s3_unreadable_attachment_is_marked_unavailable () =
-  let audio =
-    Agent_core.Types.audio_block
-      ~media_type:"audio/wav"
-      ~data:(Base64.encode_string h5_fact_audio)
-      ~source_type:Agent_core.Types.Base64
+    (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_fact_document) text);
+  Alcotest.(check bool) "projection carries the document-only fact" true
+    (contains ~needle:"the ledger year is 1987" text);
+  let restarted =
+    h5_project_for_text_only
+      ~project_media:(h5_projector ~base_path:dir ~read:h5_reader_forbidden)
+      ~goal_blocks:goal
       ()
   in
+  Alcotest.(check bool) "a restart reuses the stored reading" true
+    (contains ~needle:"the ledger year is 1987" restarted)
+
+(* H5-S3 (negative, never a substitute for S1/S2): when the reader cannot read
+   the attachment the projection says so, keeps the original identity, and
+   carries nothing derived from the media; a later success replaces it. *)
+let test_h5_s3_unreadable_attachment_is_marked_unavailable () =
+  let dir = h5_fresh_dir () in
+  let goal = [ Agent_core.Types.Text "what is the vault code?"; h5_audio_block () ] in
+  let failing = h5_reader_counting (ref 0) ~answer:(Error "stt_failed: endpoint down") in
   let text =
     h5_project_for_text_only
-      ~goal_blocks:[ Agent_core.Types.Text "what is the vault code?"; audio ]
+      ~project_media:(h5_projector ~base_path:dir ~read:failing)
+      ~goal_blocks:goal
+      ()
   in
-  Alcotest.(check bool)
-    "projection says the attachment is unavailable"
-    true
-    (contains ~needle:"unavailable" text);
-  Alcotest.(check bool)
-    "projection keeps the original identity"
-    true
-    (contains ~needle:("sha256:" ^ h5_source_sha256_prefix h5_fact_audio) text);
-  Alcotest.(check bool)
-    "projection invents no media-derived content"
-    false
-    (contains ~needle:"4172" text)
+  Alcotest.(check bool) "projection says the attachment is unavailable" true
+    (contains ~needle:"status=unavailable" text);
+  Alcotest.(check bool) "projection says the original is kept" true
+    (contains ~needle:"original is kept" text);
+  Alcotest.(check bool) "projection keeps the original identity" true
+    (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_fact_audio) text);
+  Alcotest.(check bool) "projection invents no media-derived content" false
+    (contains ~needle:"4172" text);
+  let recovered =
+    h5_project_for_text_only
+      ~project_media:
+        (h5_projector ~base_path:dir
+           ~read:(h5_reader_counting (ref 0) ~answer:(Ok ("transcript: " ^ h5_fact_audio))))
+      ~goal_blocks:goal
+      ()
+  in
+  Alcotest.(check bool) "an unavailable result is retried, not remembered" true
+    (contains ~needle:"the vault code is 4172" recovered)
 
 let synthetic_image () =
   Agent_core.Types.image_block

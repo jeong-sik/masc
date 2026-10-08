@@ -1765,6 +1765,7 @@ let run_named
     ?runtime_manifest_context
     ?runtime_manifest_append
     ?deferred_runtime_lane
+    ?on_memory_capacity_refusal
     ?on_runtime_attempt
     ?runtime_retry_deferral
     ?checkpoint_progress
@@ -2496,6 +2497,7 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
+            ?on_memory_capacity_refusal
             ?on_tool_execution
             ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
             ?composed_context:official_client_composed_context
@@ -2893,6 +2895,7 @@ let run_named
               on_request_attribution
           in
           Keeper_claude_code_runtime.run
+            ?on_memory_capacity_refusal
             ?on_tool_execution
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
@@ -3210,6 +3213,7 @@ let run_named
           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
           let provider_result, checkpoint_after, _success_sample =
             Keeper_turn_driver_try_provider.run_try_provider_with_truncation_recovery
+              ?on_memory_capacity_refusal
               ?continuation_checkpoint:
                 (if continue_from_checkpoint then agent_core_checkpoint else None)
               try_provider_ctx candidate

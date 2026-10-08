@@ -1443,26 +1443,33 @@ let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
       ( Keeper_turn_checkpoint_reason.Operation_queued
       | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ) -> []
 
-let format_workspace_memory_observation = function
+let format_workspace_memory_observation ?access = function
   | Workspace_memory_ledger.Missing -> None
   | Workspace_memory_ledger.Unavailable _ ->
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_unavailable [] ^ "\n\n")
   | Workspace_memory_ledger.Available descriptor ->
-    let briefing, briefing_status = match descriptor.briefing with
-      | Error _ -> "", render_fragment Prompt_names.keeper_context_workspace_memory_briefing_unavailable []
+    let briefing_status = match descriptor.briefing with
+      | Error _ -> render_fragment Prompt_names.keeper_context_workspace_memory_briefing_unavailable []
       | Ok Workspace_memory_briefing.Missing ->
-        "", render_fragment Prompt_names.keeper_context_workspace_memory_briefing_pending []
-      | Ok (Workspace_memory_briefing.Current summary) ->
-        summary.text, render_fragment Prompt_names.keeper_context_workspace_memory_briefing_current []
-      | Ok (Workspace_memory_briefing.Stale summary) ->
-        summary.text, render_fragment Prompt_names.keeper_context_workspace_memory_briefing_stale [] in
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_pending []
+      | Ok (Workspace_memory_briefing.Current _) ->
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_current []
+      | Ok (Workspace_memory_briefing.Stale _) ->
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_stale [] in
+    let route = match access with
+      | None -> Prompt_names.keeper_context_workspace_memory_retrieval_preview
+      | Some access ->
+        match Keeper_request_tool_access.route access ~name:"keeper_workspace_memory_read" with
+        | Direct -> Prompt_names.keeper_context_workspace_memory_retrieval_direct
+        | Discoverable -> Prompt_names.keeper_context_workspace_memory_retrieval_discoverable
+        | Unavailable -> Prompt_names.keeper_context_workspace_memory_retrieval_unavailable in
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_available
       [ "ledger_sha256", descriptor.ledger_sha256;
         "claim_count", string_of_int descriptor.claim_count;
         "conflict_count", string_of_int descriptor.conflict_count;
         "classified_count", string_of_int descriptor.classified_count;
-        "briefing", briefing;
-        "briefing_status", briefing_status ] ^ "\n\n")
+        "briefing_status", briefing_status;
+        "retrieval_route", render_fragment route [] ] ^ "\n\n")
 
 let format_recent_work = function
   | Keeper_recent_work.Absent -> None
@@ -1486,6 +1493,7 @@ let build_prompt_internal
     ?(active_goal_summaries : (goal_summary list, Goal_store.unavailable) result option)
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
+    ?workspace_memory_access
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(recent_work = Keeper_recent_work.Absent)
     ~(observation : Keeper_world_observation.world_observation)
@@ -1865,7 +1873,7 @@ let build_prompt_internal
        fetch/rebase; nothing here schedules or forces that work. *)
     | Keeper_context_layers.Lane_updates -> Lane_addon_subscription.render lane_updates
     | Keeper_context_layers.Workspace_memory ->
-      format_workspace_memory_observation workspace_memory
+      format_workspace_memory_observation ?access:workspace_memory_access workspace_memory
     | Keeper_context_layers.Repository_freshness ->
       (match repository_freshness with
        | [] -> None
@@ -2181,6 +2189,7 @@ let build_prompt
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
+      ?workspace_memory_access
       ?lane_updates
       ?repository_freshness
       ?recent_work
@@ -2194,6 +2203,7 @@ let build_prompt
     ?task_skill_surfaces
     ?active_goal_summaries
     ?workspace_memory
+    ?workspace_memory_access
     ?lane_updates
     ?repository_freshness
     ?recent_work
@@ -2206,6 +2216,7 @@ let build_prompt_preview
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
+      ?workspace_memory_access
       ?lane_updates
       ?repository_freshness
       ?recent_work
@@ -2218,6 +2229,7 @@ let build_prompt_preview
     ?task_skill_surfaces
     ?active_goal_summaries
     ?workspace_memory
+    ?workspace_memory_access
     ?lane_updates
     ?repository_freshness
     ?recent_work

@@ -85,7 +85,6 @@ const KeeperPhaseDiagnosisSchema = object({
     stop_requested: boolean(),
     restart_requested: boolean(),
     drain_complete: boolean(),
-    credential_archived: boolean(),
   }),
   determining_condition: nullable(string()),
   rows: array(KeeperPhaseDiagnosisRowSchema),

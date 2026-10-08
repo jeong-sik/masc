@@ -90,8 +90,8 @@ BiDi 연결의 `hover_at` 과 `drag` 는 실제 Firefox 157.0.1 에서 확인했
   ([Mozilla Remote Agent Security](https://firefox-source-docs.mozilla.org/remote/Security.html), 2026-10-08 확인)
 - host 는 `masc-browser-host --bidi-url ws://127.0.0.1:PORT/session` 으로 띄운다.
   이 명령을 대신 실행해 주는 것이 없다.
-  `connectors/browser/host/README.md`, `connectors/browser/install-host.sh`,
-  `scripts/install-local-build.sh` 에 BiDi 가 나오지 않는다.
+  `connectors/browser/install-host.sh` 와 `scripts/install-local-build.sh` 에 BiDi 가 나오지 않는다.
+  손으로 붙이는 절차는 #41817 이 `docs/design/browser-bidi-live-host.md` 와 host README 에 적었다.
 - BiDi host 는 세 경우에 끝난다 (`run_bidi`): 명령의 결과를 모르게 됐을 때, 서버에 묻는 요청(poll)이 실패했을 때,
   결과를 서버에 보내지 못했을 때. 확장 host 는 실패하면 잠시 뒤 다시 묻지만 BiDi host 는 다시 묻지 않는다.
   그래서 MASC 서버를 재시작하면 BiDi host 가 끝난다. 다시 띄우는 것도 손으로 한다.
@@ -159,7 +159,7 @@ WebExtension 은 지금처럼 "설치만 하면 읽는" 연결로 둔다.
 2. BiDi 를 붙이는 명령 하나와 그 상태를 TUI·`masc doctor` 에 보여 준다.
    Firefox 를 플래그로 띄우는 것은 운영자가 한다. MASC 는 띄우지 않는다.
    RFC `setup-web-search-and-browser-lane` 이 제안한 "다시 열리는 설정 명령"에 이 단계를 더하는 모양이 맞다.
-3. host README 에 BiDi 절을 넣는다.
+3. host README 에 BiDi 절을 넣는다. #41817 에서 했다.
 4. host 가 끝났을 때 TUI 가 이유와 다시 붙이는 법을 보여 준다.
    지금은 이유가 서버에 오지 않으므로(§2.4), host 가 끝나기 전에 이유를 서버에 알리는 보고가 새로 필요하다.
 
@@ -204,7 +204,7 @@ B 의 순서:
    TUI 의 "BiDi: 붙음 / 안 붙음 · 붙이는 법", host 가 끝난 이유 보고를 만든다.
 2. BiDi 의 빈칸 채우기: 요소 목록과 HTML 포함 읽기. 운영자 결정이 필요 없고 작아서 #41813 에서 먼저 했다.
    표의 칸이 바뀌었고 `test_browser_bidi_peer` 가 그 칸을 확인한다. 남은 빈칸은 탭 앞으로 가져오기(§7 의 2)다.
-3. README·스킬 문서.
+3. README·스킬 문서. 손으로 붙이는 절차와 Keeper 의 순서는 #41817 에서 적었다. 붙이는 명령이 생기면 다시 고친다.
 
 하지 않는 것:
 

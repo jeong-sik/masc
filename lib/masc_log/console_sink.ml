@@ -14,7 +14,8 @@
      ([Log.Persist.write_to_sink]) and the in-memory ring stay
      authoritative and lossless.
    - Before [start] (tests, CLI one-shots, pre-boot), [write] attempts the
-     mirror synchronously, but a failed mirror must not stop the log caller.
+     mirror synchronously. Channel I/O failures ([Sys_error]) do not stop the
+     log caller; other writer exceptions propagate unchanged.
    - After [start], [write] enqueues into a bounded queue drained by a
      dedicated OS thread; the thread alone performs the possibly-blocking
      fd write. When the writer is blocked long enough to fill the queue,
@@ -121,9 +122,9 @@ let write line =
   if not (Atomic.get enqueue_active)
   then begin
     try write_line line with
-    | _ ->
-      (* The mirror is best-effort; the caller records the entry in the ring
-         and file sink after this returns. *)
+    | Sys_error _ ->
+      (* A channel I/O failure only loses the mirror; the caller records the
+         entry in the ring and file sink after this returns. *)
       ()
   end
   else begin

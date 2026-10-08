@@ -1,7 +1,8 @@
-(** Console_sink — the console mirror must never block log producers.
+(** Console_sink — isolate console I/O from log producers after start.
 
     Contract under test (issue #20684):
-    - synchronous before enqueue mode (historical behavior)
+    - synchronous before enqueue mode: channel I/O failures are isolated,
+      while other writer exceptions propagate after observer notification
     - enqueue mode: write returns without touching the fd writer
     - bounded queue: overflow drops incoming mirror lines and counts them
     - drain writes queued lines in order and reports drops once *)
@@ -102,7 +103,7 @@ let test_writer_and_observer_failure_isolation () =
   with_clean_sink (fun () ->
     let observed = ref 0 in
     Console_sink.set_after_write_observer (Some (fun () -> incr observed));
-    Console_sink.For_testing.set_writer (Some (fun _ -> failwith "fd broken"));
+    Console_sink.For_testing.set_writer (Some (fun _ -> raise (Sys_error "fd broken")));
     Console_sink.For_testing.set_enqueue_active true;
     Console_sink.write "line a";
     Console_sink.write "line b";
@@ -130,6 +131,18 @@ let test_writer_and_observer_failure_isolation () =
     Console_sink.write "line d")
 ;;
 
+let test_synchronous_control_exception_propagates () =
+  with_clean_sink (fun () ->
+    let observed = ref 0 in
+    Console_sink.set_after_write_observer (Some (fun () -> incr observed));
+    Console_sink.For_testing.set_writer (Some (fun _ -> raise Sys.Break));
+    check_raises "synchronous interruption reaches the caller" Sys.Break
+      (fun () -> Console_sink.write "interrupted line");
+    check int "interrupted attempt still notifies the observer" 1 !observed;
+    check int "interrupted synchronous write is not queued" 0
+      (Console_sink.For_testing.queued_count ()))
+;;
+
 let () =
   run "console_sink"
     [ ( "mirror_contract"
@@ -141,6 +154,8 @@ let () =
         ; test_case "overflow drops and counts" `Quick test_overflow_drops_and_counts
         ; test_case "writer failure isolation" `Quick
             test_writer_and_observer_failure_isolation
+        ; test_case "synchronous control exception propagates" `Quick
+            test_synchronous_control_exception_propagates
         ] )
     ]
 ;;

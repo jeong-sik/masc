@@ -55,9 +55,13 @@ status: reference
   (`Keeper_turn_driver.official_client_observation`). 성공 관측값은 그대로
   통과하고, 실패는 공식 클라이언트가 프롬프트 전송을 보고한 뒤에만 관찰값이
   된다. 전송 보고가 없는 실패는 이 관찰값으로 잡히지 않으므로, 실패 관찰값이
-  없다는 것은 성공을 뜻하지 않는다. 관찰값은 `runtime_id`와 `model_id`를
-  이름 짓고, `prompt_sent_at`을 기준 시각으로 둔다.
-  → [Keeper_turn_driver.official_client_observation](../../lib/keeper/keeper_turn_driver.mli)
+  없다는 것은 성공을 뜻하지 않는다. 실패 관찰값은 `runtime_id`를 보존하고,
+  지연 시간은 `prompt_sent_at`부터 잰다. 시도의 `model_id`에는 실제 모델 id 대신
+  `Boundary_redaction.runtime_model_label`(`runtime`)을 기록하며,
+  `selected_model`과 `selected_model_raw`는 모두 `None`이다. 따라서 이 실패
+  관찰값만으로 실제 모델을 식별할 수는 없다.
+  → [Keeper_turn_driver.official_client_observation](../../lib/keeper/keeper_turn_driver.mli) ·
+  [Runtime_observation](../../lib/runtime/runtime_observation.ml)
 
 **Clients (TUI 클라이언트 표)**
 : `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
@@ -1306,17 +1310,24 @@ status: reference
   → [Runtime.get_default_route](../../lib/runtime/runtime.mli) · [config/runtime.toml](../../config/runtime.toml)
 
 **Exact Lane Slot 교체·이동 (Exact lane slot replacement and move)**
-: Dashboard 런타임 편집기가 exact-output lane의 선언된 후보 하나를 자리
-  그대로 다른 후보로 바꾸거나(`Runtime_route_exact_slot_replaced`,
-  `Runtime.replace_exact_output_lane_slot`) 자리를 옮기는 편집
-  (`Runtime_route_exact_slot_moved`의 위로·아래로·맨 처음으로). 교체는
-  쓰기 잠금 아래 제자리에서 일어난다. 새 후보는 같은 HTTP/CLI 그룹에
-  속하고 이 lane 어디에도 선언되지 않은 runtime id여야 하며, 나머지
-  후보의 순서는 보존된다. 그룹을 넘는 교체와 없는 id는 거절되고, lane에
-  후보를 더하는 것은 별개 편집이다. 이 편집은 **Runtime Candidate Order**
-  선언을 바꾸는 것이지, 그 순서로 이미 도는 turn을 바꾸는 게 아니다.
+: TUI 런타임 편집기와 서버의 `/api/v1/runtime/config/routing` API가 exact-output
+  lane의 선언된 후보 하나를 자리 그대로 바꾸거나
+  (`Runtime_route_exact_slot_replaced`, `Runtime.replace_exact_output_lane_slot`)
+  자리를 옮기는 편집(`Runtime_route_exact_slot_moved`의 위로·아래로·맨 처음으로).
+  웹 Dashboard의 슬롯 편집기는 추가·제거·위/아래 이동을 제공하며, 교체와
+  맨 처음으로 이동하는 조작은 제공하지 않는다.
+  교체는 쓰기 잠금 아래 제자리에서 일어난다. 새 후보는 같은 HTTP/CLI 그룹으로
+  분류되고 이 lane 어디에도 선언되지 않은 id여야 하며, 나머지 후보의 순서는
+  보존된다. 그룹을 넘는 교체는 거절되고, 후보 추가는 별개 편집이다.
+  알 수 없는 교체 id가 항상 저장 거절되는 것은 아니다. 카탈로그에서 찾지 못하는
+  후보는 거절 슬롯으로 보고되어 실행 후보에서 제외될 수 있으며, 다른 후보와
+  필수 lane 조건 등 전체 구성 검증을 통과하면 그 선언은 저장될 수 있다.
+  편집 대상은 `exact_output_lane_decl`의 **exact-output 슬롯 순서**이며,
+  Keeper turn의 **Runtime Candidate Order**와는 별개다.
   → [Runtime.replace_exact_output_lane_slot](../../lib/runtime/runtime.mli) ·
-  [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli)
+  [Runtime_exact_output_registry](../../lib/runtime/runtime_exact_output_registry.ml) ·
+  [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli) ·
+  [Dashboard 슬롯 API](../../dashboard/src/api/dashboard-runtime.ts)
 
 **Attempt Dispatch (실제로 보냈는지 여부)**
 : Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,

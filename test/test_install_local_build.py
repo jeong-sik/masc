@@ -83,6 +83,49 @@ def workspace(root):
 
 
 class LocalBuildInstall(unittest.TestCase):
+    def test_cleanup_protects_explicit_workspace_without_current_helper(self):
+        for helper_kind in ("missing", "old"):
+            with self.subTest(helper_kind=helper_kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                checkout = root / "checkout"
+                scripts = checkout / "scripts"
+                scripts.mkdir(parents=True)
+                shutil.copy2(SCRIPT, scripts / SCRIPT.name)
+                build_root = checkout / "_build"
+                build = build_root / "default/bin"
+                build.mkdir(parents=True)
+                binaries(build)
+                selected = build_root / "live workspace"
+                (selected / ".masc").mkdir(parents=True)
+                state = selected / ".masc/durable-state"
+                state.write_text("operator state")
+                if helper_kind == "old":
+                    preflight_helper(build, old=True)
+                    executable(scripts / "check-runtime-deployment-preflight.sh", "fixture-preflight")
+                artifact = build_root / "cache-artifact"
+                artifact.write_text("regenerable")
+                wrapper = scripts / "dune-local.sh"
+                wrapper.write_text(
+                    "#!/bin/sh\n"
+                    'repo=$(cd "$(dirname "$0")/.." && pwd -P)\n'
+                    'printf "%s\\n" "$1" >> "$repo/calls"\n'
+                    'if [ "$1" = clean ]; then rm -rf "$repo/_build"; fi\n')
+                wrapper.chmod(0o755)
+                prefix = root / "prefix"
+                result = subprocess.run(
+                    ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix),
+                     "--manifest-dir", str(root / "absent-manifests"),
+                     "--base-path", str(selected)],
+                    cwd=root,
+                    env=dict(unnamed_env(root), MASC_DUNE_LOCK_HELD="1"),
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue((prefix / "masc").is_file())
+                self.assertTrue(state.exists(), "explicit workspace was removed by cleanup")
+                self.assertEqual(state.read_text(), "operator state")
+                self.assertTrue(artifact.exists())
+                self.assertEqual((checkout / "calls").read_text().splitlines(), ["build"])
+
     def test_cleanup_protects_selected_workspace_state(self):
         for location in ("inside", "build_root", "symlink_inside", "outside", "none"):
             for explicit in (False, True) if location != "none" else (False,):

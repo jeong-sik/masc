@@ -63,6 +63,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Keep an explicitly selected workspace protected even when the preflight
+# helper is unavailable or predates resolve-workspace. A successful install
+# still cleans the default build tree, and the selected path may live inside
+# that tree.
+workspace_root="$base_path"
+
 # Use the same lock as dune-local.sh for the complete installation transaction.
 # Releasing it after build permits another install's clean to remove our input
 # while preflight, binary copies or browser refresh are still using it.

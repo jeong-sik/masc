@@ -108,20 +108,6 @@ val base_path_contention_message :
 
 val pid_lock_path : int -> string
 
-(** Deterministic external lease path for an already-canonical BasePath and
-    host run root. The path is below the current effective UID's private lease
-    directory; the full SHA-256 digest is a filesystem-safe index. Collisions
-    fail closed by contending on the same lease file. This is the v1
-    path-digest name that releases before the lease format changed and is
-    kept as the upgrade fence: a current lease locks this file for its whole
-    life, so an old and a new server still refuse to share one BasePath.
-    This function derives a path only; [acquire_base_path_lock] establishes
-    and validates the private directory. *)
-val base_path_lock_path :
-  run_dir:string ->
-  canonical_base_path:string ->
-  string
-
 val status_line_is_healthy : string -> bool
 
 (** When [pid] started, as a source-tagged token: ["proc:<boot_id>:<ticks>"]
@@ -252,12 +238,6 @@ module For_testing : sig
     -> run_dir:string
     -> string
     -> base_path_acquire_result
-
-  (** The v1 path-digest upgrade-fence file name of an already-canonical
-      BasePath, creating its private parent directory if needed. Name-only:
-      nothing is opened or locked. *)
-  val legacy_fence_path :
-    run_dir:string -> canonical_base_path:string -> string
 
   (** The v2 (st_dev, st_ino)-digest lease file name of an already-canonical
       BasePath, creating its private parent directory if needed. Name-only:

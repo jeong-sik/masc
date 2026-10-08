@@ -216,11 +216,10 @@ let write_holder_lock path pid =
   | None -> Alcotest.failf "ps reported no start time for fixture pid %d" pid
 
 let base_path_lock_path ~run_dir base_path =
-  (* The v1 fence file of this directory: the path an acquire/release cycle
-     leaves behind. Kept for the v1-name digest assertion in the
-     full-digest test; file-planting fixtures use [For_testing.lease_path]
-     and [For_testing.legacy_fence_path] instead. *)
-  Server_startup_takeover.base_path_lock_path
+  (* The v2 lease file of this directory: the path an acquire/release cycle
+     leaves behind. Kept for the full-digest assertion in the digest test;
+     file-planting fixtures use [For_testing.lease_path] instead. *)
+  Server_startup_takeover.For_testing.lease_path
     ~run_dir:(Unix.realpath run_dir)
     ~canonical_base_path:(Unix.realpath base_path)
 
@@ -626,8 +625,7 @@ let test_base_path_lock_reports_a_recorded_owner_that_is_gone () =
                 (match owner with
                  | Server_startup_takeover.Owner_recorded pid ->
                    pid = absent_pid
-                 | Server_startup_takeover.Owner_this_process _ -> false
-                 | Server_startup_takeover.Owner_unnamed -> true)
+                 | _ -> false)
             | Server_startup_takeover.Base_path_acquired lease ->
               Server_startup_takeover.release_base_path_lease lease;
               Alcotest.fail "a held BasePath lease was acquired twice"
@@ -783,16 +781,21 @@ let test_base_path_lock_shares_one_lease_across_realpath_spellings () =
       let real_base = Filename.concat dir "real" in
       Unix.mkdir real_base 0o755;
       let canonical = Unix.realpath real_base in
-      let alias =
+      let alias, alias_is_link =
         match second_realpath_spelling canonical with
-        | Some spelling -> spelling
+        | Some spelling -> spelling, false
         | None ->
           let alias_base = Filename.concat dir "alias" in
           Unix.symlink real_base alias_base;
-          alias_base
+          alias_base, true
       in
       Fun.protect
-        ~finally:(fun () -> if alias <> real_base then Sys.remove alias)
+        ~finally:(fun () ->
+          (* A second realpath spelling is another name of the same directory
+             (macOS), so there is no separate alias entry to remove:
+             unlinking the directory path fails with EPERM there. The Linux
+             shape is a symlink this test created. *)
+          if alias_is_link then Sys.remove alias)
         (fun () ->
           let check_owner name = function
             | Server_startup_takeover.Owner_this_process _ -> ()
@@ -833,78 +836,6 @@ let test_base_path_lock_shares_one_lease_across_realpath_spellings () =
               "valid BasePath was rejected: %s"
               (Server_startup_takeover.base_path_lock_rejection_to_string
                  rejection))))
-
-(* The lease used to be named by the digest of the canonical BasePath string.
-   During an upgrade an old server and a new server must still refuse to run
-   on one directory, so a new lease holds the old v1 file's kernel lock for
-   its whole life; when the new lease is released, the v1 fence goes with
-   it. *)
-let test_base_path_lock_fences_legacy_path_digest_lease () =
-  if Sys.os_type <> "Unix" then Alcotest.skip ();
-  with_base_and_run "startup-takeover-legacy-path-digest"
-    (fun ~base_path ~run_dir ->
-      let legacy_path =
-        Server_startup_takeover.For_testing.legacy_fence_path
-          ~run_dir:(Unix.realpath run_dir)
-          ~canonical_base_path:(Unix.realpath base_path)
-      in
-      (* Release leaves no file, so a real holder is staged with a forked
-         child that acquires, reports ready and waits: exactly what a v1-only
-         server leaves behind on a shared run root. *)
-      let ready_read, ready_write = Unix.pipe () in
-      let release_read, release_write = Unix.pipe () in
-      (match Unix.fork () with
-       | 0 ->
-        close_quietly ready_read;
-        close_quietly release_write;
-        (match
-           Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
-         with
-         | Server_startup_takeover.Base_path_acquired lease ->
-           ignore (Unix.write_substring ready_write "1" 0 1 : int);
-           let buffer = Bytes.create 1 in
-           ignore (Unix.read release_read buffer 0 1 : int);
-           Server_startup_takeover.release_base_path_lease lease;
-           exit 0
-         | _ -> exit 3)
-      | child_pid ->
-        close_quietly ready_write;
-        close_quietly release_read;
-        Fun.protect
-          ~finally:(fun () ->
-            close_quietly ready_read;
-            close_quietly release_write;
-            if process_alive child_pid then stop_process child_pid)
-          (fun () ->
-             let buffer = Bytes.create 1 in
-             Alcotest.(check int) "holder acquired the legacy-name lease" 1
-               (Unix.read ready_read buffer 0 1);
-           Alcotest.(check bool)
-               "the v1 fence name of the same directory is absent"
-               false
-               (Sys.file_exists legacy_path);
-             (match
-                Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
-              with
-              | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
-                Alcotest.(check bool)
-                  "the holder of a legacy lease is reported, not bypassed"
-                  true
-                  (match owner with
-                   | Server_startup_takeover.Owner_this_process pid ->
-                     pid = child_pid
-                   | _ -> true);
-                ignore (Unix.write_substring release_write "1" 0 1 : int);
-                ignore (Unix.waitpid [] child_pid : int * Unix.process_status)
-              | Server_startup_takeover.Base_path_rejected rejection ->
-                Alcotest.failf
-                  "the legacy lease was rejected instead of fenced: %s"
-                  (Server_startup_takeover.base_path_lock_rejection_to_string
-                     rejection)
-              | Server_startup_takeover.Base_path_acquired lease ->
-                Server_startup_takeover.release_base_path_lease lease;
-                Alcotest.fail
-                  "a held v1 fence was bypassed by a second acquisition"))))
 
 let test_stale_lease_release_preserves_new_active_lease () =
   with_base_and_run "startup-takeover-stale-release"
@@ -1382,17 +1313,20 @@ let test_base_path_lock_external_location_and_full_digest () =
     (fun ~base_path ~run_dir ->
       let canonical_base_path = Unix.realpath base_path in
       let path =
-        Server_startup_takeover.For_testing.legacy_fence_path
+        Server_startup_takeover.For_testing.lease_path
           ~run_dir:(Unix.realpath run_dir)
           ~canonical_base_path
       in
       let lease_directory = Filename.dirname path in
       let digest =
-        Digestif.SHA256.(digest_string canonical_base_path |> to_hex)
+        Printf.sprintf "masc-base-path-lease:%d:%d"
+          (Unix.stat canonical_base_path).Unix.st_dev
+          (Unix.stat canonical_base_path).Unix.st_ino
+        |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
       in
       Alcotest.(check string)
-        "lease filename is the full canonical BasePath digest"
-        (Printf.sprintf "masc-base-path-owner-v1-%s.lease" digest)
+        "lease filename is the full (st_dev, st_ino) identity digest"
+        (Printf.sprintf "masc-base-path-owner-v2-%s.lease" digest)
         (Filename.basename path);
       (match
          Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
@@ -1675,9 +1609,6 @@ let () =
           Alcotest.test_case
             "one directory shares one lease across realpath spellings" `Quick
             test_base_path_lock_shares_one_lease_across_realpath_spellings;
-          Alcotest.test_case
-            "legacy path-digest lease is fenced while held" `Quick
-            test_base_path_lock_fences_legacy_path_digest_lease;
           Alcotest.test_case "stale lease release preserves active ownership"
             `Quick test_stale_lease_release_preserves_new_active_lease;
           Alcotest.test_case "linked runtime directory is rejected" `Quick

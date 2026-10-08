@@ -196,6 +196,8 @@ def superseded_scoped_match_journey(executable):
         ])
 
     gate = h.GatedHttpResponse(operator(old_operator_label), hold_seconds=30.0)
+    held_new_operator = h.GatedHttpResponse(operator(new_operator_label), hold_seconds=30.0)
+    held_followup_identity = h.GatedHttpResponse((500, {}), hold_seconds=30.0)
     late_gate_label = b"late-foreign-gate"
     late_gate_snapshot = copy.deepcopy(approvals.blocked_gate_detail_http_fixtures()[cards.GATE_PATH])
     late_gate_snapshot[1]["approval_queue"] = late_gate_snapshot[1]["approval_queue"][:1]
@@ -206,6 +208,7 @@ def superseded_scoped_match_journey(executable):
     newer_asks_read = threading.Event()
     released_asks_read = threading.Event()
     gate_identity_rechecked = threading.Event()
+    held_scoped_identity = h.GatedHttpResponse((500, {}), hold_seconds=30.0)
     briefing = fixtures[BRIEFING]
     assert isinstance(briefing, tuple)
     initial_briefing = copy.deepcopy(briefing)
@@ -245,7 +248,7 @@ def superseded_scoped_match_journey(executable):
             assert gate.requested.is_set(), "newer full read did not overlap old scoped GET"
             assert not gate.completed.is_set(), "old scoped GET completed before full B"
             newer_operator_read.set()
-            return operator(new_operator_label)
+            return held_new_operator()
         return h.approval_selection_snapshot([])
 
     def read_asks():
@@ -287,14 +290,21 @@ def superseded_scoped_match_journey(executable):
 
         def health(path):
             phase = record(path)
-            root = foreign if phase in ("new-full", "released", "gate-released") else local
-            return h.RawHttpResponse(200, json.dumps({
+            root = foreign if phase in ("new-full", "released", "gate-released", "scoped-completion") else local
+            response = h.RawHttpResponse(200, json.dumps({
                 "status": "ok", "paths": {
                     "cwd": str(root), "effective_base_path": str(root),
                     "effective_masc_root": str(root / ".masc"),
                     "effective_has_masc_dir": True,
                 },
             }).encode(), content_type="application/json")
+            if phase == "released":
+                held_scoped_identity.response = response
+                return held_scoped_identity()
+            if phase == "scoped-completion":
+                held_followup_identity.response = response
+                return held_followup_identity()
+            return response
 
         fixtures["/health"] = lambda: health("/health")
         fixtures["/health?full=1"] = lambda: health("/health?full=1")
@@ -345,6 +355,14 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(process, fd, output, newer_operator_read, timeout=10), (
                 "new full refresh did not pass the held scoped operator GET"
             )
+            # Queue one revalidation while both full B and old scoped A are
+            # in flight. Opening the palette in the same input stream proves
+            # r was processed first; closing it preserves the Home surface.
+            # A resize alone would not acknowledge the input consumer.
+            h.send_and_wait(process, fd, output, b"r:", b"MASC Command palette")
+            h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
+            assert not held_new_operator.completed.is_set()
+            held_new_operator.release.set()
             assert h.wait_for_fixture_event(process, fd, output, newer_asks_read, timeout=10), (
                 "explicit full refresh failed to overtake the pending scoped GET"
             )
@@ -380,7 +398,15 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(
                 process, fd, output, released_asks_read, timeout=10
             ), "old scoped reader never consumed its released operator response"
+            # The scoped collector always probes after its surface reads.
+            # Hold that response: its outer authority check and any followup
+            # cannot run while we identify the independent Gate post-read.
+            assert h.wait_for_fixture_event(
+                process, fd, output, held_scoped_identity.requested, timeout=10
+            ), "released scoped collector never reached its final identity read"
             with lock:
+                assert calls.count(("/health", "released")) == 1, calls
+                assert held_scoped_identity.calls == 1, calls
                 state["phase"] = "gate-released"
             held_gate.release.set()
             assert h.wait_for_fixture_event(process, fd, output, held_gate.completed, timeout=10), (
@@ -388,12 +414,12 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(
                 process, fd, output, gate_identity_rechecked, timeout=10
             ), "released Gate response was not followed by an identity recheck"
-            # The released Gate response must be followed by an identity probe
-            # against B. Multiple independent probes may overlap here; only a
-            # new full bundle would violate the single-briefing boundary.
-            # Consume the returned response and mailbox, then force a fresh
-            # frame: accumulated pre-release mismatch bytes are not evidence.
-            h.drain_until_quiet(process, fd, output, cap=1)
+            # Full B is already visibly applied; the old scoped reader is
+            # blocked above and Gate's pre-read finished before its held GET.
+            # Thus this exact request belongs to Gate. Request arrival does
+            # not prove its discarded mailbox was processed: the separate
+            # gate_before_identity_refresh_journey proves that consumer path
+            # with a withheld response and uniquely rendered rejection.
             drawn = h.resize_and_wait(
                 process, fd, output, rows=40, columns=161,
                 needle=b"Enter:open", controls=(h.FULL_REDRAW,),
@@ -409,13 +435,45 @@ def superseded_scoped_match_journey(executable):
                 # The newer B full read is the only refresh. Its later identity
                 # probes must not fetch another briefing or admit stale cards.
                 assert sum(path == BRIEFING for path, _ in calls) == baseline + 1, calls
-                assert calls.count(("/health", "gate-released")) >= 1, calls
+                assert calls.count(("/health", "gate-released")) == 1, calls
+                assert calls.count(("/health", "released")) == 1, calls
+                assert not held_scoped_identity.completed.is_set(), calls
                 assert held_gate.calls == 1, "more than one independent Gate GET was gated"
+            with lock:
+                state["phase"] = "scoped-completion"
+            held_scoped_identity.release.set()
+            assert h.wait_for_fixture_event(
+                process, fd, output, held_scoped_identity.completed, timeout=10
+            ), "old scoped identity response did not complete"
+            assert h.wait_for_fixture_event(
+                process, fd, output, held_followup_identity.requested, timeout=10
+            ), "old scoped mailbox did not release the queued full revalidation"
+            # This next request can start only after the old completion is
+            # consumed. Keep its initial identity response held so it cannot
+            # apply a replacement bundle that hides stale A admission.
+            settled = h.resize_and_wait(
+                process, fd, output, rows=40, columns=162,
+                needle=b"Enter:open", controls=(h.FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            settled_visible = h.screen_text(settled)
+            assert b"[workspace mismatch]" in settled_visible, settled_visible
+            assert all(label not in settled_visible for label in
+                       (old_label, old_operator_label, new_label,
+                        new_operator_label, late_gate_label)), settled_visible
+            assert not held_followup_identity.completed.is_set()
+            with lock:
+                assert held_followup_identity.calls == 1, calls
+                assert calls.count(("/health", "scoped-completion")) == 1, calls
+                assert sum(path == BRIEFING for path, _ in calls) == baseline + 1, calls
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")
         finally:
             gate.release.set()
             held_gate.release.set()
+            held_scoped_identity.release.set()
+            held_new_operator.release.set()
+            held_followup_identity.release.set()
 
     h.run_terminal_scenario(
         executable, description="Home drops old scoped A after newer full B mismatch",
@@ -442,6 +500,7 @@ def gate_before_identity_refresh_journey(executable):
         approvals.blocked_gate_detail_http_fixtures()[cards.GATE_PATH][1]["approval_queue"])
     late[1]["approval_queue"][0]["id"] = "foreign-gate-before-identity"
     held_gate = h.GatedHttpResponse(late, hold_seconds=30.0)
+    held_post_read_identity = h.GatedHttpResponse((500, {}), hold_seconds=30.0)
     initial_gate_read = threading.Event()
     briefing = fixtures[BRIEFING]
 
@@ -472,13 +531,17 @@ def gate_before_identity_refresh_journey(executable):
         def health():
             record("/health")
             root = foreign if state["phase"] == "B" else local
-            return h.RawHttpResponse(200, json.dumps({
+            response = h.RawHttpResponse(200, json.dumps({
                 "status": "ok", "paths": {
                     "cwd": str(root), "effective_base_path": str(root),
                     "effective_masc_root": str(root / ".masc"),
                     "effective_has_masc_dir": True,
                 },
             }).encode(), content_type="application/json")
+            if state["phase"] == "B":
+                held_post_read_identity.response = response
+                return held_post_read_identity()
+            return response
 
         fixtures["/health"] = health
         fixtures["/health?full=1"] = health
@@ -502,6 +565,21 @@ def gate_before_identity_refresh_journey(executable):
             assert h.wait_for_fixture_event(
                 process, fd, output, held_gate.completed, timeout=10
             ), "B Gate fixture did not complete"
+            assert h.wait_for_fixture_event(
+                process, fd, output, held_post_read_identity.requested, timeout=10
+            ), "released Gate did not request its post-read identity"
+            rejection = b"workspace changed before the action completed"
+            withheld = h.resize_and_wait(
+                process, fd, output, rows=40, columns=120,
+                needle=b"MASC Approvals", controls=(h.FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            withheld_visible = h.screen_text(withheld)
+            assert rejection not in withheld_visible, withheld_visible
+            assert b"foreign-gate-before-identity" not in withheld_visible, withheld_visible
+            assert not held_post_read_identity.completed.is_set()
+            before = len(output)
+            held_post_read_identity.release.set()
             # This text is rendered from the Gate mailbox's rejected result,
             # after the client's post-read B identity probe. It cannot appear
             # merely because the HTTP fixture finished writing its response.
@@ -515,13 +593,15 @@ def gate_before_identity_refresh_journey(executable):
             visible = h.screen_text(shown)
             assert rejection in visible and b"foreign-gate-before-identity" not in visible, visible
             with lock:
-                assert ("/health", "B") in calls, calls
+                assert calls.count(("/health", "B")) == 1, calls
+                assert held_post_read_identity.calls == 1, calls
                 assert (BRIEFING, "B") not in calls, (
                     "ordinary B refresh ran before the Gate rejection", calls)
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")
         finally:
             held_gate.release.set()
+            held_post_read_identity.release.set()
 
     h.run_terminal_scenario(
         executable, description="Gate rejects B before ordinary identity refresh",

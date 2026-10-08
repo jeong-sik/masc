@@ -1424,7 +1424,11 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc.keeper_chat_operations masc_tui_message_input masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_memory_usage masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries
+  ;; workspace identity composes the local masc root from the cluster
+  ;; selection with the function the server reports its own root from.
+  masc.config masc.keeper_chat_operations masc_tui_message_input
+  masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_memory_usage masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane

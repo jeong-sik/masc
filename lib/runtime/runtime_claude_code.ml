@@ -1080,18 +1080,6 @@ let image_block (image : image_input) =
     ]
 ;;
 
-let user_message ~images prompt =
-  let blocks =
-    List.map image_block images @ [ `Assoc [ "type", `String "text"; "text", `String prompt ] ]
-  in
-  `Assoc
-    [ "type", `String "user"
-    ; "message", `Assoc [ "role", `String "user"; "content", `List blocks ]
-    ; "parent_tool_use_id", `Null
-    ; "session_id", `String "default"
-    ]
-;;
-
 let parse_rate_limit ~expected_session_id fields =
   let stage = "rate_limit_event" in
   let* session_id = required_string stage "session_id" fields in
@@ -2083,11 +2071,72 @@ let complete_partial_text (partial : partial_stream) ~on_stream_event ~response_
       Ok ()
 ;;
 
+module Input_attribution = Runtime_claude_input_attribution
+
+type input_observer =
+  { input_state : Input_attribution.t
+  ; on_input_observation : (Input_attribution.observation -> unit) option
+  }
+
+let emit_input_observation observer observation =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some emit ->
+      (try emit observation with
+       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Log.Runtime_agent.warn "Claude Code input observation callback raised (error=%s)"
+           (Printexc.to_string exn))
+;;
+
+let observe_input observer ~session_id ~frame fields =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some _ ->
+      Option.iter (emit_input_observation observer)
+        (Input_attribution.observe observer.input_state ~session_id ~frame fields)
+;;
+
+let input_frame_uuid fields =
+  match List.assoc_opt "uuid" fields with Some (`String value) -> Some value | _ -> None
+;;
+
+let observe_partial_input observer ~session_id fields =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some _ ->
+  let uuid = input_frame_uuid fields in
+  let frame = match List.assoc_opt "event" fields with
+    | Some (`Assoc event) ->
+        (match List.assoc_opt "type" event with
+         | Some (`String "message_start") ->
+             (match List.assoc_opt "message" event with
+              | Some (`Assoc message) ->
+                  (match List.assoc_opt "id" message with
+                   | Some (`String message_id) -> Some (Input_attribution.Partial_start {uuid;message_id})
+                   | _ -> None)
+              | _ -> None)
+         | Some (`String "message_stop") -> Some (Input_attribution.Partial_stop {uuid})
+         | Some (`String "ping") -> None
+         | Some (`String _) -> Some (Input_attribution.Partial_fragment {uuid})
+         | _ -> None)
+    | _ -> None in
+  (* Root ownership is explicit in the SDK envelope. The older content parser
+     accepts unscoped partial starts; those cannot leave an old root cursor
+     alive for the next unstamped fragment. No authored bytes are changed. *)
+  match assistant_scope ~stage:"input attribution scope" fields, frame with
+  | Ok Root_response, Some frame -> observe_input observer ~session_id ~frame fields
+  | (Ok (Child_response _) | Error _), Some (Input_attribution.Partial_start {message_id;_}) ->
+      Input_attribution.unowned_response_start observer.input_state ~message_id
+  | (Ok (Child_response _) | Error _), Some (Partial_fragment _ | Partial_stop _ | Assistant _ | Result _)
+  | (Ok Root_response | Ok (Child_response _) | Error _), None -> ()
+;;
+
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
     ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-    ~partial_stream ~stream_started ~response_emitted =
+    ~input_observer ~partial_stream ~stream_started ~response_emitted =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -2107,21 +2156,26 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "stream_event" ->
     let* () = partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         ~on_stream_event partial_stream fields in
+    observe_partial_input input_observer ~session_id:expected_session_id fields;
     await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~expected_session_id ~subscription ~resumed ~rate_limit ~assistant_model
       ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_turn_started
-      ~on_stream_event ~partial_stream ~stream_started ~response_emitted
+      ~on_stream_event ~input_observer ~partial_stream ~stream_started ~response_emitted
   | "assistant" ->
     let* scope, origin, uuid, model, blocks, message_id, usage =
       parse_assistant ~expected_session_id ~tools fields
     in
+    (match scope with
+     | Root_response -> observe_input input_observer ~session_id:expected_session_id
+         ~frame:(Input_attribution.Assistant {uuid=Some uuid;message_id}) fields
+     | Child_response _ -> ());
     let assistant_model =
       match scope, origin with
       | (Root_response | Child_response _), Api_error_diagnostic
@@ -2166,7 +2220,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~partial_stream ~stream_started ~response_emitted
+      ~input_observer ~partial_stream ~stream_started ~response_emitted
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     (* The usage windows ride the same event. They are an observation for
@@ -2184,7 +2238,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~partial_stream ~stream_started ~response_emitted
+      ~input_observer ~partial_stream ~stream_started ~response_emitted
   | "result" ->
     (* The result frame is the only place the turn's spend is reported, and
        it arrives on failures too (a quota refusal, a provider error after
@@ -2217,6 +2271,13 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         ~usage
         fields
     in
+    let outcome = match parsed_result with
+      | Ok _ -> Some Input_attribution.Provider_success
+      | Error (Quota_blocked _ | Context_window_exceeded _
+          | Turn_failed _ | Turn_failed_with_observation _) -> Some Input_attribution.Provider_error
+      | Error _ -> None in
+    observe_input input_observer ~session_id:expected_session_id
+      ~frame:(Input_attribution.Result {uuid=Some turn_id;outcome}) fields;
     let* turn_id, result, usage =
       match parsed_result with
       | Error
@@ -2284,7 +2345,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
-      ~native_tool_attempted ~on_turn_started ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_attempted ~on_turn_started ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | "system" ->
     (* [compact_boundary] is the client's own record that it summarised the
@@ -2303,7 +2364,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | "tool_progress" ->
     (* An observation cannot fail a healthy turn. Only the exact open root
@@ -2323,7 +2384,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | other ->
     protocol_error
@@ -2497,7 +2558,7 @@ let terminate_spawned_process ~clock proc stdin_w =
 
 let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~session_id
     ~prompt ~images ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent
-    ~on_stream_event ~turn_admitted =
+    ~on_stream_event ~on_input_observation ~turn_admitted =
   let tool_call_count = ref 0 in
   let assistant_usage = new_assistant_usage () in
   let mcp_session = Runtime_official_client_mcp.create_session () in
@@ -2521,9 +2582,25 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
     invoke_state_callback ~stage:"turn starting callback" (fun () ->
       on_turn_starting ~session_id)
   in
+  let input_observer =
+    { input_state = Input_attribution.create
+        ~receiver_generation:(Random_id.uuid_v7 ()) ~session_id
+        ~client_uuid:(Random_id.uuid_v7 ())
+    ; on_input_observation } in
+  emit_input_observation input_observer (Input_attribution.prepared input_observer.input_state);
+  let failed_write exn =
+    (* No rejection or claim that the child read zero bytes, even on cancel. *)
+    emit_input_observation input_observer (Input_attribution.write_unknown input_observer.input_state);
+    raise exn in
   let* () =
     try
-      io.send (user_message ~images prompt);
+      (try io.send (Input_attribution.user_message input_observer.input_state
+          ~content:(List.map image_block images @
+            [`Assoc ["type", `String "text"; "text", `String prompt]]))
+       with
+       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> failed_write exn
+       | Eio.Cancel.Cancelled _ as exn -> failed_write exn
+       | exn -> failed_write exn);
       turn_admitted := true;
       Ok ()
     with
@@ -2539,6 +2616,7 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
            ; detail = Printexc.to_string exn
            })
   in
+  emit_input_observation input_observer (Input_attribution.written input_observer.input_state);
   let* () = invoke_state_callback ~stage:"prompt sent callback" (fun () ->
     on_prompt_sent (); Ok ()) in
   await_terminal
@@ -2561,6 +2639,7 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
     ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event
+    ~input_observer
     ~partial_stream:{message_id=None; blocks=[]; completed_envelopes=Hashtbl.create 8}
     ~stream_started:(ref false)
     ~response_emitted:(ref false)
@@ -2588,7 +2667,8 @@ let with_system_prompt_file prompt use = match prompt with
 
 let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
-    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_stream_event =
+    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_stream_event
+    ~on_input_observation =
   let turn_admitted = ref false in
   try
     with_system_prompt_file config.system_prompt (fun system_prompt_file ->
@@ -2683,6 +2763,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
             with_admission_timeout (fun () -> on_turn_started ~session_id ~turn_id))
           ~on_prompt_sent
           ~on_stream_event
+          ~on_input_observation
           ~turn_admitted)))
   with
   | Idle_timeout seconds -> Error (Timeout seconds)
@@ -2813,7 +2894,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     ?admitted_subscription ?on_spawned ?(on_prompt_sent = fun () -> ()) ~mgr ~clock ~cwd
     ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
-    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event config
+    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event ?on_input_observation config
     ~prompt ~images =
   let result =
     let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt ~images in
@@ -2856,6 +2937,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_turn_started
         ~on_prompt_sent
         ~on_stream_event
+        ~on_input_observation
     with
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn

@@ -2927,6 +2927,7 @@
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_runtime_claude_code.inc)
+(include stanzas/test_runtime_claude_input_attribution.inc)
 (include stanzas/test_runtime_antigravity.inc)
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_antigravity_context.inc)

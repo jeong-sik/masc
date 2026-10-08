@@ -40,7 +40,12 @@
       "path": "bin/masc_tui_loader.ml",
       "baseline_lines": 2047,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: pure schedule snapshot and wake decoding extracted; remaining local-store/cache, board projection and HTTP loading responsibilities pending semantic review",
+      "current_lines": 1668,
+      "prs": [
+        41962
+      ],
+      "validation_artifact": "tui-schedule-decode/README.md"
     },
     {
       "path": "bin/masc_tui_mermaid.ml",

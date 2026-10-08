@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Twenty production candidates received
-bounded changes; their other responsibilities remain pending. The other 55
+is not a defect verdict or a new build gate. Twenty-one production candidates received
+bounded changes; their other responsibilities remain pending. The other 54
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -36,6 +36,7 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#42016](https://github.com/jeong-sik/masc/pull/42016) | Pure tool-schema contract owns strict decoding, projection and private construction; public signature and direct provider/MCP consumers preserved | `llm_provider/types.ml`, schema contract owner |
 | [#42021](https://github.com/jeong-sik/masc/pull/42021) | Existing approval projection owner receives chat writes, replay reconciliation, broadcasts and failed logs; pure readiness and distinct native admission preserved | `keeper_approval_queue.ml/.mli`, projection/result owners |
 | [#42024](https://github.com/jeong-sik/masc/pull/42024) | Pure fleet counts/source ages and JSON separated from durable discovery/read/diagnostic effects; owner lifecycle and storage completeness remain distinct | `keeper_event_queue_persistence.ml/.mli`, fleet projection owner |
+| [#42027](https://github.com/jeong-sik/masc/pull/42027) | Ignored declaration caller parameters and forwarding helper removed; host-owned access and meaningful dispatch provenance retained | `lane_addon_runtime.ml/.mli`, tool/HTTP and direct test consumers |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -103,6 +104,9 @@ The Core check requires an approved leader-selected candidate under the current
 execution protocol; no selection receipt or approval is fabricated here.
 
 ## Next work
+
+Unused Lane declaration caller removal and its existing editing/private ownership
+checks are recorded in [lane-declaration-access/README.md](lane-declaration-access/README.md).
 
 Pure event-queue fleet projection and its actual storage/concurrency and adjacent
 health checks are recorded in [event-queue-fleet-projection/README.md](event-queue-fleet-projection/README.md).

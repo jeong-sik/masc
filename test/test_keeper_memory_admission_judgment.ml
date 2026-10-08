@@ -97,7 +97,7 @@ let test_deferred_prevents_whole_batch_settlement () = with_batch (fun batch ->
   check bool "deferred candidate cannot be hidden by response ordering" false
     (Judgment.settled (List.rev judgments)))
 
-let test_structured_output_schema_accepts_the_envelope () =
+let test_structured_output_schema_accepts_the_envelope () = with_batch (fun batch ->
   let schema = Judgment.output_schema
       ~memory_schema:Masc.Keeper_structured_output_schema.librarian_current_output_schema in
   let accepts args = Result.is_ok (Masc.Tool_input_validation.validate
@@ -107,8 +107,14 @@ let test_structured_output_schema_accepts_the_envelope () =
     ["original Memory object alone is not the envelope",memory;
      "unknown outcome is not emitted",envelope (field "outcome" (`String "unknown") (List.hd rows) :: List.tl rows);
      "claim type remains string or null",envelope (field "memory_claim" (`Int 1) (List.hd rows) :: List.tl rows);
-     "original Memory schema remains enforced",field "memory" (field "new_claims" (`String "invalid") memory) (envelope rows);
-     "extra judgment fields stay forbidden",envelope (add "extra" `Null (List.hd rows) :: List.tl rows)]
+     "original Memory schema remains enforced",field "memory" (field "new_claims" (`String "invalid") memory) (envelope rows)];
+  (* Tool-input validation checks types/enums recursively, but its
+     additionalProperties check only covers the root object. The emitted
+     schema still declares strict candidate objects; runtime unwrap is the
+     authoritative local exact-field boundary for model responses. *)
+  Judgment.unwrap ~batch
+    (envelope (add "extra" `Null (List.hd rows) :: List.tl rows))
+  |> refused "extra judgment field at the runtime admission boundary")
 
 let () = run "explicit memory admission judgment"
   ["admission boundary",[

@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import shlex
-import signal
 import sys
 import tempfile
 import threading
@@ -495,27 +494,21 @@ def task_cancel_previous_workspace_receipt(executable):
                     # This single key owns the B revalidation pass. The
                     # initial local pass was rendered and quiet before the
                     # key, so it cannot leave a queued Revalidate intent.
+                    b_press_output_start = len(output)
                     h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
-                    # Freeze the client while any response already on the
-                    # socket is served by the fixture, then observe its
-                    # resume and settle every registered exchange.
-                    os.kill(process.pid, signal.SIGSTOP)
-                    time.sleep(gate.span + 0.25)
-                    os.kill(process.pid, signal.SIGCONT)
-                    resumed_at = time.monotonic()
-                    assert h.drain_until_quiet(process, fd, output), (
-                        "TUI output did not settle after resume: " + repr(bytes(output)))
-                    # Settle any in-flight or delayed exchanges from before/during
-                    # the freeze: wait until no exchange is held and a full quiet
-                    # span has elapsed since resume and the latest prior event.
+                    h.wait_for_output(
+                        process, fd, output, b"task-receipt-foreign-B",
+                        start=b_press_output_start, timeout=10)
+                    assert h.drain_until_quiet(process, fd, output, cap=10), (
+                        "TUI output did not settle after foreign-B applied: " + repr(bytes(output)))
+                    # The B frame proves the client applied the first refresh;
+                    # then wait for every response already registered by that
+                    # generation and a complete quiet span before starting C.
                     prior_settle_deadline = time.monotonic() + 10
-                    while (
-                        gate.held > 0
-                        or (time.monotonic() - max(resumed_at, gate.last_event_time()) < gate.span)
-                    ):
+                    while not gate.quiesced():
                         if time.monotonic() > prior_settle_deadline:
                             raise AssertionError(
-                                "prior refresh tail did not settle after resume: "
+                                "prior refresh tail did not settle after foreign-B applied: "
                                 + repr(state["exchange_log"])
                                 + f" held={gate.held} reads="
                                 + repr((state["health_reads"], state["history_reads"])))
@@ -526,18 +519,6 @@ def task_cancel_previous_workspace_receipt(executable):
                     assert all(e["completed"] is not None for e in state["exchange_log"]), (
                         "pre-press exchange is still running before second press: "
                         + repr(state["exchange_log"]))
-                    # Explicit client observation: verify that the pre-press pass applying foreign-B has
-                    # rendered its base path to screen and the PTY has drained quiet.
-                    # This proves that:
-                    # 1. apply_http_surfaces for the pre-press pass has run to completion.
-                    # 2. http_refresh_inflight has been set to false.
-                    # 3. start_scoped_refresh_followup has executed and found No_scoped_followup.
-                    # 4. No follow-up refresh intent remains queued before the second press.
-                    h.wait_for_output(
-                        process, fd, output, b"task-receipt-foreign-B",
-                        start=0, timeout=10)
-                    assert h.drain_until_quiet(process, fd, output), (
-                        "TUI output did not settle after foreign-B applied: " + repr(bytes(output)))
                     assert all(e.get("root") == str(foreign_b) or e.get("root") == local_base
                                for e in state["exchange_log"][:pre_press_count]), (
                         "pre-press exchange log contaminated with unexpected root: "
@@ -668,7 +649,7 @@ def task_cancel_previous_workspace_receipt(executable):
         h.run_terminal_scenario(
             executable, description="accepted Task cancel reports previous workspace without refresh",
             interact=interact, http_fixtures=fixtures, http_requests=requests,
-            prepare_workspace=prepare, refresh=60.0,
+            prepare_workspace=prepare, refresh=3600.0,
             extra_env={"EDITOR": f"{shlex.quote(sys.executable)} {shlex.quote(str(editor))}"},
         )
 

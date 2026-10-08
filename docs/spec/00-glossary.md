@@ -1620,6 +1620,19 @@ status: reference
   [Browser_interaction](../../lib/browser_interaction.mli) ·
   [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)
 
+**Live Transport (라이브 전송 방식)**
+: MASC 실시간 브라우저 연결(`live client`)이 브라우저와 통신하는 물리적·프로토콜 전송 수단(#41795, #41839).
+  닫힌 셋 `Web_extension`(`"web_extension"`)과 `Webdriver_bidi`(`"webdriver_bidi"`) 둘이다(`Browser_lane.live_transport`).
+  각 전송 방식이 제공할 수 있는 작업 역량(`Browser_lane.live_capability`)은 타입 표(`live_transport_serves`)로 엄격히 고정된다.
+  - **역량 12종**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Tab_activation`.
+  - **`web_extension`**: 브라우저 확장 프로그램의 페이지 내부 DOM 조작 기반. 탭 활성화(`Tab_activation` / `activate_tab`)를 제공하지만, 브라우저가 인정하는 신뢰 포인터가 없어 호버와 드래그(`Trusted_hover`·`Trusted_drag`)는 지원하지 않는다.
+  - **`webdriver_bidi`**: W3C WebDriver BiDi 프로토콜 기반의 브라우저 호스트 직접 제어(`masc-browser-host --bidi-url`). 신뢰 호버와 드래그(`Trusted_hover`·`Trusted_drag`)를 제공하지만, 창 포커스를 함께 빼앗는 특성 때문에 조용한 탭 활성화(`Tab_activation`)는 제공하지 않는다.
+  - **공통 지원(9종)**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Dom_interaction`·`Point_click`·`Point_scroll`.
+  선택된 연결의 전송 방식이 요청된 역량을 제공하지 못하면 서버는 명령을 큐에 넣기 전에 `live_transport_unsupported` 거절 코드로 차단하며, 해당 역량을 지원하는 연결된 다른 브라우저 수나 운영자 안내 문서를 반환한다. 선택한 연결에서 성공한 실시간 브라우저 응답(`BrowserRead` 등)과 탭·연결 목록(`BrowserTabs`)의 각 항목은 `clientId`와 함께 `transport` 필드를 노출하며, 연결 선택 이전의 오류 응답(`No_live_client` 등)과는 구분된다(#41839).
+  → [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
+  [Browser_host](../../lib/browser_host/browser_host.mli) ·
+  [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)
+
 **Machine Change Mark (기계 변경 표식)**
 : MSX Lane·DOS Lane 기계의 화면이 바뀌었는지 싸게 묻기 위한 표식. 변경 횟수(`count`)와
   기계 정체(`incarnation`)의 한 쌍이다(`change_mark`). 관전자는 지난번에 읽은 쌍을
@@ -2628,6 +2641,17 @@ status: reference
   검증된 계획이 `keeper_compose_<name>` 도구가 된다. 실행기는 선언된 입력과
   의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
   도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
+
+**Ready-Wave Scheduler (레디 웨이브 스케줄러)**
+: 검증된 도구 실행 계획(Tool Plan) 및 Composition Skill의 DAG 노드를 동적으로 즉시 발송하고 분기 실패를 처리하는 스케줄링 엔진(#41815, task-2186).
+  정적 레이어 배리어(static batch barrier)로 인해 독립 분기(B)가 다른 완료 분기(A→C)의 후속 실행을 가로막던 문제를 해소하고, 선언된 의존성(`after` 간선 및 상류 JSON 출력 참조)이 해결된 노드를 레디 웨이브(ready wave)로 즉시 디스패치한다.
+  - **분기 실패 정책 (Branch Failure Policy)**: 닫힌 타입 `Keeper_tool_plan.branch_failure_policy`의 두 값(`Fail_fast`, `Continue_independent`)으로 제어된다. 기본값은 `Fail_fast`다.
+    - `Fail_fast`: 한 노드가 실패하면 아직 발송되지 않은 모든 노드의 실행을 즉시 중단한다.
+    - `Continue_independent`: 한 노드가 실패하면 그 노드의 하류 자손들만 차단(`Dependency_failed`)하고, 독립된 다른 분기의 실행과 완료는 정상 진행한다.
+  - **직렬 체인 대기 해제 불변식 (Serial Chain Stand-Down)**: 직렬(`serial`) 및 종단(`terminal`) 노드는 정적 계획 순서대로 단독 실행된다. 선행 직렬 노드가 실패하거나 지연(`Deferred`, 원인 존재)되거나 건너뛰어지면, 분기 실패 정책과 무관하게 후속 직렬 체인의 모든 노드는 도구를 발송하지 않고 즉시 실행 대기를 해제(stand down)하며, 실패한 직렬 선행자가 계획 인덱스 순서에 따라 실패 원인(`cause`)을 끝까지 운반한다.
+  - **결정론적 완료 순서 (Canonical Plan Order)**: 실행 완료된 결과는 비감소 `planned_index` 순서로 정규 보고되며, 진행 중인(in-flight) 노드가 모두 정착된 후에 가장 낮은 계획 인덱스를 가진 실패 원인을 최종 선정한다.
+  → [Keeper_tool_plan](../../lib/keeper/keeper_tool_plan.mli) ·
+  [Keeper_tool_plan_executor](../../lib/keeper/keeper_tool_plan_executor.mli)
 
 **Skill Reference**
 : source, package, name으로 이뤄진 신원과 content revision의 조합

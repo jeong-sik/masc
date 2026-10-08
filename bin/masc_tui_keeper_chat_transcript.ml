@@ -59,6 +59,7 @@ type tool_activity =
   ; outcome : tool_outcome
   ; native_completion : Runtime_native_tools.completion option
   ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
   ; duration : string option
   }
 
@@ -133,6 +134,7 @@ type live_tool_call =
   ; ended : bool
   ; native_completion : Runtime_native_tools.completion option
   ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
   ; result_ready : bool
   ; failed : bool
   ; duration : string option
@@ -555,7 +557,7 @@ let nonblank = function
   | Some value when String.trim value <> "" -> Some value
   | Some _ | None -> None
 
-let make_tool_activity ?native_progress ?native_completion ?execution_id ~call_id ~tool_name ~args ~outcome
+let make_tool_activity ?native_progress ?native_retry ?native_completion ?execution_id ~call_id ~tool_name ~args ~outcome
     ~duration () =
   let call_id = nonblank call_id in
   let execution_id = nonblank execution_id in
@@ -567,6 +569,7 @@ let make_tool_activity ?native_progress ?native_completion ?execution_id ~call_i
   ; outcome
   ; native_completion
   ; native_progress
+  ; native_retry
   ; duration
   }
 
@@ -593,7 +596,7 @@ let activity_of_live_call (t : t) (call : live_tool_call) =
         | Waiting | Working -> false
         | Stream_ended | Stream_failed _ -> true)
   in
-  make_tool_activity ?native_progress:call.native_progress ?native_completion:call.native_completion ?execution_id:call.execution_id
+  make_tool_activity ?native_retry:call.native_retry ?native_progress:call.native_progress ?native_completion:call.native_completion ?execution_id:call.execution_id
     ~call_id:call.call_id ~tool_name:call.tool_name
     ~args:call.args
     ~outcome:
@@ -702,7 +705,7 @@ let native_activity_summary (activity : tool_activity) =
   | Outcome_unrecorded -> None
 
 let native_progress_summary (activity : tool_activity) =
-  Option.map (fun progress ->
+  let progress = Option.map (fun progress ->
     let observation = match progress.message, progress.output_bytes, progress.provider_elapsed_seconds with
       | Some message, _, _ -> safe_line message
       | None, Some _, _ when activity.outcome=Native_running -> "output arriving"
@@ -712,7 +715,21 @@ let native_progress_summary (activity : tool_activity) =
     match progress.elapsed with
     | None -> observation
     | Some elapsed -> observation ^ " · updated +" ^ Masc_tui_message_layout.span_text elapsed)
-    activity.native_progress
+    activity.native_progress in
+  let retry = Option.map (function
+    | Runtime_native_tools.Retry_cleared agent ->
+        "provider retry notice cleared · " ^ safe_line agent.subagent_type
+    | Runtime_native_tools.Retry_reported note ->
+        Printf.sprintf "%sprovider retry %d/%d · delay %dms · %s · %s%s"
+          (if activity.outcome=Native_running then "" else "last observed ")
+          note.attempt note.max_retries note.retry_delay_ms
+          (safe_line note.agent.subagent_type) (safe_line note.error_category)
+          (Option.fold ~none:"" ~some:(fun code -> Printf.sprintf " · status %d" code) note.error_status))
+    activity.native_retry in
+  match progress, retry with
+  | Some progress, Some retry -> Some (progress ^ " · " ^ retry)
+  | Some _ as value, None | None, (Some _ as value) -> value
+  | None, None -> None
 
 let native_progress_details (activity : tool_activity) =
   match native_progress_summary activity, activity.native_progress with
@@ -2127,6 +2144,7 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; ended = false
            ; native_completion = None
            ; native_progress = None
+           ; native_retry = None
            ; result_ready = false
            ; failed = false
            ; duration = None
@@ -2321,20 +2339,20 @@ let apply_delta ~now t (delta : Live.delta) =
           let previous_bytes = Option.bind call.native_progress (fun previous -> previous.output_bytes) in
           let previous_message = Option.bind call.native_progress (fun previous -> previous.message) in
           let previous_elapsed = Option.bind call.native_progress (fun previous -> previous.provider_elapsed_seconds) in
-          let updated = match progress with
-            | Runtime_native_tools.Output_observed {byte_count} ->
-                let previous = Option.value previous_bytes ~default:0 in
-                if byte_count <= 0 || byte_count > max_int - previous then None
-                else Some (Some (previous + byte_count), previous_message, previous_elapsed)
-            | Runtime_native_tools.Message_reported {message} -> Some (previous_bytes, Some message, previous_elapsed)
-            | Runtime_native_tools.Heartbeat_reported {elapsed_seconds} ->
-                if elapsed_seconds < 0 then None
-                else Some (previous_bytes, previous_message, Some elapsed_seconds) in
-          match updated with
-          | None -> note_unreadable t "native progress measurement is invalid"; call
-          | Some (output_bytes, message, provider_elapsed_seconds) ->
-              {call with native_progress=Some {output_bytes; message; provider_elapsed_seconds; updated_at=now;
-                elapsed=(if now >= call.started_at then Some (now -. call.started_at) else None)}}) with
+          let store output_bytes message provider_elapsed_seconds =
+            {call with native_progress=Some {output_bytes;message;provider_elapsed_seconds;updated_at=now;
+              elapsed=(if now >= call.started_at then Some (now -. call.started_at) else None)}} in
+          let invalid () = note_unreadable t "native progress measurement is invalid"; call in
+          match progress with
+          | Runtime_native_tools.Retry_observed retry -> {call with native_retry=Some retry}
+          | Runtime_native_tools.Output_observed {byte_count} ->
+              let previous = Option.value previous_bytes ~default:0 in
+              if byte_count <= 0 || byte_count > max_int - previous then invalid ()
+              else store (Some (previous + byte_count)) previous_message previous_elapsed
+          | Runtime_native_tools.Message_reported {message} -> store previous_bytes (Some message) previous_elapsed
+          | Runtime_native_tools.Heartbeat_reported {elapsed_seconds} ->
+              if elapsed_seconds < 0 then invalid ()
+              else store previous_bytes previous_message (Some elapsed_seconds)) with
        | Call_updated | Call_ambiguous -> ()
        | Call_missing | Call_conflicting -> note_unreadable t "native progress has no matching provider occurrence")
   | Live.Native_tool_ended { occurrence; completion } ->

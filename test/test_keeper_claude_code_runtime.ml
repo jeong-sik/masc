@@ -355,6 +355,7 @@ let content_of_wire_message raw =
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
+    ?required_native_posture
     ?event_capture ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report
@@ -397,6 +398,7 @@ let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_mess
                            ~system_prompt
                            ~tools
                            ~agent_core_tools:tools
+                           ?required_native_posture
                            ~initial_messages
                            ?context
                            ?event_bus
@@ -1631,7 +1633,7 @@ let test_native_completion_reaches_tui () =
     [None; Some false; Some true]
 ;;
 
-let test_root_heartbeat_reaches_scoped_journal_and_tui () =
+let test_root_heartbeat_reaches_scoped_journal_and_tui ?(retry = false) () =
   let module F = Native_tool_outcome_fixture in
   let module Stream = Keeper_autonomous_stream in
   let module J = Keeper_chat_event_log in
@@ -1692,29 +1694,56 @@ let test_root_heartbeat_reaches_scoped_journal_and_tui () =
       let kind = if thinking then "thinking" else "text" in
       let piece value = frame (`Assoc ["type",`String "content_block_delta";"index",`Int 0;
         "delta",`Assoc ["type",`String (kind ^ "_delta");kind,`String value]]) in
+      let tool_name = if retry then "Agent" else "Read" in
       let heartbeat uuid seconds = Yojson.Safe.to_string (`Assoc ["type",`String "tool_progress";
         "session_id",`String "__SESSION__";"uuid",`String uuid;"heartbeat",`Bool true;
         "parent_tool_use_id",`String "native-heartbeat";"tool_use_id",`String "opaque-observation";
-        "tool_name",`String "Read";"elapsed_time_seconds",`Int seconds]) in
+        "tool_name",`String tool_name;"elapsed_time_seconds",`Int seconds]) in
+      let retry_frames = if not retry then [] else
+        List.map (fun clear -> Emit (Yojson.Safe.to_string (`Assoc (
+          ["type",`String "tool_progress";"session_id",`String "__SESSION__";
+           "uuid",`String (if clear then "retry-clear" else "retry-note");
+           "parent_tool_use_id",`String "native-heartbeat";"tool_use_id",`String "opaque-agent-progress";
+           "tool_name",`String "Agent";"elapsed_time_seconds",`Int 0;"subagent_type",`String "Explore"]
+          @ if clear then [] else ["subagent_retry",`Assoc ["agent_id",`String "child-agent";
+            "attempt",`Int 1;"max_retries",`Int 3;"retry_delay_ms",`Int 1500;
+            "error_status",`Int 529;"error_category",`String "overloaded"]])))) [false;true] in
       let first = heartbeat "heartbeat-first" 30 in
-      with_fixture [
-        Emit (response_native_tool ~turn_id:"native" ~message_id:"native" ~call_id:"native-heartbeat" ~tool_name:"Read");
+      with_fixture ([
+        Emit (response_native_tool ~turn_id:"native" ~message_id:"native" ~call_id:"native-heartbeat" ~tool_name);
         Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc ["id",`String "body";"model",`String "claude-fixture"]]));
         Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;"content_block",`Assoc ["type",`String kind;kind,`String ""]]));
-        Emit (piece prefix); Emit first; Emit first; Emit (heartbeat "heartbeat-second" 3);
+        Emit (piece prefix); Emit first; Emit first; Emit (heartbeat "heartbeat-second" 3)]
+        @ retry_frames @ [
         Emit (piece suffix);
         Emit (frame (`Assoc ["type",`String "content_block_stop";"index",`Int 0]));
         Emit (response_frame ~uuid:"body-complete" ~message_id:"body" (`Assoc ["type",`String kind;kind,`String (secret ^ "\n")]));
         Emit (native_tool_result ~call_id:"native-heartbeat" ~content:"observed");
         Emit (heartbeat "heartbeat-late" 100);
         Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
-        Emit (result_text ~turn_id:"final" "Answer")]
-        (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"HEARTBEAT"
-          ~on_event ~on_native_tool_progress:on_progress ~on_native_tool_completion:on_completion () with
+        Emit (result_text ~turn_id:"final" "Answer")])
+        (fun cli_path ->
+         let run () = run_keeper_turn ~base_path ~cli_path ~goal:"HEARTBEAT"
+           ?required_native_posture:(if retry then Some Runtime_native_tools.Native_full else None)
+           ~on_event ~on_native_tool_progress:on_progress ~on_native_tool_completion:on_completion () in
+         let result =
+           if not retry then run ()
+           else
+             let modes = Keeper_tool_approval_mode.shared () in
+             (* [run_keeper_turn] dispatches this exact keeper. Native_full
+                requires explicit approval even for a controlled fake CLI. *)
+             let keeper_name = "claude-fixture" in
+             let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
+             Fun.protect
+               ~finally:(fun () -> Keeper_tool_approval_mode.set modes ~keeper_name previous)
+               (fun () ->
+                 Keeper_tool_approval_mode.set modes ~keeper_name Keeper_tool_approval_mode.Yolo;
+                 run ()) in
+         match result with
          | Error error -> fail (Agent_core.Error.to_string error)
          | Ok _ ->
            List.iter raise (List.rev !failures);
-           check int "actual receiver UUID-deduplicates and rejects late heartbeat" 2 !reports;
+           check int "actual receiver preserves each owned observation once" (if retry then 4 else 2) !reports;
            let lines = read_journal () in
            let replay = Chat_log.create_for_source ~keeper_name ~source:(Chat_log.Autonomous_turn turn_ref) ~started_at:0. in
            ignore (Chat_log.add_journaled replay lines);
@@ -1729,7 +1758,10 @@ let test_root_heartbeat_reaches_scoped_journal_and_tui () =
                  check bool "native end stays an observation" true (call.outcome=T.Native_ended);
                  check (option string) "heartbeat cannot mint a receipt" None call.execution_id;
                  check (option int) "decreasing provider elapsed is retained" (Some 3)
-                   (Option.bind call.native_progress (fun p -> p.provider_elapsed_seconds))
+                   (Option.bind call.native_progress (fun p -> p.provider_elapsed_seconds));
+                 if retry then check bool "actual Agent clear reaches live and durable native observation" true
+                   (call.native_retry=Some (Runtime_native_tools.Retry_cleared
+                     {agent_id="child-agent";subagent_type="Explore"}))
              | _ -> fail "heartbeat did not retain one exact native occurrence") [live;durable;replay];
            List.iter (fun events ->
              let body = String.concat "" (fragments events) in
@@ -4084,7 +4116,10 @@ let () =
         ; test_case "thinking stays ahead of tools and outside answer text" `Quick
             test_keeper_preserves_claude_thinking_before_tools
         ; test_case "native completion through adapter, journal, SSE and TUI" `Quick test_native_completion_reaches_tui
-        ; test_case "root heartbeat through receiver, scoped redaction, autonomous journal and TUI" `Quick test_root_heartbeat_reaches_scoped_journal_and_tui
+        ; test_case "root heartbeat through receiver, scoped redaction, autonomous journal and TUI" `Quick
+            (fun () -> test_root_heartbeat_reaches_scoped_journal_and_tui ())
+        ; test_case "root Agent retry through adapter, held content and both journals" `Quick
+            (fun () -> test_root_heartbeat_reaches_scoped_journal_and_tui ~retry:true ())
         ; test_case
             "no break across a MASC tool row"
             `Quick

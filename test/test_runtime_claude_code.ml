@@ -201,6 +201,7 @@ let with_fixture ?auth_json ?before_initialize_response ?close_before_user steps
 let window_outlasting_process_start_s = 5.0
 
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
+    ?(native = Runtime_native_tools.claude_code_default)
     ?account_home
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
     ?on_turn_started_delay_s ?on_stream_event ?on_prompt_sent ?on_spawned
@@ -211,6 +212,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       { (Runtime_claude_code.default_config ~cwd:"/tmp") with
         cli_path = path
       ; account_home
+      ; native
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
@@ -2532,6 +2534,119 @@ let test_heartbeat_exception_cannot_relax_auth_json () =
       | Ok _ -> fail "stream heartbeat exception admitted ambiguous authentication")
 ;;
 
+let agent_retry_frame ?(uuid="retry-1") ?(progress_id="opaque-one")
+    ?(parent="parent-agent") ?(session="__SESSION__") ?(agent_type="Explore")
+    ?(agent_id="child-agent") ?(attempt=1) ?(clear=false) () =
+  Yojson.Safe.to_string (`Assoc (["type",`String "tool_progress";
+    "session_id",`String session;"uuid",`String uuid;"tool_use_id",`String progress_id;
+    "parent_tool_use_id",`String parent;"tool_name",`String "Agent";
+    "elapsed_time_seconds",`Int 0;"subagent_type",`String agent_type]
+    @ if clear then [] else ["subagent_retry",`Assoc ["agent_id",`String agent_id;
+      "attempt",`Int attempt;"max_retries",`Int 3;"retry_delay_ms",`Int 1500;
+      "error_status",`Int 529;"error_category",`String "overloaded"]]))
+;;
+
+let test_agent_retry_observation_exception_is_narrow () =
+  let fields = match Yojson.Safe.from_string (agent_retry_frame ()) with
+    | `Assoc fields -> fields | _ -> fail "object expected" in
+  List.iter (fun extra ->
+    let malformed = Yojson.Safe.to_string (`Assoc (extra @ fields)) in
+    with_fixture [Emit malformed;Emit assistant;Emit result] (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "retry exception admitted an unrelated ambiguous envelope"))
+    [["type",`String "tool_progress"];
+     ["heartbeat",`Bool false;"tool_name",`String "Agent"];
+     ["unknown",`Int 1;"unknown",`Int 2]];
+  let auth_json = Yojson.Safe.to_string (`Assoc
+    (("loggedIn",`Bool true)::("loggedIn",`Bool false)::fields)) in
+  with_fixture ~auth_json [] (fun path -> match run_fixture path with
+    | Error (Runtime_claude_code.Protocol_error _) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "retry exception admitted ambiguous authentication")
+;;
+
+let test_agent_retry_identity_clear_and_uuid_interleaving () =
+  let change key value frame = match Yojson.Safe.from_string frame with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc ((key,value)::List.remove_assoc key fields))
+    | _ -> fail "object expected" in
+  let malformed = match Yojson.Safe.from_string (agent_retry_frame ()) with
+    | `Assoc fields ->
+        let note = match List.assoc "subagent_retry" fields with
+          | `Assoc note -> `Assoc (("attempt",`Int 9)::note) | _ -> fail "retry expected" in
+        [Yojson.Safe.to_string (`Assoc (("parent_tool_use_id",`String "other")::fields));
+         Yojson.Safe.to_string (`Assoc (("tool_name",`String "Agent")::fields));
+         Yojson.Safe.to_string (`Assoc (("tool_name",`String "Read")::fields));
+         change "subagent_retry" note (agent_retry_frame ());
+         change "subagent_retry" `Null (agent_retry_frame ());
+         change "elapsed_time_seconds" (`Float 0.5) (agent_retry_frame ())]
+    | _ -> fail "object expected" in
+  let first = agent_retry_frame () in
+  let second = agent_retry_frame ~uuid:"retry-2" ~progress_id:"opaque-two" ~attempt:2 () in
+  let finished = change "message" (`Assoc ["role",`String "user";"content",`List
+      [`Assoc ["type",`String "tool_result";"tool_use_id",`String "parent-agent";
+        "content",`String "done"]]]) native_tool_result in
+  let reports = ref [] in
+  let frames = [agent_retry_frame ~uuid:"before" ();parent_tool_assistant;
+      agent_retry_frame ~uuid:"before" ();agent_retry_frame ~uuid:"clear-before-note" ~clear:true ();
+      agent_retry_frame ~session:"foreign" ();]
+    @ malformed @ [first;first;agent_retry_frame ~attempt:9 ();
+      heartbeat_frame ~uuid:"retry-1" ~parent:"parent-agent" ~tool_name:"Agent" ();
+      heartbeat_frame ~uuid:"heartbeat-shared" ~parent:"parent-agent" ~tool_name:"Agent" ();
+      agent_retry_frame ~uuid:"heartbeat-shared" ();second;
+      agent_retry_frame ~uuid:"wrong-agent" ~agent_id:"other-child" ();
+      agent_retry_frame ~uuid:"late-clear-one" ~clear:true ();
+      agent_retry_frame ~uuid:"wrong-type" ~progress_id:"opaque-two" ~agent_type:"Plan" ~clear:true ();
+      agent_retry_frame ~uuid:"clear-two" ~progress_id:"opaque-two" ~clear:true ();
+      agent_retry_frame ~uuid:"clear-twice" ~progress_id:"opaque-two" ~clear:true ();
+      agent_retry_frame ~uuid:"retry-3" ~progress_id:"opaque-two" ~attempt:3 ();
+      finished;agent_retry_frame ~uuid:"closed-clear" ~progress_id:"opaque-two" ~clear:true ();
+      parent_tool_assistant;agent_retry_frame ~uuid:"closed-replay" ();assistant;result] in
+  with_fixture (List.map (fun frame -> Emit frame) frames) (fun path ->
+    match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(function
+          | Runtime_claude_code.Native_tool_progress {identity=Call_id "parent-agent";progress} ->
+              reports := progress :: !reports
+          | _ -> ()) path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+        check string "malformed retry observations leave the healthy turn intact" "MASC_CLAUDE_OK" turn.text;
+        let labels = List.rev !reports |> List.map (function
+          | Runtime_native_tools.Retry_observed (Retry_reported note) -> Printf.sprintf "retry:%d:%s" note.attempt note.agent.agent_id
+          | Retry_observed (Retry_cleared agent) -> "clear:" ^ agent.agent_id
+          | Heartbeat_reported {elapsed_seconds} -> Printf.sprintf "heartbeat:%d" elapsed_seconds
+          | Output_observed _ | Message_reported _ -> "unexpected") in
+        check (list string) "only current owned retry clear is visible; UUID ownership spans kinds"
+          ["retry:1:child-agent";"heartbeat:30";"retry:2:child-agent";"clear:child-agent";"retry:3:child-agent"] labels)
+;;
+
+let test_agent_retry_requires_root_native_full () =
+  let child = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("parent_tool_use_id",`String "outer")::
+        List.remove_assoc "parent_tool_use_id" fields))
+    | _ -> fail "object expected" in
+  let conflicting = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("uuid",`String "conflicting-owner")::
+        List.remove_assoc "uuid" fields))
+    | _ -> fail "object expected" in
+  List.iter (fun (native,starts,parent) ->
+    let reports = ref [] in
+    with_fixture (List.map (fun start -> Emit start) starts @
+      [Emit (agent_retry_frame ~parent ());Emit (agent_retry_frame ~parent ~uuid:"clear" ~clear:true ());
+       Emit assistant;Emit result]) (fun path ->
+        match run_fixture ~native ~on_stream_event:(function
+          | Runtime_claude_code.Native_tool_progress progress -> reports := progress.progress :: !reports
+          | _ -> ()) path with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok _ -> check bool "unowned Agent retry cannot update observations" true (!reports=[])))
+    [Runtime_native_tools.Native_read,[parent_tool_assistant],"parent-agent";
+     Native_none,[parent_tool_assistant],"parent-agent";
+     Native_full,[child],"parent-agent";
+     Native_full,[native_tool_assistant],"native-call-1";
+     Native_full,[parent_tool_assistant;conflicting],"parent-agent"]
+;;
+
 let test_child_heartbeat_and_unknown_result_scope_are_unowned () =
   List.iter (fun frames ->
     let reports = ref [] in
@@ -3070,6 +3185,9 @@ let () =
             test_tool_progress_keeps_stream_open
         ; test_case "heartbeat exception is stream-only" `Quick test_heartbeat_exception_cannot_relax_auth_json
         ; test_case "root heartbeat scope and UUID ownership" `Quick test_root_heartbeat_owns_only_current_call
+        ; test_case "Agent retry clear and cross-kind UUID ownership" `Quick test_agent_retry_identity_clear_and_uuid_interleaving
+        ; test_case "Agent retry exception stays producer scoped" `Quick test_agent_retry_observation_exception_is_narrow
+        ; test_case "Agent retry requires root native_full" `Quick test_agent_retry_requires_root_native_full
         ; test_case "child and missing result scope heartbeat ignored" `Quick test_child_heartbeat_and_unknown_result_scope_are_unowned
         ; test_case
             "unknown stream type fails closed"

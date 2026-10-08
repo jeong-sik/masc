@@ -1755,6 +1755,7 @@ let run_named
     ?official_task_reference
     ?official_client_composed_context
     ?on_official_client_tool_boundary
+    ?on_native_tool_progress
     ?on_native_tool_completion
     ?on_tool_execution
     ?on_official_client_result_handoff
@@ -2496,7 +2497,7 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          Keeper_codex_runtime.run ?on_native_tool_completion
+          Keeper_codex_runtime.run ?on_native_tool_completion ?on_native_tool_progress
             ?on_tool_execution
             ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
             ?composed_context:official_client_composed_context

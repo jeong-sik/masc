@@ -243,6 +243,7 @@ type stream_event =
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of { item_id : string; progress : Runtime_native_tools.progress }
   | Compaction_observed
   | Elicitation_cancelled of
       { server_name : string
@@ -1320,11 +1321,10 @@ let item_delta_notification ~method_ ~thread_id ~turn_id params =
   else Ok delta
 ;;
 
-(* The agentMessage item an [item/agentMessage/delta] belongs to. It only
-   tells two assistant messages of one turn apart in the live stream, so it
-   stays optional for the reason [item_delta_notification] gives: a frame
-   that omits it or sends it blank streams its delta and names no item. *)
-let agent_message_item_id params =
+(* Optional item correlation at the notification boundary. Assistant deltas
+   may still stream without it (#28010); native progress cannot attach to a
+   tool without an exact item id and matching active item kind. *)
+let notification_item_id params =
   match params with
   | `Assoc fields ->
     (match List.assoc_opt "itemId" fields with
@@ -1509,6 +1509,9 @@ let with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id run =
 type streamed_texts =
   { buffers : (string option, Buffer.t) Hashtbl.t
   ; reasoning_buffers : (string * reasoning_part, Buffer.t) Hashtbl.t
+  ; native_items : (string, item_kind) Hashtbl.t
+      (* Native start/completion lifetime, independent of [open_tool_call_ids]
+         which tracks the idle receive phase and clears when the model speaks. *)
   ; mutable current_item : string option
   }
 
@@ -1605,7 +1608,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
     Error (Unsupported_server_request method_)
   | Notification { method_ = "item/agentMessage/delta" as method_; params } ->
     let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
-    let item_id = agent_message_item_id params in
+    let item_id = notification_item_id params in
     let key = match item_id with
       | Some _ -> item_id
       | None -> streamed_texts.current_item in
@@ -1675,30 +1678,36 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_usage
       ~open_tool_call_ids:[]
       ~streamed_texts ~on_stream_event
-  | Notification
-      { method_ =
-          (( "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" ) as method_)
-      ; params
-      } ->
-    (* Output of a running tool item: the item is still running, so the
-       phase stays where it is; the read itself already counted as activity. *)
+  | Notification {method_="item/commandExecution/outputDelta" as method_; params} ->
+    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    (match notification_item_id params with
+     | Some item_id when Hashtbl.find_opt streamed_texts.native_items item_id = Some Command_execution
+                         && delta <> "" ->
+         emit_stream_event on_stream_event (Native_tool_progress
+           {item_id; progress=Runtime_native_tools.Output_observed {byte_count=String.length delta}})
+     | Some _ | None -> ());
+    continue ()
+  | Notification {method_="item/mcpToolCall/progress" as method_; params} ->
+    let* fields = assoc_at method_ params in
+    let* notification_thread = required_string method_ "threadId" fields in
+    let* notification_turn = required_string method_ "turnId" fields in
+    let* message = required_string_any method_ "message" fields in
+    let* () = if notification_thread <> thread_id || notification_turn <> turn_id
+      then protocol_error method_ "MCP progress identity does not match the active turn" else Ok () in
+    (match notification_item_id params with
+     | Some item_id when Hashtbl.find_opt streamed_texts.native_items item_id = Some Mcp_tool_call ->
+         emit_stream_event on_stream_event (Native_tool_progress
+           {item_id; progress=Runtime_native_tools.Message_reported {message}})
+     | Some _ | None -> ());
+    continue ()
+  | Notification {method_="item/fileChange/outputDelta" as method_; params} ->
     let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
-    await_turn_terminal
-      io ~handoff ~terminal_tools_closed
-      ~tools
-      ~tool_call_count ~tool_effect_attempted ~model_context_window
-      ~thread_id
-      ~turn_id
-      ~model
-      ~seen_final
-      ~seen_fallback
-      ~seen_usage
-      ~open_tool_call_ids
-      ~streamed_texts ~on_stream_event
+    continue ()
   | Notification { method_ = "item/started"; params } ->
     let stage = "item/started" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
     let* tool_item = tool_item_of_item ~stage item in
+    let* kind = item_kind_of_item ~stage item in
     let open_tool_call_ids =
       match tool_item with
       | None ->
@@ -1708,6 +1717,8 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         io.set_receive_phase Model_turn;
         []
       | Some { call_id; observation } ->
+        if not (Hashtbl.mem streamed_texts.native_items call_id) then
+          Hashtbl.add streamed_texts.native_items call_id kind;
         Option.iter
           (fun observation ->
              tool_effect_attempted := true;
@@ -1739,6 +1750,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         io.set_receive_phase Model_turn;
         []
       | Some { call_id; observation } ->
+        Hashtbl.remove streamed_texts.native_items call_id;
         Option.iter
           (fun observation ->
              tool_effect_attempted := true;
@@ -2209,7 +2221,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
       ~seen_fallback:None
       ~seen_usage:None
       ~open_tool_call_ids:[]
-      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8; current_item=None}
+      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8; native_items=Hashtbl.create 8; current_item=None}
       ~on_stream_event)
   in
   emit_stream_event on_stream_event

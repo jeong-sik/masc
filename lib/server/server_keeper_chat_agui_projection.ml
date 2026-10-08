@@ -26,6 +26,7 @@ type custom_event_name =
   | Tool_result_ready
   | Native_tool_start
   | Native_tool_end
+  | Native_tool_progress
 
 let initial =
   { thread_id = Ag_ui.default_thread_id
@@ -65,6 +66,7 @@ let custom_event_name_to_string = function
   | Tool_result_ready -> "KEEPER_TOOL_RESULT_READY"
   | Native_tool_start -> "KEEPER_NATIVE_TOOL_START"
   | Native_tool_end -> "KEEPER_NATIVE_TOOL_END"
+  | Native_tool_progress -> "KEEPER_NATIVE_TOOL_PROGRESS"
 
 let custom ~timestamp ~redact_json state name value =
   Ag_ui.make_event ~timestamp ~thread_id:state.thread_id ~run_id:state.run_id
@@ -86,7 +88,7 @@ let continuation_checkpoint_to_json ~redact_text
      @ json_opt "request_id"
          (Option.map (fun value -> `String value) event.request_id))
 
-let native_tool_to_json ?completion (tool : Keeper_chat_events.native_tool) =
+let native_tool_to_json ?progress ?completion (tool : Keeper_chat_events.native_tool) =
   `Assoc
     ([ "toolStreamScope", `Int tool.occurrence.stream_scope
      ; "toolCallBlockIndex", `Int tool.occurrence.block_index
@@ -97,7 +99,8 @@ let native_tool_to_json ?completion (tool : Keeper_chat_events.native_tool) =
          (Option.map (fun value -> `String value) tool.tool_call_id)
      @ json_opt "toolCallName"
          (Option.map (fun value -> `String value) tool.tool_call_name)
-     @ json_opt "completion" (Option.map Runtime_native_tools.completion_to_json completion))
+     @ json_opt "completion" (Option.map Runtime_native_tools.completion_to_json completion)
+     @ json_opt "progress" (Option.map Runtime_native_tools.progress_to_json progress))
 
 let project ~timestamp ~redact_text ~redact_json state event =
   let open Keeper_chat_events in
@@ -223,6 +226,9 @@ let project ~timestamp ~redact_text ~redact_json state event =
                      (continuation_checkpoint_to_json ~redact_text event))
   | Native_tool_start tool ->
       state, Some (custom ~timestamp ~redact_json state Native_tool_start (native_tool_to_json tool))
+  | Native_tool_progress (tool, progress) ->
+      state, Some (custom ~timestamp ~redact_json state Native_tool_progress
+        (native_tool_to_json ~progress tool))
   | Native_tool_end (tool, completion) ->
       let value = native_tool_to_json ~completion tool in
       state, Some (custom ~timestamp ~redact_json state Native_tool_end value)

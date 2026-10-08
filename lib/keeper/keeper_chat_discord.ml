@@ -466,6 +466,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Tool_call_args _
     | Tool_call_args_snapshot _
     | Tool_call_end _
+    | Native_tool_progress _
     | Native_tool_end _
     (* An approval prompt has no operator on a connector channel: nobody is
        sitting there to answer y/n, and posting the question would ask a room

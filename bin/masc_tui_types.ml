@@ -3027,7 +3027,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Batch_bound _
   | Masc_tui_keeper_chat_live.Run_started | Masc_tui_keeper_chat_live.Text _
   | Masc_tui_keeper_chat_live.Thinking _ | Masc_tui_keeper_chat_live.Tool_started _
-  | Masc_tui_keeper_chat_live.Native_tool_started _ | Masc_tui_keeper_chat_live.Native_tool_ended _
+  | Masc_tui_keeper_chat_live.Native_tool_started _ | Masc_tui_keeper_chat_live.Native_tool_ended _ | Masc_tui_keeper_chat_live.Native_tool_progress _
   | Masc_tui_keeper_chat_live.Tool_args _ | Masc_tui_keeper_chat_live.Tool_ended _
   | Masc_tui_keeper_chat_live.Tool_result _
   | Masc_tui_keeper_chat_live.Stream_protocol_error _

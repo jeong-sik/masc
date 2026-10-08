@@ -234,6 +234,7 @@ type stream_event =
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of { item_id : string; progress : Runtime_native_tools.progress }
   | Compaction_observed
       (** An active turn's [contextCompaction] item completed. Previously
           delivered context may have been replaced, independently of usage

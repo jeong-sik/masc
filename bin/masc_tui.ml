@@ -7135,6 +7135,7 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
     let result =
       try
         if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+        else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
         else Masc_tui_http.post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~host ~port ~keeper_name
           ~request_id
       with
@@ -7167,6 +7168,7 @@ let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~in
       let result =
         try
           if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
           else Masc_tui_http.post_keeper_observed_turn_interrupt ~on_control_token ~host:server_peer_host
             ~port:state.port ~keeper_name ~interrupt_token
         with
@@ -7273,6 +7275,7 @@ let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
       let result =
         try
           if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
           else Masc_tui_http.post_keeper_run_next ?priority_predecessors ~host:server_peer_host
             ~port:state.port ~keeper_name ~request_id ()
         with

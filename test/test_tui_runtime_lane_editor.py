@@ -1140,7 +1140,7 @@ def model_settings_config(*, cli_context=272000):
 def assert_model_form(output, *, provider, model, context):
     screen = _keyboard_harness.screen_text(bytes(output))
     expected = [("Edit model · " + provider).encode(), model.encode(), context.encode(),
-                b"Context tokens", b"Max output tokens", b"Enter next/save", b"Esc cancel"]
+                b"Context tokens", b"Max output tokens", b"next/save", b"Esc cancel"]  # the hint wraps inside the form pane
     for needle in expected:
         if needle not in screen:
             raise AssertionError(f"shared model form omitted {needle!r}: {screen!r}")
@@ -1164,6 +1164,8 @@ def run_runtime_roster_model_settings(executable: str) -> None:
     assert isinstance(store.body["runtimes"], list)
     store.body["runtimes"][0] = selected
     store.body["default_runtime"] = selected
+    # default_route names a lane; the shared fixture's "runtime-a" is a runtime.
+    store.body["default_route"] = "primary"
     for lane in store.lanes:
         lane["runtime_ids"] = [runtime_id if value == "runtime-a" else value for value in lane["runtime_ids"]]
     fixtures = _keyboard_harness.overview_event_http_fixtures()
@@ -1181,8 +1183,10 @@ def run_runtime_roster_model_settings(executable: str) -> None:
             if runtime.encode() not in screen:
                 raise AssertionError(f"All runtime roster omitted {runtime!r}: {screen!r}")
         _keyboard_harness.send_and_wait(process, fd, output, b"e", "Edit model · codex_subscription".encode())
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[C", b"500000_")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert_model_form(output, provider="codex_subscription", model="luna", context="500000_")
         press(process, fd, output, b"\x1b")
         screen = _keyboard_harness.screen_text(bytes(output))
@@ -1246,6 +1250,7 @@ def run_provider_jump(executable: str) -> None:
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b",
                         b"> 1/1  [HTTP] glm-5-turbo default")
         _keyboard_harness.send_and_wait(process, fd, output, b"d", "Edit model · glm-coding".encode())
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert_model_form(output, provider="glm-coding", model="glm-5-turbo", context="65536_")
         close_model_form(process, fd, output)
         if any(path in (ROUTING_PATH, _keyboard_runtime.RUNTIME_CONFIG_RAW_PATH)
@@ -1298,9 +1303,11 @@ def run_cli_binding_jump(executable: str, *, missing_binding: bool = False) -> N
             os.write(fd, b"q")
             return
         _keyboard_harness.send_and_wait(process, fd, output, b"\r", "Edit model · codex_subscription".encode())
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
         _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=80,
                           needle=b"Context tokens", controls=(_keyboard_harness.FULL_REDRAW,))
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
         close_model_form(process, fd, output)
         os.write(fd, b"q")
@@ -1386,6 +1393,7 @@ def run_model_settings_read_isolation(executable: str, *, old_fails: bool) -> No
                 raise AssertionError("an old response opened the newer model with stale source")
             _keyboard_harness.release_and_wait_for_frame(process, fd, output, newer,
                 "Edit model · codex_subscription".encode())
+            _keyboard_harness.drain_until_quiet(process, fd, output)
             assert_model_form(output, provider="codex_subscription", model="luna", context="272000_")
             close_model_form(process, fd, output)
             if any(path in (ROUTING_PATH, _keyboard_runtime.RUNTIME_CONFIG_RAW_PATH)

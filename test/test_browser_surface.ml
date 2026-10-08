@@ -460,6 +460,75 @@ let test_keeper_hears_why_no_browser_is_connected () =
   check string "configuration and server agree, so the browser itself is absent" "aligned"
     U.(host_field data "verdict" |> to_string)
 
+(* Reported 2026-10-07 (Board p-7a4f661d): a Keeper on the extension
+   connection asked to reach a hover-only control and was told one error
+   word, with no way to learn that a BiDi connection would take the same
+   request. The rejection names the work, the connections that serve it and
+   which connected browser, if any, to retry on. *)
+let test_keeper_hears_which_connection_serves_the_work () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let module Lane = Browser_lane in
+      let module Tools = Masc.Tool_misc_browser_lane in
+      let module U = Yojson.Safe.Util in
+      let info n transport : Lane.client_info =
+        let raw = Printf.sprintf "60000000-0000-4000-8000-%012d" n in
+        let client_id = match Lane.client_id_of_string raw with
+          | Ok id -> id | Error detail -> fail detail in
+        {client_id;browser=Lane.Firefox;version="fixture";transport;engine_version="fixture"} in
+      let connect client =
+        ignore (Lane.take_command ~client_info:client ~window_sec:0.001);
+        Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:client.Lane.client_id)) in
+      let id (client : Lane.client_info) = Lane.client_id_to_string client.client_id in
+      let viewport = `Assoc ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
+        "scrollX",`Int 0;"scrollY",`Int 0] in
+      let point = `Assoc ["x",`Float 0.5;"y",`Float 0.5] in
+      let interact client fields =
+        let result, phase = Tools.handle_interact_with_phase ~base_path:no_workspace ~tool_name:"BrowserInteract"
+          ~start_time:(Tool_timing.start ())
+          (`Assoc (["lane",`String "live";"clientId",`String (id client);"tabId",`Int 1;
+            "expectedUrl",`String "https://example.org/"] @ fields)) in
+        check bool "an unserved request has no effect" true (phase = Tool_result.Proven_pre_effect);
+        check bool "it is a workflow state, not bad input" true
+          (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+        check bool "model-facing text carries the same payload" true
+          (Yojson.Safe.from_string (Tool_result.message result) = Tool_result.data result);
+        Tool_result.data result in
+      let hover = ["action",`String "hover_at";"point",point;"viewport",viewport] in
+      let extension = info 1 Lane.Web_extension in
+      connect extension;
+      let data = interact extension hover in
+      check string "the case is named" "live_transport_unsupported" U.(data |> member "error" |> to_string);
+      check string "the refused connection is echoed" (id extension) U.(data |> member "clientId" |> to_string);
+      check string "with its transport" "web_extension" U.(data |> member "transport" |> to_string);
+      check string "and the work it does not serve" "trusted_hover" U.(data |> member "capability" |> to_string);
+      check (list string) "the transport that serves it is named" ["webdriver_bidi"]
+        U.(data |> member "servingTransports" |> to_list |> List.map to_string);
+      check int "no connected browser serves it yet" 0 U.(data |> member "servingClients" |> to_list |> List.length);
+      check bool "so the remedy is the operator's, and says how" true
+        (String_util.contains_substring U.(data |> member "retry" |> to_string) "masc-browser-host --bidi-url");
+      let bidi = info 2 Lane.Webdriver_bidi in
+      connect bidi;
+      let data = interact extension hover in
+      check (list string) "a connected BiDi browser is offered for the retry" [id bidi]
+        U.(data |> member "servingClients" |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string));
+      check bool "and the retry starts from that connection's own tabs" true
+        (String_util.contains_substring U.(data |> member "retry" |> to_string) "list its tabs");
+      let data = interact extension ["action",`String "drag";"from",point;"to",point;"viewport",viewport] in
+      check string "drag is refused on the extension the same way" "trusted_drag" U.(data |> member "capability" |> to_string);
+      let data = interact bidi ["action",`String "activate_tab"] in
+      check string "tab activation is refused on BiDi" "tab_activation" U.(data |> member "capability" |> to_string);
+      check (list string) "and the extension connection is offered" [id extension]
+        U.(data |> member "servingClients" |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string));
+      let elements = Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead"
+        ~start_time:(Tool_timing.start ())
+        (`Assoc ["lane",`String "live";"clientId",`String (id bidi);"tabId",`Int 1;"mode",`String "elements"]) in
+      check string "an element inventory read is refused on BiDi" "element_inventory"
+        U.(Tool_result.data elements |> member "capability" |> to_string);
+      List.iter (fun client -> check bool "no refused request queued a browser command" true
+        (Lane.take_command ~client_info:client ~window_sec:0.001 = Ok None)) [extension;bidi]))
+
 let test_scoped_scene_acknowledgement () =
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
@@ -582,4 +651,5 @@ let () = run "browser surface" ["behavior",[
   test_case "Keeper discovers ambiguous clients without dispatch" `Quick test_keeper_discovers_clients_without_dispatch;
   test_case "off precedes live client guidance" `Quick test_off_precedes_client_guidance;
   test_case "Keeper hears why no browser is connected" `Quick test_keeper_hears_why_no_browser_is_connected;
+  test_case "Keeper hears which connection serves the work" `Quick test_keeper_hears_which_connection_serves_the_work;
   test_case "live read pins client across both hops" `Quick test_live_read_pins_client_between_hops]]

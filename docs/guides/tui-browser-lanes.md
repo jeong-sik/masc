@@ -61,8 +61,10 @@ existing image support; unsupported terminals receive an explanation in Browser.
 
 In screenshot view, click a visible link to activate it. Mouse wheel, arrows and
 `j`/`k` scroll the actual page, and `r` refreshes the screenshot. The automation
-lane also supports pressing the left button, moving, and releasing to drag with
-trusted browser pointer actions. Live drag reports that automation is required.
+lane and a live BiDi connection also support pressing the left button, moving,
+and releasing to drag with trusted browser pointer actions. A live WebExtension
+connection refuses a drag and names the connection that serves it; the footer
+says which applies to the screenshot on screen.
 Each completed action captures the resulting page again in the same Lane.
 
 Mouse coordinates require the terminal's measured cell size. If that measurement

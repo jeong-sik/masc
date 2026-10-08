@@ -3695,14 +3695,37 @@ module Browser_lane_view = struct
     | Connected_browser client -> t.source = Live && t.selected_client = Some client
     | Stagehand_browser -> t.source = Stagehand
     | Automation_browser -> t.source = Automation
+  let transport_label = function
+    | Browser_lane.Web_extension -> "WebExtension"
+    | Browser_lane.Webdriver_bidi -> "BiDi"
   let browser_choice_label = function
     | Connected_browser client ->
-        let transport = match client.transport with
-          | Browser_lane.Web_extension -> "WebExtension"
-          | Browser_lane.Webdriver_bidi -> "BiDi" in
-        browser_name client.browser ^ " · " ^ transport ^ " · existing login · " ^ client.client_id
+        browser_name client.browser ^ " · " ^ transport_label client.transport
+        ^ " · existing login · " ^ client.client_id
     | Stagehand_browser -> "Stagehand Chromium · sentence actions · separate login"
     | Automation_browser -> "Independent Firefox/Zen · automation · separate login"
+  (* Whether the connection a screenshot came from takes a drag. A live
+     screenshot names its client, and the answer is the lane table's for that
+     client's transport. It is unknown when the view no longer holds that
+     client: the footer then says so instead of naming a rule. *)
+  type drag_support = Drag_served | Drag_needs of Browser_lane.live_transport list | Drag_unknown
+  let screenshot_drag_support t (shot : screenshot) =
+    match shot.source with
+    | Automation | Stagehand -> Drag_served
+    | Live ->
+        let known = Option.to_list t.selected_client @ listed_clients t in
+        (match List.find_opt (fun (client : client) -> Some client.client_id = shot.client_id) known with
+         | None -> Drag_unknown
+         | Some client ->
+             if Browser_lane.live_transport_serves client.transport Browser_lane.Trusted_drag
+             then Drag_served
+             else Drag_needs (Browser_lane.live_transports_serving Browser_lane.Trusted_drag))
+  let screenshot_drag_hint t shot =
+    match screenshot_drag_support t shot with
+    | Drag_served -> "drag: move"
+    | Drag_needs transports ->
+        "drag: needs a " ^ String.concat " or " (List.map transport_label transports) ^ " connection"
+    | Drag_unknown -> "drag: connection not listed"
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])

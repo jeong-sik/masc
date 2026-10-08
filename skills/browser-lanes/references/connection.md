@@ -13,6 +13,12 @@
     판정(`verdict`)과 `message`가 있다. 이
     `message`와 `retry`를 운영자에게 그대로 전한다. 고칠 수 있는 사람은 운영자뿐이라
     같은 호출을 되풀이해도 답은 같다.
+  - `live_transport_unsupported`: 고른 연결이 그 일을 못 한다. live 연결은 방식
+    (`transport`)에 따라 할 수 있는 일이 다르다. `hover_at`과 `drag`는
+    `webdriver_bidi` 연결만 하고, `activate_tab`과 `mode=elements` 읽기는
+    `web_extension` 연결만 한다. `servingClients`에 연결이 있으면 그 clientId로
+    탭 목록과 페이지를 다시 읽은 뒤 거기서 다시 한다. 탭 ID와 관측은 연결마다
+    따로다. 비어 있으면 `retry`를 운영자에게 그대로 전한다.
 - 닫힌 automation 세션에서 작업해야 한다면 자신의 새 세션을 연다.
   `BrowserSession`에는 현재 `open`/`close`가 있고 `status`는 없다.
 - 이미 시작된 세션이라는 응답은 소유권 증명이 아니다. 그 세션이 자신의 진행 중인

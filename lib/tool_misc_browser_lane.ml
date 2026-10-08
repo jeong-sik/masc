@@ -131,6 +131,32 @@ let selection_error ~base_path ~tool_name ~start_time error =
     rejection ["clients", `List (clients ());
                "retry", `String "Choose a connected browser and retry with its clientId. No \
                                  browser command was dispatched."]
+  | Browser_lane.Transport_unsupported { client_id; transport; capability } ->
+    let serving_transports = Browser_lane.live_transports_serving capability in
+    let serving_clients =
+      Browser_lane.active_clients ()
+      |> List.filter (fun (info : Browser_lane.client_info) ->
+           Browser_lane.live_transport_serves info.transport capability) in
+    (* A connection of the other kind may belong to another browser profile,
+       and its tab IDs are its own, so the retry starts from its tabs. *)
+    let retry = match serving_clients with
+      | _ :: _ ->
+        "This browser connection cannot do that. A connection in servingClients can: list its \
+         tabs and observe the page again with its clientId, then retry there. Tab IDs and \
+         observations belong to their connection. No browser command was dispatched."
+      | [] ->
+        "No connected browser connection can do that: "
+        ^ String.concat "; or " (List.map Browser_lane.live_transport_setup serving_transports)
+        ^ ". The same request returns the same answer until then; other work this \
+           connection serves is unaffected. No browser command was dispatched." in
+    rejection ["clients", `List (clients ());
+               "clientId", `String (Browser_lane.client_id_to_string client_id);
+               "transport", `String (Browser_lane.live_transport_to_string transport);
+               "capability", `String (Browser_lane.live_capability_to_wire capability);
+               "servingTransports", `List (List.map (fun transport ->
+                 `String (Browser_lane.live_transport_to_string transport)) serving_transports);
+               "servingClients", `List (List.map Browser_lane.client_json serving_clients);
+               "retry", `String retry]
 
 let read_failure ~base_path ~tool_name ~start_time = function
   | Browser_surface.Unselected error -> selection_error ~base_path ~tool_name ~start_time error

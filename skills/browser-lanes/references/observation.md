@@ -87,10 +87,12 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 ## 이미지와 큰 응답
 
 `click_at`·`scroll_at`은 현재 screenshot의 `viewport`와 정규화된 `point`를 쓴다.
-live 클릭은 DOM activation이며 trusted 포인터 입력을 보장하지 않는다. `drag`의
-trusted 입력은 automation에서만 지원된다. live에서 거절됐다고 로그인된 탭을 다른
-세션으로 바꾸거나 같은 drag를 반복하지 않는다. 필요한 조작을 지원하는 현재 페이지의
-관측된 컨트롤이 있으면 요청 범위 안에서 사용하고, 그렇지 않으면 미수행 상태를 남긴다.
+`web_extension` 연결의 클릭은 DOM activation이며 trusted 포인터 입력을 보장하지
+않는다. `hover_at`과 `drag`의 trusted 입력은 automation과 live의 `webdriver_bidi`
+연결이 한다. `live_transport_unsupported`로 거절되면 `references/connection.md`의
+같은 항목대로 한다. 로그인된 탭을 automation 세션으로 바꾸거나 같은 요청을 같은
+연결에 반복하지 않는다. 필요한 조작을 지원하는 현재 페이지의 관측된 컨트롤이 있으면
+요청 범위 안에서 사용하고, 그렇지 않으면 미수행 상태를 남긴다.
 
 화면 확인이 필요하면 관측된 `tabId`로 `BrowserRead mode=screenshot`을 호출한다.
 Keeper 응답의 `artifact`를 `keeper_analyze_image`에 넘긴다. 텍스트만 읽고 이미지의

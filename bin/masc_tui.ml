@@ -8882,10 +8882,12 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   in
   let pointer_hint = match !image_cell_pixels with
     | Some (width, height) when width > 0 && height > 0 ->
-        (match shot.source with
-         | Browser_lane_view.Live -> "click: link   drag: requires automation"
-         | Browser_lane_view.Automation -> "click: link   drag: move"
-         | Browser_lane_view.Stagehand -> "click: control   drag: move")
+        let click = match shot.source with
+          | Browser_lane_view.Live | Browser_lane_view.Automation -> "click: link"
+          | Browser_lane_view.Stagehand -> "click: control" in
+        (* A view that holds no clients answers "not listed" for a live shot. *)
+        let view = Option.value state.browser_lane ~default:(Browser_lane_view.create ()) in
+        click ^ "   " ^ Browser_lane_view.screenshot_drag_hint view shot
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"

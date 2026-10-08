@@ -123,8 +123,77 @@ let test_hover_without_click () =
       check int "receipt identifies the selected tab" 2 Yojson.Safe.Util.(receipt |> member "tabId" |> to_int);
       check string "hover receipt" "hover_at" Yojson.Safe.Util.(receipt |> member "action" |> to_string)
     | Error _ -> fail "hover rejected")
+(* The lane's table (Browser_lane.live_transport_serves) and this peer are two
+   statements of what a BiDi connection serves. One verb per capability goes
+   through the peer, encoded as the lane puts it on the wire, against a
+   browser that answers every protocol command. The peer completes exactly
+   the work the table says BiDi serves and refuses the rest before it sends a
+   script or an input. *)
+let test_peer_serves_what_the_lane_table_says () =
+  Eio_main.run (fun _ ->
+    let module Lane = Browser_lane in
+    let viewport : Lane.Pointer.viewport =
+      {document_id="observed"; width=800.; height=600.; scroll_x=0.; scroll_y=0.} in
+    let point : Lane.Pointer.point = {x=0.5;y=0.5} in
+    let interact action = Lane.Page_interact {tab_id=1; expected_url=Some "https://example.test/"; action} in
+    let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
+      | Tab_listing -> Tabs_list
+      | Text_read -> Page_read {tab_id=Some 1; max_chars=None}
+      | Document_source -> Page_document {tab_id=1}
+      | Element_inventory -> Page_elements {tab_id=Some 1}
+      | Viewport_capture -> Page_capture {tab_id=1}
+      | Scene_read -> Page_scene {tab_id=1; max_chars=1000; view=Content; scope=None}
+      | Dom_interaction -> interact (Click "#button")
+      | Point_click -> interact (Click_at {point;viewport})
+      | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
+      | Trusted_hover -> interact (Hover_at {point;viewport})
+      | Trusted_drag -> interact (Drag {from=point;to_={x=0.75;y=0.5};viewport})
+      | Tab_activation -> interact Activate_tab) in
+    (* The six names the native host forwards (Browser_host.decode_poll). *)
+    let peer_verb = function
+      | "tabs.list" -> Peer.Tabs_list | "page.read" -> Peer.Page_read | "page.scene" -> Peer.Page_scene
+      | "page.elements" -> Peer.Page_elements | "page.capture" -> Peer.Page_capture
+      | "page.interact" -> Peer.Page_interact
+      | other -> failf "the lane put a verb on the wire that the host does not forward: %s" other in
+    let calls = ref [] in
+    let command method_ _ =
+      calls := method_ :: !calls;
+      match method_ with
+      | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+      | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";
+          "title",`String "fixture";"active",`Bool true]))
+      | "browsingContext.captureScreenshot" -> Ok (obj ["data",`String "png"])
+      | "input.performActions" | "input.releaseActions" -> Ok `Null
+      | other -> failf "unexpected protocol command: %s" other in
+    let peer = Peer.create ~command in
+    List.iter (fun capability ->
+      let name = Lane.live_capability_to_wire capability in
+      let asked = verb_asking_for capability in
+      check bool (name ^ " is what its verb asks for") true (Lane.live_capability asked = Some capability);
+      let wire = Lane.verb_json asked in
+      let verb = peer_verb Yojson.Safe.Util.(wire |> member "verb" |> to_string) in
+      (* A refusal below has to be the peer's own answer for this work, not
+         its parser turning away a malformed request. *)
+      (match verb, Yojson.Safe.Util.member "args" wire with
+       | Peer.Page_interact, `Assoc fields ->
+         check bool (name ^ " is a well-formed interaction") true
+           (Result.is_ok (Masc.Browser_interaction.parse
+              (obj (("lane",`String Lane.Lane_name.(to_wire Live)) :: fields))))
+       | _ -> ());
+      calls := [];
+      let served = Lane.live_transport_serves Lane.Webdriver_bidi capability in
+      match Peer.dispatch peer ~verb (Yojson.Safe.Util.member "args" wire), served with
+      | Ok _, true -> ()
+      | Error (Peer.Before_effect _), false ->
+        check bool (name ^ " is refused before any script or input") true
+          (List.for_all (String.equal "browsingContext.getTree") !calls)
+      | Ok _, false -> failf "the peer served %s, which the lane table says BiDi does not" name
+      | Error (Peer.Before_effect detail), true | Error (Peer.Outcome_unknown detail), _ ->
+        failf "the peer did not serve %s (%s), which the lane table says BiDi does" name detail)
+      Lane.all_of_live_capability)
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity];
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
     test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error];
-  "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "closed verbs" `Quick test_unsupported; test_case "parsed pointer boundary" `Quick test_pointer_validation]]
+  "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "closed verbs" `Quick test_unsupported; test_case "parsed pointer boundary" `Quick test_pointer_validation;
+    test_case "the peer serves what the lane table says" `Quick test_peer_serves_what_the_lane_table_says]]

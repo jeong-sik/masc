@@ -17,9 +17,11 @@ Screenshot coordinate input uses the existing document/viewport guard followed
 by BiDi pointer or wheel actions. `hover_at` uses one `pointerMove`, with no
 button press, on the selected live BiDi tab or the automation lane. Copy the
 observed `expectedUrl`, `viewport` and normalized `point` from a fresh capture.
-Extension-only live clients reject this action before injecting input with
-`trusted_hover_requires_live_bidi_connection`; the operator must explicitly
-attach the already-enabled loopback Remote Agent with `--bidi-url`. Live-client
+The server refuses `hover_at` and `drag` on a WebExtension connection before
+it queues a command, as `live_transport_unsupported`; the operator must
+explicitly attach the already-enabled loopback Remote Agent with `--bidi-url`.
+[What each live connection serves](browser-lane.md#what-each-live-connection-serves)
+is the whole table. Live-client
 discovery reports `transport: "web_extension"` or `"webdriver_bidi"` alongside
 each `clientId`, including the ambiguity response and
 `/api/v1/dashboard/browser-lane/clients`. Select the `webdriver_bidi` client,
@@ -39,7 +41,9 @@ Closing the socket does not issue browser.close or browsingContext.close.
 
 This initial peer rejects includeHtml (the source-document helper has no caller
 cap), and does not implement page.elements, live activate_tab, uploads,
-download collection, or the extension's navigation commit barrier. A successful
+download collection, or the extension's navigation commit barrier. The server
+refuses the first three on a BiDi connection before it queues a command, by the
+same table. A successful
 follow receipt does not guarantee application content is ready; existing guarded
 read recovery remains necessary. A BiDi session enables browser-wide automation
 and must not be exposed beyond loopback.

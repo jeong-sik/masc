@@ -75,8 +75,8 @@ checking rendered application state, and gathering evidence across tabs.
 | `scroll` | relative CSS pixels `x`/`y` | live or automation |
 | `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live BiDi or automation |
 | `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y` | live or automation |
-| `drag` | normalized `from`/`to` and captured `viewport` | automation, using WebDriver pointer actions |
-| `activate_tab` | the selected live `clientId`/`tabId` | live only |
+| `drag` | normalized `from`/`to` and captured `viewport`; trusted pointer press, move and release | live BiDi or automation |
+| `activate_tab` | the selected live `clientId`/`tabId` | live WebExtension only |
 
 `BrowserRead mode=scene` supplies document-scoped node references and visible
 content; `mode=regions` supplies semantic regions for a scoped scene read.
@@ -87,9 +87,48 @@ reference and a CSS selector are alternative targets and cannot be combined.
 Set `expectedUrl` to the observed URL to refuse an action after navigation.
 Point actions also check the captured document and viewport. The result is an
 action receipt; read or capture again to verify the site's resulting state.
-Live clicks use DOM activation, not a trusted hardware input event. Live drag
-returns `trusted_drag_requires_automation`; changing sources would select a
-different browser session and is not an automatic fallback for a logged-in tab.
+On a WebExtension connection a click is DOM activation, not a trusted
+hardware input event. Changing sources would select a different browser
+session and is not an automatic fallback for a logged-in tab.
+
+### What each live connection serves
+
+The two live transports reach the browser differently, so each serves a
+different part of the live lane's work. `Browser_lane.live_transport_serves`
+is the one table; the server admits live work by it and the Keeper tools
+build their rejection from it.
+
+| Live work | Reached by | WebExtension | BiDi |
+|---|---|---|---|
+| `tab_listing` | `BrowserTabs` | yes | yes |
+| `text_read` | `BrowserRead mode=text` | yes | yes |
+| `scene_read` | `BrowserRead mode=scene`/`regions` | yes | yes |
+| `viewport_capture` | `BrowserRead mode=screenshot` | yes | yes |
+| `element_inventory` | `BrowserRead mode=elements` | yes | no |
+| `document_source` | the `browser_document` Lane Add-on source | yes | no |
+| `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes |
+| `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer |
+| `point_scroll` | `scroll_at` | yes | yes, a trusted wheel |
+| `trusted_hover` | `hover_at` | no | yes |
+| `trusted_drag` | `drag` | no | yes |
+| `tab_activation` | `activate_tab` | yes | no |
+
+The extension acts through DOM calls inside the page and has no pointer the
+browser treats as the operator's. The BiDi peer sends pointer and wheel input
+through the browser; it does not implement the element inventory, the
+source-document read or tab activation. BiDi's own
+[`browsingContext.activate`](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/browsingContext/activate)
+also gives the tab's window focus, which `activate_tab` promises not to do.
+
+A request its connection does not serve is a selection failure: the server
+queues no command and answers `live_transport_unsupported`. A Keeper tool's
+rejection carries the refused `clientId`, its `transport`, the `capability`,
+the `servingTransports`, the connected `servingClients` and a `retry`
+sentence. With a serving browser connected, the Keeper lists that
+connection's tabs, observes the page again and retries there. With none, the
+`retry` says what the operator attaches. The extension and the BiDi peer keep
+their own refusals for work outside their vocabulary; the server does not
+send it to them.
 
 Fill supports text inputs and textareas through the native value setter plus
 input/change events; it never sends Enter or calls submit. The website's own
@@ -149,10 +188,10 @@ requests omit `clientId` and return it as null.
 
 `transport` is `web_extension` or `webdriver_bidi`. The TUI browser picker
 displays WebExtension or BiDi beside the browser name. When both hosts attach
-to the same Firefox, select the BiDi client for trusted `hover_at`, then read
-its tabs and capture its viewport. Tab IDs do not transfer between those
-connections. The server rejects WebExtension hover before queueing a command
-with `trusted_hover_requires_live_bidi_connection`.
+to the same Firefox, select the BiDi client for trusted `hover_at` or `drag`,
+then read its tabs and capture its viewport. Tab IDs do not transfer between
+those connections. [What each live connection serves](#what-each-live-connection-serves)
+lists the rest.
 
 When a Keeper browser tool meets `no_live_client` or
 `selected_client_disconnected`, before or after its target was resolved, its
@@ -206,7 +245,8 @@ This is not a second CSS engine or DOM-to-terminal layout conversion.
 While the viewport is open, wheel up/down or `j`/`k`/arrow keys scroll the actual
 selected page by 120 CSS pixels, then capture it again. Terminal pointer presses
 and releases map the displayed image to normalized click or drag coordinates.
-Live supports point clicks and scrolling; trusted drag requires automation.
+Either live connection takes point clicks and scrolling; a drag needs the
+BiDi connection or automation.
 `r` captures the same page again; `Esc` returns to the text reader. Other keys
 and pastes are consumed by the viewport and cannot edit a hidden draft. Inputs
 during an in-flight action are not queued. Errors are shown without replaying

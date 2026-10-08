@@ -136,3 +136,19 @@ and reset, including assignment attribution and disposition/source partitions.
 the same JSON after later calls, while fresh info sees the new count.
 Parsing-only checks and whitespace checks passed. No behavior execution or
 runtime deployment of this third repair is claimed.
+||||||| 1ac9c5612c
+
+## First targeted execution result
+
+Run 37776731943 completed with failure before behavior tests ran:
+
+- `test_keeper_identity_tools.ml:890`: `Unbound module Eio_main`. The new real
+  Gate fixture requires the direct `eio_main` test library dependency. Added it
+  to `test/stanzas/test_keeper_identity_tools.inc` in the identity-policy PR.
+- `server_routes_http_routes_activity.ml:1381`: `Unbound value
+  validate_board_workspace`. The identical reference exists in baseline
+  `934c63d290`; this source was not changed by either repair. Dashboard suites
+  remain blocked on this server compilation failure. It is not test PASS.
+
+The failed run is terminal; a new targeted run is appropriate after the test
+fixture dependency repair, while the unrelated server defect stays separate.

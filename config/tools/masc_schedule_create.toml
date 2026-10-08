@@ -54,7 +54,10 @@ type = "string"
 required = true
 description = """
 What the Keeper is being woken to do. It reads this and nothing else about \
-why the wake exists, so write the work, not a reminder that work exists."""
+why the wake exists, so write the work, not a reminder that work exists. A \
+recurring wake sends this text unchanged every time, so do not copy in what you \
+observed when you created it (a head, a run id, a status): name what to look up \
+when the Keeper wakes."""
 
 [[params]]
 name = "title"

@@ -16,6 +16,15 @@ def coverage(value, label):
     return value
 
 
+def input_references(fields):
+    inherited = evidence(fields.get("input_evidence"))
+    if any(set(ref) != {"uri", "sha256"} for ref in fields["input_evidence"]):
+        raise InvalidInput("Input evidence references must contain exactly uri and sha256")
+    if any(ref["sha256"] is None for ref in inherited):
+        raise InvalidInput("Input evidence requires immutable digests")
+    return inherited
+
+
 def response_problem(response):
     if response.get("role") != "assistant":
         return "Fusion requires an assistant sampling response"

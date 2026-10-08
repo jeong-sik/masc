@@ -1051,6 +1051,50 @@ let test_receipt_projection_reads_shared_outcome_once () = with_fixture (fun _en
     (Yojson.Safe.Util.(member "terminal" (List.hd receipts) |> member "response")
      = S.create_message_result_to_yojson answer))
 
+let test_current_sampling_receipt_keeps_same_instance_input_lineage () = with_fixture (fun _env _sw dir _docker ->
+  let module Sampling = Masc.Lane_addon_sampling in
+  let module Store = Masc.Lane_addon_store in
+  let module S = Mcp_protocol.Sampling in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let store = Store.create ~root:(Filename.concat dir "sampling-input-lineage") in
+  let package = {(package dir "sampling") with model_access=Types.Host_sampling} in
+  let answer : S.create_message_result = {role=Assistant;
+    content=Text {type_="text";text="new answer"};model="fixture";stop_reason=None;_meta=None} in
+  let broker = require (Sampling.create ~store ~package ~instance_id:"same-worker"
+    ~route:"fixture" ~invoke:(fun ~route:_ ~request:_ _ -> Ok answer) ()) in
+  let handler = require (Sampling.for_worker broker ~package ~instance_id:"same-worker") in
+  let params = require (S.create_message_params_of_yojson
+    (`Assoc ["messages",`List [];"maxTokens",`Int 1])) in
+  let observe ~sources ~inherited ~flatten =
+    Sampling.with_observation broker ~binding:(`Assoc []) ~sources ~on_error:Fun.id (fun () ->
+      Result.map (fun returned ->
+        let refs = Option.get returned.S._meta |> Yojson.Safe.Util.member "masc.lane_sampling" in
+        let current = List.map (fun key -> require (Types.evidence_of_json
+          (Yojson.Safe.Util.member key refs))) ["request";"outcome"] in
+        {Types.rows=[{id="answer";lane_id="fusion/computation";kind=Types.Value;
+          title="answer";observed_at=1.;subject_id="analysis";clock=None;actor=None;
+          fields=["model_evidence",refs;
+            "input_evidence",`List (List.map Types.evidence_to_json inherited)];
+          evidence=(if flatten then inherited @ current else current);related_ids=[]}];coverage=[]})
+        (handler params)) in
+  let previous = require (observe ~sources:(`List []) ~inherited:[] ~flatten:false) in
+  let old_request = List.hd (List.hd previous.rows).evidence in
+  let sources = `List [`Assoc ["source_id",`String "retained-input";
+    "observations",`List [`Assoc ["evidence",`List [Types.evidence_to_json old_request]]]]] in
+  let current = require (observe ~sources ~inherited:[old_request] ~flatten:false) in
+  let row = List.hd current.rows in
+  check bool "prior same-worker request remains explicit input lineage" true
+    (List.assoc "input_evidence" row.fields = `List [Types.evidence_to_json old_request]);
+  check bool "current row does not claim the prior request as its receipt" false
+    (List.mem old_request row.evidence);
+  check bool "old immutable request remains readable" true
+    (Result.is_ok (Store.read_blob store old_request));
+  check bool "flattening old input lineage still rejects the false current claim" true
+    (Result.is_error (observe ~sources ~inherited:[old_request] ~flatten:true));
+  check bool "replaying an old receipt for new inputs still fails" true
+    (Result.is_error (Sampling.with_observation broker ~binding:(`Assoc []) ~sources
+      ~on_error:Fun.id (fun () -> Ok previous))))
+
 let test_sampling_receipt_requires_durable_journal () = with_fixture (fun _env _sw dir _docker ->
   let module Store = Masc.Lane_addon_store in
   let require = function Ok value -> value | Error detail -> fail detail in
@@ -1536,6 +1580,8 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling fallback rejects external hardlinks" `Quick
     (test_sampling_fallback_rejects_external_links "hardlink" (fun target path -> Unix.link target path));
   test_case "sampling reads preserve canonical failures" `Quick test_sampling_blob_read_preserves_canonical_failure;
+  test_case "current receipt keeps same-worker input lineage separate" `Quick
+    test_current_sampling_receipt_keeps_same_instance_input_lineage;
   test_case "sampling retention error carries the receipt" `Quick test_sampling_retention_error_carries_receipt;
   test_case "sampling blob failure keeps request evidence" `Quick test_sampling_blob_failure_keeps_request_evidence;
   test_case "sampling receipt requires durable journal" `Quick test_sampling_receipt_requires_durable_journal;

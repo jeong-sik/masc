@@ -144,6 +144,25 @@ let screenshot_response ?(source="live") ?(client=firefox.client_id) ?(tab_id=2)
     "data", `String "UE5H"; "viewport", `Assoc ["documentId",`String "fixture";
       "width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0]; "elapsed_ms", `Float 13.]]
 
+(* The viewport footer's drag hint is the lane table's answer for the
+   connection the screenshot names: two live screenshots can differ. *)
+let test_screenshot_drag_hint () =
+  let bidi = { firefox with client_id = "33333333-3333-4333-8333-333333333333";
+               transport = Browser_lane.Webdriver_bidi } in
+  let view = { (create ()) with clients = Some [firefox; bidi] } in
+  let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
+  expect "an extension screenshot names the connection a drag needs"
+    (screenshot_drag_support view (shot firefox.client_id) = Drag_needs [Browser_lane.Webdriver_bidi]
+     && screenshot_drag_hint view (shot firefox.client_id) = "drag: needs a BiDi connection");
+  expect "a BiDi screenshot takes the drag"
+    (screenshot_drag_hint view (shot bidi.client_id) = "drag: move");
+  expect "the chosen client answers when the list has not been read"
+    (screenshot_drag_hint (choose_client bidi (create ())) (shot bidi.client_id) = "drag: move");
+  expect "a client the view no longer holds is not given a rule"
+    (screenshot_drag_support (create ()) (shot firefox.client_id) = Drag_unknown);
+  expect "the server's own browser takes the drag"
+    (screenshot_drag_hint (create ()) (shot ~source:"automation" firefox.client_id) = "drag: move")
+
 let test_screenshot_ownership_and_draft () =
   let pending = { (loaded ()) with scroll = 3; url_draft = Some "https://example.org/?q=한글";
       load = Loading (8, Screenshot 2) } in
@@ -372,6 +391,7 @@ let () =
      "client connection ownership", test_client_connection_ownership;
      "picker empty row reads the list", test_picker_empty_row;
      "client inventory contract", test_clients_decode;
+     "screenshot drag hint follows the connection", test_screenshot_drag_hint;
      "screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;
      "read and tab selection", test_read_and_selection;
      "closed-tab refresh recovery", test_refresh_rediscovers_tabs;

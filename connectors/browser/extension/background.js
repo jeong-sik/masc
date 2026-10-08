@@ -829,7 +829,6 @@ function interactInPage(args) {
     location.assign(destination.href);
     return result;
   }
-  if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
   if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
     if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))
@@ -990,8 +989,7 @@ async function pageInteract(args, deadlineMs, signal) {
   // A later executeScript rejection can lose a result after a page effect.
   try {
     if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
-    if (args.action === 'hover_at') throw new Error("trusted_hover_requires_live_bidi_connection");
-    if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+    if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at'].includes(args.action)) throw new Error("unknown_interaction_action");
     const tab = await browser.tabs.get(args.tabId);
     signal?.throwIfAborted();
     if (args.expectedUrl !== undefined && tab.url !== args.expectedUrl) throw new Error('page_url_changed');

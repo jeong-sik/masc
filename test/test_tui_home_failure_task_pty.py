@@ -401,6 +401,17 @@ def task_cancel_previous_workspace_receipt(executable):
                         gate.complete(time.monotonic() - entered)
                         raise
                 root = foreign if state["foreign"] else local
+                on_sent = None
+                if gate is not None:
+                    # Capture this exact exchange's gate, entry, and entry time.
+                    # Under ThreadingHTTPServer, another exchange can enter before
+                    # this response write completes; indexing [-1] would attribute
+                    # completion to whatever request registered most recently.
+                    def record_sent(g=gate, e=entry, t=entered):
+                        g.complete(time.monotonic() - t)
+                        e["completed"] = time.monotonic()
+
+                    on_sent = record_sent
                 return h.RawHttpResponse(200, json.dumps({
                     "status": "ok", "paths": {
                         "cwd": str(root), "effective_base_path": str(root),
@@ -408,10 +419,7 @@ def task_cancel_previous_workspace_receipt(executable):
                         "effective_has_masc_dir": True,
                     },
                 }).encode(), content_type="application/json",
-                    on_sent=(lambda: (gate.complete(time.monotonic() - entered),
-                                      state["exchange_log"][-1].__setitem__(
-                                          "completed", time.monotonic())))
-                    if gate is not None else None)
+                    on_sent=on_sent)
 
             def rpc(body):
                 request = json.loads(body)

@@ -2950,7 +2950,7 @@ let render_keeper_message (state : state) =
       |> List.map (fun log ->
           let ended = Masc_tui_types.observed_log_has_ended state log in
           let unavailable = Masc_tui_types.observed_log_is_unavailable state log in
-          let block = held_projection ~committed:(ended || unavailable) log in
+          let block = held_projection ~committed:ended log in
           let entries = block.lb_entries in
           let entries =
             match unavailable, List.rev entries with
@@ -2993,8 +2993,7 @@ let render_keeper_message (state : state) =
     in
     let open_blocks =
       List.filter (fun block ->
-        not (Masc_tui_types.observed_log_has_ended state block.lb_log)
-        && not (Masc_tui_types.observed_log_is_unavailable state block.lb_log)) blocks
+        not (Masc_tui_types.observed_log_has_ended state block.lb_log)) blocks
     in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries

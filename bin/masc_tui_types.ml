@@ -7362,7 +7362,13 @@ let loaded_turn_has_output state ~keeper_name request_id =
    ([hold_settled_log]), which is how a cut stream's turn is followed to its
    end. Answered per frame from the same list the settled blocks come from,
    so a log that comes to hold its turn leaves here the frame it does. *)
-let observed_log_has_ended _state log = turn_log_has_ended log
+(* Visual progress may close from an authoritative operation record while
+   its partial journal remains eligible for replay. History rows and journal
+   availability do not settle the transcript's phase. *)
+let observed_log_has_ended _state log =
+  match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
+  | Stream_ended | Stream_failed _ -> true
+  | Waiting | Working -> false
 ;;
 
 let observed_log_is_unavailable state log =

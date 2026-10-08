@@ -722,6 +722,50 @@ let test_independent_departure_recovers_damaged_participation () =
     check (option string) (if stopped_keeper then "stopped Keeper is recoverable" else "expired credential is recoverable")
       None (controller ())) [false; true]
 
+let test_disconnect_waits_for_an_admitted_move_effect () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = renew config in
+  let entered, signal_entered = Eio.Promise.create () in
+  let continue, signal_continue = Eio.Promise.create () in
+  let move_done, signal_move_done = Eio.Promise.create () in
+  let departure_done, signal_departure_done = Eio.Promise.create () in
+  Eio.Switch.run @@ fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      let result = Keeper_dos_controller.with_move_admission ~config ~who:"player"
+          ~run:(fun () ->
+            Eio.Promise.resolve signal_entered ();
+            Eio.Promise.await continue;
+            (* Exercise the real HTTP/MCP dispatch path.  It calls the DOS
+               handler's own [after_announcing], which must not drain a ready
+               notice while the credential admission is held. *)
+            Tool_misc_dos_lane.flush_announcements ();
+            Tool_misc_dos_lane.enqueue ~ready:(Atomic.make true) ~author:"fixture"
+              "dispatch must publish after admission" ();
+            let ctx : Tool_misc.context =
+              { config; agent_name = "player"; help_schemas = Config.raw_all_tool_schemas } in
+            (match Tool_misc.dispatch ctx ~name:"masc_dos_step"
+                ~args:(`Assoc [ "steps", `Int 1; "until_ready", `Bool false ]) with
+             | Some result when Tool_result.is_success result -> ()
+             | Some result -> fail (Tool_result.message result)
+             | None -> fail "masc_dos_step did not dispatch");
+            check bool "handler did not flush a ready notice inside admission" true
+              (Queue.length Tool_misc_dos_lane.announcements >= 1)) in
+      Eio.Promise.resolve signal_move_done result);
+    Eio.Promise.await entered;
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve signal_departure_done
+        (participate config token Play_participation.Departed));
+    await_waiter ~base_path:config.base_path departure_done;
+    check bool "disconnect waits behind an admitted move effect" true
+      (Option.is_none (Eio.Promise.peek departure_done));
+    Eio.Promise.resolve signal_continue ();
+    (match Eio.Promise.await move_done with
+     | Ok () -> ()
+     | Error (Keeper_dos_controller.Refused detail | Keeper_dos_controller.Seats_unknown detail) -> fail detail);
+    participation_ok (Eio.Promise.await departure_done);
+  check (option string) "the completed disconnect releases the admitted controller"
+    None (controller ())
+
 let () =
   run "play_credential_transaction"
     [ "controller recovery",
@@ -729,6 +773,7 @@ let () =
       ; test_case "departed Worker Keepers are excluded from handoffs" `Quick test_departed_worker_keeper_is_not_a_handoff_target
       ; test_case "departed callers cannot pass a free controller" `Quick test_departed_caller_cannot_pass_a_free_controller
       ; test_case "independent stop and expiry survive damaged participation" `Quick test_independent_departure_recovers_damaged_participation
+      ; test_case "disconnect waits for the admitted move effect" `Quick test_disconnect_waits_for_an_admitted_move_effect
       ; test_case "disconnect precedes racing and future handoffs" `Quick test_disconnect_before_handoff_prevents_future_assignment
       ; test_case "a racing earlier handoff is released before disconnect returns" `Quick test_handoff_before_disconnect_is_released_inside_admission
       ; test_case "late admitted moves cannot strand a departed holder" `Quick test_departed_generation_recovers_a_late_admitted_move

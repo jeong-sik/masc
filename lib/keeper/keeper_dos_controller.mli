@@ -50,6 +50,14 @@ type call_refusal =
   | Refused of string  (** the call cannot run as asked; the caller can fix it *)
   | Seats_unknown of string  (** who sits at the machine could not be read *)
 
+val with_move_admission :
+  config:Workspace.config -> who:string -> run:(unit -> 'a) ->
+  ('a, call_refusal) result
+(** Admit [who] and hold the credential transaction through [run]. This is the
+    atomic boundary for a DOS operation that can acquire the shared
+    controller: a concurrent play-session departure either waits until the
+    operation completes or is committed first and prevents the operation. *)
+
 val execute :
   config:Workspace.config -> who:string -> name:string -> args:Yojson.Safe.t ->
   run:(unit -> Tool_result.result option) ->
@@ -58,9 +66,10 @@ val execute :
     departed-holder recovery and the actual DOS pass share one Auth admission,
     excluding credential publication and revocation until the effect completes.
     Handoff uses the same DOS implementation as the misc dispatcher; its Board
-    announcements are flushed after Auth release. For other tools, [run] is
-    invoked after any required holder recovery. [None] means no dispatcher
-    handled that other tool. The HTTP body must already have been read.
+    announcements are flushed after Auth release. For a controller-taking
+    operation, [run] is invoked while credential admission remains held through
+    the DOS lane effect. [None] means no dispatcher handled that other tool.
+    The HTTP body must already have been read.
     This does not authenticate [who] or cancel requests authorized earlier. *)
 
 val refusal_result : tool_name:string -> call_refusal -> Tool_result.result

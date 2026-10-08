@@ -5904,6 +5904,7 @@ type state = {
   mutable runtime_lane_replacement_selection:
     (slot_editor_target * slot_editor_identity * slot_editor_identity) option;
   mutable runtime_lane_write: runtime_lane_write;
+  mutable runtime_dim_refusals: bool;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -8715,6 +8716,7 @@ let create_state
   runtime_lane_cursor_after_write = None;
   runtime_lane_replacement_selection = None;
   runtime_lane_write = Lane_write_idle;
+  runtime_dim_refusals = true;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
@@ -11151,6 +11153,16 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
 
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
+
+let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
+  state.runtime_dim_refusals
+  && (runtime_option_refusing option
+      || match state.runtime_surface with
+         | None -> false
+         | Some snapshot ->
+             (match runtime_spent_usage snapshot.Tui_decode.rss_resolved option with
+              | Ok (_ :: _) -> true
+              | Ok [] | Error _ -> false))
 
 let runtime_quota_label (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_quota_exhausted then None

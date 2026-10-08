@@ -21989,6 +21989,13 @@ and is loaded on demand through keeper_skill.
            state.runtime_detail_scroll <-
              (if String.equal edge "home" then 0
               else Masc_tui_types.clamped_scroll_end)
+       | Some "h"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick
+              && Option.is_none state.slot_editor
+              && Option.is_none (Masc_tui_types.runtime_lane_prompt state) ->
+           state.runtime_dim_refusals <- not state.runtime_dim_refusals
        | Some "v"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target

@@ -10181,6 +10181,8 @@ let render_runtime (state : state) =
                    ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
                if index + scroll = state.runtime_cursor then
                  c.push_selected (Masc_tui_theme.strip_sgr line)
+               else if Masc_tui_types.runtime_row_deemphasized state runtime then
+                 c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)
                else c.push line)
       | Masc_tui_types.Runtime_lanes ->
       match Rows.at candidates_window (index + scroll) with
@@ -10255,6 +10257,8 @@ let render_runtime (state : state) =
               ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
           if index + scroll = state.runtime_cursor then
             c.push_selected (Masc_tui_theme.strip_sgr line)
+          else if Masc_tui_types.runtime_row_deemphasized state runtime then
+            c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)
           else c.push line
     done;
 )

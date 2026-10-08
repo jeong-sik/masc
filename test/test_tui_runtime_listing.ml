@@ -170,6 +170,37 @@ let lane_state () =
   state.runtime_mode <- Runtime_lanes;
   state
 
+let test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order () =
+  let state = lane_state () in
+  let snapshot = match state.runtime_surface with
+    | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
+  let exhausted = { (runtime "b") with ro_quota_exhausted = true } in
+  let limited = { (runtime "c") with ro_rate_limited = true } in
+  let resolved = { snapshot.rss_resolved with
+    rrs_runtimes = [runtime "a"; exhausted; limited] } in
+  state.runtime_surface <- Some (match Masc.Tui_decode.join_runtime_surface
+      ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail);
+  let runtime_ids () =
+    match state.runtime_surface with
+    | None -> []
+    | Some snapshot -> List.map (fun (runtime : Masc.Tui_decode.runtime_option) -> runtime.ro_id)
+        snapshot.rss_resolved.rrs_runtimes in
+  let original_order = ["a"; "b"; "c"] in
+  Alcotest.(check (list string)) "default view preserves configured order"
+    original_order (runtime_ids ());
+  Alcotest.(check bool) "ordinary runtime remains prominent" false
+    (runtime_row_deemphasized state (runtime "a"));
+  Alcotest.(check bool) "quota exhausted runtime is de-emphasized" true
+    (runtime_row_deemphasized state exhausted);
+  Alcotest.(check bool) "rate limited runtime is de-emphasized" true
+    (runtime_row_deemphasized state limited);
+  state.runtime_dim_refusals <- false;
+  Alcotest.(check bool) "toggle restores normal emphasis" false
+    (runtime_row_deemphasized state exhausted);
+  Alcotest.(check (list string)) "toggle never changes configured order"
+    original_order (runtime_ids ())
+
 let notice_text = function
   | None -> "no line"
   | Some (Lane_write_refused reason) -> "refuse: " ^ reason
@@ -1582,7 +1613,8 @@ let test_the_keeper_picker_window_follows_the_cursor () =
 
 let test_account_usage_stays_spent_until_new_report () =
   let open Masc.Tui_decode_usage in
-  let snapshot = match (lane_state ()).runtime_surface with
+  let state = lane_state () in
+  let snapshot = match state.runtime_surface with
     | Some snapshot -> snapshot
     | None -> Alcotest.fail "missing fixture" in
   let window = { puw_limit_id = Some "account-bucket";
@@ -1594,6 +1626,9 @@ let test_account_usage_stays_spent_until_new_report () =
   let resolved window = { snapshot.rss_resolved with
     rrs_usage = Ok { puws_since = 0.; puws_accounts = [account window] } } in
   let rt = { (runtime "a") with ro_quota_scope = Some "account:1" } in
+  state.runtime_surface <- Some {snapshot with rss_resolved = resolved window};
+  Alcotest.(check bool) "observed spent usage de-emphasizes the runtime" true
+    (runtime_row_deemphasized state rt);
   let count resolved rt = match runtime_spent_usage resolved rt with
     | Ok windows -> List.length windows
     | Error detail -> Alcotest.fail detail in
@@ -1765,6 +1800,8 @@ let () = Alcotest.run "runtime list geometry"
        Alcotest.test_case "commit application survives successful and failed rereads" `Quick test_commit_application_survives_reread;
        Alcotest.test_case "quota scope label preserves correlation" `Quick
         test_quota_scope_label_preserves_correlation;
+      Alcotest.test_case "refusing runtimes are de-emphasized without changing order" `Quick
+        test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order;
       Alcotest.test_case "short viewport retains selected list row" `Quick
         test_short_viewport_preserves_selected_list_row;
       Alcotest.test_case "lanes overview and exact picker count every notice line" `Quick

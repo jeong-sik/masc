@@ -417,11 +417,11 @@ let announcement_ready () =
 let enqueue ~ready ~author content () =
   Mutex.protect announcements_lock (fun () -> Queue.push {author;content;ready} announcements)
 ;;
-let announce ~author content () =
+let announce ~author content =
   let ready = match announcement_ready () with
     | Some ready -> ready
     | None -> Atomic.make true in
-  enqueue ~ready ~author content ()
+  fun () -> enqueue ~ready ~author content ()
 ;;
 
 (* Queue in machine order, but keep this transaction's notices invisible to

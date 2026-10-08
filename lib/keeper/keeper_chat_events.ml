@@ -373,8 +373,9 @@ let api_usage_to_json (usage : Agent_core.Types.api_usage) =
      @ json_opt "cost_usd"
          (Option.map (fun value -> `Float value) usage.cost_usd))
 
-(* Cumulative mid-stream counters: only the fields the delta actually
-   reported appear, so a reader can tell "not reported" from 0. *)
+(* Cumulative mid-stream counters and provider-reported charge: only fields
+   the delta actually reported appear, so "not reported" remains distinct from 0.
+   Non-finite charges are unavailable on live projections; never emit invalid JSON. *)
 let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
   `Assoc
     (json_opt "input_tokens" (Option.map (fun v -> `Int v) usage.input_tokens)
@@ -382,7 +383,10 @@ let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
     @ json_opt "cache_creation_input_tokens"
         (Option.map (fun v -> `Int v) usage.cache_creation_input_tokens)
     @ json_opt "cache_read_input_tokens"
-        (Option.map (fun v -> `Int v) usage.cache_read_input_tokens))
+        (Option.map (fun v -> `Int v) usage.cache_read_input_tokens)
+    @ json_opt "cost_usd"
+        (Option.bind usage.cost_usd (fun amount ->
+             if Float.is_finite amount then Some (`Float amount) else None)))
 
 (* One owner for the stop-reason word. The journal and the AGUI projection
    both write [Agent_core.Types.stop_reason_to_string]; re-exporting it here

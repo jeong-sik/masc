@@ -233,9 +233,24 @@ let same_file_identity (left : Unix.stats) (right : Unix.stats) =
   left.Unix.st_dev = right.Unix.st_dev && left.Unix.st_ino = right.Unix.st_ino
 ;;
 
-(* [Sys.readdir] is pathname based. Bind the names it returns to the directory
-   and ownership root observed around the enumeration, so a replacement by an
-   outside directory is reported as unavailable instead of publishing its
+let entries_of_open_directory dir =
+  let handle = Unix.opendir dir in
+  Fun.protect
+    ~finally:(fun () -> Unix.closedir handle)
+    (fun () ->
+      let rec read acc =
+        match Unix.readdir handle with
+        | exception End_of_file -> acc
+        | name -> read (name :: acc)
+      in
+      read [])
+  |> List.filter (fun name -> not (String.starts_with ~prefix:"." name))
+  |> List.sort String.compare
+;;
+
+(* Bind enumeration to one opened directory handle, then compare the
+   directory and ownership-root identities around the read. A replacement by
+   an outside directory is reported as unavailable instead of publishing its
    child names. [before_read] is a deterministic test seam for the same
    replacement boundary; production callers leave it at its no-op default. *)
 let entries_of_stable ?(before_read = fun _ -> ()) ~ownership_root dir =
@@ -247,7 +262,7 @@ let entries_of_stable ?(before_read = fun _ -> ()) ~ownership_root dir =
       Error ()
     else begin
       before_read dir;
-      let names = entries_of dir in
+      let names = entries_of_open_directory dir in
       let root_after = Unix.lstat ownership_root in
       let dir_after = Unix.lstat dir in
       if same_file_identity root_before root_after

@@ -9791,3 +9791,5 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_tui_code_history_sources_pty.inc)
+
+(include stanzas/test_tui_code_history_diff_pty.inc)

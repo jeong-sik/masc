@@ -10998,6 +10998,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.code_memos <- [];
   state.code_jump_back <- [];
   state.code_history_open <- false;
+  state.code_history_expanded <- None;
   state.code_diff_open <- false;
   state.code_notes_open <- false;
   state.keeper_action_serial <- state.keeper_action_serial + 1;
@@ -24226,6 +24227,10 @@ and is loaded on demand through keeper_skill.
              state.code_diff_open <- false;
              state.code_history_open <- false
            end
+       | Some "d" when state.view = Code && state.code_focus_file = Right_pane
+                       && state.code_history_open ->
+           if not (Masc_tui_render_code.toggle_history_change state) then
+             report_action state "error" "Select a Keeper record to expand its recorded change"
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The working tree against HEAD, over the open file. One overlay

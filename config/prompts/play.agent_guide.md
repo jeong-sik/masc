@@ -86,7 +86,6 @@ For text, `data.keys_pressed` is the number of UTF-8 bytes actually applied,
 which may be less than the submitted text. Keep the unpressed suffix and
 check the game before sending more; never automatically replay unknown input.
 
-
 ## Public game conversation
 
 Keepers, TUI spectators and invited players share one public room across MSX

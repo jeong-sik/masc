@@ -1,0 +1,65 @@
+name: Browser Controls macOS
+
+# Focused macOS execution of test_browser_controls. The suite normalizes
+# /var -> /private/var symlinks, which Linux runners cannot exercise.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - test/test_browser_controls.ml
+      - test/stanzas/test_browser_controls.inc
+      - .github/workflows/browser-controls-macos.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-controls-macos-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: test_browser_controls on macOS
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: System libraries
+        run: |
+          brew install flock gmp libpq openssl@3 zstd ripgrep
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig"
+            echo "CPATH=$openssl_prefix/include"
+            echo "LIBRARY_PATH=$openssl_prefix/lib"
+            echo "CPPFLAGS=-I$openssl_prefix/include"
+            echo "LDFLAGS=-L$openssl_prefix/lib"
+          } >> "$GITHUB_ENV"
+      - uses: ./.github/actions/pin-ocaml-deps
+      - name: Dependencies
+        run: opam install ./masc.opam --deps-only --locked --with-test --yes
+      - name: Build test_browser_controls
+        run: opam exec -- dune build test/test_browser_controls.exe
+      - name: Run test_browser_controls
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          git rev-parse HEAD > proof/SOURCE_COMMIT
+          uname -sm | tee proof/PLATFORM
+          DUNE_SOURCEROOT="$GITHUB_WORKSPACE" \
+            _build/default/test/test_browser_controls.exe 2>&1 | tee proof/test_browser_controls.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: browser-controls-macos-${{ github.event.pull_request.head.sha || github.sha }}
+          path: proof
+          if-no-files-found: warn
+          retention-days: 7

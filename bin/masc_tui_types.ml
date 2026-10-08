@@ -811,6 +811,69 @@ type msg_anchor =
           Other rows remain identity-only anchors. *)
   }
 
+(* Search and scroll pins use the same projected history and journal rows.
+   A surviving journal stretch keeps its origin when reasoning is folded or
+   a final reply replaces its streamed text. *)
+type chat_search_anchor =
+  | Search_history of {
+      row_anchor : msg_anchor;
+      reply_source : Masc_tui_keeper_chat_log.journal_source option;
+        (** Only a durable terminal reply slot may be replaced by a journal's
+            canonical reply. Progress/tool rows do not acquire this alias. *)
+    }
+  | Search_journal of {
+      source : Masc_tui_keeper_chat_log.journal_source;
+      origin : Masc_tui_keeper_chat_transcript.drawn_origin;
+      canonical_reply : bool;
+    }
+
+type chat_search_cursor = {
+  search_workspace : workspace_authority;
+  search_keeper : string;
+  matched_anchor : chat_search_anchor;
+  matched_occurrence : int;
+    (** Zero-based match ordinal within the entry, oldest first. Unlike a
+        physical wrapped row, this survives a change in viewport width. *)
+  older_anchors : chat_search_anchor list;
+    (** Nearest older first. If reconciliation removes the matched stretch,
+        continue at a surviving older row instead of restarting at the tail. *)
+}
+
+type polled_scroll_part = Polled_status | Polled_speech
+
+type chat_scroll_anchor =
+  | Scroll_durable of chat_search_anchor
+  | Scroll_pending of string
+  | Scroll_polled of string * polled_scroll_part
+
+type chat_pin_mode = Follow_live | Hold_scroll | Hold_search
+(** [Follow_live] is the last frame's structural snapshot, activated by a
+    scroll key before asynchronous arrivals. It never stops tail following. *)
+
+type chat_scroll_point = {
+  scroll_anchor : chat_scroll_anchor;
+  body_row : int;
+  rows_below : int;
+    (** Physical body-row ordinal within the projected entry, and its distance
+        from the viewport bottom. Neither field is a text/clock identity. *)
+}
+
+type chat_scroll_pin = {
+  pin_workspace : workspace_authority;
+  pin_keeper : string;
+  pin_scroll : int;
+  pin_mode : chat_pin_mode;
+  pin_points : chat_scroll_point list;
+    (** Drawn origins, oldest first. If a folded or replaced stretch disappears,
+        a surviving origin can still hold the reader's position. A viewport
+        containing only transient rows may retain an origin outside it. *)
+}
+
+type chat_scroll_position = {
+  scroll : int;
+  pin : chat_scroll_pin option;
+}
+
 let chat_turn_phase_of_role = function
   | Message_user _ -> Turn_input
   | Message_status | Message_thinking | Message_memory | Message_skill _ ->
@@ -5872,7 +5935,7 @@ type state = {
       (** What [/find] was last given on this pane, or [""] before it is used.
           Kept so the arg-less form continues the same search instead of
           asking for the text again. *)
-  mutable msg_find_at: msg_anchor option;
+  mutable msg_find_at: chat_search_cursor option;
       (** Structural identity of the message [/find] last landed on. The next
           search resolves it in the current causal timeline and starts
           strictly older. An index cannot survive a broadcast or Journal
@@ -6481,16 +6544,11 @@ type state = {
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: (int * string) option;
   mutable msg_copy_generation: int;
-  (* The newest row [msg_scroll] counts back from, by causal row identity, while the
-     operator is reading back. Counting from whatever is newest right now made
-     the count mean something different every time a reply landed: the new rows
-     go on that end, so the same count lands further down and the window slides
-     toward text nobody asked to see. Pinned when they scroll off the bottom
-     and released when they return to it, which is also how they get back to
-     following the turn. *)
-  mutable msg_scroll_pin: msg_anchor option;
-  (* How many rows above the newest the chat pane is showing. 0 is the bottom,
-     where the pane follows a running turn. Held rather than derived: an
+  (* Actual projected body rows on the last scrolled frame. History and journal
+     origins share the same pin, including their canonical reply aliases. *)
+  mutable msg_scroll_pin: chat_scroll_pin option;
+  (* How many rows above the newest the chat pane is showing. 0 without an
+     explicit search pin follows the running turn. Held rather than derived: an
      operator reading back should stay where they are while the keeper keeps
      talking. *)
   mutable msg_scroll: int;
@@ -6558,10 +6616,6 @@ type state = {
   (* The server refused this client's credential for the journal endpoint.
      Said once; no journal is asked for again this session. *)
   mutable msg_journal_reads_refused: bool;
-  (* The settled logs held when [msg_scroll_pin] was taken. Their rows were on
-     the screen the operator anchored, so they are not rows that arrived
-     since; a log held later is. *)
-  mutable msg_scroll_pin_settled: turn_log list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -9282,7 +9336,6 @@ let create_state
   msg_journal_inflight = [];
   msg_journal_wanted = [];
   msg_journal_reads_refused = false;
-  msg_scroll_pin_settled = [];
   detail_scroll = 0;
   workspace;
   port;
@@ -9831,24 +9884,13 @@ let merge_paged_history ~(paged : msg_entry list) ~(fresh : msg_entry list) =
 
 let set_msg_scroll (state : state) rows =
   let rows = max 0 rows in
-  if rows = 0 then begin
-    state.msg_scroll <- 0;
-    state.msg_scroll_pin <- None;
-    state.msg_scroll_pin_settled <- []
-  end
-  else begin
-    if state.msg_scroll = 0 then begin
-      state.msg_scroll_pin <-
-        (match state.msg_target_keeper_name with
-         | None -> None
-         | Some keeper_name ->
-           (match List.rev (chat_rows_for state keeper_name) with
-            | newest :: _ -> Some (msg_anchor newest)
-            | [] -> None));
-      state.msg_scroll_pin_settled <- state.msg_settled_logs
-    end;
-    state.msg_scroll <- rows
-  end
+  state.msg_scroll <- rows;
+  state.msg_scroll_pin <- Option.map (fun pin ->
+    if rows = 0 then
+      {pin with pin_mode=Follow_live; pin_scroll=0;
+        pin_points=List.map (fun point ->
+          {point with rows_below=point.rows_below + pin.pin_scroll}) pin.pin_points}
+    else {pin with pin_mode=Hold_scroll}) state.msg_scroll_pin
 
 (* Rows the composer needs beyond its first. Folded into the status-row count
    because that one number already sets both the history height and the cursor
@@ -9874,7 +9916,7 @@ let composer_extra_rows (state : state) =
 type clamped_scroll =
   | Task_detail of int
   | Board_read of (int * int)
-  | Message_scroll of int
+  | Message_scroll of chat_scroll_position
   | Schedule_detail_scroll of int
   | Keeper_detail of int
   | Keeper_calls of int
@@ -9976,7 +10018,9 @@ let apply_clamped_scroll (state : state) = function
       state.board_scroll <- body;
       state.board_comment_scroll <- comments;
       state.board_comment_landing <- None
-  | Message_scroll value -> set_msg_scroll state value
+  | Message_scroll { scroll; pin } ->
+      state.msg_scroll <- max 0 scroll;
+      state.msg_scroll_pin <- pin
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
@@ -12397,8 +12441,13 @@ let conversation_urls (state : state) : string list =
 
    The fact itself used to live in the footer alone, seventh of nine hints,
    and the footer drops hints from its tail on a narrow terminal: the one
-   thing that changes what the arrow keys do was among the first to go. *)
-let keeper_message_reading_back (state : state) = state.msg_scroll > 0
+   thing that changes what the arrow keys do was among the first to go.
+
+   A frame passes its restored pin position through [scroll] before feedback
+   stores that position. Its chrome must budget and draw against that same
+   position even when an arrival changed it since the previous paint. *)
+let keeper_message_reading_back ?scroll (state : state) =
+  Option.value scroll ~default:state.msg_scroll > 0
 
 type keeper_message_pending_preview_row =
   | Pending_preview_item of int * Masc_tui_keeper_chat_queue.item
@@ -12947,7 +12996,7 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
         |> List.map (fun line -> false, "  " ^ line) in
       command_rows @ [false, summary group]) others
 
-let keeper_message_status_rows (state : state) ~terminal_cols =
+let keeper_message_status_rows ?scroll (state : state) ~terminal_cols =
   let chat_cols = Masc_tui_roster_pane.content_cols
       ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
   let unavailable_target =
@@ -13003,19 +13052,20 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
-  + (if keeper_message_reading_back state then 1 else 0)
+  + (if keeper_message_reading_back ?scroll state then 1 else 0)
   + composer_extra_rows state
 
-let keeper_message_command_window state ~terminal_rows ~terminal_cols =
+let keeper_message_command_window ?scroll state ~terminal_rows ~terminal_cols =
   match state.view, state.keeper_message_focus, state.voice_capture,
         state.msg_recall_replaces with
-  | Keepers Keeper_message, Right_pane, None, None when state.msg_scroll = 0 ->
+  | Keepers Keeper_message, Right_pane, None, None
+    when not (keeper_message_reading_back ?scroll state) ->
     let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
     (match Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
         (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
-       let status_rows = keeper_message_status_rows state ~terminal_cols + 1 in
+       let status_rows = keeper_message_status_rows ?scroll state ~terminal_cols + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height
@@ -13032,8 +13082,8 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
    At the live edge, reserve that possible row only for the support threshold;
    once reading back, it is already part of [keeper_message_status_rows]. The
    rendered history still uses the exact rows it currently draws. *)
-let keeper_message_support_status_rows state ~status_rows =
-  status_rows + if keeper_message_reading_back state then 0 else 1
+let keeper_message_support_status_rows ?scroll state ~status_rows =
+  status_rows + if keeper_message_reading_back ?scroll state then 0 else 1
 
 
 (* The Code pane asks the server for at most this many entries per directory

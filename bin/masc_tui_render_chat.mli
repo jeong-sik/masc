@@ -12,18 +12,61 @@ val keeper_message_find_scroll :
   Masc_tui_types.state ->
   keeper_name:String.t ->
   needle:String.t ->
-  older_than:Masc_tui_types.msg_anchor option ->
-  (int * Masc_tui_types.msg_anchor) option
+  older_than:Masc_tui_types.chat_search_cursor option ->
+  (Masc_tui_types.chat_scroll_position * Masc_tui_types.chat_search_cursor) option
 
 val render_keeper_message :
   Masc_tui_types.state ->
   Masc_tui_render_prim.Frame_presenter.frame *
   Masc_tui_types.clamped_scroll option
 
-(** Layout and body rendering share the final body budget. *)
 val keeper_message_layout_entries :
   ?messages:Masc_tui_types.msg_entry list -> Masc_tui_types.state ->
   keeper_name:string -> chat_cols:int -> Message_layout.entry list
+(** History/session rows only, using the final body budget. Live and held
+    execution logs are merged by {!keeper_message_projection}. *)
+
+type tagged_row
+(** The conversation row's structural provenance, private to the renderer. *)
+
+type chat_projection = private {
+  tagged_entries : (tagged_row * Message_layout.entry) list;
+      (** Merged history and observed conversation, including live/held
+          execution. The prefix searched by the pane. *)
+  transient_anchors : Masc_tui_types.chat_scroll_anchor option list;
+      (** One per entry after that prefix: the scroll anchor of a pending
+          input or polled excerpt, when it has one. *)
+  layout_entries : Message_layout.entry list;
+      (** The same prefix followed by pending input and polled excerpts.
+          The complete sequence measured and drawn by the pane. *)
+}
+
+val keeper_message_projection :
+  Masc_tui_types.state -> keeper_name:string -> chat_cols:int -> chat_projection
+(** The shared frame/search projection, before physical row wrapping and
+    viewport clipping. Authored bodies and execution rails remain typed. *)
+
+val search_anchor_of_tag : tagged_row -> Masc_tui_types.chat_search_anchor option
+(** The durable search identity of a row; [None] for a block row that has no
+    drawn origin. *)
+
+type scroll_anchor_index
+(** Every entry's scroll anchor by position, built once per projection. *)
+
+val scroll_anchor_index : chat_projection -> scroll_anchor_index
+(** The index for this projection. The same value is returned while
+    [layout_entries] is the same list. *)
+
+val scroll_anchor_at :
+  chat_projection -> int -> Masc_tui_types.chat_scroll_anchor option
+(** The anchor of the entry at a position; [None] outside the projection. *)
+
+val with_transient_tail :
+  Message_layout.entry list -> transient:Message_layout.entry list ->
+  Message_layout.entry list
+(** The settled entries followed by the pending and polled ones. With nothing
+    transient this is the settled list itself, not a copy: the layout reuses
+    its row counts only for the list it measured. *)
 
 val chat_tail_entries :
   Masc_tui_types.state -> keeper_name:string -> role_label_column:int ->

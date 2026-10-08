@@ -93,7 +93,7 @@ let clamped_scroll_now (state : state) = function
   | Task_detail _ -> Task_detail state.task_detail_scroll
   | Board_read _ ->
       Board_read (state.board_scroll, state.board_comment_scroll)
-  | Message_scroll _ -> Message_scroll state.msg_scroll
+  | Message_scroll _ -> Message_scroll {scroll=state.msg_scroll; pin=state.msg_scroll_pin}
   | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
   | Keeper_detail _ -> Keeper_detail state.detail_scroll
   | Keeper_calls _ -> Keeper_calls state.keeper_calls_scroll

@@ -48,7 +48,7 @@ let test_readers_with_a_wheel_of_their_own_are_left_alone () =
         (Option.is_none
            (reader_after_wheel (clamped_scroll_now state drawn)
               Masc.Tui_decode.Wheel_down)))
-    [ Message_scroll 0; Board_read (0, 0); Keeper_detail 0 ]
+    [ Message_scroll {scroll=0; pin=None}; Board_read (0, 0); Keeper_detail 0 ]
 
 (* The context inspector's plain shapes are lines the frame windows, the
    same as any other reader: a notch moves them one row from where they are

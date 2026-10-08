@@ -678,6 +678,13 @@ val inbound_indent : entry -> int
     a bar in the sender's colour down that block's left edge. Zero for every
     other style. *)
 
+val rows_of_entry :
+  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?origin:origin_display ->
+  inner_width:int -> previous:entry option -> entry -> row list
+(** The exact physical rows of one entry, including its metadata and body.
+    Search uses these rows so a match inside a long entry is reachable. *)
+
 val visible_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
   ?origin:origin_display ->
@@ -740,6 +747,20 @@ val clamp_scroll :
     ...)]. It reads only as far back as the answer depends on, so a pane that
     is not scrolled does not pay for the whole conversation on every frame. *)
 
+type body_row_position = {
+  entry_index : int;
+  body_row : int;
+  rows_below : int;
+}
+(** Position within an entry's body and distance from the viewport bottom.
+    Metadata rows do not consume a body ordinal. *)
+
+type scroll_window = {
+  scroll : int;
+  rows : row list;
+  body_positions : body_row_position list;
+}
+
 val clamped_scrolled_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
   ?origin:origin_display ->
@@ -747,13 +768,23 @@ val clamped_scrolled_rows :
   height:int ->
   requested:int ->
   entry list ->
-  int * row list
+  scroll_window
 (** Clamp [requested] and return that window together.
 
     A positive scroll position is measured and sliced from one newest-to-oldest
     layout pass. Calling {!clamp_scroll} and then {!scrolled_rows} separately
     is still available to independent callers, but a frame that needs both
-    should use this function so the same entry is not rendered twice. *)
+    should use this function so the same entry is not rendered twice.
+    [body_positions] describes the actual scrolled rows, oldest first. When
+    [requested <= 0] it is empty: the gap/compression view follows new output. *)
+
+val scroll_for_body_row :
+  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?origin:origin_display ->
+  inner_width:int -> entry_index:int -> body_row:int -> entry list -> int option
+(** Number of physical rows after this body row, using the same layout and
+    cached counts as {!clamped_scrolled_rows}. [None] if the row no longer
+    exists. Counts only the newer suffix, not the entire conversation. *)
 
 val max_scroll :
   ?markdown:(entry:entry -> width:int -> string list) ->

@@ -3339,6 +3339,17 @@
   yojson))
 
 (test
+ (name test_tui_chat_search_projection)
+ (modules test_tui_chat_search_projection)
+ (libraries alcotest astring masc masc.masc_types
+  masc_tui_types masc_tui_keeper_chat_live masc_tui_keeper_chat_log
+  masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript masc_tui_image_preview masc_tui_message_layout
+  masc_tui_message_input
+  masc_tui_render_chat masc_tui_render_schedule masc_tui_frame_presenter
+  masc_tui_ansi masc_tui_theme masc_tui_roster_pane))
+
+(test
  (name test_tui_chat_rows_memo)
  (modules test_tui_chat_rows_memo)
  (libraries masc_tui_image_preview

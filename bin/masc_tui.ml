@@ -829,6 +829,7 @@ let forget_recall (state : state) =
   state.msg_recall_draft <- ("", [], [], None)
 
 let clear_keeper_history_projection state =
+  state.msg_find_at <- None;
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
   state.msg_copy_generation <- state.msg_copy_generation + 1;
@@ -8937,10 +8938,9 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
 
-   The pane is moved by [set_msg_scroll], the one seam that also pins the row
-   the scroll counts back from -- a search that wrote [msg_scroll] directly
-   would leave the pin unset and the position would drift under the next
-   message that arrived.
+   Search returns the projected body-row pin together with its scroll. The
+   frame and search use the same feedback seam, so arrivals between the command
+   and the next frame cannot move the matched row out of view.
 
    Every outcome says something. A search that silently did nothing and a key
    that did nothing look the same, which is the failure this surface keeps
@@ -8961,12 +8961,12 @@ let seek_in_chat state ~target ~restart =
           ~needle:(String.trim state.msg_find)
           ~older_than
       with
-      | Some (scroll, anchor) ->
+      | Some (position, anchor) ->
           state.msg_find_at <- Some anchor;
-          set_msg_scroll state scroll;
+          apply_clamped_scroll state (Message_scroll position);
           notice ~kind:Notice_reply
             (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
-               state.msg_find scroll)
+               state.msg_find position.scroll)
       | None ->
           if restart then
             notice ~kind:Notice_reply

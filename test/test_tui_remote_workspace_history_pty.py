@@ -1721,9 +1721,18 @@ def resource_workspace_withdrawal(binary: str) -> None:
                 assert _keyboard_harness.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
                 # Since #41518 an authority move rereads the surface on view
                 # without a manual `r`, so B's row can already be drawn by the
-                # time we get here; wait for the automatic recovery to finish,
-                # then judge the pane and let Enter reread the body.
-                _keyboard_harness.drain_until_quiet(process, fd, output)
+                # time we get here. The positive readiness signal is B's
+                # resources/list being served and applied: a rendered
+                # resource-b row waits for that list, so once the row is on
+                # screen the recovery has finished and Enter reads B's body.
+                # Output quiet alone cannot decide an async completion -- it
+                # fires on a silent gap between frames -- and its False
+                # (cap reached) is not a pass.
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                    lambda: b"resource-b" in screen(output), timeout=WAIT_SECONDS), \
+                    "B resources/list was not applied to the pane"
+                assert _keyboard_harness.drain_until_quiet(process, fd, output), \
+                    "output kept arriving; the pane was not judged on a quiet frame"
                 assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output), screen(output)
                 _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
                 assert b"resource-body-a" not in screen(output), screen(output)

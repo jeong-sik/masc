@@ -21,8 +21,8 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41879](https://github.com/jeong-sik/masc/pull/41879) | Pure line-window projection after backend acquisition | `keeper_tool_filesystem_runtime.ml` |
 | [#41890](https://github.com/jeong-sik/masc/pull/41890) | Failure card extracted; completed media retained on history reload; diagnostics remain separate from speech | `dashboard/src/components/chat/primitives.ts` |
 | [#41899](https://github.com/jeong-sik/masc/pull/41899) | One closed row classification; server failure producer; shared terminal authority and all consumers updated | `keeper_chat_store.ml`, `server_routes_http_keeper_stream.ml`, chat primitives |
-
 | [#41915](https://github.com/jeong-sik/masc/pull/41915) | Pure terminal mouse protocol separated from domain JSON contracts; direct input/scroll consumers updated | `tui_decode.ml/.mli`, main TUI and render primitives |
+| [#41932](https://github.com/jeong-sik/masc/pull/41932) | Strict pure Read coordinate decoding; effects sequenced after successful decode; private duplicate guidance variant removed | `keeper_tool_filesystem_runtime.ml` |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -86,11 +86,11 @@ which combines multiple domain payload contracts, and
 planning, input projection and effect dispatch. Trace concrete callers before
 choosing a split; top-level names alone do not establish a defect.
 
-Also follow up `read_line_window_of_args` in the filesystem runtime:
-`Safe_ops.json_int_opt` accepts float/string coercions and maps unparseable
-present values to absence. Establish whether production descriptor validation
-already rejects them and whether direct callers bypass it before changing this
-boundary. The current extraction deliberately retains its existing behavior.
+The Read-coordinate follow-up reproduced an out-of-range integer offset returning
+the file head as a successful read. Pure strict decoding and sequencing of path
+resolution after decode are now recorded in
+[read-window-input/README.md](read-window-input/README.md). The byte-budget parser
+and remaining filesystem responsibilities still require semantic review.
 
 Keep future units independently reviewable, move effects to their owning edge,
 use shared typed contracts rather than compatibility layers, and preserve strict

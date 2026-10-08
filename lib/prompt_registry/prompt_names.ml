@@ -498,13 +498,21 @@ let tool_help_index_header = "tool_help.index.header"
    the data. *)
 
 (* keeper.tool_filesystem.* — Keeper filesystem tool-result wording
-   (keeper_tool_filesystem_runtime.fs_guidance). *)
+   (Keeper_tool_filesystem_guidance.t). *)
 let keeper_tool_filesystem_offset_not_1_based =
   "keeper.tool_filesystem.offset_not_1_based"
 ;;
 
 let keeper_tool_filesystem_limit_not_positive =
   "keeper.tool_filesystem.limit_not_positive"
+;;
+
+let keeper_tool_filesystem_invalid_read_integer =
+  "keeper.tool_filesystem.invalid_read_integer"
+;;
+
+let keeper_tool_filesystem_invalid_read_arguments =
+  "keeper.tool_filesystem.invalid_read_arguments"
 ;;
 
 let keeper_tool_filesystem_available_cwds_partial =

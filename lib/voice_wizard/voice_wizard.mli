@@ -14,6 +14,7 @@
 
 type provider =
   | Macos_say
+  | Espeak_ng
   | Whisper_cli
   | Elevenlabs
   | Openai_compatible
@@ -24,10 +25,11 @@ val provider_of_label : string -> provider option
 
 val providers_for : Voice_setup.section -> provider list
 (** Which providers can serve this section, in the order they are offered.
-    [Mcp_tool] and [Macos_say] are offered for speech out and not for speech
-    in: both synthesize and have no transcribe path. [Whisper_cli] is the
-    mirror, offered for speech in only. The two command kinds lead their side:
-    they need no address and no key, so what they cost is whether the command
+    [Mcp_tool], [Macos_say] and [Espeak_ng] are offered for speech out and not
+    for speech in: all three synthesize and have no transcribe path.
+    [Whisper_cli] is the mirror, offered for speech in only. The command kinds
+    lead their side: they need no address and no key, so what they cost is
+    whether the command
     is on the machine. *)
 
 type draft =

@@ -76,10 +76,39 @@ val journal_uncertain : t -> int
     whose delivery cannot be separated from a dispatch the tool already
     made. Restores surface that window here, and health's
     [keeper_hitl_gate.late_uncertain] carries the count to the operator
-    (acked later by the D4 recover surface; an ack is a warning
-    acknowledgement, never a re-authorization). A consume older than
-    {!ttl_sec} reads as aged history, not as an open question — the same
-    authorization ceiling the live memories keep. *)
+    (acked by {!ack_uncertain}; an ack is a warning acknowledgement, never a
+    re-authorization). A consume older than {!ttl_sec} reads as aged
+    history, not as an open question — the same authorization ceiling the
+    live memories keep. *)
+
+type ack_outcome =
+  | Acked
+      (** The named consume-only tail is now acknowledged; [journal_uncertain]
+          drops by one and the ack stands in the journal across restarts. *)
+  | Ack_not_journaled
+      (** The journal append failed: the count is unchanged, so the tail
+          keeps asking to be acknowledged. *)
+  | Not_uncertain
+      (** No consume-only tail stands for this identity — already delivered,
+          already acked, aged past the TTL, or never consumed here. *)
+
+val ack_uncertain :
+  t ->
+  ?now:float ->
+  base_path:string ->
+  keeper_name:string ->
+  tool_name:string ->
+  args:Yojson.Safe.t ->
+  unit ->
+  ack_outcome
+(** Acknowledge one consume-only tail by the exact call identity that
+    consumed it (design D4/§7): the operator has seen the outcome-unknown
+    warning. An ack is a warning acknowledgement and never a
+    re-authorization — nothing is re-applied, no remembered answer is
+    restored, no new attempt is permitted by it, and the
+    execution-ledger readback stays the only basis for any manual
+    disposition. The ack is durably appended before the count drops, so it
+    survives restarts the same way the consume it answers does. *)
 
 val shared : unit -> t
 (** The store the running server uses.

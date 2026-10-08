@@ -63,6 +63,7 @@ type t =
   { mutable expired : expired_ask list
   ; mutable remembered : remembered list
   ; mutable late_uncertain : int
+  ; mutable uncertain_keys : (string * string * string * string) list
   ; mutable journal_path : string option
   ; mutex : Stdlib.Mutex.t
   }
@@ -71,6 +72,7 @@ let create () =
   { expired = []
   ; remembered = []
   ; late_uncertain = 0
+  ; uncertain_keys = []
   ; journal_path = None
   ; mutex = Stdlib.Mutex.create ()
   }
@@ -147,11 +149,13 @@ let bind_to_journal ?now ~base_path t =
           | _ -> None
         in
         (* The replay state: live asks (recorded, not yet answered or
-           consumed), remembered answers, and the consumed identities whose
-           deliver row has not closed them. *)
+           consumed), remembered answers, the consumed identities whose
+           deliver row has not closed them, and the consume-only tails an
+           operator has already acknowledged. *)
         let live_asks = ref [] in
         let remembered = ref [] in
         let consumed = ref [] in
+        let acked = ref [] in
         List.iter
           (fun fields ->
             let op = read_field fields "op" in
@@ -262,8 +266,41 @@ let bind_to_journal ?now ~base_path t =
                             && cat <= at))
                         !consumed
                 | _ -> ())
+            | Some "ack_uncertain" -> (
+                (* The operator's acknowledgement that they have seen this
+                   consume-only tail (design D4/§7): a warning
+                   acknowledgement, never a re-authorization — nothing is
+                   re-applied, no memory is restored, and no new attempt is
+                   authorized. The acked consume leaves the count. *)
+                match (row_base_path, keeper, tool, fingerprint, at) with
+                | Some bp, Some k, Some tl, Some f, Some at ->
+                    acked :=
+                      (bp, k, tl, f, at) :: !acked
+                | _ -> ())
             | _ -> ())
           records;
+        (* Drop every consume that a later ack names. Matching is by
+           identity + at <= the ack's at, exactly how [deliver] closes the
+           same window — an ack is a [deliver]-shaped closure minus the
+           claim that anything was delivered. *)
+        let acked_consumes =
+          List.filter
+            (fun (cbp, ck, ctl, cf, cat) ->
+               List.exists
+                 (fun (abp, ak, atl, af, aat) ->
+                    String.equal cbp abp
+                    && String.equal ck ak
+                    && String.equal ctl atl
+                    && String.equal cf af
+                    && cat <= aat)
+                 !acked)
+            !consumed
+        in
+        let open_consumes =
+          List.filter
+            (fun consume -> not (List.mem consume acked_consumes))
+            !consumed
+        in
         (* A consume without a later deliver is the outcome-unknown window
            the design names: the decision returned to its caller, so the
            tool may have dispatched already — the journal alone cannot
@@ -275,12 +312,15 @@ let bind_to_journal ?now ~base_path t =
            authorization ceiling reads as aged history, not as an open
            question. *)
         let uncertain =
-          List.length
-            (List.filter
-               (fun (_, _, _, _, at) -> now -. at <= ttl_sec)
-               !consumed)
+          List.filter
+            (fun (_, _, _, _, at) -> now -. at <= ttl_sec)
+            open_consumes
         in
-        t.late_uncertain <- uncertain;
+        t.late_uncertain <- List.length uncertain;
+        t.uncertain_keys <-
+          List.map
+            (fun (bp, k, tl, f, _) -> (bp, k, tl, f))
+            uncertain;
         (* Newest-first, matching the order [note_timed_out] and
            [remember_late] keep in memory. *)
         t.expired <- !live_asks;
@@ -521,3 +561,45 @@ let take t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name ~tool_name
               | Ok () -> ()
               | Error () -> t.late_uncertain <- t.late_uncertain + 1);
               Some entry.remembered_decision))
+
+(* The D4/§7 operator acknowledgement of one consume-only tail. Nothing is
+   re-applied and nothing is restored — the ack only closes the warning, so
+   the count it drops is a count of acknowledged warnings, not of
+   re-authorized calls. The ack row is durably appended before the count
+   drops, so it survives restarts the same way the consume it answers
+   does. *)
+type ack_outcome =
+  | Acked
+  | Ack_not_journaled
+  | Not_uncertain
+
+let ack_uncertain t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
+    ~tool_name ~args () : ack_outcome =
+  let args_fingerprint = fingerprint_of args in
+  let identity = (base_path, keeper_name, tool_name, args_fingerprint) in
+  Stdlib.Mutex.protect t.mutex (fun () ->
+      let outcome : ack_outcome =
+        if not (List.mem identity t.uncertain_keys)
+        then Not_uncertain
+        else
+          match
+            append_record_locked t
+              [ ("op", `String "ack_uncertain")
+              ; ("base_path", `String base_path)
+              ; ("keeper", `String keeper_name)
+              ; ("tool", `String tool_name)
+              ; ("fingerprint", `String args_fingerprint)
+              ; ("at", `Float now)
+              ]
+          with
+          | Error () -> Ack_not_journaled
+          | Ok () ->
+              t.uncertain_keys <-
+                List.filter (fun key -> key <> identity) t.uncertain_keys;
+              t.late_uncertain <- List.length t.uncertain_keys;
+              Log.Keeper.info
+                "keeper_late_approval: operator acknowledged uncertain late-approval tail workspace=%s keeper=%s tool=%s (acknowledgement, not a re-authorization)"
+                base_path keeper_name tool_name;
+              Acked
+      in
+      outcome)

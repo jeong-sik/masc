@@ -314,8 +314,75 @@ let test_gate_resolve_workspace_precondition () =
      | Error (Server_dashboard_http.Unavailable _) -> ()
      | _ -> fail "matching Gate workspace did not reach approval lookup"))
 
-let test_gate_retry_workspace_precondition () =
-  let dir = test_dir () in
+(* The D4 recover route parses its [:id] exactly and refuses bodies whose
+   typed preconditions do not name a restart-latched attempt (design §5-4).
+   The queue's own CAS behavior is pinned in test_keeper_approval_queue;
+   this pins the HTTP surface's admission shape. *)
+let test_hitl_recover_route_and_preconditions () =
+  let module Recover = Server_dashboard_http_hitl_recover in
+  let base = "/api/v1/keepers/" in
+  check (option string)
+    "recover route extracts the approval id"
+    (Some "appr-1")
+    (Recover.route (base ^ "hitl/approvals/appr-1/recover"));
+  check (option string)
+    "recover route refuses non-recover keeper paths" None
+    (Recover.route (base ^ "hitl/approvals/appr-1/resolve"));
+  check (option string)
+    "recover route refuses an empty id" None
+    (Recover.route (base ^ "hitl/approvals//recover"));
+  let rearm_body ~status ~disposition =
+    `Assoc
+      [ "action", `String "rearm"
+      ; "id", `String "appr-1"
+      ; "input_hash", `String (String.make 64 'a')
+      ; "sequence", `Int 1
+      ; "slot_id", `String "slot-1"
+      ; "call_id", `String "call-1"
+      ; "plan_fingerprint", `String "fp-1"
+      ; "request_body_sha256", `String (String.make 64 'b')
+      ; ( "exact_attempt"
+        , `Assoc
+            [ "state", `String "bound"
+            ; "approval_id", `String "appr-1"
+            ; "input_hash", `String (String.make 64 'a')
+            ; "sequence", `Int 1
+            ; "slot_id", `String "slot-1"
+            ; "call_id", `String "call-1"
+            ; "plan_fingerprint", `String "fp-1"
+            ; "request_body_sha256", `String (String.make 64 'b')
+            ; "status", `String status
+            ; "quarantine_cause", `Null
+            ] )
+      ; "summary_attempt_disposition", `Assoc [ "code", `String disposition ]
+      ]
+  in
+  let parse fields =
+    match (fields : Yojson.Safe.t) with
+    | `Assoc pairs -> (
+      match Recover.parse_rearm_fields pairs with
+      | Ok _ -> "admitted"
+      | Error detail -> detail)
+    | _ -> "recover request must be an object"
+  in
+  check string
+    "a restart-quarantined in_flight rearm passes the typed preconditions"
+    "admitted"
+    (parse
+       (rearm_body ~status:"restart_quarantined" ~disposition:"in_flight"));
+  check string
+    "a completed attempt is not recoverable"
+    "recover rearm targets restart-latched exact attempts \
+     (Exact_restart_quarantined or Exact_released_recovery_required)"
+    (parse (rearm_body ~status:"completed" ~disposition:"in_flight"));
+  check string
+    "a settled disposition is not recoverable"
+    "recover rearm requires summary_attempt_disposition in_flight or \
+     persistence_uncertain"
+    (parse
+       (rearm_body ~status:"restart_quarantined" ~disposition:"settled"))
+
+let test_gate_retry_workspace_precondition () =  let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let config = Workspace.default_config dir in
     mkdir_p (Workspace.masc_root_dir config);
@@ -7905,6 +7972,8 @@ let () =
             test_gate_resolve_workspace_precondition;
           test_case "Gate retry workspace precondition" `Quick
             test_gate_retry_workspace_precondition;
+          test_case "HITL recover route and typed preconditions" `Quick
+            test_hitl_recover_route_and_preconditions;
           test_case "keeper memory cleanup routes and requests are closed" `Quick
             test_keeper_memory_cleanup_routes_and_closed_requests;
           test_case "keeper sensitive GET permissions are exact" `Quick

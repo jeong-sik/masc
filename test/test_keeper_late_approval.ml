@@ -441,17 +441,10 @@ let test_a_consume_without_deliver_reads_as_uncertain () =
         true;
       (* Simulate the crash window by hand: the process died between the
          consume append and the deliver append, so the journal holds a
-         consume row with no closing deliver row. *)
-      remove ();
-      (* The harness callback exposes only [journal], so rebuild the path
-         tree from the journal path itself before appending the row. *)
-      let gate_dir = Filename.dirname journal in
-      let masc_dir = Filename.dirname gate_dir in
-      let root = Filename.dirname masc_dir in
-      Unix.mkdir root 0o755;
-      Unix.mkdir masc_dir 0o755;
-      Unix.mkdir gate_dir 0o755;
-      let oc = open_out journal in
+         consume row with no closing deliver row. The row carries the
+         identity the ack will name (the same fingerprint [take] wrote in
+         the first life). *)
+      let oc = open_out_gen [ Open_append ] 0o644 journal in
       output_string oc
         (Yojson.Safe.to_string
            (`Assoc
@@ -459,7 +452,10 @@ let test_a_consume_without_deliver_reads_as_uncertain () =
              ; ("base_path", `String workspace)
              ; ("keeper", `String keeper)
              ; ("tool", `String "Edit")
-             ; ("fingerprint", `String "manual")
+             ; ( "fingerprint"
+               , `String
+                   (Masc.Keeper_approval_request_fingerprint.request_fingerprint
+                      (edit_input "lib/a.ml")) )
              ; ("at", `Float (Unix.gettimeofday ()))
              ])
         ^ "\n");
@@ -468,6 +464,37 @@ let test_a_consume_without_deliver_reads_as_uncertain () =
       check bool
         "the consume whose deliver never landed is the uncertain count"
         (Late.journal_uncertain second = 1)
+        true;
+      (* The D4 ack: the operator has seen the outcome-unknown warning. The
+         ack drops the count, stands in the journal across a restart, and
+         never turns into a re-offered decision. *)
+      check bool
+        "an ack names an existing uncertain tail"
+        (Late.ack_uncertain second ~base_path:workspace ~keeper_name:keeper
+           ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ()
+        = Late.Acked)
+        true;
+      check bool "the acked tail leaves the uncertain count"
+        (Late.journal_uncertain second = 0)
+        true;
+      (* The restart replays the ack row: the tail stays acknowledged, and
+         the ack never restores a remembered answer to re-authorize the
+         call (an ack is not a rearm). *)
+      let third = make () in
+      check bool "an ack survives the restart"
+        (Late.journal_uncertain third = 0)
+        true;
+      check bool
+        "an ack never re-authorizes the call"
+        (Late.take third ~base_path:workspace ~keeper_name:keeper
+           ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ()
+        = None)
+        true;
+      check bool
+        "acking a tail that stands nowhere is refused"
+        (Late.ack_uncertain third ~base_path:workspace ~keeper_name:keeper
+           ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ()
+        = Late.Not_uncertain)
         true)
 
 let () =

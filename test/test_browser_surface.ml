@@ -538,11 +538,22 @@ let test_keeper_hears_why_no_browser_is_connected () =
    request. The rejection names the work, the connections that serve it and
    which connected browser, if any, to retry on. *)
 let test_keeper_hears_which_connection_serves_the_work () =
+  (* The answer reads the BiDi host's record under the workspace, so this
+     case has a workspace of its own that nothing else writes to. *)
+  let workspace = Filename.temp_dir "masc-browser-surface-bidi-" "" in
+  let lane_directory = List.fold_left Filename.concat workspace [".masc"; "browser-lane"] in
+  Fun.protect ~finally:(fun () ->
+      if Sys.file_exists lane_directory then
+        Array.iter (fun name -> Sys.remove (Filename.concat lane_directory name))
+          (Sys.readdir lane_directory);
+      List.iter (fun dir -> if Sys.file_exists dir then Sys.rmdir dir)
+        [lane_directory; Filename.concat workspace ".masc"; workspace]) @@ fun () ->
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
       let module Lane = Browser_lane in
       let module Tools = Masc.Tool_misc_browser_lane in
+      let module Record = Masc.Browser_bidi_host_record in
       let module U = Yojson.Safe.Util in
       let info n transport : Lane.client_info =
         let raw = Printf.sprintf "60000000-0000-4000-8000-%012d" n in
@@ -557,7 +568,7 @@ let test_keeper_hears_which_connection_serves_the_work () =
         "scrollX",`Int 0;"scrollY",`Int 0] in
       let point = `Assoc ["x",`Float 0.5;"y",`Float 0.5] in
       let interact client fields =
-        let result, phase = Tools.handle_interact_with_phase ~base_path:no_workspace ~tool_name:"BrowserInteract"
+        let result, phase = Tools.handle_interact_with_phase ~base_path:workspace ~tool_name:"BrowserInteract"
           ~start_time:(Tool_timing.start ())
           (`Assoc (["lane",`String "live";"clientId",`String (id client);"tabId",`Int 1;
             "expectedUrl",`String "https://example.org/"] @ fields)) in
@@ -578,20 +589,36 @@ let test_keeper_hears_which_connection_serves_the_work () =
       check (list string) "the transport that serves it is named" ["webdriver_bidi"]
         U.(data |> member "servingTransports" |> to_list |> List.map to_string);
       check int "no connected browser serves it yet" 0 U.(data |> member "servingClients" |> to_list |> List.length);
-      check bool "so the remedy is the operator's, and says how" true
-        (String_util.contains_substring U.(data |> member "retry" |> to_string) "masc-browser-host --bidi-url");
+      let retry = U.(data |> member "retry" |> to_string) in
+      check bool "so the remedy is the operator's, and says where the steps are" true
+        (String_util.contains_substring retry "a BiDi browser host (docs/design/browser-bidi-live-host.md)");
+      (* The command is said once, by the part that knows this workspace. *)
+      check bool "the retry names no command of its own" false
+        (String_util.contains_substring retry "--bidi-url");
       (* Only BiDi serves this, so the answer carries what the BiDi host's own
          record says: here, that none has run for the workspace. *)
+      let host_said data = U.(data |> member "bidiHost" |> member "message" |> to_string) in
+      check (list string) "the BiDi host's state and its paragraph, and no record" ["state"; "message"]
+        U.(data |> member "bidiHost" |> to_assoc |> List.map fst);
       check string "the BiDi host's state is in the answer" "never_started"
         U.(data |> member "bidiHost" |> member "state" |> to_string);
-      check bool "with how one is attached" true
-        (String_util.contains_substring U.(data |> member "bidiHost" |> member "message" |> to_string)
-           "--remote-debugging-port");
-      check bool "and the launcher by itself" true
-        (String.ends_with ~suffix:"/.masc/browser-lane/host/launch"
-           U.(data |> member "bidiHost" |> member "attach" |> member "launcher" |> to_string));
-      check string "with what it is given" "--bidi-url ws://127.0.0.1:PORT/session"
-        U.(data |> member "bidiHost" |> member "attach" |> member "arguments" |> to_string);
+      List.iter (fun fragment ->
+          check bool ("with how one is attached: " ^ fragment) true
+            (String_util.contains_substring (host_said data) fragment))
+        [ "--remote-debugging-port PORT"
+        (* This workspace has no browser lane, so its launcher is not there yet. *)
+        ; "then runs " ^ Filename.concat workspace ".masc/browser-lane/host/launch"
+          ^ " --bidi-url ws://127.0.0.1:PORT/session"
+        ; "the operator first installs the lane by running the MASC browser host installer, \
+           install-host.sh" ];
+      (* Readers that keep the beginning of a rejection keep what decides. *)
+      let position key =
+        let rec find index = function
+          | [] -> fail (key ^ " is not in the answer")
+          | (name, _) :: rest -> if String.equal name key then index else find (index + 1) rest in
+        find 0 U.(data |> to_assoc) in
+      check bool "the host's state comes before the connection lists" true
+        (position "bidiHost" < position "servingClients" && position "retry" < position "bidiHost");
       let bidi = info 2 Lane.Webdriver_bidi in
       connect bidi;
       let data = interact extension hover in
@@ -618,7 +645,37 @@ let test_keeper_hears_which_connection_serves_the_work () =
       check int "a disconnected alternative is no longer offered" 0
         U.(data |> member "servingClients" |> to_list |> List.length);
       check string "host remedy returns only after the serving connection leaves" "never_started"
-        U.(data |> member "bidiHost" |> member "state" |> to_string)))
+        U.(data |> member "bidiHost" |> member "state" |> to_string);
+      (* A host Firefox refused a session leaves that as its ending, and
+         the Keeper is told what the operator does about it. *)
+      let held =
+        match Record.take ~base_path:workspace ~pid:4242 ~bidi_url:"ws://127.0.0.1:9222/session"
+                ~client_id:bidi.client_id ~now:1_791_000_000. with
+        | Ok { held; not_synced = _ } -> held
+        | Error refusal -> fail (Record.refusal_message refusal) in
+      (match Record.ended held ~reason:"BiDi command rejected: session not created"
+               ~session:Record.Session_refused ~now:1_791_000_060. with
+       | Ok () -> ()
+       | Error failure -> fail (Record.write_failure_message failure));
+      (match Record.release held with Ok () -> () | Error detail -> fail detail);
+      let data = interact extension hover in
+      check string "the last host's ending is in the answer" "ended"
+        U.(data |> member "bidiHost" |> member "state" |> to_string);
+      List.iter (fun fragment ->
+          check bool ("with what comes before the next host: " ^ fragment) true
+            (String_util.contains_substring (host_said data) fragment))
+        [ {|gave this reason: "BiDi command rejected: session not created".|}
+        ; "Firefox refused it a BiDi session"; "restarts that Firefox" ];
+      (* Work no BiDi connection does is refused without a word of the BiDi
+         host, also when nothing connected serves it. *)
+      ignore (Lane.disconnect_client ~client_id:extension.client_id);
+      let other_bidi = info 3 Lane.Webdriver_bidi in
+      connect other_bidi;
+      let data = interact other_bidi ["action",`String "activate_tab"] in
+      check int "no extension connection is there to offer" 0
+        U.(data |> member "servingClients" |> to_list |> List.length);
+      check bool "and the BiDi host is beside the point" false
+        (List.mem_assoc "bidiHost" U.(data |> to_assoc))))
 
 let test_scoped_scene_acknowledgement () =
   Eio_main.run (fun env ->

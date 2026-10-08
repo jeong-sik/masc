@@ -203,23 +203,56 @@ record: a host that held the lock under its predecessor's record would be
 read as that predecessor. A record that could not be written later does not
 stop a serving host; the next write that succeeds carries it.
 
-Three places read the record and say what it says, with how a host is
-attached:
+Three places read the record and say what it says, with what the operator
+does next:
 
 - `masc doctor` prints a `browser_bidi_host` line. It reads the files, so it
-  answers with no server running. A host that is attached is `satisfied`,
-  one still connecting `needs_verification`, none running `needs_setup`, and
-  a record that cannot be read `invalid`. A workspace with no browser lane
-  installed and no record has no such line.
+  answers with no server running. The dashboard's setup check
+  (`GET /api/v1/setup/status`) is the same check inside a server.
+  - `satisfied`: a host runs and the server that answers lists its client.
+    That is where hover and drag are served.
+  - `needs_verification`: a host runs and that is all that is known. It is
+    still connecting, the check runs outside a server as `masc doctor` does,
+    or the answering server does not list the host's client.
+  - `needs_setup`: none runs.
+  - `invalid`: the record or its lock cannot be read.
+
+  A workspace with no browser lane installed and no record has no such line.
 - `GET /api/v1/dashboard/browser-lane/clients` adds `bidiHost` beside
-  `clients`: `state` (`never_started`, `running`, `ended`, `died`,
-  `unreadable`), the `record`, why it is unreadable as `detail`, the host
-  command as `attach` (`launcher` and `arguments`), and the same sentence as
-  `message`. A server also says whether its own client list has the host the
-  record names.
+  `clients`:
+  - `state`: `never_started`, `running`, `ended`, `died` or `unreadable`.
+  - What the state was read from: the `record`, whether the host's lock was
+    held as `lock_held`, and why either cannot be read as `detail`. A reader
+    works the state out again from these and refuses a report whose `state`
+    is another.
+  - `attach`: the host command as `launcher` and `arguments`, and
+    `launcher_state` (`installed`, `not_installed`, `needs_reinstall`).
+  - `message`: the paragraph the doctor prints.
 - A Keeper whose hover or drag is refused as `live_transport_unsupported`
-  with no BiDi connection to offer gets the same `bidiHost` in the answer,
-  to pass on to the operator.
+  while no connected browser serves it gets `bidiHost` in the answer, with
+  `state` and `message` only, to pass on to the operator. An answer that
+  offers a connection in `servingClients` has no `bidiHost`.
+
+The paragraph says what comes before the next host. That follows what became
+of the last one's session:
+
+| The last host | Before the next one |
+|---|---|
+| ended, session `none` | Nothing: the host command alone, while that Firefox still runs. |
+| ended, session `left` | Restart that Firefox. |
+| ended, session `unknown` | Start that Firefox again, restarting it if it still runs. |
+| ended, session `refused` | Stop the other host attached to that Firefox or, when none is, restart that Firefox. |
+| died | Run the host. When Firefox refuses it a session, restart that Firefox and run it again. |
+
+When the workspace has no launcher, or one that is not as an installation
+wrote it, the paragraph says to install the lane first.
+
+A host can run and be attached while the answering server does not list its
+client. Then hover and drag are refused on that server, and the paragraph
+names what makes the two differ: the host polls another server (an exported
+`MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT` in its shell), it has not polled
+for 120 seconds and the server ended its connection, or the server started
+moments ago.
 
 Attaching again is the host command alone. A host that is stopped, or ends
 by itself, first ends the BiDi session it asked for; Firefox keeps running

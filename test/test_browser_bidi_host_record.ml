@@ -343,16 +343,19 @@ let test_a_reader_follows_a_host_from_start_to_death () =
      (match Record.observe ~base_path:base with
       | Record.Running running -> check bool "the record says so" true (running.attached_at <> None)
       | other -> failf "an attached host is %s" (said other));
-     (* With no server in this process, as for masc doctor. *)
+     (* With no server in this process, as for masc doctor. A host serves
+        on the server that lists it, and none is observed here. *)
      (let condition, message = doctor base in
-      check bool "the doctor is satisfied by an attached host" true
-        (condition = Onboarding_status.Satisfied);
+      check bool "outside a server the doctor does not vouch for an attached host" true
+        (condition = Onboarding_status.Needs_verification);
       check bool "and names it" true
         (String_util.contains_substring message (Printf.sprintf "(pid %d) is attached to" pid));
       check bool "without a server it does not claim the host polls one" true
         (String_util.contains_substring message "not observed here"));
      check bool "the launcher observation carries the same state" true
-       (match (Launcher.observe ~base_path:base ~server:Launcher.Not_serving).bidi_host with
+       (match
+          (Launcher.observe ~base_path:base ~server:(fun () -> Launcher.Not_serving)).bidi_host
+        with
         | Record.Running _ -> true
         | Record.Never_started | Record.Ended _ | Record.Died _ | Record.Unreadable _ -> false);
      (* Asking needs no leave to write the lock file. *)
@@ -372,7 +375,12 @@ let test_a_reader_follows_a_host_from_start_to_death () =
    | other -> failf "a host that exited without an ending is %s" (said other));
   let condition, message = doctor base in
   check bool "the doctor asks for a host again" true (condition = Onboarding_status.Needs_setup);
-  check bool "and says the last one died" true (String_util.contains_substring message "killed or crashed")
+  check bool "and says the last one died" true (String_util.contains_substring message "killed or crashed");
+  (* This workspace has a record and no launcher, as after a host started
+     from an executable on the PATH. *)
+  check bool "and does not say to run a launcher that is not there" true
+    (String_util.contains_substring message
+       "No browser lane is installed in this workspace, so that launcher is not there yet")
 
 (* What a process other than this one finds: it tries to take the workspace,
    as a second host would. Only another process sees the kernel's lock; this

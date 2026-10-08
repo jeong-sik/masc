@@ -189,6 +189,90 @@ let test_a_refused_poll_names_its_reason () =
       (Browser_lane.(registration_refusal_of_wire (registration_refusal_to_wire refusal)) = Some refusal))
     Browser_lane.[ Client_retired; Client_identity_changed ]
 
+(* What the connection list answers of the BiDi host: that host's own
+   record, read from the workspace the server serves, beside the clients the
+   server itself lists. *)
+let test_the_connection_list_says_where_the_bidi_host_stands () =
+  let module Record = Masc.Browser_bidi_host_record in
+  let module Launcher = Masc.Browser_lane_launcher in
+  let module U = Yojson.Safe.Util in
+  let base = Filename.temp_dir "masc-browser-lane-clients-" "" in
+  let lane = List.fold_left Filename.concat base [ ".masc"; "browser-lane" ] in
+  let host_id = "50000000-0000-4000-8000-000000000006" in
+  let lane_id = match Browser_lane.client_id_of_string host_id with Ok id -> id | Error detail -> fail detail in
+  let listing () =
+    match Server_routes_http_browser_surface.clients_listing ~base_path:base with
+    | `Assoc fields -> fields
+    | _ -> fail "the connection list is not an object"
+  in
+  let host fields = List.assoc "bidiHost" fields in
+  let client_ids fields =
+    U.(List.assoc "clients" fields |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Browser_lane.withdraw_serving_port ();
+      if Sys.file_exists lane then
+        Array.iter (fun name -> Sys.remove (Filename.concat lane name)) (Sys.readdir lane);
+      List.iter (fun dir -> if Sys.file_exists dir then Sys.rmdir dir)
+        [ lane; Filename.concat base ".masc"; base ])
+  @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  Browser_lane.install_serving_port 8935;
+  let fields = listing () in
+  check (list string) "the two things it answers" [ "clients"; "bidiHost" ] (List.map fst fields);
+  check (list string) "no client is connected" [] (client_ids fields);
+  check string "and no host has run for this workspace" "never_started"
+    U.(host fields |> member "state" |> to_string);
+  check string "the launcher is this workspace's"
+    (Filename.concat base ".masc/browser-lane/host/launch")
+    U.(host fields |> member "attach" |> member "launcher" |> to_string);
+  check string "which has no browser lane to launch from" "not_installed"
+    U.(host fields |> member "attach" |> member "launcher_state" |> to_string);
+  (* A host as it stands while it serves: it holds its record, and the
+     server lists the client the record names. *)
+  let held =
+    match
+      Record.take ~base_path:base ~pid:(Unix.getpid ()) ~bidi_url:"ws://127.0.0.1:9222/session"
+        ~client_id:lane_id ~now:1_791_000_000.
+    with
+    | Ok { held; not_synced = _ } -> held
+    | Error refusal -> fail (Record.refusal_message refusal)
+  in
+  Eio.Switch.on_release sw (fun () -> ignore (Record.release held : (unit, string) result));
+  (match Record.attached held ~now:1_791_000_002. with
+   | Ok () -> ()
+   | Error failure -> fail (Record.write_failure_message failure));
+  let said fields = U.(host fields |> member "message" |> to_string) in
+  let fields = listing () in
+  check string "a host that runs" "running" U.(host fields |> member "state" |> to_string);
+  check bool "and that this server does not list is said to be missing here" true
+    (String_util.contains_substring (said fields) "This server does not list that client");
+  let info : Browser_lane.client_info =
+    { client_id = lane_id; browser = Browser_lane.Firefox; version = "157.0"; engine_version = "157.0"
+    ; transport = Browser_lane.Webdriver_bidi }
+  in
+  (match Browser_lane.register info with
+   | Ok _ -> ()
+   | Error refusal -> fail (Browser_lane.registration_refusal_to_wire refusal));
+  Eio.Switch.on_release sw (fun () -> ignore (Browser_lane.disconnect_client ~client_id:lane_id));
+  let fields = listing () in
+  check (list string) "the server lists the host's client" [ host_id ] (client_ids fields);
+  check string "under the ID the host's record names" host_id
+    U.(host fields |> member "record" |> member "client_id" |> to_string);
+  check bool "and says the host polls it" true
+    (String_util.contains_substring (said fields) "It polls this server.");
+  (match Launcher.bidi_host_report_of_json (host fields) with
+   | Ok { state = Record.Running { pid; _ }; _ } -> check int "a reader of this build reads the report" (Unix.getpid ()) pid
+   | Ok _ -> fail "the report was read as another state"
+   | Error detail -> fail detail);
+  (* A process that is no server does not say what a server would. *)
+  Browser_lane.withdraw_serving_port ();
+  check bool "without a bound listener it does not claim to be polled" true
+    (String_util.contains_substring (said (listing ())) "not observed here")
+
 let () =
   run "browser lane routes"
     [ ( "discovery"
@@ -198,4 +282,7 @@ let () =
       , [ test_case "answers only the lane token and registers no client" `Quick
             test_ping_answers_only_the_lane_token_and_registers_no_client ] )
     ; ( "poll"
-      , [ test_case "a refused poll names its reason" `Quick test_a_refused_poll_names_its_reason ] ) ]
+      , [ test_case "a refused poll names its reason" `Quick test_a_refused_poll_names_its_reason ] )
+    ; ( "connection list"
+      , [ test_case "says where the BiDi host stands" `Quick
+            test_the_connection_list_says_where_the_bidi_host_stands ] ) ]

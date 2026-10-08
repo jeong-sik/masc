@@ -186,25 +186,24 @@ let keeper_checks base_path =
    operator and a Keeper are told the same cause. *)
 (* The BiDi host is read from its own record on disk, so this answers with
    no server running. A workspace with no browser lane installed and no host
-   record has nothing to say about one. *)
+   record has nothing to say about one. A running host is satisfied only
+   where the observed server lists its client: that is where hover and drag
+   are served. *)
 let browser_bidi_host_check (observation : Browser_lane_launcher.t) =
   let report condition =
     [check Browser_bidi_host condition (Browser_lane_launcher.bidi_host_message observation)
        [Inspect_configuration]]
   in
-  match observation.bidi_host, observation.launcher with
-  | Browser_bidi_host_record.Never_started, Browser_lane_launcher.Not_installed -> []
-  | ( Browser_bidi_host_record.Never_started
-    , ( Browser_lane_launcher.Undeclared | Browser_lane_launcher.Unreadable
-      | Browser_lane_launcher.Describes_another_launcher | Browser_lane_launcher.Follows_workspace ) )
-  | (Browser_bidi_host_record.Ended _ | Browser_bidi_host_record.Died _), _ -> report Needs_setup
-  | Browser_bidi_host_record.Running { attached_at = None; _ }, _ -> report Needs_verification
-  | Browser_bidi_host_record.Running { attached_at = Some _; _ }, _ -> report Satisfied
-  | Browser_bidi_host_record.Unreadable _, _ -> report Invalid
+  match Browser_lane_launcher.bidi_host_verdict observation with
+  | Browser_lane_launcher.Bidi_absent -> []
+  | Browser_lane_launcher.Bidi_serving -> report Satisfied
+  | Browser_lane_launcher.Bidi_unverified -> report Needs_verification
+  | Browser_lane_launcher.Bidi_not_running -> report Needs_setup
+  | Browser_lane_launcher.Bidi_unreadable -> report Invalid
 
 let browser_lane_check base_path =
   let observation =
-    Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
+    Browser_lane_launcher.observe ~base_path ~server:Browser_lane_launcher.current_server in
   let message = Browser_lane_launcher.message observation in
   (match Browser_lane_launcher.verdict observation with
    | Browser_lane_launcher.Absent -> []

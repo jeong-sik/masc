@@ -445,42 +445,15 @@ open Shared_json
 
 module Stderr = Runtime_official_client_json.Stderr
 
+let parse_json_value ~stage text =
+  try Ok (Yojson.Safe.from_string text) with
+  | Yojson.Json_error detail -> protocol_error stage ("invalid JSON: " ^ detail)
+;;
+
 let parse_json ~stage text =
-  let parsed =
-    try Ok (Yojson.Safe.from_string text) with
-    | Yojson.Json_error detail -> protocol_error stage ("invalid JSON: " ^ detail)
-  in
-  let* json = parsed in
-  (* A Claude heartbeat is an observation that must be typed and ignored when
-     malformed. Its decoder performs field-by-field duplicate checks, so let
-     only an unambiguous top-level [type = tool_progress] frame carrying at
-     least one [heartbeat = true] reach it. Every other frame keeps the strict
-     whole-object duplicate-key contract. The discriminant is parsed data,
-     never a substring or a provider-specific identifier convention. *)
-  let heartbeat_observation =
-    match json with
-    | `Assoc fields ->
-      let type_values =
-        List.filter_map
-          (fun (name, value) -> if name = "type" then Some value else None)
-          fields
-      in
-      let heartbeat_values =
-        List.filter_map
-          (fun (name, value) -> if name = "heartbeat" then Some value else None)
-          fields
-      in
-      (match type_values with
-       | [ `String "tool_progress" ] ->
-         List.exists (function `Bool true -> true | _ -> false) heartbeat_values
-       | _ -> false)
-    | _ -> false
-  in
-  if heartbeat_observation
-  then Ok json
-  else
-    let* () = validate_unique_object_keys ~stage ~path:"$" json in
-    Ok json
+  let* json = parse_json_value ~stage text in
+  let* () = validate_unique_object_keys ~stage ~path:"$" json in
+  Ok json
 ;;
 
 let optional_int stage name fields =
@@ -881,7 +854,41 @@ let handle_control_request
     Error (Unsupported_control_request unsupported)
 ;;
 
-let parse_wire_line line = parse_json ~stage:"stream-json message" line
+let parse_wire_line line =
+  let stage = "stream-json message" in
+  let* json = parse_json_value ~stage line in
+  (* A Claude heartbeat is an observation that must be typed and ignored when
+     malformed. Its decoder performs field-by-field duplicate checks, so let
+     only an unambiguous top-level [type = tool_progress] frame carrying at
+     least one [heartbeat = true] reach it. Every other frame keeps the strict
+     whole-object duplicate-key contract. The discriminant is parsed data,
+     never a substring or a provider-specific identifier convention. *)
+  let heartbeat_observation =
+    match json with
+    | `Assoc fields ->
+      let type_values =
+        List.filter_map
+          (fun (name, value) -> if name = "type" then Some value else None)
+          fields
+      in
+      let heartbeat_values =
+        List.filter_map
+          (fun (name, value) -> if name = "heartbeat" then Some value else None)
+          fields
+      in
+      (match type_values with
+       | [ `String "tool_progress" ] ->
+         List.exists (function `Bool true -> true | _ -> false) heartbeat_values
+       | _ -> false)
+    | _ -> false
+  in
+  if heartbeat_observation
+  then Ok json
+  else
+    let* () = validate_unique_object_keys ~stage ~path:"$" json in
+    Ok json
+;;
+
 
 let wire_fields json =
   let stage = "stream-json message" in

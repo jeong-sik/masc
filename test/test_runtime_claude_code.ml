@@ -2473,7 +2473,7 @@ let test_unknown_stream_type_fails_closed () =
     | Ok _ -> fail "unknown stream type was silently ignored")
 ;;
 
-let heartbeat_frame ?(uuid="heartbeat-1") ?(parent="native-call-1") ?(session="__SESSION__") ?(tool_name="Bash") ?(seconds=30) () =
+let heartbeat_frame ?(uuid="heartbeat-1") ?(parent="native-call-1") ?(session="__SESSION__") ?(tool_name="Read") ?(seconds=30) () =
   Yojson.Safe.to_string (`Assoc ["type",`String "tool_progress"; "heartbeat",`Bool true;
     "session_id",`String session; "uuid",`String uuid; "tool_use_id",`String "opaque-progress-id";
     "parent_tool_use_id",`String parent; "tool_name",`String tool_name;
@@ -2520,6 +2520,15 @@ let test_root_heartbeat_owns_only_current_call () =
           ["native-call-1",30;"native-call-1",3] reports;
         check int "completed invocation cannot be reopened by replayed assistant" 1
           (List.length (List.filter (function Runtime_claude_code.Native_tool_started _ -> true | _ -> false) !seen)))
+;;
+
+let test_heartbeat_exception_cannot_relax_auth_json () =
+  with_fixture
+    ~auth_json:{|{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","type":"tool_progress","heartbeat":true,"loggedIn":false}|}
+    [] (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "stream heartbeat exception admitted ambiguous authentication")
 ;;
 
 let test_child_heartbeat_and_unknown_result_scope_are_unowned () =
@@ -3058,6 +3067,7 @@ let () =
             "tool progress keeps stream open"
             `Quick
             test_tool_progress_keeps_stream_open
+        ; test_case "heartbeat exception is stream-only" `Quick test_heartbeat_exception_cannot_relax_auth_json
         ; test_case "root heartbeat scope and UUID ownership" `Quick test_root_heartbeat_owns_only_current_call
         ; test_case "child and missing result scope heartbeat ignored" `Quick test_child_heartbeat_and_unknown_result_scope_are_unowned
         ; test_case

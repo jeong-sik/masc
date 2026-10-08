@@ -82,9 +82,9 @@ claim to reconstruct missing scope provenance in those older journals.
 
 | Runtime | Turn and text events | Thinking | Tools and progress |
 | --- | --- | --- | --- |
-| Codex app-server | `Turn_started` becomes `MessageStart`; agent-message deltas and completed-item suffixes become `TextDelta`; terminal completion becomes `MessageDelta` and `MessageStop`. Item IDs separate messages within a turn. | `item/reasoning/summaryTextDelta` and `item/reasoning/textDelta` become `ThinkingDelta`. The item ID and summary/content index identify each part; completed reasoning contributes only missing suffixes. | Dynamic tools carry call IDs and argument snapshots. Native `item/started` and `item/completed` produce observed start/end with identity and name. Command/file output deltas and MCP progress messages are not projected as chat progress. |
-| Claude Code | Partial SDK text and complete assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | Partial `thinking_delta` and complete thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end. `tool_progress` keeps transport activity alive but is not projected as chat progress. |
-| Antigravity | Init opens the normalized turn; step text and terminal response reconciliation provide text; result closes the turn. Step index identifies the source. | No typed thinking event exists in this adapter. `Internal` is not established as a reasoning payload. Thinking support is unverified. | MCP callbacks provide dynamic-tool events; tool steps provide native observed start/end using conversation ID and step index. `Done` and `Step_error` currently collapse to the same native end event. |
+| Codex app-server | `Turn_started` becomes `MessageStart`; agent-message deltas and completed-item suffixes become `TextDelta`; terminal completion becomes `MessageDelta` and `MessageStop`. Item IDs separate messages within a turn. | `item/reasoning/summaryTextDelta` and `item/reasoning/textDelta` become `ThinkingDelta`. The item ID and summary/content index identify each part; completed reasoning contributes only missing suffixes. | Dynamic tools carry call IDs and argument snapshots. Native `item/started` and `item/completed` produce observed start/end with identity and name. Known completed-item status and nullable command exit code remain native metadata. Command/file output deltas and MCP progress messages are not projected as chat progress. |
+| Claude Code | Partial SDK text and complete assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | Partial `thinking_delta` and complete thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end with the tool result’s optional `is_error` flag. `tool_progress` keeps transport activity alive but is not projected as chat progress. |
+| Antigravity | Init opens the normalized turn; step text and terminal response reconciliation provide text; result closes the turn. Step index identifies the source. | No typed thinking event exists in this adapter. `Internal` is not established as a reasoning payload. Thinking support is unverified. | MCP callbacks provide dynamic-tool events; tool steps provide native observed start/end using conversation ID and step index. `Done` reports native completion; `Step_error` reports a native error. Neither is a MASC execution receipt. |
 | GLM Coding | The configured `openai-compatible-http` route uses AGENT_CORE SSE parsing with message start/stop, text deltas, and indexed blocks. | Provider reasoning fields accepted by the configured streaming dialect produce `ThinkingDelta` or `ReasoningDetailsDelta`. Absence of a provider reasoning payload produces no invented thinking. | Indexed tool calls carry their IDs, names, and argument deltas. MASC execution receipts determine tool execution results. Official-client native-tool notifications do not apply to this HTTP route. |
 
 ## Source boundaries
@@ -130,8 +130,7 @@ through the Keeper bridge, server SSE projection and journal replay in
 `test_tui_chat_response_origins.ml`.
 
 Provider-internal subturns are not fabricated as completed Keeper turns. Native
-progress payloads, native success/failure outcomes, and Antigravity reasoning remain
-separate missing capabilities. Provider omissions and opaque signatures cannot be
+progress payloads and Antigravity reasoning remain separate missing capabilities. Provider omissions and opaque signatures cannot be
 recovered by a renderer.
 
 Keeper operation events and autonomous journal notifications carry a typed runtime
@@ -151,3 +150,61 @@ binding; `test_grpc_workspace.ml` opens actual Subscribe handlers for the same
 agent in two roots and verifies sibling subscriptions survive another's closure.
 These are source-added regression cases, not a claim that this change was executed
 in a local application or deployment.
+
+## Native completion reports
+
+`Runtime_native_tools.completion` retains provider completion evidence separately
+from a physical MASC tool execution. A native report never emits `Tool_result_ready`,
+never invents `execution_id`, and never changes a native row to MASC `Returned` or
+`Failed`. Compact/full rows and the result detail show the same typed observation.
+Reported errors, declines and nonzero exit codes remain in the compact trouble
+row when the block is large enough to fold into separate inventory/trouble rows.
+
+| Source field | Typed observation | Meaning on the pane |
+| --- | --- | --- |
+| Codex known tool `status=completed` | `Completion_reported` | Native completion reported; no inferred successful exit. |
+| Codex `status=failed` / `declined` | `Error_reported` / `Decline_reported` | Provider error / decline reported. |
+| Codex command `exitCode` | `exit_code : int option` | Retain explicit zero, nonzero, negative, or absence independently of status. |
+| Claude tool result `is_error=true` / `false` | `Result_received {is_error=Some ...}` | Error reported / no error reported. This does not establish that execution occurred. |
+| Claude tool result without `is_error` | `Result_received {is_error=None}` | Result received; error flag not reported. This is a normal optional field, not malformed input. |
+| Antigravity `Done` / `Step_error` | `Completion_reported` / `Error_reported` | Native completion / native error reported. |
+| Generic block stop or absent provider status | `End_observed` | End observed; outcome not reported. |
+| Unrecognized Codex status string | `Unrecognized_status` | Preserve the reported status, without assigning success or failure. |
+
+Codex evidence is its installed 0.160.1 app-server contract:
+[ThreadItem](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts)
+and [CommandExecutionStatus](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/typescript/v2/CommandExecutionStatus.ts).
+Claude Code 2.1.292's installed `tool_result` schema makes `is_error` optional;
+[Anthropic's tool-result contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
+also gives successful examples omitting it. The installed CLI documents that an
+error flag can accompany rejection, permission denial, interruption or cancellation,
+so no native error becomes proof of an executed MASC tool.
+
+The Keeper adapter calls the typed completion observer at the original native
+block index before its generic block stop. The chat producer stamps the current
+stream scope immediately and transports the report on the same worker FIFO.
+Autonomous turns process both callbacks under the existing stream mutex. The
+bridge requires an already-open native occurrence at that scope/index with matching
+optional call ID; mismatched scope, ID, or MASC authority publishes a mapping error.
+A matching report closes the native row once; subsequent generic stops and repeated
+reports cannot create another end. No completion guesses identity from a name or
+from tool text. Missing starts/identity are not repaired by creating synthetic tools.
+
+The journal and `KEEPER_NATIVE_TOOL_END` custom event carry the same `completion`
+object. End events with no such member mean `End_observed`; a present
+malformed object is a decode error, including duplicate keys and fields outside
+the selected outcome variant. Unknown status text goes through redaction and
+terminal text sanitization. This unit does not preserve native output/progress,
+result content, elapsed duration, or a vendor-native execution receipt. Muse retains
+its existing unknown completion semantics; GLM Coding HTTP argument ends still wait
+for the actual MASC execution callback.
+
+Actual Codex command items, Claude assistant/tool-result envelopes, and Antigravity
+step fixtures pass through their runtime parsers and adapters into
+[`native_tool_outcome_fixture.ml`](../../test/native_tool_outcome_fixture.ml). That
+helper uses the production bridge, journal codec, server SSE encoder, live decoder,
+log and transcript projection to compare reports and display. Additional cases in
+[`test_tui_native_tool_outcomes.ml`](../../test/test_tui_native_tool_outcomes.ml)
+cover unknown ends, duplicate stops, wrong scope/ID/authority, absent versus malformed
+metadata, and unchanged HTTP execution receipts. These tests are authored, not
+locally executed; syntax parsing is not type checking or runtime proof.

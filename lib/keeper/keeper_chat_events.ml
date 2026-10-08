@@ -132,7 +132,7 @@ type keeper_chat_event =
       ; tool_call_id : string option
       }
   | Native_tool_start of native_tool
-  | Native_tool_end of native_tool
+  | Native_tool_end of native_tool * Runtime_native_tools.completion
   | Tool_approval_requested of
       { tool_call_id : string
       ; tool_call_name : string

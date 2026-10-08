@@ -47,6 +47,13 @@ val record_tool_result : state -> Keeper_chat_events.tool_stream_occurrence -> s
 (** Preserve this committed result against outer cancellation/fallback, without
     exempting it from actual block/delta protocol conflicts. *)
 
+val finish_native_tool :
+  redact_text:(string -> string) -> stream_scope:int -> block_index:int ->
+  tool_call_id:string option -> Runtime_native_tools.completion -> state -> translated_event
+(** Finish only the native occurrence already opened at this exact scope and
+    index. The following AGENT_CORE block stop cannot emit a second end.
+    A native report never commits or updates a MASC execution receipt. *)
+
 val fail_stream : state -> reason:string -> translated_event
 (** Quarantine every tool occurrence in the current provider scope when the
     outer transport/cancellation boundary fails after the typed stream reader

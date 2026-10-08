@@ -1025,13 +1025,21 @@ let decode_custom_event ~request state fields =
             || String.equal name "KEEPER_NATIVE_TOOL_END" then
       let native_surface = name ^ ".value" in
       let* native_fields = exact_object_fields ~surface:native_surface
-          ~allowed:["toolStreamScope"; "toolCallBlockIndex"; "providerMessageId";
-                    "toolCallId"; "toolCallName"] value
+          ~allowed:(["toolStreamScope"; "toolCallBlockIndex"; "providerMessageId";
+                    "toolCallId"; "toolCallName"]
+                    @ (if String.equal name "KEEPER_NATIVE_TOOL_END" then ["completion"] else [])) value
           |> Result.map_error (fun detail -> Malformed_event detail) in
       let* _ = decode_tool_occurrence ~surface:native_surface native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
       let* _ = optional_string ~surface:native_surface "toolCallName" native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
+      let* () = match List.assoc_opt "completion" native_fields with
+        | None -> Ok ()
+        | Some json ->
+            Runtime_native_tools.completion_of_json json
+            |> Result.map (fun _ -> ())
+            |> Result.map_error (fun detail -> Malformed_event (native_surface ^ ": " ^ detail))
+      in
       Ok state
     else if String.equal name "KEEPER_REPLY_DETAILS" then
       match state.reply_details with

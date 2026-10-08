@@ -541,10 +541,10 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
                ; origin = Runtime_native_tools.Built_in
                }
            ; Native_tool_finished
-               { identity = Some (Runtime_native_tools.Call_id "native-command-1")
+               { observation = { identity = Some (Runtime_native_tools.Call_id "native-command-1")
                ; tool_name = Some "commandExecution"
                ; origin = Runtime_native_tools.Built_in
-               }
+               }; completion = _ }
            ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
            ; Text_delta {item_id=Some "message-1"; delta="SUBSCRIPTION_OK"}
            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
@@ -2647,10 +2647,10 @@ let test_mcp_item_outlasting_the_idle_window_completes () =
                 ; origin = Runtime_native_tools.Mcp_wrapper
                 }
             ; Native_tool_finished
-                { identity = Some (Runtime_native_tools.Call_id "native-mcp-1")
+                { observation = { identity = Some (Runtime_native_tools.Call_id "native-mcp-1")
                 ; tool_name = Some "fixture/probe"
                 ; origin = Runtime_native_tools.Mcp_wrapper
-                }
+                }; completion = _ }
             ; Text_delta { item_id = Some "message-1"; delta = "MASC_SUBSCRIPTION_OK" }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
@@ -4253,7 +4253,7 @@ let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
     ?(initial_messages = []) ?base_path ?raw_trace_path ?session_id
-    ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
+    ?on_native_tool_completion ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model ?accept () =
@@ -4315,7 +4315,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ?context
                       ~raw_trace
                       ?session_id
-                      ?on_event
+                      ?on_native_tool_completion ?on_event
                       ?on_request_attribution
                       ~sw
                       ~net:(Eio.Stdenv.net env)
@@ -4894,6 +4894,67 @@ let test_keeper_preserves_codex_reasoning_and_tool_order () =
             check (list int) "native end closes the original block" [3] stopped;
             check string "reasoning is not the assistant answer" "MASC_SUBSCRIPTION_OK"
               (keeper_response_text result))) [false; true]
+;;
+
+let test_native_completion_reaches_tui () =
+  let open Runtime_native_tools in
+  List.iter (fun (status, exit_code, outcome) ->
+    let completion = {outcome; exit_code} in
+    let completed = `Assoc ["method", `String "item/completed"; "params", `Assoc
+      ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+       "item", `Assoc (["type", `String "commandExecution";
+         "id", `String "native-command-1"]
+         @ Option.to_list (Option.map (fun s -> "status", `String s) status)
+         @ Option.to_list (Option.map (fun n -> "exitCode", `Int n) exit_code))]]
+      |> Yojson.Safe.to_string in
+    let fixture = Native_tool_outcome_fixture.create () in
+    with_fixture
+      [init_result; account_chatgpt; thread_result; turn_result;
+       native_command_started; native_command_started; completed; item_completed; turn_completed]
+      (fun cli_path ->
+        match run_keeper_turn ~cli_path ~model:"gpt-fixture"
+          ~on_event:(Native_tool_outcome_fixture.on_event fixture)
+          ~on_native_tool_completion:(Native_tool_outcome_fixture.on_completion fixture) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ -> Native_tool_outcome_fixture.check fixture ~expected:[completion]))
+    [Some "completed", None, Completion_reported;
+     Some "completed", Some 0, Completion_reported;
+     Some "completed", Some 17, Completion_reported;
+     Some "failed", Some 2, Error_reported;
+     Some "declined", None, Decline_reported;
+     Some "future-status", None, Unrecognized_status "future-status";
+     None, None, End_observed]
+;;
+
+(* An item type this runtime does not model is still shown as a native tool,
+   so the status the provider reports for it reaches the same report. *)
+let test_unclassified_native_item_keeps_its_reported_status () =
+  let open Runtime_native_tools in
+  let item method_ kind status = `Assoc ["method", `String method_; "params", `Assoc
+    ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+     "item", `Assoc (["type", `String kind; "id", `String "native-item-1"]
+       @ Option.to_list (Option.map (fun s -> "status", `String s) status))]]
+    |> Yojson.Safe.to_string in
+  List.iter (fun kind ->
+    List.iter (fun (status, outcome) ->
+      let fixture = Native_tool_outcome_fixture.create () in
+      with_fixture
+        [init_result; account_chatgpt; thread_result; turn_result;
+         item "item/started" kind (Some "inProgress"); item "item/completed" kind status;
+         item_completed; turn_completed]
+        (fun cli_path ->
+          match run_keeper_turn ~cli_path ~model:"gpt-fixture"
+            ~on_event:(Native_tool_outcome_fixture.on_event fixture)
+            ~on_native_tool_completion:(Native_tool_outcome_fixture.on_completion fixture) () with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok _ ->
+            Native_tool_outcome_fixture.check fixture ~expected:[{outcome; exit_code = None}]))
+      [Some "completed", Completion_reported;
+       Some "failed", Error_reported;
+       Some "declined", Decline_reported;
+       Some "future-status", Unrecognized_status "future-status";
+       None, End_observed])
+    ["collabAgentToolCall"; "imageGeneration"; "futureToolItem"]
 ;;
 
 let test_codex_reasoning_rejects_wrong_turn () =
@@ -7482,6 +7543,9 @@ let () =
   run "runtime codex app-server"
     [ ( "reasoning", [test_case "Keeper retains reasoning before native tools and answer" `Quick
             test_keeper_preserves_codex_reasoning_and_tool_order
+        ; test_case "native completion through adapter, journal, SSE and TUI" `Quick test_native_completion_reaches_tui
+        ; test_case "unclassified native item keeps its reported status" `Quick
+            test_unclassified_native_item_keeps_its_reported_status
         ; test_case "reasoning belongs to the active turn" `Quick test_codex_reasoning_rejects_wrong_turn] )
     ; ( "RPC capacity", [test_case "blank completion closes identity across four messages" `Quick
             test_blank_completion_closes_identity_across_four_messages

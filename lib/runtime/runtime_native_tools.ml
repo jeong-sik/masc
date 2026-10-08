@@ -31,6 +31,77 @@ type observation =
 
 type exact_action = action_identity * string
 
+type completion_outcome =
+  | End_observed
+  | Completion_reported
+  | Error_reported
+  | Decline_reported
+  | Result_received of { is_error : bool option }
+  | Unrecognized_status of string
+
+type completion = { outcome : completion_outcome; exit_code : int option }
+type finished = { observation : observation; completion : completion }
+
+let end_observed = {outcome=End_observed; exit_code=None}
+
+let completion_to_json {outcome; exit_code} =
+  let kind, fields = match outcome with
+    | End_observed -> "end_observed", []
+    | Completion_reported -> "completion_reported", []
+    | Error_reported -> "error_reported", []
+    | Decline_reported -> "decline_reported", []
+    | Result_received {is_error} -> "result_received",
+        ["is_error", Option.fold ~none:`Null ~some:(fun value -> `Bool value) is_error]
+    | Unrecognized_status value -> "unrecognized_status", ["status", `String value]
+  in
+  `Assoc (["kind", `String kind;
+    "exit_code", Option.fold ~none:`Null ~some:(fun value -> `Int value) exit_code] @ fields)
+
+let completion_of_json = function
+  | `Assoc fields ->
+      let ( let* ) = Result.bind in
+      let rec unique seen = function
+        | [] -> Ok ()
+        | (key, _) :: rest ->
+            if List.mem key seen then Error ("duplicate native completion field: " ^ key)
+            else unique (key :: seen) rest
+      in
+      let* () = unique [] fields in
+      let* outcome = match List.assoc_opt "kind" fields with
+        | Some (`String "end_observed") -> Ok End_observed
+        | Some (`String "completion_reported") -> Ok Completion_reported
+        | Some (`String "error_reported") -> Ok Error_reported
+        | Some (`String "decline_reported") -> Ok Decline_reported
+        | Some (`String "result_received") ->
+            (match List.assoc_opt "is_error" fields with
+             | Some `Null -> Ok (Result_received {is_error=None})
+             | Some (`Bool value) -> Ok (Result_received {is_error=Some value})
+             | Some _ | None -> Error "native result is_error must be a boolean or null")
+        | Some (`String "unrecognized_status") ->
+            (match List.assoc_opt "status" fields with
+             | Some (`String value) -> Ok (Unrecognized_status value)
+             | Some _ | None -> Error "unrecognized native status must retain its string")
+        | Some _ | None -> Error "native completion kind is missing or unknown"
+      in
+      let allowed = ["kind"; "exit_code"] @ (match outcome with
+        | Result_received _ -> ["is_error"]
+        | Unrecognized_status _ -> ["status"]
+        | End_observed | Completion_reported | Error_reported | Decline_reported -> []) in
+      let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+        | None -> Ok ()
+        | Some (key, _) -> Error ("unsupported native completion field: " ^ key)
+      in
+      (match List.assoc_opt "exit_code" fields with
+       | Some `Null -> Ok {outcome; exit_code=None}
+       | Some (`Int value) -> Ok {outcome; exit_code=Some value}
+       | Some _ | None -> Error "native exit_code must be an integer or null")
+  | _ -> Error "native completion must be an object"
+
+let redact_completion redact completion =
+  match completion.outcome with
+  | Unrecognized_status status -> {completion with outcome=Unrecognized_status (redact status)}
+  | End_observed | Completion_reported | Error_reported | Decline_reported | Result_received _ -> completion
+
 let valid_identity = function
   | Call_id call_id -> String.trim call_id <> ""
   | Provider_step { conversation_id; step_index } ->

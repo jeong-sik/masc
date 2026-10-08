@@ -39,7 +39,7 @@ let delta_to_string : Live.delta -> string = function
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%d/%d,%s)" occurrence.stream_scope
         occurrence.block_index (Option.value ~default:"unnamed" tool_name)
-  | Live.Native_tool_ended { occurrence } ->
+  | Live.Native_tool_ended { occurrence; _ } ->
       Printf.sprintf "native_tool_ended(%d/%d)" occurrence.stream_scope occurrence.block_index
   | Live.Tool_started { occurrence; tool_name } ->
       Printf.sprintf "tool_started(%d/%d,%s)" occurrence.stream_scope

@@ -738,6 +738,30 @@ let event_channel_conflicts state = function
      | _ -> false)
   | _ -> false
 
+(* The provider report arrives on the same callback path before its generic
+   block stop. Only the exact open native occurrence may own it: this must not
+   turn a MASC argument block or a superseded response into a native result. *)
+let finish_native_tool ~redact_text ~stream_scope ~block_index ~tool_call_id completion state =
+  let reject () =
+    { bridge_state=state;
+      chat_events=[protocol_error ~index:block_index ?tool_call_id
+        ~reason:"native completion has no matching active provider occurrence"
+        Keeper_chat_events.Tool_occurrence_mapping_invalid] }
+  in
+  if state.current_stream_scope <> Some stream_scope then reject ()
+  else match state.scope_disposition, stream_block_for_index state block_index with
+  | Scope_poisoned, _ -> {bridge_state=state; chat_events=[]}
+  | (Scope_live | Scope_cut), Some (Active_native_tool tool)
+    when Option.equal String.equal tool.tool_call_id tool_call_id ->
+      let completion = Runtime_native_tools.redact_completion redact_text completion in
+      { bridge_state=replace_block state block_index (Ended_native_tool tool);
+        chat_events=[Keeper_chat_events.Native_tool_end (tool, completion)] }
+  | (Scope_live | Scope_cut), Some (Ended_native_tool tool)
+    when Option.equal String.equal tool.tool_call_id tool_call_id ->
+      {bridge_state=state; chat_events=[]}
+  | (Scope_live | Scope_cut), _ -> reject ()
+;;
+
 (* On a keeper chat request, text, thinking and tool-argument deltas and
    snapshots reach this function already redacted, across delta boundaries,
    by [Keeper_stream_text_redaction]; [redact_text] runs on them a second
@@ -1275,7 +1299,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       match stream_block_for_index bridge_state index with
       | Some (Active_native_tool tool) ->
           { bridge_state = replace_block bridge_state index (Ended_native_tool tool)
-          ; chat_events = [ block_stop; Native_tool_end tool ]
+          ; chat_events = [ block_stop; Native_tool_end (tool, Runtime_native_tools.end_observed) ]
           }
       | Some (Ended_native_tool _) ->
           { bridge_state; chat_events = [ block_stop ] }

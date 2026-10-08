@@ -328,6 +328,8 @@ val run_named :
     (unit -> Keeper_official_client_host.composed_context option) ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
+  ?on_native_tool_completion:
+    (block_index:int -> tool_call_id:string option -> Runtime_native_tools.completion -> unit) ->
   ?on_tool_execution:
     (block_index:int -> tool_call_id:string -> execution_id:Ids.Execution_id.t -> unit) ->
   ?on_official_client_result_handoff:

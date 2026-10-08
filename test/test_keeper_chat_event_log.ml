@@ -115,9 +115,9 @@ let all_events : E.keeper_chat_event list =
       { occurrence; tool_call_id = None; snapshot = "{\"path\":\"/tmp\"}" }
   ; E.Tool_call_end { occurrence; tool_call_id = Some "tc-1" }
   ; E.Native_tool_start { occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }
-  ; E.Native_tool_end { occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }
+  ; E.Native_tool_end ({ occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }, Runtime_native_tools.end_observed)
   ; E.Native_tool_start { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }
-  ; E.Native_tool_end { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }
+  ; E.Native_tool_end ({ occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }, Runtime_native_tools.end_observed)
   ; E.Tool_approval_requested
       { tool_call_id = "tc-2"
       ; tool_call_name = "bash"
@@ -1076,7 +1076,7 @@ let test_native_activity_survives_bridge_journal_and_projection () =
     let native = List.filter_map (fun (entry : L.journaled_event) ->
       match entry.event with
       | E.Native_tool_start tool -> Some (true, tool)
-      | E.Native_tool_end tool -> Some (false, tool)
+      | E.Native_tool_end (tool, _) -> Some (false, tool)
       | _ -> None) entries in
     Alcotest.(check (list (pair bool int))) "one ordered observation per actual boundary"
       [true, 1; false, 1; true, 2; false, 2; true, 3]

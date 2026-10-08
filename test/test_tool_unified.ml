@@ -32,6 +32,23 @@ let () =
         ] );
       ( "tool_info_to_json",
         [
+          test_case "retained info renders the same usage after later calls" `Quick (fun () ->
+              Tool_registry.reset ();
+              Fun.protect ~finally:Tool_registry.reset (fun () ->
+                Tool_registry.record_call ~tool_name:"masc_status"
+                  ~disposition:(Tool_result.Completed ()) ~duration_ms:10 ();
+                let info = Tool_unified.tool_info "masc_status" in
+                let before = Tool_unified.tool_info_to_json info in
+                Tool_registry.record_call ~tool_name:"masc_status"
+                  ~disposition:(Tool_result.Failed ()) ~duration_ms:20 ();
+                check string "same observation has stable JSON"
+                  (Yojson.Safe.to_string before)
+                  (Yojson.Safe.to_string (Tool_unified.tool_info_to_json info));
+                let current = Tool_unified.tool_info "masc_status"
+                  |> Tool_unified.tool_info_to_json in
+                let open Yojson.Safe.Util in
+                check int "fresh observation includes the later call" 2
+                  (current |> member "call_stats" |> member "call_count" |> to_int)));
           test_case "JSON has required fields" `Quick (fun () ->
               let info = Tool_unified.tool_info "masc_status" in
               let json = Tool_unified.tool_info_to_json info in

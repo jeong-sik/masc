@@ -4138,10 +4138,16 @@ module Browser_lane_view = struct
         (match report.state with
          | Never_started -> false
          | Running _ | Ended _ | Died _ | Unreadable _ -> true)
+  (* The rows of a host report a short screen reads first: where the host
+     stands, and what that asks of the operator. *)
+  let picker_host_head_rows = 2
+  let picker_host_head rows =
+    List.filteri (fun index _ -> index < picker_host_head_rows) rows,
+    List.filteri (fun index _ -> index >= picker_host_head_rows) rows
   (* What the picker keeps for the rows under its choices, which the cursor
      cannot reach, when there are more of them than this: the first two, and
      the row that says how many more the screen could not hold. *)
-  let picker_rows_below_wanted = 3
+  let picker_rows_below_wanted = picker_host_head_rows + 1
   (* What it keeps when the screen has no room for those beside the choices:
      the first row and the row that counts the rest. *)
   let picker_rows_below_least = 2

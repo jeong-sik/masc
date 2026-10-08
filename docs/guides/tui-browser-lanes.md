@@ -158,8 +158,10 @@ shown. What keeps its place depends on whether the rows report a host:
   first two rows and the row that counts the rest keep their place while at
   least three choices fit beside them, or every choice when there are fewer
   than three. Where that does not fit, the first row and the count keep
-  theirs. With no live connection listed, these rows come before the three
-  rows on the extension, so those are what a short screen cuts first.
+  theirs. With no live connection listed, the three rows on the extension
+  are drawn too. On a screen that holds everything they follow the host's
+  rows. On a shorter one they follow the host's first two rows, and the rest
+  of the host's rows are what is cut: from 20 rows up all three are there.
 - No host yet: the rows only say how one is started. They take no row from
   the choices or from the rows on the extension, and are drawn where the
   screen has rows left. A workspace that has not run a BiDi host sees every

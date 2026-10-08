@@ -9123,22 +9123,32 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                (Option.bind (List.nth_opt choices cursor) browser_choice_detail));
           Option.iter (c.push_styled ~style:(Theme.recede ())) empty_line;
           (* A terminal too short for everything loses rows from the end.
-             Rows that report a host come before the rows on the extension,
-             which say the same on every screen. With no host yet, the
-             host's rows only say how one is started: they take no row from
-             what is above them, and are drawn where the screen has rows
-             left. *)
-          let draw_host () =
-            List.iter (fun row -> c.push_styled ~style:(Theme.recede ()) ("  " ^ row)) host_rows in
+             With no host yet, the host's rows only say how one is started:
+             they take no row from what is above them, and are drawn where
+             the screen has rows left. Rows that report a host come before
+             the rows on the extension. On a screen that holds all of both
+             the host's rows stay together; on a shorter one the host's
+             first rows are followed by the extension's, and what is cut
+             from the end is the rest of the host's. *)
+          let draw_host rows =
+            List.iter (fun row -> c.push_styled ~style:(Theme.recede ()) ("  " ^ row)) rows in
           let draw_extension () =
             List.iter (fun (style, row) -> c.push_styled ~style row) extension_rows in
-          if reports_a_host then (draw_host (); draw_extension ())
-          else (
+          let above =
+            browser_picker_frame_rows + min room (List.length choices)
+            + List.length (Option.to_list empty_line) in
+          let extension = List.length extension_rows in
+          if not reports_a_host then (
             draw_extension ();
-            let drawn =
-              browser_picker_frame_rows + min room (List.length choices)
-              + List.length (Option.to_list empty_line) + List.length extension_rows in
-            if budget > drawn then draw_host ())
+            if budget > above + extension then draw_host host_rows)
+          else if above + List.length host_rows + extension <= budget then (
+            draw_host host_rows;
+            draw_extension ())
+          else (
+            let head, rest = Browser_lane_view.picker_host_head host_rows in
+            draw_host head;
+            draw_extension ();
+            draw_host rest)
       | None ->
       List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ row))
         (Browser_lane_view.unserved_rows view);

@@ -838,6 +838,10 @@ let test_bidi_host_rows () =
     (choice_rows ~rows:3 ~choices:2 ~below:8 = 3);
   expect "a screen with no row for a choice still draws one"
     (choice_rows ~rows:0 ~choices:2 ~below:8 = 1);
+  (* The rows of a report a short screen draws before the extension's. *)
+  expect "the head of a report is its first two rows, and the rest follows"
+    (picker_host_head ["a"; "b"; "c"; "d"] = (["a"; "b"], ["c"; "d"])
+     && picker_host_head ["a"] = (["a"], []) && picker_host_head [] = ([], []));
   (* Rows that report a host come before the rows on the extension. Rows
      that only say how one is started come after them. *)
   let reports host = host_rows_report_a_host (viewing host) in

@@ -369,8 +369,11 @@ def run_browser_bidi_host_empty_list_regression(executable: str) -> None:
 
     A host that ran is something that happened: an operator who attaches a
     BiDi host and has no extension sees an empty list when that host ends.
-    Its rows come before the extension's, so on 18 and on 17 rows the host's
-    first rows are drawn and the extension's are what is cut.
+    Its first two rows come first on every screen. An operator who ran a
+    host once and uses the extension needs the extension's rows, so on a
+    screen too short for everything those follow the host's first two, and
+    the rest of the host's rows are what is cut. On a screen that holds
+    everything the host's rows stay together.
 
     With no host yet, the host's rows only say how one is started. They take
     no row from the extension's: a screen the extension's rows fill exactly
@@ -411,13 +414,16 @@ def run_browser_bidi_host_empty_list_regression(executable: str) -> None:
             description=f"Browser picker with no connection, {name}, {rows} rows",
             interact=interact, http_fixtures=fixtures, terminal_cols=80, terminal_rows=rows)
 
-    def a_host_that_ran(rows: int, *shown: bytes) -> None:
+    def a_host_that_ran(rows: int, shown: tuple[bytes, ...], cut: tuple[bytes, ...]) -> None:
         def check(screen: bytes) -> None:
-            for needle in (*shown, b"rows not shown"):
+            for needle in shown:
                 if needle not in screen:
                     raise AssertionError(f"{rows}-row picker lacks {needle!r}: {screen!r}")
-            if extension_rows[0] in screen:
-                raise AssertionError(f"every row fits {rows} rows; use fewer: {screen!r}")
+            for needle in cut:
+                if needle in screen:
+                    raise AssertionError(f"{needle!r} fits {rows} rows; use fewer: {screen!r}")
+            if not cut and screen.index(BIDI_HOST_REASON_ROW) > screen.index(extension_rows[0]):
+                raise AssertionError(f"a screen that holds every row split the host's rows: {screen!r}")
         draw(ended, rows, "a host that ended", BIDI_HOST_ENDED_ROW, check)
 
     def no_host_yet(rows: int, shown: tuple[bytes, ...], cut: tuple[bytes, ...]) -> None:
@@ -432,8 +438,12 @@ def run_browser_bidi_host_empty_list_regression(executable: str) -> None:
                 raise AssertionError(f"the host's how-to came before the extension's: {screen!r}")
         draw(never, rows, "no host yet", shown[0], check)
 
-    a_host_that_ran(18, BIDI_HOST_ENDED_ROW, BIDI_HOST_SESSION_ROW)
-    a_host_that_ran(17, BIDI_HOST_ENDED_ROW)
+    head = (BIDI_HOST_ENDED_ROW, BIDI_HOST_SESSION_ROW)
+    a_host_that_ran(17, (*head, b"rows not shown"), (extension_rows[0], BIDI_HOST_REASON_ROW))
+    a_host_that_ran(18, (*head, extension_rows[0], b"rows not shown"),
+        (extension_rows[1], BIDI_HOST_REASON_ROW))
+    a_host_that_ran(20, (*head, *extension_rows, b"rows not shown"), (BIDI_HOST_REASON_ROW,))
+    a_host_that_ran(24, (*head, BIDI_HOST_REASON_ROW, *BIDI_HOST_ATTACH_AGAIN_ROWS, *extension_rows), ())
     # The extension's three rows fill 17 rows exactly, so nothing else is
     # drawn, not even the row that says more is hidden. On 18 that row has a
     # place, and from 19 the host's first row.

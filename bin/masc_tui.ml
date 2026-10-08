@@ -12399,6 +12399,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
        && state.msx_live = Masc_tui_machine_live.Unread
        && Option.is_none state.msx_live_in_flight then
       launch_msx_live_read state ~mailbox;
+    if state.msx_open && state.msx_menu_open then
+      launch_dos_live_poll state ~mailbox;
     (* The surface on view asks again from the list it reads on arrival.
        Its request went out under the old authority, and a surface outside
        the bundle has no tick of its own to recover it. *)
@@ -15127,6 +15129,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              { ao_ticket; ao_result = Error err })
       approval_ticket;
       apply_server_identity_reading state (Error err);
+      withdraw_currency_authority state;
+      state.candle_observation <- Some (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host

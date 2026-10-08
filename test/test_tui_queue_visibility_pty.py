@@ -237,15 +237,22 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
                 raise AssertionError("navigation dispatched local input before the stop receipt")
             fixture.release_interrupt.set()
             _keyboard_chat.wait_for_atomic_admissions(process, fd, output, fixture, 3)
-            start = len(output)
             fixture.release.set()
             _keyboard_chat.wait_for_atomic_paused_requests(process, fd, output, fixture, fixture.submitted)
             _keyboard_chat.resume_atomic_queue(process, fd, output)
+            # The resume inspection appends several local rows. Replies keep
+            # their original request positions above those rows, so open the
+            # older conversation before asking the PTY to show every reply.
+            start = len(output)
+            os.write(fd, b"\x1b[5~" * 5)
             replies = (b"reply-queued-one", b"reply-queued-two", b"reply-local-three")
             for reply in replies:
                 _keyboard_harness.wait_for_output(process, fd, output, reply, start=start, timeout=10)
             reply_end = max(_keyboard_harness.end_of_needle(output, reply, start) for reply in replies)
             _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=reply_end, timeout=5)
+            reply_screen = capture(output, "resumed-replies", columns=80)
+            if not all(reply in reply_screen for reply in replies):
+                raise AssertionError("resumed replies are not visible in their request blocks: " + repr(reply_screen))
             # A reply delta may precede its terminal event. Wait until a
             # completed frame reflects both settled streams before asserting.
             settled = _keyboard_harness.wait_for_fixture_state(

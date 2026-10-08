@@ -26,16 +26,18 @@ def run(executable, *, visit_other_keeper):
     gates = []
 
     def interact(process, fd, _slave, output, _base):
-        def capture(stage):
+        def capture(stage, *, keeper="alpha", expected_draft=draft):
             frame = h.resize_and_wait(process, fd, output, rows=40, columns=121,
-                needle=h.composer_showing(draft), controls=(h.FULL_REDRAW,),
+                needle=h.composer_showing(expected_draft), controls=(h.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25h")
             frame = h.resize_and_wait(process, fd, output, rows=40, columns=120,
-                needle=h.composer_showing(draft), controls=(h.FULL_REDRAW,),
+                needle=h.composer_showing(expected_draft), controls=(h.FULL_REDRAW,),
                 final_cursor=b"\x1b[?25h")
             cells = h.screen_rows(frame)
-            assert any(h.composer_showing(draft).search(row)
-                for row in cells.values()), "the independently authored draft disappeared"
+            assert any(f"Keepers ▸ {keeper} ▸ chat".encode() in row
+                for row in cells.values()), "the wrong Keeper owns the composer"
+            assert any(h.composer_showing(expected_draft).search(row)
+                for row in cells.values()), "the Keeper's expected draft was not preserved"
             print("STUDIO_CAPTURE=" + json.dumps({
                 "suite": "test_tui_draft_dispatch_pty", "name": f"{mode}-{stage}",
                 "rows": 40, "columns": 120, "provenance": "fixture PTY",
@@ -59,26 +61,39 @@ def run(executable, *, visit_other_keeper):
             h.send_and_wait(process, fd, output, draft, h.composer_showing(draft))
             capture("new-draft-before-old-dispatch")
             if visit_other_keeper:
-                # The fixture has exactly alpha/beta. Ctrl-G saves/restores
-                # their drafts without treating a palette command as text.
-                h.send_and_wait(process, fd, output, b"\x07",
+                # Ctrl-G intentionally pins a chat with its own request in
+                # flight. Quiet leave saves the draft without interrupting;
+                # the roster's m action opens another Keeper even then.
+                h.send_and_wait(process, fd, output, b"\x11", b"Info")
+                h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                h.select_keeper_row(process, fd, output, b"beta")
+                h.send_and_wait(process, fd, output, b"m",
                     "Keepers ▸ beta ▸ chat".encode())
+                capture("draft-saved-on-other-keeper", keeper="beta", expected_draft=b"")
+                assert not fixture.first_post_received.is_set(), (
+                    "navigation let the old request bypass its preflight gate")
             for gate in gates:
                 gate.release.set()
             assert h.wait_for_fixture_event(process, fd, output,
                 fixture.first_post_received, timeout=5), "old request never reached HTTP"
             if visit_other_keeper:
-                h.send_and_wait(process, fd, output, b"\x07",
+                h.send_and_wait(process, fd, output, b"\x11", b"MASC Keepers")
+                h.select_keeper_row(process, fd, output, b"alpha")
+                h.send_and_wait(process, fd, output, b"m",
                     "Keepers ▸ alpha ▸ chat".encode())
             h.wait_for_output(process, fd, output, b"reply-" + draft, start=0, timeout=5)
             capture("new-draft-after-old-dispatch")
             with fixture.lock:
                 assert len(fixture.received) == 1, "draft was submitted without a second Enter"
+                assert fixture.received[0]["name"] == "alpha", "draft leaked to another Keeper"
                 assert fixture.received[0]["message"] == draft.decode()
+                assert not fixture.interrupt_requests, "quiet navigation interrupted the old request"
             fixture.release.set()
             h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
-            h.send_and_wait(process, fd, output, b"\x11", b"Info")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            h.send_and_wait(process, fd, output, b"\x11",
+                b"MASC Keepers" if visit_other_keeper else b"Info")
+            if not visit_other_keeper:
+                h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
             for gate in gates:

@@ -50,9 +50,14 @@ def detail_screen(output):
         raise AssertionError(f"Task detail header missing: {screen(output)!r}")
     left = 0
     text = header.decode("utf-8", "replace")
+    # The list is framed on its left edge or only divided from the detail by
+    # one vertical rule; either way the detail starts after the first rule
+    # that precedes the header.
+    rule = text.find("│")
     if text.startswith("│"):
-        closing = text.index("│", 1)
-        left = sum(region.cell_width(character) for character in text[:closing + 1])
+        rule = text.index("│", 1)
+    if 0 <= rule < text.index("MASC Task"):
+        left = sum(region.cell_width(character) for character in text[:rule + 1])
     columns = max(sum(region.cell_width(character) for character in row.decode("utf-8", "replace"))
                   for row in rows.values())
     return b"\n".join(region.cells(rows[key], left, columns).encode() for key in sorted(rows))

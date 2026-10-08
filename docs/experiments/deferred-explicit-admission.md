@@ -66,6 +66,13 @@ do not prove semantic judgment quality.
 Foundation run [37806167134](https://github.com/jeong-sik/masc/actions/runs/37806167134)
 at `a9ec7a9a1e8d0b6d2aa75d90ee74ab7d519dcff8` passed 93 current-store and four
 queue tests. Later judgment/runtime changes are outside that execution result.
+
+Connected producer run [37810272063](https://github.com/jeong-sik/masc/actions/runs/37810272063)
+at `03c63c6de89bd34838d9dd85b01f96c2a1b33c49` passed 228 tests: judgment5,
+write67, supersedes14, dispatch118, CLI-lane23 and growth1. Earlier worker run
+37808773842 passed queue8, Memory-lane18, boot-reconcile29 and store-scope7,
+alongside CLI23; its one judgment-fixture failure was repaired by checking
+nested extra fields at the strict runtime decoder boundary.
 The runtime fixtures use an injected exact-lane runner, not a live provider or
 CLI subprocess.
 

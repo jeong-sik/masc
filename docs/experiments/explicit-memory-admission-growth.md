@@ -91,3 +91,27 @@ semantic compression, lower total storage or better recall. After the worker is
 connected, measure which candidates were consumed and which useful claims
 survived. Repeated receipts should consolidate without collapsing independent
 release rules. Retain deferred and failed outcomes separately.
+
+
+## Measured pending-write boundary
+
+[Run37810272063](https://github.com/jeong-sik/masc/actions/runs/37810272063)
+at `03c63c6de89bd34838d9dd85b01f96c2a1b33c49` emitted all18 v2 samples.
+Every cohort/checkpoint input hash matches the baseline. At write200:
+
+| Cohort | Current facts before | Current facts after | Pending candidates after | Pending fact-array bytes |
+|---|---:|---:|---:|---:|
+| Exact reobservation | 1 | 0 | 200 | 50,765 |
+| Repeated receipts | 200 | 0 | 200 | 62,851 |
+| Independent rules | 200 | 0 | 200 | 52,049 |
+
+Each cohort returned 200 `persisted_pending_admission` receipts. No current
+snapshot was created; revision is null and the empty serialized fact array is
+two bytes. The worker and providers were not started in this experiment.
+
+This proves admission separation, not consolidation. In particular, exact
+reobservation has higher pending storage than its prior single current fact.
+The required next measurement is post-Librarian retained knowledge, consumed
+input and still-pending candidates under the same inputs. Candidate-byte counts
+exclude queue identity/frontier metadata and other files; they are not total
+storage or provider tokens.

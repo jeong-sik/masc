@@ -12330,6 +12330,20 @@ let config_path_note (state : state) =
   | None, None ->
       Ansi.dim ^ title_missing_reading ~error:None ^ Ansi.reset
 
+(* A provider id such as [codex_727e6d05] does not say which account it is,
+   and one account can sit under several ids. The selected binding's detail
+   names the email its login reports, when the account-email reading has it.
+   Both the drawing and the scroll arithmetic below count these same lines. *)
+let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row) =
+  let account_email =
+    match state.overview_account_emails with
+    | Account_emails_read { emails; unreadable_rows = _ } ->
+        List.assoc_opt row.provider emails
+        |> Option.map Terminal_text.single_line
+    | Account_emails_unread | Account_emails_failed _ -> None
+  in
+  Masc_tui_model_runtime_table.detail_lines ?account_email row
+
 (* The model knobs sit in different tables -- [reasoning-effort] and
    [temperature] under [models.NAME], [max-tokens] under
    [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
@@ -12375,7 +12389,7 @@ let render_config_models (state : state) =
    | None, Some _ ->
        let detail =
          List.nth_opt state.config_models_rows state.config_models_cursor
-         |> Option.map Masc_tui_model_runtime_table.detail_lines
+         |> Option.map (config_models_detail state)
          |> Option.value ~default:[]
        in
        (* Keep the explanation attached to the selected row. Five rows are
@@ -12514,8 +12528,7 @@ let config_models_scrolled (state : state) : scrolled =
       in
       let detail_len =
         List.nth_opt rows state.config_models_cursor
-        |> Option.map (fun r ->
-               List.length (Masc_tui_model_runtime_table.detail_lines r))
+        |> Option.map (fun r -> List.length (config_models_detail state r))
         |> Option.value ~default:0
       in
       let detail_height = min detail_len (max 0 (content_height - 2)) in

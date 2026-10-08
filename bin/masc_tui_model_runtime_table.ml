@@ -7,6 +7,7 @@ type row =
   ; context : (string * int) option
   ; model_context : int option
   ; max_tokens : int option
+  ; same_login : string list
   }
 
 let models_table = Runtime_toml_namespace.(key Models)
@@ -17,6 +18,19 @@ let parse lines =
   let* config = Runtime_toml.parse_string text
     |> Result.map_error (fun errors -> String.concat "; "
       (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)) in
+  (* Providers that name the same account-home are one client login. The
+     provider id does not say so: three ids can hide one account. *)
+  let same_login (provider : Runtime_schema.provider) =
+    match provider.account_home with
+    | None -> []
+    | Some home ->
+      List.filter_map (fun (other : Runtime_schema.provider) ->
+        match other.account_home with
+        | Some other_home
+          when String.equal other_home home && not (String.equal other.id provider.id) ->
+          Some other.id
+        | Some _ | None -> None) config.providers
+      |> List.sort_uniq String.compare in
   let rows = List.filter_map (fun (binding : Runtime_schema.binding) ->
     match List.find_opt (fun (model : Runtime_schema.model_spec) ->
       String.equal model.id binding.model_id) config.models,
@@ -31,7 +45,8 @@ let parse lines =
         api_name = Some model.api_name;
         reasoning_effort = Option.map Llm_provider.Reasoning_effort.to_string model.reasoning_effort;
         temperature = Option.map (Printf.sprintf "%.15g") model.temperature;
-        max_tokens = binding.max_tokens; context; model_context = model.max_context }
+        max_tokens = binding.max_tokens; context; model_context = model.max_context;
+        same_login = same_login provider }
     | None, _ | _, None -> None) config.bindings in
   Ok (List.sort (fun a b -> match String.compare a.provider b.provider with
     | 0 -> String.compare a.model b.model | c -> c) rows)
@@ -72,28 +87,39 @@ let toml_key name =
 
 let section head model = Printf.sprintf "[%s.%s]" head (toml_key model)
 
-let detail_lines row =
+let detail_lines ?account_email row =
   let api_name, api_note =
     match row.api_name with
     | Some api when not (String.equal api row.model) -> api, " (api-name override)"
     | Some api -> api, " (same as binding)"
     | None -> row.model, " (default; api-name key absent)"
   in
-  [ Printf.sprintf "Binding: provider=%s  model=%s" row.provider row.model
-  ; Printf.sprintf "API model: %s%s" api_name api_note
-  ; Printf.sprintf
-      "%s  reasoning-effort=%s  temperature=%s"
-      (section models_table row.model)
-      (value_or_absent row.reasoning_effort)
-      (value_or_absent row.temperature)
-  ; Printf.sprintf
-      "%s  max-tokens=%s"
-      (section row.provider row.model)
-      (tokens_text row.max_tokens)
-  ; (match row.context with None -> "Context: undeclared; Runtime shows the resolved catalog value"
-     | Some (source, n) -> Printf.sprintf "Context: %d tokens (%s); model specification: %s" n source (tokens_text row.model_context))
-  ; "- means that key is absent; add or edit it in the section shown above."
-  ]
+  let account =
+    (match account_email with
+     | Some email -> [ Printf.sprintf "Account: %s" email ]
+     | None -> [])
+    @ (match row.same_login with
+       | [] -> []
+       | others ->
+         [ Printf.sprintf "Same login as %s (shared account-home)"
+             (String.concat ", " others) ])
+  in
+  [ Printf.sprintf "Binding: provider=%s  model=%s" row.provider row.model ]
+  @ account
+  @ [ Printf.sprintf "API model: %s%s" api_name api_note
+    ; Printf.sprintf
+        "%s  reasoning-effort=%s  temperature=%s"
+        (section models_table row.model)
+        (value_or_absent row.reasoning_effort)
+        (value_or_absent row.temperature)
+    ; Printf.sprintf
+        "%s  max-tokens=%s"
+        (section row.provider row.model)
+        (tokens_text row.max_tokens)
+    ; (match row.context with None -> "Context: undeclared; Runtime shows the resolved catalog value"
+       | Some (source, n) -> Printf.sprintf "Context: %d tokens (%s); model specification: %s" n source (tokens_text row.model_context))
+    ; "- means that key is absent; add or edit it in the section shown above."
+    ]
 
 let pad s n =
   (* Cells, not bytes. Model and provider names come from runtime.toml, so

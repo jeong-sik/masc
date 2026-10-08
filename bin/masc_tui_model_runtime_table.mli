@@ -15,6 +15,10 @@ type row =
         (** Declared context precedence: binding, provider, model; absent requires catalog resolution. *)
   ; model_context : int option (** Original shared model declaration, before overrides. *)
   ; max_tokens : int option  (** From [\[PROVIDER.NAME\]]. *)
+  ; same_login : string list
+        (** Other provider ids whose [account-home] is this provider's, sorted.
+            They are one client login under different ids; empty when the
+            provider declares no account home or shares it with none. *)
   }
 
 val parse : string list -> (row list, string) result
@@ -49,10 +53,15 @@ val stacked_item_starts : pane:int -> row list -> int list
     begins -- one entry per row, in order. The pane's cursor walks bindings,
     not wrapped lines, so this is how it finds the line to mark and follow. *)
 
-val detail_lines : row -> string list
+val detail_lines : ?account_email:string -> row -> string list
 (** Selected-binding explanation for the Models pane. It names the effective
     API model and the exact TOML sections that own each knob. A model name that
-    is not a bare TOML key is quoted in the section path. *)
+    is not a bare TOML key is quoted in the section path.
+
+    A provider id does not say which account it is. [account_email], the
+    email the client reports for the provider's login, adds an [Account] line;
+    a non-empty [same_login] adds a line naming the other provider ids on the
+    same login. The caller sanitizes [account_email] for the terminal. *)
 
 val find_runtime : runtime_id:string -> row list -> (int * row) option
 (** Exact account/binding lookup for Runtime and Lane settings. *)

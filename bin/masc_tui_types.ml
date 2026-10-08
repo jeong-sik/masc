@@ -2779,8 +2779,11 @@ and surface_needs_of_surface : surface -> surface_needs = function
         ; needs_provider_history = true
         ; needs_account_emails = true
       }
+  (* The Models pane names the account behind a provider id, so Config reads
+     account emails as Usage does. *)
+  | Config -> { nothing with needs_account_emails = true }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
-  | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
+  | Repositories | Code | Changes | Connectors | Runtime | Resources
   | Tools ->
       nothing
 

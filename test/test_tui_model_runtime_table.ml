@@ -250,6 +250,7 @@ let test_detail_quotes_dotted_model_section () =
     ; temperature = None
     ; max_tokens = None
     ; context = None; model_context = None
+    ; same_login = []
     }
   in
   let detail = T.detail_lines row in
@@ -276,6 +277,54 @@ let test_accounts_and_sets () =
   check (Alcotest.list (Alcotest.option (Alcotest.pair string int))) "binding context is account scoped"
     [Some ("model", 500000); Some ("binding", 272000)]
     (List.map (fun (r:T.row) -> r.context) rows)
+
+(* A provider id does not name its account: on 2026-10-08 one Codex login sat
+   under three ids and read as three accounts. Ids that share an account-home
+   name each other. *)
+let test_same_login_names_other_ids () =
+  let provider id home =
+    [ "[providers." ^ id ^ "]"; "protocol = 'codex-app-server'"; "command = 'codex'";
+      "is-non-interactive = true"; "model-set = 'family'" ]
+    @ (match home with
+       | Some home -> [ "account-home = '" ^ home ^ "'" ]
+       | None -> [])
+  in
+  let lines =
+    [ "[models.shared]"; "max-context = 500000";
+      "[model_sets.family]"; "models = ['shared']" ]
+    @ provider "codex_a" (Some "/tmp/login-one")
+    @ provider "codex_b" (Some "/tmp/login-one")
+    @ provider "codex_c" (Some "/tmp/login-two")
+    @ provider "codex_d" None
+  in
+  check
+    (Alcotest.list (Alcotest.pair string (Alcotest.list string)))
+    "ids on one account-home name each other and nobody else"
+    [ "codex_a", [ "codex_b" ]; "codex_b", [ "codex_a" ]; "codex_c", []; "codex_d", [] ]
+    (List.map (fun (r : T.row) -> r.provider, r.same_login) (parse lines))
+
+let test_detail_names_the_account () =
+  let alpha = row_named (parse sample) "alpha" in
+  let shared = { alpha with same_login = [ "codex_b"; "codex_c" ] } in
+  check
+    (Alcotest.list string)
+    "account lines follow the binding line"
+    [ "Binding: provider=ollama_cloud  model=alpha"
+    ; "Account: someone@example.com"
+    ; "Same login as codex_b, codex_c (shared account-home)"
+    ; "API model: alpha-v2 (api-name override)"
+    ]
+    (List.filteri (fun index _ -> index < 4)
+       (T.detail_lines ~account_email:"someone@example.com" shared));
+  check
+    (Alcotest.list string)
+    "an email alone adds one line"
+    [ "Binding: provider=ollama_cloud  model=alpha"
+    ; "Account: someone@example.com"
+    ; "API model: alpha-v2 (api-name override)"
+    ]
+    (List.filteri (fun index _ -> index < 3)
+       (T.detail_lines ~account_email:"someone@example.com" alpha))
 
 let test_invalid_is_error () =
   match T.parse ["[models.broken"] with
@@ -333,6 +382,8 @@ let () =
     "masc_tui_model_runtime_table"
     [ ( "accounts", [ Alcotest.test_case "settings target exact account" `Quick test_exact_runtime_lookup;
        Alcotest.test_case "shared model preserves each account and context" `Quick test_accounts_and_sets;
+       Alcotest.test_case "ids on one login name each other" `Quick test_same_login_names_other_ids;
+       Alcotest.test_case "detail names the account" `Quick test_detail_names_the_account;
        Alcotest.test_case "invalid source is visible" `Quick test_invalid_is_error ])
     ; ( "parse"
       , [ Alcotest.test_case "reads both tables" `Quick test_reads_both_tables

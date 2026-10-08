@@ -694,7 +694,7 @@ let test_delivery_keys_do_not_invent_turn_ownership () =
   let keys = [
     `Assoc ["kind",`String "workspace_message";"request_id",`String "shared-id"];
     `Assoc ["kind",`String "fusion_run";"request_id",`String "shared-id"];
-    `Assoc ["kind",`String "approval_lifecycle";"request_id",`String "shared-id"]] in
+    `Assoc ["kind",`String "approval_lifecycle";"approval_id",`String "shared-id"]] in
   List.iter (fun key ->
     let decoded = decode (`List [
       row ~role:"user" ~delivery_key:key

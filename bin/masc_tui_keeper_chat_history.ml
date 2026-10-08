@@ -452,11 +452,9 @@ let turn_id_of_fields fields =
            explicit_turn ())
   | Ok None | Error _ -> explicit_turn ()
 
-(* The operation a direct turn ran as, and nothing else: an autonomous turn's
-   [turn_ref] and the other delivery keys are append identity, requiring an explicit
-   turn reference for turn ownership, and the journal endpoint is keyed by operation. Typed
-   here so a reader does not have to guess which of [turn_id]'s shapes it is
-   looking at. *)
+(* Only an Operation key owns the operation journal endpoint. Autonomous
+   rows use their explicit turn_ref; other delivery keys retain append
+   identity without acquiring an operation or inventing turn ownership. *)
 let operation_id_of_fields fields =
   match Delivery_identity.delivery_provenance_of_fields fields with
   | Ok

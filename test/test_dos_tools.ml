@@ -345,6 +345,23 @@ let test_inventory_and_load_share_alias_selection () =
       (string_field "program" loaded))
 ;;
 
+(* The operator may mount the whole inventory through a symlink. The boundary
+   check resolves both the root and the leaf before the descriptor-bound read;
+   inventory and load must keep working in that canonical tree. *)
+let test_a_linked_inventory_root_is_readable () =
+  with_workspace (fun base_path ->
+    let lexical_root = programs_dir ~base_path in
+    let real_root = lexical_root ^ ".real" in
+    mkdir_p real_root;
+    write_file (Filename.concat real_root "hello.com") hello_com;
+    Unix.symlink real_root lexical_root;
+    let inventory = dispatch ~base_path "masc_dos_inventory" [] in
+    check bool "linked inventory root lists files" true (is_completed inventory);
+    let loaded = load ~base_path "hello.com" in
+    check bool "linked inventory root loads files" true (is_completed loaded);
+    check string "linked root program" "hello.com" (string_field "program" loaded))
+;;
+
 let test_load_runs_to_the_first_key_request () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
@@ -1687,6 +1704,7 @@ let () =
             test_inventory_rejects_special_files_without_host_paths
         ; test_case "inventory alias selection" `Quick
             test_inventory_and_load_share_alias_selection
+        ; test_case "linked inventory root" `Quick test_a_linked_inventory_root_is_readable
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
         ; test_case "load and screen name the core" `Quick
             test_load_and_screen_name_the_core

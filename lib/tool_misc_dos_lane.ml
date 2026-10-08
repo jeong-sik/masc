@@ -229,6 +229,11 @@ let programs_available ~base_path = entries_of (programs_dir ~base_path)
    earlier realpath is only a name check, while lstat/open/fstat and the
    parent-chain revalidation are the actual read boundary. *)
 let read_regular_file ~ownership_root path =
+  let ownership_root =
+    match Unix.realpath ownership_root with
+    | real -> real
+    | exception Unix.Unix_error _ -> ownership_root
+  in
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Ok (Some contents) -> Ok contents
   | Ok None | Error _ -> Error "entry is unavailable"

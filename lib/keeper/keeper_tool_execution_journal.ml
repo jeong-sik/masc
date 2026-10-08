@@ -98,7 +98,7 @@ let status_of_string = function
 
 let record_to_json record =
   `Assoc
-    [ "schema_version", `Int record.schema_version
+    ([ "schema_version", `Int record.schema_version
     ; "request_id", `String record.request_id
     ; "node_id", `String record.node_id
     ; "status", `String (status_to_string record.status)
@@ -106,9 +106,11 @@ let record_to_json record =
     ; "plan_revision", `String record.plan_revision
     ; "input_sha", `String record.input_sha
     ; "owner", `String record.owner
-    ; "result_json", (match record.result_json with Some json -> json | None -> `Null)
     ; "updated_at_unix_s", `Float record.updated_at_unix_s
     ]
+    @ (match record.result_json with
+       | None -> []
+       | Some json -> [ "result_json", json ]))
 ;;
 
 let record_of_json json =
@@ -135,10 +137,8 @@ let record_of_json json =
                 | None -> None
               in
               let result_json =
-                match List.assoc_opt "result_json" fields with
-                | Some `Null -> None
-                | Some json -> Some json
-                | None -> None
+                (* JSON null is a completed value; only absence means no result. *)
+                List.assoc_opt "result_json" fields
               in
               let updated_at =
                 match List.assoc_opt "updated_at_unix_s" fields with

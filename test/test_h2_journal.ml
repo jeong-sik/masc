@@ -180,6 +180,12 @@ let identity_for ~plan ~input =
    request_id 의 저널로 재개. 저널 연결부(dispatch 전 begin_node, 정산 후
    settle_node)는 dispatch 내부에서 실제 순서로 통과한다. *)
 
+let settled_data (record : Journal.record) =
+  match record.result_json with
+  | Some data -> data
+  | None -> fail "settled node has no stored result"
+;;
+
 let run_attempt ~dir ~request_id ~crash_marker ~crash_flag_file ~expected_search_input =
   let plan, _a, _b = make_plan () in
   let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
@@ -222,9 +228,7 @@ let run_attempt ~dir ~request_id ~crash_marker ~crash_flag_file ~expected_search
     (match journal_decision with
      | Journal.Skip_node_settled record ->
        log "JOURNAL_SKIP %s (settled, no re-dispatch)" id;
-       let data = match record.Journal.result_json with
-         | Some data -> data
-         | None -> fail "settled node has no stored result" in
+       let data = settled_data record in
        (* 저장 결과로 정산: dispatch·효과 없음. *)
        Executor.dispatch_result
          (Tool_result.make_ok
@@ -757,6 +761,47 @@ let journal_s7 () =
       fail "saved-result replay dispatched the settled node")
 ;;
 
+let journal_s8 () =
+  stage "s8: absent results and completed JSON null survive durable replay";
+  let dir = fresh_dir_s "null_result" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () ->
+    let identity : Journal.identity =
+      {plan_revision="plan-null"; input_sha=digest "input-null"; owner="owner-null"} in
+    let begin_node node_id = Journal.begin_node ~dir ~request_id ~node_id ~identity
+        ~pre_effect_disposition:Tool_result.Effect_outcome_unknown in
+    let read_result node_id =
+      match Journal.read_record ~dir ~request_id ~node_id with
+      | Ok (Some record) -> record.result_json
+      | Ok None | Error _ -> fail "durable result record unavailable" in
+    let require_null_replay node_id =
+      match begin_node node_id with
+      | Ok (Journal.Skip_node_settled record) ->
+          (* Use the same saved-result consumer as the executor dispatch above. *)
+          let replay = Tool_result.make_ok ~tool_name:"journal-null-fixture"
+              ~start_time:(Timing.start ()) ~data:(settled_data record) () in
+          if Tool_result.data replay <> `Null then fail "JSON null changed during replay"
+      | Ok _ | Error _ -> fail "completed JSON-null node was not skipped" in
+    (match begin_node "settle" with
+     | Ok (Journal.Redo_node_pre_effect _) -> ()
+     | Ok _ | Error _ -> fail "fresh null-result node was not admitted");
+    if read_result "settle" <> None then fail "attempting absence became a JSON value";
+    (match Journal.settle_node ~dir ~request_id ~node_id:"settle" ~identity
+        ~effect_disposition:Tool_result.Proven_post_effect ~result_json:`Null () with
+     | Ok () -> () | Error reason -> fail reason);
+    if read_result "settle" <> Some `Null then fail "settled JSON null was lost on disk";
+    require_null_replay "settle";
+    (match begin_node "readback" with
+     | Ok (Journal.Redo_node_pre_effect _) -> ()
+     | Ok _ | Error _ -> fail "readback fixture was not admitted");
+    (match Journal.confirm_effect_via_readback ~dir ~request_id ~node_id:"readback"
+        ~identity ~prove_effect:(fun () -> Some true) ~result_json:(Some `Null) with
+     | Ok (Some (Journal.Skip_node_settled record))
+       when settled_data record = `Null -> ()
+     | Ok _ | Error _ -> fail "readback promotion lost JSON null");
+    if read_result "readback" <> Some `Null then fail "readback JSON null was lost on disk";
+    require_null_replay "readback")
+;;
+
 let () =
   (* dune (test) 스탠자는 인자 없이 실행하므로, 인자가 없으면 전체 시나리오를
      돈다 — runtest 기본 alias 에서 exit 2 가 나지 않게 한다. *)
@@ -769,7 +814,8 @@ let () =
     journal_s4 ();
     journal_s5 ();
     journal_s6 ();
-    journal_s7 ()
+    journal_s7 ();
+    journal_s8 ()
   | "s1" -> journal_s1 ()
   | "s2" -> journal_s2 ()
   | "s3" -> journal_s3 ()
@@ -777,4 +823,5 @@ let () =
   | "s5" -> journal_s5 ()
   | "s6" -> journal_s6 ()
   | "s7" -> journal_s7 ()
+  | "s8" -> journal_s8 ()
   | other -> fail ("unknown scenario: " ^ other)

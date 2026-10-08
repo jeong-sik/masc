@@ -721,6 +721,9 @@ class BidiHostLink(unittest.TestCase):
         self.assert_ends("BiDi peer must be Firefox", within=ATTACH_WAIT_SEC)
         self.assertEqual(self.firefox.state.methods, ["session.new", "session.end"])
         self.assertEqual(self.lane.state.polls, [])
+        # It was given a session and ended it: nothing is left, and nothing
+        # was refused.
+        self.assertEqual(self.record()["ended"]["session_in_firefox"], "none")
 
     def test_a_host_the_server_retired_registers_again_as_a_new_client(self):
         # What a host meets after its laptop slept: the server ended the
@@ -876,7 +879,10 @@ class BidiHostLink(unittest.TestCase):
         record = self.record()
         self.assertEqual(record["ended"]["reason"], "BiDi command rejected: session not created")
         self.assertIsNone(record["attached_at"])
-        self.assertEqual(record["ended"]["session_in_firefox"], "none")
+        # Firefox says this while it holds a session that is not this host's.
+        # The next host meets the same session, so the record says which
+        # refusal it was.
+        self.assertEqual(record["ended"]["session_in_firefox"], "refused")
 
     def test_a_session_left_in_firefox_is_in_the_ending(self):
         self.firefox.state.answers_session_end = False

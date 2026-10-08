@@ -18,9 +18,17 @@ let address = "ws://127.0.0.1:9222/session"
 (* How long the reader waits for the other process to say a line. *)
 let holder_line_window_sec = 30.
 
+let client raw =
+  match Browser_lane.client_id_of_string raw with
+  | Ok id -> id
+  | Error code -> failwith (raw ^ ": " ^ code)
+
+let first_client = client "0199c0de-0000-7000-8000-000000000001"
+let renewed_client = client "0199c0de-0000-7000-8000-000000000002"
+
 let hold base_path =
   match
-    Record.take ~base_path ~pid:(Unix.getpid ()) ~bidi_url:address ~client_id:"holder-client"
+    Record.take ~base_path ~pid:(Unix.getpid ()) ~bidi_url:address ~client_id:first_client
       ~now:1_791_000_000.
   with
   | Error refusal ->
@@ -63,7 +71,7 @@ let entry : Record.entry =
   { pid = 4242
   ; started_at = 1_791_000_000.
   ; bidi_url = address
-  ; client_id = "0199c0de-0000-7000-8000-000000000001"
+  ; client_id = first_client
   ; attached_at = Some 1_791_000_002.
   ; unacknowledged = []
   ; ended = None
@@ -78,10 +86,13 @@ let test_an_entry_reads_back_as_written () =
       check bool name true (Record.entry_of_json (Record.entry_to_json written) = Ok written))
     [ "attached", entry
     ; "still connecting", { entry with attached_at = None }
+    ; "polling as an ID a host made", { entry with client_id = Random_id.uuid_v7_value () }
     ; "ended", { entry with ended = Some ending }
     ; "ended with its session left", { entry with ended = Some { ending with session = Session_left } }
     ; ( "ended without knowing of its session"
       , { entry with ended = Some { ending with session = Session_unknown } } )
+    ; ( "ended because Firefox refused it a session"
+      , { entry with attached_at = None; ended = Some { ending with session = Session_refused } } )
     ; ( "with results nothing acknowledged"
       , { entry with
           unacknowledged =
@@ -167,14 +178,61 @@ let test_a_layout_this_reader_does_not_know_is_refused () =
   in
   refused "a session fate this reader does not know"
     (with_ending (replaced "session_in_firefox" (`String "closed")));
-  refused "an ending that says whether, not what" (with_ending (replaced "session_in_firefox" (`Bool true)))
+  refused "an ending that says whether, not what" (with_ending (replaced "session_in_firefox" (`Bool true)));
+  (* What a host never writes is not read as its word: the reason goes on to
+     an operator and to a model, the address and the client ID to a screen. *)
+  List.iter
+    (fun (name, reason) -> refused name (with_ending (replaced "reason" (`String reason))))
+    [ "a reason with a line break", "stopped\nNo BiDi browser host is running"
+    ; "a reason with a terminal escape", "stopped \027[2J"
+    ; "a reason that is not ASCII", "stopped \xff\xfe"
+    ; "a reason longer than a host keeps", String.make 516 'a'
+    ];
+  (match Record.entry_of_json (with_ending (replaced "reason" (`String (String.make 512 'a' ^ "...")))) with
+   | Ok _ -> ()
+   | Error detail -> failf "a reason cut at the limit was refused: %s" detail);
+  List.iter
+    (fun (name, url) -> refused name (`Assoc (replaced "bidi_url" (`String url) fields)))
+    [ "an address with a query", address ^ "?token=x"
+    ; "an address with a password", "ws://operator:secret@127.0.0.1:9222/session"
+    ; "an address on another machine", "ws://203.0.113.7:9222/session"
+    ; "an address with a line break", address ^ "\nmore"
+    ];
+  refused "a client ID that is no lane client ID" (`Assoc (replaced "client_id" (`String "holder-client") fields))
+
+(* A time read from the record is written back as the text it was read from.
+   Cut instead of rounded, about half of all millisecond values lost one
+   millisecond each time the record went through a reader and a writer. *)
+let test_a_time_is_written_back_as_it_was_read () =
+  let text_of json = Yojson.Safe.to_string json in
+  for millisecond = 0 to 999 do
+    let at = 1_791_000_000. +. (float_of_int millisecond /. 1000.) in
+    let written = Record.entry_to_json { entry with started_at = at; attached_at = Some at } in
+    match Record.entry_of_json written with
+    | Error detail -> failf "millisecond %d was not read back: %s" millisecond detail
+    | Ok read ->
+      if text_of (Record.entry_to_json read) <> text_of written
+      then failf "millisecond %d changed on its way through: %s" millisecond (text_of (Record.entry_to_json read))
+  done;
+  (* A time between two milliseconds goes to the nearer one. *)
+  let started_at json = match json with
+    | `Assoc fields -> List.assoc "started_at" fields
+    | _ -> fail "not an object" in
+  check bool "rounded to the nearest millisecond" true
+    (started_at (Record.entry_to_json { entry with started_at = 1_791_000_000.1239 })
+     = `String "2026-10-03T04:00:00.124Z"
+     && started_at (Record.entry_to_json { entry with started_at = 1_791_000_000.1232 })
+        = `String "2026-10-03T04:00:00.123Z")
 
 let state = testable (Fmt.of_to_string (function
   | Record.Never_started -> "never started"
   | Record.Running entry -> Printf.sprintf "running pid %d" entry.pid
   | Record.Ended (entry, ending) -> Printf.sprintf "ended pid %d: %s" entry.pid ending.reason
   | Record.Died entry -> Printf.sprintf "died pid %d" entry.pid
-  | Record.Unreadable detail -> "unreadable: " ^ detail)) ( = )
+  | Record.Unreadable { detail; held } ->
+    Printf.sprintf "unreadable (%s): %s"
+      (match held with Some true -> "held" | Some false -> "not held" | None -> "lock unknown") detail))
+  ( = )
 
 let said = Fmt.to_to_string (pp state)
 
@@ -187,8 +245,14 @@ let test_what_a_record_and_its_lock_say () =
   (* The host has written its ending and not yet exited. *)
   check state "an ending whose host still holds the lock" (Record.Ended (ended, ending))
     (Record.state_of ~lock_held:true (Ok (Some ended)));
-  check state "a record that cannot be read" (Record.Unreadable "torn")
-    (Record.state_of ~lock_held:true (Error "torn"))
+  (* A record nobody can read still says whether a host holds the workspace:
+     one that does refuses the next host, which then cannot replace it. *)
+  check state "a record that cannot be read, under a host"
+    (Record.Unreadable { detail = "torn"; held = Some true })
+    (Record.state_of ~lock_held:true (Error "torn"));
+  check state "a record that cannot be read, with no host"
+    (Record.Unreadable { detail = "torn"; held = Some false })
+    (Record.state_of ~lock_held:false (Error "torn"))
 
 let start_holder base =
   let from_holder, holder_out = Unix.pipe ~cloexec:true () in
@@ -326,6 +390,15 @@ let test_the_process_that_holds_a_workspace_is_told_so () =
      | Error (Record.Bad_address detail | Record.Unavailable detail) -> fail detail
      | Ok _ -> fail "one process took a workspace twice under its other path"));
   running "the holder still reads its host as running";
+  (* A record that turns unreadable under a running host is said to be that,
+     with the host still holding the workspace. *)
+  (let file = Filename.concat (List.fold_left Filename.concat base [ ".masc"; "browser-lane" ]) "bidi-host.json" in
+   let whole = In_channel.with_open_bin file In_channel.input_all in
+   Out_channel.with_open_bin file (fun channel -> output_string channel "{\"schema\": 1");
+   (match Record.observe ~base_path:base with
+    | Record.Unreadable { held = Some true; _ } -> ()
+    | other -> failf "an unreadable record under a host is %s" (said other));
+   Out_channel.with_open_bin file (fun channel -> output_string channel whole));
   check bool "and none of that dropped the lock another process meets" true
     (held_as_seen_elsewhere base);
   released held;
@@ -348,14 +421,14 @@ let test_a_host_writes_its_ending_and_the_next_replaces_it () =
   with_workspace @@ fun ~base ~lane ->
   let first = taken ~pid:100 base in
   written (Record.attached first ~now:1_791_000_002.);
-  written (Record.client_changed first ~client_id:"renewed");
+  written (Record.client_changed first ~client_id:renewed_client);
   let later = { noted with outcome = Succeeded; verb = None; request_id = None; at = 1_791_000_040. } in
   written (Record.note_unacknowledged first noted);
   written (Record.note_unacknowledged first later);
   written
     (Record.ended first ~reason:"stopped by SIGINT" ~session:Record.Session_left ~now:1_791_000_060.);
   let record = on_disk lane in
-  check string "the ID it polled as last" "renewed" record.client_id;
+  check bool "the ID it polled as last" true (record.client_id = renewed_client);
   check bool "its ending" true
     (record.ended
      = Some { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.Session_left });
@@ -446,7 +519,9 @@ let () =
           ; test_case "a request is named only by the UUID the server issues" `Quick
               test_a_request_is_named_only_by_the_uuid_the_server_issues
           ; test_case "a layout this reader does not know is refused" `Quick
-              test_a_layout_this_reader_does_not_know_is_refused ] )
+              test_a_layout_this_reader_does_not_know_is_refused
+          ; test_case "a time is written back as it was read" `Quick
+              test_a_time_is_written_back_as_it_was_read ] )
       ; ( "state"
         , [ test_case "what a record and its lock say" `Quick test_what_a_record_and_its_lock_say
           ; test_case "a reader follows a host from start to death" `Quick

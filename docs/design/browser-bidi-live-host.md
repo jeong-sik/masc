@@ -156,15 +156,18 @@ server:
     same way.
     - `none`: nothing of this host's is left. Firefox confirmed the end or
       said the connection has no session (`invalid session id`), or the host
-      never had one. A host Firefox refused because of another host's
-      session ends with `none` and that refusal as its reason.
+      never got as far as asking for one.
+    - `refused`: Firefox refused the host a session with `session not
+      created`. It does that while it holds one: another host's that is
+      attached, or one a host that died left there. The next host meets the
+      same session.
     - `left`: Firefox was asked and did not confirm: it answered with
       another error, or not in time. It is taken to keep the session, and
       then refuses the next host until it is restarted.
     - `unknown`: the connection was gone before the host could ask. A
       Firefox that quit took the session along; one still running keeps it.
 
-Read together they say one of four things:
+Read together they say one of these:
 
 | Record | Lock | Meaning |
 |---|---|---|
@@ -172,6 +175,7 @@ Read together they say one of four things:
 | no ending | held | A host is running. It is attached once the record has its session time; a server that is down does not change this. |
 | an ending | | The host left in order and said why. |
 | no ending | free | The host was killed or crashed, or it left in order and could not write its ending. Its BiDi session may be left in Firefox. |
+| unreadable | | The record is not one the reader takes. The reader still says whether a host holds the lock: one that does refuses the next host, which then cannot replace the record. |
 
 A reader looks at the record and then at the lock, so it can be wrong for
 as long as one write of the record takes: while a starting host has the
@@ -186,6 +190,13 @@ the field is `null`. A reader built before a verb was added reads that verb
 as unnamed and the rest of the record as it is. The reason for ending is the
 one free sentence, and it is written as printable ASCII: other bytes appear
 as `\xNN`, and a reason longer than 512 bytes is cut.
+
+A reader takes only what a host writes: a reason that is printable ASCII
+within that length, an address in the form a host records it, and a client
+ID the lane would take. Anything else makes the record unreadable to it,
+because what it reads is said on to an operator, a terminal and a model.
+Times are written to the nearest millisecond, and one that was read is
+written back as the same text.
 
 The host does not start when it cannot take the lock or write its first
 record: a host that held the lock under its predecessor's record would be

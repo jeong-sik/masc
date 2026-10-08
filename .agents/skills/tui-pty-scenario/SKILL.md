@@ -150,8 +150,8 @@ gh workflow run leader-ci.yml --ref main \
 ## Gotchas
 
 - 설명이 같은 시나리오가 다른 가족에도 있다. `--scenario` 는 고른 가족 안에서만 찾는다.
-- 가족을 새로 만들면 `test/dune` 규칙과 `runtest` 연결을 같이 넣는다. 빠지면
-  `test/test_tui_keyboard_scenario_selection.py` 가 실패한다. `memory-journal` 만 규칙은 있고
-  `runtest` 연결은 일부러 뺐다(Linux 러너에서 멈춘다, `test/dune` 주석). 그 예외는 그 테스트에 적혀 있다.
+- 가족을 새로 만들면 `test/dune`의 해당 규칙과 `runtest`까지의 alias 연결을 직접 확인한다.
+  가족의 `--list` 출력은 시나리오 선택만 확인하며 Dune 연결이나 실행을 증명하지 않는다.
+  `memory-journal`은 `test/dune` 주석에 설명된 Linux 러너 정지 문제로 `runtest`에서 제외되어 있다.
 - 가족 몇 개(`msx-retained-tick`, `tools-purpose` 등)는 PASS 줄 앞에 증거 JSON 줄을 찍는다.
   `--list` 는 그런 출력을 stderr 로 돌려서 stdout 에는 이름만 남긴다.

@@ -8,8 +8,24 @@ import tui_keyboard_runtime as _keyboard_runtime
 
 
 RUNTIME_ID = "fixture-runtime-한글-very-long-identity-tailZ"
-EXHAUSTED_ID = "exhausted"
 LANE_ID = "fixture-lane-아주긴이름-primary-tailL"
+# Short enough to stay whole in the RUNTIME column, so its row is found by name.
+EXHAUSTED_ID = "exhausted"
+SGR_RE = re.compile(rb"\x1b\[[0-9;]*m")
+
+
+def styling(row):
+    """The colours and attributes a captured row is drawn with.
+
+    A captured row can end with cursor or mode sequences from the frame
+    around it, which say nothing about how the row itself looks.
+    """
+    return b"".join(SGR_RE.findall(row))
+
+
+def look(row):
+    """What a reader sees of a captured row: its text and its styling."""
+    return _keyboard_harness.CSI_RE.sub(b"", row), styling(row)
 
 
 def screen(output):
@@ -17,10 +33,6 @@ def screen(output):
     end = raw.rfind(_keyboard_harness.FRAME_END)
     assert end >= 0, "no completed terminal frame"
     return _keyboard_harness.screen_text(raw[:end + len(_keyboard_harness.FRAME_END)]).decode("utf-8", errors="strict")
-
-
-def style_codes(row):
-    return re.findall(rb"\x1b\[[0-9;]*m", row)
 
 
 def status_header_visible(columns, all_runtimes):
@@ -55,21 +67,16 @@ def run(executable, no_color):
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     _, resolved = _keyboard_runtime.runtime_resolved_response()
     assert isinstance(resolved, dict)
-    normal = _keyboard_runtime.runtime_resolved_runtime(RUNTIME_ID, "fixture-provider", "fixture-model")
-    exhausted = _keyboard_runtime.runtime_resolved_runtime(EXHAUSTED_ID, "fixture-provider", "fixture-model")
-    exhausted["quota_exhausted"] = True
-    resolved["runtimes"] = [normal, exhausted]
-    resolved["default_runtime"] = normal
+    runtime = _keyboard_runtime.runtime_resolved_runtime(RUNTIME_ID, "fixture-provider", "fixture-model")
+    resolved["runtimes"] = [runtime]
+    resolved["default_runtime"] = runtime
     resolved["default_route"] = LANE_ID
-    resolved["lanes"] = [{"id": LANE_ID, "runtime_ids": [RUNTIME_ID, EXHAUSTED_ID], "declared": True}]
+    resolved["lanes"] = [{"id": LANE_ID, "runtime_ids": [RUNTIME_ID], "declared": True}]
     resolved["assignments"] = []
     _, probe = _keyboard_runtime.runtime_probe_response(fresh=True)
-    probe["probe"]["providers"] = [
-        _keyboard_runtime.runtime_probe_provider(RUNTIME_ID, status="reachable"),
-        _keyboard_runtime.runtime_probe_provider(EXHAUSTED_ID, status="reachable"),
-    ]
-    probe["probe"]["summary"].update({"runtimes": 2, "probed": 2,
-        "reachable": 2, "failed": 0, "skipped": 0, "default_runtime_id": RUNTIME_ID})
+    probe["probe"]["providers"] = [_keyboard_runtime.runtime_probe_provider(RUNTIME_ID, status="reachable")]
+    probe["probe"]["summary"].update({"runtimes": 1, "probed": 1,
+        "reachable": 1, "failed": 0, "skipped": 0, "default_runtime_id": RUNTIME_ID})
     fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = (200, resolved)
     fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = (200, probe)
     fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = (200, probe)
@@ -79,72 +86,6 @@ def run(executable, no_color):
         _keyboard_harness.send_and_wait(process, fd, output, b"9", b"MASC System / Runtime")
         _keyboard_harness.wait_for_output(process, fd, output, b"tailZ", start=0, timeout=10)
         _keyboard_harness.wait_for_output(process, fd, output, b"reachable", start=0, timeout=10)
-        if not no_color:
-            _keyboard_harness.send_and_wait(process, fd, output, b"p", b"All runtimes")
-            rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=True)
-            exhausted_rows = [
-                (row_id, row)
-                for row_id, row in rows.items()
-                if EXHAUSTED_ID.encode() in row
-            ]
-            assert len(exhausted_rows) == 1, (
-                f"exhausted runtime row missing from All runtimes: {rows!r}"
-            )
-            exhausted_index, exhausted_row = exhausted_rows[0]
-            normal_rows = [
-                (row_id, row)
-                for row_id, row in rows.items()
-                if RUNTIME_ID[-4:].encode() in row
-                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
-            ]
-            assert len(normal_rows) == 1, f"normal runtime row missing: {rows!r}"
-            normal_index, normal_row = normal_rows[0]
-            assert normal_index < exhausted_index, rows
-            initial_text = _keyboard_harness.CSI_RE.sub(b"", exhausted_row)
-            start = len(output)
-            os.write(fd, b"h")
-            _keyboard_harness.wait_for_output(process, fd, output, EXHAUSTED_ID.encode(), start=start, timeout=3)
-            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
-            dimmed_off_rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=True)
-            dimmed_off_matches = [
-                row for row in dimmed_off_rows.values()
-                if EXHAUSTED_ID.encode() in row
-            ]
-            assert len(dimmed_off_matches) == 1, f"exhausted row missing after h: {dimmed_off_rows!r}"
-            dimmed_off = dimmed_off_matches[0]
-            assert _keyboard_harness.CSI_RE.sub(b"", dimmed_off) == initial_text, dimmed_off
-            if not no_color:
-                assert style_codes(dimmed_off) != style_codes(exhausted_row), (exhausted_row, dimmed_off)
-            normal_after_off = [
-                row for row in dimmed_off_rows.values()
-                if RUNTIME_ID[-4:].encode() in row
-                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
-            ]
-            assert normal_after_off == [normal_row], (normal_row, normal_after_off)
-            start = len(output)
-            os.write(fd, b"h")
-            _keyboard_harness.wait_for_output(process, fd, output, EXHAUSTED_ID.encode(), start=start, timeout=3)
-            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
-            dimmed_on_rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=True)
-            dimmed_on_matches = [
-                (row_id, row) for row_id, row in dimmed_on_rows.items()
-                if EXHAUSTED_ID.encode() in row
-            ]
-            assert len(dimmed_on_matches) == 1, f"exhausted row missing after second h: {dimmed_on_rows!r}"
-            dimmed_on_index, dimmed_on = dimmed_on_matches[0]
-            normal_on = [
-                (row_id, row) for row_id, row in dimmed_on_rows.items()
-                if RUNTIME_ID[-4:].encode() in row
-                and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
-            ]
-            assert len(normal_on) == 1, f"normal row missing after second h: {dimmed_on_rows!r}"
-            normal_on_index, normal_on_row = normal_on[0]
-            assert _keyboard_harness.CSI_RE.sub(b"", dimmed_on) == initial_text, dimmed_on
-            assert normal_on_index < dimmed_on_index, dimmed_on_rows
-            if not no_color:
-                assert style_codes(dimmed_on) == style_codes(exhausted_row), (exhausted_row, dimmed_on)
-            assert normal_on_row == normal_row, (normal_row, normal_on_row)
-            _keyboard_harness.send_and_wait(process, fd, output, b"p", b"Service lanes")
         for all_runtimes in (False, True):
             if all_runtimes:
                 # The lane sweep already ended at120x32; an unchanged size
@@ -171,8 +112,8 @@ def run(executable, no_color):
                     assert "…" not in route_block, (columns, route_block)
                 if status_visible:
                     suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
-                    # The normal default row remains available for the existing
-                    # narrow identity check; the exhausted candidate is inspected above.
+                    # The fixture has no account usage scope, so the folded row
+                    # reports usage unknown; reachability remains in detail.
                     candidate_rows = [row for row in visible.splitlines()
                                       if suffix in row and "usage unknown" in row]
                     assert len(candidate_rows) == 1, (columns, all_runtimes, visible)
@@ -224,7 +165,88 @@ def run(executable, no_color):
         extra_env={"NO_COLOR": "1"} if no_color else {})
 
 
+def run_dimming(executable):
+    """`h` dims and restores a quota-exhausted row without moving or redrawing the others.
+
+    Its own fixture and its own TUI: a second runtime with a long status
+    changes the column widths the responsive sweep in `run` measures.
+    """
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    _, resolved = _keyboard_runtime.runtime_resolved_response()
+    assert isinstance(resolved, dict)
+    normal = _keyboard_runtime.runtime_resolved_runtime(RUNTIME_ID, "fixture-provider", "fixture-model")
+    exhausted = _keyboard_runtime.runtime_resolved_runtime(EXHAUSTED_ID, "fixture-provider", "fixture-model")
+    exhausted["quota_exhausted"] = True
+    resolved["runtimes"] = [normal, exhausted]
+    resolved["default_runtime"] = normal
+    resolved["default_route"] = LANE_ID
+    resolved["lanes"] = [{"id": LANE_ID, "runtime_ids": [RUNTIME_ID, EXHAUSTED_ID], "declared": True}]
+    resolved["assignments"] = []
+    _, probe = _keyboard_runtime.runtime_probe_response(fresh=True)
+    probe["probe"]["providers"] = [
+        _keyboard_runtime.runtime_probe_provider(RUNTIME_ID, status="reachable"),
+        _keyboard_runtime.runtime_probe_provider(EXHAUSTED_ID, status="reachable"),
+    ]
+    probe["probe"]["summary"].update({"runtimes": 2, "probed": 2,
+        "reachable": 2, "failed": 0, "skipped": 0, "default_runtime_id": RUNTIME_ID})
+    fixtures[_keyboard_harness.RUNTIME_RESOLVED_PATH] = (200, resolved)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_PATH] = (200, probe)
+    fixtures[_keyboard_runtime.RUNTIME_PROBE_FORCE_PATH] = (200, probe)
+
+    def runtime_rows(rows):
+        """The exhausted row and the normal row of the All runtimes table."""
+        exhausted_rows = [(row_id, row) for row_id, row in rows.items()
+                          if EXHAUSTED_ID.encode() in row]
+        assert len(exhausted_rows) == 1, f"exhausted runtime row missing: {rows!r}"
+        # The table clips the long ID in the middle and keeps its tail.
+        normal_rows = [(row_id, row) for row_id, row in rows.items()
+                       if RUNTIME_ID[-4:].encode() in row
+                       and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)]
+        assert len(normal_rows) == 1, f"normal runtime row missing: {rows!r}"
+        return exhausted_rows[0], normal_rows[0]
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.tab_until(process, fd, output, b"MASC System")
+        _keyboard_harness.send_and_wait(process, fd, output, b"9", b"MASC System / Runtime")
+        _keyboard_harness.wait_for_output(process, fd, output, b"tailZ", start=0, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, b"reachable", start=0, timeout=10)
+        # The cursor starts on the first (normal) row, so the exhausted row is
+        # drawn unselected and its dimming is visible.
+        _keyboard_harness.send_and_wait(process, fd, output, b"p", b"All runtimes")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+
+        def toggle():
+            start = len(output)
+            os.write(fd, b"h")
+            _keyboard_harness.wait_for_output(process, fd, output, EXHAUSTED_ID.encode(), start=start, timeout=3)
+            _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=start, timeout=3)
+            _keyboard_harness.drain_until_quiet(process, fd, output)
+            return runtime_rows(_keyboard_harness.screen_rows(bytes(output), preserve_styles=True))
+
+        (dim_index, dim_row), (normal_index, normal_row) = runtime_rows(
+            _keyboard_harness.screen_rows(bytes(output), preserve_styles=True))
+        assert normal_index < dim_index, (normal_index, dim_index)
+        text = _keyboard_harness.CSI_RE.sub(b"", dim_row)
+
+        (off_index, off_row), (off_normal_index, off_normal_row) = toggle()
+        assert (off_index, off_normal_index) == (dim_index, normal_index), "h moved a row"
+        assert _keyboard_harness.CSI_RE.sub(b"", off_row) == text, off_row
+        assert styling(off_row) != styling(dim_row), (dim_row, off_row)
+        assert look(off_normal_row) == look(normal_row), (normal_row, off_normal_row)
+
+        (on_index, on_row), (on_normal_index, on_normal_row) = toggle()
+        assert (on_index, on_normal_index) == (dim_index, normal_index), "h moved a row"
+        assert look(on_row) == look(dim_row), (dim_row, on_row)
+        assert look(on_normal_row) == look(normal_row), (normal_row, on_normal_row)
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(executable,
+        description="Runtime listing dims and restores an exhausted row",
+        interact=interact, http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
     for no_color in (False, True):
         run(os.path.abspath(sys.argv[1]), no_color)
+    run_dimming(os.path.abspath(sys.argv[1]))
     print("Runtime list responsive identity/status and full detail: PASS")

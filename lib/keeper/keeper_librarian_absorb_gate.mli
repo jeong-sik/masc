@@ -12,7 +12,7 @@
     The gate only ever narrows [absorbed]. When the gate is declared off, or
     the Keeper is excluded, the answer is applied as it came. When the gate is
     declared on but cannot be asked -- the lane is off, or no destination is
-    armed -- nothing is absorbed and every source stays current. When an
+    armed -- the runtime leaves the entire Memory range pending. When an
     enabled judgment fails, only completed positive verdicts appear in the
     gate's result; unconfirmed sources stay current. The runtime leaves the
     entire Memory range pending on judgment failure, including the proposed
@@ -23,8 +23,10 @@
     asked the reverse question -- do the memories it named, which stay
     current, convey each of its statements? When every statement is
     conveyed the claim is a copy of what stays and is not applied. When a
-    statement is not conveyed, or the question cannot be answered, the claim
-    is applied as before. *)
+    statement is not conveyed, the claim is applied. A reverse request failure
+    leaves the entire range pending too: a failed duplicate check is not
+    evidence that a proposal adds knowledge. Deliberate reverse exemptions
+    and pre-dispatch size limitations retain their existing policy. *)
 
 (** {1 Statements} *)
 
@@ -278,7 +280,11 @@ val failure_detail
     were confirmed and kept current, and the request body sha256s. The
     runtime logs it once, with the lane and snapshot state, and records it
     in the journal; {!run} does not log a failed judgment itself. [None]
-    for a completed judgment or a skipped run. *)
+    for a completed judgment, a pass without absorptions, or an explicitly
+    disabled/excluded gate. An enabled but unavailable gate and a failed
+    reverse request also return a failure, so neither can commit candidates
+    or advance the durable consumer. A skipped evaluation is not necessarily
+    permission to commit. *)
 
 val run
   :  ?observe:(observation -> unit)

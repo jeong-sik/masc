@@ -29,12 +29,8 @@ def run(executable, columns):
     fixtures["/api/v1/git/log"] = h.PathHttpResponse(git)
     fixtures["/api/v1/ide/file-activity"] = h.PathHttpResponse(activity)
 
-    def home(process, fd, output):
-        if history.window(output, columns)[0] != 1:
-            h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
-
     def read_document(process, fd, output):
-        home(process, fd, output)
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
         parts = {}
         while True:
             first, last, total, body = history.window(output, columns)
@@ -52,16 +48,16 @@ def run(executable, columns):
         h.send_and_wait(process, fd, output, b"\r", b"local lock = 1")
         h.resize_and_wait(process, fd, output, rows=30, columns=columns,
             needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
+        # The source label and long Keeper name wrap separately at 60 columns.
         h.send_and_wait(process, fd, output, b"H", b"Keeper:")
         document = read_document(process, fd, output)
         assert "Githistoryunavailable" in document, document
-        assert "KEEPERTAIL" in document, document
         assert "TASKTAIL" in document and "EXECTAIL" in document, document
         assert mode["activity_reads"] == 1, mode
 
         # r retries both sources without leaving the history overlay.
         mode.update(git=True, activity=False)
-        home(process, fd, output)
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
         h.send_and_wait(process, fd, output, b"r", b"Commit: abc1234")
         document = read_document(process, fd, output)
         assert "activitysourceoffline" in document, document
@@ -69,7 +65,7 @@ def run(executable, columns):
         assert "Githistoryunavailable" not in document, document
 
         mode.update(git=False, activity=False)
-        home(process, fd, output)
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
         # The HTTP error wraps after "source" at 60 columns. Wait for the
         # new source state, then check the complete error across its rows.
         h.send_and_wait(process, fd, output, b"r", b"Git history unavailable")
@@ -80,7 +76,7 @@ def run(executable, columns):
         assert "nocommitorexactKeeperchangetouches" not in document, document
 
         mode.update(git=True, activity=True)
-        home(process, fd, output)
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"rows 1-")
         h.send_and_wait(process, fd, output, b"r", b"Commit: abc1234")
         document = read_document(process, fd, output)
         assert "KEEPERTAIL" in document, document

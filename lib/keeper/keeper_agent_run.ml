@@ -51,7 +51,7 @@ let response_policy_for_turn ~turn_kind ~input_speaker
       | Schedule_due wake -> Option.is_none wake.result_delivery
       | Board_post_created | Board_post_updated | Board_comment_added _
       | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
-      | Delegate_completed | Ask_answered_row _ | Composition_completed
+      | Delegate_completed _ | Ask_answered_row _ | Composition_completed
       | External_attention _ | Completion_authority_rejected _
       | Task_outcome _ | Task_cancelled _ -> false in
     if observation.pending_messages = []
@@ -1244,6 +1244,10 @@ let run_turn
   | Error e ->
     Keeper_agent_result.not_dispatched e
   | Ok s ->
+    let approval_gate = Option.map
+      (fun (gate : Keeper_tool_approval_gate.t) ->
+        { gate with identity_tool_index = s.Keeper_run_tools.identity_tool_index })
+      approval_gate in
     let original_gate_message = user_message in
     let prepared_gate_input = s.Keeper_run_tools.model_message in
     let user_message = prepared_gate_input.text in

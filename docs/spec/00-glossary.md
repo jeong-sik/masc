@@ -697,6 +697,13 @@ status: reference
   → [Keeper_tooling.Response](../../lib/keeper_tooling/response.mli) ·
   [Keeper_agent_run](../../lib/keeper/keeper_agent_run.ml)
 
+**Chat Operation Reconciliation (채팅 오퍼레이션 정산)**
+: Keeper 채팅 오퍼레이션의 이벤트 스트림이 서버 재시작이나 연결 단절 등으로 종단 이벤트(`terminal event`) 없이 종료되었을 때, 듀러블 오퍼레이션 상태(`Keeper_chat_operation.state`)와 저널 엔드포인트(`read_whole_journal`)를 대조하여 화면 표시와 진행 행을 정합화하는 계약(#41680, #41705, #41730). 오퍼레이션이 이미 종료(`succeeded`·`failed`·`cancelled`)되었으나 스트림이 닫히지 않아 라이브 진행 행(`progress row`)에 과거 실행이 멈춘 채로 잔류하는 현상을 방지하며(`reconcile_operation`), 가짜 응답이나 합성 저널 이벤트를 임의로 조작하지 않고(`without fabricating journal events or a reply`) 스트림 도중 보존된 부분 텍스트(`partial text`), 도구 호출, 스킬 전달 영수증, 이전 연속 턴 이력을 그대로 보존한다. 저널 재조회 시 오퍼레이션 상태를 먼저 관측하고 저널을 읽은 뒤, 큐/실행 상태가 전진했는지 재확인(`read_with_operation_state`)하여 경합 상황에서도 성공한 첫 저널과 최신 오퍼레이션 상태의 정합성을 보장한다. 아울러 서버 재시작으로 중단된 세그먼트를 정산할 때(`record_restart_terminal`)는 신규 정산 세그먼트 표식(`Newly_settled_segment`)을 부여하여 이전 연속 세그먼트의 과거 에러가 새 재시작 정산을 가로채지 못하게 방지하며, 재시작 종단 전달 재시도 시 재연결 커서가 저널보다 앞서더라도 중복 재생 없이 안정적으로 중단 종단을 완결한다(#41705, #41730).
+  → [Masc_tui_keeper_chat_log](../../bin/masc_tui_keeper_chat_log.mli) ·
+  [Masc_tui_keeper_chat_transcript](../../bin/masc_tui_keeper_chat_transcript.mli) ·
+  [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
+  [Keeper_chat_operation_store](../../lib/keeper_chat_operations/keeper_chat_operation_store.mli)
+
 **Keeper Direct Native Call (키퍼 직접 네이티브 호출)**
 : 한 직접 Keeper 채팅 오퍼레이션(`Keeper_chat_operation`) 안에서 실행되는 단일
   네이티브 Agent API 호출 단위(#41655). 입력 접수(`input admission`) 직후이자
@@ -2276,7 +2283,8 @@ status: reference
   명확히 분리된다:
   1. 위임 완료 답변(`Delegate_replied`, `Delegate_failed`): 480 바이트 초과 시 줄임표(`...`)로 끝을
      자르되 결코 침묵 절단(`silent cut`)하지 않고, `masc_keeper_delegate_status` 조회 경로와
-     `operation_id`를 덧붙여 말단에 위치한 아티팩트 객체나 코드 블록을 온전히 복원할 수 있게 한다.
+     `operation_id`를 덧붙여 말단에 위치한 아티팩트 객체나 코드 블록을 복원할 수 있게 한다(단, 조회
+     경로는 operation 기록이 보존되어 있을 때 유효하며, 보존 기간 만료 등으로 기록 부재 시 원문 복원은 불가).
   2. 비동기 컴포지션 완료(`Composition_completed`): 성공 시에는 중복 적재를 막기 위해 본문을 비우고,
      실패나 취소 상세가 480 바이트를 초과하면 `keeper_composition_status` 조회 경로와 `request_id`를
      덧붙여 침묵 절단을 방지한다.
@@ -3183,6 +3191,11 @@ status: reference
 **Selective Source Candidate Validation (질의 매칭 소스 후보 선별 검증)**
 : `keeper_memory_search`는 먼저 쿼리에 맞는 소스 결속 주장과 그 경로·다이제스트를 고른 뒤, 그 후보만 잠금 아래에서 재검증한다. 쿼리에 맞지 않는 소스는 읽거나 무효화하지 않고 저장된 채 미검증으로 둔다. 매칭 후보의 읽기가 끝나지 않으면 본문을 보류하고 `source_verification.status="incomplete"`와 재조회 안내를 돌려준다. 검증된 현재 결과를 가린 뒤가 아니라 후보 검증·제외 후 `limit`을 적용하므로 오래되거나 확인할 수 없는 후보가 유효한 뒤쪽 결과를 밀어내지 않는다.
   → [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.mli) · [keeper_tool_memory_runtime](../../lib/keeper/keeper_tool_memory_runtime.ml)
+
+**Memory Retraction Plan Receipt (기억 철회 계획 영수증)**
+: Memory OS에서 사유(`reason`)를 수반하는 기억 철회(`retract_fact`) 및 대체(`supersede_fact`) 시, 스냅샷 교체 전에 디스크에 사전 기록되는 영구 복구 증거(#41590). 사전 준비(`prepared`) 단계에서 계획 ID(`plan_id`), 이전/목표 리비전(`prior_revision`·`target_revision`), 이전/목표 스냅샷 SHA-256(`prior_snapshot_sha256`·`target_snapshot_sha256`), 철회 문장 목록(`dropped_statements`)을 사이드카 JSON(`.memory-retraction-plan.json`)으로 기록한다. 스냅샷 교체 후 저널 저널링(`append_removal_journal_and_clear_receipt`)이 완료되어야만 영수증이 삭제되며, 만약 저널 확정 전에 프로세스가 중단되더라도 부팅 시 또는 후속 쓰기자가 `reconcile_retraction_plan_receipt`를 통해 스냅샷과 영수증을 대조하여 저널을 확정한다. 정산되지 않은 대기 영수증이 있는 동안에는 `read_dropped` 조회가 명시적 에러를 반환하고, 후속 쓰기자가 제거된 원본을 다른 내용으로 덮어쓰는 것을 차단한다.
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
+  [Keeper_memory_os_types](../../lib/keeper/keeper_memory_os_types.mli)
 
 **Shared Fact (작업공간 기억 원장 행)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.

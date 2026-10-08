@@ -1,0 +1,12 @@
+{
+  "parent": "ceb642430239cd3be6804386660c2693942a53f1",
+  "checks": {
+    "owner_ml_equals_extracted_blocks_plus_header_and_named_comment_change": true,
+    "remaining_types_ml_equals_parent_after_two_block_replacements": true,
+    "owner_mli_equals_selected_public_schema_signature_plus_header": true,
+    "public_types_mli_byte_identical": true
+  },
+  "owner_ml_sha256": "70491f8319db812243163bc2bad65e70bf38bf5bc68a8220738cb6e5157fd02d",
+  "public_types_mli_sha256": "235fc31934b26d718167363445e44e702db97ff1abc68caad9abd7a247372a0f",
+  "limits": "Source extraction evidence only. Ppx generated diagnostic namespace follows the new owner; existing wire formats and accepted/refused inputs require executed consumer checks."
+}

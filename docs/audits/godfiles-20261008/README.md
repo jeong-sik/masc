@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Seventeen production candidates received
-bounded changes; their other responsibilities remain pending. The other 58
+is not a defect verdict or a new build gate. Eighteen production candidates received
+bounded changes; their other responsibilities remain pending. The other 57
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 

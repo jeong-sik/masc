@@ -1,0 +1,35 @@
+Testing `MCP'.
+This run has ID `JQ1BNU8G'.
+
+  [OK]          schema_conversion          0   type mapping.
+  [OK]          schema_conversion          1   unknown type fails.
+  [OK]          schema_conversion          2   full schema.
+  [OK]          schema_conversion          3   empty schema.
+  [OK]          schema_conversion          4   no required.
+  [OK]          schema_conversion          5   no description.
+  [OK]          schema_conversion          6   missing property type is not p...
+  [OK]          schema_conversion          7   nullable union uses concrete t...
+  [OK]          schema_conversion          8   union unknown type fails.
+  [OK]          schema_conversion          9   union null-only is not projected.
+  [OK]          schema_conversion         10   union multiple concrete types ...
+  [OK]          schema_conversion         11   integer-number union uses number.
+  [OK]          schema_conversion         12   mixed numeric enum uses number.
+  [OK]          schema_conversion         13   heterogeneous enum omits prope...
+  [OK]          tool_bridge                0   mcp_tool_to_agent_core_tool.
+  [OK]          tool_bridge                1   bridge error propagation.
+  [OK]          tool_bridge                2   malformed schema skips only th...
+  [OK]          sdk_bridge                 0   mcp_tool_of_agent_core_tool.
+  [OK]          sdk_bridge                 1   agent_core_tool no description.
+  [OK]          sdk_bridge                 2   text_of_tool_result.
+  [OK]          sdk_bridge                 3   text_of_tool_result empty.
+  [OK]          sdk_bridge                 4   text_of_tool_result non-text o...
+  [OK]          sdk_bridge                 5   text_of_tool_result mixed cont...
+  [OK]          sdk_bridge                 6   text_of_tool_result large exact.
+  [OK]          mcp_tool_of_json           0   valid.
+  [OK]          mcp_tool_of_json           1   input_schema underscore.
+  [OK]          mcp_tool_of_json           2   missing name.
+  [OK]          mcp_tool_of_json           3   missing schema.
+  [OK]          mcp_tool_of_json           4   non-assoc.
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/MCP'.
+Test Successful in 0.003s. 29 tests run.

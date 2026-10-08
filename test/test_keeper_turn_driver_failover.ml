@@ -8,6 +8,7 @@ let load_list_text ~config_path =
 
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 module Driver = Masc.Keeper_turn_driver
+module Attempt_checkpoint = Masc.Keeper_attempt_checkpoint
 module Try_provider = Masc.Keeper_turn_driver_try_provider
 module Deferred_store = Masc.Keeper_deferred_runtime_lane_store
 module Agent_run_receipt = Masc.Keeper_agent_run_receipt.For_testing
@@ -1726,26 +1727,26 @@ let test_current_image_checkpoint_survives_text_fallback () =
       { (completed_run_result ()) with checkpoint = Some provider_checkpoint } in
     let projection = text_view.Driver.attempt_replay_prefix_projection in
     let restored =
-      match Driver.For_testing.project_provider_attempt_result
-              ~replay_prefix_projection:projection (Ok provider_result)
-            |> Driver.For_testing.turn_result with
+      match Attempt_checkpoint.project
+              ~projection (Ok provider_result)
+            |> fun outcomes -> outcomes.Attempt_checkpoint.turn_result with
       | Ok { Runtime_agent.checkpoint = Some checkpoint; _ } -> checkpoint
       | Ok _ -> Alcotest.fail "successful text fallback lost its checkpoint"
       | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
     Alcotest.(check bool) "successful text fallback retains current-goal pixels and exact suffix"
       true (restored.messages = history @ [ canonical_input ] @ suffix);
     let sidecar = `Assoc ["original_task",`String "image-fallback-task"] in
-    let failed = Driver.For_testing.project_provider_attempt_result
+    let failed = Attempt_checkpoint.project
       ~checkpoint_after:{provider_checkpoint with working_context=Some sidecar}
-      ~replay_prefix_projection:projection (Error (retryable_network_error "checkpoint persistence failed")) in
-    let failed_checkpoint = Driver.For_testing.produced_checkpoint failed |> Option.get in
+      ~projection (Error (retryable_network_error "checkpoint persistence failed")) in
+    let failed_checkpoint = failed.Attempt_checkpoint.checkpoint_after |> Option.get in
     Alcotest.(check bool) "failed producer keeps canonical pixels and exact suffix"
       true (failed_checkpoint.messages=restored.messages);
     Alcotest.(check bool) "failed producer keeps its working context"
       true (failed_checkpoint.working_context=Some sidecar);
     let persisted = ref [] in
-    let sink = Driver.For_testing.canonical_checkpoint_sink
-        ~replay_prefix_projection:projection
+    let sink = Attempt_checkpoint.canonical_sink
+        ~projection
         (fun (snapshot : Agent_core.Agent.checkpoint_snapshot) ->
           persisted := snapshot.checkpoint :: !persisted; Ok ()) in
     let snapshot checkpoint =

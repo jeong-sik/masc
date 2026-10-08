@@ -1046,6 +1046,112 @@ let image_count_in_messages (messages : Agent_core.Types.message list) =
     0
     messages
 
+(* H5 (task-2187): audio and document carried by the turn must reach a
+   text-only fallback as an attachment-bound reading, not only as an
+   "omitted" count. Expected shape is documented in
+   docs/KEEPER-MEDIA-FALLBACK-H5.md. These fixtures are red on main: the
+   projection keeps only the degrade note. *)
+let h5_fact_audio = "h5-audio-only-fact::the vault code is 4172"
+let h5_fact_document = "h5-document-only-fact::the ledger year is 1987"
+
+let h5_source_sha256_prefix bytes =
+  String.sub (Digestif.SHA256.to_hex (Digestif.SHA256.digest_string bytes)) 0 16
+
+let h5_text_of_blocks blocks =
+  blocks
+  |> List.filter_map (function Agent_core.Types.Text t -> Some t | _ -> None)
+  |> String.concat "\n"
+
+let h5_project_for_text_only ~goal_blocks =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime =
+      match Runtime.get_runtime_by_id "primary.text_model" with
+      | Some runtime -> runtime
+      | None -> Alcotest.fail "missing runtime primary.text_model"
+    in
+    let projected =
+      Driver.For_testing.project_input_for_attempt
+        ~project_images:
+          (Masc.Keeper_vision_ingest.fallback_projector
+             ~keeper_name:"h5-media-fallback" ())
+        ~keeper_name:"h5-media-fallback"
+        ~emit_runtime_manifest:(emit_manifest_collector (ref []))
+        ~goal_blocks:(Some goal_blocks)
+        ~goal_metadata:[]
+        ~initial_messages:[]
+        ~agent_core_checkpoint:None
+        ~runtime_id:"primary.text_model"
+        runtime
+    in
+    match projected.Driver.attempt_goal_blocks with
+    | Some blocks -> h5_text_of_blocks blocks
+    | None -> Alcotest.fail "the degraded goal must stay present")
+
+(* H5-S1: a fact only the audio holds. The text-only candidate's input must
+   name the attachment by the identity of its payload. *)
+let test_h5_s1_audio_fact_reaches_text_only_fallback () =
+  let audio =
+    Agent_core.Types.audio_block
+      ~media_type:"audio/wav"
+      ~data:(Base64.encode_string h5_fact_audio)
+      ~source_type:Agent_core.Types.Base64
+      ()
+  in
+  let text =
+    h5_project_for_text_only
+      ~goal_blocks:[ Agent_core.Types.Text "what is the vault code?"; audio ]
+  in
+  Alcotest.(check bool)
+    "projection binds the audio by source sha256"
+    true
+    (contains ~needle:("sha256:" ^ h5_source_sha256_prefix h5_fact_audio) text)
+
+(* H5-S2: the same for a document-only fact. *)
+let test_h5_s2_document_fact_reaches_text_only_fallback () =
+  let document =
+    Agent_core.Types.document_block
+      ~media_type:"application/pdf"
+      ~data:(Base64.encode_string h5_fact_document)
+      ~source_type:Agent_core.Types.Base64
+      ()
+  in
+  let text =
+    h5_project_for_text_only
+      ~goal_blocks:[ Agent_core.Types.Text "what is the ledger year?"; document ]
+  in
+  Alcotest.(check bool)
+    "projection binds the document by source sha256"
+    true
+    (contains ~needle:("sha256:" ^ h5_source_sha256_prefix h5_fact_document) text)
+
+(* H5-S3 (negative, never a substitute for S1/S2): when no reader can read the
+   attachment, the projection says so, keeps the original identity, and carries
+   nothing derived from the media. *)
+let test_h5_s3_unreadable_attachment_is_marked_unavailable () =
+  let audio =
+    Agent_core.Types.audio_block
+      ~media_type:"audio/wav"
+      ~data:(Base64.encode_string h5_fact_audio)
+      ~source_type:Agent_core.Types.Base64
+      ()
+  in
+  let text =
+    h5_project_for_text_only
+      ~goal_blocks:[ Agent_core.Types.Text "what is the vault code?"; audio ]
+  in
+  Alcotest.(check bool)
+    "projection says the attachment is unavailable"
+    true
+    (contains ~needle:"unavailable" text);
+  Alcotest.(check bool)
+    "projection keeps the original identity"
+    true
+    (contains ~needle:("sha256:" ^ h5_source_sha256_prefix h5_fact_audio) text);
+  Alcotest.(check bool)
+    "projection invents no media-derived content"
+    false
+    (contains ~needle:"4172" text)
+
 let synthetic_image () =
   Agent_core.Types.image_block
     ~media_type:"image/png"
@@ -6298,6 +6404,18 @@ let () =
             "attempt input is projected per runtime"
             `Quick
             test_attempt_input_is_projected_per_runtime;
+          Alcotest.test_case
+            "H5-S1 audio fact reaches text-only fallback"
+            `Quick
+            test_h5_s1_audio_fact_reaches_text_only_fallback;
+          Alcotest.test_case
+            "H5-S2 document fact reaches text-only fallback"
+            `Quick
+            test_h5_s2_document_fact_reaches_text_only_fallback;
+          Alcotest.test_case
+            "H5-S3 unreadable attachment is marked unavailable"
+            `Quick
+            test_h5_s3_unreadable_attachment_is_marked_unavailable;
           Alcotest.test_case
             "media rows keep their fields in the public view"
             `Quick

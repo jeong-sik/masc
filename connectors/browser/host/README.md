@@ -85,6 +85,15 @@ The host accepts only HTTP origins at `127.0.0.1`, `localhost`, or `::1`.
 Remote destinations and URL credentials, paths, queries, and fragments are
 rejected before the token is read or sent.
 
+## Attaching a BiDi connection
+
+The same executable attaches to a Firefox started with
+`--remote-debugging-port` when it is run with `--bidi-url`. Firefox does not
+start it in that mode; the operator does. A BiDi connection serves the trusted
+pointer work the extension cannot (`hover_at`, `drag`). The steps, what the
+port exposes and when the host ends are in
+[Attached Firefox BiDi peer](../../../docs/design/browser-bidi-live-host.md#attaching-a-connection).
+
 ## Connecting an ordinary Firefox / Zen profile
 
 A `live` Browser Lane uses the extension in the browser profile you are currently

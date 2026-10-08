@@ -6,6 +6,48 @@ the executable continues using WebExtension native messaging stdin/stdout.
 The endpoint must be loopback; MASC does not start Firefox, copy a profile,
 change preferences, or obtain application tokens.
 
+## Attaching a connection
+
+The operator does both steps. Nothing in MASC starts this Firefox or this host.
+
+1. Start Firefox with its Remote Agent on a loopback port.
+
+   ```sh
+   /Applications/Firefox.app/Contents/MacOS/firefox --remote-debugging-port 9222
+   ```
+
+   The command-line flag is the only way to enable the Remote Agent, so a
+   Firefox that is already running without it has to be quit first. Any local
+   process can connect to that port, drive the browser and read its cookies;
+   there is no authentication. A profile that is logged in only where a Keeper
+   works (`--profile <directory>`) limits what the port exposes to those
+   sites, at the cost of logging in there once.
+
+2. Run the host for the workspace the MASC server serves.
+
+   ```sh
+   masc-browser-host --base-path "$BASE_PATH" --bidi-url ws://127.0.0.1:9222/session
+   ```
+
+   The browser lane has to be installed for that workspace first:
+   `connectors/browser/install-host.sh` writes the lane token the host and the
+   server share (`<base-path>/.masc/browser-lane/token`). The host finds the
+   server's port in the workspace's `connection.toml`; `--server` names one
+   explicitly.
+
+The connection is attached when the TUI's Browser Lane picker (`b`) lists a
+`Firefox · BiDi` row, and `/api/v1/dashboard/browser-lane/clients` reports a
+client with `transport: "webdriver_bidi"`.
+
+The host runs in the foreground until it is stopped. It also ends by itself
+when a command's outcome is unknown, or when a poll or a result does not reach
+the server, so restarting the MASC server ends it. It does not retry; start it
+again. The reason goes to the host's own log output and is not reported to
+the server.
+
+The peer attaches only to a browser that reports itself as `firefox`. Zen has
+not been tried.
+
 The BiDi connection owns its opaque context to integer tab mapping. IDs are not
 recycled during the client lifetime and are never joined to extension IDs or
 URLs. Tab visibility and Firefox version are observed, not inferred from index.

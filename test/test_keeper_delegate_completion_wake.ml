@@ -330,7 +330,8 @@ let the_full_reply_rides_lossless_through_the_projection () =
     let fields_of op =
       let hit =
         List.find_opt
-          (fun (_, completion) -> String.equal completion.dc_operation_id op)
+          (fun ((_, completion) : _ * Event_queue.delegate_completion) ->
+            String.equal completion.dc_operation_id op)
           (queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker)
       in
       match hit with

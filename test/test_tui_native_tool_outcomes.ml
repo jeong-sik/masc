@@ -7,6 +7,15 @@ module Bridge = Masc.Keeper_chat_agent_core_stream_bridge
 module Live = Masc_tui_keeper_chat_live
 module Transcript = Masc_tui_keeper_chat_transcript
 
+(* Malformed fixtures edit the public serialized payload, preserving the
+   producer's metadata without constructing its private event record. *)
+let wire_with_custom_value ?id event replace =
+  let json = match Ag_ui.event_to_json event with
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        key, if key = "value" then replace value else value) fields)
+    | _ -> fail "projected event must be an object" in
+  Sse_wire.format_event_yojson ?id json
+
 let start f ~native ~index ~id =
   F.on_event f (Agent_core.Types.ContentBlockStart
     {index; content_type=(if native then Native.stream_content_type else "tool_use");
@@ -93,8 +102,8 @@ let test_absent_and_malformed_metadata () =
     match event with
     | None -> fail "native end was not projected"
     | Some event ->
-        let event = { event with Ag_ui.custom_value = Option.map (replace_completion replacement) event.custom_value } in
-        Live.feed (Live.create ()) (Ag_ui.event_to_sse ~id:1 event)
+        Live.feed (Live.create ())
+          (wire_with_custom_value ~id:1 event (replace_completion replacement))
         |> List.map (fun (observed : Live.observed_delta) -> observed.delta) in
   let old = `Assoc (List.remove_assoc "completion" fields) in
   check bool "end without result metadata remains unknown" true

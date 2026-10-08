@@ -9753,7 +9753,7 @@
 (test
  (name test_tui_native_tool_outcomes)
  (modules test_tui_native_tool_outcomes)
- (libraries alcotest yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui native_tool_outcome_fixture
+ (libraries alcotest yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui masc.sse_wire native_tool_outcome_fixture
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
 
 (rule
@@ -9783,7 +9783,7 @@
 (test
  (name test_tui_native_tool_progress)
  (modules test_tui_native_tool_progress)
- (libraries masc.fs_compat astring alcotest yojson unix eio_main masc masc.runtime masc.agent_core masc.server masc.ag_ui
+ (libraries masc.fs_compat astring alcotest yojson unix eio_main masc masc.runtime masc.agent_core masc.server masc.ag_ui masc.sse_wire
   masc.masc_types native_tool_outcome_fixture masc_tui_keeper_chat_live masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript masc_tui_keeper_chat_projection))
 

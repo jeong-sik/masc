@@ -6,6 +6,88 @@ the executable continues using WebExtension native messaging stdin/stdout.
 The endpoint must be loopback; MASC does not start Firefox, copy a profile,
 change preferences, or obtain application tokens.
 
+## Attaching a connection
+
+The operator does both steps. Nothing in MASC starts this Firefox or this host.
+
+1. Start a Firefox with its Remote Agent on a loopback port, on a profile
+   kept for this.
+
+   ```sh
+   FIREFOX=/Applications/Firefox.app/Contents/MacOS/firefox
+   PROFILE="$HOME/masc-keeper-firefox-profile"
+   mkdir -p "$PROFILE"
+   "$FIREFOX" --no-remote --profile "$PROFILE" --remote-debugging-port 9222
+   ```
+
+   `FIREFOX` is the Firefox executable. The path above is the macOS one, the
+   only platform this was run on. On Linux it is the `firefox` on the `PATH`.
+   `PROFILE` is any directory kept for this. It is not under a hidden
+   directory because a Firefox installed as a Snap reaches only non-hidden
+   files in the home directory
+   ([Snap home interface](https://snapcraft.io/docs/reference/interfaces/home-interface/),
+   read 2026-10-08).
+
+   This is a second Firefox beside the one in everyday use, which keeps
+   running without the flag. Log in there once, only to the sites a Keeper
+   works on. Any local process can connect to that port, drive that browser
+   and read its cookies; there is no authentication. The dedicated profile is
+   what keeps that to those sites (RFC browser-live-one-connection, decision
+   1). The command-line flag is the only way to enable the Remote Agent, so it
+   cannot be turned on in a Firefox that is already running.
+
+2. Run the host for the workspace the MASC server serves.
+
+   ```sh
+   BASE_PATH="$HOME/masc-workspace"
+   "$BASE_PATH/.masc/browser-lane/host/launch" --bidi-url ws://127.0.0.1:9222/session
+   ```
+
+   `BASE_PATH` is the directory that holds that workspace's `.masc`; the path
+   above is an example.
+
+   The browser lane has to be installed for that workspace first.
+   `connectors/browser/install-host.sh` writes the lane token the host and the
+   server share (`<base-path>/.masc/browser-lane/token`), a copy of the host
+   executable, and the `launch` script used here. The launcher runs that copy
+   with this workspace's `--base-path` and token file and passes on what
+   follows it, so it does not depend on the `PATH`.
+
+   `masc-browser-host --base-path "$BASE_PATH" --bidi-url ...` is the same
+   host when the executable is on the `PATH`. Set `BASE_PATH` before it: an
+   empty `--base-path` is taken as the current directory, not as "use the
+   default". Leaving the option out uses `MASC_BASE_PATH`.
+
+   The host finds the server's port in the workspace's `connection.toml`. An
+   exported `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT` outranks that file: with
+   either set, the host polls that server with this workspace's token. Unset
+   both in the shell that runs the host, or name the server with `--server`.
+
+The connection is attached when the TUI's Browser Lane picker (`b`) lists a
+`Firefox · BiDi` row, and `/api/v1/dashboard/browser-lane/clients` reports a
+client with `transport: "webdriver_bidi"`.
+
+If the everyday Firefox also has the extension connected, the live lane has
+two browsers. A request that names no `clientId` is then refused as
+`ambiguous_browser_clients`; a Keeper picks the `webdriver_bidi` connection
+from the list and keeps its `clientId` for the task.
+
+The host runs in the foreground until it is stopped. It also ends by itself
+when a command's outcome is unknown, or when a poll or a result does not reach
+the server, so restarting the MASC server ends it. It does not retry. The
+reason goes to the host's own log output and is not reported to the server.
+
+Attaching again takes both steps, Firefox first. The host does not end the
+BiDi session it created, the session stays in Firefox after the host is gone,
+and Firefox takes one session at a time. A host started against the same
+Firefox is refused with `session not created` and exits. Quit that Firefox,
+start it with the same command and profile, then start the host. Measured on
+Firefox 157.0.1 on 2026-10-08, after a host stopped with SIGTERM and with
+SIGKILL (RFC browser-live-one-connection, section 2.4).
+
+The peer attaches only to a browser that reports itself as `firefox`. Zen has
+not been tried.
+
 The BiDi connection owns its opaque context to integer tab mapping. IDs are not
 recycled during the client lifetime and are never joined to extension IDs or
 URLs. Tab visibility and Firefox version are observed, not inferred from index.

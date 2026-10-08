@@ -6404,7 +6404,10 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
            state.changes_cursor <- 0;
            state.changes_scroll <- 0;
            state.changes_diff_row <- None;
-           state.changes_diff_scroll <- 0
+           state.changes_diff_scroll <- 0;
+           state.changes_tree_diff <- None;
+           state.changes_tree_diff_error <- None;
+           state.changes_tree_diff_path <- None
        | Some _ | None -> ())
    | Connectors -> (
        match browser_lane_on_screen state with

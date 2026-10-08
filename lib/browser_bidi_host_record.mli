@@ -103,7 +103,9 @@ type entry =
   }
 
 type state =
-  | Never_started  (** No record: no BiDi host has run for this workspace. *)
+  | Never_started  (** No record, and no host holds the lock. *)
+  | Record_missing_but_locked
+      (** A host holds the lock but has not left a readable record. *)
   | Running of entry
       (** The lock is held. [attached_at] says whether the host has its
           session yet. A server that is down does not change this: the host
@@ -121,8 +123,8 @@ type state =
           [held = None] is the lock that could not be asked, and [detail] is
           then why. That is also what a record without an ending reads as
           when its lock cannot be asked: whether its host runs is not known.
-          A record with its ending, and no record, do not turn on the lock
-          and are read without it. *)
+          A record with its ending does not turn on the lock and is read
+          without it. *)
 
 (** Where a workspace's [bidi-host.json] is, for a reader that tells the
     operator which file it means. *)
@@ -133,7 +135,8 @@ val record_path : base_path:string -> string
     record write takes, and right on its next read:
     - a host has just taken the lock and not yet written its record: the
       reader sees its predecessor, as [Running] when that one died, as [Ended]
-      when it left in order, and [Never_started] when there was none;
+      when it left in order, and [Record_missing_but_locked] when there was
+      no predecessor;
     - a host wrote its ending and exited between the two reads: [Died].
 
     A record write that failed is carried by the host's next one that
@@ -141,9 +144,9 @@ val record_path : base_path:string -> string
     still connecting. *)
 val observe : base_path:string -> state
 
-(** The state for a record and what the lock says. With no record, or with
-    a record that has its ending, the lock changes nothing, and {!observe}
-    asks it only for the others. *)
+(** The state for a record and what the lock says. With no record, a held
+    lock means [Record_missing_but_locked]; with an ended record the lock
+    changes nothing. {!observe} asks it for the others. *)
 val state_of : lock_held:bool -> (entry option, string) result -> state
 
 (** {1 The host's side} *)

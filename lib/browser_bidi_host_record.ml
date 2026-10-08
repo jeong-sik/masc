@@ -37,6 +37,7 @@ type entry =
 
 type state =
   | Never_started
+  | Record_missing_but_locked
   | Running of entry
   | Ended of entry * ending
   | Died of entry
@@ -290,7 +291,7 @@ let entry_of_json json =
 
 let state_of ~lock_held = function
   | Error detail -> Unreadable { detail; held = Some lock_held }
-  | Ok None -> Never_started
+  | Ok None -> if lock_held then Record_missing_but_locked else Never_started
   | Ok (Some ({ ended = Some ending; _ } as entry)) -> Ended (entry, ending)
   | Ok (Some ({ ended = None; _ } as entry)) -> if lock_held then Running entry else Died entry
 
@@ -357,10 +358,11 @@ let lock_held base_path =
 
 let observe ~base_path =
   match read_entry base_path with
-  (* No record, and a record with its ending, say the same whatever the lock
-     says, so a lock that cannot be asked takes nothing from them. *)
-  | (Ok None | Ok (Some { ended = Some _; _ })) as entry -> state_of ~lock_held:false entry
-  | (Ok (Some { ended = None; _ }) | Error _) as entry ->
+  (* A record with its ending is final regardless of the lock. A missing
+     record still needs the lock to distinguish no host from one that has
+     taken the lock but has not written its record yet. *)
+  | (Ok (Some { ended = Some _; _ })) as entry -> state_of ~lock_held:false entry
+  | (Ok None | Ok (Some { ended = None; _ }) | Error _) as entry ->
     (match lock_held base_path with
      | Ok lock_held -> state_of ~lock_held entry
      | Error detail -> Unreadable { detail; held = None })

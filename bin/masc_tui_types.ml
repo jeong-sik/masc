@@ -3230,6 +3230,8 @@ type code_history_entry =
 
 type code_history_listing = {
   chl_entries: code_history_entry list;
+  chl_git_error: string option;
+      (** None means the Git read succeeded, including an empty result. *)
   chl_activity_note: string;
       (** Coverage or failure of the durable Keeper-change read. Git commits
           remain visible when this says unavailable. *)

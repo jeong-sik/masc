@@ -100,6 +100,16 @@ The native execution entries below describe successive changes included together
 
 - Show replayed Keeper chat failures after partial output or prior replies, without duplicating history errors or hiding failed requests when focus changes. (#41660)
 
+### Final candidate repairs
+
+### Fixed
+
+- Correct the Keeper native tool origin regression test to verify lifecycle observations and their identities without treating them as MASC tool executions (#41750).
+
+### Internal
+
+- Align the Keeper chat projection, transcript and Runtime key table tests with the native tool events, the eight outcomes and the per-reading `e` key; the key sheet lists `e` once as "model settings / add candidate" (#41912).
+
 ## [0.49.0] - 2026-10-04
 
 ### Upgrade notes

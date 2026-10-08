@@ -147,6 +147,7 @@ let test_poisoned_scope_retires_observed_activity () =
   List.iter (fun failure -> List.iter (fun with_tool ->
     let f = F.create () in
     let send = F.on_event f in
+    F.start_runtime_attempt f ~runtime_id:"first-runtime" ~attempt_index:0;
     send (MessageStart {id="poisoned-response";model="fixture";usage=None});
     send (ContentBlockDelta {index=0;delta=TextDelta "answer\n"});
     send (ContentBlockDelta {index=1;delta=ThinkingDelta "reasoning\n"});
@@ -172,6 +173,7 @@ let test_poisoned_scope_retires_observed_activity () =
       check string "observed reasoning preserved" "reasoning\n" (T.thinking t)) [live;replay];
     check bool "live and durable failure activity agree" true
       (T.status_rows ~now:2000. (T.of_log ~now:2000. live)=T.status_rows ~now:2000. (T.of_log ~now:2000. replay));
+    F.start_runtime_attempt f ~runtime_id:"retry-runtime" ~attempt_index:1;
     send (MessageStart {id="retry-response";model="fixture";usage=None});
     send (ContentBlockDelta {index=0;delta=TextDelta "retry\n"});
     let live,replay = F.snapshots f in

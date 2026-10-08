@@ -367,10 +367,10 @@ type t =
            that it is free. Owner-fiber-local; every reader and writer below
            runs in the command loop. *)
   ; restart_interrupted : Chat_operation.t list
-        (* The running operations this start settled as
-           [Interrupted_by_restart], for the caller that owns the transcript
-           to leave a failure row per request. Fixed at start; a later
-           restart is a later owner. *)
+        (* All durable [Interrupted_by_restart] failures, including batch
+           members and prior starts, so the transcript and event journal can
+           retry incomplete recovery. Fixed at start; settlement identity
+           makes repeated recovery idempotent. *)
   }
 
 let error_to_string = function
@@ -1023,9 +1023,14 @@ let start
            ~keeper_name
            "restart interrupted %d running chat operation(s)"
            (List.length interrupted));
-      read_operation_projection operation_store ~now:startup_now
-      |> Result.map_error owner_error_of_operation_error
-      |> Result.map (fun projection -> projection, interrupted)
+      Result.bind
+        (read_operation_projection operation_store ~now:startup_now
+         |> Result.map_error owner_error_of_operation_error)
+        (fun projection ->
+        run_operation_store ~label:"read restart recovery operations" (fun () ->
+          Chat_operation_store.list_restart_interrupted operation_store)
+        |> Result.map_error owner_error_of_operation_error
+        |> Result.map (fun recovery -> projection, recovery))
   in
   (match startup_result with
    | Error _ as error ->

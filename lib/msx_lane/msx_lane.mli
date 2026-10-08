@@ -324,6 +324,67 @@ val ram_diff : unit -> (ram_diff, error) result
     before/after hex. [Error Invalid_request] before any peek. The snapshot
     survives machine swaps — a reload after a peek reads as wholesale change,
     which it is. *)
+
+(** {b Core identity} — which ocaml-msx build this lane linked, the way
+    {!Dos_lane.core} does for the DOS lane. [binary_commit] names only the
+    masc sources: two builds of one commit can link different cores — the
+    vendored copy or an older opam install — and only this field tells
+    them apart. *)
+
+type core = {
+  source_digest : string;
+      (** the linked ocaml-msx core's own identity: a digest of its [lib/]
+          sources, computed by its build ([Msx_core_identity]). Not a
+          commit — an opam install has no history to ask. *)
+  pinned_source_digest : string;
+      (** the digest of the core at the CI pin, [OCAML_MSX_SHA] in
+          [scripts/opam-pin-external-deps.sh]. *)
+  matches_pin : bool;
+      (** the two digests are equal. [false] means this server runs a
+          different core from the one CI builds against — an older opam
+          copy, or a vendored checkout on another branch. *)
+}
+[@@deriving yojson]
+
+val core : core
+
+val core_to_yojson : core -> Yojson.Safe.t
+(** PPX-generated serializer, exposed for the [masc_msx_meta] tool. *)
+
+(** {b Checkpoint metadata} — what a saved slot holds, read without
+    restoring it. A restore replaces the shared machine a watcher shows,
+    so answering "what is in this slot" through {!restore} moved a live
+    campaign to ask a question. *)
+
+type checkpoint_info = {
+  version : int;  (** the checkpoint format version, currently 1 *)
+  frame : int option;
+      (** the saved frame counter. Checkpoint version 1 does not record it —
+          reading it would mean decoding the machine — so [None] until a
+          format that carries it. *)
+  saved_at_unix : float option;
+      (** the checkpoint file's modification time: the moment the slot was
+          written. Absent when the file cannot be stat'ed. *)
+  core_sha : string option;
+      (** the [Msx_core_identity.source_digest] of the core that saved the
+          checkpoint. Checkpoints saved before the field existed read as
+          [None] — an unknown core, not a wrong one. *)
+  cartridge : string option;  (** file name in the slot, as saved *)
+  disk : string option;  (** file name in drive A, as saved *)
+  ledger_entries : int;  (** saved input edges *)
+  byte_length : int;
+      (** the checkpoint file's size in bytes, as read. *)
+  sha256 : string;
+      (** hex SHA-256 of the checkpoint file's bytes, as read — the payload
+          identity a readback compares without parsing the envelope. *)
+}
+
+val checkpoint_info : path:string -> (checkpoint_info, error) result
+(** Reads one checkpoint file's metadata. Never touches the machine, the
+    ledger or the activity gate: inspection stays available when execution
+    is disabled. A missing file is [Invalid_request] naming the path; a file
+    that is there and will not read is [Unreadable]; bytes that do not
+    parse as a checkpoint envelope are [Invalid_request]. *)
 val save : path:string -> (observation, error) result
 (** Atomically replace a named checkpoint with the complete machine and ledger.
     Does not advance or eject the machine. *)

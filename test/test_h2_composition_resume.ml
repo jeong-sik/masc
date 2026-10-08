@@ -183,13 +183,8 @@ let dispatch ~marker_for ~commit_crash ~tool_use_id:_ ~node ~descriptor:_ ~sched
        ())
 ;;
 
-let expected_failure_detail () =
-  "discovery-phase expected"
-;;
-
-let unused () = ignore expected_failure_detail
-
-(* 실측 1회: plan 을 새로 만들어(재시작) 끝까지 돌린다. executor 는
+(* 실측 1회: 같은 프로세스에서 plan 을 새로 만들어 끝까지 돌린다.
+   이 경로는 process crash나 동일 request의 durable resume를 재현하지 않는다. executor 는
    배치 실행에서 Eio 취소 컨텍스트를 요구하므로 Eio_main.run 안에서
    돌린다 (acceptance fixture 패턴과 동일). *)
 let measure_attempt ~crash_spec =
@@ -265,7 +260,7 @@ let s1_restart_after_effect () =
     (match second with `Completed -> "completed" | `Failed -> "failed")
     effects_after_second
     (count "a" (claimed_file ()))
-    (count "a" (claimed_file ()) >= 2)
+    (effects_after_second >= 2)
 ;;
 
 (* H2-S1 변형: b(2단계) crash. b 는 a 의 출력을 입력으로 읽으므로
@@ -282,7 +277,7 @@ let s1_restart_b_after_effect () =
     (match second with `Completed -> "completed" | `Failed -> "failed")
     (count "b" (effect_file ()))
     (count "b" (claimed_file ()))
-    (count "b" (claimed_file ()) >= 2)
+    (count "b" (effect_file ()) >= 2)
 ;;
 
 (* H2-S1 변형: 첫 효과 직전 crash (a 가 효과를 내기 전). *)
@@ -556,11 +551,6 @@ let s3_phase2_recover_queued () =
     | Some id -> id
     | None -> fail "H2_ASYNC_REQUEST is required for s3 phase 2"
   in
-  let record_path =
-    match Sys.getenv_opt "H2_ASYNC_RECORD" with
-    | Some path -> path
-    | None -> fail "H2_ASYNC_RECORD is required for s3_2q"
-  in
   Eio_main.run (fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     stage "s3 phase2q: recovery boundary over a queued record";
@@ -575,7 +565,6 @@ let s3_phase2_recover_queued () =
               | Async.Unreadable reason -> "unreadable: " ^ reason
               | Async.Rejected rejection ->
                 Yojson.Safe.to_string (Async.access_rejection_to_json rejection))));
-    ignore record_path;
     let report = Async.recover_lost_disk_records ~base_path () in
     log "S3P2Q recovery report lost=%d finalized=%d cleaned=%d unreadable=%d failed=%d"
       report.Async.lost report.Async.finalized report.Async.cleaned

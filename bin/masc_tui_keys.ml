@@ -1338,7 +1338,8 @@ let code_notes_bindings =
   ]
 
 let code_history_bindings =
-  [ b Navigate "j/k" "scroll"
+  [ b Meta "r" "refresh"
+  ; b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
   ; b Navigate "H" "close"
   ; b Navigate "Home/End" "edges"

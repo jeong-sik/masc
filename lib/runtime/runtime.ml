@@ -1066,7 +1066,6 @@ let materialize_config
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
   in
   let* () = validate_runtime_context_marks runtimes in
-  let* () = validate_muse_prompt_ceilings runtimes in
   (* Every runtime on one provider account must declare the account's
      allowance alike: admission keeps one allowance per account. *)
   let* admission_allowances =
@@ -2057,11 +2056,6 @@ let turn_timeout_s_of_runtime_id (id : string) : float option =
 let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option =
   match get_runtime_by_id id with
   | Some rt -> Some (quota_scope_of_runtime rt)
-  | None -> None
-;;
-let prompt_capacity_bytes_of_runtime_id (id : string) : int option =
-  match get_runtime_by_id id with
-  | Some rt -> prompt_capacity_bytes rt
   | None -> None
 ;;
 

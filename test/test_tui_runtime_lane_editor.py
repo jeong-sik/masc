@@ -1140,9 +1140,13 @@ def model_settings_config(*, cli_context=272000):
 def assert_model_form(output, *, provider, model, context):
     screen = _keyboard_harness.screen_text(bytes(output))
     expected = [("Edit model · " + provider).encode(), model.encode(), context.encode(),
-                b"Context tokens", b"Max output tokens", b"Enter", b"next/save", b"Esc cancel"]  # the hint wraps inside the form pane
+                b"Context tokens", b"Max output tokens", b"Esc cancel"]
+    # The hint wraps inside the form pane, so the words are joined across rows
+    # before the contiguous caption is checked.
+    flat = b" ".join(screen.split())
+    expected.append(b"Enter next/save")
     for needle in expected:
-        if needle not in screen:
+        if needle not in (flat if needle == b"Enter next/save" else screen):
             raise AssertionError(f"shared model form omitted {needle!r}: {screen!r}")
 
 

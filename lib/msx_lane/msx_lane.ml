@@ -971,6 +971,7 @@ let core =
 type checkpoint_info = {
   exists : bool;
   version : int;
+  state_format_version : int option;
   frame : int option;
   saved_at_unix : float option;
   mtime_utc : string;
@@ -1057,11 +1058,17 @@ let checkpoint_info ~path =
       let* version = required_int "version" in
       let* machine = required_string "machine" in
       let* ledger = required_list "ledger" in
-      let machine_is_encoded =
+      let decoded_machine =
         match Base64.decode machine with
-        | Ok bytes -> bytes <> ""
-        | Error _ -> false in
-      if not machine_is_encoded
+        | Ok bytes when bytes <> "" -> Some bytes
+        | Ok _ | Error _ -> None in
+      let state_format_version =
+        match decoded_machine with
+        | Some bytes
+          when String.length bytes >= 11 && String.sub bytes 0 10 = "OCAML-MSX\000" ->
+          Some (Char.code bytes.[10])
+        | _ -> None in
+      if Option.is_none decoded_machine
       then invalid "machine must be nonempty base64"
       else if not (List.for_all valid_ledger_entry ledger)
       then invalid "ledger contains a malformed entry"
@@ -1082,6 +1089,7 @@ let checkpoint_info ~path =
         Ok
           { exists = true
           ; version
+          ; state_format_version
           ; frame
           ; saved_at_unix
           ; mtime_utc = mtime_to_utc mtime_unix

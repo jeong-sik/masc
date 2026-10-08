@@ -1155,6 +1155,22 @@ let test_checkpoint_info_reads_without_restoring () =
   let dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
   let path = Filename.concat (Filename.concat dir "saves") "info-slot.json" in
   let payload = In_channel.with_open_bin path In_channel.input_all in
+  let expected_state_format_version =
+    match Yojson.Safe.from_string payload with
+    | `Assoc fields ->
+      (match List.assoc_opt "machine" fields with
+       | Some (`String encoded) ->
+         (match Base64.decode encoded with
+          | Ok bytes when String.length bytes >= 11 && String.sub bytes 0 10 = "OCAML-MSX\000" ->
+            Some (Char.code bytes.[10])
+          | Ok _ | Error _ -> None)
+       | Some _ | None -> None)
+    | _ -> None in
+  check bool "embedded state format marker reported" true
+    (match member "state_format_version" (Tool_result.data info), expected_state_format_version with
+     | Some (`Int actual), Some expected -> actual = expected
+     | Some `Null, None -> true
+     | _ -> false);
   check int "checkpoint byte length reported" (String.length payload)
     (match member "byte_length" (Tool_result.data info) with
      | Some (`Int n) -> n

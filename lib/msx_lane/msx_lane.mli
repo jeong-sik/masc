@@ -362,7 +362,9 @@ val core_to_yojson : core -> Yojson.Safe.t
 type checkpoint_info = {
   exists : bool;
       (** true for a successfully inspected slot; missing slots return a typed error. *)
-  version : int;  (** the checkpoint format version, currently 1 *)
+  version : int;  (** the checkpoint envelope version, currently 1 *)
+  state_format_version : int option;
+      (** the embedded ocaml-msx state format marker; [None] if unrecognized. *)
   frame : int option;
       (** the saved frame counter. Checkpoint version 1 does not record it —
           reading it would mean decoding the machine — so [None] until a

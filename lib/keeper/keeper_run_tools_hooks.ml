@@ -31,6 +31,7 @@ let create_tool_observer_serialization () : tool_observer_serialization =
 type agent_setup =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   ; agent_cell : Agent_core.Agent.t option ref
@@ -115,6 +116,7 @@ type ctx =
   ; skill_activation_context : Keeper_skill_activation_recorder.t
   ; tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   }
@@ -1313,6 +1315,7 @@ let assemble_hooks
     Ok
       { tools = built_tools
       ; agent_core_tools = ctx.agent_core_tools
+      ; identity_tool_index = ctx.identity_tool_index
       ; on_demand_tool_names = ctx.on_demand_tool_names
       ; result_bounds = ctx.result_bounds
       ; agent_cell = ctx.agent_cell

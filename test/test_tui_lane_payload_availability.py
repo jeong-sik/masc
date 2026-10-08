@@ -19,6 +19,35 @@ import tui_keyboard_keepers as _keyboard_keepers
 
 
 
+def unfold_preflight(process, master, output) -> None:
+    """Open the selected run, then unfold its raw output with `d`."""
+    fold = "d: 모델·확률·원문 펼치기".encode()
+    _keyboard_harness.send_and_wait(process, master, output, b"\r", fold)
+    # Tall enough that the raw output would show under the preflight summary
+    # if the folded pane drew it.
+    _keyboard_harness.resize_and_wait(
+        process,
+        master,
+        output,
+        rows=42,
+        columns=180,
+        needle=fold,
+        controls=(_keyboard_harness.FULL_REDRAW,),
+    )
+    _keyboard_harness.drain_until_quiet(process, master, output)
+    folded = _keyboard_harness.screen_text(bytes(output))
+    assert b"RUN  succeeded" in folded, folded
+    assert b"FOLDED_OUTPUT_MARKER" not in folded, folded
+    _keyboard_harness.send_and_wait(
+        process, master, output, b"d", b"FOLDED_OUTPUT_MARKER"
+    )
+    _keyboard_harness.drain_until_quiet(process, master, output)
+    unfolded = _keyboard_harness.screen_text(bytes(output))
+    assert "원문 실행 증거".encode() in unfolded, unfolded
+    assert b"Model jev-fixture" in unfolded, unfolded
+    assert fold not in unfolded, unfolded
+
+
 def run(executable: str, scenario: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures[_keyboard_keepers.KEEPER_LANES_PATH] = _keyboard_keepers.keeper_lanes_response([])
@@ -90,6 +119,35 @@ def run(executable: str, scenario: str) -> None:
             "before": {"marker": "before-small"},
             "after": {"marker": "after-small"},
         }
+    elif scenario == "preflight-folded":
+        # A Librarian run that reports its JEV preflight opens with the raw
+        # output folded behind the pane's own `d`. A run JEV answered without
+        # generation has no generation slot.
+        run_record["selected_slot"] = None
+        run_record["output"] = {
+            "exact_output": {"marker": "FOLDED_OUTPUT_MARKER"},
+            "jev_preflight": {
+                "status": "judged",
+                "decision": "keep_current",
+                "confidence": 0.9,
+                "probabilities": {
+                    "keep_current": 0.9,
+                    "needs_generation": 0.05,
+                    "uncertain": 0.05,
+                },
+                "model": "jev-fixture",
+                "elapsed_s": 0.1,
+                "destination": {
+                    "destination_uri": "https://jev.invalid/v1/evaluate",
+                    "model": "jev-requested",
+                },
+                "request_body_sha256": "a" * 64,
+                "passed_over": [],
+            },
+            "generation_path": "jev_no_change",
+            "full_llm_skipped": True,
+            "preflight_domain_rejection": None,
+        }
     elif scenario != "available-null":
         raise AssertionError("unknown fixture scenario")
     summary = {
@@ -134,6 +192,11 @@ def run(executable: str, scenario: str) -> None:
         _keyboard_harness.send_and_wait(
             process, master, output, b"\r", b"1 loaded / 1 retained \xc2\xb7 end"
         )
+        if scenario == "preflight-folded":
+            unfold_preflight(process, master, output)
+            assert detail_reads == [run_id], detail_reads
+            os.write(master, b"q")
+            return
         _keyboard_harness.send_and_wait(process, master, output, b"\r", b"INPUT \xc2\xb7")
         _keyboard_harness.read_available(master, output)
         before = len(output)
@@ -225,6 +288,13 @@ def run(executable: str, scenario: str) -> None:
             frame = bytes(output[start:])
             screen = _keyboard_harness.screen_text(bytes(output))
             assert b'"field-63"' in screen, screen
+            # Home returns the pane to its first row, and j steps one row down.
+            _keyboard_harness.send_and_wait(
+                process, master, output, b"\x1b[H", b"FIELD_00_START"
+            )
+            _keyboard_harness.send_and_wait(
+                process, master, output, b"j", re.compile(rb"RUN RESULT\s+2-\d+/\d+")
+            )
         elif scenario == "many-labels":
             assert b'"field-00000"' in screen and b"VALUE_00000" in screen, screen
             _keyboard_harness.send_and_wait(
@@ -291,6 +361,7 @@ if __name__ == "__main__":
         "many-fields",
         "many-labels",
         "total-fit",
+        "preflight-folded",
     ):
         run(os.path.abspath(sys.argv[1]), scenario)
     print("TUI lane original payload availability: PASS")

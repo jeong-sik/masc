@@ -171,7 +171,6 @@ let script = {js|function interactInPage(args) {
     location.assign(destination.href);
     return result;
   }
-  if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
   if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
     if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))

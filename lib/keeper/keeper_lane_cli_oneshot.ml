@@ -170,6 +170,24 @@ let prompt_with_schema ~requirement ~prompt =
   prompt ^ "\n\n" ^ Exact_output.schema_instruction_text requirement
 ;;
 
+(* The sentence has to say what this client accepts. Claude Code, Codex and
+   Muse Code return what the model writes, so they get the Agent Core sentence
+   the HTTP path uses. Antigravity takes a schema-bound answer only through
+   its [finish] tool; told to write the value, the model writes it, the CLI
+   refuses, and the prompt goes out twice. *)
+let prompt_for_execution ~(execution : Runtime_execution.t) ~requirement ~prompt =
+  match execution with
+  | Runtime_execution.Antigravity_cli _ ->
+    prompt
+    ^ "\n\n"
+    ^ Runtime_antigravity.structured_output_instruction
+        ~schema:(Exact_output.domain_schema requirement)
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Muse_serve _
+  | Runtime_execution.Agent_core _ -> prompt_with_schema ~requirement ~prompt
+;;
+
 (* [Unknown_runtime] and [Not_an_official_client] used to be one case
    ([Fusion_official_client.is_official_client] answers [false] for both: no
    such runtime, and a runtime that is not an official client), so every
@@ -193,16 +211,15 @@ let run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prom
          | Some runner -> runner
          | None -> default_runner ~base_dir
        in
-       (* Same words as the HTTP path's prompt-carried schema ([Off]/[JsonMode]).
-          The instruction stays even though the transport now carries the schema
+       (* The instruction stays even though the transport now carries the schema
           too: the Claude and Antigravity CLIs enforce by validating their own
           answer and re-prompting, so a model that was told the shape needs fewer
           rounds to produce it, and llama.cpp's own documentation notes that a
           schema handed to a grammar is never shown to the model at all. The two
-          channels answer different halves -- one says what to write, the other
-          refuses what does not match. *)
+          channels answer different halves -- one says what to deliver and how,
+          the other refuses what does not match. *)
        let prompt =
-         prompt_with_schema ~requirement ~prompt
+         prompt_for_execution ~execution:runtime.Runtime_instance.execution ~requirement ~prompt
        in
        Option.iter (fun f -> f (Dispatching {runtime_id})) observe;
        (match

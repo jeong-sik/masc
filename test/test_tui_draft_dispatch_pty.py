@@ -59,14 +59,16 @@ def run(executable, *, visit_other_keeper):
             h.send_and_wait(process, fd, output, draft, h.composer_showing(draft))
             capture("new-draft-before-old-dispatch")
             if visit_other_keeper:
-                h.palette_go(process, fd, output, b"keeper beta",
+                # The fixture has exactly alpha/beta. Ctrl-G saves/restores
+                # their drafts without treating a palette command as text.
+                h.send_and_wait(process, fd, output, b"\x07",
                     "Keepers ▸ beta ▸ chat".encode())
             for gate in gates:
                 gate.release.set()
             assert h.wait_for_fixture_event(process, fd, output,
                 fixture.first_post_received, timeout=5), "old request never reached HTTP"
             if visit_other_keeper:
-                h.palette_go(process, fd, output, b"keeper alpha",
+                h.send_and_wait(process, fd, output, b"\x07",
                     "Keepers ▸ alpha ▸ chat".encode())
             h.wait_for_output(process, fd, output, b"reply-" + draft, start=0, timeout=5)
             capture("new-draft-after-old-dispatch")

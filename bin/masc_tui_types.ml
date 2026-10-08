@@ -6113,7 +6113,7 @@ type state = {
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
   mutable tools_evidence_request: unit ref option;
-  mutable tools_evidence_reference: Masc.Skill_reference.t option;
+  mutable tools_evidence_reference: Skill_reference.t option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
   mutable lane_addons: Masc_tui_lane_addons.t option;

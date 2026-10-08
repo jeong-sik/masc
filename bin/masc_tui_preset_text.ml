@@ -143,18 +143,14 @@ let contents_lines (d : D.preset_detail) =
              (List.map (fun (name, bytes) -> Printf.sprintf "%s(%dB)" name bytes) rows))
       ]
   in
-  [ "Preset directory: " ^ d.D.pd_directory
-  ; (match d.D.pd_settings_match with
-     | D.Preset_settings_match -> "Matches saved workspace settings (Keeper reload timing still applies)"
-     | D.Preset_settings_differ -> "Saved workspace settings differ from this preset"
-     | D.Preset_settings_unavailable reason -> "Settings comparison unavailable: " ^ reason)
+  [ (match d.D.pd_settings_match with
+     | D.Preset_settings_match -> "설정 상태 · 저장 당시와 동일"
+     | D.Preset_settings_differ -> "설정 상태 · 현재 설정과 다름"
+     | D.Preset_settings_unavailable reason -> "설정 비교 불가 · " ^ reason)
   ]
   @ default_prompt_lines d.D.pd_default_prompts
-  @ List.map (fun (key, path, source) ->
-      Printf.sprintf "Prompt %s · current effective %s · Markdown %s" key
-        (match source with D.Prompt_override -> "override" | D.Prompt_file -> "file" | D.Prompt_missing -> "missing")
-        (Option.value path ~default:"no file registered")) d.D.pd_prompt_files
-  @ sized "override" d.D.pd_overrides
+  @ [ ""; "저장된 설정" ]
+  @ sized "프롬프트" d.D.pd_overrides
   @ sized "지시문" d.D.pd_instructions
   @ (match d.D.pd_assignments with
      | [] -> []
@@ -166,6 +162,17 @@ let contents_lines (d : D.preset_detail) =
   @ (match d.D.pd_lanes with
      | [] -> []
      | lanes -> [ "레인 " ^ String.concat ", " lanes ])
+  @ (match d.D.pd_prompt_files with
+     | [] -> []
+     | files -> [ ""; "현재 프롬프트" ]
+       @ List.concat_map (fun (key, path, source) ->
+         [ key ^ " · " ^ (match source with
+             | D.Prompt_override -> "사용자 설정"
+             | D.Prompt_file -> "기본값"
+             | D.Prompt_missing -> "없음")
+         ; "  " ^ (match path with Some path -> path | None -> "등록된 파일 없음")
+         ]) files)
+  @ [ ""; "저장 위치"; "  " ^ d.D.pd_directory ]
 ;;
 
 let detail_lines ~(selected : D.preset_manifest option)

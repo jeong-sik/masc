@@ -15,12 +15,37 @@ let test_context_identity () =
   check (list int) "same URL does not merge opaque contexts" [1;2] (ids ());
   contexts:=["b"];check (list int) "remaining context keeps identity" [2] (ids ());
   contexts:=["b";"c"];check (list int) "closed context ID never reused" [2;3] (ids ())
-let test_unsupported () =
-  let called=ref false in
-  let peer=Peer.create ~command:(fun _ _->called:=true;Error "unexpected") in
-  (match Peer.dispatch peer ~verb:Peer.Page_elements (obj []) with
-   | Error (Peer.Before_effect _) -> () | _ -> fail "page.elements must fail before any effect");
-  check bool "no protocol dispatch" false !called
+(* The inventory is the automation lane's own page script, run in the tab the
+   request names and returned with that tab's ID. *)
+let test_element_inventory () =
+  let ran=ref [] in
+  let inventory=obj ["url",`String "https://example.test/";"title",`String "fixture";
+    "total",`Int 1;"truncated",`Bool false;
+    "elements",`List [obj ["selector",`String "html:nth-of-type(1) > body:nth-of-type(1) > button:nth-of-type(1)";
+      "tag",`String "button";"text",`String "Add reaction"]]] in
+  let command method_ args = match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List
+        [obj ["context",`String "other"]; obj ["context",`String "owned"]]])
+    | "script.callFunction" ->
+      let open Yojson.Safe.Util in
+      ran:=(args |> member "target" |> member "context" |> to_string,
+            args |> member "functionDeclaration" |> to_string) :: !ran;
+      Ok (script_value inventory)
+    | other -> failf "unexpected inventory command: %s" other in
+  let peer=Peer.create ~command in
+  match Peer.dispatch peer ~verb:Peer.Page_elements (obj ["tabId",`Int 2]) with
+  | Ok data ->
+    let open Yojson.Safe.Util in
+    check int "the inventory names the tab it read" 2 (data |> member "tabId" |> to_int);
+    check int "and carries the page's elements" 1 (data |> member "elements" |> to_list |> List.length);
+    (match !ran with
+     | [context, declaration] ->
+       check string "one script, in the requested tab" "owned" context;
+       check bool "and it is the shared element script" true
+         (String_util.contains_substring declaration Masc.Browser_page_script.elements)
+     | _ -> fail "the inventory ran other than one script")
+  | Error (Peer.Before_effect detail) | Error (Peer.Outcome_unknown detail) ->
+    failf "the peer refused an element inventory: %s" detail
 let test_pointer_validation () =
   let calls=ref [] in
   let command method_ _ =
@@ -195,5 +220,5 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
     test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error];
-  "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "closed verbs" `Quick test_unsupported; test_case "parsed pointer boundary" `Quick test_pointer_validation;
+  "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory; test_case "parsed pointer boundary" `Quick test_pointer_validation;
     test_case "the peer serves what the lane table says" `Quick test_peer_serves_what_the_lane_table_says]]

@@ -104,7 +104,7 @@ build their rejection from it.
 | `text_read` | `BrowserRead mode=text` | yes | yes |
 | `scene_read` | `BrowserRead mode=scene`/`regions` | yes | yes |
 | `viewport_capture` | `BrowserRead mode=screenshot` | yes | yes |
-| `element_inventory` | `BrowserRead mode=elements` | yes | no |
+| `element_inventory` | `BrowserRead mode=elements` | yes | yes |
 | `document_source` | the `browser_document` Lane Add-on source | yes | no |
 | `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes |
 | `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer |
@@ -115,8 +115,8 @@ build their rejection from it.
 
 The extension acts through DOM calls inside the page and has no pointer the
 browser treats as the operator's. The BiDi peer sends pointer and wheel input
-through the browser; it does not implement the element inventory, the
-source-document read or tab activation. BiDi's own
+through the browser; it does not implement the source-document read or tab
+activation. BiDi's own
 [`browsingContext.activate`](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/browsingContext/activate)
 also gives the tab's window focus, which `activate_tab` promises not to do.
 

@@ -40,10 +40,11 @@ release guarantee.
 Closing the socket does not issue browser.close or browsingContext.close.
 
 This initial peer rejects includeHtml (the source-document helper has no caller
-cap), and does not implement page.elements, live activate_tab, uploads,
-download collection, or the extension's navigation commit barrier. The server
-refuses the first three on a BiDi connection before it queues a command, by the
-same table. A successful
+cap), and does not implement live activate_tab, uploads, download collection,
+or the extension's navigation commit barrier. The server refuses the first two
+on a BiDi connection before it queues a command, by the same table.
+page.elements runs the automation lane's element script in the requested tab,
+so its selectors are the ones the DOM interactions take. A successful
 follow receipt does not guarantee application content is ready; existing guarded
 read recovery remains necessary. A BiDi session enables browser-wide automation
 and must not be exposed beyond loopback.

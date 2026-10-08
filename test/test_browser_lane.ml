@@ -131,8 +131,8 @@ let test_transport_table () =
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
     Lane.[Trusted_hover; Trusted_drag] (unserved Lane.Web_extension);
-  check (list capability) "the BiDi peer has no document source, element inventory or tab activation"
-    Lane.[Document_source; Element_inventory; Tab_activation] (unserved Lane.Webdriver_bidi);
+  check (list capability) "the BiDi peer has no document source or tab activation"
+    Lane.[Document_source; Tab_activation] (unserved Lane.Webdriver_bidi);
   List.iter (fun capability ->
     check bool (Lane.live_capability_to_wire capability ^ " is reachable on some connection") true
       (Lane.live_transports_serving capability <> []);

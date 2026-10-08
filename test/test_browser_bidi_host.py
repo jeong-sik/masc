@@ -107,8 +107,14 @@ def run(host, firefox, out=None):
         fixture = root / "fixture.html"
         fixture.write_text('''<!doctype html><title>BiDi native fixture</title>
 <style>body{margin:0;min-height:2000px}#pad{width:500px;height:300px;background:lightblue}
-#hover-result{display:none;position:fixed;top:0;right:0}#pad:hover+#hover-result{display:block}</style>
-<a href="#followed">Observed destination</a><div id="pad">untouched</div><span id="hover-result"></span><script>
+#hover-result{display:none;position:fixed;top:0;right:0}#pad:hover+#hover-result{display:block}
+#message{position:fixed;left:600px;top:100px;width:300px;height:60px;background:#eee}
+#react{display:none;position:absolute;left:10px;top:10px;width:140px;height:30px}
+#message:hover #react{display:block}#reactions{position:fixed;left:600px;top:200px}</style>
+<a href="#followed">Observed destination</a><div id="pad">untouched</div><span id="hover-result"></span>
+<div id="message"><button id="react" type="button">Add reaction</button></div><span id="reactions"></span><script>
+document.querySelector('#react').addEventListener('click',e=>{
+  document.querySelector('#reactions').textContent+=' reaction:'+e.isTrusted});
 const pad=document.querySelector('#pad'); let down=false;
 let presses=0;
 pad.addEventListener('pointerdown',()=>{presses++});
@@ -219,8 +225,49 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
                 assert time.monotonic() < deadline, "wheel effect absent; input not replayed"
             other = call("page.read", {"tabId": second})
             assert other["ok"] and other["data"] == before["data"]
-            unsupported = call("page.elements", {"tabId": first})
-            assert not unsupported["ok"] and unsupported["effectPhase"] == "not_started"
+            # A control that exists only while the pointer is over its row, the
+            # shape of a chat message's reaction button. One BiDi connection
+            # finds it, reveals it, sees it and presses it.
+            def inventory():
+                listed = call("page.elements", {"tabId": first})
+                assert listed["ok"] and listed["data"]["tabId"] == first, listed
+                return listed["data"]["elements"]
+
+            def named(elements, text):
+                return [element for element in elements if element["text"] == text]
+
+            hidden = inventory()
+            assert named(hidden, "Observed destination") and not named(hidden, "Add reaction"), hidden
+            current = scrolled["data"]
+            here, frame = current["url"], current["viewport"]
+            assert frame["width"] >= 900 and frame["height"] >= 220, frame
+            reveal = call("page.interact", {"tabId": first, "action": "hover_at", "expectedUrl": here,
+                "viewport": frame, "point": {"x": 880 / frame["width"], "y": 150 / frame["height"]}})
+            assert reveal["ok"], reveal
+            revealed = named(inventory(), "Add reaction")
+            assert len(revealed) == 1 and revealed[0]["tag"] == "button", revealed
+            seen = call("page.scene", {"tabId": first, "view": "content", "maxChars": 50000})
+            assert seen["ok"], seen
+            buttons = [node for node in seen["data"]["nodes"] if node.get("text") == "Add reaction"]
+            assert len(buttons) == 1 and buttons[0]["rects"], seen
+            box = buttons[0]["rects"][0]
+            pictured = call("page.capture", {"tabId": first})
+            assert pictured["ok"], pictured
+            frame = pictured["data"]["viewport"]
+            pressed = call("page.interact", {"tabId": first, "action": "click_at", "expectedUrl": here,
+                "viewport": frame, "point": {"x": (box["x"] + box["width"] / 2) / frame["width"],
+                                             "y": (box["y"] + box["height"] / 2) / frame["height"]}})
+            assert pressed["ok"], pressed
+            reacted = call("page.read", {"tabId": first})
+            assert reacted["data"]["text"].count("reaction:true") == 1, reacted
+            # The inventory's selector is the one the DOM actions take.
+            scripted = call("page.interact", {"tabId": first, "action": "click", "expectedUrl": here,
+                "selector": revealed[0]["selector"]})
+            assert scripted["ok"], scripted
+            both = call("page.read", {"tabId": first})
+            assert "reaction:true reaction:false" in both["data"]["text"], both
+            other = call("page.read", {"tabId": second})
+            assert other["ok"] and other["data"] == before["data"]
             assert len({row[0] for row in metadata}) == 1 and all(row[1] for row in metadata)
             assert all(row[2] == "webdriver_bidi" for row in metadata), metadata
             outcome.update(passed=True, tabs=matching, version=metadata[0][1])

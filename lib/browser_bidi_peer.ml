@@ -119,7 +119,10 @@ let dispatch t ~verb args =
         let* url=pre (string "url" p) in let* title=pre (required "title" p) in let* active=pre (required "active" p) in
         rows (index+1) (obj ["id",`Int id;"index",`Int index;"url",str url;"title",title;"active",active]::acc) rest in
     rows 0 [] current
-  | Page_elements -> Error (Before_effect "unsupported BiDi browser verb")
+  | Page_elements -> on_tab (fun context id -> pre (
+        (* The inventory the automation lane reads, so its selectors mean the
+           same thing to the DOM interactions below. *)
+        let* p=script t context Browser_page_script.elements (obj []) in with_tab id p))
   | Page_read -> on_tab (fun context id -> pre (let* p=read t context args in with_tab id p))
   | Page_scene -> on_tab (fun context id -> pre (let* fields=match args with `Assoc xs->Ok xs|_->Error "invalid scene arguments" in
         let* p=scene t context (obj (("mode",str "read")::fields)) in with_tab id p))

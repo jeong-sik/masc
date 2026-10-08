@@ -521,11 +521,6 @@ let test_keeper_hears_which_connection_serves_the_work () =
       check string "tab activation is refused on BiDi" "tab_activation" U.(data |> member "capability" |> to_string);
       check (list string) "and the extension connection is offered" [id extension]
         U.(data |> member "servingClients" |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string));
-      let elements = Tools.handle_read ~base_path:no_workspace ~tool_name:"BrowserRead"
-        ~start_time:(Tool_timing.start ())
-        (`Assoc ["lane",`String "live";"clientId",`String (id bidi);"tabId",`Int 1;"mode",`String "elements"]) in
-      check string "an element inventory read is refused on BiDi" "element_inventory"
-        U.(Tool_result.data elements |> member "capability" |> to_string);
       List.iter (fun client -> check bool "no refused request queued a browser command" true
         (Lane.take_command ~client_info:client ~window_sec:0.001 = Ok None)) [extension;bidi]))
 

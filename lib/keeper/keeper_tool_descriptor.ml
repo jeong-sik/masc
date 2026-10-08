@@ -3068,6 +3068,9 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "msx_change_disk" "masc_msx_change_disk" ~readonly:false
   ; (masc_misc_descriptor "msx_screen" "masc_msx_screen" ~readonly:true
      |> with_composable_output (Json_output { schema = msx_screen_output_schema }))
+  ; masc_misc_descriptor "msx_meta" "masc_msx_meta" ~readonly:true
+  ; masc_misc_descriptor "msx_checkpoint_info" "masc_msx_checkpoint_info"
+      ~readonly:true
   ; masc_misc_descriptor "msx_press" "masc_msx_press" ~readonly:false
   ; masc_misc_descriptor "msx_step" "masc_msx_step" ~readonly:false
   ; masc_misc_descriptor "msx_step_until_change" "masc_msx_step_until_change"

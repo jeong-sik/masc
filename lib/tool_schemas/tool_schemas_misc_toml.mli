@@ -23,6 +23,8 @@ val msx_save : Masc_domain.tool_schema
 val msx_restore : Masc_domain.tool_schema
 val msx_change_disk : Masc_domain.tool_schema
 val msx_screen : Masc_domain.tool_schema
+val msx_meta : Masc_domain.tool_schema
+val msx_checkpoint_info : Masc_domain.tool_schema
 val msx_press : Masc_domain.tool_schema
 val msx_step : Masc_domain.tool_schema
 val msx_step_until_change : Masc_domain.tool_schema

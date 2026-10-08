@@ -126,7 +126,11 @@ readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # 052f50b reverts ocaml-msx #41 (#44): 0x0024 is BIOS ENASLT, not SNSMAT, and
 # serving it as an implicit CALSLT restored ppi_a after every slot switch, so
 # a Sangokushi II warm-boot drew only black from #41 through #43.
-readonly OCAML_MSX_SHA="052f50b4bc57b54632dbd19b33a9acb64ef73072"
+# eb0410e is the ocaml-msx main merge commit for #45. The core-identity
+# addition is additive-only: the lib/ top-level sources hashed into the
+# source digest are byte-identical to 052f50b, so the digest value is
+# unchanged. lib/msx_lane links ocaml-msx.core-identity for masc_msx_meta.
+readonly OCAML_MSX_SHA="eb0410eab4abe81c1300e0f7debd20fc298d2055"
 # DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
 # Path-pinned locally for core development; SHA-pinned here for CI.
 # d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and

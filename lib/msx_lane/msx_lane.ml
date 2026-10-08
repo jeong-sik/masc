@@ -809,6 +809,7 @@ let checkpoint_json (st : machine) =
   let named = function None -> `Null | Some name -> `String name in
   `Assoc
     [ "version", `Int 1
+    ; "core_sha", `String Msx_core_identity.source_digest
     ; "machine", `String (Base64.encode_string (Msx.serialize st.m))
     ; "cartridge", named st.cart
     ; "disk", named st.disk
@@ -935,4 +936,140 @@ let change_disk ~path ~backup_path =
             Ok (observe next)))
       | _ -> Error (Invalid_request "load a disk game before changing disks"))
   with Sys_error message -> Error (Unreadable message)
+;;
+
+(* The digest ocaml-msx reports for the sources at OCAML_MSX_SHA in
+   scripts/opam-pin-external-deps.sh. Bump the two together: CI links the
+   pinned core, and test_msx_tools checks that the linked digest equals this
+   one, so a SHA bumped alone turns that test red with the new digest in its
+   message. Read the digest of a commit from its build:
+   _build/default/lib/identity/msx_core_identity.ml. The digest covers only
+   lib/ top-level (dune plus *.ml/*.mli, by base name), so an additive-only
+   core change in a subdirectory keeps the value. *)
+let pinned_core_source_digest = "c4e0ede25fe25a717fc758569a5b2f0c"
+
+type core = {
+  source_digest : string;
+  pinned_source_digest : string;
+  matches_pin : bool;
+}
+[@@deriving yojson]
+
+let core =
+  { source_digest = Msx_core_identity.source_digest
+  ; pinned_source_digest = pinned_core_source_digest
+  ; matches_pin = String.equal Msx_core_identity.source_digest pinned_core_source_digest
+  }
+
+type checkpoint_info = {
+  version : int;
+  frame : int option;
+  saved_at_unix : float option;
+  core_sha : string option;
+  cartridge : string option;
+  disk : string option;
+  ledger_entries : int;
+  byte_length : int;
+  sha256 : string;
+}
+
+let checkpoint_info ~path =
+  (* Inspection stays available when execution is disabled, so this is the
+     one call in the lane without [require_activity]: it reads a file the
+     caller names and touches no machine state. *)
+  if not (Sys.file_exists path)
+  then Error (Invalid_request ("no MSX checkpoint at " ^ path))
+  else
+    let contents =
+      try Ok (read_file path) with
+      | Sys_error message -> Error (Unreadable message) in
+    match contents with
+    | Error e -> Error e
+    | Ok contents ->
+      let byte_length = String.length contents in
+      let sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
+      let json =
+        try Ok (Yojson.Safe.from_string contents) with
+        | Yojson.Json_error message ->
+          Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
+      match json with
+      | Error e -> Error e
+    | Ok json ->
+      let invalid message = Error (Invalid_request ("invalid MSX checkpoint: " ^ message)) in
+      let fields =
+        match json with
+        | `Assoc fields -> Ok fields
+        | _ -> invalid "the envelope must be a JSON object" in
+      let ( let* ) = Result.bind in
+      let* fields = fields in
+      let find name = List.assoc_opt name fields in
+      let required_int name =
+        match find name with
+        | Some (`Int value) -> Ok value
+        | Some _ -> invalid (name ^ " must be an integer")
+        | None -> invalid (name ^ " is required") in
+      let required_string name =
+        match find name with
+        | Some (`String value) when value <> "" -> Ok value
+        | Some (`String _) -> invalid (name ^ " must not be empty")
+        | Some _ -> invalid (name ^ " must be a string")
+        | None -> invalid (name ^ " is required") in
+      let required_list name =
+        match find name with
+        | Some (`List values) -> Ok values
+        | Some _ -> invalid (name ^ " must be an array")
+        | None -> invalid (name ^ " is required") in
+      let valid_ledger_entry = function
+        | `Assoc entry ->
+          (match List.assoc_opt "frame" entry, List.assoc_opt "who" entry,
+                 List.assoc_opt "key" entry, List.assoc_opt "edge" entry with
+           | Some (`Int frame), Some (`String who), Some (`String key),
+             Some (`String ("down" | "up")) ->
+             frame >= 0 && who <> "" && key <> ""
+           | _ -> false)
+        | _ -> false in
+      let optional_int name =
+        match find name with
+        | None | Some `Null -> Ok None
+        | Some (`Int value) -> Ok (Some value)
+        | Some _ -> invalid (name ^ " must be an integer or null") in
+      let optional_string name =
+        match find name with
+        | None | Some `Null -> Ok None
+        | Some (`String value) when value <> "" -> Ok (Some value)
+        | Some (`String _) -> invalid (name ^ " must not be empty")
+        | Some _ -> invalid (name ^ " must be a string or null") in
+      let* version = required_int "version" in
+      let* machine = required_string "machine" in
+      let* ledger = required_list "ledger" in
+      let machine_is_encoded =
+        match Base64.decode machine with
+        | Ok bytes -> bytes <> ""
+        | Error _ -> false in
+      if not machine_is_encoded
+      then invalid "machine must be nonempty base64"
+      else if not (List.for_all valid_ledger_entry ledger)
+      then invalid "ledger contains a malformed entry"
+      else if version <> 1
+      then invalid (Printf.sprintf "unsupported version %d" version)
+      else
+        let* frame = optional_int "frame" in
+        let* core_sha = optional_string "core_sha" in
+        let* cartridge = optional_string "cartridge" in
+        let* disk = optional_string "disk" in
+        let saved_at_unix =
+          match Unix.stat path with
+          | exception _ -> None
+          | stats -> Some stats.st_mtime in
+        Ok
+          { version
+          ; frame
+          ; saved_at_unix
+          ; core_sha
+          ; cartridge
+          ; disk
+          ; ledger_entries = List.length ledger
+          ; byte_length
+          ; sha256
+          }
 ;;

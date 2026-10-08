@@ -314,6 +314,20 @@ def superseded_scoped_match_journey(executable):
         fixtures["/health?full=1"] = lambda: health("/health?full=1")
 
     def interact(process, fd, _slave, output, _base):
+        runtime_log = Path(_base) / ".masc" / "logs" / f"masc-tui-{process.pid}.log"
+
+        def gate_refresh_tickets():
+            # Read the explicit diagnostic fields. Startup Poll tickets must
+            # never acknowledge the held explicit Refresh below.
+            prefix = "started Gate snapshot request="
+            tickets = []
+            for line in runtime_log.read_text(encoding="utf-8").split("\n")[:-1]:
+                if prefix in line:
+                    ticket, intent = line.split(prefix, 1)[1].split(" intent=")
+                    if intent == "refresh":
+                        tickets.append(int(ticket))
+            return tickets
+
         try:
             h.wait_for_output(process, fd, output, b"Esc:list", start=0, timeout=10)
             h.resize_and_wait(process, fd, output, rows=40, columns=159, needle=b"Esc:list")
@@ -344,6 +358,10 @@ def superseded_scoped_match_journey(executable):
             h.send_and_wait(process, fd, output, b"p", b"Questions waiting on you")
             assert h.wait_for_fixture_event(process, fd, output, held_gate.requested, timeout=10), (
                 "independent Gate read never reached its response gate")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: len(gate_refresh_tickets()) == 1, timeout=10), (
+                "held Gate refresh has no unique dispatched ticket")
+            held_gate_ticket, = gate_refresh_tickets()
             keepers.press_label_on_screen(process, fd, output, b"Dashboard",
                                          row=1, needle=b"Enter:open")
             with lock:
@@ -387,6 +405,13 @@ def superseded_scoped_match_journey(executable):
                     ("/health", "new-full")
                 ) < calls.index((h.KEEPER_ASKS_PATH, "new-full")), calls
                 state["phase"] = "released"
+            log_start = runtime_log.stat().st_size
+
+            def discarded(message):
+                with runtime_log.open("rb") as log:
+                    log.seek(log_start)
+                    return message.encode() in log.read()
+
             gate.release.set()
             assert h.wait_for_fixture_event(process, fd, output, gate.completed, timeout=10), (
                 "old scoped GET never completed after release"
@@ -394,24 +419,23 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(
                 process, fd, output, released_asks_read, timeout=10
             ), "old scoped reader never consumed its released operator response"
-            def scoped_probe_finished():
-                with lock:
-                    return calls.count(("/health", "released")) == 1
+            # A server-side callback fires before the client consumes its
+            # response. Wait for the runtime's actual stale-message discard,
+            # not a shared /health count or a period without terminal output.
             assert h.wait_for_fixture_state(process, fd, output,
-                scoped_probe_finished, timeout=10), "released scoped read did not recheck identity"
+                lambda: discarded("discarded scoped refresh completion: workspace authority superseded"),
+                timeout=10), "released scoped completion was not discarded by the runtime"
             with lock:
                 state["phase"] = "gate-released"
+            log_start = runtime_log.stat().st_size
             held_gate.release.set()
             assert h.wait_for_fixture_event(process, fd, output, held_gate.completed, timeout=10), (
                 "old Gate read never completed after workspace invalidation")
-            def gate_probe_finished():
-                with lock:
-                    return calls.count(("/health", "gate-released")) == 1
             assert h.wait_for_fixture_state(process, fd, output,
-                gate_probe_finished, timeout=10), "released Gate read did not recheck identity"
-            # Consume the returned response and mailbox, then force a fresh
-            # frame: accumulated pre-release mismatch bytes are not evidence.
-            h.drain_until_quiet(process, fd, output, cap=1)
+                lambda: discarded(f"discarded Gate snapshot request={held_gate_ticket}: workspace authority superseded"),
+                timeout=10), "released Gate completion was not discarded by the runtime"
+            # Both late messages have reached their authority guard. Force a
+            # fresh frame so pre-release mismatch bytes cannot satisfy this.
             drawn = h.resize_and_wait(
                 process, fd, output, rows=40, columns=161,
                 needle=b"Enter:open", controls=(h.FULL_REDRAW,),
@@ -424,12 +448,22 @@ def superseded_scoped_match_journey(executable):
                        (old_label, old_operator_label, new_label, new_operator_label)), (
                 "unverified full or superseded scoped decisions were restored", visible)
             with lock:
-                # The old read now performs one post-read identity probe;
-                # no extra full refresh can repair a wrongly admitted bundle.
+                # Concurrent workspace reads share /health, so its count is
+                # not a per-loader completion count. Keep the actual safety
+                # boundary: no new full bundle or decision listing may mask
+                # a wrongly admitted late response with replacement data.
                 assert sum(path == BRIEFING for path, _ in calls) == baseline + 1, calls
-                assert calls.count(("/health", "released")) == 1, calls
-                assert calls.count(("/health", "gate-released")) == 1, calls
+                assert calls.count(("/health", "released")) >= 1, calls
+                assert calls.count(("/health", "gate-released")) >= 1, calls
+                assert calls.count((h.KEEPER_ASKS_PATH, "released")) == 1, calls
+                assert not any(
+                    phase in ("released", "gate-released")
+                    and (path in (cards.OPERATOR_PATH, cards.GATE_PATH)
+                         or (path == h.KEEPER_ASKS_PATH and phase == "gate-released"))
+                    for path, phase in calls
+                ), ("replacement decision read masked a late response", calls)
                 assert held_gate.calls == 1, "more than one independent Gate GET was gated"
+            assert gate_refresh_tickets() == [held_gate_ticket], "another Gate refresh obscured the held ticket"
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")
         finally:
@@ -439,6 +473,7 @@ def superseded_scoped_match_journey(executable):
     h.run_terminal_scenario(
         executable, description="Home drops old scoped A after newer full B mismatch",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
+        extra_env={"MASC_LOG_TRANSPORT_LEVEL": "debug"},
         prepare_workspace=prepare, refresh=60.0, starts_in_chat=True,
     )
     home.assert_no_decision_posts(requests)

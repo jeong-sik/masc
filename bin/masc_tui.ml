@@ -2707,6 +2707,9 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
+  Log.Transport.debug "started Gate snapshot request=%d intent=%s"
+    (Snapshot_read.request_id request)
+    (match intent with Snapshot_read.Poll -> "poll" | Snapshot_read.Refresh -> "refresh");
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (Gate_snapshot_loaded (request, expected_workspace, result)))
@@ -13747,6 +13750,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         apply_async_message state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
       else (match message with
+        | Gate_snapshot_loaded (request, _, _) ->
+          Log.Transport.debug "discarded Gate snapshot request=%d: workspace authority superseded"
+            (Snapshot_read.request_id request)
         | Keeper_chat_dispatch_started (_, _, acknowledge) ->
           ignore (Eio.Promise.try_resolve acknowledge false)
         | Keeper_chat_done (_, _, _, acknowledge) ->
@@ -14553,7 +14559,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket) ->
       http_scoped_refresh_inflight := false;
       if authority = state.workspace_authority then
-      apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket err;
+      apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket err
+      else
+        Log.Transport.debug "discarded scoped refresh completion: workspace authority superseded";
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight

@@ -14,6 +14,8 @@ module Snapshot_read : sig
   type intent = Poll | Refresh
 
   val idle : t
+  (** Stable per-source ticket for correlating runtime diagnostics. *)
+  val request_id : request -> int
   val start : intent:intent -> t -> t * request option
   val invalidate : t -> t
   (** Retire a pending owner without reusing its request number. *)
@@ -26,6 +28,7 @@ end = struct
   type intent = Poll | Refresh
 
   let idle = { next = 0; pending = None }
+  let request_id request = request
 
   let invalidate state = { state with pending = None }
 

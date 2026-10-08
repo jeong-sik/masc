@@ -168,6 +168,8 @@ let test_inventory_when_unnamed () =
     install_program ~base_path "hello.com" hello_com;
     let result = dispatch ~base_path "masc_dos_load" [] in
     check bool "listing succeeds" true (is_completed result);
+    check bool "unnamed load does not expose a host path" true
+      (member "programs_dir" (Tool_result.data result) = None);
     match member "programs_available" (Tool_result.data result) with
     | Some (`List [ `String name ]) -> check string "the inventory" "hello.com" name
     | _ -> fail "no programs_available")

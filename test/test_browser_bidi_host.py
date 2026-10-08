@@ -55,7 +55,7 @@ def run(host, firefox, out=None):
                 pass
 
             def do_GET(self):
-                data = (oversized if self.path == "/oversized" else fixture).read_bytes()
+                data = {"/oversized": oversized, "/huge-control": huge_control}.get(self.path, fixture).read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
@@ -130,6 +130,11 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
         oversized.write_text('<!doctype html><meta charset="utf-8"><title>Oversized fixture</title><p>'
             + "x" * (1100 * 1024), encoding="utf-8")
         oversized_url = f"http://127.0.0.1:{server.server_port}/oversized"
+        # A control whose value alone is larger than one BiDi socket message.
+        huge_control = root / "huge-control.html"
+        huge_control.write_text('<!doctype html><meta charset="utf-8"><title>Huge control</title><p>huge control</p>'
+            '<input id="big" value="' + "v" * (9 * 1024 * 1024) + '">', encoding="utf-8")
+        huge_control_url = f"http://127.0.0.1:{server.server_port}/huge-control"
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -139,7 +144,7 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
         native_log = (evidence / "native.log").open("wb")
         try:
             ff = subprocess.Popen([firefox, "--headless", "--no-remote", "--profile", str(root / "profile"),
-                "--remote-debugging-port", str(port), fixture_url, fixture_url, oversized_url],
+                "--remote-debugging-port", str(port), fixture_url, fixture_url, oversized_url, huge_control_url],
                 stdout=log, stderr=log)
             deadline = time.monotonic() + 20
             while True:
@@ -233,6 +238,26 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert bounded_out["data"]["html"] is None and bounded_out["data"]["htmlComplete"] is False, bounded_out
             assert bounded_out["data"]["htmlUnavailableReason"] == "document_html_exceeds_1_mib", bounded_out
             assert bounded_out["data"]["documentId"] and bounded_out["data"]["tabId"] == large[0], bounded_out
+            # An inventory too large for one socket message is refused in the
+            # page with its size. The same connection then answers the next
+            # read: nothing over the limit reached the socket.
+            while True:
+                listing = call("tabs.list", {})
+                assert listing["ok"], listing
+                huge = [tab["id"] for tab in listing["data"] if tab["url"] == huge_control_url]
+                if huge:
+                    break
+                assert time.monotonic() < deadline, listing
+            assert len(huge) == 1, listing
+            while True:
+                too_large = call("page.elements", {"tabId": huge[0]})
+                assert too_large["ok"] is False and too_large.get("effectPhase") == "not_started", too_large
+                if "still loading" not in too_large["error"]:
+                    break
+                assert time.monotonic() < deadline, too_large
+            assert too_large["error"].startswith("page_answer_exceeds_bidi_reply_limit: "), too_large
+            survived = call("page.read", {"tabId": huge[0]})
+            assert survived["ok"] and survived["data"]["text"] == "huge control", survived
             observed = call("page.scene", {"tabId": first, "view": "content", "maxChars": 50000})
             assert observed["ok"], observed
             scene = observed["data"]

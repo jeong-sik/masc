@@ -7,6 +7,10 @@ module Executor = Keeper_tool_plan_executor
 
 let query = "Transcribe the current prompt; mark unreadable text with ?."
 
+let member name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
 let plan () =
   let document = In_channel.with_open_bin "../skills/msx-observe/SKILL.md"
       In_channel.input_all in

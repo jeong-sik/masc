@@ -1178,7 +1178,7 @@ let test_checkpoint_info_reads_without_restoring () =
        | Some (`String encoded) ->
          (match Base64.decode encoded with
           | Ok bytes -> fields, bytes
-          | Error detail -> fail detail)
+          | Error (`Msg detail) -> fail detail)
        | _ -> fail "saved checkpoint machine missing")
     | _ -> fail "saved checkpoint must be an object" in
   let corrupted = Bytes.of_string machine in

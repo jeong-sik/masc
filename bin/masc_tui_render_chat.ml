@@ -2551,7 +2551,16 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                   entry ~speaker:(label speaker) ~heading_boundary Message_layout.Keeper
                     (label role) text
               | Keeper_chat_transcript.Drawn_status text ->
-                  entry Message_layout.Status (label "STATUS") text
+                  (match item.origin with
+                   | Keeper_chat_transcript.Admission_of_request _ ->
+                       (* This is the receipt's snapshot, retained even after
+                          execution starts. It does not report the current
+                          queue or control state. Keep that distinction in
+                          the body too, where narrow gutters cannot hide it. *)
+                       entry Message_layout.Status "RECEIPT" ("접수 당시: " ^ text)
+                   | Text_stretch _ | Thinking_stretch _ | Tool_stretch _
+                   | Unstreamed_skills | Reply_of_segment _ | Error_of_segment _ ->
+                       entry Message_layout.Status (label "STATUS") text)
               | Keeper_chat_transcript.Drawn_error _
                 when failure_in_live_status turn_log || committed_error ->
                   (* Only the focused live log has the footer's status;

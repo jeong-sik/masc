@@ -2253,6 +2253,24 @@ let update_locked_with_output
              ~snapshot
            |> Result.map_error store_error
          in
+         let* () =
+           match explicit_write_range_id with
+           | None -> Ok ()
+           | Some range ->
+             let previous = List.find_map (function
+               | Committed {range_id=Explicit_write_range prior; _}
+                 when String.equal prior.receipt_scope range.receipt_scope -> Some prior
+               | Committed _ | Prepared _ -> None) durable_range_receipts in
+             let expected_after = match previous with
+               | None -> 0
+               | Some prior -> prior.through_sequence in
+             if range.after_sequence = expected_after
+                && range.through_sequence > expected_after
+             then Ok ()
+             else Error (store_error (Printf.sprintf
+               "explicit-write range frontier conflict scope=%s expected_after_sequence=%d actual_after_sequence=%d through_sequence=%d"
+               range.receipt_scope expected_after range.after_sequence range.through_sequence))
+         in
          let* next, output = build ~snapshot_content previous in
          let* source_lines =
            match

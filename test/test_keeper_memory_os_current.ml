@@ -2050,6 +2050,12 @@ let test_explicit_write_receipt_commits_no_change_and_survives_retirement () =
       ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id:"keeper" ~now:200.
       ~source:(source Current.Librarian) ~new_claims () |> require_ok in
   let target = fact ~claim:"queued fact" () in
+  let initial_gap = {explicit_write_range_id with after_sequence=1; through_sequence=2} in
+  (match apply_disposition ~keepers_dir ~explicit_write_range_id:initial_gap
+      ~new_claims:[target] () with
+   | Error _ -> () | Ok _ -> fail "a new scope skipped its initial input prefix");
+  check bool "initial gap cannot create a snapshot" false
+    (Sys.file_exists (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
   let first = commit ~durable_range_id ~official_range_id ~explicit_write_range_id [target] in
   check bool "explicit input joins the actual rewritten snapshot" true
     (first.commit = Current.Rewritten);
@@ -2077,6 +2083,20 @@ let test_explicit_write_receipt_commits_no_change_and_survives_retirement () =
    | Ok retired -> check int "retirement writes a later revision"
        (first.snapshot.revision+1) retired.revision
    | Error _ -> fail "retirement failed");
+  let retired_bytes = Fs_compat.load_file path in
+  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let receipts_before = Fs_compat.load_file receipt_path in
+  List.iter (fun stale ->
+    (match apply_disposition ~keepers_dir ~explicit_write_range_id:stale
+        ~new_claims:[target] () with
+     | Error _ -> () | Ok _ -> fail "stale explicit input resurrected a retired fact");
+    check string "rejected duplicate, old or gapped range leaves snapshot unchanged"
+      retired_bytes (Fs_compat.load_file path);
+    check string "rejected range cannot replace its committed receipt"
+      receipts_before (Fs_compat.load_file receipt_path))
+    [next; explicit_write_range_id;
+     {next with after_sequence=3; through_sequence=4};
+     {next with through_sequence=3}];
   let other = {explicit_write_range_id with receipt_scope="different-queue-generation"} in
   ignore (apply_disposition ~keepers_dir ~explicit_write_range_id:other () |> require_ok);
   check bool "retirement and a different queue generation preserve consumed input" true

@@ -169,7 +169,8 @@ type official_range_id =
     whitespace; the consumer must bind it to its queue generation.
     [after_sequence] is nonnegative and [through_sequence] is strictly larger.
     [input_sha256] is the lowercase SHA-256 of the exact ordered input payloads.
-    The consumer owns sequence continuity and verification of that digest. *)
+    The store checks the range against the last committed sequence under its
+    write lock; the consumer owns verification of the actual input digest. *)
 type explicit_write_range_id =
   { receipt_scope : string
   ; after_sequence : int
@@ -397,8 +398,8 @@ val committed_explicit_write_range
   -> (explicit_write_range_id option, string) result
 (** Same snapshot proof, independently retained for explicit-write candidates.
     Later retirement of an admitted fact does not erase the consumed range.
-    Consumers must consult this receipt before replaying candidates; the store
-    does not automatically suppress a repeated [apply_disposition] invocation. *)
+    Consumers may read it to acknowledge a commit after interrupted delivery.
+    [apply_disposition] atomically refuses repeated, old or gapped ranges. *)
 
 type disposition =
   { snapshot : t
@@ -477,6 +478,13 @@ val apply_disposition
     side of a process interruption is guessed. An [Unchanged] commit replaces
     nothing, so its ranges are recorded committed at once, bound to the kept
     snapshot's revision and SHA-256.
+
+    An explicit-write range must start at zero when its scope has no committed
+    receipt, otherwise at that receipt's [through_sequence], and advance it.
+    This check runs under the store locks after receipt recovery and before
+    building the disposition. A stale duplicate cannot resurrect a retired
+    fact. A conflict is an error, not a successful no-op; the consumer can reread
+    the authoritative receipt before acknowledging already-consumed input.
 
     An [absorbed] fact that is still current leaves the snapshot too, and its
     row is appended to {!Keeper_memory_absorbed} under the lock, after the next

@@ -81,14 +81,37 @@ objective, not a newly enforced database invariant.
 
 ## Jev forward review
 
-Each proposed absorption is evaluated with a structured pair:
+Each proposed absorption is evaluated with the selected pass's source observations:
 
 ```json
 {
   "source_memory": "complete original memory",
-  "proposed_memory": "candidate that will remain"
+  "proposed_memory": "candidate that will remain",
+  "new_observations": [
+    {"kind": "conversation", "batch_turn_ref": "selected batch identity", "local_position": 0,
+     "text": "host-attributed conversation text"}
+  ]
 }
 ```
+
+The runtime constructs these observations from the same selected input read by
+Librarian, rather than from the generated candidate. Conversation entries retain
+role and host speaker labels. `batch_turn_ref` identifies the selected batch and
+is not an attribution of each observation to its final turn. `local_position` is
+a zero-based position within each observation kind. Historical task-context ranges
+retain their actual turn attribution and unattributed gaps in a separate
+`historical_task_contexts` observation; absent attribution is never invented. Tool entries carry the host's execution outcome;
+that outcome alone does not prove domain success. Counterpart content retains its
+existing host-provenance rendering and remains untrusted. Hidden reasoning and
+raw tool payloads remain excluded by the existing Librarian projection.
+
+Serialized observations count toward the existing provider request boundary. If
+an evidence-bearing pair cannot fit, the pass fails before dispatch and the entire
+Memory range stays pending, including new claims. A typed input-capacity failure
+is forwarded to the existing source-range narrowing path, allowing a smaller
+range to retry against the unchanged snapshot. It does not silently omit the
+evidence or append a candidate while leaving its originals unreviewed. Selecting
+or splitting large evidence ranges for forward review is still future work.
 
 The closed choices are `mergeable`, `different_context`, `loses_knowledge`, and
 `uncertain`. Only `mergeable` permits that source to leave current memory.
@@ -100,10 +123,11 @@ of the original fail.
 
 The Librarian owns the complete multi-source interpretation. Jev reviews each
 source/candidate relationship; it does not independently verify the truth of
-new assertions against the world. Every pair has its own durable evaluation
-record. Invalid answers, incomplete dispatch and cancellation keep the existing
+new assertions against the world. Every request has its own durable evaluation
+record, including the new observations before provider dispatch. Invalid answers, incomplete dispatch and cancellation keep the existing
 failure semantics. A pair outside the provider request boundary is explicitly
-unjudgeable and its original remains current. Large-pair decomposition is not
+unjudgeable and its original remains current; with new observations this also
+fails the pass so the candidate is not committed. Large-pair decomposition is not
 implemented here.
 
 The reverse copy review is unchanged: it checks whether an unabsorbing new
@@ -158,9 +182,11 @@ historical retrieval boundary and are not removed by the change.
 A synthetic event-lineage probe of the current question matched 10 of 12 intended
 admission decisions. Two same-event follow-up resolution cases were still refused,
 including a held-out restoration case. Thus the instructions express the intended
-policy but do not establish reliable temporal consolidation. The source/candidate
-pair does not carry independently identifiable follow-up evidence; adding grounded
-event context and validating that path remains necessary. These refusals retain
+policy but do not establish reliable temporal consolidation. That source/candidate-only
+experiment did not carry follow-up evidence. The subsequent controlled experiment
+in `experiments/memory-transition-evidence` motivates the source-observation path
+above: 15/18 pair-only, 12/18 instruction-only, 18/18 with evidence. These remain
+six development scenarios, not a deployed quality measurement. These refusals retain
 original memories, so no memory-reduction claim follows from this experiment.
 
 

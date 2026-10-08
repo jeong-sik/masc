@@ -23651,7 +23651,7 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages System_logs
        | Some key when state.keeper_navigation_open ->
            (match key with
-            | "right" | "esc" | "\t" ->
+            | "right" | "esc" | "\t" | "tab" ->
                 state.keeper_navigation_open <- false;
                 state.keeper_message_focus <- Right_pane
             | "down" | "j" ->

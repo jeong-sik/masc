@@ -76,6 +76,9 @@ COMPOSER_ROWS = {"keepers": 1, "board": 1, "config": 1, "keeper-detail": 1,
 # (Masc_tui_roster_pane.pane_cols).
 ROSTER_SCREENS = frozenset(("keeper-detail-roster", "keeper-chat-roster"))
 ROSTER_PANE_COLUMNS = 34
+# Detail ends in key hints plus the shared composer. Chat ends in one
+# roster padding row, the full-width identity row, then key hints.
+ROSTER_ROWS_BELOW = {"keeper-detail-roster": 2, "keeper-chat-roster": 3}
 
 # How often the observer stream says it is still open. A write to a TUI that
 # has gone fails, which is what ends the stream's handler.
@@ -227,6 +230,30 @@ def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
     return region.ServedFixtures(served)
 
 
+def measure_roster_rail(rows, *, right, bottom):
+    """The roster has content and one continuous divider, with no box corners.
+
+    Chat may put a portrait above the roster. Start at the roster's own
+    heading, and keep the shared status, hints and composer outside the rail.
+    """
+    headings = [row for row, text in rows.items()
+                if "KEEPERS" in region.cells(text, 0, right)]
+    assert len(headings) == 1, headings
+    top = headings[0] - 1  # The rail's blank opening row precedes its heading.
+    edges = [row for row in rows if row >= top
+             and region.cells(rows[row], right - 1, right) == "│"]
+    assert bottom >= top, (top, bottom)
+    assert sorted(edges) == list(range(top, bottom + 1)), edges
+    content = []
+    for row in range(top, bottom + 1):
+        text = region.cells(rows[row], 0, right - 1)
+        assert not any(corner in text for corner in "┌┐└┘"), (row, text)
+        content.append(text)
+    for name in ("alpha", "beta"):
+        assert any(name in text for text in content), (name, content)
+    return {"top": top, "bottom": bottom}
+
+
 def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
     measured: dict[tuple[str, object], dict[str, object]] = {}
 
@@ -250,8 +277,8 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
             assert_board_contract(rows, left=left, right=right,
                 selected_title=selected_post, where=where)
         if left:
-            measured[(screen, columns)]["roster"] = region.measure_pane(
-                rows, left=0, right=left)
+            measured[(screen, columns)]["roster"] = measure_roster_rail(
+                rows, right=left, bottom=region.TERMINAL_ROWS - ROSTER_ROWS_BELOW[screen])
         if screen == "keeper-detail-roster":
             measured[(screen, columns)]["body_pane"] = region.measure_pane(
                 rows, left=left, right=right)

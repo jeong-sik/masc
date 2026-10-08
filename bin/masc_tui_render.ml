@@ -79,7 +79,8 @@ let keeper_roster_name_cells = Masc_tui_roster_pane.pane_cols - 7
    changes. A short name has no animation target and therefore costs no idle
    repaint. *)
 let keeper_roster_marquee_target (state : state) ~cols =
-  if not (keeper_roster_pane_shown state ~cols) then None
+  if not (keeper_roster_pane_shown state ~cols)
+     || (state.view = Overview && not state.keeper_navigation_open) then None
   else
     match state.view, selected_keeper state with
     | (Overview | Keepers (Keeper_detail | Keeper_message)), Some keeper ->

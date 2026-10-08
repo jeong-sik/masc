@@ -1,0 +1,1053 @@
+{
+  "baseline_sha": "559c028cc22bc79c320de58d0a004abb1547eaa2",
+  "threshold_lines": 2000,
+  "files": [
+    {
+      "path": "bin/main_eio.ml",
+      "baseline_lines": 4327,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui.ml",
+      "baseline_lines": 27845,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui_http.ml",
+      "baseline_lines": 3516,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui_keeper_chat_transcript.ml",
+      "baseline_lines": 2608,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui_loader.ml",
+      "baseline_lines": 2047,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui_mermaid.ml",
+      "baseline_lines": 2134,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui_message_layout.ml",
+      "baseline_lines": 2418,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui_render.ml",
+      "baseline_lines": 14279,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui_render_chat.ml",
+      "baseline_lines": 3924,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui_render_prim.ml",
+      "baseline_lines": 5153,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui_render_schedule.ml",
+      "baseline_lines": 2004,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "baseline_lines": 12820,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/evidence/2026-10-05-settings-runtime-workspace/retained-write-before-test.ts",
+      "baseline_lines": 2425,
+      "kind": "evidence",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/api/dashboard-runtime.ts",
+      "baseline_lines": 2625,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/api/dashboard.test.ts",
+      "baseline_lines": 6149,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/components/chat/primitives.test.ts",
+      "baseline_lines": 4579,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/components/chat/primitives.ts",
+      "baseline_lines": 5481,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/components/connector-status.ts",
+      "baseline_lines": 2322,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/components/keeper-config-panel.test.ts",
+      "baseline_lines": 2792,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/components/keeper-config-panel.ts",
+      "baseline_lines": 2834,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/components/runtime-toml-editor.test.ts",
+      "baseline_lines": 2163,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/components/settings-surface.test.ts",
+      "baseline_lines": 2866,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/components/settings-surface.ts",
+      "baseline_lines": 2200,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/components/tools/scheduled-automation-panel.ts",
+      "baseline_lines": 2376,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/components/work.test.ts",
+      "baseline_lines": 2022,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/styles/dashboard.css",
+      "baseline_lines": 2467,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "dashboard/src/styles/keeper-workspace.css",
+      "baseline_lines": 2170,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "docs/evidence/browser-delivery-20260913/native-history-harness.py",
+      "baseline_lines": 15910,
+      "kind": "evidence",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "docs/evidence/browser-live-content-20260913/native-history-d441/harness.py",
+      "baseline_lines": 15910,
+      "kind": "evidence",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/dated_jsonl/dated_jsonl.ml",
+      "baseline_lines": 2018,
+      "kind": "production",
+      "status": "partial: pure calendar and segment-layout rules separated",
+      "prs": [
+        41872
+      ],
+      "current_lines": 1881
+    },
+    {
+      "path": "lib/fs_compat/atomic_write.ml",
+      "baseline_lines": 3327,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/fs_compat/capability_recovery_obligation.ml",
+      "baseline_lines": 3195,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/fs_compat/fs_compat.ml",
+      "baseline_lines": 4265,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/hitl_summary_worker.ml",
+      "baseline_lines": 2066,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_agent_run.ml",
+      "baseline_lines": 2649,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_approval_queue.ml",
+      "baseline_lines": 3182,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_board_attention_candidate.ml",
+      "baseline_lines": 2450,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_board_attention_partition.ml",
+      "baseline_lines": 2123,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_board_attention_worker.ml",
+      "baseline_lines": 2438,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_chat_store.ml",
+      "baseline_lines": 3324,
+      "kind": "production",
+      "status": "partial: types and pure projection separated; invalid-kind acknowledgement fixed",
+      "prs": [
+        41868,
+        41871
+      ],
+      "current_lines": 2825
+    },
+    {
+      "path": "lib/keeper/keeper_gate.ml",
+      "baseline_lines": 2386,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_memory_os_current.ml",
+      "baseline_lines": 3300,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_msg_async.ml",
+      "baseline_lines": 3115,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_official_client_host.ml",
+      "baseline_lines": 2365,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_owner.ml",
+      "baseline_lines": 2308,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_reaction_ledger.ml",
+      "baseline_lines": 2171,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_sandbox_microvm.ml",
+      "baseline_lines": 2597,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_skill_activation_ledger.ml",
+      "baseline_lines": 2609,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_tool_composition_surface.ml",
+      "baseline_lines": 2266,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_tool_descriptor.ml",
+      "baseline_lines": 3416,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_tool_filesystem_runtime.ml",
+      "baseline_lines": 3315,
+      "kind": "production",
+      "status": "partial: pure line-window projection separated",
+      "prs": [
+        41879
+      ],
+      "current_lines": 3210
+    },
+    {
+      "path": "lib/keeper/keeper_tool_in_process_runtime.ml",
+      "baseline_lines": 2636,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_tool_memory_runtime.ml",
+      "baseline_lines": 2345,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_turn_driver.ml",
+      "baseline_lines": 3290,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_turn_driver_try_provider.ml",
+      "baseline_lines": 3181,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_turn_sandbox_runtime.ml",
+      "baseline_lines": 3012,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper/keeper_unified_prompt.ml",
+      "baseline_lines": 2226,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper_chat_operations/keeper_chat_operation_store.ml",
+      "baseline_lines": 2500,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper_runtime/keeper_event_queue_persistence.ml",
+      "baseline_lines": 2107,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/keeper_runtime/keeper_event_queue_state.ml",
+      "baseline_lines": 2280,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/lane_addon/lane_addon_runtime.ml",
+      "baseline_lines": 2100,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/process/process_eio.ml",
+      "baseline_lines": 2032,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/runtime/runtime.ml",
+      "baseline_lines": 4157,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/runtime/runtime_claude_code.ml",
+      "baseline_lines": 2292,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/runtime/runtime_codex_app_server.ml",
+      "baseline_lines": 2778,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/runtime/runtime_toml.ml",
+      "baseline_lines": 3493,
+      "kind": "production",
+      "status": "partial: protocol declarations separated and duplicate lookup removed",
+      "prs": [
+        41858
+      ],
+      "current_lines": 3377
+    },
+    {
+      "path": "lib/server/server_bootstrap_loops.ml",
+      "baseline_lines": 2358,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/server/server_dashboard_http_keeper_api.ml",
+      "baseline_lines": 2231,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/server/server_dashboard_http_runtime_info.ml",
+      "baseline_lines": 2700,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/server/server_routes_http_keeper_stream.ml",
+      "baseline_lines": 4060,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_dashboard.ml",
+      "baseline_lines": 3996,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/server/server_runtime_bootstrap.ml",
+      "baseline_lines": 2177,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/tui_decode.ml",
+      "baseline_lines": 7548,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "lib/tui_decode.mli",
+      "baseline_lines": 2532,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/lib/execution_event_store.ml",
+      "baseline_lines": 2441,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/lib/execution_journal.ml",
+      "baseline_lines": 2354,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/capabilities.ml",
+      "baseline_lines": 2505,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/exact_output.ml",
+      "baseline_lines": 2477,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/http_client.ml",
+      "baseline_lines": 4286,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/streaming.ml",
+      "baseline_lines": 4065,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/types.ml",
+      "baseline_lines": 2027,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/test/test_backend_openai_codec.ml",
+      "baseline_lines": 3213,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/test/test_capabilities.ml",
+      "baseline_lines": 3665,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/test/test_checkpoint.ml",
+      "baseline_lines": 2336,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/test/test_complete_http.ml",
+      "baseline_lines": 4541,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/test/test_exact_output_flow.ml",
+      "baseline_lines": 5623,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/test/test_exact_output_single_surface.ml",
+      "baseline_lines": 2363,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/test/test_pipeline.ml",
+      "baseline_lines": 4030,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/test/test_provider_complete.ml",
+      "baseline_lines": 2383,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/test/test_provider_config.ml",
+      "baseline_lines": 2949,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "packages/agent_core/test/test_streaming_openai.ml",
+      "baseline_lines": 2068,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "scripts/capture-tui-keeper-chat.py",
+      "baseline_lines": 2340,
+      "kind": "tooling",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "scripts/harness/workload/keeper_multi_collaboration_acceptance.py",
+      "baseline_lines": 4800,
+      "kind": "tooling",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "scripts/install-runtime-setup.py",
+      "baseline_lines": 2585,
+      "kind": "tooling",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/fusion_core/test_fusion.ml",
+      "baseline_lines": 2145,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_board_dispatch.ml",
+      "baseline_lines": 2878,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_dashboard_http_core.ml",
+      "baseline_lines": 8019,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_discord_gateway_state.ml",
+      "baseline_lines": 2788,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_fs_compat_capability_write.ml",
+      "baseline_lines": 2322,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_fs_compat_publication_reconciliation.ml",
+      "baseline_lines": 2057,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_gate_keeper_backend.ml",
+      "baseline_lines": 4507,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_goal_verification_gate.ml",
+      "baseline_lines": 2004,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_heartbeat_integration.ml",
+      "baseline_lines": 5911,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_hitl_summary_worker.ml",
+      "baseline_lines": 3395,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_install_runtime_setup.py",
+      "baseline_lines": 2341,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_antigravity_runtime.ml",
+      "baseline_lines": 2344,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_approval_queue.ml",
+      "baseline_lines": 6789,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_board_attention_exact_flow.ml",
+      "baseline_lines": 2552,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_board_attention_worker.ml",
+      "baseline_lines": 4140,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_chat_store.ml",
+      "baseline_lines": 3733,
+      "kind": "test",
+      "status": "invalid-kind acknowledgement scenario added; not executed",
+      "prs": [
+        41871
+      ],
+      "current_lines": 3754
+    },
+    {
+      "path": "test/test_keeper_checkpoint_stale_guard.ml",
+      "baseline_lines": 2279,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_claude_code_runtime.ml",
+      "baseline_lines": 3974,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_event_queue.ml",
+      "baseline_lines": 2378,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_event_queue_state_v2.ml",
+      "baseline_lines": 2147,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_librarian_absorb_gate.ml",
+      "baseline_lines": 2390,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_librarian_durable_consumer.ml",
+      "baseline_lines": 3644,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_librarian_retry.ml",
+      "baseline_lines": 2332,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_memory_os_current.ml",
+      "baseline_lines": 3304,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_memory_write.ml",
+      "baseline_lines": 3926,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_muse_runtime.ml",
+      "baseline_lines": 2684,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_mutex_coverage.ml",
+      "baseline_lines": 2626,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_official_client_host.ml",
+      "baseline_lines": 3050,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_owner.ml",
+      "baseline_lines": 5577,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_run_tools_hooks.ml",
+      "baseline_lines": 2347,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_sandbox_docker_route.ml",
+      "baseline_lines": 2704,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_sandbox_microvm.ml",
+      "baseline_lines": 3471,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_sandbox_read_backend.ml",
+      "baseline_lines": 3240,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_supervisor.ml",
+      "baseline_lines": 3116,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_terminal_reason_typed.ml",
+      "baseline_lines": 3025,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_toml.ml",
+      "baseline_lines": 2326,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_tool_call_log.ml",
+      "baseline_lines": 2953,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_tool_descriptor_registry_integrity.ml",
+      "baseline_lines": 2371,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_tool_dispatch_runtime.ml",
+      "baseline_lines": 10243,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_turn_driver_failover.ml",
+      "baseline_lines": 6683,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_turn_up_args.ml",
+      "baseline_lines": 3135,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_keeper_vision_tool.ml",
+      "baseline_lines": 2454,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_mcp_server_eio.ml",
+      "baseline_lines": 3274,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_model_inference_metrics.ml",
+      "baseline_lines": 2096,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_official_client_session_store.ml",
+      "baseline_lines": 2108,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_runtime_claude_code.ml",
+      "baseline_lines": 2906,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_runtime_codex_app_server.ml",
+      "baseline_lines": 7971,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_runtime_config_validity.ml",
+      "baseline_lines": 7124,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_runtime_per_keeper_routing.ml",
+      "baseline_lines": 4389,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_runtime_provider_auth_headers.ml",
+      "baseline_lines": 3280,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_schedule_consumer_dispatch.ml",
+      "baseline_lines": 4318,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_schedule_store.ml",
+      "baseline_lines": 2020,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_schedule_tool_wiring.ml",
+      "baseline_lines": 2072,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_server_runtime_bootstrap.ml",
+      "baseline_lines": 6434,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tool_blob_store.ml",
+      "baseline_lines": 2223,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tool_board_coverage.ml",
+      "baseline_lines": 3703,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tool_input_validation.ml",
+      "baseline_lines": 2742,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tool_task_coverage.ml",
+      "baseline_lines": 3289,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tui_acting_pane.ml",
+      "baseline_lines": 2382,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tui_chat_queue_wiring.ml",
+      "baseline_lines": 5482,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tui_decode.ml",
+      "baseline_lines": 13682,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tui_keeper_chat_history.ml",
+      "baseline_lines": 2383,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tui_keeper_chat_transcript.ml",
+      "baseline_lines": 3058,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tui_keys.ml",
+      "baseline_lines": 3536,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tui_message_layout.ml",
+      "baseline_lines": 3259,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tui_render_memory.ml",
+      "baseline_lines": 2678,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_tui_render_schedule.ml",
+      "baseline_lines": 3154,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_types_coverage.ml",
+      "baseline_lines": 2002,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_verification.ml",
+      "baseline_lines": 4810,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_workspace.ml",
+      "baseline_lines": 3513,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/test_workspace_coverage.ml",
+      "baseline_lines": 3948,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/tui_keyboard_chat.py",
+      "baseline_lines": 3223,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/tui_keyboard_harness.py",
+      "baseline_lines": 3268,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "test/tui_keyboard_keepers.py",
+      "baseline_lines": 2761,
+      "kind": "test",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "viewer/src/dom/turn_controls.rs",
+      "baseline_lines": 2108,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "viewer/src/dom/turn_runtime.rs",
+      "baseline_lines": 2096,
+      "kind": "production",
+      "status": "pending semantic review"
+    },
+    {
+      "path": "viewer/style.css",
+      "baseline_lines": 5283,
+      "kind": "production",
+      "status": "pending semantic review"
+    }
+  ]
+}

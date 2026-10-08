@@ -232,6 +232,21 @@ let established_base_path_lock_path ~run_dir base_path =
       "test fixture BasePath was rejected: %s"
       (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
 
+(* macOS answers realpath with two different strings for one directory:
+   /private/tmp/X and /System/Volumes/Data/private/tmp/X are the same inode
+   (hole-finder task-2206, run 37813366033). The lease must name the
+   directory itself, so on a host without the second spelling this case has
+   nothing to ask and is skipped instead of passing vacuously. *)
+let second_realpath_spelling canonical_base_path =
+  let prefix = "/private/" in
+  if
+    String.length canonical_base_path > String.length prefix
+    && String.equal
+         (String.sub canonical_base_path 0 (String.length prefix))
+         prefix
+  then Some ("/System/Volumes/Data/" ^ canonical_base_path)
+  else None
+
 let with_base_and_run prefix f =
   with_temp_dir (prefix ^ "-base") (fun base_path ->
     with_temp_dir (prefix ^ "-run") (fun run_dir ->
@@ -755,6 +770,106 @@ let test_base_path_lock_rejects_same_process_symlink_alias () =
       Alcotest.failf
         "valid BasePath was rejected: %s"
         (Server_startup_takeover.base_path_lock_rejection_to_string rejection)))
+
+(* Two realpath spellings of one directory must share one lease. On Linux
+   realpath resolves symlinks to one string, so the alias spelling is built
+   from a symlink into the same directory; on macOS the second spelling is
+   the /System/Volumes/Data prefix of the same path. Both shapes compare two
+   different canonical strings for the same (st_dev, st_ino) directory. *)
+let test_base_path_lock_shares_one_lease_across_realpath_spellings () =
+  if Sys.os_type <> "Unix" then Alcotest.skip ();
+  with_temp_dir "startup-takeover-spelling-base" (fun dir ->
+    with_temp_dir "startup-takeover-spelling-run" (fun run_dir ->
+      let real_base = Filename.concat dir "real" in
+      Unix.mkdir real_base 0o755;
+      let canonical = Unix.realpath real_base in
+      let alias =
+        match second_realpath_spelling canonical with
+        | Some spelling -> spelling
+        | None ->
+          let alias_base = Filename.concat dir "alias" in
+          Unix.symlink real_base alias_base;
+          alias_base
+      in
+      Fun.protect
+        ~finally:(fun () -> if alias <> real_base then Sys.remove alias)
+        (fun () ->
+          let check_owner name = function
+            | Server_startup_takeover.Owner_this_process _ -> ()
+            | owner ->
+              Alcotest.failf
+                "%s observed an unexpected owner (expected this process)"
+                name
+          in
+          let expect_refused name = function
+            | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+              check_owner name owner
+            | Server_startup_takeover.Base_path_acquired lease ->
+              Server_startup_takeover.release_base_path_lease lease;
+              Alcotest.failf "%s acquired a second lease for one directory" name
+            | Server_startup_takeover.Base_path_rejected rejection ->
+              Alcotest.failf
+                "%s was rejected: %s"
+                name
+                (Server_startup_takeover.base_path_lock_rejection_to_string
+                   rejection)
+          in
+          match
+            Server_startup_takeover.acquire_base_path_lock ~run_dir real_base
+          with
+          | Server_startup_takeover.Base_path_already_owned _ ->
+            Alcotest.fail "first BasePath spelling was already owned"
+          | Server_startup_takeover.Base_path_acquired lease ->
+            Fun.protect
+              ~finally:(fun () ->
+                Server_startup_takeover.release_base_path_lease lease)
+              (fun () ->
+                 expect_refused "second realpath spelling"
+                   (Server_startup_takeover.acquire_base_path_lock
+                      ~run_dir
+                      alias))
+          | Server_startup_takeover.Base_path_rejected rejection ->
+            Alcotest.failf
+              "valid BasePath was rejected: %s"
+              (Server_startup_takeover.base_path_lock_rejection_to_string
+                 rejection))))
+
+(* The lease used to be named by the digest of the canonical BasePath string.
+   During an upgrade an old server and a new server must still refuse to run
+   on one directory, so a new lease holds the old v1 file's kernel lock for
+   its whole life; when the new lease is released, the v1 fence goes with
+   it. *)
+let test_base_path_lock_fences_legacy_path_digest_lease () =
+  if Sys.os_type <> "Unix" then Alcotest.skip ();
+  with_base_and_run "startup-takeover-legacy-path-digest"
+    (fun ~base_path ~run_dir ->
+      let legacy_path =
+        Server_startup_takeover.base_path_lock_path
+          ~run_dir
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
+      let legacy_lease = established_base_path_lock_path ~run_dir base_path in
+      Alcotest.(check bool)
+        "v1 name differs from the legacy path-digest name"
+        true
+        (not (String.equal legacy_lease legacy_path));
+      match
+        Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
+      with
+      | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+        Alcotest.(check bool)
+          "the holder of a legacy lease is reported, not bypassed"
+          true
+          (match owner with
+           | Server_startup_takeover.Owner_recorded _ -> true
+           | Server_startup_takeover.Owner_this_process _ -> false
+           | Server_startup_takeover.Owner_unnamed -> true)
+      | Server_startup_takeover.Base_path_rejected rejection ->
+        Alcotest.failf
+          "the legacy lease was rejected instead of fenced: %s"
+          (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+      | Server_startup_takeover.Base_path_acquired lease ->
+        Alcotest.fail "a held legacy path-digest lease was acquired twice")
 
 let test_stale_lease_release_preserves_new_active_lease () =
   with_base_and_run "startup-takeover-stale-release"
@@ -1491,6 +1606,12 @@ let () =
             test_base_path_lock_reclaims_stale_pid_file;
           Alcotest.test_case "same-process symlink alias is rejected" `Quick
             test_base_path_lock_rejects_same_process_symlink_alias;
+          Alcotest.test_case
+            "one directory shares one lease across realpath spellings" `Quick
+            test_base_path_lock_shares_one_lease_across_realpath_spellings;
+          Alcotest.test_case
+            "legacy path-digest lease is fenced while held" `Quick
+            test_base_path_lock_fences_legacy_path_digest_lease;
           Alcotest.test_case "stale lease release preserves active ownership"
             `Quick test_stale_lease_release_preserves_new_active_lease;
           Alcotest.test_case "linked runtime directory is rejected" `Quick

@@ -1565,7 +1565,7 @@ let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw
     check bool "off is an explicit host refusal" true
       (match call name (`Assoc []) with
        | Error (Runtime.Host_refusal (Lane_addon_call_context.Activity_disabled _)) -> true | _ -> false);
-    check int "off cannot reach worker mutation" before (List.length !(state.admissions)))
+    check Alcotest.int "off cannot reach worker mutation" before (List.length !(state.admissions)))
     ["masc_msx_step";"masc_dos_step"];
   List.iter (fun name -> check bool "off retains observation, save and eject" true
     (Result.is_ok (call name (`Assoc []))))
@@ -1599,11 +1599,11 @@ let test_machine_export_host_admission () = with_fixture (fun env _sw config dir
     let denied = call ~principal "masc_dos_pass" (`Assoc ["to", `String "not-invited"]) in
     check bool "unknown recipient is a typed pre-effect host refusal" true
       (match denied with Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
-    check int "denied handoff never invokes worker" 0 (List.length !(state.admissions));
+    check Alcotest.int "denied handoff never invokes worker" 0 (List.length !(state.admissions));
     let unnamed = call ~principal:Lane_addon_call_context.Anonymous "masc_dos_step" (`Assoc []) in
     check bool "anonymous controller call is a typed host refusal" true
       (match unnamed with Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
-    check int "anonymous call never invokes worker" 0 (List.length !(state.admissions));
+    check Alcotest.int "anonymous call never invokes worker" 0 (List.length !(state.admissions));
     state.controller := Some "revoked-player";
     check bool "admitted caller reaches worker" true
       (Result.is_ok (call ~principal "masc_dos_step" (`Assoc [])));
@@ -1627,7 +1627,7 @@ let test_machine_notices_keep_effect_order () =
     Machine_addon_events.record second (reply "second effect");
     Machine_addon_events.ready second;
     Machine_addon_events.drain ();
-    check int "later publication cannot overtake pending credential release" 0 (List.length !published);
+    check Alcotest.int "later publication cannot overtake pending credential release" 0 (List.length !published);
     Machine_addon_events.ready first;
     Machine_addon_events.drain ();
     check (list (pair string string)) "effect order and host authors are preserved"

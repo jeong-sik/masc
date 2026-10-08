@@ -14,6 +14,13 @@ import tui_keyboard_harness as h
 
 def run(executable):
     fixture = chat.AtomicChatFixture(first_working=True)
+    # Token reports draw beside the runtime roster row. Supply that actual
+    # read contract before using observed token counters as ordered witnesses.
+    # Runtime IDs are opaque fixture metadata. Token witnesses use140columns;
+    # the120-column footer deliberately omits a clause that cannot fit whole.
+    runtime_path = "/api/v1/gate/keepers?detailed=true"
+    fixture.fixtures[runtime_path] = h.keeper_runtime_http_fixtures(
+        alpha_runtime_id="cfg")[runtime_path]
     stop_answer = threading.Event()
     resume_reasoning = threading.Event()
     stop_reasoning = threading.Event()
@@ -55,11 +62,11 @@ def run(executable):
                        + activity(0, 0, "text", "observed"))
                 content_gate("late-runtime-name")
                 yield event("KEEPER_RUNTIME_ATTEMPT_STARTED", {
-                    "runtime_id": "observed-runtime", "attempt_index": 0})
+                    "runtime_id": "run", "attempt_index": 0})
                 yield event("KEEPER_STREAM_MESSAGE_DELTA", {"usage": {"output_tokens": 1}})
                 content_gate("repeated-runtime-name")
                 yield event("KEEPER_RUNTIME_ATTEMPT_STARTED", {
-                    "runtime_id": "observed-runtime", "attempt_index": 0})
+                    "runtime_id": "run", "attempt_index": 0})
                 yield event("KEEPER_STREAM_MESSAGE_DELTA", {"usage": {"output_tokens": 2}})
                 content_gate("overlap")
                 yield (event("KEEPER_THINKING_DELTA", {"index": 1, "delta": "checking alongside the answer"})
@@ -103,7 +110,7 @@ def run(executable):
     fixture.fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(stream)
 
     def interact(process, fd, _slave, output, _base):
-        def observe(label, expected, absent=(), *, start=0):
+        def observe(label, expected, absent=(), *, start=0, columns=120, required=()):
             h.wait_for_output(process, fd, output, expected, start=start, timeout=5)
             # Editing the draft completes a new frame even when the status row
             # is retained; screen_rows reconstructs the actual terminal cells.
@@ -117,14 +124,16 @@ def run(executable):
             assert any(b"reply-phase-check" in row for row in rows), "response body disappeared"
             # Capture original ANSI bytes from a complete redraw. Screenshot
             # replay checks xterm cells against this independently recorded PTY.
-            frame = h.resize_and_wait(process, fd, output, rows=30, columns=121,
+            frame = h.resize_and_wait(process, fd, output, rows=30, columns=columns + 1,
                 needle=expected, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
-            frame = h.resize_and_wait(process, fd, output, rows=30, columns=120,
+            frame = h.resize_and_wait(process, fd, output, rows=30, columns=columns,
                 needle=expected, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
             cells = h.screen_rows(frame)
+            current = b"\n".join(cells.values())
+            assert all(value in current for value in required), (label, current)
             print("STUDIO_CAPTURE=" + json.dumps({
                 "suite": "test_tui_model_response_phase_pty", "name": label,
-                "rows": 30, "columns": 120, "provenance": "fixture PTY",
+                "rows": 30, "columns": columns, "provenance": "fixture PTY",
                 "frame_b64": base64.b64encode(frame).decode(),
                 "screen": b"\n".join(cells.get(row, b"") for row in range(1, 31)).decode(errors="replace")}), flush=True)
             return list(cells.values())
@@ -150,19 +159,29 @@ def run(executable):
 
         try:
             chat.open_atomic_chat(process, fd, output)
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"configured: cfg" in h.screen_text(bytes(output)), timeout=5), "runtime roster row did not arrive"
             h.send_and_wait(process, fd, output, b"phase-check", h.composer_showing(b"phase-check"))
             os.write(fd, b"\r")
             observe("answering", b"STREAMING")
+            h.resize_and_wait(process, fd, output, rows=30, columns=140,
+                needle=b"STREAMING", controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
             content_gates["late-runtime-name"].set()
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: b"out 1" in h.screen_text(bytes(output)), timeout=5), "late metadata counter did not arrive"
+            observe("late-runtime-counter", b"STREAMING", (b"model content ended",),
+                columns=140, required=(b"out 1",))
             observe("late-runtime-name", b"STREAMING", (b"model content ended",))
+            h.resize_and_wait(process, fd, output, rows=30, columns=140,
+                needle=b"STREAMING", controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
             content_gates["repeated-runtime-name"].set()
             # The following usage report is the ordered processing witness.
             # An unchanged status by itself cannot prove the preceding runtime
             # metadata was consumed by the TUI.
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: b"out 2" in h.screen_text(bytes(output)), timeout=5), "repeat metadata counter did not arrive"
+            observe("repeated-runtime-counter", b"STREAMING", (b"model content ended",),
+                columns=140, required=(b"out 2",))
             observe("repeated-runtime-name", b"STREAMING", (b"model content ended",))
             start = len(output)
             content_gates["overlap"].set()

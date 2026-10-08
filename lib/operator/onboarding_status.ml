@@ -189,21 +189,23 @@ let keeper_checks base_path =
    record has nothing to say about one. A running host is satisfied only
    where the observed server lists its client: that is where hover and drag
    are served. *)
-let browser_bidi_host_check (observation : Browser_lane_launcher.t) =
+let browser_bidi_host_check host =
   let report condition =
-    [check Browser_bidi_host condition (Browser_lane_launcher.bidi_host_message observation)
+    [check Browser_bidi_host condition (Browser_bidi_host_status.message host)
        [Inspect_configuration]]
   in
-  match Browser_lane_launcher.bidi_host_verdict observation with
-  | Browser_lane_launcher.Bidi_absent -> []
-  | Browser_lane_launcher.Bidi_serving -> report Satisfied
-  | Browser_lane_launcher.Bidi_unverified -> report Needs_verification
-  | Browser_lane_launcher.Bidi_not_running -> report Needs_setup
-  | Browser_lane_launcher.Bidi_unreadable -> report Invalid
+  match Browser_bidi_host_status.verdict host with
+  | Browser_bidi_host_status.Host_absent -> []
+  | Browser_bidi_host_status.Host_serving -> report Satisfied
+  | Browser_bidi_host_status.Host_unverified -> report Needs_verification
+  | Browser_bidi_host_status.Host_not_running -> report Needs_setup
+  | Browser_bidi_host_status.Host_unreadable -> report Invalid
 
+(* One observation answers both checks, so they say of one launcher and one
+   list of connections. *)
 let browser_lane_check base_path =
-  let observation =
-    Browser_lane_launcher.observe ~base_path ~server:Browser_lane_launcher.current_server in
+  let host = Browser_bidi_host_status.observe ~base_path in
+  let observation = host.lane in
   let message = Browser_lane_launcher.message observation in
   (match Browser_lane_launcher.verdict observation with
    | Browser_lane_launcher.Absent -> []
@@ -212,7 +214,7 @@ let browser_lane_check base_path =
    | Browser_lane_launcher.Unverified ->
      [check Browser_lane Needs_verification message [Inspect_configuration]]
    | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]])
-  @ browser_bidi_host_check observation
+  @ browser_bidi_host_check host
 
 let inspect ~base_path =
   match base_path with

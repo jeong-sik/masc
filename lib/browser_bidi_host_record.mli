@@ -25,8 +25,9 @@
 type session =
   | No_session_left
       (** Nothing of this host's is left in Firefox: Firefox confirmed the
-          end or said this connection has no session, or the host never got
-          as far as asking for one. *)
+          end or said this connection has no session, the host never got as
+          far as asking for one, or Firefox answered its request for one with
+          an error other than "session not created". *)
   | Session_left
       (** The host asked Firefox to end it and Firefox did not confirm: it
           answered with an error other than having no session, or did not
@@ -38,8 +39,10 @@ type session =
   | Session_refused
       (** Firefox refused the host a session with "session not created". It
           does that while it holds one: another host's that is attached, or
-          one a host that died left there. That session is not this host's,
-          and it is still there for the next host to meet. *)
+          one a host that died left there. That session is not this host's.
+          It was there when this host asked, and stays until its own host
+          ends it or that Firefox is restarted: the record does not say
+          whether it is there now. *)
 
 type ending =
   { at : float
@@ -112,10 +115,18 @@ type state =
           crashed, or it left in order and could not write its ending. Its
           BiDi session may be left in Firefox. *)
   | Unreadable of { detail : string; held : bool option }
-      (** The record is not one this reader understands, or cannot be read.
-          [held] says whether a host holds the lock all the same, and is
-          [None] when the lock could not be asked either. A host that holds
-          it refuses the next one, which then cannot replace the record. *)
+      (** The record is not one this reader understands or cannot be read,
+          with whether a host holds the lock all the same: one that does
+          refuses the next host, which then cannot replace the record.
+          [held = None] is the lock that could not be asked, and [detail] is
+          then why. That is also what a record without an ending reads as
+          when its lock cannot be asked: whether its host runs is not known.
+          A record with its ending, and no record, do not turn on the lock
+          and are read without it. *)
+
+(** Where a workspace's [bidi-host.json] is, for a reader that tells the
+    operator which file it means. *)
+val record_path : base_path:string -> string
 
 (** What [bidi-host.json] and the lock say now. The two are read one after
     the other, the record first, so a reader can be wrong for as long as one
@@ -197,8 +208,10 @@ val release : held -> (unit, string) result
 (** Times are written to the nearest millisecond. *)
 val entry_to_json : entry -> Yojson.Safe.t
 
-(** Takes what {!entry_to_json} writes and nothing else: the fields of this
-    layout, an address and a client ID in the form a host records them, and
-    a reason that is printable ASCII within the length a host keeps. A time
-    it read is written back as the same text. *)
+(** Takes the fields of this layout and no others, with these three in the
+    form a host writes them: an address as it is recorded, a client ID the
+    lane takes, and a reason in printable ASCII that is within the length a
+    host keeps or cut there and marked. That bounds what a reader passes on
+    to one line of known bytes; it does not judge what the line says. A time
+    a host wrote is written back as the same text. *)
 val entry_of_json : Yojson.Safe.t -> (entry, string) result

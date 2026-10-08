@@ -376,20 +376,23 @@ def task_cancel_previous_workspace_receipt(executable):
         def prepare(base):
             seed(base)
             local = Path(base).resolve()
-            foreign = local / "task-receipt-foreign-B"
-            (foreign / ".masc").mkdir(parents=True)
+            foreign_b = local / "task-receipt-foreign-B"
+            (foreign_b / ".masc").mkdir(parents=True)
+            foreign_c = local / "task-receipt-foreign-C"
+            (foreign_c / ".masc").mkdir(parents=True)
 
             def health():
                 state["health_reads"] += 1
                 gate = state["health_gate"]
                 entry = None
+                root = state.get("workspace_root", foreign_b if state.get("foreign") else local)
                 if gate is not None:
                     entered = time.monotonic()
                     gate.register()
                     entry = {
                         "registered": entered,
                         "completed": None,
-                        "post_press": state.get("post_press", False),
+                        "root": str(root),
                     }
                     state["exchange_log"].append(entry)
                     try:
@@ -404,7 +407,6 @@ def task_cancel_previous_workspace_receipt(executable):
                     except BaseException:
                         gate.complete(time.monotonic() - entered)
                         raise
-                root = foreign if state["foreign"] else local
                 on_sent = None
                 if gate is not None:
                     # Capture this exact exchange's gate, entry, and entry time.
@@ -567,35 +569,47 @@ def task_cancel_previous_workspace_receipt(executable):
                         "pre-press exchange is still running before second press: "
                         + repr(state["exchange_log"]))
 
-                    state["post_press"] = True
+                    # The boundary out of the settle segment is a client-side
+                    # identifiable completion event, not elapsed time alone:
+                    # we configure the fixture to return a unique workspace
+                    # root foreign_C ("task-receipt-foreign-C"), then deliver
+                    # a fresh refresh press ('r').
+                    # Observing that the screen renders the new workspace identity
+                    # ("task-receipt-foreign-C") proves that:
+                    # 1. The client processed the fresh 'r' key and dispatched HTTP.
+                    # 2. The second refresh reached the server, received foreign_C,
+                    #    and completed surface collection on the wire.
+                    # 3. The client applied the bundle, updated state.server_identity,
+                    #    and painted the frame to the PTY.
+                    # Producer code (bin/masc_tui.ml:10435-10470, 10980-11050, 11840-11870)
+                    # guarantees that identity_after (/health) is the final call in
+                    # load_http_surfaces, and because Workspace_identity_mismatch
+                    # is established, all scoped surface application and authority-change
+                    # follow-up refreshes are skipped ("another workspace's bundle
+                    # withheld nothing a second pass would bring"). Zero trailing reads
+                    # follow this screen observation.
+                    state["workspace_root"] = foreign_c
+                    second_press_output_start = len(output)
+                    second_pressed_at = time.monotonic()
                     os.write(fd, b"r")
-                    pressed_at = time.monotonic()
-                    deadline = time.monotonic() + 15
-                    # The boundary is "the press produced an exchange and
-                    # that exchange has completed". Registration and
-                    # completion are tracked per request, and only entries
-                    # registered after the second press (post_press=True)
-                    # count toward this boundary. An older exchange from
-                    # the first pass was already drained above, and any
-                    # post-press registration is keyed on the fresh press.
-                    def pressed_receipt_done():
-                        return any(
-                            entry.get("post_press")
-                            and entry["registered"] >= pressed_at
-                            and entry["completed"] is not None
-                            for entry in state["exchange_log"][pre_press_count:])
-                    while not (pressed_receipt_done() and gate.quiesced()):
-                        if time.monotonic() > deadline:
+                    h.wait_for_output(
+                        process, fd, output, b"task-receipt-foreign-C",
+                        start=second_press_output_start, timeout=15)
+
+                    settle_deadline = time.monotonic() + 15
+                    while not gate.quiesced():
+                        if time.monotonic() > settle_deadline:
                             raise AssertionError(
-                                "refresh tail did not settle past the pressed exchange: "
+                                "refresh tail did not quiesce after foreign_C applied: "
                                 + repr(state["exchange_log"])
                                 + " reads=" + repr((state["health_reads"], state["history_reads"])))
                         gate.changed.clear()
                         h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
                     boundary = [entry for entry in state["exchange_log"][pre_press_count:]
-                                if entry.get("post_press") and entry["registered"] >= pressed_at]
+                                if entry.get("root") == str(foreign_c)
+                                and entry["registered"] >= second_pressed_at]
                     assert boundary, (
-                        "settled without any post-press registration: "
+                        "settled without any foreign_C registration: "
                         + repr(state["exchange_log"]))
                     assert all(entry["completed"] is not None for entry in boundary), (
                         "a post-press exchange is still running at settle time: "
@@ -603,7 +617,7 @@ def task_cancel_previous_workspace_receipt(executable):
                     assert any(length >= 0.5 for length in gate.durations), (
                         "the completion gate never held the drill's slow exchange: "
                         + repr(gate.durations))
-                    window_opened_at = boundary[0]["completed"]
+                    window_opened_at = boundary[-1]["completed"]
                 finally:
                     state["drill_delay"] = 0.0
                 # The gate stays armed through the receipt window: any

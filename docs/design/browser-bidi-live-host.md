@@ -192,7 +192,7 @@ record: a host that held the lock under its predecessor's record would be
 read as that predecessor. A record that could not be written later does not
 stop a serving host; the next write that succeeds carries it.
 
-Three places read the record and say what it says, with how a host is
+Four places read the record and say what it says, with how a host is
 attached:
 
 - `masc doctor` prints a `browser_bidi_host` line. It reads the files, so it
@@ -209,6 +209,10 @@ attached:
 - A Keeper whose hover or drag is refused as `live_transport_unsupported`
   with no BiDi connection to offer gets the same `bidiHost` in the answer,
   to pass on to the operator.
+- The TUI's Browser Lane picker draws it from the server's `bidiHost`:
+  whether a host runs, why the last one ended, what stands in the way of the
+  next, the results the server did not acknowledge, and the command that
+  starts one ([the rows](../guides/tui-browser-lanes.md)).
 
 Attaching again is the host command alone. A host that is stopped, or ends
 by itself, first ends the BiDi session it asked for; Firefox keeps running

@@ -37,6 +37,170 @@ from tui_keyboard_harness import (
 )
 
 
+def bidi_host_report(state: str, record: dict | None = None, detail: str | None = None) -> dict:
+    """The server's word on the BiDi host, as it comes with the connection
+    list. The TUI's reader takes this layout and no other; given another it
+    draws a row saying it cannot read the report, which no scenario expects."""
+    return {"state": state, "record": record, "detail": detail,
+            "attach": {"launcher": "/workspace/.masc/browser-lane/host/launch",
+                       "arguments": "--bidi-url ws://127.0.0.1:PORT/session"},
+            "message": "a sentence the TUI does not draw"}
+
+
+def bidi_host_record(*, client: str, attached: bool = True, ended: dict | None = None,
+                     unacknowledged: tuple[dict, ...] = ()) -> dict:
+    """The host's own record, as the server passes it on."""
+    return {"schema": 1, "pid": 4242, "started_at": "2026-10-03T04:00:00.000Z",
+            "bidi_url": "ws://127.0.0.1:9222/session", "client_id": client,
+            "attached_at": "2026-10-03T04:00:02.000Z" if attached else None,
+            "unacknowledged": list(unacknowledged), "ended": ended}
+
+
+BIDI_HOST_STOPPED = {"at": "2026-10-03T04:01:00.000Z", "reason": "stopped by SIGINT",
+                     "session_in_firefox": "left"}
+BIDI_HOST_ENDED_ROW = "BiDi host: ended 2026-10-03T04:01:00Z · stopped by SIGINT".encode()
+BIDI_HOST_SESSION_ROW = "Session end not confirmed · restart that Firefox before attaching".encode()
+BIDI_HOST_ATTACH_ROWS = (b"Attach: /workspace/.masc/browser-lane/host/launch",
+                         b"--bidi-url ws://127.0.0.1:PORT/session")
+
+
+def run_browser_bidi_host_status_regression(executable: str) -> None:
+    """The picker says where the BiDi host stands.
+
+    What it says comes with the connection list, so it changes when the list
+    is read again: no host has run, one is attached, one ended and why, and
+    nothing at all from a server that reports nothing. The terminal is 80
+    columns wide and every row is read whole.
+    """
+    fixtures = overview_event_http_fixtures()
+    extension = "11111111-1111-4111-8111-111111111111"
+    bidi = "22222222-2222-4222-8222-222222222222"
+    zen = "33333333-3333-4333-8333-333333333333"
+    extension_row = {"clientId": extension, "browser": "firefox", "transport": "web_extension"}
+    bidi_row = {"clientId": bidi, "browser": "firefox", "transport": "webdriver_bidi"}
+    zen_row = {"clientId": zen, "browser": "zen", "transport": "web_extension"}
+    unacknowledged = {"request_id": "0199c0de-0000-4000-8000-0000000000a1", "verb": "page.interact",
+                      "outcome": "unknown", "cause": "unconfirmed", "at": "2026-10-03T04:00:30.000Z"}
+    answers = {
+        "never": {"clients": [extension_row], "bidiHost": bidi_host_report("never_started")},
+        "attached": {"clients": [extension_row, bidi_row],
+                     "bidiHost": bidi_host_report("running", bidi_host_record(client=bidi))},
+        # Two connections and the longest thing the picker says of a host.
+        "ended": {"clients": [extension_row, zen_row],
+                  "bidiHost": bidi_host_report("ended", bidi_host_record(
+                      client=bidi, ended=BIDI_HOST_STOPPED, unacknowledged=(unacknowledged,)))},
+        # A server from before the report: the list and nothing else.
+        "silent": {"clients": [extension_row, bidi_row]},
+    }
+    now = ["never"]
+    url = "https://example.org/"
+
+    def read(body):
+        request = json.loads(body)
+        assert request == {"lane": "live", "clientId": extension}, request
+        text = "extension fixture"
+        return 200, {"ok": True, "data": {"source": "live", "clientId": extension, "elapsed_ms": 0,
+            "tabs": [{"id": 2, "title": "owned", "url": url, "active": True}],
+            "page": {"tabId": 2, "title": "owned", "url": url, "text": text, "chars": len(text),
+                     "truncated": False}}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = lambda: (200, {"ok": True, "data": answers[now[0]]})
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+
+    def interact(process, master, _slave, output, _base):
+        def picker(state: str, key: bytes, needle: bytes) -> bytes:
+            """The whole screen once the picker has drawn [needle] for [state]."""
+            now[0] = state
+            read_available(master, output)
+            start = len(output)
+            os.write(master, key)
+            wait_for_output(process, master, output, needle, start=start, timeout=5)
+            wait_for_output(process, master, output, FRAME_END,
+                start=end_of_needle(output, needle, start), timeout=3)
+            return screen_text(bytes(output))
+
+        def require(screen: bytes, *needles: bytes) -> None:
+            for needle in needles:
+                if needle not in screen:
+                    raise AssertionError(f"80-column picker lacks {needle!r}: {screen!r}")
+
+        def forbid(screen: bytes, *needles: bytes) -> None:
+            for needle in needles:
+                if needle in screen:
+                    raise AssertionError(f"picker still shows {needle!r}: {screen!r}")
+
+        # One connection, so the lane reads it without asking which.
+        palette_go(process, master, output, b"go Browser Lane", b"extension fixture")
+        # While the picker waits it shows nothing of the read before, so the
+        # row to wait for is one only the answer brings.
+        never = picker("never", b"b", "Firefox · WebExtension · existing login".encode())
+        require(never, b"BiDi host: none has run for this workspace", *BIDI_HOST_ATTACH_ROWS)
+        attached_row = "BiDi host: attached · pid 4242 · ws://127.0.0.1:9222/session".encode()
+        attached = picker("attached", b"r", attached_row)
+        require(attached, "Firefox · BiDi · existing login".encode())
+        # A host that is attached is not told how to start one.
+        forbid(attached, b"Attach:", b"--bidi-url", b"none has run")
+        ended = picker("ended", b"r", BIDI_HOST_ENDED_ROW)
+        require(ended, BIDI_HOST_SESSION_ROW,
+            "1 result unacknowledged · last: page.interact, outcome unknown".encode(),
+            "at 2026-10-03T04:00:30Z · request 0199c0de-0000-4000-8000-0000000000a1".encode(),
+            *BIDI_HOST_ATTACH_ROWS)
+        forbid(ended, "Firefox · BiDi · existing login".encode(), b"BiDi host: attached")
+        # All of it fits 24 rows, with every choice above it.
+        require(ended, "Firefox · WebExtension · existing login".encode(),
+            "Zen · WebExtension · existing login".encode(), b"Stagehand Chromium", b"Independent Firefox/Zen")
+        forbid(ended, b"rows not shown")
+        silent = picker("silent", b"r", "Firefox · BiDi · existing login".encode())
+        forbid(silent, b"BiDi host", b"Attach:", b"unacknowledged", b"cannot read")
+        send_and_wait(process, master, output, b"\x1b", b"extension fixture")
+        send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
+        os.write(master, b"q")
+
+    run_terminal_scenario(executable, description="Browser picker says where the BiDi host stands",
+        interact=interact, http_fixtures=fixtures, terminal_cols=80, terminal_rows=24)
+
+
+def run_browser_bidi_host_short_terminal_regression(executable: str) -> None:
+    """On a terminal too short for everything the choices keep their rows.
+
+    The BiDi host's rows come last and are the ones cut, from the end: what
+    stands in the way of the next host stays, how to start one goes, and the
+    frame says rows are missing.
+    """
+    fixtures = overview_event_http_fixtures()
+    extension = "11111111-1111-4111-8111-111111111111"
+    bidi = "22222222-2222-4222-8222-222222222222"
+    zen = "33333333-3333-4333-8333-333333333333"
+    listing = {
+        "clients": [{"clientId": extension, "browser": "firefox", "transport": "web_extension"},
+                    {"clientId": zen, "browser": "zen", "transport": "web_extension"}],
+        "bidiHost": bidi_host_report("ended", bidi_host_record(client=bidi, ended=BIDI_HOST_STOPPED)),
+    }
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": listing})
+
+    def interact(process, master, _slave, output, _base):
+        # Two connections, so the lane opens on the picker.
+        palette_go(process, master, output, b"go Browser Lane", BIDI_HOST_ENDED_ROW)
+        wait_for_output(process, master, output, FRAME_END,
+            start=end_of_needle(output, BIDI_HOST_ENDED_ROW, 0), timeout=3)
+        screen = screen_text(bytes(output))
+        for needle in ("Firefox · WebExtension · existing login".encode(),
+                       "Zen · WebExtension · existing login".encode(),
+                       b"Stagehand Chromium", b"Independent Firefox/Zen",
+                       BIDI_HOST_ENDED_ROW, BIDI_HOST_SESSION_ROW, b"rows not shown"):
+            if needle not in screen:
+                raise AssertionError(f"18-row picker lacks {needle!r}: {screen!r}")
+        if b"Attach:" in screen:
+            raise AssertionError(f"18-row picker has room for the attach rows; use a shorter one: {screen!r}")
+        # The picker closes onto the lane, which has no browser chosen.
+        send_and_wait(process, master, output, b"\x1b", b"Esc:hide lane")
+        send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
+        os.write(master, b"q")
+
+    run_terminal_scenario(executable, description="Browser picker keeps its choices on a short terminal",
+        interact=interact, http_fixtures=fixtures, terminal_cols=80, terminal_rows=18)
+
+
 def run_browser_client_picker_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
     firefox = "11111111-1111-4111-8111-111111111111"
@@ -476,7 +640,12 @@ def run_browser_unserved_gesture_regression(executable: str, *, bidi_listed: boo
         clicked.set()
         return 200, {"ok":True,"data":{}}
 
-    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":connected}})
+    listing = {"clients": connected}
+    if not bidi_listed:
+        # No BiDi connection, and the last BiDi host left its session behind.
+        listing["bidiHost"] = bidi_host_report("ended", bidi_host_record(
+            client=bidi, ended=BIDI_HOST_STOPPED))
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":listing})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
     fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(act)
@@ -551,8 +720,11 @@ def run_browser_unserved_gesture_regression(executable: str, *, bidi_listed: boo
             require(after_refresh,
                 "Not sent · WebExtension: no drag · BiDi serves it · b:choose browser".encode())
         else:
+            # Why no BiDi connection is listed comes between the cause and
+            # where attaching one is written.
             require(after_refresh,
                 "Not sent · WebExtension: no drag · no BiDi connection is listed".encode(),
+                BIDI_HOST_ENDED_ROW, BIDI_HOST_SESSION_ROW,
                 b"Setup: docs/design/browser-bidi-live-host.md")
         if b"HTTP failed" in after_refresh:
             raise AssertionError(f"a gesture that was never sent reads as a failed read: {after_refresh!r}")
@@ -568,7 +740,7 @@ def run_browser_unserved_gesture_regression(executable: str, *, bidi_listed: boo
             start=end_of_needle(output, b"Live Firefox", key_at), timeout=3)
         after_key = screen_text(bytes(output[start:]))
         require(after_key, extension_row, b"READ AFTER THE REFUSAL")
-        if b"Not sent" in after_key or b"Setup:" in after_key:
+        if b"Not sent" in after_key or b"Setup:" in after_key or b"BiDi host:" in after_key:
             raise AssertionError(f"the next input left the refused gesture on screen: {after_key!r}")
         # The picker says the same thing about the connection under its cursor.
         read_available(master, output)

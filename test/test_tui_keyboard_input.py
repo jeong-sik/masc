@@ -61,6 +61,8 @@ from tui_keyboard_board import (
     run_board_list_footer_regression,
 )
 from tui_keyboard_browser import (
+    run_browser_bidi_host_short_terminal_regression,
+    run_browser_bidi_host_status_regression,
     run_browser_client_picker_regression,
     run_browser_scene_regression,
     run_browser_screenshot_regression,
@@ -243,6 +245,8 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
         (
             run_browser_screenshot_regression,
             run_browser_client_picker_regression,
+            run_browser_bidi_host_status_regression,
+            run_browser_bidi_host_short_terminal_regression,
             run_browser_scene_regression,
         ),
     ),

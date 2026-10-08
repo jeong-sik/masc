@@ -8959,7 +8959,7 @@ let browser_lane_source_hint view =
 let browser_lane_unserved_gesture_rows (view : Browser_lane_view.t) =
   match view.unserved_gesture with
   | None -> []
-  | Some unserved -> Browser_lane_view.unserved_gesture_rows unserved
+  | Some unserved -> Browser_lane_view.unserved_gesture_rows ~host:view.bidi_host unserved
 
 let browser_lane_fixed_rows view =
   (* Status, selection, tab, URL, divider and text position are always drawn.
@@ -9110,7 +9110,13 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               c.push_styled ~style:(Theme.info ()) "  Live requires the MASC extension and its registered native host.";
               c.push_styled ~style:(Theme.recede ())
                 ("  " ^ transport_setup_row [Browser_lane.Web_extension]);
-              c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh."))
+              c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh."));
+          (* Last, so a terminal too short for everything keeps the choices
+             and loses these from the end: how to start a host goes first,
+             whether one runs last. *)
+          List.iter (fun row ->
+              c.push_styled ~style:(Theme.recede ()) ("  " ^ Terminal_text.single_line row))
+            (bidi_host_rows view.bidi_host)
       | None ->
       List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ row))
         (browser_lane_unserved_gesture_rows view);

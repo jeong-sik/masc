@@ -307,7 +307,7 @@ type async_msg =
   | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
   | Browser_history_list_loaded of int * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Browser_history_page_loaded of int * (Masc.Browser_observation.t, string) result
-  | Browser_lane_clients_loaded of int * (Browser_lane_view.client list, string) result
+  | Browser_lane_clients_loaded of int * (Browser_lane_view.discovered, string) result
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
   | Browser_lane_action_done of int * (unit, string) result

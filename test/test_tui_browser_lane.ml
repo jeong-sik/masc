@@ -10,6 +10,31 @@ let firefox = { client_id = "11111111-1111-4111-8111-111111111111"; browser = Fi
 let zen = { client_id = "22222222-2222-4222-8222-222222222222"; browser = Zen;
             transport = Browser_lane.Web_extension }
 let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; zen] }
+(* A connection list that came with no word of the BiDi host. *)
+let found listed = { listed; bidi_host = Host_not_reported }
+
+module Record = Masc.Browser_bidi_host_record
+module Launcher = Masc.Browser_lane_launcher
+
+let host_entry : Record.entry =
+  { pid = 4242; started_at = 1_791_000_000.; bidi_url = "ws://127.0.0.1:9222/session"
+  ; client_id = "33333333-3333-4333-8333-333333333333"; attached_at = Some 1_791_000_002.
+  ; unacknowledged = []; ended = None }
+let host_attach : Launcher.bidi_attach =
+  { launcher = "/workspace/.masc/browser-lane/host/launch"
+  ; arguments = "--bidi-url ws://127.0.0.1:PORT/session" }
+let host_report state : Launcher.bidi_host_report =
+  { state; attach = host_attach; message = "the server's own sentence" }
+let host state = Host_reported (host_report state)
+let host_ending ?(reason = "stopped by SIGINT") session : Record.ending =
+  { at = 1_791_000_060.; reason; session }
+let host_ended ?reason session =
+  let ending = host_ending ?reason session in
+  host (Record.Ended ({ host_entry with ended = Some ending }, ending))
+let unacknowledged ?(cause = Record.Unconfirmed) ?(outcome = Record.Unknown)
+    ?(verb = Some Masc.Browser_bidi_peer.Page_interact) at : Record.unacknowledged =
+  { request_id = Record.request_id_of_wire "0199c0de-0000-4000-8000-0000000000a1"
+  ; verb; outcome; cause; at }
 let response ?(source="live") ?(client=firefox.client_id) ?(page_id=2) () =
   `Assoc ["ok", `Bool true; "data", `Assoc [
     "source", `String source; "clientId", (if source = "automation" then `Null else `String client); "elapsed_ms", `Float 12.5;
@@ -264,24 +289,43 @@ let test_pointer_decision () =
    does not erase it, and the next input does. *)
 let test_unserved_gesture () =
   expect "with a serving connection listed the next step is the picker"
-    (unserved_gesture_rows
+    (unserved_gesture_rows ~host:Host_not_reported
        {asked = Browser_lane.Web_extension; capability = Browser_lane.Trusted_drag; serving_listed = true}
      = ["Not sent · WebExtension: no drag · BiDi serves it · b:choose browser"]);
   expect "with none listed the next step is where attaching one is written"
-    (unserved_gesture_rows
+    (unserved_gesture_rows ~host:Host_not_reported
        {asked = Browser_lane.Web_extension; capability = Browser_lane.Trusted_drag; serving_listed = false}
      = ["Not sent · WebExtension: no drag · no BiDi connection is listed";
         "Setup: " ^ Browser_lane.live_transport_setup_doc Browser_lane.Webdriver_bidi]);
+  let drag_unserved =
+    {asked = Browser_lane.Web_extension; capability = Browser_lane.Trusted_drag; serving_listed = false} in
+  expect "with no BiDi connection the rows say where the BiDi host stands"
+    (unserved_gesture_rows ~host:(host_ended Record.Session_left) drag_unserved
+     = ["Not sent · WebExtension: no drag · no BiDi connection is listed";
+        "BiDi host: ended 2026-10-03T04:01:00Z · stopped by SIGINT";
+        "Session end not confirmed · restart that Firefox before attaching";
+        "Setup: " ^ Browser_lane.live_transport_setup_doc Browser_lane.Webdriver_bidi]);
+  expect "a gesture BiDi does not serve says nothing of the BiDi host"
+    (unserved_gesture_rows ~host:(host_ended Record.Session_left)
+       {asked = Browser_lane.Webdriver_bidi; capability = Browser_lane.Tab_activation; serving_listed = false}
+     = ["Not sent · BiDi: no tab switch · no WebExtension connection is listed";
+        "Setup: " ^ Browser_lane.live_transport_setup_doc Browser_lane.Web_extension]);
+  expect "with a serving connection listed the host is not spoken of"
+    (unserved_gesture_rows ~host:(host (Record.Running host_entry)) {drag_unserved with serving_listed = true}
+     = ["Not sent · WebExtension: no drag · BiDi serves it · b:choose browser"]);
+  List.iter (fun host ->
   List.iter (fun asked ->
     List.iter (fun capability ->
       if not (Browser_lane.live_transport_serves asked capability) then
         List.iter (fun serving_listed ->
           List.iter (fun row ->
             expect ("a refused gesture's row fits 80 columns: " ^ row) (cells ("  " ^ row) <= row_cells))
-            (unserved_gesture_rows {asked; capability; serving_listed}))
+            (unserved_gesture_rows ~host {asked; capability; serving_listed}))
           [true; false])
       Browser_lane.all_of_live_capability)
-    Browser_lane.all_of_live_transport;
+    Browser_lane.all_of_live_transport)
+    [Host_not_reported; host Record.Never_started; host (Record.Running host_entry);
+     host_ended Record.Session_unknown; host (Record.Died host_entry)];
   let ready = loaded () in
   let unserved =
     {asked = Browser_lane.Web_extension; capability = Browser_lane.Trusted_drag; serving_listed = false} in
@@ -324,26 +368,26 @@ let test_screenshot_ownership_and_draft () =
 
 let test_client_connection_ownership () =
   let discover t = { t with load = Loading (20, Discover Read_after_discovery) } in
-  let empty, read = accept_clients ~generation:20 (Ok []) (discover (create ())) in
+  let empty, read = accept_clients ~generation:20 (Ok (found [])) (discover (create ())) in
   expect "empty successful discovery is a browser connection state"
     (not read && empty.load = No_browser && read_status empty = Browser_missing);
   expect "dismissing picker retains known connection absence"
     (read_status { empty with client_picker = None } = Browser_missing);
-  let lost, read = accept_clients ~generation:20 (Ok []) (discover (loaded ())) in
+  let lost, read = accept_clients ~generation:20 (Ok (found [])) (discover (loaded ())) in
   expect "disconnected selected client stays pinned without calling another browser"
     (not read && lost.selected_client = Some firefox && read_status lost = Browser_missing);
-  let restored, read = accept_clients ~generation:20 (Ok [firefox]) (discover lost) in
+  let restored, read = accept_clients ~generation:20 (Ok (found [firefox])) (discover lost) in
   expect "same client can reconnect after empty discovery"
     (read && restored.selected_client = Some firefox && restored.load = Idle);
   let failed, read = accept_clients ~generation:20 (Error "HTTP 401") (discover (create ())) in
   expect "discovery errors stay errors, not missing-browser guidance"
     (not read && read_status failed = Read_failed && not (awaiting_browser failed));
-  let choose, read = accept_clients ~generation:20 (Ok [firefox; zen]) (discover (create ())) in
+  let choose, read = accept_clients ~generation:20 (Ok (found [firefox; zen])) (discover (create ())) in
   expect "two clients require explicit choice, no read" (not read && choose.selected_client = None && choose.client_picker = Some 0 && read_status choose = Unread);
-  let first, read = accept_clients ~generation:20 (Ok [firefox]) (discover (create ())) in
+  let first, read = accept_clients ~generation:20 (Ok (found [firefox])) (discover (create ())) in
   expect "fresh singleton can be pinned" (read && first.selected_client = Some firefox);
   let old = { (loaded ()) with scroll = 8 } in
-  let disconnected, read = accept_clients ~generation:20 (Ok [zen]) (discover old) in
+  let disconnected, read = accept_clients ~generation:20 (Ok (found [zen])) (discover old) in
   expect "missing pin never rebinds singleton with same tab ids"
     (not read && disconnected.selected_client = Some firefox && disconnected.selected_tab = None
      && disconnected.reading = None && disconnected.scroll = 0 && not (selected_client_available disconnected));
@@ -360,7 +404,7 @@ let test_client_connection_ownership () =
   let refused, image = accept_screenshot ~generation:23 (decode_screenshot (screenshot_response ())) capture in
   expect "same tab id screenshot from wrong client is refused" (image = None && match refused.load with Failed _ -> true | _ -> false);
   expect "late discovery cannot replace chosen client"
-    (accept_clients ~generation:20 (Ok [firefox]) pending = (pending, false));
+    (accept_clients ~generation:20 (Ok (found [firefox])) pending = (pending, false));
   expect "automation sends no native client ID" (request_body (switch_source Automation right) = `Assoc ["lane", `String "automation"])
   ;
   expect "stagehand sends its lane and no native client ID"
@@ -377,10 +421,10 @@ let test_picker_empty_row () =
   let failed, _ = accept_clients ~generation:30 (Error "connection refused") (discover (create ())) in
   expect "a failed discovery holds no list" (failed.clients = None && listed_clients failed = []);
   expect "a failed discovery is not an empty one" (row failed = Some Masc_tui_types.page_failed_note);
-  let empty, _ = accept_clients ~generation:30 (Ok []) (discover (create ())) in
+  let empty, _ = accept_clients ~generation:30 (Ok (found [])) (discover (create ())) in
   expect "an answered discovery with nothing in it says so"
     (row empty = Some "  No active native browser connections");
-  let two, _ = accept_clients ~generation:30 (Ok [firefox; zen]) (discover (create ())) in
+  let two, _ = accept_clients ~generation:30 (Ok (found [firefox; zen])) (discover (create ())) in
   expect "connections to offer need no empty row" (two.clients = Some [firefox; zen] && row two = None)
 
 let test_clients_decode () =
@@ -506,7 +550,7 @@ let test_unified_browser_picker () =
   let independent = choose_browser Automation_browser current in
   let waiting = { independent with scroll = 7; selected_tab = Some 3;
     load = Loading (90, Discover Choose_client) } in
-  let discovered, read = accept_clients ~generation:90 (Ok [firefox]) waiting in
+  let discovered, read = accept_clients ~generation:90 (Ok (found [firefox])) waiting in
   expect "opening picker on server source does not switch to singleton live client"
     (not read && discovered.source = Automation && discovered.selected_tab = Some 3
      && discovered.scroll = 7 && discovered.client_picker = Some 0);
@@ -518,11 +562,110 @@ let test_unified_browser_picker () =
     (live.source = Live && live.selected_client = Some zen && live.selected_tab = None
      && request_body live = `Assoc ["lane", `String "live"; "clientId", `String zen.client_id]);
   expect "stale discovery cannot overwrite explicit selection"
-    (accept_clients ~generation:90 (Ok [firefox]) live = (live, false))
+    (accept_clients ~generation:90 (Ok (found [firefox])) live = (live, false))
+
+(* What the picker says of the BiDi host, for each thing the server can
+   report of it. *)
+let test_bidi_host_rows () =
+  let attach = ["Attach: /workspace/.masc/browser-lane/host/launch";
+                "        --bidi-url ws://127.0.0.1:PORT/session"] in
+  let says name host rows =
+    let drawn = bidi_host_rows host in
+    if drawn <> rows then failwith (name ^ ":\n" ^ String.concat "\n" drawn) in
+  says "nothing reported draws nothing" Host_not_reported [];
+  says "a host that never ran says so and how one is started" (host Record.Never_started)
+    ("BiDi host: none has run for this workspace" :: attach);
+  says "a host still connecting"
+    (host (Record.Running { host_entry with attached_at = None }))
+    ["BiDi host: connecting · pid 4242 · ws://127.0.0.1:9222/session"];
+  says "an attached host is not told how to start one" (host (Record.Running host_entry))
+    ["BiDi host: attached · pid 4242 · ws://127.0.0.1:9222/session"];
+  says "a host that ended in order says when and why" (host_ended Record.No_session_left)
+    ("BiDi host: ended 2026-10-03T04:01:00Z · stopped by SIGINT" :: attach);
+  says "a session left in Firefox is the step before attaching" (host_ended Record.Session_left)
+    (["BiDi host: ended 2026-10-03T04:01:00Z · stopped by SIGINT";
+      "Session end not confirmed · restart that Firefox before attaching"] @ attach);
+  says "a host whose Firefox left does not claim a session is held"
+    (host_ended ~reason:"BiDi connection ended: BiDi EOF" Record.Session_unknown)
+    (["BiDi host: ended 2026-10-03T04:01:00Z · BiDi connection ended: BiDi EOF";
+      "Session not ended · restart that Firefox if it is still running"] @ attach);
+  says "a host that left no reason is not said to have crashed" (host (Record.Died host_entry))
+    (["BiDi host: pid 4242 is gone · no reason recorded";
+      "Its session may be left in Firefox · restart Firefox if a host is refused"] @ attach);
+  says "a record that cannot be read says why" (host (Record.Unreadable "bidi-host.json is not JSON"))
+    ("BiDi host: its record cannot be read · bidi-host.json is not JSON" :: attach);
+  says "a report this TUI cannot read says so" (Host_report_unreadable "no state")
+    ["BiDi host: this TUI cannot read the server's report · no state"];
+  let with_results results = host (Record.Running { host_entry with unacknowledged = results }) in
+  says "one unacknowledged result: what ran, and that its fate is unknown"
+    (with_results [unacknowledged 1_791_000_030.])
+    ["BiDi host: attached · pid 4242 · ws://127.0.0.1:9222/session";
+     "1 result unacknowledged · last: page.interact, outcome unknown";
+     "at 2026-10-03T04:00:30Z · request 0199c0de-0000-4000-8000-0000000000a1"];
+  says "several: the count, and the last one with what settles it"
+    (with_results [unacknowledged 1_791_000_030.;
+                   unacknowledged ~cause:Record.Refused ~outcome:Record.Succeeded
+                     ~verb:(Some Masc.Browser_bidi_peer.Tabs_list) 1_791_000_040.])
+    ["BiDi host: attached · pid 4242 · ws://127.0.0.1:9222/session";
+     "2 results unacknowledged · last: tabs.list, ran, refused";
+     "at 2026-10-03T04:00:40Z · request 0199c0de-0000-4000-8000-0000000000a1"];
+  says "a request the host could not name"
+    (with_results [{ (unacknowledged ~cause:Record.Not_sent ~outcome:Record.Not_started ~verb:None
+                        1_791_000_030.) with request_id = None }])
+    ["BiDi host: attached · pid 4242 · ws://127.0.0.1:9222/session";
+     "1 result unacknowledged · last: unknown verb, not started, not sent";
+     "at 2026-10-03T04:00:30Z · request not a UUID"];
+  (* Every row this file words fits; the reason and the launcher's path are
+     another's words. *)
+  let widest = unacknowledged ~cause:Record.Not_sent ~outcome:Record.Unknown
+      ~verb:(Some Masc.Browser_bidi_peer.Page_elements) 1_791_000_030. in
+  List.iter (fun host ->
+      List.iter (fun row ->
+          expect ("a BiDi host row fits 80 columns: " ^ row) (cells ("  " ^ row) <= row_cells))
+        (bidi_host_rows host))
+    [host Record.Never_started; host (Record.Running { host_entry with pid = 4_194_304 });
+     host_ended Record.Session_left; host_ended Record.Session_unknown; host (Record.Died host_entry);
+     host (Record.Running { host_entry with unacknowledged = List.init 12 (fun _ -> widest) })]
+
+(* The report rides the connection list: it is read from the same answer,
+   kept with the list, and dropped with it. *)
+let test_bidi_host_discovery () =
+  let row id = `Assoc ["clientId", `String id; "browser", `String "firefox";
+                       "transport", `String "web_extension"] in
+  let answer extra =
+    `Assoc ["ok", `Bool true; "data", `Assoc (("clients", `List [row firefox.client_id]) :: extra)] in
+  let ended = host_report (let ending = host_ending Record.Session_left in
+                           Record.Ended ({ host_entry with ended = Some ending }, ending)) in
+  expect "the server's report is read with the list"
+    (decode_discovery (answer ["bidiHost", Launcher.bidi_host_report_to_json ended])
+     = Ok { listed = [firefox]; bidi_host = Host_reported ended });
+  expect "a server that says nothing of the host still lists its connections"
+    (decode_discovery (answer []) = Ok (found [firefox])
+     && decode_discovery (answer ["bidiHost", `Null]) = Ok (found [firefox]));
+  (match decode_discovery (answer ["bidiHost", `Assoc ["state", `String "paused"]]) with
+   | Ok { listed; bidi_host = Host_report_unreadable _ } ->
+       expect "a report this TUI cannot read does not cost the list" (listed = [firefox])
+   | Ok _ | Error _ -> failwith "an unreadable host report was not kept apart from the list");
+  let discover t = { t with load = Loading (40, Discover Choose_client) } in
+  let reported, _ =
+    accept_clients ~generation:40 (Ok { listed = [firefox]; bidi_host = Host_reported ended })
+      (discover (create ())) in
+  expect "the view holds what the discovery said" (reported.bidi_host = Host_reported ended);
+  let again, _ = accept_clients ~generation:40 (Ok (found [firefox])) (discover reported) in
+  expect "the next discovery replaces it" (again.bidi_host = Host_not_reported);
+  let failed, _ = accept_clients ~generation:40 (Error "connection refused") (discover reported) in
+  expect "a discovery that failed holds no report, as it holds no list"
+    (failed.bidi_host = Host_not_reported && failed.clients = None);
+  let waiting = withdraw_discovery reported in
+  expect "a picker waiting on a discovery shows neither of the read before it"
+    (waiting.clients = None && bidi_host_rows waiting.bidi_host = []
+     && waiting = { reported with clients = None; bidi_host = Host_not_reported })
 
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
     ["unified browser picker", test_unified_browser_picker;
+     "the picker says where the BiDi host stands", test_bidi_host_rows;
+     "the BiDi host report rides the connection list", test_bidi_host_discovery;
      "raw refresh scroll identity", test_raw_refresh_scroll_identity;
      "scoped refresh failure and region recovery", test_scoped_refresh_failure_retains_read_intent;
      "visual pointer navigation", test_visual_pointer_navigation;

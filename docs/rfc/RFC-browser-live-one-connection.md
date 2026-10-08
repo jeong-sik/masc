@@ -388,7 +388,9 @@ B 의 순서:
   host 기록은 #41919 에서 host 가 쓰게 했다.
   그 기록을 읽어 말하는 것은 #41971 에서 했다: `masc doctor` 의 `browser_bidi_host` 줄,
   서버 연결 목록의 `bidiHost`, Keeper 가 받는 거절 답의 `bidiHost`.
-  남은 것은 TUI 의 표시와 설정 명령의 확인 단계다.
+  TUI 의 표시는 #41973 에서 했다: 브라우저 고르기 목록 아래의 BiDi host 줄들과,
+  보내지 않은 hover·drag 아래의 host 상태 줄. 서버가 연결 목록과 함께 주는 `bidiHost` 를 읽는다.
+  남은 것은 설정 명령의 확인 단계다.
   설정 명령의 단계는 RFC `setup-web-search-and-browser-lane` 의 명령(`masc browser-lane-setup`)에 더하는 것인데,
   그 RFC 는 Draft 이고 명령이 아직 없다. 명령이 생긴 뒤에 더한다. 그 단계가 말할 내용 가운데
   host 기록의 상태와 붙이는 명령은 `masc doctor` 가 이미 말한다.

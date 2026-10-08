@@ -58,12 +58,47 @@ TUI reads that table in four places:
   sent. The screenshot closes and a row under the status says so:
   `Not sent · WebExtension: no drag · BiDi serves it · b:choose browser` when a
   BiDi connection is listed. When none is, the row ends `no BiDi connection is
-  listed` and the next row names where attaching one is written
+  listed`, the rows after it say where the BiDi host stands (below), and the
+  last names where attaching one is written
   (`Setup: docs/design/browser-bidi-live-host.md`). The read badge does not
   change, because nothing was requested. The rows stay through the lane's own
   refreshes and go with the next key or click.
 
 These rows fit an 80-column terminal up to the `b:choose browser` key.
+
+The picker also says where the BiDi host stands, under its choices. A BiDi
+connection is there only while its host runs, and the host is a process the
+operator starts ([how](../design/browser-bidi-live-host.md)). The server
+reads the host's own record and sends it with the connection list, so these
+rows change when the list is read again (`r`).
+
+| The host | First row |
+|---|---|
+| never ran for this workspace | `BiDi host: none has run for this workspace` |
+| is starting | `BiDi host: connecting · pid 4242 · ws://127.0.0.1:9222/session` |
+| is attached | `BiDi host: attached · pid 4242 · ws://127.0.0.1:9222/session` |
+| left in order | `BiDi host: ended 2026-10-03T04:01:00Z · stopped by SIGINT` |
+| left no reason | `BiDi host: pid 4242 is gone · no reason recorded` |
+
+- A host whose Firefox did not confirm the end of its session adds `Session
+  end not confirmed · restart that Firefox before attaching`. One whose
+  connection was gone before it could end the session adds `Session not
+  ended · restart that Firefox if it is still running`. One that left no
+  reason adds `Its session may be left in Firefox · restart Firefox if a
+  host is refused`.
+- Results the server did not acknowledge add two rows: how many, and the
+  last one's verb and what became of the command, then its time and request
+  ID. `, refused` or `, not sent` follows when the server does not have the
+  result; with neither, it may have arrived.
+- When no host runs, two rows give the command that starts one:
+  `Attach: <workspace>/.masc/browser-lane/host/launch` and
+  `--bidi-url ws://127.0.0.1:PORT/session`, for a Firefox started with
+  `--remote-debugging-port PORT`.
+- A server that does not report the host draws none of these rows.
+
+A refused gesture shows the first row and the session row. On a terminal too
+short for everything the picker keeps its choices and these rows are cut from
+the end; the frame says how many rows are not shown.
 
 In a Keeper's chat, the tool results view shows a refused browser call as its
 case, what the connection leaves out and how many connected browsers serve it,

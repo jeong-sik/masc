@@ -189,6 +189,43 @@ let keeper_board_event_collection_health_json () =
       ~keeper_names
 ;;
 
+(* The keeper_hitl_gate section (task-1665, design D1): live waits from the
+   tool-approval registry — the same source GET /api/v1/keepers/tool-approvals
+   serves — over the durable ask counts from the asking workspace's queue.
+   Every computation failure is a distinct projection rather than a zero:
+   [Keeper_hitl_gate_health.no_workspace_json] keeps the live side when there
+   is no server state, and [queue_unreadable_json] goes unavailable instead
+   of letting an unread authority read as "nothing pending". Timeout
+   counters (design D3) come from the registry's process-lifetime totals. *)
+let keeper_hitl_gate_health_json () =
+  let registry = Keeper_tool_approval_registry.shared () in
+  let waits = Keeper_tool_approval_registry.pending registry in
+  let { Keeper_tool_approval_registry.answered_total
+      ; timed_out_total } =
+    Keeper_tool_approval_registry.outcome_totals registry
+  in
+  let late_uncertain = 0 in
+  (* The approval journal (design D2) has no producer yet; D2 wires its
+     count here. *)
+  match current_server_state_opt () with
+  | None ->
+    Keeper_hitl_gate_health.no_workspace_json ~waits ~answered_total
+      ~timed_out_total ~late_uncertain ()
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    (match
+       Keeper_approval_queue.list_pending_entries_for_workspace
+         ~base_path:config.base_path
+     with
+     | Error error ->
+       Keeper_hitl_gate_health.queue_unreadable_json
+         ~error:(Keeper_approval_queue_result.storage_error_to_string error)
+     | Ok entries ->
+       Keeper_hitl_gate_health.aggregate
+         ~now:(Unix.gettimeofday ())
+         ~waits ~entries ~answered_total ~timed_out_total ~late_uncertain)
+;;
+
 let paused_keeper_count = function
   | `Assoc fields ->
       (match List.assoc_opt "count" fields with

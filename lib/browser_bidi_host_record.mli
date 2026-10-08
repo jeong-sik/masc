@@ -211,8 +211,9 @@ val entry_to_json : entry -> Yojson.Safe.t
 
 (** Takes the fields of this layout and no others, with these three in the
     form a host writes them: an address as it is recorded, a client ID the
-    lane takes, and a reason in printable ASCII that is within the length a
-    host keeps or cut there and marked. That bounds what a reader passes on
-    to one line of known bytes; it does not judge what the line says. A time
-    a host wrote is written back as the same text. *)
+    lane takes, and a reason in printable ASCII, with a backslash only where
+    it starts [\xNN], that is within the length a host keeps or cut there
+    and marked. That bounds what a reader passes on to one line of known
+    bytes; it does not judge what the line says. A time a host wrote is
+    written back as the same text. *)
 val entry_of_json : Yojson.Safe.t -> (entry, string) result

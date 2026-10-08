@@ -153,9 +153,16 @@ let selection_error ~base_path ~tool_name ~start_time error =
       match host with
       | Some host -> Browser_bidi_host_status.listed_clients host
       | None -> Browser_lane.active_clients () in
+    (* A connection whose host the record says no longer runs is still
+       listed for as long as its lease lasts, and serves nothing: it is not
+       offered. *)
+    let live =
+      match host with
+      | Some host -> Browser_bidi_host_status.live_clients host
+      | None -> listed in
     let serving_clients =
       List.filter (fun (info : Browser_lane.client_info) ->
-        Browser_lane.live_transport_serves info.transport capability) listed in
+        Browser_lane.live_transport_serves info.transport capability) live in
     (* A connection of the other kind may belong to another browser profile,
        and its tab IDs are its own, so the retry starts from its tabs. *)
     let retry = match serving_clients with
@@ -173,10 +180,11 @@ let selection_error ~base_path ~tool_name ~start_time error =
        one ended. The operator acts on it, not the Keeper. A connection that
        serves the work makes that beside the point: the Keeper retries
        there. The state and the paragraph sit with the fields that decide.
-       The paragraph does not grow with what a host has done: its length is
-       bound by the workspace path and the reason for ending, which a host
-       writes in at most 515 bytes. The record itself is not sent: its list
-       of results grows while a host runs. *)
+       The paragraph does not grow with what a host has done. Its length
+       follows the workspace path, the address the last host was given and
+       the reason for ending, which a host writes in at most 515 bytes; the
+       address has no limit of its own. The record itself is not sent: its
+       list of results grows while a host runs. *)
     let bidi_host =
       match serving_clients, host with
       | [], Some host -> ["bidiHost", Browser_bidi_host_status.summary_to_json host]

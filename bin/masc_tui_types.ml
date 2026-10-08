@@ -3954,10 +3954,12 @@ module Browser_lane_view = struct
      | Launcher_installed ->
          { lead; said = Filename.quote attach.launcher; breaks = At_slashes }
          :: (match address with
-             | Some address -> [host_said under ("--bidi-url " ^ Filename.quote address)]
+             | Some address ->
+                 [host_said under (Masc.Browser_bidi_host_status.bidi_url_flag ^ " " ^ Filename.quote address)]
              | None ->
                  [host_said under attach.arguments;
-                  host_said under "PORT: the --remote-debugging-port Firefox was started with"])
+                  host_said under
+                    ("PORT: the " ^ Masc.Browser_bidi_host_status.firefox_flag ^ " Firefox was started with")])
      | Launcher_not_installed -> [host_said lead "install the browser lane in this workspace first"]
      | Launcher_needs_reinstall ->
          [host_said lead "install the browser lane again first (launcher not as installed)"])

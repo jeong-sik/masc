@@ -173,14 +173,29 @@ let nullable read = function
 let reason_limit_bytes = 512
 let cut_mark = "..."
 let printable_byte byte = byte >= ' ' && byte <= '~'
+let upper_hex byte = (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'F')
 
-(* A reason in the bytes and at the length the writer leaves one: printable
-   ASCII, within the limit, or cut there and marked. The reader takes no
-   other, so that what it passes on to a screen is one bounded line. *)
+(* The pieces the writer leaves: a printable byte other than the backslash,
+   and [\xNN] with two upper-case hex digits for any other byte. A cut falls
+   between pieces, so the mark after it is three more printable bytes. *)
+let rec written_pieces raw index =
+  if index = String.length raw then true
+  else if raw.[index] = '\\' then
+    index + 4 <= String.length raw
+    && raw.[index + 1] = 'x'
+    && upper_hex raw.[index + 2]
+    && upper_hex raw.[index + 3]
+    && written_pieces raw (index + 4)
+  else printable_byte raw.[index] && written_pieces raw (index + 1)
+
+(* A reason in the bytes and at the length the writer leaves one: its pieces,
+   within the limit, or cut there and marked. The reader takes no other, so
+   that what it passes on to a screen is one bounded line, and a backslash
+   in it never runs into a quote set around it. *)
 let written_reason raw =
   let length = String.length raw in
   let cut = length <= reason_limit_bytes + String.length cut_mark && String.ends_with ~suffix:cut_mark raw in
-  if (length <= reason_limit_bytes || cut) && String.for_all printable_byte raw
+  if (length <= reason_limit_bytes || cut) && written_pieces raw 0
   then Ok raw
   else Error "ended.reason is not what a host writes"
 

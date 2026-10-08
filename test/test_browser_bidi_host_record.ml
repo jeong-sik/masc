@@ -200,10 +200,22 @@ let test_a_layout_this_reader_does_not_know_is_refused () =
     ; "a reason with a terminal escape", "stopped \027[2J"
     ; "a reason that is not ASCII", "stopped \xff\xfe"
     ; "a reason longer than a host keeps", String.make 516 'a'
+    (* A host writes a backslash only as the start of [\xNN]. *)
+    ; "a reason with a bare backslash", {|could not read C:\temp|}
+    ; "a reason that ends in a backslash", {|stopped \|}
+    ; "a reason with a lower-case mark", {|stopped \x5c|}
+    ; "a reason with a mark cut short", {|stopped \x5|}
+    ; "a reason with a mark cut by the length mark", String.make 509 'a' ^ {|\x5...|}
     ];
-  (match Record.entry_of_json (with_ending (replaced "reason" (`String (String.make 512 'a' ^ "...")))) with
-   | Ok _ -> ()
-   | Error detail -> failf "a reason cut at the limit was refused: %s" detail);
+  List.iter
+    (fun (name, reason) ->
+      match Record.entry_of_json (with_ending (replaced "reason" (`String reason))) with
+      | Ok _ -> ()
+      | Error detail -> failf "%s was refused: %s" name detail)
+    [ "a reason cut at the limit", String.make 512 'a' ^ "..."
+    ; "a reason with the marks a host writes", {|status line: \xFF\x0A\x5Cx41|}
+    ; "a reason cut after a mark", String.make 508 'a' ^ {|\x5C...|}
+    ];
   List.iter
     (fun (name, url) -> refused name (`Assoc (replaced "bidi_url" (`String url) fields)))
     [ "an address with a query", address ^ "?token=x"

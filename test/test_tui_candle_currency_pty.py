@@ -401,7 +401,9 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
         assert end >= 0, "Dashboard projection has no complete frame"
         rows = h.screen_rows(bytes(output[:end + len(h.FRAME_END)]))
         footer = h.screen_row_of(rows, b"q:quit")
-        assert footer > 1 and b"Port:" in rows[footer], rows
+        # At 100 columns the footer hints fill the row and the port suffix is
+        # dropped, so the row is identified by its q:quit hint alone.
+        assert footer > 1, rows
         markers = (b"Approval", b"Question", b"Needs your decision",
                    b"Continue", b"Home destinations")
         return tuple(line for row, line in sorted(rows.items())

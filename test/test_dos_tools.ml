@@ -130,6 +130,12 @@ let install_program ~base_path name contents =
   write_file (Filename.concat dir name) contents
 ;;
 
+let install_program_file ~base_path program name contents =
+  let dir = Filename.concat (programs_dir ~base_path) program in
+  mkdir_p dir;
+  write_file (Filename.concat dir name) contents
+;;
+
 let load ~base_path name = dispatch ~base_path "masc_dos_load" [ ("program", `String name) ]
 
 (* Setup for the tests that are about what happens after a load. The load's
@@ -162,9 +168,331 @@ let test_inventory_when_unnamed () =
     install_program ~base_path "hello.com" hello_com;
     let result = dispatch ~base_path "masc_dos_load" [] in
     check bool "listing succeeds" true (is_completed result);
+    check bool "unnamed load does not expose a host path" true
+      (member "programs_dir" (Tool_result.data result) = None);
     match member "programs_available" (Tool_result.data result) with
     | Some (`List [ `String name ]) -> check string "the inventory" "hello.com" name
     | _ -> fail "no programs_available")
+;;
+
+let test_inventory_describes_mountable_assets_without_a_machine () =
+  with_workspace (fun base_path ->
+    install_program_file ~base_path "sg3" "KOEI.COM" hello_com;
+    install_program_file ~base_path "sg3" "END.EXE" "end";
+    install_program ~base_path "solo.com" hello_com;
+    let result = dispatch ~base_path "masc_dos_inventory" [] in
+    check bool "inventory succeeds without a loaded game" true (is_completed result);
+    check bool "inventory does not expose a host path" true
+      (member "programs_dir" (Tool_result.data result) = None);
+    let programs =
+      match member "programs" (Tool_result.data result) with
+      | Some (`List entries) -> entries
+      | _ -> fail "no structured programs inventory"
+    in
+    let entry name =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              (match List.assoc_opt "name" fields with
+               | Some (`String actual) -> String.equal actual name
+               | _ -> false)
+            | _ -> false)
+          programs
+      with
+      | Some (`Assoc fields) -> fields
+      | Some _ -> fail (name ^ " is not an object")
+      | None -> fail (name ^ " is absent")
+    in
+    let sg3 = entry "sg3" in
+    check string "directory kind" "directory"
+      (match List.assoc_opt "kind" sg3 with Some (`String value) -> value | _ -> "");
+    check bool "both executables are advertised" true
+      (match List.assoc_opt "executable_candidates" sg3 with
+       | Some (`List [ `String "END.EXE"; `String "KOEI.COM" ]) -> true
+       | _ -> false);
+    check bool "ambiguous boot is explicit" true
+      (List.assoc_opt "default_boot" sg3 = Some `Null);
+    let files =
+      match List.assoc_opt "files" sg3 with
+      | Some (`List values) -> values
+      | _ -> fail "directory has no files"
+    in
+    let file_name value =
+      match value with
+      | `Assoc fields ->
+        (match List.assoc_opt "name" fields with Some (`String name) -> name | _ -> "")
+      | _ -> ""
+    in
+    check bool "the executable is listed" true (List.exists (fun value -> file_name value = "sg3/KOEI.COM") files);
+    check bool "the companion file is listed" true (List.exists (fun value -> file_name value = "sg3/END.EXE") files);
+    let solo = entry "solo.com" in
+    check string "standalone file kind" "file"
+      (match List.assoc_opt "kind" solo with Some (`String value) -> value | _ -> "");
+    check bool "standalone file reports bytes" true
+      (match List.assoc_opt "bytes" solo with Some (`Int value) -> value > 0 | _ -> false);
+    check bool "standalone file reports sha256" true
+      (match List.assoc_opt "sha256" solo with
+       | Some (`String value) -> String.length value = 64
+       | _ -> false);
+    check string "sha256 matches the mounted bytes"
+      Digestif.SHA256.(to_hex (digest_string hello_com))
+      (match List.assoc_opt "sha256" solo with
+       | Some (`String value) -> value
+       | _ -> ""))
+;;
+
+(* FIFO entries must be reported without opening them. In particular, a
+   writer-free FIFO must never hold the inventory worker, and no error result
+   may disclose the resolved host path. *)
+let test_inventory_rejects_special_files_without_host_paths () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    mkdir_p root;
+    let top_fifo = Filename.concat root "pipe.com" in
+    Unix.mkfifo top_fifo 0o600;
+    let game = Filename.concat root "pipe-game" in
+    mkdir_p game;
+    write_file (Filename.concat game "pipe-game.com") hello_com;
+    Unix.mkfifo (Filename.concat game "asset.fifo") 0o600;
+    let inventory = dispatch ~base_path "masc_dos_inventory" [] in
+    check bool "special files do not block inventory" true (is_completed inventory);
+    let programs =
+      match member "programs" (Tool_result.data inventory) with
+      | Some (`List values) -> values
+      | _ -> fail "no inventory programs"
+    in
+    let entry name =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              List.assoc_opt "name" fields = Some (`String name)
+            | _ -> false)
+          programs
+      with
+      | Some (`Assoc fields) -> fields
+      | _ -> fail (name ^ " is absent")
+    in
+    let kind fields =
+      match List.assoc_opt "kind" fields with Some (`String value) -> value | _ -> ""
+    in
+    check string "top-level FIFO is unavailable" "unavailable" (kind (entry "pipe.com"));
+    let child_files =
+      match List.assoc_opt "files" (entry "pipe-game") with
+      | Some (`List values) -> values
+      | _ -> fail "pipe-game has no files"
+    in
+    let child_fifo =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              List.assoc_opt "name" fields = Some (`String "pipe-game/asset.fifo")
+            | _ -> false)
+          child_files
+      with
+      | Some (`Assoc fields) -> fields
+      | _ -> fail "child FIFO is absent"
+    in
+    check string "child FIFO is unavailable" "unavailable" (kind child_fifo);
+    let top_load = load ~base_path "pipe.com" in
+    let child_load = load ~base_path "pipe-game" in
+    List.iter
+      (fun result ->
+        check bool "special-file load is refused" false (is_completed result);
+        check bool "special-file error has no host path" false
+          (contains (Common.masc_dir_from_base_path ~base_path) (Tool_result.message result)))
+      [ top_load; child_load ])
+;;
+
+(* Inventory names are the caller-visible identity. A symlink alias and its
+   target may contain different conventional executables; inventory and load
+   must choose from the same identity so the advertised default is the one
+   that actually boots. *)
+let test_inventory_and_load_share_alias_selection () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    mkdir_p root;
+    let real = Filename.concat root "real-game" in
+    mkdir_p real;
+    write_file (Filename.concat real "alias.com") hello_com;
+    write_file (Filename.concat real "real-game.com") spinner_com;
+    Unix.symlink real (Filename.concat root "alias");
+    let inventory = dispatch ~base_path "masc_dos_inventory" [] in
+    let programs =
+      match member "programs" (Tool_result.data inventory) with
+      | Some (`List values) -> values
+      | _ -> fail "no inventory programs"
+    in
+    let alias =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              List.assoc_opt "name" fields = Some (`String "alias")
+            | _ -> false)
+          programs
+      with
+      | Some (`Assoc fields) -> fields
+      | _ -> fail "alias is absent"
+    in
+    check bool "alias advertises the alias-named executable" true
+      (List.assoc_opt "default_boot" alias = Some (`String "alias.com"));
+    let loaded = load ~base_path "alias" in
+    check bool "alias load succeeds" true (is_completed loaded);
+    check string "load follows the advertised default" "alias.com"
+      (string_field "program" loaded))
+;;
+
+(* The operator may mount the whole inventory through a symlink. The boundary
+   check resolves both the root and the leaf before the descriptor-bound read;
+   inventory and load must keep working in that canonical tree. *)
+let test_a_linked_inventory_root_is_readable () =
+  with_workspace (fun base_path ->
+    let lexical_root = programs_dir ~base_path in
+    let real_root = lexical_root ^ ".real" in
+    mkdir_p real_root;
+    write_file (Filename.concat real_root "hello.com") hello_com;
+    Unix.symlink real_root lexical_root;
+    let inventory = dispatch ~base_path "masc_dos_inventory" [] in
+    check bool "linked inventory root lists files" true (is_completed inventory);
+    let loaded = load ~base_path "hello.com" in
+    check bool "linked inventory root loads files" true (is_completed loaded);
+    check string "linked root program" "hello.com" (string_field "program" loaded))
+;;
+
+(* Enumerating a directory is part of the boundary too. Replace the validated
+   inventory root with a different real directory at the deterministic read
+   seam and ensure the descriptor identity check refuses it before publishing
+   the outside child name. *)
+let test_inventory_directory_replacement_hides_child_names () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    let game = Filename.concat root "game" in
+    mkdir_p game;
+    write_file (Filename.concat game "game.com") hello_com;
+    let outside = Filename.temp_dir "masc-dos-outside-dir-" "" in
+    Fun.protect
+      ~finally:(fun () -> Fs_compat.remove_tree outside)
+      (fun () ->
+        write_file (Filename.concat outside "outside-private-name.dat") "private";
+        let moved = root ^ ".moved" in
+        let replaced = ref false in
+        let result =
+          Tool_misc_dos_lane.handle_inventory_with_read_hooks
+            ~before_program:(fun _ -> ())
+            ~after_read:(fun _ -> ())
+            ~before_read:(fun real ->
+              Unix.rename real moved;
+              Unix.rename outside real;
+              replaced := true)
+            ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path
+        in
+        let response =
+          Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result)
+        in
+        check bool "root replacement hook completed" true !replaced;
+        check bool "replaced root is refused" false (is_completed result);
+        check bool "outside child name is not enumerated" false
+          (contains "outside-private-name.dat" response)))
+;;
+
+(* Inventory describes base assets. Without a saved overlay, loading mounts
+   these direct files; subdirectories never become mounted files. *)
+let test_inventory_skips_subdirectories_like_load () =
+  with_workspace (fun base_path ->
+    install_program_file ~base_path "game" "game.com" hello_com;
+    let root = Filename.concat (programs_dir ~base_path) "game" in
+    mkdir_p (Filename.concat root "fake.exe");
+    mkdir_p (Filename.concat root "assets");
+    let result = dispatch ~base_path "masc_dos_inventory" [] in
+    let programs = match member "programs" (Tool_result.data result) with
+      | Some (`List values) -> values | _ -> fail "no inventory" in
+    let game = List.find (fun value ->
+      member "name" value = Some (`String "game")) programs in
+    check bool "inventory explicitly describes base assets" true
+      (member "asset_scope" (Tool_result.data result) = Some (`String "base_inventory"));
+    check bool "saved files are explicitly deferred to load" true
+      (member "saved_overlay" (Tool_result.data result) = Some (`String "applied_on_load"));
+    check bool "only the mounted executable is a candidate" true
+      (member "executable_candidates" game = Some (`List [`String "game.com"]));
+    let files = match member "files" game with
+      | Some (`List values) -> values | _ -> fail "no mounted files" in
+    check (list string) "inventory lists only the mounted file" ["game/game.com"]
+      (List.map (fun value -> match member "name" value with
+        | Some (`String name) -> name | _ -> fail "no filename") files);
+    let loaded = load ~base_path "game" in
+    check bool "directory with subdirectories still loads" true (is_completed loaded);
+    check bool "machine mounts exactly the advertised file" true
+      (member "files" (Tool_result.data loaded) = Some (`List [`String "game.com"])))
+;;
+
+(* Swap a directory out during enumeration, then restore it before final
+   validation. Pathname before/after checks alone would accept the outside
+   names; descriptor enumeration returns only the original inventory names. *)
+let test_inventory_temporary_swap_cannot_publish_foreign_names () =
+  List.iter (fun nested ->
+    with_workspace (fun base_path ->
+      let root = programs_dir ~base_path in
+      install_program_file ~base_path "game" "game.com" hello_com;
+      let target = if nested then Filename.concat root "game" else root in
+      let moved = target ^ ".moved" in
+      let outside = Filename.temp_dir "masc-dos-outside-swap-" "" in
+      Fun.protect ~finally:(fun () -> Fs_compat.remove_tree outside) (fun () ->
+        write_file (Filename.concat outside "private-outside.exe") "private";
+        let swapped = ref false in
+        let result = Tool_misc_dos_lane.handle_inventory_with_read_hooks
+            ~before_program:(fun _ -> ())
+          ~before_read:(fun directory ->
+            if String.equal directory target then begin
+              Unix.rename target moved;
+              Unix.symlink outside target;
+              swapped := true
+            end)
+          ~after_read:(fun directory ->
+            if String.equal directory target then begin
+              Unix.unlink target;
+              Unix.rename moved target
+            end)
+          ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path in
+        check bool "the actual enumeration crossed the swap" true !swapped;
+        check bool "bound original inventory remains readable" true (is_completed result);
+        let response = Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result) in
+        check bool "outside names never enter the response" false
+          (contains "private-outside.exe" response);
+        check bool "host root is never serialized" false (contains base_path response);
+        check bool "original executable is still advertised" true (contains "game.com" response))))
+    [false; true]
+;;
+
+(* The root identity remains owned after enumeration. A replacement between
+   that read and per-program inspection cannot become a new authority merely
+   because it contains a matching game name. *)
+let test_inventory_root_replacement_between_reads_is_refused () =
+  with_workspace (fun base_path ->
+    install_program_file ~base_path "game" "game.com" hello_com;
+    let root = programs_dir ~base_path in
+    let moved = root ^ ".moved" in
+    let outside = Filename.temp_dir "masc-dos-outside-authority-" "" in
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree outside) (fun () ->
+      mkdir_p (Filename.concat outside "game");
+      write_file (Filename.concat outside "game/private-outside.com") "foreign";
+      let replaced = ref false in
+      let result = Tool_misc_dos_lane.handle_inventory_with_read_hooks
+        ~before_program:(fun canonical ->
+          Unix.rename canonical moved;
+          Unix.symlink outside canonical;
+          replaced := true)
+        ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ())
+        ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path in
+      check bool "replacement happened between inventory reads" true !replaced;
+      check bool "request refuses replacement authority" false (is_completed result);
+      let response = Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result) in
+      check bool "foreign filename is never published" false (contains "private-outside.com" response);
+      check bool "foreign digest is never published" false
+        (contains Digestif.SHA256.(to_hex (digest_string "foreign")) response);
+      check bool "host path is never published" false (contains outside response)))
 ;;
 
 let test_load_runs_to_the_first_key_request () =
@@ -204,6 +532,20 @@ let test_load_and_screen_name_the_core () =
       (Yojson.Safe.to_string expected) (Yojson.Safe.to_string (core_of "screen" screen));
     check string "the digest is the one the core baked at its build"
       Dos_core_identity.source_digest Dos_lane.core.Dos_lane.source_digest)
+;;
+
+let test_meta_names_the_core_without_a_machine () =
+  with_workspace (fun base_path ->
+    let result = dispatch ~base_path "masc_dos_meta" [] in
+    check bool "meta succeeds without a loaded game" true (is_completed result);
+    let actual =
+      match member "core" (Tool_result.data result) with
+      | Some value -> value
+      | None -> fail "meta carries no core"
+    in
+    check string "meta returns the linked core"
+      (Yojson.Safe.to_string (Dos_lane.core_to_yojson Dos_lane.core))
+      (Yojson.Safe.to_string actual))
 ;;
 
 (* CI links the core at OCAML_DOS_SHA. This fails when the SHA moved without
@@ -316,6 +658,40 @@ let test_a_link_out_of_the_inventory_is_refused () =
         Unix.symlink outside (Filename.concat game "data.dat");
         check bool "and so is a linked file beside the executable" false
           (is_completed (load ~base_path "game"))))
+;;
+
+(* The lexical realpath check is not the read boundary: replace the leaf
+   between the first parent inspection and the descriptor check and require the
+   descriptor-bound reader to reject the changed identity. The hook is the
+   deterministic replacement point used by Fs_compat's regression suite, so
+   this does not depend on a sleep or a timing race. *)
+let test_inventory_read_rejects_a_controlled_replacement () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    mkdir_p root;
+    Unix.chmod root 0o700;
+    let path = Filename.concat root "race.com" in
+    let moved = path ^ ".old" in
+    write_file path hello_com;
+    let inspections = ref 0 in
+    let parent_lstat directory =
+      let stat = Unix.lstat directory in
+      if String.equal directory root then begin
+        incr inspections;
+        if !inspections = 2 then begin
+          Unix.rename path moved;
+          write_file path "replacement"
+        end
+      end;
+      stat
+    in
+    match
+      Fs_compat.Owned_read_for_testing.load_with_snapshot
+        ~parent_lstat ~owner_uid:(Unix.geteuid ()) ~ownership_root:root path
+    with
+    | Error { Fs_compat.failure = Fs_compat.Filesystem_identity_changed _; _ } -> ()
+    | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+    | Ok _ -> fail "descriptor-bound inventory read accepted a replaced leaf")
 ;;
 
 (* A game directory often holds several programs: 삼국지3 boots KOEI.COM,
@@ -965,6 +1341,8 @@ let test_read_only_classification () =
        | None -> fail (name ^ " declares no readonly flag"))
   in
   check bool "screen reads" true (read_only "masc_dos_screen");
+  check bool "meta reads" true (read_only "masc_dos_meta");
+  check bool "inventory reads" true (read_only "masc_dos_inventory");
   check bool "peek reads" true (read_only "masc_dos_peek");
   check bool "load changes the machine" false (read_only "masc_dos_load");
   check bool "press changes the machine" false (read_only "masc_dos_press");
@@ -984,7 +1362,7 @@ let test_every_tool_is_declared () =
          | Some (schema : Masc_domain.tool_schema) ->
            check string "schema name" name schema.name
          | None -> fail (name ^ " registers no schema")))
-    [ "masc_dos_load"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
+    [ "masc_dos_load"; "masc_dos_meta"; "masc_dos_inventory"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
       "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek";
       "masc_dos_pass"; "masc_dos_save"; "masc_dos_restore" ]
 ;;
@@ -1442,7 +1820,8 @@ let test_activity_refusal_is_proven_pre_effect () =
        "masc_dos_press", ["keys", `List [`String "space"]]];
     List.iter (fun name ->
       check bool "inventory inspection remains available" true
-        (is_completed (dispatch ~base_path name []))) ["masc_dos_load"; "masc_dos_restore"])
+        (is_completed (dispatch ~base_path name [])))
+      ["masc_dos_load"; "masc_dos_inventory"; "masc_dos_restore"])
     [Machine_configuration.Disabled; Unobserved]
 ;;
 
@@ -1452,9 +1831,25 @@ let () =
       , [ test_case "no machine" `Quick test_no_machine
         ; test_case "click no machine" `Quick test_click_without_a_machine_is_refused
         ; test_case "inventory" `Quick test_inventory_when_unnamed
+        ; test_case "inventory describes assets" `Quick
+            test_inventory_describes_mountable_assets_without_a_machine
+        ; test_case "inventory mount parity" `Quick test_inventory_skips_subdirectories_like_load
+        ; test_case "inventory temporary directory swap" `Quick
+            test_inventory_temporary_swap_cannot_publish_foreign_names
+        ; test_case "inventory root authority across reads" `Quick
+            test_inventory_root_replacement_between_reads_is_refused
+        ; test_case "inventory special files" `Quick
+            test_inventory_rejects_special_files_without_host_paths
+        ; test_case "inventory alias selection" `Quick
+            test_inventory_and_load_share_alias_selection
+        ; test_case "linked inventory root" `Quick test_a_linked_inventory_root_is_readable
+        ; test_case "inventory directory replacement" `Quick
+            test_inventory_directory_replacement_hides_child_names
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
         ; test_case "load and screen name the core" `Quick
             test_load_and_screen_name_the_core
+        ; test_case "meta names the core without a machine" `Quick
+            test_meta_names_the_core_without_a_machine
         ; test_case "linked core is the pinned one" `Quick
             test_the_linked_core_is_the_pinned_one
         ; test_case "press" `Quick test_press_reaches_the_guest_and_the_ledger
@@ -1462,6 +1857,8 @@ let () =
             test_click_reaches_the_guest_and_the_ledger
         ; test_case "inventory only" `Quick test_only_inventory_names_resolve
         ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
+        ; test_case "inventory replacement identity" `Quick
+            test_inventory_read_rejects_a_controlled_replacement
         ; test_case "boot inside a directory" `Quick
             test_boot_names_the_program_inside_a_directory
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key

@@ -7026,7 +7026,7 @@
 (test
  (name test_tui_browser_lane)
  (modules test_tui_browser_lane)
- (libraries masc.browser_lane masc_tui_types))
+ (libraries masc.browser_lane masc_tui_frame masc_tui_types))
 
 (test
  (name test_tui_browser_lane_text)
@@ -7055,6 +7055,8 @@
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
+
+(include stanzas/test_tui_browser_rejection.inc)
 
 (include stanzas/test_browser_lane_name.inc)
 
@@ -9165,6 +9167,16 @@
 (include stanzas/test_candle_appraiser_transport.inc)
 
 (include stanzas/test_tui_code_diff_pan_pty.inc)
+
+(rule
+ (alias runtest-test_tui_preset_baseline_pty)
+ (deps test_tui_preset_baseline_pty.py tui_keyboard_harness.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_preset_baseline_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_preset_baseline_pty)))
 
 (rule
  (alias runtest-test_tui_preset_viewport_pty)

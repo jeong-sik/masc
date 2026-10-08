@@ -843,12 +843,16 @@ let test_base_path_lock_fences_legacy_path_digest_lease () =
   if Sys.os_type <> "Unix" then Alcotest.skip ();
   with_base_and_run "startup-takeover-legacy-path-digest"
     (fun ~base_path ~run_dir ->
+      let legacy_lease =
+        established_base_path_lock_path
+          ~run_dir
+          (Filename.concat base_path "inner")
+      in
       let legacy_path =
         Server_startup_takeover.base_path_lock_path
           ~run_dir
           ~canonical_base_path:(Unix.realpath base_path)
       in
-      let legacy_lease = established_base_path_lock_path ~run_dir base_path in
       Alcotest.(check bool)
         "v1 name differs from the legacy path-digest name"
         true

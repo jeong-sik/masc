@@ -75,7 +75,7 @@ let test_cold_open_discovery () =
        check bool "history names its autonomous journal" true
          (List.mem source (List.filter_map Types.journal_source_of_history decoded.rows)));
   check int "held source not fetched twice" 0
-    (List.length (Types.journal_source_fetch_targets ~held:[Log.source_key source]
+    (List.length (Types.journal_source_fetch_targets ~keeper_name:"alpha" ~held:["alpha", source]
        ~unavailable:[] [source, 10.; source, 12.]))
 
 let test_poll_excerpt_defers_only_to_exact_journal_text () =

@@ -163,7 +163,9 @@ let test_operation_and_journal_read_order () =
       | value :: rest -> states := rest; Ok (Some value)
       | [] -> fail "unexpected operation reread" in
     let read_journal () = calls := !calls @ ["journal"]; Ok [] in
-    let observed, _ = Log.read_with_operation_state ~read_operation ~read_journal in
+    let observed, _, replay = Log.read_with_operation_state ~read_operation ~read_journal in
+    check bool "terminal replay requires a terminal record" (is_terminal next)
+      (replay = Log.Replayed_after_terminal);
     check bool "claim between reads is observed" true (observed = Ok (Some next));
     check (list string) "journal follows the newest operation observation"
       ["operation";"journal";"operation";"journal"] !calls)
@@ -179,16 +181,22 @@ let test_operation_and_journal_read_order () =
     let read_journal () = match !journals with
       | x :: xs -> journals := xs; x
       | [] -> fail "unexpected extra journal read" in
-    let observed, journal = Log.read_with_operation_state ~read_operation ~read_journal in
+    let observed, journal, replay = Log.read_with_operation_state ~read_operation ~read_journal in
     check bool "operation settling during the journal read is observed" true (observed = Ok (Some terminal));
+    check bool "fallback page does not retire replay" true (replay = Log.Replay_pending);
     check bool "failed terminal reread preserves the first successful journal" true (journal = Ok first);
     check int "the terminal journal was retried" 0 (List.length !journals))
     [Queued; Running {started_at=2.}];
   let terminal = Failed {completed_at=3.;failure={kind=Interrupted_by_restart;
     detail="server restarted";outcome_ref=None}} in
-  let observed, journal = Log.read_with_operation_state
+  let observed, journal, replay = Log.read_with_operation_state
     ~read_operation:(fun () -> Ok (Some terminal))
     ~read_journal:(fun () -> Error Log.Journal_pruned) in
+  check bool "failed post-terminal read remains eligible" true (replay = Log.Replay_pending);
+  let _, _, success = Log.read_with_operation_state
+    ~read_operation:(fun () -> Ok (Some terminal)) ~read_journal:(fun () -> Ok []) in
+  check bool "successful post-terminal replay retires even an empty journal" true
+    (success = Log.Replayed_after_terminal);
   check bool "journal absence cannot erase the exact failure" true
     (observed = Ok (Some terminal) && journal = Error Log.Journal_pruned)
 
@@ -203,7 +211,8 @@ let test_failed_operation_recheck_keeps_the_working_observation () =
         | x :: xs -> states := xs; x
         | [] -> fail "unexpected operation read" in
       let read_journal () = incr reads; Ok first in
-      let observed, journal = Log.read_with_operation_state ~read_operation ~read_journal in
+      let observed, journal, replay = Log.read_with_operation_state ~read_operation ~read_journal in
+      check bool "failed operation recheck cannot retire replay" true (replay = Log.Replay_pending);
       check bool "failed refresh cannot erase the exact earlier observation" true
         (observed = Ok (Some initial));
       check bool "working output survives the failed refresh" true (journal = Ok first);

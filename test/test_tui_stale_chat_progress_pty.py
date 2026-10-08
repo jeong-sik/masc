@@ -1,5 +1,6 @@
 """Open chat with a failed, unterminated old journal beside a current execution."""
 
+import json
 import os
 import sys
 import threading
@@ -7,6 +8,7 @@ import time
 import urllib.parse
 
 import tui_keyboard_harness as h
+import tui_keyboard_observer as observer
 
 
 def run(executable: str, *, refresh_fails: bool = False) -> None:
@@ -228,9 +230,124 @@ def unavailable_journal_operation_recovers(executable: str) -> None:
     assert not [path for path, _ in posts if path != "/mcp"], posts
 
 
+def journal_mailbox_recovers_terminal_tail(executable: str, state_kind: str) -> None:
+    """A partial mailbox result releases its read even after record-only closure."""
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures.update(observer.observer_http_fixtures())
+    operation_id = 'mailbox-tail-' + state_kind.lower()
+    now = time.time()
+    partial = 'PARTIAL_BEFORE_' + state_kind
+    tail = 'RECOVERED_JOURNAL_TAIL_' + state_kind
+    announce = threading.Event()
+    done = threading.Event()
+    connected = threading.Event()
+    requested_tail = threading.Event()
+    calls = []
+    posts = []
+    verified = {'value': False}
+    first = [
+        {'type': 'run_started', 'run_id': operation_id, 'thread_id': 'keeper:alpha'},
+        {'type': 'text_message_start', 'message_id': operation_id + '-message', 'role': 'assistant'},
+        {'type': 'text_delta', 'delta': partial},
+    ]
+    last = [{'type': 'text_delta', 'delta': tail}]
+    if state_kind in ('Running', 'Succeeded'):
+        last.append({'type': 'reply_details', 'reply': partial + tail,
+                     'turn_outcome': 'visible_reply', 'turn_ref': 'trace-mailbox#1'})
+    last.append({'type': 'event_error', 'message': 'HEARD_JOURNAL_FAILURE'} if state_kind == 'Failed'
+                else {'type': 'run_finished', 'run_id': operation_id})
+    events = first + last
+    last_seq = len(events) - 1
+
+    def history():
+        return 200, [{'id': operation_id, 'role': 'user',
+            'content': ('HISTORY_AFTER_TERMINAL_' if verified['value'] else 'QUESTION_') + state_kind,
+            'ts': now, 'speaker_authority': 'owner', 'transcript_slot': {'kind': 'accepted_user'},
+            'delivery_key': {'kind': 'operation', 'operation_id': operation_id}}]
+
+    def operation():
+        result = {'schema': 'masc.keeper_chat_operation.v1', 'operation_id': operation_id,
+                  'state': state_kind}
+        if state_kind == 'Running':
+            result['started_at'] = now
+        else:
+            result['completed_at'] = now + 3
+            if state_kind == 'Succeeded':
+                result['outcome_ref'] = 'durable-outcome'
+            elif state_kind == 'Failed':
+                result.update(failure_kind='Turn_cancelled', failure_detail='RECORD_ONLY_FAILURE')
+        return 200, result
+
+    def journal(path):
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+        assert query['operation_id'] == [operation_id], query
+        since = int(query.get('since_seq', ['-1'])[0])
+        calls.append(since)
+        if announce.is_set():
+            assert since == 2, calls
+            requested_tail.set()
+            end = last_seq
+        else:
+            end = 2
+        return 200, {'schema': 'masc.keeper_chat_events.v2', 'operation_id': operation_id,
+            'events': [{'v': 1, 'seq': i, 'ts': now + i, 'event': event}
+                       for i, event in enumerate(events) if since < i <= end],
+            'has_more': False, 'next_since_seq': end, 'next_since_offset': 100 * (end + 1)}
+
+    def chunks():
+        connected.set()
+        yield b': observer connected\n\n'
+        assert announce.wait(20), 'terminal journal notification was not released'
+        yield b'data: ' + json.dumps({'type': 'keeper_chat_operation_event', 'name': 'alpha',
+            'operation_id': operation_id, 'seq': last_seq, 'ts_unix': now + last_seq,
+            'ag_ui_event': {'type': 'CUSTOM', 'name': 'fixture-journal-grew'}}).encode() + b'\n\n'
+        done.wait(20)
+
+    fixtures['/api/v1/keepers/alpha/chat/history'] = history
+    fixtures['/api/v1/keepers/alpha/chat/events'] = h.PathHttpResponse(journal)
+    fixtures[f'/api/v1/keepers/alpha/chat/operations/{operation_id}'] = operation
+    fixtures['/api/v1/keepers/alpha/memory-journal?limit=20'] = (200, {'entries': []})
+    fixtures['/mcp?sse_kind=observer'] = h.StreamingHttpResponse(chunks)
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            h.wait_for_output(process, fd, output, b'MASC Dashboard', start=0, timeout=8)
+            h.send_and_wait(process, fd, output, b'3', b'MASC Keepers')
+            h.select_keeper_row(process, fd, output, b'alpha')
+            h.palette_go(process, fd, output, b'keeper alpha', ('QUESTION_' + state_kind).encode())
+            h.wait_for_output(process, fd, output, partial.encode(), start=0, timeout=8)
+            assert h.wait_for_fixture_event(process, fd, output, connected, timeout=8)
+            assert calls == [-1], calls
+            announce.set()
+            assert h.wait_for_fixture_event(process, fd, output, requested_tail, timeout=8), calls
+            h.wait_for_output(process, fd, output, tail.encode(), start=0, timeout=8)
+            h.drain_until_quiet(process, fd, output)
+            screen = h.screen_text(bytes(output))
+            assert screen.count(partial.encode()) == 1 and screen.count(tail.encode()) == 1, screen
+            assert calls == [-1, 2], calls
+            verified['value'] = True
+            h.send_and_wait(process, fd, output, b'\x11', b'MASC Keepers')
+            h.palette_go(process, fd, output, b'keeper alpha', ('HISTORY_AFTER_TERMINAL_' + state_kind).encode())
+            h.drain_until_quiet(process, fd, output)
+            assert calls == [-1, 2], calls  # Heard terminal, including no-reply cancellation, retires replay.
+            assert not [path for path, _ in posts if path != '/mcp'], posts
+            h.send_and_wait(process, fd, output, b'\x11', b'MASC Keepers')
+            os.write(fd, b'q')
+        finally:
+            announce.set()
+            done.set()
+
+    h.run_terminal_scenario(executable,
+        description='Actual journal mailbox recovers a tail after ' + state_kind + ' operation record',
+        interact=interact, http_fixtures=fixtures, http_requests=posts,
+        refresh=3600.0, terminal_rows=42, terminal_cols=140)
+
+
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     run(executable)
     run(executable, refresh_fails=True)
     unavailable_journal_operation_recovers(executable)
-    print("tui stale chat progress: PASS (3 scenarios)")
+    for state_kind in ('Running', 'Succeeded', 'Failed', 'Cancelled'):
+        journal_mailbox_recovers_terminal_tail(executable, state_kind)
+    print("tui stale chat progress: PASS (7 scenarios)")

@@ -622,6 +622,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
  (libraries
+  masc_tui_keeper_chat_log
   masc_tui_message_layout
   masc_tui_image_preview
   masc

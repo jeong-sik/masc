@@ -89,8 +89,13 @@ type dispatch =
     that read a producer output are validated when their node runs. Each node
     dispatches as soon as its dependencies have settled instead of waiting
     for a static batch barrier; serial and terminal nodes additionally run
-    alone in static schedule order. In-flight nodes always settle before the
-    lowest-planned-index cause is selected. The plan's
+    alone in static schedule order, and a serial or terminal node whose serial
+    predecessor failed, deferred (a cause), or was skipped never dispatches a
+    tool — the chain stands down under either branch failure policy, while the
+    failed predecessor itself carries the plan cause through planned index
+    order. In-flight nodes always settle before the lowest-planned-index cause
+    is selected. Settled results are reported in canonical plan order
+    (non-decreasing [planned_index]); the plan's
     {!Keeper_tool_plan.branch_failure_policy} decides what a blocked node
     stops: [Fail_fast] stops every node that has not dispatched yet, while
     [Continue_independent] only stops the failed node's descendants and lets

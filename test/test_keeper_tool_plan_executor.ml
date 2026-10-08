@@ -965,6 +965,119 @@ let serial_order_fixture () =
   | Error _ -> fail "valid serial-order fixture plan was rejected"
 ;;
 
+(* H4-S2 follow-up (code-reviewer P2): a serial chain stands down as a chain.
+   s2 follows s1 in the static serial order without declaring a dependency, so
+   the wave must consult the serial predecessor's settlement: when s1 failed
+   (or deferred or was skipped), s2 dispatches no tool under either branch
+   failure policy, while s1 itself still carries the plan cause. *)
+let serial_chain_failure_fixture ~branch_failure_policy =
+  let producer = canonical_descriptor "keeper_lane_status" in
+  let serial = canonical_descriptor "BrowserSession" in
+  let session_input =
+    Plan.Json_template.literal (`Assoc [ "action", `String "status" ])
+  in
+  let nodes =
+    [ make_node ~tool_name:"keeper_lane_status" ~after:[] ~input:empty_input "producer"
+    ; make_node ~tool_name:"BrowserSession" ~after:[ "producer" ] ~input:session_input "s1"
+    ; make_node ~tool_name:"BrowserSession" ~after:[ "producer" ] ~input:session_input "s2"
+    ]
+  in
+  match
+    Plan.create ~descriptors:[ producer; serial ] ~branch_failure_policy nodes
+  with
+  | Ok plan -> plan
+  | Error _ -> fail "valid serial-chain failure fixture plan was rejected"
+;;
+
+let test_serial_failure_stops_successor_fail_fast () =
+  Eio_main.run @@ fun _env ->
+  let plan = serial_chain_failure_fixture ~branch_failure_policy:Plan.Fail_fast in
+  let called = ref [] in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    let name = node_name node in
+    called := !called @ [ name ];
+    match name with
+    | "producer" ->
+      Executor.dispatch_result (completed ~tool_name:name ~data:lane_status_data)
+    | "s1" ->
+      Executor.dispatch_result
+        ~failure_effect_disposition:Tool_result.Proven_pre_effect
+        (Tool_result.make_err
+           ~tool_name:name
+           ~class_:Tool_result.Workflow_rejection
+           ~start_time:(Tool_timing.start ())
+           "s1 rejected")
+    | "s2" -> failf "s2 dispatched after serial predecessor failure under Fail_fast"
+    | other -> failf "unexpected dispatched node: %s" other
+  in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+  | Ok _ -> fail "failed serial node did not fail the plan"
+  | Error failure ->
+    check
+      (list string)
+      "serial successor was not dispatched and chain order kept"
+      [ "producer"; "s1" ]
+      !called;
+    check
+      (list string)
+      "settled results keep canonical plan order"
+      [ "producer"; "s1" ]
+      (List.map (fun result -> Plan.Node_id.to_string result.Executor.node_id) failure.settled);
+    (match failure.cause with
+     | Executor.Tool_did_not_complete result ->
+       check string "failed serial node carries the cause" "s1" (Plan.Node_id.to_string result.node_id)
+     | Executor.Plan_execution_failed _
+     | Executor.Node_observation_failed _
+     | Executor.Outer_completion_mismatch _ ->
+       fail "serial failure became a plan error")
+;;
+
+let test_serial_failure_stops_successor_continue_independent () =
+  Eio_main.run @@ fun _env ->
+  let plan =
+    serial_chain_failure_fixture ~branch_failure_policy:Plan.Continue_independent
+  in
+  let called = ref [] in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    let name = node_name node in
+    called := !called @ [ name ];
+    match name with
+    | "producer" ->
+      Executor.dispatch_result (completed ~tool_name:name ~data:lane_status_data)
+    | "s1" ->
+      Executor.dispatch_result
+        ~failure_effect_disposition:Tool_result.Proven_pre_effect
+        (Tool_result.make_err
+           ~tool_name:name
+           ~class_:Tool_result.Workflow_rejection
+           ~start_time:(Tool_timing.start ())
+           "s1 rejected")
+    | "s2" ->
+      failf "s2 dispatched after serial predecessor failure under Continue_independent"
+    | other -> failf "unexpected dispatched node: %s" other
+  in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+  | Ok _ -> fail "failed serial node did not fail the plan"
+  | Error failure ->
+    check
+      (list string)
+      "serial successor was not dispatched even under Continue_independent"
+      [ "producer"; "s1" ]
+      !called;
+    check
+      (list string)
+      "settled results keep canonical plan order"
+      [ "producer"; "s1" ]
+      (List.map (fun result -> Plan.Node_id.to_string result.Executor.node_id) failure.settled);
+    (match failure.cause with
+     | Executor.Tool_did_not_complete result ->
+       check string "failed serial node carries the cause" "s1" (Plan.Node_id.to_string result.node_id)
+     | Executor.Plan_execution_failed _
+     | Executor.Node_observation_failed _
+     | Executor.Outer_completion_mismatch _ ->
+       fail "serial failure became a plan error")
+;;
+
 let test_serial_nodes_run_alone_in_schedule_order () =
   Eio_main.run @@ fun _env ->
   let plan = serial_order_fixture () in
@@ -1064,6 +1177,14 @@ let () =
             "serial nodes run alone in schedule order"
             `Quick
             test_serial_nodes_run_alone_in_schedule_order
+        ; test_case
+            "serial failure stops successor under Fail_fast"
+            `Quick
+            test_serial_failure_stops_successor_fail_fast
+        ; test_case
+            "serial failure stops successor under Continue_independent"
+            `Quick
+            test_serial_failure_stops_successor_continue_independent
         ] )
     ; ( "node input validation"
       , [ test_case

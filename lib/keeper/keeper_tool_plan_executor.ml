@@ -532,96 +532,110 @@ let execute_with_tool_use_id
             (dependency, Eio.Promise.await promise))
           (Keeper_tool_plan.dependencies node)
       in
-      (match serial_predecessor node_id with
-       | None -> ()
-       | Some predecessor ->
-         let promise, _ = find_outcome predecessor in
-         ignore (Eio.Promise.await promise));
       let skip () =
         mark_blocked node_id;
         let _, resolve = find_outcome node_id in
         Eio.Promise.resolve resolve Wave_skipped
       in
-      (* A node commits once every dependency has settled: its commit ticket is
-         the latest dependency completion. Under [Fail_fast] a node stops only
-         when a failure completed before that commit, so siblings that were
-         already unblocked still settle exactly like one static batch. Later
-         or concurrent failures never retroactively stop a committed node. *)
-      let commit_ticket, dependency_blocked =
-        List.fold_left
-          (fun (latest, blocked_found) (dependency, outcome) ->
-            match outcome with
-            | Wave_skipped -> (latest, true)
-            | Wave_settled (_, ticket) ->
-              ((if ticket > latest then ticket else latest), blocked_found || is_blocked dependency))
-          (-1, false)
-          dependency_outcomes
+      (* Serial and terminal nodes follow the static schedule order, so a serial
+         chain stands down as a chain: when the serial predecessor failed or
+         deferred (cause <> None) or was skipped, this node dispatches no tool
+         under either branch failure policy — a serial slot never waits on a
+         predecessor whose effect never landed. The failed predecessor itself
+         still carries the plan cause through planned_index ordering. *)
+      let serial_predecessor_stopped =
+        match serial_predecessor node_id with
+        | None -> false
+        | Some predecessor ->
+          let promise, _ = find_outcome predecessor in
+          match Eio.Promise.await promise with
+          | Wave_skipped -> true
+          | Wave_settled (settlement, _) -> Option.is_some settlement.cause
       in
-      let failure_before_ready =
-        List.exists
-          (fun (_, failure_ticket) -> failure_ticket < commit_ticket)
-          (Atomic.get failures)
-      in
-      let halted =
-        match policy with
-        | Keeper_tool_plan.Fail_fast -> failure_before_ready
-        | Keeper_tool_plan.Continue_independent -> false
-      in
-      if dependency_blocked || halted
+      if serial_predecessor_stopped
       then skip ()
       else (
-        if exclusive
-        then Exclusive_gate.acquire_exclusive gate
-        else Exclusive_gate.acquire_shared gate;
-        let release () =
-          if exclusive
-          then Exclusive_gate.release_exclusive gate
-          else Exclusive_gate.release_shared gate
+        (* A node commits once every dependency has settled: its commit ticket
+           is the latest dependency completion. Under [Fail_fast] a node stops
+           only when a failure completed before that commit, so siblings that
+           were already unblocked still settle exactly like one static batch.
+           Later or concurrent failures never retroactively stop a committed
+           node. *)
+        let commit_ticket, dependency_blocked =
+          List.fold_left
+            (fun (latest, blocked_found) (dependency, outcome) ->
+              match outcome with
+              | Wave_skipped -> (latest, true)
+              | Wave_settled (_, ticket) ->
+                ((if ticket > latest then ticket else latest), blocked_found || is_blocked dependency))
+            (-1, false)
+            dependency_outcomes
         in
-        let halted_after_gate =
+        let failure_before_ready =
+          List.exists
+            (fun (_, failure_ticket) -> failure_ticket < commit_ticket)
+            (Atomic.get failures)
+        in
+        let halted =
           match policy with
-          | Keeper_tool_plan.Fail_fast ->
-            List.exists
-              (fun (_, failure_ticket) -> failure_ticket < commit_ticket)
-              (Atomic.get failures)
+          | Keeper_tool_plan.Fail_fast -> failure_before_ready
           | Keeper_tool_plan.Continue_independent -> false
         in
-        if halted_after_gate
-        then (
-          release ();
-          skip ())
+        if dependency_blocked || halted
+        then skip ()
         else (
-          let outputs =
-            List.filter_map
-              (fun (dependency, outcome) ->
-                match outcome with
-                | Wave_settled (settlement, _) ->
-                  Option.map
-                    (fun output -> (dependency, output))
-                    settlement.output
-                | Wave_skipped -> None)
-              dependency_outcomes
+          if exclusive
+          then Exclusive_gate.acquire_exclusive gate
+          else Exclusive_gate.acquire_shared gate;
+          let release () =
+            if exclusive
+            then Exclusive_gate.release_exclusive gate
+            else Exclusive_gate.release_shared gate
           in
-          let settlement =
-            execute_one
-              ~plan
-              ~run_id
-              ~prepared_inputs
-              ~outputs
-              ~tool_use_id_for_node
-              ~dispatch
-              ?observe_node_result
-              scheduled
+          let halted_after_gate =
+            match policy with
+            | Keeper_tool_plan.Fail_fast ->
+              List.exists
+                (fun (_, failure_ticket) -> failure_ticket < commit_ticket)
+                (Atomic.get failures)
+            | Keeper_tool_plan.Continue_independent -> false
           in
-          let ticket = Atomic.fetch_and_add tick 1 in
-          release ();
-          (match settlement.cause with
-           | Some _ ->
-             mark_blocked node_id;
-             mark_failed node_id ticket
-           | None -> ());
-          let _, resolve = find_outcome node_id in
-          Eio.Promise.resolve resolve (Wave_settled (settlement, ticket))))
+          if halted_after_gate
+          then (
+            release ();
+            skip ())
+          else (
+            let outputs =
+              List.filter_map
+                (fun (dependency, outcome) ->
+                  match outcome with
+                  | Wave_settled (settlement, _) ->
+                    Option.map
+                      (fun output -> (dependency, output))
+                      settlement.output
+                  | Wave_skipped -> None)
+                dependency_outcomes
+            in
+            let settlement =
+              execute_one
+                ~plan
+                ~run_id
+                ~prepared_inputs
+                ~outputs
+                ~tool_use_id_for_node
+                ~dispatch
+                ?observe_node_result
+                scheduled
+            in
+            let ticket = Atomic.fetch_and_add tick 1 in
+            release ();
+            (match settlement.cause with
+             | Some _ ->
+               mark_blocked node_id;
+               mark_failed node_id ticket
+             | None -> ());
+            let _, resolve = find_outcome node_id in
+            Eio.Promise.resolve resolve (Wave_settled (settlement, ticket)))))
     in
     Eio.Fiber.all (List.map (fun node () -> run_node node) nodes);
     let wave_results =

@@ -1406,6 +1406,17 @@ val update_private_file_durable_locked_result :
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 
+(** Bounded-tail admission transaction using the same path mutex and descriptor
+    lock as the strict JSONL readers and appenders. [decide] receives at most
+    [max_bytes] of the existing suffix, dropping the first boundary fragment, while
+    the append and rollback still use the full file's original length.
+    The callback runs under the lock and must not perform Eio effects. *)
+val update_private_file_tail_durable_locked_result :
+  string ->
+  max_bytes:int ->
+  (string -> string option * 'a) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+
 (** Append transaction for a recovery journal whose incomplete final event has
     no externally committed effect. Under the same in-process mutex and exclusive
     descriptor lock as the updater, truncate only the suffix after the last newline

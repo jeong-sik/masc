@@ -3885,7 +3885,7 @@ let read_private_jsonl_tail_locked_result path ~max_bytes =
       Private_file_failed_with_cleanup_failure { error = Read_error error; cleanup_failure }
 ;;
 
-let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomplete_tail=false) ~io path decide =
+let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomplete_tail=false) ?tail_bytes ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
   if create then mkdir_p_memoized dir;
@@ -3912,7 +3912,21 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomple
            lock_whole_file fd;
            (* See Unix.lseek: only the file-position side effect is required. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+           let from =
+             match tail_bytes with
+             | None -> 0
+             | Some max_bytes ->
+               Int.max 0 ((Unix.fstat fd).Unix.st_size - max_bytes)
+           in
+           ignore (Unix.lseek fd from Unix.SEEK_SET : int);
            let existing = read_fd_chunks fd (Buffer.create 4096) in
+           let existing =
+             if from = 0 then existing
+             else match String.index_opt existing '\n' with
+             | None -> existing
+             | Some newline ->
+               String.sub existing (newline + 1) (String.length existing - newline - 1)
+           in
            let recovered =
              if not recover_incomplete_tail || existing = ""
                 || existing.[String.length existing - 1] = '\n' then Ok existing
@@ -3945,6 +3959,12 @@ let update_private_file_durable_locked_result ?(create=true) path decide =
     ~io:private_jsonl_transaction_unix_io
     path
     decide
+;;
+
+let update_private_file_tail_durable_locked_result path ~max_bytes decide =
+  if max_bytes <= 0 then invalid_arg "update_private_file_tail_durable_locked_result";
+  update_private_file_durable_locked_with_io ~tail_bytes:max_bytes
+    ~io:private_jsonl_transaction_unix_io path decide
 ;;
 
 let recover_and_update_private_jsonl_durable_locked_result path decide =

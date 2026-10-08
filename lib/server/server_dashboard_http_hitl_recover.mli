@@ -46,3 +46,12 @@ val handle_post :
     [action:"ack_uncertain"] acknowledges a consume-only late-approval tail
     (a warning acknowledgement, never a re-authorization). The workspace is
     the authenticated caller's. *)
+
+val uncertain_path : string
+val uncertain_response : Mcp_server.server_state -> Httpun.Status.t * Yojson.Safe.t
+val handle_uncertain_get : Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** CanAdmin listing of exact attempts in the authenticated workspace; unavailable
+    journals return 503, never an empty successful list. ack requires consume_id. *)
+
+val parse_ack_fields : (string * Yojson.Safe.t) list -> ((string * string), string) result
+(** Exact keeper/consume ID; no original argument reconstruction required. *)

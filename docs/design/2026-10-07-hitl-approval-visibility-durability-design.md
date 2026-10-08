@@ -110,32 +110,29 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
   이 지적한 full-replace 위험을 처음부터 만들지 않는다).
 - 복원: `create ()` 시점에 저널을 읽어 expired/remembered 를 재구성한다. 재시작 직후
   `take` 가 바로 동작하려면 이 복원이 부팅 동기 경로여야 한다(주석으로 근거 명시).
-- 실행 원장과의 결속: `consume`·`deliver` 레코드는 위 공통 필드에 실행 원장의 정확한
-  `attempt_identity`를 추가한다. caller는 decision을 반환받기 전에 이 identity를 정하고,
-  `consume`에 내구 기록한 동일 identity로만 dispatch한다. `deliver`도 같은 identity를 참조한다.
-  복원과 readback은 `(base_path, keeper, tool_call_id, args_fingerprint, attempt_identity)`를
-  함께 대조하며, 다른 attempt의 성공이나 기록 부재를 해당 attempt의 비실행 증거로 대체하지 않는다.
-  `expired`·`remembered`에는 아직 후속 실행 attempt가 없을 수 있으므로 이 필드를 요구하지 않는다.
-- 소비(reviewer 경계 2 반영, 성공 경계를 순서 계약으로 고정):
-  1. `take` 는 **먼저** `op=consume` 레코드를 append+fsync 하고, 성공한 뒤에만 decision 을 caller 에게
-     반환한다. append/fsync 가 실패하면 decision 을 반환하지 않고 메모리 항목도 제거하지 않는다 —
-     재시작 뒤 복원 시 같은 결정이 다시 제공될 수 있다(중복 인가보다 안전한 쪽으로 무릅니다).
-  2. caller 반환에 성공하면 `op=deliver` 레코드를 붙인다. 저널에 `consume` 만 있고 `deliver` 가 없는
-     꼬리 레코드는 **전달·실행 결과 불명** 창이다 — consume fsync 와 caller 반환 사이의 중단만
-     미전달이고, 반환 이후에는 caller 가 tool dispatch 를 진행할 수 있으므로 consume-only 상태에서
-     외부 효과의 부재를 단정할 수 없다. 복원 시 자동 재적용하지 않고 health `late_uncertain` 카운트로
-     노출하며, operator 확인(`ack`)으로만 닫는다. `ack` 는 경고 확인이지 재인가가 아니어서, 실행 원장의
-     결과 또는 비실행 증거 없이 새 attempt 를 허가하지 않는다.
-  3. 보장 창과 불명 창을 구분한다 — gate 는 dispatch 앞에서 막는 지점이고, tool 실행은 decision 이
-     caller(스트림 핸들러)에게 돌아간 뒤 정상 턴 흐름에서 위 `consume`에 결속한 attempt identity로
-     일어난다. 따라서
-     주입한 중단점으로 무효과를 확인할 수 있는 창은 **consume 내구화 후 caller 반환 전**이다.
-     복원자는 consume-only 기록만으로 그 중단점을 알 수 없으므로 이 경우도 `late_uncertain`으로
-     분류한다. 반환 이후 deliver
-     append/fsync 전 중단은 consume-only 저널과 실제 효과가 공존할 수 있는 결과 불명 상태이며, 위 2의
-     `late_uncertain` 계약으로 멈춘다. tombstone이나 전달 기록만으로 end-to-end 단 한 번을
-     주장하지 않는다. 승인 저널은 결정 소비·전달을 기록하고, 중복 실행 방지는 같은 attempt의 실행
-     원장에 있는 dispatch admission·결과 재사용·결과 불명 시 재실행 거절 계약이 담당한다.
+- 소비 시도 결속: 미출시 저널 schema는 `masc.late_approval.v2`다. `take`는 consume 전에
+  고유 `consume_id`를 만들고 consume/deliver/ack는 같은 workspace·keeper·tool·fingerprint와
+  그 ID 하나만 참조한다. 같은 입력의 다른 시도가 성공해도 앞선 불확실 시도는 닫히지 않는다.
+  이는 승인 소비 identity이며 외부 실행 원장의 attempt identity와 동일하다는 주장은 하지 않는다.
+- 실제 순서: consume append+fsync → 메모리 승인 제거 → deliver append 시도 → decision 반환.
+  consume 실패는 decision을 반환하지 않는다. deliver 실패도 decision은 반환하므로 이후 caller가
+  외부 효과를 만들 수 있다. 성공한 deliver 역시 외부 실행 완료 증거가 아니다. consume-only는
+  결과 불명으로 보존하고 해당 ID의 operator ack만 경고를 닫는다. ack는 재인가가 아니다.
+- 부팅 복원은 각 op의 필수 필드·schema·중복 consume ID·정확한 열린 시도의 closure를 검증한다.
+  pre-ID/다른 schema/손상 저널은 typed 오류를 store에 보존하고 mutation을 거절한다. 이전 행을
+  건너뛰거나 시간으로 결합하거나 자동 삭제·마이그레이션하지 않는다. health와 operator 조회는
+  unavailable을 표시하므로 오류를 `late_uncertain=0`의 정상 상태로 표현하지 않는다.
+- operator는 CanAdmin `GET /api/v1/keepers/hitl/late-approval-attempts`에서 인증된 workspace의
+  정확한 keeper/tool/fingerprint/consume_id를 조회한다. 기존 recover의 `ack_uncertain` body에는
+  `keeper_name`과 `consume_id`만 필수이며 그 시도 하나만 닫는다. tool/fingerprint는 저장된
+  시도에서 읽으므로 재시작 후 원 args를 재구성할 필요가 없다. 승인 재사용 TTL은 미확정 증거에 적용하지 않는다.
+- GET에서 받은 ID를 사용한 ack body 예: `{"action":"ack_uncertain","keeper_name":"keeper-a","consume_id":"<listed consume_id>"}`.
+  기존 `POST /api/v1/keepers/hitl/approvals/<approval_id>/recover`의 응답도 닫힌 `consume_id`를 반환한다.
+- append의 known-commit receipt는 cleanup 경고와 구분한다. commit 여부를 확인할 수 없는
+  실제 I/O 오류는 store를 unavailable로 fence하며 명시적 재복원 전 새 mutation을 거절한다.
+  테스트의 deliver 거절 seam은 쓰기 전 실패이므로 이 불확실 I/O를 재현한 증거가 아니다.
+- 같은 store의 mutex 획득과 I/O 전체를 worker에서 실행하여 scheduler가 blocking lock을
+  기다리며 writer의 worker 복귀를 막는 교착을 피한다.
 - TTL 900s 는 **유지**한다. 이것은 wall-clock 자동 만료(금지)가 아니라 "인간 결정 하나가 인가할 수 있는
   시간"의 안전 상계이고, 기존 주석(`keeper_late_approval.ml:60~79`)의 논리 — yolo 전환 시 과거 기억
   발화 차단 포함 — 가 그대로 성립하기 때문이다. TTL 이 "만료"가 아니라 "인가 상계"임을 주석에
@@ -223,12 +220,12 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
    정확성, `status="attention"` 전환 조건 테스트. `/health?full=1` 롤업에 섹션이 등장하는지
    routes 테스트. `measured_since` 가 부팅 시각과 같은지 확인.
 3. **저널 경계(reviewer 표 반영)** —
-   - consume append/fsync 실패: decision 미반환, 메모리 항목 보존, 재시도 시 재배분 가능 확인.
+   - consume append/fsync 실패: decision 미반환, 미확정 실제 I/O 오류는 mutation 차단. 명시적 재복원에서 consume 유무를 확인한 뒤에만 재사용 여부를 결정한다.
    - consume 후 caller 반환 전 중단: 주입 지점에서는 dispatch가 없었음을 확인하되, 복원은
      `late_uncertain`으로 분류하고 자동 재적용하지 않는다. 기록만으로 미전달을 판정하지 않는다.
-   - caller 반환 → 해당 attempt의 dispatch·효과 발생 → deliver append/fsync 전 중단:
-     consume-only 저널과 실제 효과가 함께 존재하는 fixture를 만들고, 복원 시 `late_uncertain`,
-     자동 재적용 없음, ack 뒤에도 효과 횟수 증가 없음으로 검사한다.
+   - 실제 deliver append 실패 seam 뒤 decision 반환, 같은 입력의 새 consume/deliver 성공,
+     재시작 뒤 첫 consume_id가 계속 uncertain인지 검사한다. 같은 시각이어도 ID로 분리하며
+     승인 TTL 이후에도 불확실 증거를 보존한다.
    - consume/deliver/readback의 attempt 결속: 같은 workspace·call·fingerprint라도 다른
      attempt의 결과는 거절하며, 원래 attempt의 기록 부재만으로 비실행을 확정하지 않는다.
    - deliver 기록 후 dispatch 전 중단: deliver 가 전달 기록이지 tool 실행 완료 증거가 아님을

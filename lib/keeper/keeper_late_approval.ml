@@ -59,11 +59,18 @@ type remembered = {
    the flip would fire on the first gated call after the flip back. *)
 let ttl_sec = 900.0
 
+type journal_error = Corrupt_journal of string | Journal_unavailable of string
+type uncertain_attempt =
+  { consume_id : string; base_path : string; keeper_name : string
+  ; tool_name : string; args_fingerprint : string; consumed_at : float }
+let journal_schema = "masc.late_approval.v2"
+
 type t =
   { mutable expired : expired_ask list
   ; mutable remembered : remembered list
-  ; mutable late_uncertain : int
-  ; mutable uncertain_keys : (string * string * string * string) list
+  ; mutable uncertain : uncertain_attempt list
+  ; mutable journal_error : journal_error option
+  ; mutable fail_deliver : bool
   ; mutable journal_path : string option
   ; mutex : Stdlib.Mutex.t
   }
@@ -71,11 +78,17 @@ type t =
 let create () =
   { expired = []
   ; remembered = []
-  ; late_uncertain = 0
-  ; uncertain_keys = []
+  ; uncertain = []
+  ; journal_error = None
+  ; fail_deliver = false
   ; journal_path = None
   ; mutex = Stdlib.Mutex.create ()
   }
+
+(* The entire blocking lock and file transaction runs off the scheduler.
+   Nested Fs/Eio_guard calls execute inline in this non-Eio worker. *)
+let with_store t f = Eio_guard.run_in_systhread ~label:"late-approval-store" (fun () ->
+  Stdlib.Mutex.protect t.mutex f)
 
 (* Created at load, so there is no moment where a timeout or a late answer
    arrives before the store exists — the same argument the registry makes
@@ -115,12 +128,50 @@ let reap_locked t ~now =
   t.remembered <-
     List.filter (fun entry -> fresh entry.remembered_answered_at) t.remembered
 
+let validate_records records =
+  let attempts = Hashtbl.create 16 in
+  let bad detail = raise (Yojson.Json_error detail) in
+  List.iter (fun fields ->
+    let string name = match List.assoc_opt name fields with
+      | Some (`String value) when value <> "" -> value
+      | _ -> bad ("missing or invalid " ^ name) in
+    let op = string "op" in
+    let names = ["schema";"op";"base_path";"keeper";"tool";"fingerprint";"at"] @
+      (match op with
+       | "note_timed_out" -> ["tool_call_id"]
+       | "remember_late" -> ["tool_call_id";"decision";"actor"]
+       | "consume" | "deliver" | "ack_uncertain" -> ["consume_id"]
+       | _ -> bad "unknown late approval operation") in
+    if List.sort String.compare (List.map fst fields) <> List.sort String.compare names then
+      bad "missing, duplicate or unknown journal fields";
+    if string "schema" <> journal_schema then bad "unknown journal schema";
+    let identity = string "base_path", string "keeper", string "tool", string "fingerprint" in
+    (match List.assoc "at" fields with
+     | `Float value when Float.is_finite value -> ()
+     | `Int _ -> () | _ -> bad "invalid journal timestamp");
+    match op with
+    | "note_timed_out" -> ignore (string "tool_call_id")
+    | "remember_late" ->
+        ignore (string "tool_call_id"); ignore (string "actor");
+        if Option.is_none (Registry.decision_of_string (string "decision")) then bad "invalid decision"
+    | "consume" ->
+        let id = string "consume_id" in
+        if Hashtbl.mem attempts id then bad "duplicate consume attempt";
+        Hashtbl.add attempts id (identity, false)
+    | "deliver" | "ack_uncertain" ->
+        let id = string "consume_id" in
+        (match Hashtbl.find_opt attempts id with
+         | Some (expected, false) when expected = identity -> Hashtbl.replace attempts id (identity, true)
+         | _ -> bad "closure does not name an open exact consume")
+    | _ -> bad "unknown journal operation") records
+
 let bind_to_journal ?now ~base_path t =
   let path = Keeper_gate_path.late_approval_log ~base_path in
   let now = match now with Some now -> now | None -> Unix.gettimeofday () in
   let restore () =
     match Fs_compat.recover_private_jsonl_durable_locked_result path with
-    | Error _ -> ()
+    | Error error -> t.journal_error <- Some (Journal_unavailable
+        (Fs_compat.private_jsonl_transaction_error_to_string error))
     | Ok snapshot when snapshot.Fs_compat.bytes = "" -> ()
     | Ok snapshot ->
         (* Oldest-first replay, the order the rows were appended in: the
@@ -134,9 +185,19 @@ let bind_to_journal ?now ~base_path t =
           |> List.filter (fun line -> line <> "")
           |> List.filter_map (fun line ->
                  match Yojson.Safe.from_string line with
-                 | `Assoc fields -> Some fields
-                 | _ -> None)
+                 | `Assoc fields ->
+                     if List.assoc_opt "schema" fields <> Some (`String journal_schema) then
+                       raise (Yojson.Json_error "unknown late approval journal schema");
+                     (match List.assoc_opt "op" fields with
+                      | Some (`String ("consume" | "deliver" | "ack_uncertain")) ->
+                          (match List.assoc_opt "consume_id" fields with
+                           | Some (`String id) when id <> "" -> ()
+                           | _ -> raise (Yojson.Json_error "missing consume attempt identity"))
+                      | _ -> ());
+                     Some fields
+                 | _ -> raise (Yojson.Json_error "expected journal object"))
         in
+        validate_records records;
         let read_field fields name =
           match List.assoc_opt name fields with
           | Some (`String s) -> Some s
@@ -165,6 +226,7 @@ let bind_to_journal ?now ~base_path t =
             let tool = read_field fields "tool" in
             let fingerprint = read_field fields "fingerprint" in
             let at = read_float fields "at" in
+            let consume_id = read_field fields "consume_id" in
             match op with
             | Some "note_timed_out" -> (
                 match (row_base_path, keeper, call_id, tool, fingerprint, at)
@@ -231,8 +293,8 @@ let bind_to_journal ?now ~base_path t =
                     | _ -> ())
                 | _ -> ())
             | Some "consume" -> (
-                match (row_base_path, keeper, tool, fingerprint, at) with
-                | Some bp, Some k, Some tl, Some f, Some at ->
+                match (consume_id, row_base_path, keeper, tool, fingerprint, at) with
+                | Some id, Some bp, Some k, Some tl, Some f, Some at ->
                     (* The remembered answer is durably spent: dropping it
                        here mirrors the in-memory path, so a replayed
                        consume can never hand the same decision to a second
@@ -250,20 +312,20 @@ let bind_to_journal ?now ~base_path t =
                             && String.equal
                                  existing.remembered_args_fingerprint f))
                         !remembered;
-                    consumed := (bp, k, tl, f, at) :: !consumed
+                    consumed := (id, bp, k, tl, f, at) :: !consumed
                 | _ -> ())
             | Some "deliver" -> (
-                match (row_base_path, keeper, tool, fingerprint, at) with
-                | Some bp, Some k, Some tl, Some f, Some at ->
+                match (consume_id, row_base_path, keeper, tool, fingerprint, at) with
+                | Some id, Some bp, Some k, Some tl, Some f, Some at ->
                     consumed :=
                       List.filter
-                        (fun (cbp, ck, ctl, cf, cat) ->
+                        (fun (cid, cbp, ck, ctl, cf, _) ->
                           not
                             (String.equal cbp bp
                             && String.equal ck k
                             && String.equal ctl tl
                             && String.equal cf f
-                            && cat <= at))
+                            && String.equal cid id))
                         !consumed
                 | _ -> ())
             | Some "ack_uncertain" -> (
@@ -272,27 +334,25 @@ let bind_to_journal ?now ~base_path t =
                    acknowledgement, never a re-authorization — nothing is
                    re-applied, no memory is restored, and no new attempt is
                    authorized. The acked consume leaves the count. *)
-                match (row_base_path, keeper, tool, fingerprint, at) with
-                | Some bp, Some k, Some tl, Some f, Some at ->
+                match (consume_id, row_base_path, keeper, tool, fingerprint, at) with
+                | Some id, Some bp, Some k, Some tl, Some f, Some at ->
                     acked :=
-                      (bp, k, tl, f, at) :: !acked
+                      (id, bp, k, tl, f, at) :: !acked
                 | _ -> ())
             | _ -> ())
           records;
-        (* Drop every consume that a later ack names. Matching is by
-           identity + at <= the ack's at, exactly how [deliver] closes the
-           same window — an ack is a [deliver]-shaped closure minus the
-           claim that anything was delivered. *)
+        (* An ack closes only its exact consume attempt under the same scope.
+           Its timestamp cannot settle another attempt of the same input. *)
         let acked_consumes =
           List.filter
-            (fun (cbp, ck, ctl, cf, cat) ->
+            (fun (cid, cbp, ck, ctl, cf, _) ->
                List.exists
-                 (fun (abp, ak, atl, af, aat) ->
+                 (fun (aid, abp, ak, atl, af, _) ->
                     String.equal cbp abp
                     && String.equal ck ak
                     && String.equal ctl atl
                     && String.equal cf af
-                    && cat <= aat)
+                    && String.equal cid aid)
                  !acked)
             !consumed
         in
@@ -302,57 +362,69 @@ let bind_to_journal ?now ~base_path t =
             !consumed
         in
         (* A consume without a later deliver is the outcome-unknown window
-           the design names: the decision returned to its caller, so the
+           the design names: the decision may have returned to its caller, so the
            tool may have dispatched already — the journal alone cannot
            separate "never delivered" from "delivered, outcome unwritten".
-           It is surfaced as [late_uncertain] for an operator to ack, never
-           silently reapplied: an answer whose delivery is unknown must not
-           authorize a call nobody is making. The window is bounded by the
-           TTL the same way the live memories are: a consume older than the
-           authorization ceiling reads as aged history, not as an open
-           question. *)
-        let uncertain =
-          List.filter
-            (fun (_, _, _, _, at) -> now -. at <= ttl_sec)
-            open_consumes
-        in
-        t.late_uncertain <- List.length uncertain;
-        t.uncertain_keys <-
-          List.map
-            (fun (bp, k, tl, f, _) -> (bp, k, tl, f))
-            uncertain;
+           It is surfaced as [late_uncertain] until its exact attempt is
+           acknowledged. Authorization TTL does not expire uncertain evidence. *)
+        t.uncertain <- List.map (fun (consume_id, base_path, keeper_name, tool_name, args_fingerprint, consumed_at) ->
+          {consume_id; base_path; keeper_name; tool_name; args_fingerprint; consumed_at}) open_consumes;
         (* Newest-first, matching the order [note_timed_out] and
            [remember_late] keep in memory. *)
         t.expired <- !live_asks;
         t.remembered <- !remembered
   in
-  Stdlib.Mutex.protect t.mutex (fun () ->
-      Eio_guard.run_in_systhread ~label:"late-approval-journal-restore" restore;
+  with_store t (fun () ->
+      t.expired <- []; t.remembered <- []; t.uncertain <- []; t.journal_error <- None;
+      (try Eio_guard.run_in_systhread ~label:"late-approval-journal-restore" restore
+       with Yojson.Json_error detail -> t.journal_error <- Some (Corrupt_journal detail));
       (* Bound after restore the way every other operation reaps: a record
          older than the authorization ceiling is restored as nothing, not
          as a credential. *)
       reap_locked t ~now;
       t.journal_path <- Some path)
 
-let journal_uncertain t = t.late_uncertain
+let journal_uncertain t = with_store t (fun () -> List.length t.uncertain)
+let journal_error t = with_store t (fun () -> t.journal_error)
+let uncertain_attempts t ~base_path = with_store t (fun () ->
+  match t.journal_error with
+  | Some error -> Error error
+  | None -> Ok (List.filter (fun entry -> String.equal entry.base_path base_path) t.uncertain))
 
 let append_record_locked t record =
-  match t.journal_path with
+  if Option.is_some t.journal_error then Error ()
+  else if t.fail_deliver && List.assoc_opt "op" record = Some (`String "deliver") then
+    (t.fail_deliver <- false; Error ())
+  else match t.journal_path with
   (* An unbound store keeps the pre-journal behavior (the same contract
      [bind_to_journal] documents): there is no crash boundary to
      acknowledge, so nothing has to stand or fall with a file and the
      in-memory state is the whole authority. *)
   | None -> Ok ()
   | Some path -> (
-      let line = Yojson.Safe.to_string (`Assoc record) ^ "\n" in
+      let line = Yojson.Safe.to_string (`Assoc (("schema", `String journal_schema) :: record)) ^ "\n" in
       match
         Eio_guard.run_in_systhread
           ~label:"late-approval-journal-append"
           (fun () ->
-            Fs_compat.append_private_jsonl_durable_stable_result path line)
+            Fs_compat.append_private_jsonl_durable_stable_result path line
+            |> Fs_compat.private_jsonl_cursor_success_receipt)
       with
-      | Ok _ -> Ok ()
-      | Error _ -> Error ())
+      | Ok receipt ->
+          (* Settlement can fail after the append has durably committed. Its
+             success receipt is authoritative; adding another closure would
+             corrupt the exact-attempt history. *)
+          Option.iter (fun error -> Log.Keeper.warn
+            "late_approval_journal: committed append cleanup failed: %s"
+            (Fs_compat.private_jsonl_transaction_error_to_string error))
+            receipt.Fs_compat.settlement_error;
+          Ok ()
+      | Error error ->
+          (* No known commit receipt: refuse further mutations until an
+             explicit restore re-establishes the durable history. *)
+          t.journal_error <- Some (Journal_unavailable
+            (Fs_compat.private_jsonl_transaction_error_to_string error));
+          Error ())
 
 (* Entries older than the TTL leave on every write and every read, so the
    lists cannot grow on nothing but time: an unattended keeper whose asks
@@ -385,7 +457,7 @@ let note_timed_out t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
     ; expired_noted_at = now
     }
   in
-  Stdlib.Mutex.protect t.mutex (fun () ->
+  with_store t (fun () ->
       reap_locked t ~now;
       let appended =
         append_record_locked t
@@ -423,7 +495,7 @@ let same_identity (left : remembered) ~base_path ~keeper_name ~tool_name
 
 let remember_late t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
     ~tool_call_id ~actor decision () =
-  Stdlib.Mutex.protect t.mutex (fun () ->
+  with_store t (fun () ->
       reap_locked t ~now;
       (* [expired] is newest-first, and so is this match: if a provider ever
          recycles a call id, the answer attaches to the newest ask that
@@ -495,12 +567,12 @@ let remember_late t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
 let take t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name ~tool_name
     ~args () =
   let args_fingerprint = fingerprint_of args in
-  Stdlib.Mutex.protect t.mutex (fun () ->
+  with_store t (fun () ->
       (* A stale entry is reaped before the lookup, so an aged memory reads
          as no memory and the call is asked about again. *)
       reap_locked t ~now;
       match
-        List.find_opt
+        if Option.is_some t.journal_error then None else List.find_opt
           (fun entry ->
             same_identity entry ~base_path ~keeper_name ~tool_name
               ~args_fingerprint)
@@ -508,6 +580,7 @@ let take t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name ~tool_name
       with
       | None -> None
       | Some entry -> (
+          let consume_id = Random_id.uuid_v7 () in
           (* Consume-before-return (design D2, reviewer boundary 2): the
              decision is durably spent before it reaches the caller. If the
              append fails, nothing changes in memory — the restart
@@ -516,6 +589,7 @@ let take t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name ~tool_name
           match
             append_record_locked t
               [ ("op", `String "consume")
+              ; ("consume_id", `String consume_id)
               ; ("base_path", `String base_path)
               ; ("keeper", `String keeper_name)
               ; ("tool", `String entry.remembered_tool_name)
@@ -543,14 +617,13 @@ let take t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name ~tool_name
                       (same_identity existing ~base_path ~keeper_name
                          ~tool_name ~args_fingerprint))
                   t.remembered;
-              (* Delivered: the decision crossed back to the caller, which
-                 may dispatch the tool from here on. The journal row keeps
-                 the consume/unknown window closed; a crash before this
-                 append is the outcome-unknown window the boot counts as
-                 [late_uncertain]. *)
+              (* Record delivery intent before returning. This is not external
+                 effect completion. If this append fails the decision still
+                 returns, so the exact consume remains outcome-unknown. *)
               (match
                  append_record_locked t
                    [ ("op", `String "deliver")
+                   ; ("consume_id", `String consume_id)
                    ; ("base_path", `String base_path)
                    ; ("keeper", `String keeper_name)
                    ; ("tool", `String entry.remembered_tool_name)
@@ -559,7 +632,9 @@ let take t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name ~tool_name
                    ]
                with
               | Ok () -> ()
-              | Error () -> t.late_uncertain <- t.late_uncertain + 1);
+              | Error () -> t.uncertain <-
+                  {consume_id; base_path; keeper_name; tool_name; args_fingerprint; consumed_at=now}
+                  :: t.uncertain);
               Some entry.remembered_decision))
 
 (* The D4/§7 operator acknowledgement of one consume-only tail. Nothing is
@@ -574,32 +649,24 @@ type ack_outcome =
   | Not_uncertain
 
 let ack_uncertain t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
-    ~tool_name ~args () : ack_outcome =
-  let args_fingerprint = fingerprint_of args in
-  let identity = (base_path, keeper_name, tool_name, args_fingerprint) in
-  Stdlib.Mutex.protect t.mutex (fun () ->
-      let outcome : ack_outcome =
-        if not (List.mem identity t.uncertain_keys)
-        then Not_uncertain
-        else
-          match
-            append_record_locked t
-              [ ("op", `String "ack_uncertain")
-              ; ("base_path", `String base_path)
-              ; ("keeper", `String keeper_name)
-              ; ("tool", `String tool_name)
-              ; ("fingerprint", `String args_fingerprint)
-              ; ("at", `Float now)
-              ]
-          with
-          | Error () -> Ack_not_journaled
-          | Ok () ->
-              t.uncertain_keys <-
-                List.filter (fun key -> key <> identity) t.uncertain_keys;
-              t.late_uncertain <- List.length t.uncertain_keys;
-              Log.Keeper.info
-                "keeper_late_approval: operator acknowledged uncertain late-approval tail workspace=%s keeper=%s tool=%s (acknowledgement, not a re-authorization)"
-                base_path keeper_name tool_name;
-              Acked
-      in
-      outcome)
+    ~consume_id () : ack_outcome =
+  let matches entry = entry.consume_id = consume_id && entry.base_path = base_path
+    && entry.keeper_name = keeper_name in
+  with_store t (fun () ->
+    if Option.is_some t.journal_error then Ack_not_journaled
+    else match List.find_opt matches t.uncertain with
+    | None -> Not_uncertain
+    | Some entry ->
+        match append_record_locked t
+          ["op", `String "ack_uncertain"; "consume_id", `String consume_id;
+           "base_path", `String base_path; "keeper", `String keeper_name;
+           "tool", `String entry.tool_name; "fingerprint", `String entry.args_fingerprint;
+           "at", `Float now] with
+        | Error () -> Ack_not_journaled
+        | Ok () ->
+            t.uncertain <- List.filter (fun attempt -> not (matches attempt)) t.uncertain;
+            Acked)
+
+module For_testing = struct
+  let fail_next_deliver t = with_store t (fun () -> t.fail_deliver <- true)
+end

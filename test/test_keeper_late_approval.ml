@@ -448,7 +448,9 @@ let test_a_consume_without_deliver_reads_as_uncertain () =
       output_string oc
         (Yojson.Safe.to_string
            (`Assoc
-             [ ("op", `String "consume")
+             [ ("schema", `String "masc.late_approval.v2")
+             ; ("consume_id", `String "fixture-interrupted-consume")
+             ; ("op", `String "consume")
              ; ("base_path", `String workspace)
              ; ("keeper", `String keeper)
              ; ("tool", `String "Edit")
@@ -470,8 +472,7 @@ let test_a_consume_without_deliver_reads_as_uncertain () =
          never turns into a re-offered decision. *)
       check bool
         "an ack names an existing uncertain tail"
-        (Late.ack_uncertain second ~base_path:workspace ~keeper_name:keeper
-           ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ()
+        (Late.ack_uncertain second ~base_path:workspace ~keeper_name:keeper ~consume_id:"fixture-interrupted-consume" ()
         = Late.Acked)
         true;
       check bool "the acked tail leaves the uncertain count"
@@ -492,15 +493,103 @@ let test_a_consume_without_deliver_reads_as_uncertain () =
         true;
       check bool
         "acking a tail that stands nowhere is refused"
-        (Late.ack_uncertain third ~base_path:workspace ~keeper_name:keeper
-           ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ()
+        (Late.ack_uncertain third ~base_path:workspace ~keeper_name:keeper ~consume_id:"fixture-interrupted-consume" ()
         = Late.Not_uncertain)
         true)
+
+let test_later_delivery_preserves_earlier_attempt () =
+  with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ->
+    let store = make () in
+    let args = edit_input "lib/a.ml" in
+    let now = Unix.gettimeofday () -. Late.ttl_sec -. 100. in
+    let consume call_id fail =
+      Late.note_timed_out store ~now ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:call_id ~tool_name:"Edit" ~args ();
+      ignore (Late.remember_late store ~now ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:call_id ~actor:"operator" Registry.Approve ());
+      if fail then Late.For_testing.fail_next_deliver store;
+      check bool "actual consume still returns decision" true
+        (Late.take store ~now ~base_path:workspace ~keeper_name:keeper ~tool_name:"Edit" ~args () = Some Registry.Approve) in
+    consume "first" true;
+    let first = List.hd (Result.get_ok (Late.uncertain_attempts store ~base_path:workspace)) in
+    consume "second" false;
+    check int "later success retains live first uncertainty" 1 (Late.journal_uncertain store);
+    let restarted = make () in
+    let restored = Result.get_ok (Late.uncertain_attempts restarted ~base_path:workspace) in
+    check int "later deliver closes only its own consume on replay" 1 (List.length restored);
+    check string "same first attempt remains" first.consume_id (List.hd restored).consume_id;
+    consume "third" true;
+    let restarted = make () in
+    check int "both failed attempts remain" 2 (Late.journal_uncertain restarted);
+    check bool "wrong workspace cannot ack attempt" true
+      (Late.ack_uncertain restarted ~base_path:"/other" ~keeper_name:keeper
+        ~consume_id:first.consume_id () = Late.Not_uncertain);
+    check bool "ack exactly first attempt" true
+      (Late.ack_uncertain restarted ~base_path:workspace ~keeper_name:keeper
+        ~consume_id:first.consume_id () = Late.Acked);
+    check int "ack leaves other attempt" 1 (Late.journal_uncertain restarted);
+    let final = make () in
+    check int "exact ack survives restart" 1 (Late.journal_uncertain final);
+    check bool "ack never reauthorizes" true
+      (Late.take final ~base_path:workspace ~keeper_name:keeper ~tool_name:"Edit" ~args () = None))
+
+let test_malformed_consume_cannot_restore_approval () =
+  List.iter (fun missing ->
+    with_journal (fun ~clock:_ ~journal ~make ~remove:_ ->
+      let first = make () in
+      let args = edit_input "lib/a.ml" in
+      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"malformed" ~tool_name:"Edit" ~args ();
+      ignore (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"malformed" ~actor:"operator" Registry.Approve ());
+      let fields =
+        [ "schema", `String "masc.late_approval.v2"; "op", `String "consume";
+          "consume_id", `String "malformed-consume";
+          "base_path", `String workspace; "keeper", `String keeper;
+          "tool", `String "Edit";
+          "fingerprint", `String (Masc.Keeper_approval_request_fingerprint.request_fingerprint args);
+          "at", `Float (Unix.gettimeofday ()) ]
+        |> List.filter (fun (name, _) -> name <> missing)
+      in
+      let out = open_out_gen [Open_append] 0o600 journal in
+      output_string out (Yojson.Safe.to_string (`Assoc fields) ^ "\n");
+      close_out out;
+      let second = make () in
+      check bool ("missing " ^ missing ^ " is corrupt") true
+        (match Late.journal_error second with Some (Late.Corrupt_journal _) -> true | _ -> false);
+      check bool "earlier remembered answer cannot be resurrected" true
+        (Late.take second ~base_path:workspace ~keeper_name:keeper ~tool_name:"Edit" ~args () = None);
+      check bool "operator listing fails explicitly" true
+        (Result.is_error (Late.uncertain_attempts second ~base_path:workspace))))
+    ["base_path"; "keeper"; "tool"; "fingerprint"; "at"]
+
+let test_pre_id_journal_fails_closed () =
+  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ->
+    Masc.Fs_compat.mkdir_p (Filename.dirname journal);
+    Out_channel.with_open_bin journal (fun out ->
+      output_string out "{\"op\":\"consume\",\"at\":0}\n");
+    let store = make () in
+    check bool "old schema is an explicit fault" true
+      (match Late.journal_error store with Some (Late.Corrupt_journal _) -> true | _ -> false);
+    check bool "operator read cannot claim no uncertainty" true
+      (Result.is_error (Late.uncertain_attempts store ~base_path:workspace));
+    Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
+      ~tool_call_id:"new" ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ();
+    check bool "faulted store cannot create reusable answer" true
+      (Late.remember_late store ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"new" ~actor:"operator" Registry.Approve () = Late.No_matching_ask);
+    check bool "faulted ack explicitly unavailable" true
+      (Late.ack_uncertain store ~base_path:workspace ~keeper_name:keeper ~consume_id:"unknown" () = Late.Ack_not_journaled))
 
 let () =
   run "keeper_late_approval"
     [ ( "remembering a late answer"
-      , [ test_case "an answer after the timeout is remembered" `Quick
+      , [ test_case "later delivery and ack settle only their exact attempt" `Quick
+            test_later_delivery_preserves_earlier_attempt
+        ; test_case "malformed v2 consume cannot resurrect approval" `Quick
+            test_malformed_consume_cannot_restore_approval
+        ; test_case "pre-ID schema fails closed" `Quick test_pre_id_journal_fails_closed
+        ; test_case "an answer after the timeout is remembered" `Quick
             test_an_answer_after_the_timeout_is_remembered
         ; test_case "an answer that names no ask is dropped" `Quick
             test_an_answer_that_names_no_ask_is_dropped

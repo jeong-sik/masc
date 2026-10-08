@@ -60,26 +60,33 @@ val bind_to_journal :
     retry after a restart arrives, and a lazy restore could answer an ask
     the operator already settled.
 
-    Restore is best-effort on unreadable rows — a row the current build
-    cannot decode is skipped, the way a torn tail is cut — but a bound
-    store durably appends every mutation. The server binds the shared
+    Restore validates every complete v2 row before replay. Invalid rows or
+    unavailable storage fence mutations until a successful explicit restore.
+    A bound store durably appends every mutation; a known commit receipt
+    survives cleanup failure, while an unconfirmed append fences the store. The server binds the shared
     store once at boot; tests bind per-store temp directories. Calling it
     twice rebinds and re-restores (the second read is the journal plus
     whatever the first bound period appended). The [?now] injection exists
     so tests can restore with a fixed clock, matching the other
     operations. *)
 
+type journal_error = Corrupt_journal of string | Journal_unavailable of string
+val journal_error : t -> journal_error option
+(** A restore error fences all journal mutations; no uncertain count establishes health. *)
+type uncertain_attempt =
+  { consume_id : string; base_path : string; keeper_name : string
+  ; tool_name : string; args_fingerprint : string; consumed_at : float }
+val uncertain_attempts : t -> base_path:string -> (uncertain_attempt list, journal_error) result
+(** Authenticated workspace projection; every acknowledgement names one consume. *)
+
 val journal_uncertain : t -> int
 (** The count of consumed late answers whose deliver row is missing — the
-    outcome-unknown window design D2 names. [take] returns the decision and
-    then appends [op=deliver]; a crash between the two leaves a consume
-    whose delivery cannot be separated from a dispatch the tool already
-    made. Restores surface that window here, and health's
+    outcome-unknown window design D2 names. [take] attempts [op=deliver] before returning the decision; if
+    that append fails it still returns, so consume-only evidence cannot
+    establish whether the caller subsequently dispatched. Restores surface that window here, and health's
     [keeper_hitl_gate.late_uncertain] carries the count to the operator
     (acked by {!ack_uncertain}; an ack is a warning acknowledgement, never a
-    re-authorization). A consume older than {!ttl_sec} reads as aged
-    history, not as an open question — the same authorization ceiling the
-    live memories keep. *)
+    re-authorization). Uncertain attempts do not expire with authorization TTL. *)
 
 type ack_outcome =
   | Acked
@@ -90,19 +97,18 @@ type ack_outcome =
           keeps asking to be acknowledged. *)
   | Not_uncertain
       (** No consume-only tail stands for this identity — already delivered,
-          already acked, aged past the TTL, or never consumed here. *)
+          already acked, or never consumed here. *)
 
 val ack_uncertain :
   t ->
   ?now:float ->
   base_path:string ->
   keeper_name:string ->
-  tool_name:string ->
-  args:Yojson.Safe.t ->
+  consume_id:string ->
   unit ->
   ack_outcome
-(** Acknowledge one consume-only tail by the exact call identity that
-    consumed it (design D4/§7): the operator has seen the outcome-unknown
+(** Acknowledge one consume-only tail by authenticated workspace, Keeper and consume ID;
+    tool/fingerprint are read from the stored attempt (design D4/§7): the operator has seen the outcome-unknown
     warning. An ack is a warning acknowledgement and never a
     re-authorization — nothing is re-applied, no remembered answer is
     restored, no new attempt is permitted by it, and the
@@ -213,8 +219,8 @@ val take :
     D2's order contract): an append failure reads as [None] and changes
     nothing, so a restart re-offers the decision rather than silently
     dropping it — the safe side of "duplicate authorization is worse than
-    re-asking". After the decision is returned an [op=deliver] row is
-    appended; a crash before it lands the consume in
+    re-asking". Before returning the decision, an [op=deliver] row is attempted;
+    a failure still returns the decision and leaves the consume in
     {!journal_uncertain}'s outcome-unknown window. Entries older than
     {!ttl_sec} are reaped before the lookup, so a stale memory reads as
     [None] — no memory — and the call is asked about again. *)
@@ -227,3 +233,8 @@ val take :
     answering client write any name into the ledger. Consumed entries are
     gone by the time {!take} returns, so the stamp is visible only through
     the module's own log lines and for as long as the memory stands. *)
+
+module For_testing : sig
+  val fail_next_deliver : t -> unit
+  (** Refuse exactly the next deliver append before I/O; consume uses real durable append. *)
+end

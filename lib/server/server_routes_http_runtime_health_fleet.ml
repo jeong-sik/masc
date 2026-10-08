@@ -197,7 +197,7 @@ let keeper_board_event_collection_health_json () =
    is no server state, and [queue_unreadable_json] goes unavailable instead
    of letting an unread authority read as "nothing pending". Timeout
    counters (design D3) come from the registry's process-lifetime totals. *)
-let keeper_hitl_gate_health_json () =
+let keeper_hitl_gate_health_snapshot () =
   let registry = Keeper_tool_approval_registry.shared () in
   let waits = Keeper_tool_approval_registry.pending registry in
   let { Keeper_tool_approval_registry.answered_total
@@ -224,6 +224,13 @@ let keeper_hitl_gate_health_json () =
        Keeper_hitl_gate_health.aggregate
          ~now:(Unix.gettimeofday ())
          ~waits ~entries ~answered_total ~timed_out_total ~late_uncertain)
+;;
+
+let keeper_hitl_gate_health_json () =
+  match Keeper_late_approval.journal_error (Keeper_late_approval.shared ()) with
+  | None -> keeper_hitl_gate_health_snapshot ()
+  | Some (Keeper_late_approval.Corrupt_journal _ | Journal_unavailable _) ->
+      `Assoc ["status", `String "unavailable"; "error", `String "late_approval_journal_unavailable"]
 ;;
 
 let paused_keeper_count = function

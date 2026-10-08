@@ -183,10 +183,14 @@ let parse_ack_fields fields =
   in
   let* keeper_name = required "keeper_name" in
   let* keeper_name = nonempty_trimmed_string "recover request.keeper_name" keeper_name in
-  let* tool_name = required "tool_name" in
-  let* tool_name = nonempty_trimmed_string "recover request.tool_name" tool_name in
-  let* args = required "args" in
-  Ok (keeper_name, tool_name, args)
+  let* () = if List.sort String.compare (List.map fst fields) =
+      ["action";"consume_id";"keeper_name"] then Ok ()
+    else Error "ack requires only action, keeper_name and consume_id" in
+  let* consume_id = required "consume_id" in
+  let* consume_id = match consume_id with
+    | `String id when id <> "" -> Ok id
+    | _ -> Error "recover request.consume_id must be a nonempty exact ID" in
+  Ok (keeper_name, consume_id)
 ;;
 
 let parse_json body =
@@ -255,11 +259,11 @@ let rearm_json ~base_path ~requested_by ~approval_id ~input_hash ~sequence
       , Keeper_approval_queue_result.exact_attempt_error_to_string error )
 ;;
 
-let ack_json ~base_path ~approval_id ~keeper_name ~tool_name ~args =
+let ack_json ~base_path ~approval_id ~keeper_name ~consume_id =
   let store = Keeper_late_approval.shared () in
   let outcome =
     Keeper_late_approval.ack_uncertain store ?now:None ~base_path
-      ~keeper_name ~tool_name ~args ()
+      ~keeper_name ~consume_id ()
   in
   match outcome with
   | Keeper_late_approval.Acked ->
@@ -268,6 +272,7 @@ let ack_json ~base_path ~approval_id ~keeper_name ~tool_name ~args =
          [ "ok", `Bool true
          ; "approval_id", `String approval_id
          ; "action", `String "ack_uncertain"
+         ; "consume_id", `String consume_id
          ; "acked", `Bool true
          ; ("late_uncertain"
            , `Int
@@ -278,7 +283,7 @@ let ack_json ~base_path ~approval_id ~keeper_name ~tool_name ~args =
     Error
       ( `Status_conflict
       , "no consume-only tail stands for this identity (delivered, acked, \
-         aged out, or never consumed)" )
+         or never consumed)" )
   | Keeper_late_approval.Ack_not_journaled ->
     Error (`Unavailable, "ack journal append failed; the count is unchanged")
 ;;
@@ -335,8 +340,8 @@ let handle_post state ~actor ~approval_id request reqd body =
         match parse_ack_fields fields with
         | Error detail ->
           respond_error request reqd ~status:`Bad_request ~code:"invalid_request" detail
-        | Ok (keeper_name, tool_name, args) ->
-          match ack_json ~base_path ~approval_id ~keeper_name ~tool_name ~args with
+        | Ok (keeper_name, consume_id) ->
+          match ack_json ~base_path ~approval_id ~keeper_name ~consume_id with
           | Ok json -> respond request reqd json
           | Error (`Status_conflict, detail) ->
             respond_error request reqd ~status:`Conflict ~code:"status_conflict" detail
@@ -351,3 +356,17 @@ let handle_post state ~actor ~approval_id request reqd body =
       | None ->
         respond_error request reqd ~status:`Bad_request ~code:"invalid_request"
           "recover request.action is required"))
+
+let uncertain_path = "/api/v1/keepers/hitl/late-approval-attempts"
+let uncertain_response state =
+  let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+  match Keeper_late_approval.uncertain_attempts (Keeper_late_approval.shared ()) ~base_path with
+  | Error (Keeper_late_approval.Corrupt_journal _ | Journal_unavailable _) ->
+      `Service_unavailable, `Assoc ["ok", `Bool false; "code", `String "late_approval_journal_unavailable"]
+  | Ok attempts -> `OK, `Assoc ["ok", `Bool true;
+      "attempts", `List (List.map (fun (a : Keeper_late_approval.uncertain_attempt) -> `Assoc
+        ["consume_id", `String a.consume_id; "keeper_name", `String a.keeper_name;
+         "tool_name", `String a.tool_name; "args_fingerprint", `String a.args_fingerprint;
+         "consumed_at", `Float a.consumed_at; "outcome", `String "unknown"]) attempts)]
+let handle_uncertain_get state request reqd =
+  let status, body = uncertain_response state in respond request reqd ~status body

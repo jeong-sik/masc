@@ -898,7 +898,7 @@ let prepare_keeper_persistence_owned
   if late_uncertain > 0 then
     Log.Keeper.warn
       "late_approval_journal: restored with uncertain_consume=%d \
-       (decision delivered to its caller but no deliver row followed; \
+       (delivery and external outcome unknown; no closing deliver row; \
        operator confirmation required, never reapplied)"
       late_uncertain;
   let prepared =

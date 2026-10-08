@@ -320,6 +320,14 @@ let test_gate_resolve_workspace_precondition () =
    this pins the HTTP surface's admission shape. *)
 let test_hitl_recover_route_and_preconditions () =
   let module Recover = Server_dashboard_http_hitl_recover in
+  let ack = ["action", `String "ack_uncertain"; "keeper_name", `String "alpha";
+             "consume_id", `String "exact-consume"] in
+  check bool "ack uses listed keeper and exact consume without original args" true
+    (Recover.parse_ack_fields ack = Ok ("alpha", "exact-consume"));
+  check bool "ack cannot omit exact consume" true
+    (Result.is_error (Recover.parse_ack_fields (List.remove_assoc "consume_id" ack)));
+  check bool "ack rejects duplicate consume identity" true
+    (Result.is_error (Recover.parse_ack_fields (("consume_id", `String "other") :: ack)));
   let base = "/api/v1/keepers/" in
   check (option string)
     "recover route extracts the approval id"

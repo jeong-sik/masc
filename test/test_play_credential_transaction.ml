@@ -52,7 +52,7 @@ let with_machine f =
 let recover config =
   Keeper_dos_controller.execute ~config ~who:"operator" ~name:"masc_dos_step"
     ~args:(`Assoc [ "steps", `Int 1; "until_ready", `Bool false ])
-    ~run:(fun () -> None)
+    ~run:(fun ?dos_admission:_ () -> None)
 
 let recovered = function
   | Ok None -> ()
@@ -442,7 +442,7 @@ let operator_holds config =
 let hand_to config target =
   Keeper_dos_controller.execute ~config ~who:"operator" ~name:"masc_dos_pass"
     ~args:(`Assoc ["to",`String target])
-    ~run:(fun () -> fail "handoff must use its admitted lane effect, not the unguarded callback")
+    ~run:(fun ?dos_admission:_ () -> fail "handoff must use its admitted lane effect, not the unguarded callback")
 
 let handed = function
   | Ok (Some result) when Tool_result.is_success result -> result
@@ -710,7 +710,7 @@ let test_departed_caller_cannot_pass_a_free_controller () =
   participation_ok (participate config token Play_participation.Departed);
   let pass () = Keeper_dos_controller.execute ~config ~who:"player" ~name:"masc_dos_pass"
       ~args:(`Assoc ["to", `String "operator"])
-      ~run:(fun () -> fail "pass cannot bypass its admitted lane effect") in
+      ~run:(fun ?dos_admission:_ () -> fail "pass cannot bypass its admitted lane effect") in
   check bool "departure blocks handoff admission" true (Result.is_error (pass ()));
   check (option string) "free controller remains free" None (controller ());
   participation_ok (participate config token Play_participation.Connected);
@@ -785,10 +785,43 @@ let test_disconnect_waits_for_an_admitted_move_effect () =
   check (option string) "the completed disconnect releases the admitted controller"
     None (controller ())
 
+let test_preparation_allows_disconnect_before_final_admission () =
+  List.iter (fun name ->
+    with_machine @@ fun config _ _ ->
+    let token, _ = renew config in
+    let programs = Tool_misc_dos_lane.programs_dir ~base_path:config.base_path in
+    Fs_compat.mkdir_p programs;
+    Out_channel.with_open_bin (Filename.concat programs "replacement.com")
+      (fun channel -> output_string channel "\xeb\xfe");
+    let dir = Tool_misc_dos_lane.checkpoints_dir ~base_path:config.base_path in
+    let slot = match Machine_checkpoint.slot_of_string "prepared" with
+      | Ok slot -> slot | Error detail -> fail detail in
+    ignore (dos_ok (Dos_lane.save ~who:"player" ~dir ~slot));
+    let args = if name = "masc_dos_load" then `Assoc ["program", `String "replacement.com"]
+      else `Assoc ["slot", `String "prepared"] in
+    let before = (dos_ok (Dos_lane.screen ())).Dos_lane.program in
+    let result = Keeper_dos_controller.execute ~config ~who:"player" ~name ~args
+      ~run:(fun ?dos_admission () ->
+        check int "preparation does not own the credential transaction" 0
+          (File_lock_eio.For_testing.holders_and_waiters ~lock_path:(lock_path config.base_path));
+        participation_ok (participate config token Play_participation.Departed);
+        let ctx : Tool_misc.context =
+          {config; agent_name="player"; help_schemas=Config.raw_all_tool_schemas} in
+        Tool_misc.dispatch ?dos_admission ctx ~name ~args) in
+    (match result with
+     | Error (Keeper_dos_controller.Seats_unknown _) -> ()
+     | Error (Refused detail) -> fail detail
+     | Ok _ -> fail "prepared operation bypassed final participation admission");
+    check (option string) "disconnect remains effective" None (controller ());
+    check (option string) "refused commit did not replace the machine" before
+      (dos_ok (Dos_lane.screen ())).Dos_lane.program)
+    ["masc_dos_load"; "masc_dos_restore"]
+
 let () =
   run "play_credential_transaction"
     [ "controller recovery",
-      [ test_case "current discovery follows regular symlinks" `Quick test_current_listing_follows_regular_symlink
+      [ test_case "preparation allows disconnect before final admission" `Quick test_preparation_allows_disconnect_before_final_admission
+      ; test_case "current discovery follows regular symlinks" `Quick test_current_listing_follows_regular_symlink
       ; test_case "departed Worker Keepers are excluded from handoffs" `Quick test_departed_worker_keeper_is_not_a_handoff_target
       ; test_case "departed callers cannot pass a free controller" `Quick test_departed_caller_cannot_pass_a_free_controller
       ; test_case "independent stop and expiry survive damaged participation" `Quick test_independent_departure_recovers_damaged_participation

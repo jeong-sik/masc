@@ -137,7 +137,7 @@ let dispatch
        with
        | Some operation -> candle operation
        | None ->
-         let run () = Tool_misc.dispatch
+         let run ?dos_admission () = Tool_misc.dispatch ?dos_admission
            ~lane_access:(Lane_addon_sources.Keeper keeper_name)
            { Tool_misc.config
            ; agent_name

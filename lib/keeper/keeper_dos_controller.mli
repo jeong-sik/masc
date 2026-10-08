@@ -60,7 +60,8 @@ val with_move_admission :
 
 val execute :
   config:Workspace.config -> who:string -> name:string -> args:Yojson.Safe.t ->
-  run:(unit -> Tool_result.result option) ->
+  run:(?dos_admission:((unit -> Tool_result.result) -> Tool_result.result) ->
+    unit -> Tool_result.result option) ->
   (Tool_result.result option, call_refusal) result
 (** Execute an already authorized misc tool request. Handoff target discovery,
     departed-holder recovery and the actual DOS pass share one Auth admission,
@@ -68,7 +69,9 @@ val execute :
     Handoff uses the same DOS implementation as the misc dispatcher; its Board
     announcements are flushed after Auth release. For a controller-taking
     operation, [run] is invoked while credential admission remains held through
-    the DOS lane effect. [None] means no dispatcher handled that other tool.
+    the DOS lane effect. Load and restore instead receive [dos_admission],
+    which the dispatcher must apply only to the prepared lane commit; their
+    inventory and checkpoint preparation run outside the credential transaction. [None] means no dispatcher handled that other tool.
     The HTTP body must already have been read.
     This does not authenticate [who] or cancel requests authorized earlier. *)
 

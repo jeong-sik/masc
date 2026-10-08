@@ -333,7 +333,7 @@ let lifecycle_body = "{}"
 let purge_body keeper_name =
   Yojson.Safe.to_string (`Assoc [ ("agent_name", `String keeper_name) ])
 
-let directive_body ~operator_operation_id action =
+let directive_body ~(expected_workspace : Decode.server_identity) ~operator_operation_id action =
   let fields =
     match action with
     | "resume" ->
@@ -342,7 +342,10 @@ let directive_body ~operator_operation_id action =
         ]
     | _ -> [ ("action", `String action) ]
   in
-  Yojson.Safe.to_string (`Assoc fields)
+  Yojson.Safe.to_string (`Assoc
+    (("expected_workspace", `Assoc
+      [ "base_path", `String expected_workspace.sid_base_path
+      ; "masc_root", `String expected_workspace.sid_masc_root ]) :: fields))
 
 let mint_operation_id ~keeper ~serial =
   Printf.sprintf "masc-tui-resume-%s-%d" keeper serial

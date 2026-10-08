@@ -75,7 +75,7 @@ let run_response ~config ~who ~route ~body =
        let ctx : Tool_misc.context =
          { config; agent_name = who; help_schemas = Config.raw_all_tool_schemas } in
        (match Keeper_dos_controller.execute ~config ~who ~name ~args
-           ~run:(fun () -> Tool_misc.dispatch ctx ~name ~args) with
+           ~run:(fun ?dos_admission () -> Tool_misc.dispatch ?dos_admission ctx ~name ~args) with
         | Error (Keeper_dos_controller.Refused message) -> rejected message
         | Error (Keeper_dos_controller.Seats_unknown message) ->
           `Service_unavailable, result_json ~ok:false ~message `Null

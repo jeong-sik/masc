@@ -8088,21 +8088,24 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   if List.mem keeper_name state.keeper_queue_inflight then
     chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
       "A queue request is pending; wait for its result before the next change"
-  else if action = Inbox.Resume
-          && state.workspace_identity = Workspace_identity_match
-          && keeper_available_for_new_message state keeper_name
-          && (match List.find_opt (fun (keeper : keeper) ->
-                String.equal keeper.k_name keeper_name) state.keepers with
-              | Some keeper -> resume_preflight_keeper_input ~owner_paused:keeper.k_paused state keeper_name
-              | None -> false) then begin
-    launch_waiting_keeper_input state ~mailbox ~keeper_name;
-    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
-      "Resumed locally retained input"
-  end else begin
+  else begin
+  let local_resume = action = Inbox.Resume
+    && state.workspace_identity = Workspace_identity_match
+    && keeper_available_for_new_message state keeper_name
+    && can_resume_preflight_keeper_input state keeper_name in
+  let expected_workspace = state.server_identity in
   state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
   let control_generation = match action with
-    | Inbox.Pause | Inbox.Resume -> Some (begin_keeper_chat_control state keeper_name)
+    | Inbox.Pause | Inbox.Resume ->
+        Some (begin_keeper_chat_control ~preserve_input_holds:local_resume
+                ~preserve_priority_requests:local_resume state keeper_name)
     | _ -> None in
+  let check_control () =
+    Result.bind (check_authority ()) (fun () ->
+      match control_generation with
+      | Some generation when generation <> keeper_chat_control_generation state keeper_name ->
+          Error "A newer Keeper control superseded this queue request"
+      | Some _ | None -> Ok ()) in
   let operator_operation_id = "tui-queue-" ^ Random_id.uuid_v7 () in
   let host = server_peer_host and port = state.port in
   let root = "/api/v1/keepers/" ^ Masc_tui_http.percent_encode_path_segment keeper_name in
@@ -8114,15 +8117,45 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
          Printf.sprintf "  %s\n    %s" item.request.request_id item.request.message) pending in
   let perform () =
     let ( let* ) = Result.bind in
-    let* () = check_authority () in
+    let* () = check_control () in
     let* receipt = match action with
       | Inbox.Inspect -> Ok []
       | Inbox.Pause | Inbox.Resume ->
         let verb = if action = Inbox.Pause then "pause" else "resume" in
+        let* expected_workspace = match expected_workspace with
+          | Some identity -> Ok identity
+          | None -> Error "Workspace identity is unavailable; input remains retained" in
+        let* owner_paused =
+          if not local_resume then Ok true else
+            (match Masc_tui_loader.load_keeper_roster ~host ~port ~expected_workspace with
+             | Error failure -> Error (Keeper_control.roster_failure_message
+                 ~credential_sent:(Masc_tui_http.operator_token_present ()) failure)
+             | Ok (roster, _) ->
+               match Keeper_control.liveness_of_roster roster keeper_name with
+               | Keeper_control.Present runtime -> Ok runtime.kr_paused
+               (* A complete roster without the Keeper: no owner is running,
+                  and the server refuses chat admission without one, so a
+                  local send could only be refused. Name the way out. *)
+               | Absent ->
+                 Error "Keeper is not running on the server; boot it, then /queue resume sends the retained input"
+               | Unobserved | Invalid _ ->
+                 Error "Keeper pause state is unavailable; input remains retained") in
+        let* () = check_control () in
+        (* The retained input leaves as soon as the owner is confirmed, ahead
+           of the informational queue reads below. *)
+        let confirm confirmation =
+          if action = Inbox.Resume then
+            Option.iter (fun generation ->
+              enqueue_async mailbox (Keeper_queue_resume_confirmed (keeper_name, generation, confirmation)))
+              control_generation in
+        if not owner_paused then begin
+          confirm Owner_already_active;
+          Ok ["Server confirmed the Keeper is active"]
+        end else
         let* status, body = Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
-          ~action:verb ~operator_operation_id in
+          ~action:verb ~operator_operation_id ~expected_workspace in
         (match Keeper_control.classify_response ~status ~body with
-         | Keeper_control.Accepted _ -> Ok ["Server confirmed queue " ^ verb]
+         | Keeper_control.Accepted _ -> confirm Owner_resumed; Ok ["Server confirmed queue " ^ verb]
          | Keeper_control.Rejected {detail;_} | Keeper_control.Paused_owner_conflict detail -> Error detail
          | Keeper_control.Purge_accepted _ -> Error "Unexpected purge response to queue directive")
       | Inbox.Cancel_event (reference, incarnation, _) | Inbox.Prioritize_event (reference, incarnation, _) ->
@@ -10221,6 +10254,20 @@ let dispatch_approvals_listing state =
     Some ticket
   end
 
+(* The recovery read's answer, ticketed outside the refresh bundle. Same
+   ownership rule as every Snapshot_read source: only the read still pending
+   publishes, and the workspace it named must still be the current one.
+   Its Listing_order ticket guards against stale answers superseding a newer
+   refresh pass or an action committed while the recovery read was in flight. *)
+let apply_approvals_summary_load state ~listing_ticket ~expected_workspace request result =
+  match Snapshot_read.settle state.approvals_summary_read request with
+  | None -> ()
+  | Some read ->
+    state.approvals_summary_read <- read;
+    if state.workspace_identity = Workspace_identity_match
+       && Option.exists (same_server_workspace expected_workspace) state.server_identity
+    then apply_approval_observation state { ao_ticket = listing_ticket; ao_result = result }
+
 (* One request per refresh returns this many lines. The server caps the
    parameter at 3000; a screenful of scrollback is what the surface can show
    without holding the whole ring in memory. *)
@@ -10434,13 +10481,55 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
+(* The operator confirm-queue read, on the same terms the held-call listing
+   reads: identity must match first, the request names the expected
+   workspace, and the read skips itself when one is already on the wire or
+   the count is already drawn. Its Listing_order ticket binds the recovery
+   read to the current action flow and sequence. *)
+let launch_approvals_summary_load state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  if Masc_tui_approvals_model.confirm_queue_reading state = List_read then ()
+  else if state.workspace_identity <> Workspace_identity_match then ()
+  else if Snapshot_read.in_flight state.approvals_summary_read then ()
+  else
+    match state.server_identity with
+    | None -> ()
+    | Some expected_workspace ->
+        match dispatch_approvals_listing state with
+        | None -> ()
+        | Some listing_ticket ->
+            let read, request =
+              Snapshot_read.start ~intent:Snapshot_read.Poll
+                state.approvals_summary_read
+            in
+            state.approvals_summary_read <- read;
+            match request with
+            | None -> ()
+            | Some request ->
+                let host = server_peer_host in
+                let port = state.port in
+                Masc_tui_async_read.launch
+                  ~deliver:(fun result ->
+                    enqueue_async mailbox
+                      (Approvals_summary_loaded
+                         (request, listing_ticket, expected_workspace, result)))
+                  (fun () ->
+                    let ( let* ) = Result.bind in
+                    let* () =
+                      probe_expected_workspace ~host ~port expected_workspace
+                    in
+                    let* () =
+                      if authority <> state.workspace_authority
+                      then Error "Workspace authority withdrawn"
+                      else Ok ()
+                    in
+                    Masc_tui_loader.load_approvals ~host ~port)
+
 let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
-  let expected_workspace =
-    Result.to_option server_identity
-    |> Option.map (fun identity -> canonical_path identity.Tui_decode.sid_base_path)
-  in
+  let expected_workspace = Result.to_option server_identity in
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
@@ -10882,6 +10971,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.pending_approval_action <- None;
   state.approval_snapshot <- None;
   state.approvals_error <- None;
+  state.approvals_summary_read <- Snapshot_read.invalidate state.approvals_summary_read;
   state.approval_detail_open <- false;
   state.asks_snapshot <- None;
   state.asks_error <- None;
@@ -12563,15 +12653,18 @@ let handle_ask_submit state ~mailbox =
    surfacing as a failure. Recovery runs once — a conflict raised by the
    recovery itself is the operator's to read. *)
 let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_operation_id
-    action =
+    ~expected_workspace action =
   let perform = function
     | Keeper_control.Lifecycle lifecycle_action ->
         Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
           ~action:lifecycle_action
     | Keeper_control.Directive directive_action ->
-        Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
-          ~action:directive_action ~operator_operation_id
-      | Keeper_control.Purge ->
+        (match expected_workspace with
+         | None -> Error "Workspace identity is unavailable; Keeper directive was not sent"
+         | Some expected_workspace ->
+           Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
+             ~action:directive_action ~operator_operation_id ~expected_workspace)
+    | Keeper_control.Purge ->
           Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name
   in
   let rec walk ~recovery_available last_outcome steps =
@@ -12669,7 +12762,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
     let result =
       try
         run_keeper_action_steps ~check_request ~host ~port ~keeper_name
-          ~operator_operation_id action
+          ~operator_operation_id ~expected_workspace:identity action
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -12682,7 +12775,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
       let result =
         try
           run_keeper_action_steps ~check_request ~host ~port ~keeper_name
-            ~operator_operation_id action
+            ~operator_operation_id ~expected_workspace:identity action
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
@@ -13816,17 +13909,25 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Some (installer,error) ->
             {view with loading=false;installer=Some installer;
               error=Option.bind error lane_addons_detail_failure;scroll=0})
-  | Keeper_queue_loaded (keeper_name, control_generation, action, result) ->
+  | Keeper_queue_resume_confirmed (keeper_name, generation, confirmation) ->
+      settle_keeper_priority_control state keeper_name ~generation
+        ~outcome:(match confirmation with
+          | Owner_resumed -> Priority_superseded
+          | Owner_already_active -> Priority_unconfirmed);
+      if finish_keeper_chat_control state keeper_name ~generation then begin
+        (match confirmation with
+         | Owner_resumed -> clear_keeper_priority_requests state keeper_name
+         | Owner_already_active -> ());
+        release_retained_keeper_input state keeper_name;
+        launch_waiting_keeper_input state ~mailbox ~keeper_name
+      end
+  | Keeper_queue_loaded (keeper_name, control_generation, _, result) ->
       Option.iter (fun generation -> settle_keeper_priority_control state keeper_name
         ~generation ~outcome:(match result with
           | Ok _ -> Priority_superseded | Error _ -> Priority_unconfirmed)) control_generation;
-      let current_control = match control_generation with
-        | Some generation -> finish_keeper_chat_control state keeper_name ~generation
-        | None -> false in
-      (match action, result with
-       | Masc_tui_queue_inspection.Resume, Ok _ when current_control ->
-         release_retained_keeper_input state keeper_name
-       | (Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _ | Cancel_event _ | Prioritize_event _), (Ok _ | Error _) -> ());
+      Option.iter (fun generation ->
+        ignore (finish_keeper_chat_control state keeper_name ~generation : bool))
+        control_generation;
       state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
       launch_keeper_turns_load state ~mailbox;
       let kind, lines = match result with
@@ -14171,6 +14272,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         state.workspace_identity <> Workspace_identity_match
         || Option.is_some state.keepers_error
       in
+      (* Recovery, not repair: only a session that has never seen a matching
+         identity (cold start, or the server went away and came back) may
+         re-read the confirm queue outside the bundle. A workspace that just
+         read as another one keeps its count on the failed line it earned --
+         an automatic extra read must not be the thing that launders a
+         foreign admission. *)
+      let identity_recovered =
+        state.workspace_identity = Workspace_identity_unread
+      in
       let authority = read_authority state in
       apply_http_surfaces state ~mailbox results;
       resume_reads_after_authority_change state ~mailbox
@@ -14231,6 +14341,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
        | _ -> ());
+      (* The refresh that confirmed this identity also confirmed its own
+         listing request, so its confirm-queue answer was refused as
+         superseded before it could ever be drawn. The other approval
+         sources relaunch above for the same reason; the count's own source
+         re-reads here instead of sitting unread until the next cadence. *)
+      if identity_recovered then enqueue_async mailbox Approvals_listing_superseded;
       open_observer_if_due state ~retry_closed:false
         ~host:(server_peer_host) ~port:state.port ~mailbox;
       end;
@@ -14238,6 +14354,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
+  | Approvals_listing_superseded -> launch_approvals_summary_load state ~mailbox
+  | Approvals_summary_loaded (request, listing_ticket, expected_workspace, result) ->
+      apply_approvals_summary_load state ~listing_ticket ~expected_workspace request result
   | Observer_opened { session_id; handshake } ->
       state.mcp_session <- Some session_id;
       (match handshake with

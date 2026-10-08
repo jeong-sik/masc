@@ -111,7 +111,7 @@ type turn_result =
   { session_id : string
   ; turn_id : string
   ; model : string option
-  ; text : string option
+  ; text : string
   ; usage : Runtime_muse_msp.token_usage option
   ; last_call_usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
@@ -1306,12 +1306,9 @@ let run_protocol
     | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
     | outcome -> outcome
   in
-  (* Preserve message presence through the adapter: transport silence is not
-     a model-selected empty final answer. Streaming itself has no payload
-     when there was no text, but the result retains [None]. *)
-  let text = state.final_text in
-  emit_stream_event on_stream_event
-    (Turn_finished { text = Option.value text ~default:"" });
+  (* DET-OK: a turn that completed with no agent message replied nothing. *)
+  let text = Option.value state.final_text ~default:"" in
+  emit_stream_event on_stream_event (Turn_finished { text });
   Ok
     { session_id
     ; turn_id

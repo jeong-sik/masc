@@ -1669,7 +1669,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             { Agent_core.Types.id = turn.turn_id
             ; model
             ; stop_reason = EndTurn
-            ; content = (match turn.text with None -> [] | Some text -> [ Text text ])
+            ; content = [ Text turn.text ]
             ; usage = Option.map api_usage_of_token_usage turn.usage
             ; telemetry =
                 Some

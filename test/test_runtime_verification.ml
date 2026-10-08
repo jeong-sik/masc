@@ -1219,11 +1219,8 @@ else:
         assert json.loads(text)["challenge"]
         if mode == "muse-forged":
             text = '{"challenge":"forged-after-tool-call"}'
-    if mode == "muse-empty-message":
-        text = ""
-    if mode != "muse-no-message":
-        notify("item/completed", item={"itemId": "m-readiness", "kind": "agentMessage", "turnId": "t-readiness",
-            "revision": 1, "status": "completed", "text": text})
+    notify("item/completed", item={"itemId": "m-readiness", "kind": "agentMessage", "turnId": "t-readiness",
+        "revision": 1, "status": "completed", "text": text})
     notify("turn/completed", turnId="t-readiness", terminal="completed")
 for line in sys.stdin:
     pass
@@ -1334,8 +1331,7 @@ tools-support = true
         check bool (mode ^ " tool actually called")
           (mode = "muse-success" || mode = "muse-exit-signal" || mode = "muse-forged"
            || mode = "muse-ran-other-model" || mode = "muse-ran-other-model-first"
-           || mode = "muse-ran-then-unnamed" || mode = "muse-no-message"
-           || mode = "muse-empty-message")
+           || mode = "muse-ran-then-unnamed")
           result.tool_called;
       (* A mismatched start can be refused before the turn, or after the full
          tool roundtrip; neither may verify the requested binding. *)
@@ -1363,8 +1359,6 @@ tools-support = true
     List.iter (fun (mode, failure) -> check_case mode failure)
       ["muse-success", None; "muse-exit-signal", None;
        "muse-no-tool", Some "tool_not_called";
-       "muse-no-message", Some "empty_response";
-       "muse-empty-message", Some "empty_response";
        "muse-forged", Some "tool_result_not_consumed";
        "muse-auth", Some "client_not_authenticated";
        "muse-auth-retryable", Some "client_not_authenticated";

@@ -302,21 +302,19 @@ let post ?(timeout_sec = http_timeout_sec) ~clock ~client ~server ~config ~info 
       try
         Eio.Switch.run (fun sw ->
           match
-            Cohttp_eio.Client.post client ~sw
+            Cohttp_eio.Client.call_result client ~sw
               ~headers:(Cohttp.Header.of_list
                 [ "Content-Type", "application/json"; "x-lane", Browser_lane.Lane_name.(to_wire Live); "x-lane-token", token;
                   "x-browser-client-id", config.client_id; "x-browser-name", info.browser;
                   "x-browser-version", info.version; "x-browser-engine-version", info.engine_version;
                   "x-browser-transport", Browser_lane.live_transport_to_string info.transport ])
               ~body:(Cohttp_eio.Body.of_string (Yojson.Safe.to_string json))
-              (endpoint server path)
+              `POST (endpoint server path)
           with
-          (* cohttp-eio reports as [Failure] a peer that closed the connection
-             before a response head, one that sent something that is not a
-             head, and a host name it could not resolve. In each there is no
-             answer from the server, which a status or a body would be. *)
           | exception Failure _ -> Error No_response
-          | response, body ->
+          | Error Cohttp_eio.Client.Connection_closed -> Error No_response
+          | Error (Cohttp_eio.Client.Invalid_response _) -> Error Response_invalid
+          | Ok (response, body) ->
             let status = Cohttp.Response.status response |> Cohttp.Code.code_of_status in
             if status <> 200 then Error (Http_status status)
             else

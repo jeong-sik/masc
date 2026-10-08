@@ -177,14 +177,11 @@ readonly OCAML_MSX_SHA="ab17a2bcd82a3c1cee44121d65e50ccb313e6f22"
 # says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
 # than #32: re-run this script with --install, or vendor the pinned core.
 readonly OCAML_DOS_SHA="a7b1ad660b2780e6b03c15db0ffbbd68af9eaa36"
-# cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
-# delivery from the position already delivered instead of offset 0. Without it
-# a chunk handed over in three or more single_read calls repeats its first
-# bytes and drops the displaced ones, which is the sse/malformed_payload the
-# providers were blamed for (masc#28761). Pinned as version 6.2.1 so the lock
-# file constraint still holds. Verified by test_cohttp_eio_body_flow. Remove
-# the pin when a cohttp-eio release carries the fix (upstream PR from this fork).
-readonly COHTTP_EIO_SHA="45ecbe94b2a6e9a49e5ce11a9f69127833814d46"
+# cohttp-eio 6.2.1 carries the partial body read fix and typed response-head
+# errors. The latter lets browser-host distinguish peer EOF (retryable) from
+# malformed HTTP (answered, do not replay). Keep this pin until both changes
+# are in a release or the upstream branch.
+readonly COHTTP_EIO_SHA="9963da4c028b5681ff96eeeaa9b276d6be60c507"
 # ocaml-protoc-plugin 6.2.0 + one commit: protoc-gen-ocaml reads its request
 # until end of input. 6.2.0 stops at the first read shorter than its 1024-byte
 # buffer, and a macOS pipe hands over 512 bytes first, so every local build of
@@ -366,7 +363,7 @@ opam_pin_add ocaml-msx "https://github.com/jeong-sik/ocaml-msx.git#${OCAML_MSX_S
 pinned_pkgs+=("ocaml-msx")
 opam_pin_add ocaml-dos "https://github.com/jeong-sik/ocaml-dos.git#${OCAML_DOS_SHA}" -n -y
 pinned_pkgs+=("ocaml-dos")
-opam_pin_add cohttp-eio.6.2.1 "https://github.com/jeong-sik/ocaml-cohttp.git#${COHTTP_EIO_SHA}" -n -y
+opam_pin_add cohttp-eio.6.2.1 "https://github.com/anyang-keepers/ocaml-cohttp.git#${COHTTP_EIO_SHA}" -n -y
 pinned_pkgs+=("cohttp-eio")
 opam_pin_add ocaml-protoc-plugin.6.2.0 "https://github.com/jeong-sik/ocaml-protoc-plugin.git#${OCAML_PROTOC_PLUGIN_SHA}" -n -y
 pinned_pkgs+=("ocaml-protoc-plugin")

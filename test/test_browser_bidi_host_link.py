@@ -77,6 +77,7 @@ class LaneState:
         # Results and the disconnect, in the order they reached the server.
         self.arrivals = []
         self.drop_next_result = threading.Event()
+        self.invalid_next_result = threading.Event()
         self.drop_every_result = False
         # Take the next result as the real route does, lose the answer, and
         # refuse the same result when it comes again.
@@ -172,6 +173,11 @@ class Lane(http.server.BaseHTTPRequestHandler):
             state.result_posts.append(body)
             state.arrivals.append(("result", body.get("id")))
             state.result_received.set()
+            if state.invalid_next_result.is_set():
+                state.invalid_next_result.clear()
+                self.close_connection = True
+                self.connection.sendall(b"not an HTTP response\r\n\r\n")
+                return
             if body.get("id") in state.taken:
                 # The real route resolves a request once; the same result
                 # again finds nothing waiting for it.
@@ -519,6 +525,19 @@ class BidiHostLink(unittest.TestCase):
         self.assertTrue(self.call(self.lane)["ok"], "the host did not go on to the next command")
         self.assertIn("result not delivered: the server answered the re-sent result with HTTP 400; "
                       "it may have taken an earlier attempt", self.host_log())
+
+    def test_invalid_http_result_response_is_not_retried(self):
+        self.attach(fixed=True)
+        polls = len(self.lane.state.polls)
+        self.lane.state.invalid_next_result.set()
+        self.lane.state.commands.put({"id": str(uuid.uuid4()), "verb": "tabs.list", "args": {}})
+        self.assertTrue(self.lane.state.result_received.wait(EXIT_WAIT_SEC), self.host_log())
+        self.wait_until(lambda: len(self.lane.state.polls) > polls,
+                        "the host did not return to polling after an invalid HTTP response")
+        self.assertEqual(len(self.lane.state.result_posts), 1)
+        self.assertIn("the server received the result and did not accept it (invalid HTTP response)",
+                      self.host_log())
+        self.assertTrue(self.call(self.lane)["ok"], "the host did not continue after recording the failure")
 
     def test_a_poll_the_server_fails_or_garbles_is_asked_again(self):
         # A status the server gave, then a body that is JSON and not a poll

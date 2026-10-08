@@ -2699,13 +2699,14 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
   | Poll_ready Advancing ->
       let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority } in
       msx_pending_poll := Poll_pending request;
-      let expected_workspace = state.server_identity in
       let check = capture_workspace_check state ~mailbox in
+      let identity = state.server_identity in
       let run () =
         let admission =
-          try match check () with
-          | Error detail -> Error detail
-          | Ok () ->
+          try match identity, check () with
+          | _, Error detail -> Error detail
+          | None, Ok () -> Error "Workspace identity unavailable; MSX tick withdrawn"
+          | Some expected, Ok () ->
             if request.poll_authority <> state.workspace_authority
                || request.poll_view != !msx_poll_view || request.poll_port <> state.port
                || not (machine_changes_allowed state)
@@ -2713,7 +2714,7 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
                || state.machine_source <> Masc.Machine_lane.Msx
                || state.machine_interaction <> Control_machine
             then Error "MSX control view or workspace authority withdrawn"
-            else Ok ()
+            else Ok expected
 
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2721,13 +2722,9 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
         in
         match admission with
         | Error detail -> enqueue_async mailbox (Msx_tick_withdrawn (request, detail))
-        | Ok () ->
+        | Ok expected_workspace ->
           let frame =
-            try match expected_workspace with
-            | None -> Error "MSX workspace identity is unavailable"
-            | Some expected_workspace ->
-                Masc_tui_http.tick_msx ~expected_workspace ~host:server_peer_host ~port:request.poll_port
-            with
+            try Masc_tui_http.tick_msx ~expected_workspace ~host:server_peer_host ~port:request.poll_port with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn -> Error (Printexc.to_string exn)
           in

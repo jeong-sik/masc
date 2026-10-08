@@ -55,10 +55,9 @@ val msx_tick_default_frames : int
 (** Frames a [POST /api/v1/msx/tick] advances when the body names none. *)
 
 val tick_response :
-  config:Workspace.config -> body:string ->
+  body:string ->
   [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
-(** Authenticated tick body handling. [expected_workspace], when present, is
-    validated against [config] before any executor submission. An optional integer [frames] controls
+(** Authenticated tick body handling. An optional integer [frames] controls
     advancement. [pixel_response="retained"] requests an inline/retained pixel
     response; optional [known_pixels={revision,width,height}] advertises the
     client's exact retained pixels. Duplicate and unknown fields are refused before
@@ -66,7 +65,18 @@ val tick_response :
     Stepping and atomic frame/ledger capture run once on the shared executor pool;
     an unavailable pool refuses the tick without running it inline.
     Activity refusal is HTTP 409 with [ok=false] and a closed [code] of
-    [activity_disabled] or [activity_unobserved], before execution starts. *)
+    [activity_disabled] or [activity_unobserved], before execution starts.
+    The body is not bound to a workspace; see [tick_response_bound]. *)
+
+val tick_response_bound :
+  config:Workspace.config -> body:string ->
+  [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
+(** [tick_response] for the route, which knows its workspace.
+    [expected_workspace], when present, is validated against [config] before
+    any executor submission, as for every MSX write: one naming a different
+    workspace is a [`Conflict] with [code] [workspace_precondition_failed], and
+    a malformed one a [`Bad_request]; nothing is stepped in either case. The
+    field is removed before the strict tick decoder. *)
 
 val activity_json : unit -> Yojson.Safe.t
 (** Read the published MSX activity only. No machine is started or advanced.

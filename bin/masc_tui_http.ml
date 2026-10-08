@@ -788,12 +788,14 @@ let post_msx_checkpoint ~expected_workspace ~host ~port ~restore ~slot =
    Only validated pixels are retained; every tick supplies fresh metadata. *)
 let msx_tick_cache = Masc_tui_msx_tick.create ()
 
-let tick_msx ~expected_workspace ~(host : string) ~(port : int) :
+let tick_msx ~(expected_workspace : Masc.Tui_decode.server_identity)
+    ~(host : string) ~(port : int) :
     (Masc_tui_msx_tick.response, string) result =
   let headers = auth_headers () in
+  (* The tick names the workspace the terminal confirmed, so a server swapped
+     onto the same port after the check refuses it before stepping. *)
+  let body_fields = [ expected_workspace_field expected_workspace ] in
   let request ~body =
-    let fields = Yojson.Safe.Util.to_assoc (Yojson.Safe.from_string body) in
-    let body = msx_write_body ~expected_workspace fields in
     match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers
         ~host ~port ~path:msx_tick_path ~body with
     | Error _ as error -> error
@@ -802,7 +804,7 @@ let tick_msx ~expected_workspace ~(host : string) ~(port : int) :
         Result.map (fun json -> status_code,json)
           (decode_json ~allow_empty:false ~status_code:(if status_code=409 then 200 else status_code) ~body)
   in
-  Masc_tui_msx_tick.fetch msx_tick_cache ~host ~port ~headers ~request
+  Masc_tui_msx_tick.fetch ~body_fields msx_tick_cache ~host ~port ~headers ~request
 ;;
 
 let fetch_msx_activity ~host ~port =

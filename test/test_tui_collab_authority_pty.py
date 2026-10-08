@@ -260,10 +260,18 @@ def run_control_boundary(executable):
 def run_machine_pre_refresh_swap(executable, operation):
     """A cached A grant cannot send a machine write to B before periodic health."""
     current, observed, prepare, health = workspace_fixture()
-    requests = []
     rgb = base64.b64encode(b'\xff\x00\x00\x00\x00\xff').decode()
     first_tick = threading.Event()
     release_tick = threading.Event()
+    tick_recorded = threading.Event()
+
+    class RecordedRequests(list):
+        def append(self, request):
+            super().append(request)
+            if request[0] == '/api/v1/msx/tick':
+                tick_recorded.set()
+
+    requests = RecordedRequests()
 
     def live(path):
         source = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)['source_kind'][0]
@@ -305,6 +313,11 @@ def run_machine_pre_refresh_swap(executable, operation):
                     if operation == 'disk':
                         key(b'\x1b[19~', b'change disk')
                         key(b'j', b'game.dsk')
+            if operation == 'tick':
+                # The response callback runs before the harness records it.
+                # Other operations intentionally keep their first tick blocked.
+                assert h.wait_for_fixture_event(
+                    process, master, output, tick_recorded, timeout=8)
             before = len(requests)
             start = len(output)
             if operation != 'tick':
@@ -321,7 +334,7 @@ def run_machine_pre_refresh_swap(executable, operation):
             # the withdrawn view or restore its control grant.
             release_tick.set()
             key(b':go Collab\r', '› guest'.encode())
-            assert 'Controlling' not in h.screen_text(bytes(output))
+            assert b'Controlling' not in h.screen_text(bytes(output))
             key(b'\x1b', b'MASC Dashboard')
             os.write(master, b'q')
         finally:

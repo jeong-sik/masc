@@ -103,6 +103,23 @@ let test_haiku_5_5_row_reaches_the_wire () =
       (thinking off = `Assoc [ "type", `String "disabled" ]);
     check bool "the disabled request names no effort" true
       (member "output_config" off = `Null);
+    List.iter (fun effort ->
+      let disabled = config ~enable_thinking:false ~reasoning_effort:effort () in
+      let check_wire wire =
+        check bool "explicit low-high effort keeps disabled thinking" true
+          (thinking wire = `Assoc ["type", `String "disabled"]);
+        check string "explicit effort reaches output config" (Effort.to_string effort)
+          (Yojson.Safe.Util.(member "output_config" wire |> member "effort" |> to_string)) in
+      check_wire (body disabled);
+      check_wire (Backend.build_count_tokens_request ~config:disabled ~messages ()
+                  |> Yojson.Safe.from_string);
+      let artifact = match Backend.build_request_artifact_with_thinking_control
+        ~anthropic_thinking_control:(Some Capabilities.Anthropic_adaptive_disabled_through_high)
+        ~config:disabled ~messages () with
+        | Ok value -> value
+        | Error _ -> fail "disabled effort artifact was refused" in
+      check_wire (Backend.request_payload artifact |> Yojson.Safe.from_string))
+      [Effort.Low; Effort.Medium; Effort.High];
     (* The API takes [disabled] at high effort or below and answers 400 above
        it, so these two must not reach the wire. *)
     List.iter

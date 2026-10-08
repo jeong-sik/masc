@@ -2522,8 +2522,21 @@ let test_replayed_chat_failure_is_visible_without_a_history_error () =
           (count "PARTIAL_REPLY" screen);
         check int (stage ^ ": the failure is visible exactly once") 1
           (count "operator interrupted the turn" screen);
-        check int (stage ^ ": the failure uses the error role") 1
-          (count "ERROR" screen)
+        let failure_row = List.find (fun row ->
+          Astring.String.is_infix ~affix:"operator interrupted the turn" row)
+          (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+        check bool (stage ^ ": the typed error mark is on the failure row") true
+          (Astring.String.is_infix
+             ~affix:(Masc_tui_message_layout.speaker_mark Masc_tui_message_layout.Error)
+             failure_row);
+        state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+        let detailed, _ = Masc_tui_render_chat.render_keeper_message state in
+        let detailed_row = List.find (fun row ->
+          Astring.String.is_infix ~affix:"operator interrupted the turn" row)
+          (List.map Masc_tui_theme.strip_sgr detailed.Masc_tui_frame_presenter.lines) in
+        check bool (stage ^ ": explicit inline retains the error role") true
+          (Astring.String.is_infix ~affix:"ERROR" detailed_row);
+        state.msg_origin_display <- Masc_tui_message_layout.Origin_bare
       in
       check_frame "cold replay";
       let _ = Tui_types.turn_log_add_journaled log journal in
@@ -3380,11 +3393,20 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
         ; ktr_state = Tui_decode.Keeper_turn_idle } ];
     let settled_screen = screen () in
     check int "the reply is still drawn once" 1 (count "said" settled_screen);
-    check bool "and the turn's rail closes" true
-      (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_closes)
-         settled_screen > 0
-       || count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_stands)
-            settled_screen > 0))
+    List.iter (fun rail ->
+      check int "the bare conversation omits turn rails" 0
+        (count (Masc_tui_message_layout.turn_rail_glyph rail) settled_screen))
+      Masc_tui_message_layout.[Rail_opens; Rail_closes; Rail_stands];
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    let detailed_settled = screen () in
+    check int "explicit inline retains the completed reply once" 1 (count "said" detailed_settled);
+    (* A single speech row may stand without a rail; a multi-row turn closes.
+       Either way it must not keep the opening mark of a live turn. *)
+    let reply_row = List.find (Astring.String.is_infix ~affix:"said")
+      (String.split_on_char '\n' detailed_settled) in
+    check int "the completed inline reply is not left as a live opening" 0
+      (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_opens)
+         reply_row))
 ;;
 
 (* The pane's own turn is the live block while its request is in flight, and
@@ -4299,44 +4321,54 @@ let test_composing_holds_only_while_the_composer_is_live () =
 
 ;;
 
-(* In-flight status remains visible without a clock by default. Opting into
-   clocks also reveals request ages, including other Keepers' compact rows. *)
+(* The selected request keeps its progress owner when extra diagnostic rows
+   fold away. Background requests stay tracked without occupying this composer. *)
 let test_the_sending_rows_follow_clock_visibility () =
   List.iter (fun keeper_name ->
     let state = Tui_types.create_state ~tool_visibility:Tui_types.Tools_full
         ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let entry = inflight_with_log ~keeper_name ~started_at:2. [Live.Run_started] in
     state.msg_target_keeper_name <- Some "alpha";
-    state.msg_inflight <- [inflight_with_log ~keeper_name ~started_at:2. [Live.Run_started]];
+    state.msg_inflight <- [entry];
+    let drawn () = Tui_types.keeper_message_inflight_rows state ~chat_cols:80 ~now:5. in
+    if keeper_name <> "alpha" then begin
+      check (list (pair bool string)) "another Keeper has no composer diagnostics" [] (drawn ());
+      check bool "another Keeper does not own this progress row" true
+        (Option.is_none (Tui_types.keeper_message_status_log state));
+      check bool "hidden background request remains tracked" true
+        (List.memq entry state.msg_inflight);
+      state.msg_target_keeper_name <- Some keeper_name
+    end;
     let summary ~now =
       match List.rev (Tui_types.keeper_message_inflight_rows state ~chat_cols:80 ~now) with
       | (_, text) :: _ -> text
-      | [] -> fail "an in-flight request lost its status row"
+      | [] -> fail "the selected in-flight request lost its diagnostic row"
     in
     let bare_summary = summary ~now:5. in
-    check bool "default request row retains its running status" true
+    check bool "selected request retains its running status" true
       (String.starts_with ~prefix:"  (running " bare_summary);
-    check string "default request row omits changing ages" bare_summary
-      (summary ~now:782.);
+    check string "default request row omits changing ages" bare_summary (summary ~now:782.);
     state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     check bool "three-second request displays its age" true
       (String.ends_with ~suffix:" · 3s)" (summary ~now:5.));
     check bool "thirteen-minute request displays its changed age" true
       (String.ends_with ~suffix:" · 13m00s)" (summary ~now:782.));
     state.msg_tool_visibility <- Tui_types.Tools_compact;
-    if keeper_name = "alpha" then begin
-      check (list (pair bool string)) "compact mode has no duplicate own request row" []
-        (Tui_types.keeper_message_inflight_rows state ~chat_cols:80 ~now:5.);
-      check (list string) "compact status retains the running request" ["기존 작업 처리 중"]
-        (List.map Masc_tui_answering.chat_activity_row_text
-           (Tui_types.keeper_message_activity_rows state))
-    end else begin
-      state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
-      check string "compact mode hides the other Keeper request age" bare_summary
-        (summary ~now:782.);
-      state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
-      check bool "compact mode retains the other Keeper request age" true
-        (String.ends_with ~suffix:" · 3s)" (summary ~now:5.))
-    end)
+    check (list (pair bool string)) "compact mode has no duplicate request row" [] (drawn ());
+    check (list string) "compact activity does not repeat the progress owner" []
+      (List.map Masc_tui_answering.chat_activity_row_text (Tui_types.keeper_message_activity_rows state));
+    check (option string) "compact progress retains exactly the selected request"
+      (Some entry.sent_request.request_id)
+      (Option.map Tui_types.turn_log_request_id (Tui_types.keeper_message_status_log state));
+    state.msg_target_keeper_name <- Some (if keeper_name="alpha" then "beta" else "alpha");
+    check bool "switching away releases the old request's progress row" true
+      (Option.is_none (Tui_types.keeper_message_status_log state));
+    check bool "switching targets does not delete the tracked request" true
+      (List.memq entry state.msg_inflight);
+    state.msg_target_keeper_name <- Some keeper_name;
+    check (option string) "switching back restores that exact request owner"
+      (Some entry.sent_request.request_id)
+      (Option.map Tui_types.turn_log_request_id (Tui_types.keeper_message_status_log state)))
     ["alpha"; "beta"]
 
 ;;

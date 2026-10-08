@@ -76,7 +76,7 @@ jobs:
               'run_url': os.environ['CANDIDATE_RUN'],
               'results': results,
               'checks_passed': passed,
-              'behavior_scope': 'full Test workflow with the checked-in known-failure policy',
+              'behavior_scope': 'full Test workflow; test-suite failures fail the behavior job',
               'published': False,
           }
           Path('candidate-verification.json').write_text(json.dumps(receipt, indent=2) + '\n')

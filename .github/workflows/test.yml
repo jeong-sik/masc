@@ -266,8 +266,9 @@ jobs:
       # Explicit chat-phase selection captures the actual recorded ANSI frames;
       # absent frames or a mismatching replay never count as screen evidence.
       - name: Capture Chat phase fixture PTY screenshots
-        if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_model_response_phase_pty') }}
+        if: ${{ !cancelled() && (contains(inputs.suite, 'test_tui_model_response_phase_pty') || contains(inputs.suite, 'test_tui_input_delivery_phase_pty')) }}
         env:
+          STUDIO_SELECTED_SUITES: ${{ inputs.suite }}
           STUDIO_SOURCE_SHA: ${{ inputs.candidate_sha || github.sha }}
           STUDIO_RUN_ID: ${{ github.run_id }}
           STUDIO_TEST_OUTCOME: ${{ steps.tests.outcome }}
@@ -301,14 +302,28 @@ jobs:
           }
           Path(os.environ["RUNNER_TEMP"], "studio-run.json").write_text(json.dumps(info))
           PYINFO
-          "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
-            --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
-            --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
-            --suite test_tui_model_response_phase_pty \
-            --suite-pass-marker "TUI model response phase PTY: PASS"
+          chat_phase_failed=false
+          for chat_phase_suite in test_tui_model_response_phase_pty test_tui_input_delivery_phase_pty; do
+            if [[ "$STUDIO_SELECTED_SUITES" != *"$chat_phase_suite"* ]]; then
+              continue
+            fi
+            case "$chat_phase_suite" in
+              test_tui_model_response_phase_pty) phase_pass_marker="TUI model response phase PTY: PASS" ;;
+              test_tui_input_delivery_phase_pty) phase_pass_marker="TUI input delivery phase PTY: PASS" ;;
+            esac
+            if ! "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
+              --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
+              --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT/$chat_phase_suite" \
+              --suite "$chat_phase_suite" --suite-pass-marker "$phase_pass_marker"; then
+              chat_phase_failed=true
+            fi
+          done
+          if "$chat_phase_failed"; then
+            exit 1
+          fi
 
       - name: Upload Chat phase fixture PTY screenshots
-        if: ${{ always() && contains(inputs.suite, 'test_tui_model_response_phase_pty') }}
+        if: ${{ always() && (contains(inputs.suite, 'test_tui_model_response_phase_pty') || contains(inputs.suite, 'test_tui_input_delivery_phase_pty')) }}
         uses: actions/upload-artifact@v7
         with:
           name: chat-phase-studio-${{ inputs.candidate_sha || github.sha }}

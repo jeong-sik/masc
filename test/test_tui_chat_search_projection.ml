@@ -409,7 +409,13 @@ let test_admission_pin_survives_batch_reply_arrival () = at_sizes (fun origin ->
     T.turn_log_add ~now:32. held ~seq:(Some 2) (Live.Text text);
     T.turn_log_add ~now:33. held ~seq:(Some 3) (reply text);
     T.turn_log_add ~now:34. held ~seq:(Some 4) Live.Run_finished;
-    Log.commit held.tl_log;
+    (* The terminal callback retains the source before removing its watcher. *)
+    let completed = List.find (fun (entry : T.inflight) -> entry.log == held)
+        state.msg_inflight in
+    T.settle_turn_log state completed;
+    state.msg_inflight <- List.filter (fun (entry : T.inflight) ->
+      not (Chat.same_request_identity entry.sent_request completed.sent_request))
+      state.msg_inflight;
     check bool "request-owned receipt stays visible through binding and answer growth" true
       (Astring.String.is_infix ~affix:"Message queued:" (screen state));
     assert_still_reading state "Message queued:";

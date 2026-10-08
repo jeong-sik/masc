@@ -190,6 +190,16 @@ let test_a_turn_stops_claiming_a_number_when_its_rows_disagree () =
     (sole_turn disagreed).ct_turn_sequence
 ;;
 
+let test_turn_sequence_conflict_cannot_be_forgotten () =
+  List.iter (fun sequences ->
+    let rows = List.mapi (fun position turn_sequence ->
+      keeper ?turn_sequence ~operation_seq:position ~request_id:"a" "answer" (float_of_int position)) sequences in
+    Alcotest.(check (option int)) "later repetition cannot erase an earlier disagreement"
+      None (sole_turn rows).ct_turn_sequence)
+    [[Some 7;Some 8;Some 7]; [Some 7;Some 8;Some 8];
+     [Some 7;Some 8;None;Some 7]; [None;Some 7;Some 8;Some 7]]
+;;
+
 let test_a_folded_row_still_carries_its_number () =
   let original = user ~request_id:"a" "ask" 1. in
   let repeated = {original with me_turn_sequence=Some 4} in
@@ -435,6 +445,8 @@ let () =
             test_two_tool_rows_with_one_text_are_two_calls;
           Alcotest.test_case "a turn stops claiming a number when its rows disagree"
             `Quick test_a_turn_stops_claiming_a_number_when_its_rows_disagree;
+          Alcotest.test_case "sequence conflict remains observed" `Quick
+            test_turn_sequence_conflict_cannot_be_forgotten;
           Alcotest.test_case "a folded row still carries its number" `Quick
             test_a_folded_row_still_carries_its_number;
           Alcotest.test_case "journal and unowned lines keep their places" `Quick

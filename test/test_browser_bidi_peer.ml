@@ -235,6 +235,12 @@ let send_server_message flow json =
     else if length < 65536 then Printf.sprintf "\x81\x7e%c%c" (Char.chr (length lsr 8)) (Char.chr (length land 0xff))
     else fail "scripted reply too long for a 16-bit frame" in
   Eio.Flow.copy_string (head ^ payload) flow
+let send_server_frame flow opcode payload =
+  let length=String.length payload in
+  if length >= 126 then fail "scripted frame too long";
+  Eio.Flow.copy_string (String.init 2 (function
+    | 0 -> Char.chr (0x80 lor opcode)
+    | _ -> Char.chr length) ^ payload) flow
 let reply_to request result =
   obj ["type",`String "success";"id",Yojson.Safe.Util.member "id" request;"result",result]
 let with_scripted_firefox script use =
@@ -438,6 +444,53 @@ let test_refused_upgrade_is_the_connections_error () =
       | Error _->check bool "no peer was handed to the callback" false !used
       | Ok ()->fail "a refused upgrade produced a connection"
       | exception Failure detail->failf "the refused upgrade escaped as an exception: %s" detail))
+let test_peer_close_frame_ends_a_pending_command () =
+  let outcome=with_scripted_firefox (fun flow ->
+      send_server_message flow (session_created (read_client_message flow));
+      ignore (read_client_message flow : Yojson.Safe.t);
+      send_server_frame flow 0x8 "";
+      try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
+    (fun ~ended peer ->
+      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
+      check bool "the close callback ends the holder" true (Eio.Promise.peek ended <> None);
+      match result with
+      | Error (Peer.Before_effect "BiDi peer closed") -> Ok ()
+      | Error (Peer.Before_effect detail) -> Error detail
+      | Error (Peer.Outcome_unknown detail) -> Error detail
+      | Ok _ -> Error "a pending command survived the close frame") in
+  check (result unit string) "close frame is delivered" (Ok ()) outcome
+let test_malformed_json_ends_a_pending_command () =
+  let outcome=with_scripted_firefox (fun flow ->
+      send_server_message flow (session_created (read_client_message flow));
+      ignore (read_client_message flow : Yojson.Safe.t);
+      send_server_frame flow 0x1 "not-json";
+      try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
+    (fun ~ended peer ->
+      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
+      check bool "invalid text disconnects the holder" true (Eio.Promise.peek ended <> None);
+      match result with
+      | Error (Peer.Before_effect "invalid BiDi JSON") -> Ok ()
+      | Error (Peer.Before_effect detail) -> Error detail
+      | Error (Peer.Outcome_unknown detail) -> Error detail
+      | Ok _ -> Error "invalid JSON produced an answer") in
+  check (result unit string) "malformed JSON is reported" (Ok ()) outcome
+let test_invalid_websocket_frame_ends_a_pending_command () =
+  let outcome=with_scripted_firefox (fun flow ->
+      send_server_message flow (session_created (read_client_message flow));
+      ignore (read_client_message flow : Yojson.Safe.t);
+      (* Reserved opcode 0x3 is not a valid data frame. *)
+      send_server_frame flow 0x3 "";
+      try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
+    (fun ~ended peer ->
+      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
+      check bool "the protocol error reaches the closed callback" true (Eio.Promise.peek ended <> None);
+      match result with
+      | Error (Peer.Before_effect _) | Error (Peer.Outcome_unknown _) -> Ok ()
+      | Ok _ -> Error "an invalid websocket frame produced an answer") in
+  check (result unit string) "invalid frame ends the connection" (Ok ()) outcome
 let test_hover_without_click () =
   Eio_main.run (fun _ ->
     let hovered = ref false in
@@ -554,7 +607,10 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
     test_case "a refused session leaves none to end" `Quick test_a_refused_session_leaves_none_to_end;
     test_case "an unreadable refusal leaves a session to end" `Quick
       test_an_unreadable_refusal_leaves_a_session_to_end;
-    test_case "a session is there to end once asked for" `Quick test_a_session_is_there_to_end_once_asked_for];
+    test_case "a session is there to end once asked for" `Quick test_a_session_is_there_to_end_once_asked_for;
+    test_case "close frame ends a pending command" `Quick test_peer_close_frame_ends_a_pending_command;
+    test_case "malformed JSON ends a pending command" `Quick test_malformed_json_ends_a_pending_command;
+    test_case "invalid websocket frame reaches the error path" `Quick test_invalid_websocket_frame_ends_a_pending_command];
   "effect",[test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "document source is the shared document helper" `Quick test_document_source;
     test_case "a document still loading is not answered for" `Quick test_document_still_loading;

@@ -67,11 +67,13 @@ type fixture = {
 }
 
 let backend fixture : Lane.For_testing.backend = {
-  start = (fun ~sw:_ ~instance_id ~package:_ ~binding:_ ~on_created ->
+  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~package:_ ~binding:_ ~on_created ->
     incr fixture.starts;
     let stopped = ref false in
     let connection : Lane.For_testing.connection = {
       container_id = digest instance_id;
+        exported_tools = (fun () -> []);
+        call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
         action_schema = (fun () -> None);
         act = (fun ~arguments:_ -> Error "read-only fixture");
       observe = (fun ~binding:_ ~sources:_ ->
@@ -85,8 +87,8 @@ let backend fixture : Lane.For_testing.backend = {
     on_created connection;
     Ok connection);
   image_ready = (fun ~package:_ -> Ok ());
-  acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-  recover_stop = (fun ~instance_id:_ ~container_id:_ -> Ok ());
+  acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+  recover_stop = (fun ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ());
 }
 
 let dispatch fixture operation fields =

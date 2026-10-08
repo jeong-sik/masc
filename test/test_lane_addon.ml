@@ -33,6 +33,9 @@ type fake = {
   stops : (string, int) Hashtbl.t;
   modes : (string, string) Hashtbl.t;
   recovery : (string * string) list ref;
+  principals : Lane_addon_call_context.principal list ref;
+  controller : string option ref;
+  admissions : Machine_controller_contract.admission option list ref;
 }
 
 let fake_output : Types.output = {
@@ -45,15 +48,35 @@ let fake_output : Types.output = {
 
 let make_backend ?observe_step () =
   let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
-                recovery=ref [] } in
+                recovery=ref []; principals=ref []; controller=ref None; admissions=ref [] } in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~binding ~on_created ->
+    start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Types.package) ~binding ~on_created ->
       let released, release = Eio.Promise.create () in
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;
       Hashtbl.add state.bindings instance_id binding;
       let connection : Runtime.For_testing.connection = {
         container_id = Store.digest instance_id;
+        exported_tools = (fun () -> List.map (fun name ->
+          match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String name;
+            "inputSchema",`Assoc ["type",`String "object"]]) with
+          | Ok tool -> tool | Error message -> fail message) package.exported_tools);
+        call_exported_tool = (fun ~on_result:_ ~authorize ~principal ~name:_ ~arguments:_ ->
+          state.principals := principal :: !(state.principals);
+          let invoke admission =
+            state.admissions := admission :: !(state.admissions);
+            if package.id = "export-hang" then begin
+              Hashtbl.replace state.calls (instance_id ^ "/export") 1;
+              Eio.Promise.await released
+            end;
+            if package.id = "export-error" then
+              Error (Lane_addon_call_context.Transport_error "response lost after possible mutation")
+            else Ok (Mcp_protocol.Mcp_types.tool_result_of_text instance_id) in
+          match authorize with
+          | None -> invoke None
+          | Some authorize -> authorize ~release_controller:(fun ~holder:_ ~reason:_ ->
+              Error (Lane_addon_call_context.Transport_error "release fixture unavailable"))
+              ~snapshot:(fun () -> Ok !(state.controller)) ~invoke);
         action_schema = (fun () -> None);
         act = (fun ~arguments:_ -> Error "read-only fixture");
         observe = (fun ~binding:_ ~sources:_ ->
@@ -81,9 +104,9 @@ let make_backend ?observe_step () =
         else Ok connection
       end);
     image_ready = (fun ~package:_ -> Ok ());
-    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ ->
+    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
-    recover_stop = (fun ~instance_id ~container_id ->
+    recover_stop = (fun ~state_owner:_ ~instance_id ~container_id ->
       match container_id with
       | Some id when id = Store.digest instance_id ->
           state.recovery := (instance_id, id) :: !(state.recovery); Ok ()
@@ -121,6 +144,21 @@ let detach config id = ignore (unwrap (dispatch config Runtime.Detach ["instance
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 let await_phase clock config id expected = await clock (fun () -> phase (instance config id) = expected)
+let machine_runtime_config ~enabled = Printf.sprintf {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+[machines.msx]
+enabled = %b
+[machines.dos]
+enabled = %b
+|} enabled enabled
+
 let with_fixture ?acquire ?observe_step f =
   let dir = Filename.temp_file "lane-runtime-" ".fixture" in
   Sys.remove dir; Unix.mkdir dir 0o700;
@@ -137,7 +175,12 @@ let with_fixture ?acquire ?observe_step f =
               let state, backend = make_backend ?observe_step () in
               let backend = match acquire with None -> backend | Some acquire -> {backend with acquire} in
               Runtime.For_testing.with_backend backend (fun () ->
-                f env sw (Workspace.default_config dir) dir state))))))
+                let saved_runtime = Masc.Runtime.For_testing.snapshot () in
+                Fun.protect ~finally:(fun () -> Masc.Runtime.For_testing.restore saved_runtime) (fun () ->
+                  let path = Filename.concat dir "runtime-fixture.toml" in
+                  write path (machine_runtime_config ~enabled:true);
+                  ignore (unwrap (Masc.Runtime.init_default ~config_path:path));
+                  f env sw (Workspace.default_config dir) dir state)))))))
 
 let test_hang_error_coalescing_and_primary_progress () = with_fixture (fun env sw config dir state ->
   let clock = Eio.Stdenv.clock env in
@@ -434,10 +477,10 @@ let test_capture_cannot_rewrite_detach_failure () =
   let released, release = Eio.Promise.create () in
   let returned, return = Eio.Promise.create () in
   let captures = ref 0 in
-  let acquire ~access ~store ~package ~resolve_lane_output ~binding =
+  let acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding =
     incr captures;
     if !captures=2 then (Eio.Promise.resolve enter (); Eio.Promise.await released);
-    let result = Lane_addon_sources.acquire ~access ~store ~package ~resolve_lane_output ~binding in
+    let result = Lane_addon_sources.acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding in
     if !captures=2 then Eio.Promise.resolve return ();
     result in
   with_fixture ~acquire (fun env _sw config dir state ->
@@ -1361,7 +1404,143 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
     detach config id; await_phase clock config id "detached";
     check Alcotest.int "released surviving container retains exact cleanup ownership" 1 (List.length !(state.recovery)))
 
+let test_tool_exports_bind_live_incarnations () = with_fixture (fun env _sw config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let access = Lane_addon_sources.Operator_configuration in
+  let exports () = Runtime.tool_exports ~config ~access ~reserved:[] in
+  check int "no installation exposes nothing" 0 (List.length (unwrap (exports ())));
+  let attach_export ?(names = ["masc_msx_step"]) mode =
+    let path = manifest dir mode in
+    let original = In_channel.with_open_bin path In_channel.input_all in
+    write path (original ^ "\n[world.tools]\nexport = "
+      ^ Yojson.Safe.to_string (`List (List.map (fun name -> `String name) names)) ^ "\n");
+    unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
+      "run_id",`String "world";"binding",`Assoc ["sources",`List []]]) |> text "instance_id" in
+  let first = attach_export "good" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> int "observation_seq" (instance config first) > 0);
+  let cached () = unwrap (Runtime.observation_for_export ~config ~access ~name:"masc_msx_step") in
+  let calls_before = Hashtbl.find state.calls first in
+  let snapshot = match cached () with Some snapshot -> snapshot | None -> fail "missing attached observation" in
+  check bool "completed observation is stable while worker remains alive" false snapshot.refreshing;
+  check string "cached observation belongs to selected installation" first snapshot.instance_id;
+  check int "cached read performs no worker observation" calls_before (Hashtbl.find state.calls first);
+  let handle = List.hd (unwrap (exports ())) in
+  let call handle = Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:handle ~arguments:(`Assoc []) in
+  check bool "live installation is callable" true (Result.is_ok (call handle));
+  ignore (unwrap (Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:handle
+    ~arguments:(`Assoc ["caller", `Assoc ["kind", `String "keeper"; "name", `String "forged"]])
+    |> Result.map_error (function Runtime.Unavailable message | Runtime.Outcome_unknown message
+      | Runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message) -> message)));
+  check bool "model arguments cannot replace operator authority" true
+    (List.hd !(state.principals) = Lane_addon_call_context.Operator);
+  check bool "reserved host name rejects publication" true
+    (Result.is_error (Runtime.tool_exports ~config ~access ~reserved:["masc_msx_step"]));
+  let second = attach_export "second" in
+  await clock (fun () -> int "observation_seq" (instance config second) > 0);
+  check bool "ambiguous name rejects publication" true (Result.is_error (exports ()));
+  check bool "ambiguous name rejects an old handle" true (Result.is_error (call handle));
+  detach config second;
+  await_phase clock config second "detached";
+  detach config first;
+  check bool "detach immediately revokes old handle" true (Result.is_error (call handle));
+  check bool "detach immediately removes cached observation" true (cached () = None);
+  let replacement = attach_export "replacement" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  check bool "same-name replacement cannot receive old call" true (Result.is_error (call handle));
+  check bool "new handle invokes replacement" true
+    (Result.is_ok (call (List.hd (unwrap (exports ())))));
+  detach config replacement;
+  await_phase clock config replacement "detached";
+  let uncertain = attach_export "export-error" in
+  await clock (fun () -> int "observation_seq" (instance config uncertain) > 0);
+  let uncertain_handle = List.hd (unwrap (exports ())) in
+  let previous_seq = int "observation_seq" (instance config uncertain) in
+  check bool "lost worker response preserves unknown outcome" true
+    (match call uncertain_handle with Error (Runtime.Outcome_unknown _) -> true | _ -> false);
+  check bool "unknown effect cannot certify the previous screen stable" true
+    (match Runtime.observation_for_export ~config ~access ~name:"masc_msx_step" with
+     | Error _ -> true
+     | Ok (Some snapshot) -> snapshot.refreshing || snapshot.observation_seq > previous_seq
+     | Ok None -> false);
+  await clock (fun () -> int "observation_seq" (instance config uncertain) > previous_seq);
+  detach config uncertain;
+  await_phase clock config uncertain "detached";
+  let cancelled = attach_export "export-hang" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> int "observation_seq" (instance config cancelled) > 0);
+  let cancelled_handle = List.hd (unwrap (exports ())) in
+  Eio.Fiber.first
+    (fun () -> ignore (call cancelled_handle))
+    (fun () ->
+      await clock (fun () -> Hashtbl.mem state.calls (cancelled ^ "/export"));
+      let snapshot = match cached () with Some snapshot -> snapshot | None -> fail "missing calling worker observation" in
+      check bool "in-flight machine call marks cached screen refreshing" true snapshot.refreshing);
+  await_phase clock config cancelled "detached";
+  check bool "caller cancellation retires the installation" true
+    (Hashtbl.mem state.stops cancelled);
+  check bool "cancelled handle stays revoked" true (Result.is_error (call cancelled_handle));
+  let remote = attach_export "export-hang" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  let remote_handle = List.hd (unwrap (exports ())) in
+  let cancel_remote, release_remote = Eio.Promise.create () in
+  let cleanup_started, mark_cleanup_started = Eio.Promise.create () in
+  let cleanup_allowed, release_cleanup = Eio.Promise.create () in
+  let owner_complete = Atomic.make false in
+  let caller_returned = Atomic.make false in
+  let authorize ~release_controller:_ ~snapshot:_ ~invoke =
+    Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () ->
+      Eio.Promise.resolve mark_cleanup_started ();
+      Eio.Promise.await cleanup_allowed)) (fun () -> invoke None) in
+  let remote_call () = Runtime.call_exported_tool_with_authority
+    ~on_complete:(fun () -> Atomic.set owner_complete true) ~on_result:(fun _ -> ())
+    ~authorize:(Some authorize) ~principal:None ~config ~access ~reserved:[]
+    ~export:remote_handle ~arguments:(`Assoc []) in
+  let _, () = Eio.Fiber.pair
+    (fun () -> Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+      check bool "caller is on another domain" false (Eio_context.root_switch_on_current_domain ());
+      Eio.Fiber.first (fun () -> ignore (remote_call ()))
+        (fun () -> Eio.Promise.await cancel_remote);
+      Atomic.set caller_returned true))
+    (fun () ->
+      await clock (fun () -> Hashtbl.mem state.calls (remote ^ "/export"));
+      Eio.Promise.resolve release_remote ();
+      Eio.Promise.await cleanup_started;
+      await clock (fun () -> Atomic.get caller_returned);
+      check bool "caller cancellation cannot complete owner-held admission" false (Atomic.get owner_complete);
+      Eio.Promise.resolve release_cleanup ()) in
+  await_phase clock config remote "detached";
+  await clock (fun () -> Atomic.get owner_complete);
+  check bool "remote caller cancellation cleans owner worker" true (Hashtbl.mem state.stops remote))
+
+let test_machine_dependencies_reject_cycles () = with_fixture (fun env _sw config dir state ->
+  let attach_machine ~id ~export ~source =
+    let path = manifest dir id in
+    let original = In_channel.with_open_bin path In_channel.input_all in
+    write path (original ^ "\n[world.tools]\nexport = [" ^ Printf.sprintf "%S" export ^ "]\n");
+    dispatch config Runtime.Attach ["manifest_path",`String path;"run_id",`String id;
+      "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "input";"kind",`String source]]]] in
+  check bool "self-capture rejected before creating a worker" true
+    (Result.is_error (attach_machine ~id:"self-msx" ~export:"masc_msx_screen" ~source:"msx_capture"));
+  check int "self-cycle cannot launch a worker" 0 (Hashtbl.length state.bindings);
+  let first = unwrap (attach_machine ~id:"msx" ~export:"masc_msx_screen" ~source:"dos_capture") |> text "instance_id" in
+  await (Eio.Stdenv.clock env) (fun () -> int "observation_seq" (instance config first) > 0);
+  let before = Hashtbl.length state.bindings in
+  check bool "implicit machine cycle is rejected even across runs" true
+    (Result.is_error (attach_machine ~id:"dos" ~export:"masc_dos_screen" ~source:"msx_capture"));
+  check int "rejected cycle cannot launch its second worker" before (Hashtbl.length state.bindings);
+  detach config first;
+  await_phase (Eio.Stdenv.clock env) config first "detached";
+  let a,b = Eio.Fiber.pair
+    (fun () -> attach_machine ~id:"concurrent-msx" ~export:"masc_msx_screen" ~source:"dos_capture")
+    (fun () -> attach_machine ~id:"concurrent-dos" ~export:"masc_dos_screen" ~source:"msx_capture") in
+  let accepted = List.filter_map (function Ok value -> Some (text "instance_id" value) | Error _ -> None) [a;b] in
+  check int "concurrent admission cannot publish both sides of a cycle" 1 (List.length accepted);
+  List.iter (fun id -> detach config id; await_phase (Eio.Stdenv.clock env) config id "detached") accepted)
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "tool exports bind live incarnations" `Quick test_tool_exports_bind_live_incarnations;
+  test_case "machine source dependencies reject cycles" `Quick test_machine_dependencies_reject_cycles;
   test_case "invalid retained visibility is isolated" `Quick test_invalid_retained_visibility_is_isolated;
   test_case "MCP attribution never authorizes private Lane reads" `Quick
     test_mcp_attribution_does_not_authorize_private_lane;

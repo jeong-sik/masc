@@ -13,21 +13,32 @@ exception Fleet_commit_uncertain of string
 exception Fleet_commit_pending of string
 exception Worker_detached
 exception Action_persistence_failed of string
+type tool_export = Lane_addon_tool_export.t = private { instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
+type tool_call_error = Unavailable of string | Outcome_unknown of string
+  | Host_refusal of Lane_addon_call_context.host_refusal
+let tool_change_handler = ref (fun () -> ())
+let register_tool_change_handler handler = tool_change_handler := handler
+let notify_tool_change (package : package) =
+  if package.exported_tools <> [] then !tool_change_handler ()
 type connection = {
   observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
+  exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
+  call_exported_tool : on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+    (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
   action_schema : unit -> Yojson.Safe.t option;
   act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
   stop : unit -> (unit, string) result;
   container_id : string;
 }
 type backend = {
-  start : sw:Eio.Switch.t -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
+  start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
     on_created:(connection -> unit) -> (connection, string) result;
   acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
+    resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
     binding:Yojson.Safe.t ->
     (Yojson.Safe.t, string) result;
-  recover_stop : instance_id:string -> container_id:string option ->
+  recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
     (unit, string) result;
   image_ready : package:package -> (unit, string) result;
 }
@@ -67,7 +78,7 @@ type entry = {
   visibility : visibility;
   mutable last_committed_sources : string option;
   mutable unchanged_source_refreshes : int;
-  mutable running : bool; mutable started : bool; persistence_mutex : Eio.Mutex.t;
+  mutable running : bool; mutable started : bool; mutable active_tool_calls : int; persistence_mutex : Eio.Mutex.t;
   mutable coalesced_wakes : int;
   mutable cancel_worker : (unit -> unit) option;
   mutable configuration : configuration_owner option;
@@ -135,6 +146,21 @@ let configuration_of_fields fields =
       let* fields = object_ value in
       let* id = text fields "id" in let* source_path = text fields "source_path" in
       let* revision = text fields "revision" in Ok (Some {id; source_path; revision})
+let state_owner_for ~store ~instance_id ~package_id ~configuration state_storage =
+  match state_storage with
+  | Ephemeral -> Ok None
+  | Persistent ->
+      let installation_id = Yojson.Safe.to_string (match configuration with
+        | Some (owner : configuration_owner) -> `List [`String "configuration"; `String owner.id]
+        | None -> `List [`String "manual"; `String instance_id]) in
+      offload (fun () -> Lane_addon_worker_state.create_owner
+        ~workspace_root:(Lane_addon_store.root store) ~installation_id ~package_id)
+      |> Result.map Option.some
+
+let state_owner_for_entry m (e : entry) =
+  state_owner_for ~store:m.store ~instance_id:e.instance_id ~package_id:e.package.id
+    ~configuration:e.configuration e.package.state_storage
+
 let visibility_to_json = function
   | Shared -> `Assoc ["kind", `String "shared"]
   | Operator_only -> `Assoc ["kind", `String "operator"]
@@ -396,6 +422,33 @@ let visibility_covers consumer producer = match consumer, producer with
   | Operator_only, _ | _, Shared -> true
   | Keeper_only a, Keeper_only b -> String.equal a b
   | Shared, (Operator_only | Keeper_only _) | Keeper_only _, Operator_only -> false
+let machine_export_name = function
+  | Machine_lane.Msx -> "masc_msx_screen"
+  | Machine_lane.Dos -> "masc_dos_screen"
+let depends_on ~(consumer : entry) ~(producer : entry) =
+  let lane_changed = match producer.configuration with
+    | Some owner -> consumer.run_id = producer.run_id && List.mem owner.id consumer.input_installations
+    | None -> false in
+  let machine_changed = producer.visibility = Shared && List.exists (fun machine ->
+    List.mem (machine_export_name machine) producer.package.exported_tools
+    && Lane_addon_sources.interested consumer.refresh_interest (Lane_addon_sources.Machine_changed machine))
+    Machine_lane.all in
+  lane_changed || machine_changed
+let resolve_machine_output m ~consumer_id machine =
+  let name = machine_export_name machine in
+  let candidates = entries m |> List.filter (fun (e : entry) ->
+    e.visibility = Shared
+    && List.mem name e.package.exported_tools
+    && match e.phase with Detached | Detaching -> false | Attached | Observing | Failed _ -> true) in
+  match candidates with
+  | [e] when e.instance_id = consumer_id -> Error "a machine cannot capture its own output"
+  | [e] when e.phase = Attached && e.started && not e.stopping && e.seq > 0
+      && e.pending = Idle && e.active_tool_calls = 0 && Option.is_none e.current_action ->
+      Ok {Lane_addon_sources.worker_instance=e.instance_id;worker_seq=e.seq;
+        worker_max_bytes=e.package.resources.max_reply_bytes;worker_output=e.output}
+  | [_] -> Error "machine worker observation is unavailable or refreshing"
+  | [] -> Error "no shared machine worker is attached"
+  | _ -> Error "multiple shared workers provide the machine"
 let resolve_lane_output m ~access ~visibility ~run_id ~installation_id =
   let producers = entries m |> List.filter (fun e -> match e.configuration with
     | Some owner -> owner.id = installation_id | None -> false) in
@@ -416,13 +469,11 @@ let resolve_lane_output m ~access ~visibility ~run_id ~installation_id =
   | [] -> Error "upstream installation is unavailable"
   | _ -> Error "multiple workers claim the upstream installation"
 let wake_dependents m producer =
-  match producer.configuration with
-  | None -> ()
-  | Some owner -> entries m |> List.iter (fun e ->
-      if e.running && not e.stopping && e.run_id = producer.run_id
-        && List.mem owner.id e.input_installations then wake ~request:Refresh_sources e)
+  entries m |> List.iter (fun e ->
+    if e.instance_id <> producer.instance_id && e.running && not e.stopping
+      && depends_on ~consumer:e ~producer then wake ~request:Refresh_sources e)
 let failed m e message =
-  if not e.stopping then e.phase <- Failed message;
+  if not e.stopping then (e.phase <- Failed message; notify_tool_change e.package);
   match persist m e with Ok () -> wake_dependents m e | Error error ->
     if not e.stopping then e.phase <- Failed (message ^ "; binding persistence: " ^ error)
     else Log.Misc.error "Lane stopped binding persistence: %s" error
@@ -443,7 +494,8 @@ let stop_entry ~sw ~backend m e =
     let cleanup = match e.connection with
       | Some c -> Some (Some c.container_id, c.stop)
       | None when not e.running -> Some (None, fun () ->
-          backend.recover_stop ~instance_id:e.instance_id ~container_id:None)
+          let* state_owner = state_owner_for_entry m e in
+          backend.recover_stop ~state_owner ~instance_id:e.instance_id ~container_id:None)
       | None -> None (* startup still owns the unresolved create operation *) in
     match cleanup with
     | None -> ()
@@ -644,6 +696,12 @@ let perform_action m e c (queued : Lane_addon_action.receipt) =
        | Ok () -> ()
        | Error message -> raise (Action_persistence_failed ("action result persistence: " ^ message)))
 
+let observing e =
+  let recovering = match e.phase with Failed _ -> true
+    | Attached | Observing | Detaching | Detached -> false in
+  e.phase <- Observing;
+  if recovering then notify_tool_change e.package
+
 let run ~sw backend m e =
   fork_isolated ~sw (fun () ->
     let work () = try
@@ -654,7 +712,10 @@ let run ~sw backend m e =
           (match persist m e with Ok () -> () | Error message ->
             e.stopping <- true; e.phase <- Failed message);
           if e.stopping then stop_entry ~sw ~backend m e in
-        match backend.start ~sw:worker_sw ~instance_id:e.instance_id ~package:e.package ~binding:e.binding ~on_created:created with
+        let started = let* state_owner = state_owner_for_entry m e in
+          backend.start ~state_owner ~sw:worker_sw ~instance_id:e.instance_id
+            ~package:e.package ~binding:e.binding ~on_created:created in
+        match started with
         | Error message ->
             publish_resource Lane_addon_resource_events.Acquire_failed e
               (Option.map (fun c -> c.container_id) e.connection) (Some message);
@@ -664,6 +725,7 @@ let run ~sw backend m e =
             else failed m e message
         | Ok c ->
             e.connection <- Some c; e.started <- true;
+            notify_tool_change e.package;
             let rec loop () =
               if e.stopping then (
                 match e.phase with Detached -> () | _ ->
@@ -693,9 +755,10 @@ let run ~sw backend m e =
                     ()
                   else (
                     let previous_phase = e.phase in
-                    if request=Observe_now then e.phase <- Observing;
+                    if request=Observe_now then observing e;
                     let result =
                       let* sources = backend.acquire ~access:e.source_access ~store:m.store ~package:e.package ~binding:e.binding
+                        ~resolve_machine_output:(resolve_machine_output m ~consumer_id:e.instance_id)
                         ~resolve_lane_output:(resolve_lane_output m ~access:e.source_access ~visibility:e.visibility ~run_id:e.run_id) in
                       if e.stopping then Ok () else
                       let* fingerprint = match e.package.refresh_policy with
@@ -707,7 +770,7 @@ let run ~sw backend m e =
                         e.unchanged_source_refreshes <- e.unchanged_source_refreshes + 1;
                         Ok ())
                       else (
-                        e.phase <- Observing;
+                        observing e;
                         let* output = c.observe ~binding:e.binding ~sources in
                         let* () = commit_output m e ~sources output in
                         e.last_committed_sources <- fingerprint;
@@ -737,11 +800,17 @@ let backend ~store () = match !override with
        adding a second timeout with the same meaning. *)
     let control_timeout_sec = Env_config_runtime.Sidecar.control_command_timeout_sec in
     {
-      start = (fun ~sw ~instance_id ~package ~binding ~on_created ->
+      start = (fun ~sw ~state_owner ~instance_id ~package ~binding ~on_created ->
         let* sampling_handler = prepare_sampling_handler
           ~sw ~store ~instance_id ~package ~binding in
         let wrap worker = {
           container_id = Lane_addon_worker.container_id worker;
+          exported_tools = (fun () -> Lane_addon_worker.exported_tools worker);
+          call_exported_tool = (fun ~on_result ~authorize ~principal ~name ~arguments ->
+            Lane_addon_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
+            |> Result.map_error (function
+              | Lane_addon_worker.Host_refusal refusal -> Lane_addon_call_context.Host_refusal refusal
+              | error -> Lane_addon_call_context.Transport_error (Lane_addon_worker.error_to_string error)));
           action_schema = (fun () -> Lane_addon_worker.action_schema worker);
           act = (fun ~arguments -> Lane_addon_worker.act worker ~arguments
             |> Result.map_error Lane_addon_worker.error_to_string);
@@ -752,7 +821,7 @@ let backend ~store () = match !override with
         | None -> Error "Lane Add-on Docker control requires the server Eio clock"
         | Some clock ->
             Lane_addon_worker.start ~sw ~clock ~control_timeout_sec
-              ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package
+              ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package ?state_owner
               ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ?sampling_handler ()
             |> Result.map wrap |> Result.map_error Lane_addon_worker.error_to_string);
       acquire = Lane_addon_sources.acquire;
@@ -764,13 +833,13 @@ let backend ~store () = match !override with
               ~mgr:Posix_spawn_process_mgr.mgr ~package ()
             |> Result.map (fun (_ : string) -> ())
             |> Result.map_error Lane_addon_worker.error_to_string);
-      recover_stop = (fun ~instance_id ~container_id ->
+      recover_stop = (fun ~state_owner ~instance_id ~container_id ->
         match clock with
         | None -> Error "Lane Add-on Docker control requires the server Eio clock"
         | Some clock ->
             Lane_addon_worker.recover_stop ~clock ~control_timeout_sec
               ~mgr:Posix_spawn_process_mgr.mgr
-              ~instance_id ~container_id ()
+              ~instance_id ~container_id ?state_owner ()
             |> Result.map_error Lane_addon_worker.error_to_string) }
 let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -783,6 +852,126 @@ let manager config =
                      fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
                      configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[] } in
       Hashtbl.add managers root m; m
+let live_exports m access =
+  entries m |> List.concat_map (fun (e : entry) ->
+    if not e.started || e.stopping || not (can_read access e.visibility) then []
+    else match e.phase, e.connection with
+      | (Attached | Observing), Some connection ->
+          connection.exported_tools () |> List.filter_map (fun tool ->
+            if List.mem tool.Mcp_protocol.Mcp_types.name e.package.exported_tools
+            then Some (Lane_addon_tool_export.create ~instance_id:e.instance_id ~tool) else None)
+      | (Attached | Observing), None | (Failed _ | Detaching | Detached), _ -> [])
+
+let unique_exports ~reserved exports =
+  let names = List.map (fun export -> export.tool.Mcp_protocol.Mcp_types.name) exports in
+  if List.exists (fun name -> List.mem name reserved) names then
+    Error "Add-on export collides with a host tool"
+  else if List.length names <> List.length (List.sort_uniq String.compare names) then
+    Error "Add-on tool name is provided by multiple visible installations"
+  else Ok exports
+
+let tool_exports ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> Ok []
+  | Some m -> unique_exports ~reserved (live_exports m access))
+
+type export_observation = {
+  instance_id : string;
+  observation_seq : int;
+  max_bytes : int;
+  refreshing : bool;
+  output : output;
+}
+
+let observation_for_export ~config ~access ~name = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> Ok None
+  | Some m ->
+      let candidates = entries m |> List.filter (fun (e : entry) ->
+        can_read access e.visibility && List.mem name e.package.exported_tools
+        && match e.phase with Detached | Detaching -> false | Attached | Observing | Failed _ -> true) in
+      match candidates with
+      | [] -> Ok None
+      | [e] ->
+          (match e.phase with
+           | Failed detail -> Error detail
+           | Detaching | Detached -> Ok None
+           | Attached | Observing ->
+               if e.seq = 0 || not e.started || e.stopping then Error "machine worker observation is not available yet"
+               else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=e.package.resources.max_reply_bytes;
+                 refreshing=e.phase = Observing || e.pending <> Idle || e.active_tool_calls > 0 || Option.is_some e.current_action;output=e.output}))
+      | _ -> Error "multiple visible installations provide this machine")
+
+let with_tool_call_owner work =
+  let cancelled, signal_cancelled = Eio.Promise.create () in
+  try Eio_context.run_on_owner_domain (fun () ->
+    (* The general owner dispatcher deliberately outlives its waiter. Tool
+       invocations explicitly carry their caller's cancellation across domains. *)
+    match Eio.Promise.peek cancelled with
+    | Some exn -> raise exn
+    | None -> Eio.Fiber.first work (fun () -> raise (Eio.Promise.await cancelled)))
+  with Eio.Cancel.Cancelled _ as exn ->
+    ignore (Eio.Promise.try_resolve signal_cancelled exn);
+    raise exn
+
+let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
+  with_tool_call_owner (fun () ->
+    Fun.protect ~finally:on_complete (fun () ->
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    let* m = match Hashtbl.find_opt managers root with
+      | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
+    let* exports = unique_exports ~reserved (live_exports m access)
+      |> Result.map_error (fun detail -> Unavailable detail) in
+    let* () = if List.exists (fun (current : tool_export) -> current.instance_id = export.instance_id
+        && current.tool = export.tool) exports then Ok ()
+      else Error (Unavailable "Add-on tool installation is no longer available") in
+    let* e, connection = match Hashtbl.find_opt m.entries export.instance_id with
+      | Some ({connection=Some connection; _} as e) -> Ok (e, connection)
+      | _ -> Error (Unavailable "Add-on tool connection is unavailable") in
+    let* sw = match Eio_context.get_root_switch_opt () with
+      | Some sw -> Ok sw | None -> Error (Unavailable "Add-on background owner is unavailable") in
+    let worker_backend = backend ~store:m.store () in
+    e.active_tool_calls <- e.active_tool_calls + 1;
+    Fun.protect ~finally:(fun () -> e.active_tool_calls <- e.active_tool_calls - 1) (fun () ->
+    try
+      let principal = match principal with
+        | Some principal -> principal
+        | None -> match access with
+          | Lane_addon_sources.Keeper name -> Lane_addon_call_context.Keeper name
+          | Lane_addon_sources.Operator_configuration -> Lane_addon_call_context.Operator
+          | Lane_addon_sources.Unauthenticated -> Lane_addon_call_context.Anonymous in
+      let result = connection.call_exported_tool ~on_result ~authorize ~principal ~name:export.tool.name ~arguments in
+      (* Worker-owned state is not an input source, so source-change hints alone
+         cannot reveal a tool's effect. Refresh its observation after a completed
+         reply, including a worker error that may have changed machine state. *)
+      (match result with
+       | Ok _ -> if not e.stopping then wake e
+       | Error (Lane_addon_call_context.Host_refusal _) -> ()
+       | Error (Lane_addon_call_context.Transport_error detail) ->
+           if not e.stopping then (
+             failed m e ("tool outcome unknown: " ^ detail);
+             wake e));
+      result |> Result.map_error (function
+        | Lane_addon_call_context.Host_refusal refusal -> Host_refusal refusal
+        | Transport_error detail -> Outcome_unknown detail)
+    with Eio.Cancel.Cancelled _ as exn ->
+      (* This caller has a shorter lifetime than the observer. Retire both
+         projections before handing cleanup to the server-owned switch. *)
+      Eio.Cancel.protect (fun () ->
+        e.stopping <- true;
+        e.phase <- Failed "exported tool call cancelled; effect outcome unknown";
+        notify_tool_change e.package;
+        (match persist m e with Ok () -> () | Error detail ->
+          Log.Misc.error "Cancelled Add-on tool state persistence: %s" detail);
+        stop_entry ~sw ~backend:worker_backend m e);
+      raise exn)))
+
+let call_exported_tool_with_principal = call_exported_tool_with_authority ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:None
+
+let call_exported_tool = call_exported_tool_with_principal ~principal:None
+
 (* Entries and their wake promises belong to the root-switch owner domain. A
    caller on the HTTP serving domain or a pool worker is carried there, like
    [dispatch], instead of being dropped. *)
@@ -961,6 +1150,13 @@ let historical_detach ~sw m fields =
     let* run_id = text fields "run_id" in
     let* package_id = text package "id" in
     let* package_revision = text package "revision" in
+    let* configuration = configuration_of_fields fields in
+    let* state_storage = match List.assoc_opt "state_storage" package with
+      | None | Some (`String "ephemeral") -> Ok Ephemeral
+      | Some (`String "persistent") -> Ok Persistent
+      | Some _ -> Error "invalid retained state storage" in
+    let* state_owner = state_owner_for ~store:m.store ~instance_id:id ~package_id
+        ~configuration state_storage in
     let* resources = match List.assoc_opt "resources" package with
       | Some json -> object_ json | None -> Error "missing persisted resource settings" in
     let detaching = replace_phase fields Detaching in
@@ -976,7 +1172,7 @@ let historical_detach ~sw m fields =
       | Error message -> Hashtbl.replace m.recovering id (Cleanup_request_failed (fields,message)); Error message in
     let backend = backend ~store:m.store () in
     fork_recovery ~sw m ~id ~on_failure:(fun detail -> Cleanup_unconfirmed (fields,detail)) (fun () ->
-      let result = try backend.recover_stop ~instance_id:id ~container_id with
+      let result = try backend.recover_stop ~state_owner ~instance_id:id ~container_id with
         | Eio.Cancel.Cancelled _ as exn ->
             Hashtbl.replace m.recovering id (Cleanup_unconfirmed (fields,"cleanup cancelled before its result was confirmed"));
             raise exn
@@ -1061,7 +1257,7 @@ let configuration_json m ~access =
           "source_revision", `String d.source_revision;
           "desired_revision", `String d.revision;
           "applied_revision", nullable (Option.bind active (fun e -> Option.map (fun owner -> owner.revision) e.configuration));
-          "instance_id", nullable (Option.map (fun e -> e.instance_id) active);
+          "instance_id", nullable (Option.map (fun (e : entry) -> e.instance_id) active);
           "application", Lane_addon_application.to_json application] in
       `Assoc ["directory", `String reading.directory; "complete", `Bool reading.snapshot.complete;
         "issues", `List (reading.issues |> List.filter (fun (issue : Lane_addon_config.issue) ->
@@ -1174,6 +1370,20 @@ let validate_connection m ~run_id ~configuration_id ~binding =
   let* () = visit [] configuration_id in
   Ok input_installations
 
+let validate_live_connections m candidate =
+  let nodes = candidate :: List.filter (fun (e : entry) -> not e.stopping) (entries m) in
+  let complete = Hashtbl.create (List.length nodes) in
+  let rec visit trail node =
+    if List.mem node.instance_id trail then Error "cyclic Lane source connection, including implicit machine inputs"
+    else if Hashtbl.mem complete node.instance_id then Ok ()
+    else
+      let* () = List.fold_left (fun result producer ->
+        let* () = result in
+        if depends_on ~consumer:node ~producer then visit (node.instance_id::trail) producer else Ok ())
+        (Ok ()) nodes in
+      Hashtbl.add complete node.instance_id (); Ok () in
+  List.fold_left (fun result node -> let* () = result in visit [] node) (Ok ()) nodes
+
 let binding_visibility m ~access ?resolve_visibility binding =
   let* sources = Lane_addon_sources.parse binding in
   let merge left right = match left, right with
@@ -1210,9 +1420,10 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     phase = Attached; seq = 0; output = {rows=[];coverage=[]}; connection = None;
     stopping = false; cleanup_running = false; wake = promise; resolver; pending = Idle;
     refresh_interest; source_access; visibility; last_committed_sources=None; unchanged_source_refreshes=0;
-    running = true; started = false; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
+    running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     cancel_worker = None; configuration; input_installations } in
+  let* () = validate_live_connections m e in
   (* Construction only validates the registered host boundary. Discard this
      root-switch closure: backend.start constructs the actual callback with
      the worker switch, so provider work cannot outlive its worker. *)
@@ -1225,7 +1436,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
 
 let detach_entry ~sw m e =
   (match e.phase with Detached -> () | _ ->
-    e.stopping <- true; e.phase <- Detaching; wake e;
+    e.stopping <- true; e.phase <- Detaching; notify_tool_change e.package; wake e;
     wake_dependents m e;
     stop_entry ~sw ~backend:(backend ~store:m.store ()) m e);
   let* () = persist m e in Ok (entry_json e)
@@ -1808,6 +2019,7 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
         | Some schema -> Lane_addon_action.validate_value ~schema ~name:"lane binding" binding |> Result.map (fun _ -> ())) in
       let* sw = match Eio_context.get_root_switch_opt () with
         | Some sw -> Ok sw | None -> Error (Runtime_failed "server background owner unavailable") in
+      Eio.Mutex.use_ro m.configuration_mutex (fun () ->
       let source_access = match caller, access with
         | None, Lane_addon_sources.Operator_configuration -> Lane_addon_sources.Unauthenticated
         | _, access -> access in
@@ -1820,7 +2032,7 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
         | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
         | Shared | Operator_only -> source_access in
       let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
-      runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None ~source_access ~visibility)
+      runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None ~source_access ~visibility))
   | Observe ->
       let* e = request_result (find m args) in
       if e.stopping then Error (Request_rejected "instance is stopping or detached")
@@ -2093,19 +2305,23 @@ module For_testing = struct
   let with_declaration_writer writer f = Eio.Fiber.with_binding declaration_writer_key writer f
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
+    exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
+    call_exported_tool : on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+      (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (unit, string) result;
     container_id : string;
   }
   type nonrec backend = backend = {
-    start : sw:Eio.Switch.t -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
+    start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
       on_created:(connection -> unit) -> (connection, string) result;
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
-      resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
+      resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
+    resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t ->
       (Yojson.Safe.t, string) result;
-    recover_stop : instance_id:string -> container_id:string option ->
+    recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
       (unit, string) result;
     image_ready : package:package -> (unit, string) result;
   }

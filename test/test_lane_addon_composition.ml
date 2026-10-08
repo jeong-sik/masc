@@ -63,9 +63,11 @@ let with_fixture ?(acquire=Lane_addon_sources.acquire) ?produce_package ?(produc
                 directory (Runtime.configuration_directory config);
               let received = Hashtbl.create 4 and stopped = ref [] in
               let backend : Runtime.For_testing.backend = {
-                start=(fun ~sw:_ ~instance_id ~package ~binding:_ ~on_created ->
+                start=(fun ~sw:_ ~state_owner:_ ~instance_id ~package ~binding:_ ~on_created ->
                   let connection : Runtime.For_testing.connection = {
                     container_id=Store.digest instance_id;
+                    exported_tools = (fun () -> []);
+                    call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
                     action_schema = (fun () -> None);
                     act = (fun ~arguments:_ -> Error "read-only fixture");
                     observe=(fun ~binding ~sources ->
@@ -80,7 +82,7 @@ let with_fixture ?(acquire=Lane_addon_sources.acquire) ?produce_package ?(produc
                   on_created connection; Ok connection);
                 image_ready=(fun ~package:_ -> Ok ());
                 acquire;
-                recover_stop=(fun ~instance_id:_ ~container_id:_ -> Ok ())} in
+                recover_stop=(fun ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ())} in
               Runtime.For_testing.with_backend backend (fun () ->
                 (* Exceptional exits cancel the Eio switch before the outer
                    cleanup removes this fresh directory. Normal exits retire
@@ -129,11 +131,11 @@ let test_pending_notification_does_not_repeat_same_completed_input () =
   let entered,enter = Eio.Promise.create () and released,release = Eio.Promise.create () in
   let acquisitions = ref 0 and calls = ref 0 in
   let consumer binding = member "value" binding=`String "judge" in
-  let acquire ~access ~store ~package ~resolve_lane_output ~binding =
+  let acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding =
     if consumer binding then (
       incr acquisitions;
       if !acquisitions=1 then (Eio.Promise.resolve enter (); Eio.Promise.await released));
-    Lane_addon_sources.acquire ~access ~store ~package ~resolve_lane_output ~binding in
+    Lane_addon_sources.acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding in
   let produce ~binding ~sources:_ = if consumer binding then incr calls; output in
   with_fixture ~acquire ~produce (fun clock config root directory _received _stopped ->
     let producer_manifest = manifest ~name:"producer" root in

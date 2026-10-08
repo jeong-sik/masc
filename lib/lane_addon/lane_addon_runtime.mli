@@ -44,6 +44,40 @@ val authorize_retained_read : bindings:Yojson.Safe.t list -> access:Lane_addon_s
     incarnations and private dependencies fail closed. The supplied access is
     host-owned; no request field can set it. No stored bytes are changed. *)
 
+val register_tool_change_handler : (unit -> unit) -> unit
+(** Server notification bridge. Callbacks signal clients to refresh their
+    authorized inventories and must not acquire worker lifecycle locks. *)
+
+type tool_export = Lane_addon_tool_export.t = private { instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
+type tool_call_error = Unavailable of string | Outcome_unknown of string
+  | Host_refusal of Lane_addon_call_context.host_refusal
+val tool_exports : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> (tool_export list, string) result
+(** Reads initialized live workers only; does not start or recover installations.
+    The caller supplies the complete reserved host namespace. Collisions fail
+    explicitly. Visibility follows verified caller authority. *)
+val call_exported_tool_with_authority : on_complete:(unit -> unit) -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal option ->
+  config:Workspace.config -> access:Lane_addon_sources.access -> reserved:string list ->
+  export:tool_export -> arguments:Yojson.Safe.t ->
+  (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
+(** Trusted host boundary only: principal must come from host admission,
+    never from caller-supplied tool arguments. [access] still controls visibility.
+    [on_result] records replies under worker RPC serialization. [on_complete]
+    runs on the owner domain after mediation unwinds, including cancellation;
+    caller cancellation alone does not run it. Both callbacks must be synchronous
+    and must not publish effects or acquire credential admission. *)
+val call_exported_tool_with_principal : principal:Lane_addon_call_context.principal option ->
+  config:Workspace.config -> access:Lane_addon_sources.access -> reserved:string list ->
+  export:tool_export -> arguments:Yojson.Safe.t ->
+  (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
+(** Trusted host boundary only: principal must come from verified credentials,
+    never from caller-supplied tool arguments. [access] still controls visibility. *)
+val call_exported_tool : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> export:tool_export -> arguments:Yojson.Safe.t ->
+  (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
+(** Revalidates the exact installation and schema at invocation. Reattachment
+    cannot redirect a handle retained by an earlier Keeper turn. *)
+
 type skill_export_owner = Declaration of string | Instance of string
 type skill_export = {
   owner : skill_export_owner;
@@ -112,18 +146,22 @@ module For_testing : sig
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;
+    exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
+    call_exported_tool : on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+      (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (unit, string) result;
     container_id : string;
   }
   type backend = {
-    start : sw:Eio.Switch.t -> instance_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
+    start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
       on_created:(connection -> unit) -> (connection, string) result;
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
-      resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
+      resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
+    resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
-    recover_stop : instance_id:string -> container_id:string option ->
+    recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
       (unit, string) result;
     image_ready : package:Lane_addon_types.package -> (unit, string) result;
   }
@@ -144,3 +182,17 @@ module For_testing : sig
   (** Fiber-local staged publication injection captured before offload. *)
   val reset : unit -> unit
 end
+
+type export_observation = {
+  instance_id : string;
+  observation_seq : int;
+  max_bytes : int;
+  refreshing : bool;
+  output : Lane_addon_types.output;
+}
+val observation_for_export :
+  config:Workspace.config -> access:Lane_addon_sources.access -> name:string ->
+  (export_observation option, string) result
+(** Read the last completed observation of the visible installation exporting
+    [name], without an RPC or starting a worker. No installation is [None];
+    ambiguous, failed or not-yet-observed installations are errors. *)

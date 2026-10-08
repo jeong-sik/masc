@@ -75,16 +75,49 @@ val resolve_config
     address the file names does; otherwise it retries where it is.
 
     A result is sent again only when the request may not have reached the
-    server: no connection, a broken exchange, or no answer in time. A result
-    the server answered, with any status or a body the host cannot accept, is
-    logged as undelivered and the host returns to polling. A result whose
-    server moved is not sent to the new address either: its request belonged
-    to the server that issued it. *)
+    server: no connection, a broken exchange, a connection that closed
+    without a response, or no answer in time. A result the server answered,
+    with any status or a body the host cannot accept, is logged as
+    undelivered and the host returns to polling. A result whose server moved
+    is not sent to the new address either: its request belonged to the server
+    that issued it. *)
 val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
 
-(** The BiDi host: the same poll loop with commands dispatched to a loopback
-    Firefox BiDi endpoint at [url] instead of the extension. *)
-val run_bidi : Eio_unix.Stdenv.base -> config -> string -> (unit, string) result
+(** The BiDi host: commands are dispatched to a loopback Firefox BiDi endpoint
+    at [url] instead of the extension. Its link to the server is {!run}'s: a
+    failed poll is asked again, the workspace connection file is followed,
+    and a result that may not have arrived is sent again, so a MASC server
+    that restarts finds this host still attached, as the same client.
+
+    It returns, with why, when:
+    - the BiDi connection ended, also while the host waits for work. A
+      command it ended under is answered first, once;
+    - a command's outcome is unknown. That answer too is offered once;
+    - the server refuses the client's registration.
+
+    [stop] blocks until the operator asked the host to stop and answers what
+    asked. From then on the host takes no further command: one in flight is
+    finished and its answer offered once, the server is told, and the host
+    returns [Ok ()]. Asked before the BiDi connection is up, it abandons the
+    attempt and returns [Ok ()]; asked while its session request is
+    unanswered, it waits for that answer first.
+
+    On each of these ways out, and when an exception raised while it serves
+    leaves it, the host first ends the BiDi session it asked for, so the same
+    Firefox takes the next host. Firefox keeps a session whose socket closed
+    and takes one session at a time; ending it closes no tab and leaves the
+    browser running. A session that could not be ended is logged with what
+    the operator does about it, and a stop that left one returns an error
+    instead of [Ok ()]. That includes a host cancelled from outside: its
+    connection is taken down before the session can be ended over it. A
+    result that stayed undelivered is logged and does not change what the
+    host returns. *)
+val run_bidi
+  :  Eio_unix.Stdenv.base
+  -> config
+  -> string
+  -> stop:(unit -> string)
+  -> (unit, string) result
 
 module For_testing : sig
   (** A transport step under its deadline: the step's outcome when it

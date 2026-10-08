@@ -265,8 +265,17 @@ val error_to_json : error -> Yojson.Safe.t
 
 type t
 
+type branch_failure_policy =
+  | Fail_fast
+  | Continue_independent
+
+val default_branch_failure_policy : branch_failure_policy
+
+val branch_failure_policy : t -> branch_failure_policy
+
 val create
   :  descriptors:Keeper_tool_descriptor.t list
+  -> ?branch_failure_policy:branch_failure_policy
   -> node list
   -> (t, error) result
 

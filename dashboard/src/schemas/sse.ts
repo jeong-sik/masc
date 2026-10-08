@@ -219,7 +219,7 @@ const KEEPER_CHAT_AG_UI_FIELDS_BY_TYPE = new Map<string, ReadonlySet<string>>([
   ['RUN_FINISHED', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId'])],
   ['RUN_ERROR', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'message', 'code'])],
   ['TEXT_MESSAGE_START', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'role'])],
-  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta'])],
+  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta', 'textStreamScope'])],
   ['TEXT_MESSAGE_END', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId'])],
   ['TOOL_CALL_START', new Set([
     ...KEEPER_CHAT_AG_UI_BASE_FIELDS,
@@ -712,6 +712,13 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
         ? ok(true)
         : fail('ag_ui_event.role', 'Expected assistant or user AG-UI role')
     case 'TEXT_MESSAGE_CONTENT':
+      if ('textStreamScope' in value && (
+        typeof value.textStreamScope !== 'number'
+        || !Number.isSafeInteger(value.textStreamScope)
+        || value.textStreamScope < 0
+      )) {
+        return fail('ag_ui_event.textStreamScope', 'Expected textStreamScope non-negative integer')
+      }
       return typeof value.delta === 'string'
         ? ok(true)
         : fail('ag_ui_event.delta', 'Expected AG-UI text delta')

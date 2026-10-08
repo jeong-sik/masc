@@ -802,18 +802,11 @@ let pending_board_event_of_delegate_completion
     | Keeper_event_queue.Delegate_no_reply -> "no_reply", ""
     | Keeper_event_queue.Delegate_failed detail -> "failed", detail
   in
-  (* [short_preview] truncates at [delegate_reply_preview_max_len] bytes and
-     ends with "..." exactly when it cut. A cut reply keeps only its head in
-     the row: the tail is where exact export objects and code fences live --
-     an artifact marker past the cut vanished from a delivered answer while
-     the row said nothing, so the reader had no way to know the text it held
-     was partial. The row itself is a pure projection and cannot fetch
-     anything back. So a cut is never silent: the row appends the read path,
-     [masc_keeper_delegate_status] with the operation id the row already
-     carries as its post id, which returns the original full reply for that
-     exact outcome. Raising the ceiling would only hide the same cut again at
-     a different size; the wording lives in config/prompts like every event
-     row, and a render failure still states the cut and the id as bare data. *)
+  (* The preview stays bounded, while [Delegate_completed] preserves the
+     original terminal payload. The unified prompt adds [reply_full] for a
+     cut reply; the configured note names that field as the primary source
+     and retains the operation lookup only for events without it. A prompt
+     render failure still leaves the lookup coordinates as structured data. *)
   let preview =
     (* [short_preview] measures after [String.trim], so the cut test must
        measure the same trimmed bytes: a space-padded short reply must not

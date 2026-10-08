@@ -214,8 +214,12 @@ let metadata db cleanup expected = statement db cleanup "scope"
   | rc -> Error (sqlite_failure db "scope" rc))
 let decode_row scope stmt =
   let* seq64 = integer (Sqlite3.column stmt 0) in
-  let* seq = Runtime_json_integer.of_json (`Intlit (Int64.to_string seq64))
-      |> Result.map_error (fun detail -> Corrupt {line=0;detail}) in
+  let* seq =
+    let as_int = Int64.to_int seq64 in
+    if Int64.equal (Int64.of_int as_int) seq64 then
+      Runtime_json_integer.of_json (`Int as_int)
+      |> Result.map_error (fun detail -> Corrupt {line=0;detail})
+    else Error (Corrupt {line=0;detail="sequence outside the OCaml int range"}) in
   let* event_uuid = text (Sqlite3.column stmt 1) in
   let* recorded_at = match Sqlite3.column stmt 2 with
     | Sqlite3.Data.FLOAT f when Float.is_finite f -> Ok f
@@ -392,7 +396,7 @@ let read ?after reader = with_database ~create:false reader (fun db cleanup ->
     let* () = validate_schema db cleanup in
     let* store_id,next = metadata db cleanup reader.scope in
     let through_sequence = Int64.to_int (Int64.pred next) in
-    let* boundary = match after with
+    let* boundary = match (after : cursor option) with
       | None -> Ok 0
       | Some cursor when cursor.store_id<>store_id -> Error Cursor_store_mismatch
       | Some cursor when cursor.after_sequence>through_sequence -> Error Cursor_ahead

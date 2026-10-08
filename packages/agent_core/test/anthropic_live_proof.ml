@@ -299,13 +299,12 @@ let () =
            if not (Re.execp (Re.compile (Re.str lookup_code)) text)
            then fail label ("second turn did not return the code: " ^ String.trim text)
            else (
-             pass label (describe_response second);
              if seen.signed_thinking_blocks = 0
              then
-               warn
+               fail
                  label
-                 "the first turn carried no signed thinking block, so replay was not \
-                  exercised"))));
+                 "the first turn carried no signed thinking block; required replay was not exercised"
+             else pass label (describe_response second)))));
   if !failed
   then (
     print_endline "FAIL: at least one request shape the row allows did not come back whole";

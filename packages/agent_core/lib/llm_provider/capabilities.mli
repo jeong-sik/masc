@@ -103,6 +103,9 @@ type structured_output_support = Capability_vocab.structured_output_support =
 
 type anthropic_thinking_control =
   | Anthropic_adaptive_default
+  | Anthropic_adaptive_disabled_through_high
+      (** Explicit disabled thinking accepts low/medium/high effort, or the
+          model default when effort is omitted; higher efforts require adaptive. *)
   | Anthropic_adaptive_between_tools
       (** [enable_thinking=false] selects [between_tools], not fully disabled
           thinking; only low/medium/high effort is accepted in that mode. *)

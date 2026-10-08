@@ -221,8 +221,7 @@ def creation_preserves_retained_queue(executable):
                 h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
                 os.write(fd, b"q")
             finally:
-                fixture.release_interrupt.set()
-                fixture.release.set()
+                fixture.close()
 
         h.run_terminal_scenario(
             executable, description="Keeper creation preserves retained queue",

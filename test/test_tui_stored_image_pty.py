@@ -265,9 +265,7 @@ def run(executable, *, mode, evidence_dir=None):
             released.set()
             history.release.set()
             if queue is not None:
-                queue.release_first_acceptance.set()
-                queue.release_interrupt.set()
-                queue.release.set()
+                queue.close()
 
     _keyboard_harness.run_terminal_scenario(
         executable,

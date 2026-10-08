@@ -51,6 +51,7 @@ from tui_keyboard_harness import (
     send_and_wait,
     tab_until,
     wait_for_fixture_event,
+    wait_for_fixture_state,
     wait_for_http_request,
     wait_for_output,
     wait_for_terminal_input_consumed,
@@ -964,6 +965,8 @@ class AtomicChatFixture:
     """A held server turn with durable admissions and a separately gated Esc ack.
 
     Events, rather than model completion or a guessed sleep, release each phase.
+    Admission may continue while paused, but a new execution requires an explicit
+    resume. A previously started execution may still publish its terminal.
     The real TUI runs against this wire fixture; Owner/SQLite execution is tested
     by the OCaml suites, not simulated as a claimed production success here.
     """
@@ -992,6 +995,10 @@ class AtomicChatFixture:
         self.admitted = threading.Condition(self.lock)
         self.edited = threading.Event()
         self.paused = False
+        self.closed = False
+        self.started_requests: set[str] = set()
+        self.finished_requests: set[str] = set()
+        self.waiting_for_resume: set[str] = set()
         self.token = "control-before-stop"
         self.turn_token = "9dd7c86d-0ca9-4a91-a24f-4d57085f0372"
         self.operations: list[dict[str, Any]] = []
@@ -1085,21 +1092,30 @@ class AtomicChatFixture:
             self.fixtures[path] = lambda: (200, operation)
             self.fixtures[path + "/edit"] = RequestHttpResponse(lambda body: self.edit(operation, body))
             self.fixtures[f"/api/v1/keepers/alpha/chat/operations?state=queued&after_sequence={sequence}"] = (200, {"operations": []})
+            working = self.first_working and sequence == 1 and not self.paused and not self.closed
+            if working:
+                self.started_requests.add(request["request_id"])
+            paused_at_admission = self.paused
+            token_at_admission = self.token
+            queued_count = sum(item["operation_id"] not in self.started_requests for item in self.operations)
             self.admitted.notify_all()
         response = keeper_chat_succeeded_response(body)
         blocks = [block for block in response.body.split(b"\n\n") if block]
         acceptance = json.loads(blocks[0].removeprefix(b"data: "))
-        working = self.first_working and sequence == 1
         acceptance["value"]["state"] = "Running" if working else "Queued"
-        acceptance["value"]["queued_count"] = sequence - 1 if self.first_working else sequence
+        acceptance["value"]["queued_count"] = queued_count
         if self.no_control_token or resumed_retained:
             acceptance["value"].pop("interactive", None)
         else:
+            # These admissions have no interrupt target. Keeper_owner's
+            # signal_exact(None) cannot signal a turn, and ordinary Enter
+            # does not resume a paused owner. Only the explicit resume
+            # directive reopens execution.
             acceptance["value"]["interactive"] = {
-                "outcome": "applied", "chat_control_token": self.token,
-                "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
+                "outcome": "paused" if paused_at_admission else "applied",
+                "chat_control_token": token_at_admission,
+                "signalled": False, "resumed": False, "interrupt_error": None,
             }
-        self.paused = False
 
         def chunks() -> Iterator[bytes]:
             prefix = f"data: {json.dumps(acceptance)}\n\n".encode()
@@ -1110,11 +1126,51 @@ class AtomicChatFixture:
             yield prefix
             if not self.release.wait(timeout=30):
                 raise AssertionError("interaction never released the held server turn")
+            # Releasing the old execution is not a resume directive. Already
+            # working streams can finish while paused; queued starts cannot.
+            if not working and not self.start_execution(request["request_id"]):
+                return
+            with self.lock:
+                if self.closed:
+                    return
             # The original request id is retained even when queued text is edited.
             terminal = keeper_chat_succeeded_response(json.dumps({**request, "message": operation["input"]["message"]}).encode())
             yield b"\n\n".join(terminal.body.split(b"\n\n")[4 if working else 1:])
+            with self.admitted:
+                self.finished_requests.add(request["request_id"])
+                self.admitted.notify_all()
 
         return StreamingHttpResponse(chunks)
+
+    def start_execution(self, request_id: str) -> bool:
+        """Claim a new fixture execution; replay must reuse an existing claim.
+
+        This is the pause boundary, not an owner scheduler simulation. The
+        caller separately controls when the preceding execution has settled.
+        close() aborts the wait without resuming or inventing stream events.
+        """
+        with self.admitted:
+            while self.paused and not self.closed:
+                self.waiting_for_resume.add(request_id)
+                self.admitted.notify_all()
+                self.admitted.wait()
+            self.waiting_for_resume.discard(request_id)
+            if self.closed:
+                return False
+            if request_id in self.started_requests:
+                raise AssertionError("an already started execution must be replayed, not restarted")
+            self.started_requests.add(request_id)
+            self.admitted.notify_all()
+            return True
+
+    def close(self) -> None:
+        """Unblock fixture handlers on success or failure without a hidden resume."""
+        with self.admitted:
+            self.closed = True
+            self.admitted.notify_all()
+        self.release.set()
+        self.release_interrupt.set()
+        self.release_first_acceptance.set()
 
     def edit(self, operation: dict[str, Any], body: bytes) -> HttpResponse:
         operation["input"] = json.loads(body)["input"]
@@ -1134,13 +1190,15 @@ class AtomicChatFixture:
                 raise AssertionError(f"Esc ignored the locally working direct execution {expected}: {request!r}")
         elif request.get("interrupt_token") != self.turn_token:
             raise AssertionError(f"Esc targeted another turn: {request!r}")
-        with self.lock:
+        with self.admitted:
             self.interrupt_requests.append(request)
-        self.paused = True
+            self.paused = True
+            self.admitted.notify_all()
         self.interrupted.set()
         if not self.release_interrupt.wait(timeout=20):
             raise AssertionError("interaction never acknowledged Esc")
-        self.token = "control-after-stop"
+        with self.lock:
+            self.token = "control-after-stop"
         target = ({"request_id": request["request_id"]} if "request_id" in request
                   else {"interrupt_token": self.turn_token})
         return 200, {"signalled": True, "paused": True, **target, "chat_control_token": self.token}
@@ -1152,8 +1210,12 @@ class AtomicChatFixture:
         expected = self.submitted[0]["expected_workspace"]
         if set(expected) != {"base_path", "masc_root"} or request.get("expected_workspace") != expected:
             raise AssertionError(f"resume changed the retained input workspace: {request!r}")
-        self.paused = False
-        self.resume_confirmed = True
+        with self.admitted:
+            if self.closed:
+                return 503, {"error": "fixture closed"}
+            self.paused = False
+            self.resume_confirmed = True
+            self.admitted.notify_all()
         return 200, {"ok": True}
 
     def unexpected_run_next(self, body: bytes) -> HttpResponse:
@@ -1182,6 +1244,30 @@ def wait_for_atomic_admissions(process: subprocess.Popen[bytes], master_fd: int,
             raise AssertionError(f"only {len(fixture.submitted)} of {count} messages reached server admission")
         with fixture.admitted:
             fixture.admitted.wait(timeout=0.02)
+
+
+def wait_for_atomic_paused_requests(process, master_fd, output, fixture, requests) -> None:
+    """Observe each admitted request reach the pause gate before sending resume."""
+    expected = {request["request_id"] for request in requests}
+
+    def waiting():
+        with fixture.lock:
+            return expected <= fixture.waiting_for_resume
+
+    if not wait_for_fixture_state(process, master_fd, output, waiting, timeout=5):
+        raise AssertionError("queued executions did not wait at the explicit pause boundary")
+    with fixture.lock:
+        if not fixture.paused or fixture.resume_confirmed:
+            raise AssertionError("ordinary Enter implicitly resumed the paused owner")
+        if expected & fixture.started_requests:
+            raise AssertionError("a queued execution started before explicit resume")
+    if any(("reply-" + request["message"]).encode() in output for request in requests):
+        raise AssertionError("a queued reply escaped before explicit resume")
+
+
+def resume_atomic_queue(process, master_fd, output) -> None:
+    send_and_wait(process, master_fd, output, b"/queue resume", composer_showing(b"/queue resume"))
+    send_and_wait(process, master_fd, output, b"\r", b"Server confirmed queue resume")
 
 
 def chat_queue_interaction(fixture: AtomicChatFixture) -> Interaction:
@@ -1224,8 +1310,7 @@ def chat_queue_interaction(fixture: AtomicChatFixture) -> Interaction:
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
         finally:
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
     return interact
 
 
@@ -1262,14 +1347,15 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
             if fixture.run_next_calls or any(path == "/api/v1/keepers/turn/run-next" for path, _ in requests):
                 raise AssertionError("plain Enter used a second run-next control request")
             fixture.release.set()
+            wait_for_atomic_paused_requests(process, master_fd, output, fixture, fixture.submitted)
+            resume_atomic_queue(process, master_fd, output)
             wait_for_output(process, master_fd, output, b"reply-new-course", start=0, timeout=10)
             wait_for_output(process, master_fd, output, b"reply-one-more", start=0, timeout=10)
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
         finally:
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
     return interact
 
 
@@ -1305,13 +1391,18 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
             if fixture.submitted[2]["admission_intent"]["control_token"] != "control-after-stop":
                 raise AssertionError("held Enter did not use the one stop acknowledgement")
             fixture.release.set()
+            wait_for_atomic_paused_requests(process, master_fd, output, fixture, fixture.submitted[1:])
+            # The running operation settles even though the next starts remain paused.
+            if not wait_for_fixture_state(process, master_fd, output,
+                    lambda: fixture.submitted[0]["request_id"] in fixture.finished_requests, timeout=5):
+                raise AssertionError("pause prevented the already working operation from settling")
+            resume_atomic_queue(process, master_fd, output)
             wait_for_output(process, master_fd, output, b"reply-after-stop", start=0, timeout=10)
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
         finally:
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
     return interact
 
 
@@ -1333,8 +1424,7 @@ def chat_pending_stop_leave_interaction(fixture: AtomicChatFixture) -> Interacti
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
         finally:
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
     return interact
 
 
@@ -1371,8 +1461,7 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
                 process, master_fd, output, b"Goodbye!", start=start, timeout=3.0
             )
         finally:
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
     return interact
 
 
@@ -1405,15 +1494,17 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
             if fixture.submitted[0]["admission_intent"]["control_token"] != "control-after-stop":
                 raise AssertionError("fresh Enter did not use the completed stop authority")
             send_and_wait(process, master_fd, output, b"/queue", composer_showing(b"/queue"))
+            queue_read_start = len(output)
             queued = send_and_wait(process, master_fd, output, b"\r", b"Local unsent messages: 1")
             if b"retained-original" not in screen_text(frame_containing(queued, b"Local unsent messages: 1")):
                 raise AssertionError("fresh Enter discarded the Esc-retained input")
+            # Finish this read before asking for another queue operation.
+            wait_for_output(process, master_fd, output, b"Queue snapshot", start=queue_read_start, timeout=5)
             fixture.release.set()
-            wait_for_output(process, master_fd, output, b"reply-explicit-followup", start=0, timeout=10)
+            wait_for_atomic_paused_requests(process, master_fd, output, fixture, fixture.submitted)
             if len(fixture.submitted) != 1:
                 raise AssertionError("retained input reached admission before explicit resume")
-            send_and_wait(process, master_fd, output, b"/queue resume", composer_showing(b"/queue resume"))
-            send_and_wait(process, master_fd, output, b"\r", b"Server confirmed queue resume")
+            resume_atomic_queue(process, master_fd, output)
             wait_for_atomic_admissions(process, master_fd, output, fixture, 2)
             if [item["message"] for item in fixture.submitted] != ["explicit-followup", "retained-original"]:
                 raise AssertionError(f"explicit resume lost or merged an Enter request: {fixture.submitted!r}")
@@ -1421,12 +1512,13 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
                 raise AssertionError("separate Enter sends shared a request identity")
             if fixture.submitted[1].get("admission_intent") is not None:
                 raise AssertionError("resumed retained input invented fresh Enter authority")
+            wait_for_output(process, master_fd, output, b"reply-explicit-followup", start=0, timeout=10)
+            wait_for_output(process, master_fd, output, b"reply-retained-original", start=0, timeout=10)
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
         finally:
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
     return interact
 
 

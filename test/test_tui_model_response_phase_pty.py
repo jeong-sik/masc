@@ -224,8 +224,7 @@ def run(executable):
             stop_reasoning.set()
             for gate in content_gates.values():
                 gate.set()
-            fixture.release.set()
-            fixture.release_interrupt.set()
+            fixture.close()
 
     h.run_terminal_scenario(executable,
         description="Content identities and provider response stop preserve the open Keeper turn",

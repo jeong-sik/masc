@@ -266,7 +266,7 @@ jobs:
       # Explicit chat-phase selection captures the actual recorded ANSI frames;
       # absent frames or a mismatching replay never count as screen evidence.
       - name: Capture Chat phase fixture PTY screenshots
-        if: ${{ !cancelled() && (contains(inputs.suite, 'test_tui_model_response_phase_pty') || contains(inputs.suite, 'test_tui_input_delivery_phase_pty')) }}
+        if: ${{ !cancelled() && (contains(inputs.suite, 'test_tui_model_response_phase_pty') || contains(inputs.suite, 'test_tui_input_delivery_phase_pty') || contains(inputs.suite, 'test_tui_draft_dispatch_pty')) }}
         env:
           STUDIO_SELECTED_SUITES: ${{ inputs.suite }}
           STUDIO_SOURCE_SHA: ${{ inputs.candidate_sha || github.sha }}
@@ -303,13 +303,14 @@ jobs:
           Path(os.environ["RUNNER_TEMP"], "studio-run.json").write_text(json.dumps(info))
           PYINFO
           chat_phase_failed=false
-          for chat_phase_suite in test_tui_model_response_phase_pty test_tui_input_delivery_phase_pty; do
+          for chat_phase_suite in test_tui_model_response_phase_pty test_tui_input_delivery_phase_pty test_tui_draft_dispatch_pty; do
             if [[ "$STUDIO_SELECTED_SUITES" != *"$chat_phase_suite"* ]]; then
               continue
             fi
             case "$chat_phase_suite" in
               test_tui_model_response_phase_pty) phase_pass_marker="TUI model response phase PTY: PASS" ;;
               test_tui_input_delivery_phase_pty) phase_pass_marker="TUI input delivery phase PTY: PASS" ;;
+              test_tui_draft_dispatch_pty) phase_pass_marker="TUI draft dispatch PTY: PASS" ;;
             esac
             if ! "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
               --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
@@ -323,7 +324,7 @@ jobs:
           fi
 
       - name: Upload Chat phase fixture PTY screenshots
-        if: ${{ always() && (contains(inputs.suite, 'test_tui_model_response_phase_pty') || contains(inputs.suite, 'test_tui_input_delivery_phase_pty')) }}
+        if: ${{ always() && (contains(inputs.suite, 'test_tui_model_response_phase_pty') || contains(inputs.suite, 'test_tui_input_delivery_phase_pty') || contains(inputs.suite, 'test_tui_draft_dispatch_pty')) }}
         uses: actions/upload-artifact@v7
         with:
           name: chat-phase-studio-${{ inputs.candidate_sha || github.sha }}

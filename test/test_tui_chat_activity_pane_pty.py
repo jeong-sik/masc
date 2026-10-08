@@ -57,7 +57,7 @@ def output_handoff_scenario(executable):
         _keyboard_harness.drain_until_quiet(process, fd, output, cap=1.0)
         return _keyboard_harness.screen_rows(bytes(output))
 
-    def interact(process, fd, _slave, output, _base):
+    def interact_body(process, fd, _slave, output, _base):
         try:
             _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
@@ -111,6 +111,12 @@ def output_handoff_scenario(executable):
                           start=settlement_start, timeout=12)
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         _keyboard_harness.write_all(fd, output, b"q")
+
+    def interact(process, fd, slave, output, base):
+        try:
+            interact_body(process, fd, slave, output, base)
+        finally:
+            fixture.close()
 
     _keyboard_harness.run_terminal_scenario(executable, description="Autonomous output stays in the conversation beside queued input",
                             interact=interact, http_fixtures=fixture.fixtures, refresh=0.5,

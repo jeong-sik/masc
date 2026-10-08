@@ -537,8 +537,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False, paused_before_resum
         finally:
             release_roster.set()
             admission.release_admission.set()
-            admission.release.set()
-            admission.release_interrupt.set()
+            admission.close()
     _keyboard_harness.run_terminal_scenario(binary,
         description=("MASC-root-only change" if root_only else "workspace change")
             + " suspends complete unsent inputs until explicit resume in A"
@@ -626,8 +625,7 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
             leave_chat_for_roster(process, fd, output)
             os.write(fd, b"q")
         finally:
-            admission.release.set()
-            admission.release_interrupt.set()
+            admission.close()
     _keyboard_harness.run_terminal_scenario(binary,
         description=("MASC-root-only transition: " if root_only else "")
             + "staged image bytes and references retain exact workspace and Keeper ownership",

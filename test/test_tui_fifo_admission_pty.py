@@ -62,9 +62,7 @@ def run(executable: str) -> None:
             _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
         finally:
-            fixture.release_first_acceptance.set()
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
 
     _keyboard_harness.run_terminal_scenario(
         executable,
@@ -219,8 +217,7 @@ def run(executable: str) -> None:
             os.write(master_fd, b"q")
         finally:
             release_first_promotion.set()
-            priority_fixture.release_interrupt.set()
-            priority_fixture.release.set()
+            priority_fixture.close()
 
     _keyboard_harness.run_terminal_scenario(
         executable,

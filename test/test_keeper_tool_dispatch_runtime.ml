@@ -1487,25 +1487,15 @@ let test_manual_gate_does_not_defer_internal_memory_write () =
          "Manual Gate memory write outcome"
          "success"
          (outcome_label result.KTE.disposition);
-       check bool
-         "Manual Gate memory write created its snapshot"
-         true
+       check bool "Manual Gate pending write does not create current Memory" false
          (Sys.file_exists memory_path);
-       (match
-          Masc.Keeper_memory_os_current.read_for_keepers_dir
-            ~keepers_dir
-            ~keeper_id:meta.name
-        with
-        | Ok (Some { facts = [ fact ]; _ }) ->
-          check string
-            "internal memory write persisted the exact claim"
-            "**internal memory** persists without external Gate approval"
-            fact.claim
-        | Ok (Some snapshot) ->
-          failf
-            "internal memory write persisted %d facts instead of one"
-            (List.length snapshot.facts)
-        | Ok None -> fail "internal memory write persisted no snapshot"
+       (match Masc.Keeper_memory_admission_queue.read_pending ~keepers_dir ~keeper_id:meta.name with
+        | Ok (Some batch) ->
+          (match Masc.Keeper_memory_admission_queue.candidates batch with
+           | [candidate] -> check string "internal write preserves exact pending claim"
+               "**internal memory** persists without external Gate approval" candidate.fact.claim
+           | _ -> fail "expected one pending observation")
+        | Ok None -> fail "internal memory write omitted pending input"
         | Error detail -> fail detail);
        (match
           Masc.Keeper_approval_queue.list_pending_entries_for_workspace
@@ -4767,6 +4757,20 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
        failed_naming Tool_result.Proven_pre_effect "the missing retraction"
          (first "retract-missing");
        succeeded "lane status beside memory calls" (first "lane-first");
+       let module Admission = Masc.Keeper_memory_admission_queue in
+       let module Current = Masc.Keeper_memory_os_current in
+       let pending = match Admission.read_pending ~keepers_dir ~keeper_id:meta.name with
+         | Ok (Some batch) -> batch | _ -> fail "successful write omitted pending input" in
+       check string "batch reports pending admission" "persisted_pending_admission"
+         Yojson.Safe.Util.((parse_json (first "write-kept").content) |> member "outcome" |> to_string);
+       (match Current.apply_disposition ~explicit_write_range_id:(Admission.range_id pending)
+          ~keepers_dir ~keeper_id:meta.name ~now:(Unix.gettimeofday ())
+          ~source:{Current.kind=Current.Librarian;trace_id="fixture-admission"}
+          ~absorbed:[] ~revisions:[]
+          ~new_claims:(List.map (fun (row : Admission.candidate) -> row.fact) (Admission.candidates pending)) () with
+        | Ok _ -> () | Error detail -> fail detail);
+       (match Admission.acknowledge_committed ~keepers_dir ~keeper_id:meta.name with
+        | Ok () -> () | Error detail -> fail detail);
        let kept_id =
          match
            Masc.Keeper_memory_os_current.read_for_keepers_dir
@@ -4779,8 +4783,8 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
          | Ok None -> fail "the claim persisted no snapshot"
          | Error detail -> fail detail
        in
-       (* A directory where the snapshot file belongs: the next write and
-          retraction fail inside the store, whatever user the test runs as. *)
+       (* Unreadable queue and current paths independently reject the pending
+          write and retraction, whatever user the test runs as. *)
        let snapshot_path =
          Masc.Keeper_memory_os_current.path_for_keepers_dir
            ~keepers_dir
@@ -4788,6 +4792,9 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
        in
        Unix.unlink snapshot_path;
        Unix.mkdir snapshot_path 0o755;
+       let queue_path = Admission.path ~keepers_dir ~keeper_id:meta.name in
+       Unix.unlink queue_path;
+       Unix.mkdir queue_path 0o755;
        let second =
          run_batch
            "store failure batch"

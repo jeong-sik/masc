@@ -12316,6 +12316,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
        Its request went out under the old authority, and a surface outside
        the bundle has no tick of its own to recover it. *)
     launch_surface_reads state ~mailbox state.view;
+    refresh_acting_pane_changes state ~mailbox;
     (* Retained nested readers own their selection independently of the list
        underneath. Reissue their observations without resetting navigation. *)
     (match state.view with
@@ -12415,7 +12416,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
       (match state.repository_changes_scope, state.repository_changes_diff_path with
        | Some scope, Some path ->
            launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader ~scope ~path
-       | _ -> ());
+       | Some scope, None -> launch_repository_changes_load state ~mailbox ~scope
+       | None, _ -> ());
     if state.patch_modal_open then Option.iter (fun path ->
       launch_repository_changes_diff_load state ~mailbox ~reader:Patch_diff_reader
         ~scope:Tui_decode.Repository_change_project ~path) state.patch_modal_path;

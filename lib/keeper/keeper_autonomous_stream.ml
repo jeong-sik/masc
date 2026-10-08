@@ -115,7 +115,16 @@ let on_event t event = with_stream t (fun () ->
   forward t (Keeper_stream_text_redaction.Scoped.on_event t.text ~stream_scope event);
   ignore (Accum.take_protocol_errors t.accum))
 
-let on_tool_stream_observation t observation = with_stream t (fun () -> match observation with
+let on_tool_stream_observation t observation =
+  let protect_observation = match observation with
+    | Keeper_hooks_agent_core.Native_task_observed _ ->
+        (* Preserve admitted persistence through its health/report outcome,
+           without holding the unrelated root publication mutex. *)
+        Eio.Cancel.protect
+    | Runtime_attempt_started _ | Turn_collected _ | Turn_closed_without_sources _
+    | Native_tool_progress _ | Native_tool_completion _ | Official_tool_result _ ->
+        with_stream t in
+  protect_observation (fun () -> match observation with
   | Keeper_hooks_agent_core.Runtime_attempt_started {runtime_id; lane_attempt_index; _} ->
       flush t;
       let previous_scope = Accum.start_runtime_attempt t.accum in
@@ -128,7 +137,6 @@ let on_tool_stream_observation t observation = with_stream t (fun () -> match ob
       (match Accum.close_turn_without_sources t.accum ~turn with
        | Ok () -> () | Error detail -> mapping_failed t detail)
   | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
-      (* Root closure and native block indices do not own this receiver journal. *)
       Keeper_native_task_journal.observe t.task_journal ~attempt bound
       |> Keeper_native_task_journal.report ~keeper_name:t.keeper_name
   | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->

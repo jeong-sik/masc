@@ -3410,6 +3410,62 @@ let test_native_task_journal_autonomous_closed_root () =
         (Keeper_autonomous_stream.current ~base_path ~keeper_name:"claude-fixture" = None)))
 ;;
 
+let test_native_task_journal_wait_does_not_hold_root_stream () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let keeper_name = "claude-fixture" in
+        let turn_ref = Ids.Turn_ref.make ~trace_id:"task-journal-lock" ~absolute_turn:1 in
+        let stream = Keeper_autonomous_stream.create ~base_path ~keeper_name ~turn_ref in
+        let attempt, (bound : Keeper_claude_task_binding.bound) = List.hd observations in
+        let reader = Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name
+          ~receiver_generation:bound.ticket.receiver_generation ~session_id:bound.ticket.session_id) in
+        let entered, signal_entered = Eio.Promise.create () in
+        let release, signal_release = Eio.Promise.create () in
+        let callback_entered, signal_callback = Eio.Promise.create () in
+        let task_done, signal_done = Eio.Promise.create () in
+        let root_done, signal_root = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          match Keeper_fs_durable_directory.ensure ~ownership_root:base_path
+            ~before_prepare:(fun () ->
+              Eio.Promise.resolve signal_entered ();
+              Eio.Promise.await release)
+            ~before_directory_fsync:(fun _ -> ())
+            (Filename.dirname (Task_journal.path reader)) with
+          | Ok _ -> ()
+          | Error _ -> fail "fixture directory preparation failed");
+        Eio.Promise.await entered;
+        Fun.protect ~finally:(fun () -> Eio.Promise.resolve signal_release ()) (fun () ->
+          Eio.Fiber.fork ~sw (fun () ->
+            (* No yielding operation separates this signal from entry into the
+               real callback. Its first filesystem wait retains the old root
+               mutex on the regression path. *)
+            Eio.Promise.resolve signal_callback ();
+            Keeper_autonomous_stream.on_tool_stream_observation stream
+              (Keeper_hooks_agent_core.Native_task_observed {attempt;bound});
+            Eio.Promise.resolve signal_done ());
+          Eio.Promise.await callback_entered;
+          Eio.Fiber.fork ~sw (fun () ->
+            Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+            Eio.Promise.resolve signal_root ());
+          (* Timeout only the waiter: finish itself masks cancellation. The
+             finally releases task preparation before the switch joins either
+             protected callback, including on the old implementation. *)
+          Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () ->
+            Eio.Promise.await root_done);
+          check bool "root closes while task directory preparation is held" true
+            (Keeper_autonomous_stream.current ~base_path ~keeper_name = None);
+          check bool "blocked task has not committed a receiver file" false
+            (Sys.file_exists (Task_journal.path reader)));
+        Eio.Promise.await task_done;
+        let rows = task_journal_ok (Task_journal.read reader) in
+        check (list string) "released callback persists its original task UUID"
+          [bound.observation.uuid]
+          (List.map (fun (row : Task_journal.record) -> row.observation.uuid) rows);
+        check bool "task completion cannot reopen the closed root" true
+          (Keeper_autonomous_stream.current ~base_path ~keeper_name = None))))
+;;
+
 let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
@@ -4665,6 +4721,8 @@ let () =
             test_native_task_journal_callback_failure_preserves_root_answer
         ; test_case "autonomous task journal outlives its closed root stream" `Quick
             test_native_task_journal_autonomous_closed_root
+        ; test_case "task journal wait does not hold root stream" `Quick
+            test_native_task_journal_wait_does_not_hold_root_stream
         ; test_case "later command witness cannot adopt an unattributed task owner" `Quick
             test_task_binding_does_not_adopt_an_earlier_unattributed_call
         ; test_case "task metadata retains closed native owner without flushing model content" `Quick

@@ -79,9 +79,10 @@ continues to propagate rather than being swallowed as an ordinary disk error.
 
 Each append reads and validates the full receiver history under the file lock,
 with time and memory proportional to that history. Across n observations this
-reprocesses O(n²) history bytes. The autonomous callback also holds its stream
-mutex during the transaction, although blocking file I/O runs in a worker. These
-are outstanding cost and lock-coupling defects, not measured performance gains.
+reprocesses O(n²) history bytes. The task callback uses journal serialization
+without holding the autonomous root-stream mutex; its cancellation protection remains in place through issue
+recording and reporting. Blocking file I/O runs in a worker. Full-history
+validation remains an outstanding cost defect, with no measured speedup claim.
 There is no caching authority, compaction or retention policy. Files
 and directory chains use existing private-file infrastructure; concurrent
 external replacement/renaming of journal files is not a supported writer.
@@ -111,7 +112,7 @@ those repairs nor claims the inherited `awaited` gap is fixed.
 
 ## Authored checks and evidence limits
 
-Four cases in `test_keeper_claude_code_runtime` obtain private values through
+The original four cases in `test_keeper_claude_code_runtime` obtain private values through
 actual fake-CLI runtime/adapter/driver callbacks with scoped Native_full/Yolo
 admission; no JSON-to-private-owner fixture shortcut is used:
 
@@ -126,6 +127,13 @@ admission; no JSON-to-private-owner fixture shortcut is used:
   invocation, then injects them through the autonomous observation entrypoint
   after root closure. It verifies storage capability and unchanged root journal
   bytes/current turn identity, not receipt of provider events after root result.
+
+An additional authored fixture holds actual cold task-directory preparation,
+starts the real autonomous task callback, and requires root closure before
+releasing the directory gate. It then checks the original task UUID was stored
+without reopening the root. Its timeout applies to an unprotected completion
+waiter; the directory gate is released before the switch joins either protected
+callback. This fixture has not been executed in this correction.
 
 The direct HTTP route's full execution path is source-reviewed here; these new
 cases do not execute that whole route. Cleanup-warning forwarding follows the

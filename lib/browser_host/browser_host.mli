@@ -93,8 +93,23 @@ val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
     - the BiDi connection ended, also while the host waits for work. A
       command it ended under is answered first, once;
     - a command's outcome is unknown. That answer too is offered once;
-    - the server refuses the client's registration. *)
-val run_bidi : Eio_unix.Stdenv.base -> config -> string -> (unit, string) result
+    - the server refuses the client's registration.
+
+    It returns [Ok ()] when [stop ()] returns: [stop] blocks until the
+    operator asked the host to stop and answers what asked. A command in
+    flight is finished and answered first.
+
+    However it returns, it first ends the BiDi session it created, so the
+    same Firefox takes the next host. Firefox keeps a session whose socket
+    closed and takes one session at a time; ending it closes no tab and
+    leaves the browser running. A session that could not be ended is logged
+    with what the operator does about it. *)
+val run_bidi
+  :  Eio_unix.Stdenv.base
+  -> config
+  -> string
+  -> stop:(unit -> string)
+  -> (unit, string) result
 
 module For_testing : sig
   (** A transport step under its deadline: the step's outcome when it

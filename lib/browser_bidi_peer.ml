@@ -8,10 +8,22 @@ let required name json = match field name json with Some v -> Ok v | None -> Err
 type failure = Before_effect of string | Outcome_unknown of string
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
 type t = { command : string -> Yojson.Safe.t -> (Yojson.Safe.t,string) result;
+  session_end : unit -> (unit,string) result; mutable session_open : bool;
   mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option }
-let create ~command = {command;contexts=[];next_tab=0;version=None}
+let create ?session_end ~command () =
+  let session_end = match session_end with
+    | Some session_end -> session_end
+    | None -> fun () -> Result.map ignore (command "session.end" (obj [])) in
+  {command;session_end;session_open=false;contexts=[];next_tab=0;version=None}
+(* Firefox keeps a session whose socket closed and takes one session at a
+   time, so one left behind refuses every later connection until that Firefox
+   is restarted. Ending it closes no tab and leaves the browser running. *)
+let end_session t =
+  if not t.session_open then Ok ()
+  else let* () = t.session_end () in t.session_open <- false; Ok ()
 let metadata t =
   let* result = t.command "session.new" (obj ["capabilities",obj []]) in
+  t.session_open <- true;
   let* caps = required "capabilities" result in
   let* name = string "browserName" caps in
   if name <> "firefox" then Error "BiDi peer must be Firefox"
@@ -186,6 +198,10 @@ let dispatch t ~verb args =
       | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction") in
       Result.map_error (fun detail -> Outcome_unknown detail) (with_tab id receipt))
 
+(* How long a finishing connection waits for Firefox to end the session. A
+   Firefox that is there answers at once; the window only bounds one that is
+   not, so stopping the host does not wait on it. *)
+let session_end_window_sec = 2.
 module Endpoint = Ws_direct_core.Endpoint
 module Message = Ws_direct_core.Connection.Message
 exception Peer_finished of (unit, string) result
@@ -193,14 +209,18 @@ let with_connection ~env ~timeout ~url use =
   let* host,port,resource=Browser_bidi_downloads.endpoint url in
   try Eio.Switch.run (fun sw ->
     let clock=Eio.Stdenv.clock env and net=Eio.Stdenv.net env in
-    let pending=Hashtbl.create 4 and sequence=ref 0 and broken=ref None in
+    let pending=Hashtbl.create 4 and sequence=ref 0 and broken=ref None and shut=ref None in
     let ended,set_ended=Eio.Promise.create () in
+    (* No further page command is carried. The socket may still be open: this
+       side stops trusting a connection whose command got no reply. *)
     let disconnect reason =
       if !broken=None then (
         broken:=Some reason;
-        Eio.Promise.resolve set_ended reason;
-        Hashtbl.iter (fun _ resolve->Eio.Promise.resolve resolve (Error reason)) pending;
-        Hashtbl.clear pending) in
+        Eio.Promise.resolve set_ended reason);
+      Hashtbl.iter (fun _ resolve->Eio.Promise.resolve resolve (Error reason)) pending;
+      Hashtbl.clear pending in
+    (* The socket itself is gone; nothing more can be sent. *)
+    let closed reason = if !shut=None then shut:=Some reason; disconnect reason in
     Eio.Switch.on_release sw (fun ()->disconnect "BiDi connection closed");
     let connect () =
       Crypto_rng.ensure_default ();
@@ -223,8 +243,8 @@ let with_connection ~env ~timeout ~url use =
               settle id (let* code=string "error" json in Error ("BiDi command rejected: " ^ code))
             | _->disconnect "invalid BiDi response envelope") in
       let builder _=Endpoint.handlers ~on_message
-        ~on_close:(fun ~code:_ ~reason:_->disconnect "BiDi peer closed")
-        ~on_error:disconnect ~on_eof:(fun ()->disconnect "BiDi EOF") () in
+        ~on_close:(fun ~code:_ ~reason:_->closed "BiDi peer closed")
+        ~on_error:closed ~on_eof:(fun ()->closed "BiDi EOF") () in
       let authority=(if host="::1" then "[::1]" else host)^":"^string_of_int port in
       (* ws-direct reports an upgrade the peer refused, or a head that did not
          arrive in its own window, as [Failure]. That is this connection's
@@ -234,25 +254,34 @@ let with_connection ~env ~timeout ~url use =
           ~max_message:reply_limit_bytes flow builder with
         | wsd->Ok wsd
         | exception Failure detail->Error ("BiDi connection: " ^ detail) in
+      (* One command and its reply. A reply that arrived as the window
+         closed is the reply. *)
+      let exchange ~window method_ params =
+        incr sequence;let id= !sequence in
+        let reply,resolve=Eio.Promise.create () in Hashtbl.add pending id resolve;
+        Endpoint.Wsd.send_text wsd (Yojson.Safe.to_string (obj ["id",`Int id;"method",str method_;"params",params]));
+        Watched_work.run
+          ~watcher:(fun ()->Eio.Time.sleep clock window; Error `Deadline_exceeded)
+          (fun ()->Ok (Eio.Promise.await reply)) in
       let command method_ params =
         match !broken with Some e->Error e|None->
-          incr sequence;let id= !sequence in
-          let reply,resolve=Eio.Promise.create () in Hashtbl.add pending id resolve;
-          Endpoint.Wsd.send_text wsd (Yojson.Safe.to_string (obj ["id",`Int id;"method",str method_;"params",params]));
-          (* A reply that arrived as the deadline passed is the reply: the
-             connection is ended only for a command that got none. *)
-          (match
-             Watched_work.run
-               ~watcher:(fun ()->Eio.Time.sleep clock timeout; Error `Deadline_exceeded)
-               (fun ()->Ok (Eio.Promise.await reply))
-           with
+          (* The connection is ended only for a command that got no reply. *)
+          (match exchange ~window:timeout method_ params with
            | Ok reply->reply
            | Error `Deadline_exceeded->
              disconnect "BiDi transport deadline exceeded";
              Error "BiDi transport deadline exceeded") in
+      (* Ending the session is not a page command. It is sent on a connection
+         this side stopped trusting too, for as long as the socket is open: a
+         page whose script hung is not a browser that is gone. *)
+      let session_end () =
+        match !shut with Some reason->Error reason|None->
+          (match exchange ~window:session_end_window_sec "session.end" (obj []) with
+           | Ok reply->Result.map ignore reply
+           | Error `Deadline_exceeded->Error "no answer to session.end in time") in
       (* The host owns the whole command deadline. A cancelled command ends this
          connection instead of admitting another write behind an unknown one. *)
-      Ok (create ~command) in
+      Ok (create ~session_end ~command ()) in
     try
       (* A connection established as the deadline passed is the connection. *)
       let peer=match

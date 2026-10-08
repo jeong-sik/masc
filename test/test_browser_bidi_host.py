@@ -155,9 +155,9 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
                     if time.monotonic() >= deadline:
                         raise AssertionError("owned Firefox did not start")
                     time.sleep(.05)
-            native = subprocess.Popen([host, "--base-path", str(root), "--token-file", str(root / "token"),
-                "--server", f"http://127.0.0.1:{server.server_port}", "--bidi-url", f"ws://127.0.0.1:{port}/session"],
-                stdin=subprocess.DEVNULL, stdout=native_log, stderr=native_log)
+            host_argv = [host, "--base-path", str(root), "--token-file", str(root / "token"),
+                "--server", f"http://127.0.0.1:{server.server_port}", "--bidi-url", f"ws://127.0.0.1:{port}/session"]
+            native = subprocess.Popen(host_argv, stdin=subprocess.DEVNULL, stdout=native_log, stderr=native_log)
             assert ready.wait(20), f"native peer did not register; stderr retained in {evidence / 'native.log'}"
 
             def call(verb, args):
@@ -345,6 +345,21 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert other["ok"] and other["data"] == before["data"]
             assert len({row[0] for row in metadata}) == 1 and all(row[1] for row in metadata)
             assert all(row[2] == "webdriver_bidi" for row in metadata), metadata
+            # A host that is stopped ends the BiDi session it created, so
+            # this same Firefox, not restarted, takes the next host. Its tabs
+            # are the ones the first host saw.
+            first_host = metadata[0][0]
+            seen = sorted(tab["url"] for tab in call("tabs.list", {})["data"])
+            native.terminate()
+            assert native.wait(timeout=10) == 0, f"stopped host exit; see {evidence / 'native.log'}"
+            assert stopped.wait(5), "the stopped host did not tell the server"
+            assert ff.poll() is None, "Firefox ended with the host's session"
+            ready.clear()
+            native = subprocess.Popen(host_argv, stdin=subprocess.DEVNULL, stdout=native_log, stderr=native_log)
+            assert ready.wait(20), f"a second host did not attach; see {evidence / 'native.log'}"
+            again = call("tabs.list", {})
+            assert again["ok"] and sorted(tab["url"] for tab in again["data"]) == seen, again
+            assert metadata[-1][0] != first_host, "the second host is a new client"
             outcome.update(passed=True, tabs=matching, version=metadata[0][1])
         except BaseException:
             outcome["error"] = traceback.format_exc()

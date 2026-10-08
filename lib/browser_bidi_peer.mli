@@ -4,8 +4,24 @@ type failure = Before_effect of string | Outcome_unknown of string
 (** Native host verbs, decoded once from the MASC poll wire. *)
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
 type t
-val create : command:(string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result) -> t
+(** [session_end] ends the session over its own path; without it the session
+    is ended through [command]. *)
+val create
+  :  ?session_end:(unit -> (unit, string) result)
+  -> command:(string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result)
+  -> unit
+  -> t
+(** Creates the BiDi session and answers the browser's version. *)
 val metadata : t -> (string, string) result
+(** Ends the session {!metadata} created; [Ok ()] when there is none. Firefox
+    keeps a session whose socket closed and takes one at a time, so a session
+    left behind refuses every later connection until that Firefox is
+    restarted. Ending it closes no tab and leaves the browser running. Under
+    {!with_connection} this is sent for as long as the socket is open, also
+    after a command got no reply, and waits at most
+    {!session_end_window_sec}. *)
+val end_session : t -> (unit, string) result
+val session_end_window_sec : float
 val dispatch : t -> verb:verb -> Yojson.Safe.t -> (Yojson.Safe.t, failure) result
 (** One socket message carries at most this many bytes; a larger one ends the
     connection. *)

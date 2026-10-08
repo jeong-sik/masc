@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import signal
 import socket
 import socketserver
 import struct
@@ -36,6 +37,9 @@ POLL_WAIT_SEC = 0.2
 EXIT_WAIT_SEC = 5
 # Long enough for a host that would wrongly exit to have done so.
 STAYS_ALIVE_SEC = 2
+# How long the scripted Firefox holds a command's answer back in the case
+# that stops the host under it.
+SLOW_ANSWER_SEC = 1
 PAGE = {"url": "https://example.test/", "title": "Fixture", "text": "fixture text",
         "active": True, "scrollX": 0, "scrollY": 0}
 
@@ -143,6 +147,10 @@ class FirefoxState:
         self.methods = []
         self.sockets = []
         self.leave_on = None
+        self.slow_on = None
+        self.answers_session_end = True
+        self.answers_the_upgrade = True
+        self.connected = threading.Event()
 
 
 class FirefoxServer(socketserver.ThreadingTCPServer):
@@ -191,9 +199,15 @@ class Firefox(socketserver.BaseRequestHandler):
 
     def handle(self):
         state = self.server.state
+        state.connected.set()
         head = b""
         while b"\r\n\r\n" not in head:
             head += self.request.recv(4096)
+        if not state.answers_the_upgrade:
+            # Something listens here and never speaks WebSocket.
+            while self.request.recv(4096):
+                pass
+            return
         key = next(line.split(b":", 1)[1].strip() for line in head.split(b"\r\n")
                    if line.lower().startswith(b"sec-websocket-key:"))
         accept = base64.b64encode(hashlib.sha1(key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest())
@@ -206,6 +220,14 @@ class Firefox(socketserver.BaseRequestHandler):
                 state.methods.append(message["method"])
                 if message["method"] == state.leave_on:
                     # Firefox quits with this command unanswered.
+                    return
+                if message["method"] == state.slow_on:
+                    time.sleep(SLOW_ANSWER_SEC)
+                if message["method"] == "session.end":
+                    if not state.answers_session_end:
+                        continue
+                    # Firefox answers, then closes the socket itself.
+                    self.send_message({"type": "success", "id": message["id"], "result": {}})
                     return
                 if message["method"] == "session.new":
                     result = {"sessionId": "scripted", "capabilities":
@@ -267,7 +289,7 @@ class BidiHostLink(unittest.TestCase):
         self.lanes.remove(entry)
         stop_lane(*entry)
 
-    def attach(self, fixed):
+    def start(self, fixed):
         """Start the host. [fixed] pins it to the lane with --server; without
         it the workspace connection file names the port."""
         argv = [str(HOST), "--base-path", str(self.base),
@@ -281,6 +303,9 @@ class BidiHostLink(unittest.TestCase):
         self.process = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL,
                                         stdout=self.log, stderr=self.log)
         self.processes.append(self.process)
+
+    def attach(self, fixed):
+        self.start(fixed)
         self.assertTrue(self.lane.state.polled.wait(EXIT_WAIT_SEC), self.host_log())
 
     def host_log(self):
@@ -301,13 +326,17 @@ class BidiHostLink(unittest.TestCase):
         time.sleep(STAYS_ALIVE_SEC)
         self.assertIsNone(self.process.poll(), self.host_log())
 
-    def assert_ends(self, reason):
+    def assert_ends(self, reason, code=1):
         try:
-            code = self.process.wait(timeout=EXIT_WAIT_SEC)
+            exited = self.process.wait(timeout=EXIT_WAIT_SEC)
         except subprocess.TimeoutExpired:
             self.fail("the host is still running\n" + self.host_log())
-        self.assertEqual(code, 1)
+        self.assertEqual(exited, code, self.host_log())
         self.assertIn(reason, self.host_log())
+
+    def assert_session_ended_last(self):
+        self.assertEqual(self.firefox.state.methods.count("session.end"), 1, self.firefox.state.methods)
+        self.assertEqual(self.firefox.state.methods[-1], "session.end")
 
     def test_a_server_restarted_on_its_port_finds_the_host_still_attached(self):
         self.attach(fixed=True)
@@ -357,6 +386,8 @@ class BidiHostLink(unittest.TestCase):
         self.assert_ends("BiDi connection ended: BiDi EOF")
         # The server is told, so the dead connection is not listed.
         self.assertTrue(self.lane.state.disconnected.wait(EXIT_WAIT_SEC))
+        # Over a closed socket no session can be ended; the host says so.
+        self.assertIn("the BiDi session was not ended (BiDi EOF)", self.host_log())
 
     def test_firefox_leaving_ends_a_host_that_is_sending_a_result_again(self):
         self.attach(fixed=True)
@@ -389,6 +420,55 @@ class BidiHostLink(unittest.TestCase):
         self.assert_ends("native client registration rejected")
         # One refusal is the answer; the host does not ask it again.
         self.assertEqual(len(self.lane.state.polls), 1)
+        # A host that ends by itself leaves no session in Firefox either.
+        self.assert_session_ended_last()
+
+    def stopped_by(self, stop):
+        self.attach(fixed=True)
+        self.assertTrue(self.call(self.lane)["ok"])
+        self.process.send_signal(stop)
+        self.assert_ends(f"stopped by {stop.name}", code=0)
+        # The server is told and Firefox is left free for the next host.
+        self.assertTrue(self.lane.state.disconnected.wait(EXIT_WAIT_SEC))
+        self.assert_session_ended_last()
+        self.assertNotIn("was not ended", self.host_log())
+
+    def test_sigterm_stops_the_host_and_ends_its_session(self):
+        self.stopped_by(signal.SIGTERM)
+
+    def test_ctrl_c_stops_the_host_and_ends_its_session(self):
+        self.stopped_by(signal.SIGINT)
+
+    def test_a_stop_under_a_command_answers_it_first(self):
+        self.attach(fixed=True)
+        self.firefox.state.slow_on = "browsingContext.getTree"
+        ident = str(uuid.uuid4())
+        self.lane.state.commands.put({"id": ident, "verb": "tabs.list", "args": {}})
+        deadline = time.monotonic() + EXIT_WAIT_SEC
+        while "browsingContext.getTree" not in self.firefox.state.methods:
+            self.assertLess(time.monotonic(), deadline, self.host_log())
+            time.sleep(0.02)
+        self.process.send_signal(signal.SIGTERM)
+        answer = self.lane.state.results.get(timeout=EXIT_WAIT_SEC)
+        self.assertEqual(answer["id"], ident)
+        self.assertTrue(answer["ok"], answer)
+        self.assert_ends("stopped by SIGTERM", code=0)
+        self.assert_session_ended_last()
+
+    def test_a_session_firefox_does_not_end_is_said_to_the_operator(self):
+        self.firefox.state.answers_session_end = False
+        self.attach(fixed=True)
+        self.process.send_signal(signal.SIGTERM)
+        self.assert_ends("the BiDi session was not ended (no answer to session.end in time)", code=0)
+        self.assertIn("restart it before attaching again", self.host_log())
+
+    def test_a_stop_before_the_host_is_attached_abandons_the_attempt(self):
+        self.firefox.state.answers_the_upgrade = False
+        self.start(fixed=True)
+        self.assertTrue(self.firefox.state.connected.wait(EXIT_WAIT_SEC), self.host_log())
+        self.process.send_signal(signal.SIGTERM)
+        self.assert_ends("stopped by SIGTERM before it was attached", code=0)
+        self.assertEqual(self.lane.state.polls, [])
 
 
 if __name__ == "__main__":

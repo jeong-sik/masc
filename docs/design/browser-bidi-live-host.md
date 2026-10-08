@@ -58,8 +58,10 @@ two browsers. A request that names no `clientId` is then refused as
 `ambiguous_browser_clients`; a Keeper picks the `webdriver_bidi` connection
 from the list and keeps its `clientId` for the task.
 
-The host runs in the foreground until it is stopped. Restarting the MASC
-server does not end it. A poll the server did not answer is asked again after
+The host runs in the foreground until it is stopped with Ctrl-C or SIGTERM.
+It then finishes and answers a command in flight, tells the server, and ends
+the BiDi session it created. A stop that comes while it is still connecting
+abandons the attempt. Restarting the MASC server does not end it. A poll the server did not answer is asked again after
 five seconds, at the port the workspace's `connection.toml` names once that
 port answers, and a result that may not have arrived is sent again before the
 next poll. The restarted server sees the same client ID, and Firefox is not
@@ -76,13 +78,25 @@ It ends by itself in three cases, and says which in its own log output:
 
 The reason is not reported to the server.
 
-Attaching again takes both steps, Firefox first. The host does not end the
-BiDi session it created, the session stays in Firefox after the host is gone,
-and Firefox takes one session at a time. A host started against the same
-Firefox is refused with `session not created` and exits. Quit that Firefox,
-start it with the same command and profile, then start the host. Measured on
-Firefox 157.0.1 on 2026-10-08, after a host stopped with SIGTERM and with
-SIGKILL (RFC browser-live-one-connection, section 2.4).
+Attaching again is the host command alone. However the host ends, it first
+ends the BiDi session it created; Firefox keeps running with its tabs and
+takes the next host, which registers as a new client. Without that step the
+session would stay in Firefox after the host is gone, and Firefox takes one
+session at a time (RFC browser-live-one-connection, section 2.4).
+
+Two cases do leave the session behind. A host started after them is refused
+with `session not created` and exits; quit that Firefox, start it with the
+same command and profile, then start the host.
+
+- The host was killed with SIGKILL, or crashed.
+- Firefox did not answer the session's end within two seconds, or its socket
+  was already closed. The host logs `the BiDi session was not ended` with the
+  reason. If the socket closed because Firefox quit, there is nothing to
+  restart.
+
+Measured on Firefox 157.0.1 on 2026-10-08: a host stopped with SIGTERM was
+followed by a second host on the same Firefox, and a host stopped with
+SIGKILL was not.
 
 The peer attaches only to a browser that reports itself as `firefox`. Zen has
 not been tried.
@@ -118,7 +132,8 @@ share the existing host command deadline; connection setup has that same bound.
 Protected pointer-release cleanup can additionally run up to one transport
 deadline after the outer command deadline. A timeout is not an instantaneous
 release guarantee.
-Closing the socket does not issue browser.close or browsingContext.close.
+Ending the host issues `session.end` and neither browser.close nor
+browsingContext.close.
 
 This initial peer does not implement live activate_tab, uploads, download
 collection, or the extension's navigation commit barrier. The server refuses

@@ -36,7 +36,19 @@ let () =
         | exception Unix.Unix_error _ -> Error "native stdout setup failed" in
       try Eio_main.run (fun env -> match !bidi_url with
         | None -> Browser_host.run env config
-        | Some url -> Browser_host.run_bidi env config url)
+        | Some url ->
+          (* The operator stops this host by hand. A signal is taken as a
+             request, so the host ends its BiDi session and tells the server
+             before it exits. The handler only records the request and wakes
+             the waiting fiber, which Eio allows from a signal handler. *)
+          let asked = Atomic.make None and wake = Eio.Condition.create () in
+          List.iter (fun (signal, name) ->
+            Sys.set_signal signal (Sys.Signal_handle (fun _ ->
+              Atomic.set asked (Some name);
+              Eio.Condition.broadcast wake)))
+            [ Sys.sigint, "SIGINT"; Sys.sigterm, "SIGTERM" ];
+          Browser_host.run_bidi env config url
+            ~stop:(fun () -> Eio.Condition.loop_no_mutex wake (fun () -> Atomic.get asked)))
       with Eio.Io _ -> Error "native messaging connection failed"
   in
   match result with

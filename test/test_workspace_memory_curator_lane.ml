@@ -628,7 +628,7 @@ let check_delivery ~base_path ~freshness expected =
   let read args =
     let outcome = Masc.Keeper_workspace_memory_read.handle ~base_path ~args in
     (match outcome.disposition with
-     | Masc.Tool_result.Completed () -> ()
+     | Tool_result.Completed () -> ()
      | Deferred () | Failed _ -> Alcotest.fail outcome.raw_output);
     match outcome.data with
     | Some data -> data

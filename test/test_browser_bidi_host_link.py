@@ -76,6 +76,9 @@ class LaneState:
         self.result_posts = []
         # Results and the disconnect, in the order they reached the server.
         self.arrivals = []
+        # The client ID each result and each disconnect came under.
+        self.result_clients = []
+        self.disconnect_clients = []
         self.drop_next_result = threading.Event()
         self.drop_every_result = False
         # Take the next result as the real route does, lose the answer, and
@@ -88,6 +91,22 @@ class LaneState:
         self.result_received = threading.Event()
         self.disconnected = threading.Event()
         self.refuse_registration = False
+        # Client IDs the lane has ended. A poll under one is answered as the
+        # real route answers it; [retire_next_poll] ends the next poller, and
+        # [retire_every_client] ends each one on its first poll.
+        self.retired = set()
+        self.retire_next_poll = threading.Event()
+        self.retire_every_client = False
+        # The lane's answer for an ID it holds as another browser.
+        self.identity_changed = False
+        # A refusal whose error field is a sentence, as the routes send for
+        # a request they cannot read.
+        self.refuse_in_prose = None
+        # The first poll arrives, which is when the real lane registers its
+        # ID; the answer is lost, and the lane goes on to end the ID.
+        self.lose_first_answer_then_retire = False
+        self.stall_next_refusal = threading.Event()
+        self.release_stalled = threading.Event()
         self.poll_wait_sec = POLL_WAIT_SEC
         # Statuses, or bodies the host cannot read, for the next polls.
         self.poll_answers = queue.Queue()
@@ -129,6 +148,15 @@ class Lane(http.server.BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def refuse(self, code):
+        """A refusal as the lane's routes send it: 400 with the code."""
+        data = json.dumps({"ok": False, "error": code}).encode()
+        self.send_response(400)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def drop(self):
         # The request arrived and no answer leaves.
         self.close_connection = True
@@ -149,6 +177,23 @@ class Lane(http.server.BaseHTTPRequestHandler):
             if state.refuse_registration:
                 self.send_error(400)
                 return
+            if state.identity_changed:
+                self.refuse("client_identity_changed")
+                return
+            if state.refuse_in_prose is not None:
+                self.refuse(state.refuse_in_prose)
+                return
+            if state.lose_first_answer_then_retire:
+                state.lose_first_answer_then_retire = False
+                state.retired.add(client)
+                self.drop()
+                return
+            if state.retire_every_client or state.retire_next_poll.is_set():
+                state.retire_next_poll.clear()
+                state.retired.add(client)
+            if client in state.retired:
+                self.refuse("client_disconnected")
+                return
             try:
                 scripted = state.poll_answers.get_nowait()
             except queue.Empty:
@@ -165,12 +210,24 @@ class Lane(http.server.BaseHTTPRequestHandler):
                 response = {"ok": True, "empty": True}
         elif self.path == "/browser-lane/result":
             state.result_posts.append(body)
+            state.result_clients.append(client)
             state.arrivals.append(("result", body.get("id")))
+            if state.stall_next_refusal.is_set():
+                # A refusal whose status arrives and whose body never does.
+                state.stall_next_refusal.clear()
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", "64")
+                self.end_headers()
+                self.wfile.flush()
+                state.release_stalled.wait(HELD_POLL_SEC)
+                self.close_connection = True
+                return
             state.result_received.set()
             if body.get("id") in state.taken:
                 # The real route resolves a request once; the same result
                 # again finds nothing waiting for it.
-                self.send_error(400)
+                self.refuse("request_not_owned_by_client")
                 return
             if state.take_then_drop_next_result.is_set():
                 state.take_then_drop_next_result.clear()
@@ -191,6 +248,7 @@ class Lane(http.server.BaseHTTPRequestHandler):
             response = {"ok": True}
         elif self.path == "/browser-lane/disconnect":
             state.arrivals.append(("disconnect", None))
+            state.disconnect_clients.append(client)
             state.disconnected.set()
             response = {"ok": True}
         else:
@@ -498,8 +556,9 @@ class BidiHostLink(unittest.TestCase):
                         within=RETRY_WAIT_SEC)
         self.assertEqual(self.firefox.state.methods.count("browsingContext.getTree"), 1)
         self.assertTrue(self.call(self.lane)["ok"], "the host did not go on to the next command")
-        self.assertIn("result not delivered: the server answered the re-sent result with HTTP 400; "
-                      "it may have taken an earlier attempt", self.host_log())
+        self.assertIn("result not delivered: the server answered the re-sent result with "
+                      "HTTP 400, request_not_owned_by_client; it may have taken an earlier attempt",
+                      self.host_log())
 
     def test_a_poll_the_server_fails_or_garbles_is_asked_again(self):
         # A status the server gave, then a body that is JSON and not a poll
@@ -607,6 +666,102 @@ class BidiHostLink(unittest.TestCase):
         self.assert_ends("BiDi peer must be Firefox", within=ATTACH_WAIT_SEC)
         self.assertEqual(self.firefox.state.methods, ["session.new", "session.end"])
         self.assertEqual(self.lane.state.polls, [])
+
+    def test_a_host_the_server_retired_registers_again_as_a_new_client(self):
+        # What a host meets after its laptop slept: the server ended the
+        # connection for want of a poll, and nothing starts another host.
+        self.attach(fixed=True)
+        self.assertTrue(self.call(self.lane)["ok"])
+        first = self.lane.state.polls[0]
+        self.lane.state.retire_next_poll.set()
+        self.wait_until(lambda: self.lane.state.polls[-1] != first, "the host did not register again",
+                        within=RETRY_WAIT_SEC)
+        polls = list(self.lane.state.polls)
+        again = polls[-1]
+        # The ended ID was asked about once more, then only the new one.
+        self.assertEqual(polls, [first] * polls.index(again) + [again] * polls.count(again))
+        answer = self.call(self.lane)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(answer["data"][0]["url"], PAGE["url"])
+        self.assertEqual(self.lane.state.result_clients[-1], again, "the result came under the ended ID")
+        self.assertIn(f"registering again as client {again}", self.host_log())
+        # The same Firefox session throughout, and the host is still there.
+        self.assertEqual(self.firefox.state.methods.count("session.new"), 1)
+        self.assertNotIn("session.end", self.firefox.state.methods)
+        self.assertIsNone(self.process.poll(), self.host_log())
+        # It leaves as the client it now is.
+        self.process.send_signal(signal.SIGTERM)
+        self.assert_ends("stopped by SIGTERM", code=0)
+        self.assertTrue(self.lane.state.disconnected.wait(EXIT_WAIT_SEC))
+        self.assertEqual(self.lane.state.disconnect_clients, [again])
+
+    def test_a_client_whose_first_answer_was_lost_is_registered_again(self):
+        # The lane registers an ID when its poll arrives. This ID's answer
+        # never reached the host, the lane ended the ID for its silence, and
+        # the host's next poll is told so. A new ID is served.
+        self.lane.state.lose_first_answer_then_retire = True
+        self.attach(fixed=True)
+        self.wait_until(lambda: len(set(self.lane.state.polls)) == 2, "the host did not register again",
+                        within=RETRY_WAIT_SEC)
+        polls = list(self.lane.state.polls)
+        self.assertEqual(polls[:2], [polls[0], polls[0]], "the lost poll, then the one told it was ended")
+        self.assertTrue(self.call(self.lane)["ok"])
+        self.assertIsNone(self.process.poll(), self.host_log())
+        self.assertEqual(self.firefox.state.methods.count("session.new"), 1)
+
+    def test_a_refusal_whose_body_never_arrives_is_still_the_servers_answer(self):
+        # The status says the server took the result and refused it. Waiting
+        # out a body that does not come would turn that into "no answer" and
+        # send the result again.
+        self.attach(fixed=True)
+        self.lane.state.stall_next_refusal.set()
+        self.lane.state.commands.put({"id": str(uuid.uuid4()), "verb": "tabs.list", "args": {}})
+        try:
+            self.wait_until(
+                lambda: "the server received the result and did not accept it (HTTP 400)" in self.host_log(),
+                "the host waited on the refusal's body")
+        finally:
+            self.lane.state.release_stalled.set()
+        self.assertTrue(self.call(self.lane)["ok"], "the host did not go on to the next command")
+        self.assertEqual(len(self.lane.state.result_posts), 2, "one result for each command, none sent again")
+
+    def test_a_client_the_server_holds_as_another_browser_ends_the_host(self):
+        self.lane.state.identity_changed = True
+        self.attach(fixed=True)
+        self.assert_ends("native client registration rejected (client_identity_changed)")
+        # The same answer would come again, so it is not asked again.
+        self.assertEqual(len(self.lane.state.polls), 1)
+        self.assert_session_ended_last()
+
+    def test_a_refusal_in_prose_is_not_carried_into_the_log(self):
+        # The host's log takes a code from the server, never a sentence that
+        # could quote a request.
+        self.lane.state.refuse_in_prose = "body must be a JSON object, got: page text"
+        self.attach(fixed=True)
+        self.assert_ends("native client registration rejected")
+        self.assertNotIn("page text", self.host_log())
+        self.assertNotIn("native client registration rejected (", self.host_log())
+        self.assertEqual(len(self.lane.state.polls), 1)
+
+    def test_a_server_that_ends_a_client_on_its_first_poll_ends_the_host(self):
+        # An ID called ended on the first poll it ever sent did not fall
+        # silent. A host that took another one would be told the same,
+        # without end.
+        self.lane.state.retire_every_client = True
+        self.attach(fixed=True)
+        self.assert_ends("native client registration rejected (the server calls a client ID ended on its first poll)")
+        self.assertEqual(len(set(self.lane.state.polls)), 1)
+        self.assert_session_ended_last()
+
+    def test_a_server_that_ends_the_new_client_too_ends_the_host(self):
+        self.attach(fixed=True)
+        self.assertTrue(self.call(self.lane)["ok"])
+        self.lane.state.retire_every_client = True
+        self.assert_ends("native client registration rejected (the server calls a client ID ended on its first poll)",
+                         within=RETRY_WAIT_SEC)
+        # The one it served, and the one it took after that.
+        self.assertEqual(len(set(self.lane.state.polls)), 2)
+        self.assert_session_ended_last()
 
     def stopped_by(self, stop):
         self.attach(fixed=True)

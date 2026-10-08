@@ -102,7 +102,7 @@
       "path": "dashboard/src/components/chat/primitives.ts",
       "baseline_lines": 5481,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "failure card extracted; persisted media loss repaired and locally verified; other responsibilities pending"
     },
     {
       "path": "dashboard/src/components/connector-status.ts",

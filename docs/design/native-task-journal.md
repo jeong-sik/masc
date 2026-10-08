@@ -6,6 +6,12 @@ original input, native call and dispatch identity instead of inferring ownership
 from the current root stream. It does not add public events, an HTTP reader, task
 UI, or a long-lived provider receiver.
 
+This is an internal persistence prerequisite. No production caller reads the
+stored rows or retained health list, so this unit does not yet make task state
+or persistence health visible to an operator. The current receiver ends at its
+first root result; tasks still running then may have no terminal observation.
+An absent terminal row is not evidence of completion.
+
 ## Authority and data
 
 `Keeper_native_task_journal.prepare` is the only constructor of the abstract
@@ -61,17 +67,22 @@ Ordinary cleanup behavior is inherited from the existing Fs transaction, not a
 new task-specific exception/finalizer implementation.
 
 The direct callback reports task persistence issues separately and still returns
-`Ok ()` to its tool-mapping match. Autonomous callbacks persist even after their
-root event bus is closed. Neither path publishes task metadata into root events,
+`Ok ()` to its tool-mapping match. The autonomous callback can persist an already
+bound observation when invoked after its root event bus is closed. Production
+receiver lifetime does not currently supply later provider observations. Neither
+path publishes task metadata into root events,
 flushes model text/Thinking, reopens native progress, records a native execution
 receipt, nor changes native effects, model usage or root outcome. Cancellation
 continues to propagate rather than being swallowed as an ordinary disk error.
 
 ## Cost and unfinished boundaries
 
-Each append validates the full receiver history under the file lock, with time
-and memory proportional to that history. This deliberate first implementation
-has no arbitrary cap, caching authority, compaction or retention policy. Files
+Each append reads and validates the full receiver history under the file lock,
+with time and memory proportional to that history. Across n observations this
+reprocesses O(n²) history bytes. The autonomous callback also holds its stream
+mutex during the transaction, although blocking file I/O runs in a worker. These
+are outstanding cost and lock-coupling defects, not measured performance gains.
+There is no caching authority, compaction or retention policy. Files
 and directory chains use existing private-file infrastructure; concurrent
 external replacement/renaming of journal files is not a supported writer.
 
@@ -82,6 +93,21 @@ receiver sink, exact input attribution and cancellation/resume policy. The next
 transport/UI unit also needs an authenticated task read/cursor contract, strict
 OCaml/TS event consumers, separate background task projection and measured
 settled-answer/background-task/new-input PTY frames. None exists in this patch.
+
+The reader follow-up must bind receiver discovery and cursor reads to the
+request's authenticated workspace and Keeper. It must expose complete committed
+rows in sequence order, preserve scope/corruption and persistence-failure states,
+and distinguish missing terminal evidence from a settled task. Operator-visible
+health needs a production consumer; the existing warn log and collector-local
+`issues` list do not implement that contract. UI presentation and a persistent
+receiver require separately reviewed consumers and lifetime authority.
+
+Two upstream repairs are also not included in this head: #41923 commit
+`be7cc1110a6361a355e62b0301d6a253ad1bd52f` admits and validates optional `awaited`
+without changing task ownership; parent #41978 commit
+`b5c8aa1a81ecaaaec020f49c9a3d9c8aed7d392c` corrects a fixture's stamped UUID.
+The stack owner must preserve both during integration. This unit neither copies
+those repairs nor claims the inherited `awaited` gap is fixed.
 
 ## Authored checks and evidence limits
 
@@ -96,13 +122,19 @@ admission; no JSON-to-private-owner fixture shortcut is used:
   contiguous commit sequence and explicit filesystem failure health.
 - Persistence failure inside the actual driver callback preserves the original
   final root answer and all three typed failure results.
-- Actual autonomous observation entrypoint after root closure writes all task
-  rows with its turn reference while leaving the root journal bytes/current
-  turn identity unchanged.
+- The fixture first captures admitted observations during a completed fake-CLI
+  invocation, then injects them through the autonomous observation entrypoint
+  after root closure. It verifies storage capability and unchanged root journal
+  bytes/current turn identity, not receipt of provider events after root result.
 
 The direct HTTP route's full execution path is source-reviewed here; these new
 cases do not execute that whole route. Cleanup-warning forwarding follows the
 existing Fs outcome contract and its existing fault-injection tests; no new
-cleanup-fault execution is claimed. New cases are authored, **not executed**.
-Only OCaml parsing and diff whitespace checks are run locally. No build, type
-check, provider call, PTY, CI, screenshot, merge or deployed behavior is claimed.
+cleanup-fault execution is claimed. The original author did not execute these
+cases. A later owner report
+(comment 6064649051) records 68 passing suite cases on an unpublished temporary
+merge of this head with parent `b5c8aa1a81`; that tree differs by one fixture
+expectation and is not exact-head execution proof. It does not resolve the
+missing consumer, receiver lifetime, inherited `awaited`, or append-cost gaps.
+This documentation correction executes no native/typecheck/provider/PTY tests
+and makes no merge or deployed-behavior claim.

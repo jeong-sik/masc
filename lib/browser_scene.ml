@@ -274,9 +274,9 @@ let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (r
        Remove every supplied occurrence before attaching the authoritative
        values so first-key and last-key consumers see the same observation. *)
     let fields = List.filter (fun (key, _) ->
-      not (List.mem key ["source"; "clientId"; "elapsed_ms"])) fields in
-    Ok (`Assoc (fields @ ["source",`String (Browser_surface.source_name request.route);
-      "clientId",Browser_surface.client_id_json target;"elapsed_ms",`Float elapsed_ms]))
+      not (List.mem key ("source" :: "elapsed_ms" :: Browser_lane.connection_field_names))) fields in
+    Ok (`Assoc (fields @ ["source",`String (Browser_surface.source_name request.route)]
+      @ Browser_lane.target_connection_fields target @ ["elapsed_ms",`Float elapsed_ms]))
   | _ -> Error "scene must be an object"
 
 

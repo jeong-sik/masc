@@ -361,7 +361,9 @@ let test_native_occurrence_numeric_live_and_projection () =
                   | `Assoc fields -> `Assoc (("toolStreamScope",scope)::("toolCallBlockIndex",index)::
                       List.remove_assoc "toolStreamScope" (List.remove_assoc "toolCallBlockIndex" fields))
                   | _ -> fail "native event must have an object payload") event.Ag_ui.custom_value in
-                {event with Ag_ui.custom_value}
+                Ag_ui.make_event ~timestamp:event.timestamp ~run_id:event.run_id
+                  ~custom_name:event.custom_name ~custom_value
+                  ~thread_id:event.thread_id event.event_type
             | _ -> event in
           state,wire ^ Ag_ui.event_to_sse event)
       (Server_keeper_chat_agui_projection.initial,acceptance) events in wire in

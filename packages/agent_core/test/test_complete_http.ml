@@ -311,6 +311,7 @@ let test_complete_stream_openai_captures_llama_server_timings () =
     @@ fun sw ->
     let url = start_mock_server ~sw ~net:env#net openai_sse_with_llama_timings in
     let prefill = ref None in
+    let events = ref [] in
     let result =
       Complete.complete_stream
         ~sw
@@ -322,11 +323,19 @@ let test_complete_stream_openai_captures_llama_server_timings () =
           | Telemetry_event.Prefill_complete { prompt_eval_tokens; cache_hit; _ } ->
             prefill := Some (prompt_eval_tokens, cache_hit)
           | _ -> ())
-        ~on_event:(fun _ -> ())
+        ~on_event:(fun event -> events := event :: !events)
         ()
     in
     (match result with
      | Ok resp ->
+       check string "streamed reported id" "c-t" resp.id;
+       check string "streamed reported model" "qwen3.8-27b" resp.model;
+       (match List.rev !events with
+        | Types.Connected :: Types.MessageStart {id="c-t";model="qwen3.8-27b";usage=None}
+            :: Types.ContentBlockStart {content_type="text";_} :: _ -> ()
+        | _ -> Alcotest.fail "HTTP stream must publish its reported prelude before content");
+       check int "one HTTP response prelude" 1
+         (List.length (List.filter (function Types.MessageStart _ -> true | _ -> false) !events));
        (match resp.telemetry with
         | Some { timings = Some t; _ } ->
           check (option int) "cache_n" (Some 1741) t.cache_n;

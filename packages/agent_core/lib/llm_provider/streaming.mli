@@ -154,6 +154,14 @@ val create_openai_stream_state
     separated out rather than drawn as reply text. Defaults to [false], and a
     model that does not declare it keeps every byte of its content channel. *)
 
+(** Emits one [MessageStart] from a complete, nonblank provider [chunk_id]
+    and [chunk_model] pair, before this request publishes other events. Empty
+    or partial metadata never uses the configured model as a reported value.
+    If output has already been published without a complete pair, no later
+    prelude is emitted: a late start would conflict with the existing content
+    or reset consumer metadata. Later metadata does not create another response;
+    each HTTP request owns its own normalization state. Tool-bearing chunks
+    commit the prelude and content together, or roll back both on failure. *)
 val openai_chunk_to_events
   :  openai_stream_state
   -> openai_chunk

@@ -2932,7 +2932,6 @@
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_muse_serve.inc)
-(include stanzas/test_runtime_client_prompt_ceiling.inc)
 (include stanzas/test_runtime_muse_serve_config.inc)
 (include stanzas/test_runtime_muse_home.inc)
 (include stanzas/test_runtime_muse_model_discovery.inc)
@@ -9850,3 +9849,5 @@
  (name test_h3_working_state_meaning)
  (modules test_h3_working_state_meaning)
  (libraries masc_test_deps))
+
+(include stanzas/test_tui_code_history_sources_pty.inc)

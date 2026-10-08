@@ -290,8 +290,9 @@ class FirefoxState:
         self.leave_on = None
         self.slow_on = None
         self.silent_on = None
-        # Firefox's answer when it already holds a session.
-        self.refuses_the_session = False
+        # The error Firefox answers session.new with, when it gives no
+        # session. "session not created" is what it says while it holds one.
+        self.refuses_the_session_with = None
         self.browser_name = "firefox"
         self.answers_session_end = True
         self.answers_the_upgrade = True
@@ -384,9 +385,10 @@ class Firefox(socketserver.BaseRequestHandler):
                     self.send_message({"type": "success", "id": message["id"], "result": {}})
                     return
                 if message["method"] == "session.new":
-                    if state.refuses_the_session:
-                        self.send_message({"type": "error", "id": message["id"], "error": "session not created",
-                                           "message": "Maximum number of active sessions"})
+                    if state.refuses_the_session_with is not None:
+                        self.send_message({"type": "error", "id": message["id"],
+                                           "error": state.refuses_the_session_with,
+                                           "message": "said by the scripted Firefox"})
                         continue
                     result = {"sessionId": "scripted", "capabilities":
                               {"browserName": state.browser_name, "browserVersion": "157.0-scripted"}}
@@ -707,7 +709,7 @@ class BidiHostLink(unittest.TestCase):
 
     def test_a_session_firefox_refuses_leaves_none_to_end(self):
         # What a second host meets while another holds the one session.
-        self.firefox.state.refuses_the_session = True
+        self.firefox.state.refuses_the_session_with = "session not created"
         self.start(fixed=True)
         self.assert_ends("BiDi command rejected: session not created", within=ATTACH_WAIT_SEC)
         self.assertEqual(self.firefox.state.methods, ["session.new"])
@@ -873,16 +875,26 @@ class BidiHostLink(unittest.TestCase):
         self.assertTrue(self.call(self.lane)["ok"])
 
     def test_a_host_firefox_refused_leaves_that_as_its_ending(self):
-        self.firefox.state.refuses_the_session = True
+        self.firefox.state.refuses_the_session_with = "session not created"
         self.start(fixed=True)
         self.assert_ends("BiDi command rejected: session not created", within=ATTACH_WAIT_SEC)
         record = self.record()
         self.assertEqual(record["ended"]["reason"], "BiDi command rejected: session not created")
         self.assertIsNone(record["attached_at"])
         # Firefox says this while it holds a session that is not this host's.
-        # The next host meets the same session, so the record says which
-        # refusal it was.
+        # That session was there when this host asked, so the record says
+        # which refusal it was.
         self.assertEqual(record["ended"]["session_in_firefox"], "refused")
+
+    def test_a_session_firefox_did_not_start_is_not_one_it_holds(self):
+        # Any other error is Firefox failing to start a session. It says
+        # nothing of one that is there, and this host got none.
+        self.firefox.state.refuses_the_session_with = "unknown error"
+        self.start(fixed=True)
+        self.assert_ends("BiDi command rejected: unknown error", within=ATTACH_WAIT_SEC)
+        record = self.record()
+        self.assertEqual(record["ended"]["reason"], "BiDi command rejected: unknown error")
+        self.assertEqual(record["ended"]["session_in_firefox"], "none")
 
     def test_a_session_left_in_firefox_is_in_the_ending(self):
         self.firefox.state.answers_session_end = False
@@ -968,8 +980,10 @@ class BidiHostLink(unittest.TestCase):
         self.assertEqual((listed["request_id"], listed["outcome"], listed["cause"]),
                          (ident, "succeeded", "unconfirmed"))
         self.assertEqual(len(self.lane.state.result_posts), 1)
-        self.assertIn("so the result was not sent again; the server may have taken an earlier attempt",
-                      self.host_log())
+        # The host writes its record before it logs, so the record can be
+        # read a moment before the line is.
+        said = "so the result was not sent again; the server may have taken an earlier attempt"
+        self.wait_until(lambda: said in self.host_log(), "the host did not log why it stopped sending")
         # The server does have it: the one attempt arrived.
         self.assertEqual(self.lane.state.results.get(timeout=EXIT_WAIT_SEC)["id"], ident)
         self.assertTrue(self.call(self.lane)["ok"], "the host did not go on once it could read the token")

@@ -569,16 +569,22 @@ let test_deferred_notice_is_not_available_to_other_flushers () =
   Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
     auth_ok (Auth.with_credential_transaction config.base_path (fun _ ->
       announce ~author:"operator" "deferred handoff fixture" ();
+      let system_thread_announcement =
+        Tool_misc_dos_lane.announce ~author:"operator" "system-thread notice" in
+      Eio_unix.run_in_systhread (fun () -> system_thread_announcement ());
       (* Another request's drain must leave this notice queued while Auth is held. *)
       let flushed, signal_flushed = Eio.Promise.create () in
       Eio.Switch.run @@ fun sw ->
         Eio.Fiber.fork ~sw (fun () ->
           Tool_misc_dos_lane.flush_announcements ();
           Eio.Promise.resolve signal_flushed (Queue.length Tool_misc_dos_lane.announcements));
-        check int "flusher cannot remove a notice inside admission" 1
+        check int "flusher cannot remove a notice inside admission" 2
           (Eio.Promise.await flushed))));
   let notice = Queue.take Tool_misc_dos_lane.announcements in
-  check bool "notice becomes publishable after admission" true (Atomic.get notice.ready)
+  let system_notice = Queue.take Tool_misc_dos_lane.announcements in
+  check bool "notice becomes publishable after admission" true (Atomic.get notice.ready);
+  check bool "system-thread notice becomes publishable after admission" true
+    (Atomic.get system_notice.ready)
 
 let participation_ok = function
   | Ok () -> ()
@@ -747,11 +753,18 @@ let test_disconnect_waits_for_an_admitted_move_effect () =
               "dispatch must publish after admission" ();
             let ctx : Tool_misc.context =
               { config; agent_name = "player"; help_schemas = Config.raw_all_tool_schemas } in
-            (match Tool_misc.dispatch ctx ~name:"masc_dos_step"
-                ~args:(`Assoc [ "steps", `Int 1; "until_ready", `Bool false ]) with
+            (match Tool_misc.dispatch ctx ~name:"masc_dos_eject" ~args:(`Assoc []) with
              | Some result when Tool_result.is_success result -> ()
              | Some result -> fail (Tool_result.message result)
-             | None -> fail "masc_dos_step did not dispatch");
+             | None -> fail "masc_dos_eject did not dispatch");
+            (* Restore the fixture machine before the admitted callback lets
+               the competing disconnect proceed.  The eject above is the
+               actual system-thread announcement path under test. *)
+            ignore (dos_ok (Dos_lane.load ~who:"player"
+              ~ledger_dir:(Filename.concat config.base_path "ledger")
+              ~saves_dir:(Filename.concat config.base_path "saves")
+              ~checkpoint_dir:(Filename.concat config.base_path "checkpoints")
+              ~program_name:"spin.com" ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore));
             check bool "handler did not flush a ready notice inside admission" true
               (Queue.length Tool_misc_dos_lane.announcements >= 1)) in
       Eio.Promise.resolve signal_move_done result);

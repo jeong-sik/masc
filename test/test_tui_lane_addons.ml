@@ -476,6 +476,11 @@ let context_flow_uses_declared_connections () =
     (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance opened));
   check int "a declaration the snapshot does not list names no row" (-1)
     (UI.open_declaration view "/config/absent.toml").configuration_cursor;
+  (* Opening a declaration then switching to Summary with an open document
+     keeps the opened declaration as the action target (#41519 review). *)
+  let summary_opened = {opened with presentation=UI.Summary; document_key=Some "/config/project-metric.toml"} in
+  check (option string) "switching to summary with an open document keeps the opened declaration as action target" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance summary_opened));
   check bool "flow exposes the selected action target" true
     (List.mem "Action target: Project observer · source-worker" (UI.lines ~width:160 view));
   let links = UI.lines ~width:160 {view with presentation=UI.Summary;

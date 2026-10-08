@@ -194,9 +194,11 @@ let with_connection ~env ~timeout ~url use =
   try Eio.Switch.run (fun sw ->
     let clock=Eio.Stdenv.clock env and net=Eio.Stdenv.net env in
     let pending=Hashtbl.create 4 and sequence=ref 0 and broken=ref None in
+    let ended,set_ended=Eio.Promise.create () in
     let disconnect reason =
       if !broken=None then (
         broken:=Some reason;
+        Eio.Promise.resolve set_ended reason;
         Hashtbl.iter (fun _ resolve->Eio.Promise.resolve resolve (Error reason)) pending;
         Hashtbl.clear pending) in
     Eio.Switch.on_release sw (fun ()->disconnect "BiDi connection closed");
@@ -266,7 +268,7 @@ let with_connection ~env ~timeout ~url use =
          exceptionally to cancel both driver fibers, then recover only our
          private completion marker outside the switch. No close handshake or
          remote browser/tab command is required to stop an unresponsive peer. *)
-      let result=use peer in
+      let result=use ~ended peer in
       raise (Peer_finished result)
     with
     | Eio.Cancel.Cancelled _ as exn->raise exn

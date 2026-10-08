@@ -14,5 +14,10 @@ val reply_limit_bytes : int
     the page, as [Before_effect] for a read, instead of being sent: at three
     bytes a unit it could pass {!reply_limit_bytes}. *)
 val script_answer_limit_units : int
+(** [with_connection ~env ~timeout ~url use] connects and hands [use] the
+    peer. [ended] resolves, with why, once the connection carries no further
+    command: Firefox closed it, the socket failed, a message was not BiDi, or
+    a command got no reply within [timeout]. From then on every command
+    answers that reason; the caller decides when to stop. *)
 val with_connection : env:Eio_unix.Stdenv.base -> timeout:float -> url:string ->
-  (t -> (unit, string) result) -> (unit, string) result
+  (ended:string Eio.Promise.t -> t -> (unit, string) result) -> (unit, string) result

@@ -75,15 +75,25 @@ val resolve_config
     address the file names does; otherwise it retries where it is.
 
     A result is sent again only when the request may not have reached the
-    server: no connection, a broken exchange, or no answer in time. A result
-    the server answered, with any status or a body the host cannot accept, is
-    logged as undelivered and the host returns to polling. A result whose
-    server moved is not sent to the new address either: its request belonged
-    to the server that issued it. *)
+    server: no connection, a broken exchange, a connection that closed
+    without a response, or no answer in time. A result the server answered,
+    with any status or a body the host cannot accept, is logged as
+    undelivered and the host returns to polling. A result whose server moved
+    is not sent to the new address either: its request belonged to the server
+    that issued it. *)
 val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
 
-(** The BiDi host: the same poll loop with commands dispatched to a loopback
-    Firefox BiDi endpoint at [url] instead of the extension. *)
+(** The BiDi host: commands are dispatched to a loopback Firefox BiDi endpoint
+    at [url] instead of the extension. Its link to the server is {!run}'s: a
+    failed poll is asked again, the workspace connection file is followed,
+    and a result that may not have arrived is sent again, so a MASC server
+    that restarts finds this host still attached, as the same client.
+
+    It returns, with why, when:
+    - the BiDi connection ended, also while the host waits for work. A
+      command it ended under is answered first, once;
+    - a command's outcome is unknown. That answer too is offered once;
+    - the server refuses the client's registration. *)
 val run_bidi : Eio_unix.Stdenv.base -> config -> string -> (unit, string) result
 
 module For_testing : sig

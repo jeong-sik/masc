@@ -392,7 +392,7 @@ let read ?after reader = with_database ~create:false reader (fun db cleanup ->
     let* () = validate_schema db cleanup in
     let* store_id,next = metadata db cleanup reader.scope in
     let through_sequence = Int64.to_int (Int64.pred next) in
-    let* boundary = match after with
+    let* boundary = match (after : cursor option) with
       | None -> Ok 0
       | Some cursor when cursor.store_id<>store_id -> Error Cursor_store_mismatch
       | Some cursor when cursor.after_sequence>through_sequence -> Error Cursor_ahead

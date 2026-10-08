@@ -140,8 +140,10 @@ type turn_usage =
 (** Two facts about one client turn that neither stands in for. *)
 type observed_usage =
   { latest_request_input : request_input option
-        (** Newest assistant request, deduplicated by message id: the
-            context that request occupied. Not what the turn spent. *)
+        (** Newest root assistant request, deduplicated by message id: the
+            context that request occupied. Child tool envelopes carry their
+            own model and usage and cannot replace this root observation.
+            Not what the turn spent. *)
   ; turn_total : turn_usage option
         (** Result-frame sum over this client turn's provider calls: what
             the turn spent. Not a context window size. *)

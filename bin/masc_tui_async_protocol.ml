@@ -169,6 +169,7 @@ type async_msg =
   | Approvals_listing_superseded
   | Approvals_summary_loaded of
       Masc_tui_types.Snapshot_read.request
+      * Masc_tui_operator_projection.Listing_order.ticket
       * Masc.Tui_decode.server_identity
       * (approval_snapshot, string) result
   | Surface_composer_released

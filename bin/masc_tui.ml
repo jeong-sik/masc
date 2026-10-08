@@ -10103,15 +10103,17 @@ let dispatch_approvals_listing state =
 
 (* The recovery read's answer, ticketed outside the refresh bundle. Same
    ownership rule as every Snapshot_read source: only the read still pending
-   publishes, and the workspace it named must still be the current one. *)
-let apply_approvals_summary_load state ~expected_workspace request result =
+   publishes, and the workspace it named must still be the current one.
+   Its Listing_order ticket guards against stale answers superseding a newer
+   refresh pass or an action committed while the recovery read was in flight. *)
+let apply_approvals_summary_load state ~listing_ticket ~expected_workspace request result =
   match Snapshot_read.settle state.approvals_summary_read request with
   | None -> ()
   | Some read ->
     state.approvals_summary_read <- read;
     if state.workspace_identity = Workspace_identity_match
        && Option.exists (same_server_workspace expected_workspace) state.server_identity
-    then apply_approvals_load state result
+    then apply_approval_observation state { ao_ticket = listing_ticket; ao_result = result }
 
 (* One request per refresh returns this many lines. The server caps the
    parameter at 3000; a screenful of scrollback is what the surface can show
@@ -10329,42 +10331,47 @@ let refresh_status results =
 (* The operator confirm-queue read, on the same terms the held-call listing
    reads: identity must match first, the request names the expected
    workspace, and the read skips itself when one is already on the wire or
-   the count is already drawn. *)
+   the count is already drawn. Its Listing_order ticket binds the recovery
+   read to the current action flow and sequence. *)
 let launch_approvals_summary_load state ~mailbox =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if Masc_tui_approvals_model.confirm_queue_reading state = List_read then ()
   else if state.workspace_identity <> Workspace_identity_match then ()
+  else if Snapshot_read.in_flight state.approvals_summary_read then ()
   else
     match state.server_identity with
     | None -> ()
     | Some expected_workspace ->
-        let read, request =
-          Snapshot_read.start ~intent:Snapshot_read.Poll
-            state.approvals_summary_read
-        in
-        state.approvals_summary_read <- read;
-        match request with
+        match dispatch_approvals_listing state with
         | None -> ()
-        | Some request ->
-            let host = server_peer_host in
-            let port = state.port in
-            Masc_tui_async_read.launch
-              ~deliver:(fun result ->
-                enqueue_async mailbox
-                  (Approvals_summary_loaded
-                     (request, expected_workspace, result)))
-              (fun () ->
-                let ( let* ) = Result.bind in
-                let* () =
-                  probe_expected_workspace ~host ~port expected_workspace
-                in
-                let* () =
-                  if authority <> state.workspace_authority
-                  then Error "Workspace authority withdrawn"
-                  else Ok ()
-                in
-                Masc_tui_loader.load_approvals ~host ~port)
+        | Some listing_ticket ->
+            let read, request =
+              Snapshot_read.start ~intent:Snapshot_read.Poll
+                state.approvals_summary_read
+            in
+            state.approvals_summary_read <- read;
+            match request with
+            | None -> ()
+            | Some request ->
+                let host = server_peer_host in
+                let port = state.port in
+                Masc_tui_async_read.launch
+                  ~deliver:(fun result ->
+                    enqueue_async mailbox
+                      (Approvals_summary_loaded
+                         (request, listing_ticket, expected_workspace, result)))
+                  (fun () ->
+                    let ( let* ) = Result.bind in
+                    let* () =
+                      probe_expected_workspace ~host ~port expected_workspace
+                    in
+                    let* () =
+                      if authority <> state.workspace_authority
+                      then Error "Workspace authority withdrawn"
+                      else Ok ()
+                    in
+                    Masc_tui_loader.load_approvals ~host ~port)
 
 let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
@@ -14175,8 +14182,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   | Approvals_listing_superseded -> launch_approvals_summary_load state ~mailbox
-  | Approvals_summary_loaded (request, expected_workspace, result) ->
-      apply_approvals_summary_load state ~expected_workspace request result
+  | Approvals_summary_loaded (request, listing_ticket, expected_workspace, result) ->
+      apply_approvals_summary_load state ~listing_ticket ~expected_workspace request result
   | Observer_opened { session_id; handshake } ->
       state.mcp_session <- Some session_id;
       (match handshake with

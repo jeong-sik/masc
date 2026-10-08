@@ -1812,6 +1812,7 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
             ~attachments:(match role with
               | Message_user _ -> List.map (fun a -> Masc_tui_image_preview.Staged a) request.Keeper_chat.attachments
               | _ -> []);
+          me_media = [];
           me_memory_summary = None;
           me_memory_pass = Masc_tui_message_layout.No_pass;
           me_journal = [];
@@ -7126,6 +7127,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
        | Some preview -> preview
        | None -> Masc_tui_image_preview.in_message ~text:row.Keeper_chat_history.text
            ~attachments:(List.map (fun note -> note.Keeper_chat_history.att_image) row.attachments))
+  ; me_media = row.Keeper_chat_history.media
   ; me_memory_summary =
       Option.map
         (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
@@ -8318,6 +8320,7 @@ let chat_notice state ~keeper_name ~kind text =
               me_operation_seq = next_chat_operation_seq state "";
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
               me_image = Masc_tui_image_preview.No_image;
+              me_media = [];
               me_memory_summary = None;
               me_memory_pass = Masc_tui_message_layout.No_pass;
               me_journal = [];

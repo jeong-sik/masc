@@ -26,6 +26,7 @@ let entry ?gate role text =
   ; me_operation_seq = 0
   ; me_text = text
   ; me_image = Masc_tui_image_preview.No_image
+  ; me_media = []
   ; me_memory_summary = None
   ; me_journal = []
   ; me_memory_pass = Masc_tui_message_layout.No_pass

@@ -587,6 +587,9 @@ type msg_entry = {
           timestamps never move rows; phase then this sequence is the order. *)
   me_text: string;
   me_image: Masc_tui_image_preview.preview;
+  me_media: Masc_tui_chat_media.t list;
+      (** Original decoded output metadata. A journal may replace the prose,
+          but does not own these durable media records or their image action. *)
   me_memory_summary: string option;
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
@@ -8460,13 +8463,25 @@ let log_draws_row (held : held_turn) (row : msg_entry) =
 (* The committed rows the pane still draws once these turns are held by
    settled logs: a turn has one source, and for a held turn that is the log.
    The same list when nothing is held, so the memo above it can tell. *)
+let media_remainder (row : msg_entry) =
+  match row.me_role, row.me_media with
+  | (Message_keeper | Message_autonomous), (_ :: _ as media) ->
+      Some {row with me_text =
+        Masc_tui_chat_media.append_text ~text:"" media
+        |> Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true}
+  | (Message_keeper | Message_autonomous), []
+  | (Message_tool | Message_skill _ | Message_thinking | Message_user _
+    | Message_status | Message_local | Message_error | Message_memory), _ -> None
+;;
+
 let rows_the_logs_do_not_draw ~held rows =
   match held with
   | [] -> rows
   | held ->
-      List.filter
+      List.filter_map
         (fun (row : msg_entry) ->
-          not (List.exists (fun turn -> log_draws_row turn row) held))
+          if List.exists (fun turn -> log_draws_row turn row) held
+          then media_remainder row else Some row)
         rows
 ;;
 
@@ -10505,12 +10520,13 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
          else None)
   in
   let without_partial_replies rows =
-    List.filter
+    List.filter_map
       (fun (row : msg_entry) ->
         match row.me_role with
-        | Message_keeper | Message_autonomous ->
-            not (List.exists (fun source -> row.me_execution_source = Some source) partial_replies)
-        | _ -> true)
+        | Message_keeper | Message_autonomous
+          when List.exists (fun source -> row.me_execution_source = Some source) partial_replies ->
+            media_remainder row
+        | _ -> Some row)
       rows
   in
   (* Partial selected logs own the exact activities already drawn, even

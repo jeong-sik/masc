@@ -64,8 +64,20 @@ let test_restart_projection_consistency () =
       fixture () |> overlay (fun value -> value
         |> replace "requires_restart" (`Bool true)
         |> replace "pending_keys" (`List [`String "keeper.pending"])) ]
+let test_account_groups () =
+  let group ids = `Assoc ["integration_ids", `List (List.map (fun id -> `String id) ids)] in
+  let read groups = fixture () |> replace "account_groups" groups |> decode |> success in
+  expect "server grouping retained with source"
+    ((read (`List [group ["codex_a"; "codex_b"]; group ["claude"]])).account_groups
+      = Ok [["codex_a"; "codex_b"]; ["claude"]]);
+  List.iter (fun groups -> expect "bad membership remains unavailable"
+    (Result.is_error (read groups).account_groups))
+    [`Null; `List [group ["a"]; group ["a"]]; `List [group []]; `List [group [""]]];
+  expect "absent evidence is not an empty successful read"
+    (Result.is_error (success (decode (fixture ()))).account_groups)
 let () = List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-  ["atomic GET source and metadata", test_atomic_read;
+  ["server-owned account group evidence", test_account_groups;
+   "atomic GET source and metadata", test_atomic_read;
    "pending and preempted settings", test_pending_and_preempted;
    "invalid source remains readable", test_invalid_source_is_readable;
    "TOML parse failure projection", test_parse_failure_shape;

@@ -4028,7 +4028,7 @@
 (test
  (name test_tui_model_runtime_table)
  (modules test_tui_model_runtime_table)
- (libraries alcotest masc_tui_model_runtime_table masc_tui_message_layout))
+ (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout))
 
 (test
  (name test_tui_context_bars)
@@ -9784,3 +9784,8 @@
  (name test_h3_working_state_meaning)
  (modules test_h3_working_state_meaning)
  (libraries masc_test_deps))
+
+(test
+ (name test_tui_models_account_reading)
+ (modules test_tui_models_account_reading)
+ (libraries alcotest masc_tui_types masc_tui_render_prim))

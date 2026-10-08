@@ -432,6 +432,9 @@ let runtime_config_raw_json
     ; ("path", `String path)
     ; ("file_name", `String Config_dir_resolver.runtime_toml_filename)
     ; ("source_text", `String source_text)
+    ; ("account_groups", match Runtime_toml.parse_string source_text with
+        | Ok config -> Runtime_wizard_inventory.account_groups_json config
+        | Error _ -> `Null)
     ; ( "application"
       , runtime_config_application_json
           ?skill_application

@@ -14,25 +14,23 @@ type row =
 
 let models_table = Runtime_toml_namespace.(key Models)
 
-let parse lines =
+let parse ?(account_groups = []) lines =
   let text = String.concat "\n" lines in
   let ( let* ) = Result.bind in
   let* config = Runtime_toml.parse_string text
     |> Result.map_error (fun errors -> String.concat "; "
       (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)) in
-  (* Providers that name the same account-home are one client login. The
-     provider id does not say so: three ids can hide one account. *)
+  (* Membership was resolved beside this source on the server, whose client
+     environment owns inherited homes. Never infer it from the TUI's HOME. *)
+  let* () =
+    if List.exists (List.exists (fun id ->
+      Option.is_none (Runtime_schema.provider_of_id config id))) account_groups
+    then Error "account groups name a provider absent from this source" else Ok () in
   let same_login (provider : Runtime_schema.provider) =
-    match provider.account_home with
+    match List.find_opt (List.mem provider.id) account_groups with
     | None -> []
-    | Some home ->
-      List.filter_map (fun (other : Runtime_schema.provider) ->
-        match other.account_home with
-        | Some other_home
-          when String.equal other_home home && not (String.equal other.id provider.id) ->
-          Some other.id
-        | Some _ | None -> None) config.providers
-      |> List.sort_uniq String.compare in
+    | Some ids -> List.filter (fun id -> not (String.equal id provider.id)) ids
+        |> List.sort_uniq String.compare in
   (* A login is named by its smallest provider id. Rows sort by that name, so
      the ids of one login sit next to each other; a login with one id keeps
      its own id as the name and its old place. *)
@@ -187,10 +185,13 @@ let account_label_of_email email =
   if Masc_tui_message_layout.display_width local <= account_label_cells then local
   else Masc_tui_message_layout.fit_width local account_label_cells
 
-let keepers_on_login ~assignments row =
-  let prefixes = List.map (fun id -> id ^ ".") (row.provider :: row.same_login) in
+let keepers_on_login ~rows ~assignments row =
+  let providers = row.provider :: row.same_login in
+  let runtime_ids = List.filter_map (fun candidate ->
+    if List.mem candidate.provider providers
+    then Some (candidate.provider ^ "." ^ candidate.model) else None) rows in
   List.filter_map (fun (keeper, runtime_id) ->
-    if List.exists (fun prefix -> String.starts_with ~prefix runtime_id) prefixes
+    if List.mem runtime_id runtime_ids
     then Some keeper else None) assignments
   |> List.sort_uniq String.compare
 

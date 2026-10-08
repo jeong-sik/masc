@@ -15235,7 +15235,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           (* Parsed here, with the lex, so the pane and the scroll bound read
              one list. Parsing per frame would put the count a frame behind
              the keys on a reload. *)
-          (match Masc_tui_model_runtime_table.parse lines with
+          (match Result.bind reading.account_groups (fun account_groups ->
+             Masc_tui_model_runtime_table.parse ~account_groups lines) with
            | Ok rows ->
              state.config_models_rows <- rows;
              state.config_models_cursor <- min state.config_models_cursor (max 0 (List.length rows - 1));

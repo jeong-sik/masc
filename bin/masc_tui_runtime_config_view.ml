@@ -21,7 +21,8 @@ type metadata = {
   applied_keys : string list;
   preempted_keys : string list;
 }
-type reading = { path : string; source_text : string; metadata : metadata }
+type reading = { path : string; source_text : string; metadata : metadata;
+  account_groups : (string list list, string) result }
 type tone = Neutral | Good | Warning | Bad
 
 let ( let* ) = Result.bind
@@ -114,7 +115,19 @@ let decode json =
     then Error "Keeper restart status contradicts pending settings"
     else Ok ()
   in
-  Ok { path; source_text; metadata = {
+  let account_groups =
+    let* groups = field "account_groups" json in
+    match groups with
+    | `Null -> Error "account groups unavailable: invalid runtime configuration"
+    | groups ->
+      let* groups = list (get (list string) "integration_ids") groups in
+      let ids = List.concat groups in
+      if List.exists (fun ids -> ids = [] || List.exists (String.equal "") ids) groups
+         || List.length ids <> List.length (List.sort_uniq String.compare ids)
+      then Error "invalid or duplicate account group membership"
+      else Ok groups
+  in
+  Ok { path; source_text; account_groups; metadata = {
     source_revision; validation; routing; routing_requires_restart; keeper; keeper_requires_restart;
     configured_count; pending_keys; applied_keys; preempted_keys;
   } }

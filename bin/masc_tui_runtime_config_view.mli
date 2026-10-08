@@ -23,7 +23,8 @@ type metadata = {
   applied_keys : string list;
   preempted_keys : string list;
 }
-type reading = { path : string; source_text : string; metadata : metadata }
+type reading = { path : string; source_text : string; metadata : metadata;
+  account_groups : (string list list, string) result }
 type tone = Neutral | Good | Warning | Bad
 
 val decode : Yojson.Safe.t -> (reading, string) result

@@ -5151,3 +5151,15 @@ let pane_surface_header buf cols (state : state) ~name ~split =
 
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)
+
+let models_account_reading ~provider = function
+  | Account_emails_unread -> None, ["Account emails: not yet read"]
+  | Account_emails_failed reason ->
+      None, ["Account emails unread: " ^ Masc.Tui_terminal_text.sanitize_terminal_text reason]
+  | Account_emails_read { emails; unreadable_rows } ->
+      let email = List.assoc_opt provider emails
+        |> Option.map Masc.Tui_terminal_text.sanitize_terminal_text in
+      let notes = if unreadable_rows > 0 then
+          [Printf.sprintf "Account emails: %d rows this build cannot read" unreadable_rows]
+        else [] in
+      email, notes

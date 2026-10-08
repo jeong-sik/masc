@@ -16,7 +16,12 @@ let parse lines =
   let lines = List.concat_map (fun line -> if line = "[providers.ollama_cloud]" then
     [line; "protocol = \"openai-compatible-http\""; "kind = \"openai_compat\"";
      "endpoint = \"http://localhost:9000/v1\""] else [line]) lines in
-  match T.parse (lines @ declared) with
+  let lines = lines @ declared in
+  let config = Runtime_toml.parse_string (String.concat "\n" lines) |> Result.get_ok in
+  let account_groups = Runtime_wizard_inventory.account_groups_json config
+    |> Yojson.Safe.Util.to_list |> List.map (fun group ->
+      Yojson.Safe.Util.(group |> member "integration_ids" |> to_list |> List.map to_string)) in
+  match T.parse ~account_groups lines with
   | Ok rows -> rows | Error detail -> Alcotest.fail detail
 
 let sample =
@@ -305,6 +310,21 @@ let test_same_login_names_other_ids () =
     [ "codex_a", [ "codex_b" ]; "codex_b", [ "codex_a" ]; "codex_c", []; "codex_d", [] ]
     (List.map (fun (r : T.row) -> r.provider, r.same_login) (parse lines))
 
+let test_server_owned_membership () =
+  let lines = ["[models.shared]"; "max-context=8192";
+    "[providers.a]"; "protocol='codex-app-server'"; "command='codex'";
+    "is-non-interactive=true"; "account-home='/client/distinct-a'";
+    "[providers.b]"; "protocol='codex-app-server'"; "command='codex'";
+    "is-non-interactive=true"; "account-home='/client/distinct-b'";
+    "[a.shared]"; "[b.shared]"] in
+  (* The client consumes membership as evidence; it cannot recompute the
+     server environment. An unknown member instead refuses mismatched source. *)
+  let rows = T.parse ~account_groups:[["a";"b"]] lines |> Result.get_ok in
+  check (Alcotest.list string) "server membership controls peers"
+    ["b"] (List.hd rows).same_login;
+  check bool "foreign-source membership rejected" true
+    (Result.is_error (T.parse ~account_groups:[["a";"missing"]] lines))
+
 let test_detail_names_the_account () =
   let alpha = row_named (parse sample) "alpha" in
   let shared = { alpha with same_login = [ "codex_b"; "codex_c" ] } in
@@ -388,10 +408,12 @@ let test_keepers_on_login () =
   let row = { alpha with provider = "codex_a"; same_login = [ "codex_z" ] } in
   let assignments =
     [ "zed", "codex_z.model"; "amy", "codex_a.model"; "lane-user", "sonnet-lane";
-      "other", "codex_ab.model" ]
+      "other", "codex_ab.model"; "dotted", "codex_a.extra.model"; "unknown", "codex_a.undeclared" ]
   in
   check (Alcotest.list string) "direct assignments on any id of the login, sorted"
-    [ "amy"; "zed" ] (T.keepers_on_login ~assignments row);
+    [ "amy"; "zed" ] (T.keepers_on_login ~rows:[{row with model="model"}; {row with provider="codex_z";model="model"};
+      {row with provider="codex_a.extra";model="model";same_login=[]}]
+      ~assignments row);
   check string "the count comes before the names"
     "Keepers assigned directly (lanes not counted): 2 - amy, zed"
     (List.nth (T.detail_lines ~keepers:[ "amy"; "zed" ] row) 2);
@@ -455,6 +477,7 @@ let () =
     "masc_tui_model_runtime_table"
     [ ( "accounts", [ Alcotest.test_case "settings target exact account" `Quick test_exact_runtime_lookup;
        Alcotest.test_case "shared model preserves each account and context" `Quick test_accounts_and_sets;
+       Alcotest.test_case "server-owned membership" `Quick test_server_owned_membership;
        Alcotest.test_case "ids on one login name each other" `Quick test_same_login_names_other_ids;
        Alcotest.test_case "detail names the account" `Quick test_detail_names_the_account;
        Alcotest.test_case "one login is adjacent and tagged" `Quick test_one_login_is_adjacent_and_tagged;

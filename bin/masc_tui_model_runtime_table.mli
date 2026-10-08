@@ -16,9 +16,8 @@ type row =
   ; model_context : int option (** Original shared model declaration, before overrides. *)
   ; max_tokens : int option  (** From [\[PROVIDER.NAME\]]. *)
   ; same_login : string list
-        (** Other provider ids whose [account-home] is this provider's, sorted.
-            They are one client login under different ids; empty when the
-            provider declares no account home or shares it with none. *)
+        (** Other provider ids in the server-resolved client credential scope,
+            sorted. Empty when no shared scope has been observed. *)
   ; login_group : int option
         (** [Some n] when the login is shared: the same [n] on every id of one
             login, counted from 1 in the order of each login's smallest id. *)
@@ -28,12 +27,14 @@ type row =
             with {!account_label_of_email}. *)
   }
 
-val parse : string list -> (row list, string) result
+val parse : ?account_groups:string list list -> string list -> (row list, string) result
 (** [parse lines] reads the runtime.toml source the TUI already fetches for
     the raw config pane. Rows come back sorted by login, then provider, then
     model. A login is named by the smallest provider id on it, so ids that
-    share an account-home are adjacent and an id alone on its login keeps the
-    place its own name gives it.
+    share a server-resolved account scope are adjacent. [account_groups] must
+    accompany this exact source read; the parser never resolves client-local
+    environment defaults. Omitted groups leave each provider isolated (for
+    form-only parsing, without claiming observed account membership).
 
     A model with a [\[models.NAME\]] table but no provider binding is
     skipped: it names no lane and has no [max-tokens] column to show. *)
@@ -73,10 +74,11 @@ val account_label_of_email : string -> string
     ellipsis when it is longer. Display text for telling accounts apart; the
     detail line carries the whole email. *)
 
-val keepers_on_login : assignments:(string * string) list -> row -> string list
+val keepers_on_login : rows:row list -> assignments:(string * string) list -> row -> string list
 (** Names of the Keepers whose runtime id is a binding of this row's provider
     or of another id on the same login, sorted. [assignments] pairs a Keeper
-    name with its runtime id. A Keeper assigned to a lane is not here: its
+    name with its runtime id. [rows] supplies the exact declared bindings;
+    provider-name prefixes never establish membership. A Keeper assigned to a lane is not here: its
     runtime id names the lane, not an account. *)
 
 val detail_lines :

@@ -12335,16 +12335,10 @@ let config_path_note (state : state) =
    account from the account-email reading: a short label beside every
    provider id, and the whole email on the selected binding. Drawing and
    scroll arithmetic below use these same rows and these same detail lines. *)
-let config_models_emails (state : state) =
-  match state.overview_account_emails with
-  | Account_emails_read { emails; unreadable_rows = _ } -> emails
-  | Account_emails_unread | Account_emails_failed _ -> []
-
 let config_models_drawn_rows (state : state) =
-  let emails = config_models_emails state in
   List.map
     (fun (row : Masc_tui_model_runtime_table.row) ->
-      match List.assoc_opt row.provider emails with
+      match fst (models_account_reading ~provider:row.provider state.overview_account_emails) with
       | Some email ->
           { row with
             account_label =
@@ -12359,15 +12353,14 @@ let config_models_drawn_rows (state : state) =
    missing on 2026-10-08, when fourteen were moved onto one account. Only a
    complete roster is counted: a partial one would read as fewer Keepers. *)
 let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row) =
-  let account_email =
-    List.assoc_opt row.provider (config_models_emails state)
-    |> Option.map Terminal_text.single_line
-  in
+  let account_email, account_notes =
+    models_account_reading ~provider:row.provider state.overview_account_emails in
   let keepers =
     match state.keeper_roster with
     | Masc_tui_keeper_control.Roster_complete rows ->
         Some
           (Masc_tui_model_runtime_table.keepers_on_login
+             ~rows:state.config_models_rows
              ~assignments:
                (List.map
                   (fun (keeper : Masc.Tui_decode.keeper_runtime) ->
@@ -12378,7 +12371,7 @@ let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row
     | Masc_tui_keeper_control.Roster_partial _
     | Masc_tui_keeper_control.Roster_invalid _ -> None
   in
-  Masc_tui_model_runtime_table.detail_lines ?account_email ?keepers row
+  account_notes @ Masc_tui_model_runtime_table.detail_lines ?account_email ?keepers row
 
 (* The model knobs sit in different tables -- [reasoning-effort] and
    [temperature] under [models.NAME], [max-tokens] under

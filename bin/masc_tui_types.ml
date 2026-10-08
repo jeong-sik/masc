@@ -11164,6 +11164,9 @@ let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
               | Ok (_ :: _) -> true
               | Ok [] | Error _ -> false))
 
+let toggle_runtime_dim_refusals state =
+  state.runtime_dim_refusals <- not state.runtime_dim_refusals
+
 let runtime_quota_label (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_quota_exhausted then None
   else Some (match runtime.ro_quota_resets_at with

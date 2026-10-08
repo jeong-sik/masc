@@ -195,11 +195,16 @@ let test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order () =
     (runtime_row_deemphasized state exhausted);
   Alcotest.(check bool) "rate limited runtime is de-emphasized" true
     (runtime_row_deemphasized state limited);
-  state.runtime_dim_refusals <- false;
+  Alcotest.(check bool) "dimming is on by default" true state.runtime_dim_refusals;
+  toggle_runtime_dim_refusals state;
   Alcotest.(check bool) "toggle restores normal emphasis" false
     (runtime_row_deemphasized state exhausted);
   Alcotest.(check (list string)) "toggle never changes configured order"
-    original_order (runtime_ids ())
+    original_order (runtime_ids ());
+  toggle_runtime_dim_refusals state;
+  Alcotest.(check bool) "second toggle restores dimming" true state.runtime_dim_refusals;
+  Alcotest.(check bool) "refusing row is dimmed again" true
+    (runtime_row_deemphasized state exhausted)
 
 let notice_text = function
   | None -> "no line"

@@ -21995,7 +21995,7 @@ and is loaded on demand through keeper_skill.
               && Option.is_none state.runtime_lane_pick
               && Option.is_none state.slot_editor
               && Option.is_none (Masc_tui_types.runtime_lane_prompt state) ->
-           state.runtime_dim_refusals <- not state.runtime_dim_refusals
+           Masc_tui_types.toggle_runtime_dim_refusals state
        | Some "v"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target

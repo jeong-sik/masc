@@ -9,7 +9,11 @@ time computed from that reading. For 'every day at 09:00 KST', use \
 recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, \
 recurrence_timezone=Asia/Seoul. For compact calendar rules, use \
 recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. \
-The due request wakes its Keeper; it does not authorize later effects. When \
+The due request wakes its Keeper; it does not authorize later effects. In \
+the message, write the work to do at wake time and what to look up; do not \
+write in a state snapshot observed now, since a recurring schedule repeats \
+its wording on every occurrence and a snapshot goes stale. Read the current \
+state from the durable schedule record or the PR when the Keeper wakes. When \
 the creating turn has a routable continuation, the runtime records that \
 exact route as the result destination; otherwise it records an explicit \
 no-delivery policy. A due time before the current second is refused with \

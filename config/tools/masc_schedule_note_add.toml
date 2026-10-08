@@ -4,7 +4,11 @@ schedule exists, what changed and when, and the context a Keeper needs when
 it wakes. They are keyed by the stable schedule_id, so a definition
 replacement (masc_schedule_update) does not orphan them. Notes are
 append-only: there is no edit and no removal, and notes survive terminal
-schedule states. Read history with masc_schedule_notes_list. You are recorded as the author."""
+schedule states. A note is not shown to the Keeper when it wakes: the wake \
+prompt carries only schedule_id, due_at, payload_digest, occurrence_id, \
+title and message, so put in the message anything the woken turn must know \
+and use a note to record why the schedule exists and what changed over \
+time. Read history with masc_schedule_notes_list. You are recorded as the author."""
 additional_properties = false
 defer_loading = true
 

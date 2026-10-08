@@ -33,6 +33,14 @@ let forward t events =
     apply t (Bridge.translate ~redact_text:t.redact_text ~base_dir:"/unused-no-media"
       ~stream_scope t.bridge event)) events
 
+(* The same pre-advance accumulator disposition and redaction flush used by
+   direct/autonomous runtime-attempt observations. A MessageStart alone cannot
+   resurrect a poisoned scope. *)
+let start_runtime_attempt t ~runtime_id ~attempt_index =
+  forward t (Redactor.flush t.text);
+  let previous_scope = Accum.start_runtime_attempt t.accum in
+  apply t (Bridge.start_runtime_attempt ~runtime_id ~attempt_index ~previous_scope t.bridge)
+
 let on_event t event =
   Accum.on_event t.accum event;
   forward t (Redactor.on_event t.text ~stream_scope:(Accum.current_stream_scope t.accum) event)

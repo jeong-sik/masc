@@ -38,7 +38,7 @@ Verification mapping:
   write in execution surfaces; a separate response agent migrated it.
 - No Dune build, behavior suite, browser validation or deployment performed.
 
-## Next repair: attached-service policy ownership
+## Attached-service policy ownership repair
 
 Producer: `Keeper_identity_tools.agent_tools` converts the catalog to immutable
 `offered_tool` records but also writes `Keeper_identity_tool_index.shared ()`.
@@ -53,11 +53,28 @@ and reads its own `read_only` value. This finding does not demonstrate bypass of
 that Gate. The stale global index changes classification and explanations and
 retains names after their offering disappears.
 
-Next: remove registration from catalog projection, bind policy classification to
-the exact turn's offering, and test interleaved catalogs, absent tools and
-retained turn snapshots. Trace approval-gate creation through agent setup and
-bundle construction rather than introducing a second global registry or deriving
-identity from name prefixes.
+Catalog projection no longer registers anything. `Keeper_identity_tool_index`
+is an immutable map built from `identity_allow.kept`, the same admitted offering
+passed to bundle construction. Agent setup carries it in its result. Before
+runtime dispatch the agent copies the stream gate with that exact index; the
+driver binds the hook to the copied gate's index. Other gate values remain
+unchanged. Policy calls require an explicit index, including an empty index for
+built-in-only or unbound contexts.
+
+Verification mapping:
+
+- `agent_tools` -> immutable offered records -> admitted `identity_allow.kept`
+  -> setup context/result -> copied approval gate -> driver pre-tool hook.
+- `test_keeper_identity_tools` covers catalog projection, retained read/write
+  declarations for the same tool name, absent tools, policy explanations, and
+  a real approval hook with bound versus unbound gate observations.
+- Existing policy, gate, bundle classification, native restart and readonly
+  fixtures now supply explicit scope. Parsing and whitespace checks passed;
+  behavior suites and type checking have not run.
+
+Remaining audit work includes validating these source changes through the
+repository's approved candidate checks and inspecting other state producers.
+Neither draft PR nor syntax checks establish the complete requested outcome.
 
 ## Runtime boundary
 

@@ -9775,3 +9775,10 @@
  (modules test_msx_addon_worker)
  (libraries masc.lane_addon_call_context masc.msx_worker masc.msx_lane masc.masc_core masc.machine_configuration
   mcp_protocol mcp_protocol.eio eio_main eio.unix alcotest yojson base64 digestif unix))
+
+(test
+ (name test_dos_addon_worker)
+ (modules test_dos_addon_worker)
+ (libraries masc.tool_types masc.lane_addon_tool_result masc.lane_addon_call_context masc.machine_controller_contract
+  masc.dos_worker masc.dos_lane masc.machine_pad_layout masc.masc_core masc.machine_configuration
+  mcp_protocol mcp_protocol.eio eio_main eio.unix alcotest yojson base64 digestif unix))

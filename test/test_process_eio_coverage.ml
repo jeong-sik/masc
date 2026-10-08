@@ -11,6 +11,14 @@ let contains haystack needle =
   in
   loop 0
 
+let with_runtime_reset f =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  Fun.protect ~finally:Process_eio.reset_for_testing f
+
 let test_should_retry_unix_fallback_on_bind_error () =
   let exn = Unix.Unix_error (Unix.EADDRINUSE, "bind", "") in
   check bool "retry bind eaddrinuse" true
@@ -37,31 +45,77 @@ let test_capture_bounds_oversized_stdout () =
   (* [ceiling] must sit strictly inside what the child writes, otherwise the
      assertions below hold trivially and prove nothing. *)
   check bool "child out-writes the ceiling" true (emitted > ceiling);
-  let output =
-    Process_eio.run_argv
-      [ "/bin/sh";
-        "-c";
-        Printf.sprintf "yes %s | head -c %d" (String.make 64 'a') emitted ]
+  let argv =
+    [ "/bin/sh";
+      "-c";
+      Printf.sprintf "yes %s | head -c %d" (String.make 64 'a') emitted ]
   in
-  (* Pinned to the ceiling plus the truncation marker, not merely "smaller
-     than the child wrote": a bound that only shaved a few bytes would still
-     satisfy the loose form. *)
-  let len = String.length output in
-  check bool "capture stays under what the child emitted" true (len < emitted);
-  check bool "capture lands at the ceiling plus a short marker" true
-    (len >= ceiling && len <= ceiling + 128);
-  check bool "elided bytes are reported, not dropped silently" true
-    (contains output "(truncated ")
+  let run_and_check () =
+    let output = Process_eio.run_argv argv in
+    (* Pinned to the ceiling plus the truncation marker, not merely "smaller
+       than the child wrote": shaving a few bytes would not prove the cap. *)
+    let len = String.length output in
+    check bool "capture stays under what the child emitted" true (len < emitted);
+    check bool "capture lands at the ceiling plus a short marker" true
+      (len >= ceiling && len <= ceiling + 128);
+    check bool "elided bytes are reported, not dropped silently" true
+      (contains output "(truncated ")
+  in
+  run_and_check ();
+  with_runtime_reset run_and_check
 
 (* Output that fits is byte-identical: the ceiling must not perturb the
    overwhelmingly common short-output call. *)
 let test_capture_leaves_small_stdout_untouched () =
   Process_eio.reset_for_testing ();
-  let output = Process_eio.run_argv [ "/bin/sh"; "-c"; "printf 'small-exact'" ] in
-  check bool "no truncation marker on a short capture" false
-    (contains output "(truncated ");
-  check bool "short capture passes through verbatim" true
-    (contains output "small-exact")
+  let run_and_check () =
+    let output = Process_eio.run_argv [ "/bin/sh"; "-c"; "printf 'small-exact'" ] in
+    check bool "no truncation marker on a short capture" false
+      (contains output "(truncated ");
+    check string "short capture passes through byte-identical" "small-exact" output
+  in
+  run_and_check ();
+  with_runtime_reset run_and_check
+
+let test_eio_pipeline_preserves_streams_and_callbacks () =
+  with_runtime_reset @@ fun () ->
+  let payload = String.make 12_288 'x' ^ "\nfinal bytes\n" in
+  let stages =
+    [ Process_eio.plumbed_stage ~env:None ~cwd:None
+        ~argv:[ "/bin/sh"; "-c";
+                "printf '%s' \"$1\"; printf 'first-error\\n' >&2";
+                "capture-fixture"; payload ];
+      Process_eio.plumbed_stage ~env:None ~cwd:None
+        ~argv:[ "/bin/sh"; "-c";
+                "cat; printf 'second-error\\n' >&2; exit 7" ] ]
+  in
+  let expected_stderr = "first-error\nsecond-error\n" in
+  let check_result = function
+    | Error detail -> fail detail
+    | Ok (status, stdout, stderr) ->
+      check bool "pipeline preserves nonzero stage status" true
+        (status = Unix.WEXITED 7);
+      check string "pipeline drains all final stdout" payload stdout;
+      check string "pipeline retains stderr in stage order" expected_stderr stderr
+  in
+  check_result (Process_eio.run_argv_pipeline_with_status_split stages);
+  let stdout_chunks = Buffer.create (String.length payload) in
+  let stderr_chunks = Buffer.create 64 in
+  check_result
+    (Process_eio.run_argv_pipeline_with_status_split
+       ~on_stdout_chunk:(Buffer.add_string stdout_chunks)
+       ~on_stderr_chunk:(Buffer.add_string stderr_chunks) stages);
+  check string "stdout callbacks preserve the complete stream" payload
+    (Buffer.contents stdout_chunks);
+  (* Stage drainers run concurrently; callback arrival order need not match
+     the deterministic order used for the returned stderr. *)
+  check int "stderr callbacks preserve the complete byte count"
+    (String.length expected_stderr) (Buffer.length stderr_chunks);
+  let sorted_bytes text =
+    String.to_seq text |> List.of_seq |> List.sort Char.compare
+  in
+  check (list char) "stderr callbacks preserve every byte independent of arrival order"
+    (sorted_bytes expected_stderr) (sorted_bytes (Buffer.contents stderr_chunks))
 
 let test_run_argv_fallback_preserves_env () =
   let output =
@@ -143,14 +197,6 @@ let check_refusal_names_the_missing_program () =
     failf "expected Executable_not_found, got %s" (Process_eio.spawn_refusal_to_string refusal)
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
-
-let with_runtime_reset f =
-  Eio_main.run @@ fun env ->
-  let proc_mgr = Eio.Stdenv.process_mgr env in
-  let clock = Eio.Stdenv.clock env in
-  let cwd_default = Eio.Stdenv.fs env in
-  Process_eio.init ~cwd_default ~proc_mgr ~clock;
-  Fun.protect ~finally:Process_eio.reset_for_testing f
 
 (* A file that exists and is not executable: the spawn is refused, not the
    lookup. *)
@@ -1412,6 +1458,9 @@ let test_run_argv_with_stdin_held_open_preserves_open_pipe () =
 let () =
   run "Process_eio coverage"
     [
+      ( "capture owner",
+        [ test_case "pipeline preserves streams and callbacks" `Quick
+            test_eio_pipeline_preserves_streams_and_callbacks ] );
       ( "fallback cwd",
         [ test_case "each execution path uses its requested directory" `Quick
             test_fallback_cwd_applies_to_each_execution_path;

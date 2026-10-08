@@ -568,6 +568,20 @@ def task_cancel_previous_workspace_receipt(executable):
                     assert all(e["completed"] is not None for e in state["exchange_log"]), (
                         "pre-press exchange is still running before second press: "
                         + repr(state["exchange_log"]))
+                    # Explicit client observation: verify that the pre-press pass applying foreign-B has
+                    # rendered its base path to screen and the PTY has drained quiet.
+                    # This proves that:
+                    # 1. apply_http_surfaces for the pre-press pass has run to completion.
+                    # 2. http_refresh_inflight has been set to false.
+                    # 3. start_scoped_refresh_followup has executed and found No_scoped_followup.
+                    # 4. No follow-up refresh intent remains queued before the second press.
+                    h.wait_for_output(process, fd, output, b"task-receipt-foreign-B", timeout=10)
+                    assert h.drain_until_quiet(process, fd, output), (
+                        "TUI output did not settle after foreign-B applied: " + repr(bytes(output)))
+                    assert all(e.get("root") == str(foreign_b) or e.get("root") == str(local)
+                               for e in state["exchange_log"][:pre_press_count]), (
+                        "pre-press exchange log contaminated with unexpected root: "
+                        + repr(state["exchange_log"][:pre_press_count]))
 
                     # The boundary out of the settle segment is a client-side
                     # identifiable completion event, not elapsed time alone:
@@ -583,11 +597,15 @@ def task_cancel_previous_workspace_receipt(executable):
                     #    and painted the frame to the PTY.
                     # Producer code (bin/masc_tui.ml:10435-10470, 10980-11050, 11840-11870)
                     # guarantees that identity_after (/health) is the final call in
-                    # load_http_surfaces, and because Workspace_identity_mismatch
+                    # load_http_surfaces. Because Workspace_identity_mismatch
                     # is established, all scoped surface application and authority-change
-                    # follow-up refreshes are skipped ("another workspace's bundle
-                    # withheld nothing a second pass would bring"). Zero trailing reads
-                    # follow this screen observation.
+                    # follow-up refreshes are skipped (:11865).
+                    # Side reads launched on authority change (:11850-11857) target
+                    # /turns and /schedules, which do not touch /health or /tasks/history.
+                    # Furthermore, because http_refresh_inflight was false when 'r'
+                    # was pressed, scoped_refresh_followup remained No_scoped_followup,
+                    # so start_scoped_refresh_followup launches no subsequent pass.
+                    # Zero trailing /health or /tasks/history reads follow this screen observation.
                     state["workspace_root"] = foreign_c
                     second_press_output_start = len(output)
                     second_pressed_at = time.monotonic()
@@ -614,6 +632,9 @@ def task_cancel_previous_workspace_receipt(executable):
                     assert all(entry["completed"] is not None for entry in boundary), (
                         "a post-press exchange is still running at settle time: "
                         + repr(boundary))
+                    assert len(boundary) == len(state["exchange_log"][pre_press_count:]), (
+                        "unexpected extra exchanges occurred outside boundary: "
+                        + repr(state["exchange_log"][pre_press_count:]))
                     assert any(length >= 0.5 for length in gate.durations), (
                         "the completion gate never held the drill's slow exchange: "
                         + repr(gate.durations))

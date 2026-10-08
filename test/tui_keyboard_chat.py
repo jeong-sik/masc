@@ -1512,8 +1512,20 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
                 raise AssertionError("separate Enter sends shared a request identity")
             if fixture.submitted[1].get("admission_intent") is not None:
                 raise AssertionError("resumed retained input invented fresh Enter authority")
-            wait_for_output(process, master_fd, output, b"reply-explicit-followup", start=0, timeout=10)
-            wait_for_output(process, master_fd, output, b"reply-retained-original", start=0, timeout=10)
+            # Queue inspections are newer LOCAL rows; neither reply moves
+            # below them when its stream settles. Read the original request
+            # blocks with the same PageUp gesture used by the queue scenario.
+            reply_start = len(output)
+            os.write(master_fd, b"\x1b[5~" * 5)
+            replies = (b"reply-explicit-followup", b"reply-retained-original")
+            for reply in replies:
+                wait_for_output(process, master_fd, output, reply, start=reply_start, timeout=10)
+            reply_end = max(end_of_needle(output, reply, reply_start) for reply in replies)
+            wait_for_output(process, master_fd, output, FRAME_END, start=reply_end, timeout=5)
+            frame_end = output.rfind(FRAME_END) + len(FRAME_END)
+            reply_screen = screen_text(bytes(output[:frame_end]))
+            if not all(reply in reply_screen for reply in replies):
+                raise AssertionError("resumed replies are not visible in their request blocks: " + repr(reply_screen))
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")

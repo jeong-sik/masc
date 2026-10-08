@@ -1,5 +1,5 @@
 {
-  "base_sha": "747c2d403b637099f15cb2fec02fc019b0024eb9",
+  "base_sha": "d7c2912b045505a0044e04de057f760f70f6e43d",
   "private_name_and_comment_changes": {
     "(* See [atomic_write.mli] for the contract. *)": "(* See [atomic_replace.mli] for the contract. *)",
     "its legacy best-effort handling": "its best-effort handling",
@@ -8,5 +8,6 @@
   },
   "extracted_source_sha256": "fa976de30501ab451fa241c8738429eab115503f534f6978ca471a82b062e919",
   "remaining_capability_body_sha256": "21dbafc298082765d9004e727109194082b770a435915f9070ae4d5bb65fc3f0",
-  "comparison": "ordinary replacement prefix/tail and remaining capability body match parent after declared private name/header/comment edits; no effect order or failure/cancellation policy changes"
+  "comparison": "ordinary replacement prefix/tail and remaining capability body match parent after declared private name/header/comment edits; no effect order or failure/cancellation policy changes",
+  "initial_base_sha": "747c2d403b637099f15cb2fec02fc019b0024eb9"
 }

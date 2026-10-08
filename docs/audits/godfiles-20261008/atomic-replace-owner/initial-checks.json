@@ -1,8 +1,12 @@
 {
-  "base_sha": "d7c2912b045505a0044e04de057f760f70f6e43d",
+  "base_sha": "747c2d403b637099f15cb2fec02fc019b0024eb9",
   "builds": [
     {
-      "command": "opam exec -- dune build --root . -j 4 test/test_fs_compat.exe test/test_tool_blob_store.exe",
+      "command": "opam exec -- dune build --root . -j 4 test/test_fs_compat.exe",
+      "exit_code": 0
+    },
+    {
+      "command": "opam exec -- dune build --root . -j 4 test/test_tool_blob_store.exe",
       "exit_code": 0
     }
   ],
@@ -20,10 +24,10 @@
   ],
   "executables": {
     "_build/default/test/test_fs_compat.exe": "9bc55ba9370c97ec6862b3199930dd2f836ab35d1cdb6061a80757ff48a6b8c6",
-    "_build/default/test/test_tool_blob_store.exe": "593124052e62b34ed58c48fcaca3dad1c4f469ba884aad528a56caee02247713"
+    "_build/default/test/test_tool_blob_store.exe": "c4d4d6aa80a8161cc44848ecd9e360f5cac73b6929ad9757f6cc9eea91ea0da9"
   },
   "atomic_write_lines_before": 2640,
   "atomic_write_lines_after": 2396,
   "ordinary_owner_lines": 245,
-  "scope": "revalidated on rewritten current parent with identical thirteen own-source fingerprints; focused compilation and fourteen writer/one cold-file-ingestion cases, no all-target build/full suite or deployment"
+  "scope": "selected executable compilation and isolated existing writer/file-ingestion cases; dependencies compiled as needed; no all-target build, full suite, CI, live workspace recovery or deployment"
 }

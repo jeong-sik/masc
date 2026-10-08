@@ -54,9 +54,9 @@ shared grammar and the unchanged blob consumer.
 
 | Changed contract | Actual verification | Result |
 | --- | --- | --- |
-| Direct public bindings, types, ordinary and streamed replacement | focused `test_fs_compat.exe` build | Exit 0; [build.log](build.log), empty successful output |
-| Failure stages, cancellation, temp grammar and off-fiber/raw-byte writes | existing `save_file_atomic` group | 14 cases passed; [write.log](write.log) |
-| Worker-only streamed replacement and cold file-ingestion consumer | focused `test_tool_blob_store.exe` build and existing basic case 3 | Exit 0 and 1 case passed; [blob-build.log](blob-build.log), [blob.log](blob.log) |
+| Direct public bindings, types, ordinary and streamed replacement | focused `test_fs_compat.exe` build | Exit 0; [rebase-build.log](rebase-build.log), empty successful output |
+| Failure stages, cancellation, temp grammar and off-fiber/raw-byte writes | existing `save_file_atomic` group | 14 cases passed; [rebase-write.log](rebase-write.log) |
+| Worker-only streamed replacement and cold file-ingestion consumer | focused `test_tool_blob_store.exe` build and existing basic case 3 | Exit 0 and 1 case passed; [rebase-build.log](rebase-build.log), [rebase-blob.log](rebase-blob.log) |
 
 Only the 15 actually executed cases are counted. Dependencies compiled as needed
 for those targets; this was not an all-target build. The separate rename-only
@@ -64,3 +64,17 @@ policy body is source-identical after the declared private rename and typechecke
 but no separate rename-only behavior scenario was run. Other blob, inventory,
 concurrency and capability-publication groups, full CI, live startup recovery,
 power-loss durability and deployment remain unverified by this slice.
+
+## Parent rewrite and current validation
+
+After publication, the external parent branch was rewritten from
+`747c2d403b637099f15cb2fec02fc019b0024eb9` to
+`d7c2912b045505a0044e04de057f760f70f6e43d` on updated main. This PR's two commits
+were rebased onto that actual parent; its intended diff scope remained intact.
+All thirteen recorded own-source fingerprints stayed identical, and both body
+comparisons hold against the new parent. The selected build and all fifteen
+cases were then rerun successfully on that source; the table and `checks.json`
+refer to those current results. `initial-checks.json` and original build/test
+logs retain the distinct earlier validation and are not asserted as current-head
+execution. The new parent changed other dependencies, so initial validation was
+not silently extended to the rebased combination.

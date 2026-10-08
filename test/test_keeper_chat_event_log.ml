@@ -58,7 +58,7 @@ let all_events : E.keeper_chat_event list =
       execution_id = (match Masc.Keeper_owner.Chat_operation.Operation_id.of_string "batch-owner" with Ok id -> id | Error detail -> Alcotest.fail detail) }
   ; E.Text_message_start { message_id = "msg-1"; role = E.User }
   ; E.Text_message_start { message_id = "msg-2"; role = E.Assistant }
-  ; E.Text_delta "hello"
+  ; E.Text_delta {text="hello"; stream_scope=None}
   ; E.Text_message_end
   ; E.External_effect_completed
       { target =
@@ -78,14 +78,14 @@ let all_events : E.keeper_chat_event list =
   ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
   ; E.Agent_core_runtime_attempt_started { runtime_id = None; attempt_index = None }
   ; E.Agent_core_stream_message_start
-      { provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = Some usage_full }
+      { stream_scope = 0; provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = Some usage_full }
   ; E.Agent_core_stream_message_start
-      { provider_message_id = "pm-2"; model = "m"; usage = None }
+      { stream_scope = 0; provider_message_id = "pm-2"; model = "m"; usage = None }
   ; E.Agent_core_stream_message_delta
-      { stop_reason = Some Agent_core.Types.EndTurn
+      { stream_scope = 0; stop_reason = Some Agent_core.Types.EndTurn
       ; usage = Some delta_usage_partial
       }
-  ; E.Agent_core_stream_message_delta { stop_reason = None; usage = None }
+  ; E.Agent_core_stream_message_delta { stream_scope = 0; stop_reason = None; usage = None }
   ; E.Agent_core_stream_message_stop
   ; E.Agent_core_stream_ping
   ; E.Agent_core_content_block_start
@@ -175,7 +175,7 @@ let test_codec_round_trip_all_constructors () =
 
 let test_envelope_round_trip () =
   let entry : L.journaled_event =
-    { seq = 3; ts = 1_762_300_000.25; event = E.Text_delta "hi" }
+    { seq = 3; ts = 1_762_300_000.25; event = E.Text_delta {text="hi"; stream_scope=None} }
   in
   let encoded = L.journaled_event_to_json entry in
   match L.journaled_event_of_json encoded with
@@ -247,7 +247,7 @@ let test_journal_round_trip () =
        let journal =
          L.open_journal ~base_dir ~keeper_name:"golden-keeper" ~operation_id:"op-1" ()
        in
-       L.append journal ~seq:0 ~ts:1_762_300_000.0 (E.Text_delta "hello");
+       L.append journal ~seq:0 ~ts:1_762_300_000.0 (E.Text_delta {text="hello"; stream_scope=None});
        L.append
          journal
          ~seq:1
@@ -265,7 +265,7 @@ let test_journal_round_trip () =
          (List.nth journaled 0).ts;
        Alcotest.(check string)
          "event payload round-trips through the journal"
-         (Yojson.Safe.to_string (L.keeper_chat_event_to_json (E.Text_delta "hello")))
+         (Yojson.Safe.to_string (L.keeper_chat_event_to_json (E.Text_delta {text="hello"; stream_scope=None})))
          (Yojson.Safe.to_string
             (L.keeper_chat_event_to_json (List.nth journaled 0).event)))
 
@@ -289,7 +289,7 @@ let test_journal_append_is_fail_open () =
          journal
          ~seq:0
          ~ts:1_762_300_000.0
-         (E.Text_delta "dropped, logged, live path unaffected");
+         (E.Text_delta {text="dropped, logged, live path unaffected"; stream_scope=None});
        Alcotest.(check bool) "append did not raise" true true)
 
 let test_journal_skips_non_finite_floats () =
@@ -301,19 +301,19 @@ let test_journal_skips_non_finite_floats () =
          L.open_journal ~base_dir ~keeper_name:"k" ~operation_id:"op" ()
        in
        (* NaN [ts]: skipped. *)
-       L.append journal ~seq:0 ~ts:Float.nan (E.Text_delta "nan ts");
+       L.append journal ~seq:0 ~ts:Float.nan (E.Text_delta {text="nan ts"; stream_scope=None});
        (* NaN [cost_usd]: skipped. *)
        L.append
          journal
          ~seq:1
          ~ts:1_762_300_000.0
          (E.Agent_core_stream_message_start
-            { provider_message_id = "pm-1"
+            { stream_scope = 0; provider_message_id = "pm-1"
             ; model = "m"
             ; usage = Some { usage_full with Agent_core.Types.cost_usd = Some Float.nan }
             });
        (* Finite everywhere: journaled. *)
-       L.append journal ~seq:2 ~ts:1_762_300_000.25 (E.Text_delta "fine");
+       L.append journal ~seq:2 ~ts:1_762_300_000.25 (E.Text_delta {text="fine"; stream_scope=None});
        (* NaN [duration_sec]: skipped. *)
        L.append
          journal
@@ -340,8 +340,8 @@ let test_journal_torn_tail_reads_complete_rows () =
        let keeper_name = "torn-keeper" in
        let operation_id = "op-torn" in
        let journal = L.open_journal ~base_dir ~keeper_name ~operation_id () in
-       L.append journal ~seq:0 ~ts:1_762_300_000.0 (E.Text_delta "one");
-       L.append journal ~seq:1 ~ts:1_762_300_000.25 (E.Text_delta "two");
+       L.append journal ~seq:0 ~ts:1_762_300_000.0 (E.Text_delta {text="one"; stream_scope=None});
+       L.append journal ~seq:1 ~ts:1_762_300_000.25 (E.Text_delta {text="two"; stream_scope=None});
        let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
        let append_raw bytes =
          let oc = open_out_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path in
@@ -395,7 +395,7 @@ let test_journal_torn_tail_reads_complete_rows () =
         | Error _ -> Alcotest.fail "a completed tail must read");
        (* A bad complete row in the middle is corruption, not a fragment. *)
        append_raw "this complete line is not an envelope\n";
-       L.append journal ~seq:3 ~ts:1_762_300_001.0 (E.Text_delta "four");
+       L.append journal ~seq:3 ~ts:1_762_300_001.0 (E.Text_delta {text="four"; stream_scope=None});
        (match L.read_journal_path_result path with
         | Error (L.Journal_corrupt _) -> ()
         | Error L.Journal_missing -> Alcotest.fail "corrupt read as missing"
@@ -471,14 +471,14 @@ let test_on_publish_hook_receives_monotonic_seq () =
   in
   List.iter
     (Masc.Keeper_chat_events.publish bus)
-    [ E.Text_delta "a"; E.Text_delta "b"; E.Text_message_end ];
+    [ E.Text_delta {text="a"; stream_scope=None}; E.Text_delta {text="b"; stream_scope=None}; E.Text_message_end ];
   Alcotest.(check (list int))
     "seq is 0-based and monotonic"
     [ 0; 1; 2 ]
     (List.rev_map fst !seen);
   (* publish order == subscribe order, hook or no hook *)
   (match Masc.Keeper_chat_events.subscribe bus with
-   | Masc.Keeper_chat_events.Next (E.Text_delta "a") -> ()
+   | Masc.Keeper_chat_events.Next (E.Text_delta {text="a"; stream_scope=None}) -> ()
    | _ -> Alcotest.fail "first subscribed event mismatch")
 
 let test_subscribe_published_returns_seq_and_publish_ts () =
@@ -533,19 +533,19 @@ let test_on_publish_hook_failure_does_not_break_publish () =
       ~on_publish:(fun ~seq:_ ~ts:_ _ -> failwith "journal exploded")
       ()
   in
-  Masc.Keeper_chat_events.publish bus (E.Text_delta "still delivered");
+  Masc.Keeper_chat_events.publish bus (E.Text_delta {text="still delivered"; stream_scope=None});
   match Masc.Keeper_chat_events.subscribe bus with
-  | Masc.Keeper_chat_events.Next (E.Text_delta "still delivered") -> ()
+  | Masc.Keeper_chat_events.Next (E.Text_delta {text="still delivered"; stream_scope=None}) -> ()
   | _ -> Alcotest.fail "event lost after hook failure"
 
 let test_close_ends_the_read_after_every_earlier_event () =
   let bus = Masc.Keeper_chat_events.create () in
-  Masc.Keeper_chat_events.publish bus (E.Text_delta "a");
+  Masc.Keeper_chat_events.publish bus (E.Text_delta {text="a"; stream_scope=None});
   Masc.Keeper_chat_events.close bus;
   (* A second close is the same declaration, not a second sentinel. *)
   Masc.Keeper_chat_events.close bus;
   (match Masc.Keeper_chat_events.subscribe bus with
-   | Masc.Keeper_chat_events.Next (E.Text_delta "a") -> ()
+   | Masc.Keeper_chat_events.Next (E.Text_delta {text="a"; stream_scope=None}) -> ()
    | _ -> Alcotest.fail "the event published before close is read first");
   (match Masc.Keeper_chat_events.subscribe bus with
    | Masc.Keeper_chat_events.Closed -> ()
@@ -567,7 +567,7 @@ let test_close_cancelled_on_a_full_bus_is_retried () =
   Eio_main.run @@ fun _env ->
   let bus = Masc.Keeper_chat_events.create () in
   for _ = 1 to Masc.Keeper_chat_events.bus_capacity do
-    Masc.Keeper_chat_events.publish bus (E.Text_delta "filler")
+    Masc.Keeper_chat_events.publish bus (E.Text_delta {text="filler"; stream_scope=None})
   done;
   (* The close suspends on the full bus; the sibling wins and cancels it. *)
   let attempt =
@@ -640,7 +640,7 @@ let test_an_interrupted_reader_does_not_strand_the_turn () =
   let turn_finished = ref false in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     for _ = 1 to 2 * Masc.Keeper_chat_events.bus_capacity do
-      Masc.Keeper_chat_events.publish bus (E.Text_delta "still streaming")
+      Masc.Keeper_chat_events.publish bus (E.Text_delta {text="still streaming"; stream_scope=None})
     done;
     Masc.Keeper_chat_events.close bus;
     turn_finished := true;
@@ -695,7 +695,7 @@ let test_reader_gone_releases_every_parked_publisher () =
     (fun index () ->
       Eio.Fiber.fork_daemon ~sw (fun () ->
         for _ = 1 to 2 * Masc.Keeper_chat_events.bus_capacity do
-          Masc.Keeper_chat_events.publish bus (E.Text_delta "still streaming")
+          Masc.Keeper_chat_events.publish bus (E.Text_delta {text="still streaming"; stream_scope=None})
         done;
         turn_finished.(index) <- true;
         `Stop_daemon))
@@ -722,7 +722,7 @@ let test_reader_gone_releases_every_parked_publisher () =
 let test_publish_after_close_is_a_publisher_defect () =
   let bus = Masc.Keeper_chat_events.create () in
   Masc.Keeper_chat_events.close bus;
-  match Masc.Keeper_chat_events.publish bus (E.Text_delta "late") with
+  match Masc.Keeper_chat_events.publish bus (E.Text_delta {text="late"; stream_scope=None}) with
   | () -> Alcotest.fail "publish after close must not succeed"
   | exception Invalid_argument _ -> ()
 
@@ -737,7 +737,7 @@ let test_full_bus_hook_runs_before_add () =
       ()
   in
   for _ = 1 to Masc.Keeper_chat_events.bus_capacity do
-    Masc.Keeper_chat_events.publish bus (E.Text_delta "filler")
+    Masc.Keeper_chat_events.publish bus (E.Text_delta {text="filler"; stream_scope=None})
   done;
   Alcotest.(check int)
     "every publish up to the capacity reached the hook"
@@ -748,7 +748,7 @@ let test_full_bus_hook_runs_before_add () =
      a plain Alcotest function) the Suspend effect raises unhandled. Either
      way the hook has already run by then — that hook-before-add ordering is
      what this test pins. *)
-  (match Masc.Keeper_chat_events.publish bus (E.Text_delta "overflow") with
+  (match Masc.Keeper_chat_events.publish bus (E.Text_delta {text="overflow"; stream_scope=None}) with
    | () -> Alcotest.fail "publish on a full bus must not silently succeed"
    | exception _ -> ());
   Alcotest.(check int) "hook observed the overflowing publish"
@@ -806,7 +806,7 @@ let golden_events : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-golden"; thread_id = "keeper:golden" }
   ; E.Agent_core_stream_connected
   ; E.Agent_core_stream_message_start
-      { provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = Some usage_full }
+      { stream_scope = 0; provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = Some usage_full }
   ; E.Agent_core_stream_ping
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
   ; E.Agent_core_content_block_start
@@ -818,8 +818,8 @@ let golden_events : E.keeper_chat_event list =
   ; E.Agent_core_thinking_delta { index = 0; delta = "let me think" }
   ; E.Agent_core_thinking_signature_delta { index = 0; signature_bytes = 128 }
   ; E.Agent_core_content_block_stop { index = 0 }
-  ; E.Text_delta "Hello"
-  ; E.Text_delta ", world"
+  ; E.Text_delta {text="Hello"; stream_scope=None}
+  ; E.Text_delta {text=", world"; stream_scope=None}
   ; E.Agent_core_content_block_start
       { index = 1
       ; content_type = "tool_use"
@@ -855,7 +855,7 @@ let golden_events : E.keeper_chat_event list =
   ; E.Agent_core_stream_protocol_error protocol_error_full
   ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
   ; E.Agent_core_stream_message_delta
-      { stop_reason = Some Agent_core.Types.EndTurn
+      { stream_scope = 0; stop_reason = Some Agent_core.Types.EndTurn
       ; usage = Some delta_usage_partial
       }
   ; E.Agent_core_stream_message_stop
@@ -1001,7 +1001,7 @@ let test_continued_short_reply_uses_monotonic_journal_ids () =
     let first = E.create ~first_seq:(cursor ()) ~on_publish:(L.append journal) () in
     let first_events = [E.Run_started {run_id="run"; thread_id="keeper:k"};
       E.Text_message_start {message_id="message"; role=E.Assistant}]
-      @ List.init 20 (fun _ -> E.Text_delta "working")
+      @ List.init 20 (fun _ -> E.Text_delta {text="working"; stream_scope=None})
       @ [E.Continuation_checkpoint {message=""; request_id=Some "continued"};
          E.Text_message_end; E.Run_finished {run_id="run"}] in
     let before_terminal = List.filter (function E.Run_finished _ -> false | _ -> true) first_events in
@@ -1017,7 +1017,7 @@ let test_continued_short_reply_uses_monotonic_journal_ids () =
       live := {L.seq; ts; event} :: !live) () in
     let final_events = [E.Run_started {run_id="run"; thread_id="keeper:k"};
       E.Text_message_start {message_id="message"; role=E.Assistant};
-      E.Text_delta "actual answer"; E.Text_message_end; E.Run_finished {run_id="run"}] in
+      E.Text_delta {text="actual answer"; stream_scope=None}; E.Text_message_end; E.Run_finished {run_id="run"}] in
     List.iter (E.publish resumed) final_events;
     E.close resumed;
     let rec read_closed_bus entries = match E.subscribe_published resumed with
@@ -1177,11 +1177,27 @@ let test_autonomous_turn_journal_is_live_and_replayable () =
       Alcotest.(check bool) "no operation identity on autonomous wire" true (member "operation_id" body = `Null)))
 ;;
 
+let test_text_scope_codec () =
+  List.iter (fun stream_scope ->
+    let event = E.Text_delta {text="part"; stream_scope} in
+    let wire = L.keeper_chat_event_to_json event |> Yojson.Safe.to_string |> Yojson.Safe.from_string in
+    Alcotest.(check bool) "text identity roundtrips through stored bytes" true
+      (L.keeper_chat_event_of_json wire = Ok event)) [None; Some 0; Some 2];
+  List.iter (fun fields ->
+    let wire = `Assoc (["type", `String "text_delta"; "delta", `String "part"] @ fields) in
+    Alcotest.(check bool) "malformed known scope is not downgraded to unknown" true
+      (Result.is_error (L.keeper_chat_event_of_json wire)))
+    [["stream_scope", `Int (-1)]; ["stream_scope", `String "2"];
+     ["stream_scope", `Float 2.]; ["stream_scope", `Null];
+     ["stream_scope", `Int 2; "stream_scope", `Int 3]]
+;;
+
 let () =
   Alcotest.run
     "keeper_chat_event_log"
     [ ( "codec"
-      , [ Alcotest.test_case "continued short reply keeps monotonic journal IDs" `Quick test_continued_short_reply_uses_monotonic_journal_ids
+      , [ Alcotest.test_case "text scope validates and roundtrips" `Quick test_text_scope_codec
+        ; Alcotest.test_case "continued short reply keeps monotonic journal IDs" `Quick test_continued_short_reply_uses_monotonic_journal_ids
         ; Alcotest.test_case
             "round trip all constructors"
             `Quick

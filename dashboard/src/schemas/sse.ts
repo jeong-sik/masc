@@ -481,8 +481,8 @@ function validateKeeperCustomPayload(
       'because',
     ],
     KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
-    KEEPER_STREAM_MESSAGE_START: ['provider_message_id', 'model', 'usage'],
-    KEEPER_STREAM_MESSAGE_DELTA: ['stop_reason', 'usage'],
+    KEEPER_STREAM_MESSAGE_START: ['stream_scope', 'provider_message_id', 'model', 'usage'],
+    KEEPER_STREAM_MESSAGE_DELTA: ['stream_scope', 'stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
     KEEPER_CONTENT_BLOCK_STOP: ['index'],
     KEEPER_THINKING_DELTA: ['index', 'delta'],
@@ -513,6 +513,8 @@ function validateKeeperCustomPayload(
 
   switch (name) {
     case 'KEEPER_STREAM_MESSAGE_START': {
+      const scope = requiredInteger(value, 'stream_scope')
+      if (!scope.success) return scope
       const provider = requiredString(value, 'provider_message_id')
       if (!provider.success) return provider
       const model = requiredString(value, 'model')
@@ -520,6 +522,8 @@ function validateKeeperCustomPayload(
       return value.usage === undefined ? ok(true) : validateUsage(value.usage)
     }
     case 'KEEPER_STREAM_MESSAGE_DELTA': {
+      const scope = requiredInteger(value, 'stream_scope')
+      if (!scope.success) return scope
       const stopReason = optionalString(value, 'stop_reason')
       if (!stopReason.success) return stopReason
       return value.usage === undefined ? ok(true) : validateDeltaUsage(value.usage)

@@ -75,10 +75,13 @@ type delta =
       }
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
-  | Stream_model_started of { model : string }
+  | Stream_model_started of { model : string; stream_scope : int option }
+      (** Bridge-allocated response identity; [None] when the observed frame
+          does not establish one. Repeated starts in one scope are one response. *)
   | Stream_details of
-      { usage : stream_usage option
-      ; stop_reason : string option
+      { stream_scope : int option
+      ; usage : stream_usage option
+      ; stop_reason : Agent_core.Types.stop_reason option
       }
       (** What the provider said about the message in flight: the counters so
           far, and why it stopped writing ([end_turn], [max_tokens],
@@ -86,7 +89,7 @@ type delta =
           them as one record ([dashboard/src/keeper-stream.ts]
           KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
           least one of the two is present. *)
-  | Text of string  (** Assistant text to append. *)
+  | Text of {text : string; stream_scope : int option}  (** Assistant text to append. *)
   | Thinking of string  (** Reasoning text to append. *)
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }

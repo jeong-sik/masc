@@ -39,8 +39,8 @@ let delta_to_string : Live.delta -> string = function
       Printf.sprintf "runtime_attempt_started(%s,%s)"
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
-  | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
-  | Live.Stream_details { usage; stop_reason } ->
+  | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Stream_details { usage; stop_reason; _ } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
         (match usage with
          | None -> "no usage"
@@ -50,8 +50,8 @@ let delta_to_string : Live.delta -> string = function
                (token_count usage.Live.output_tokens)
                (token_count usage.Live.cache_read_input_tokens)
                (token_count usage.Live.cache_creation_input_tokens))
-        (Option.value ~default:"none" stop_reason)
-  | Live.Text text -> "text(" ^ text ^ ")"
+        (Option.fold ~none:"none" ~some:Agent_core.Types.stop_reason_to_string stop_reason)
+  | Live.Text {text=text; _} -> "text(" ^ text ^ ")"
   | Live.Thinking text -> "thinking(" ^ text ^ ")"
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%s,%s)" (occurrence_to_string occurrence)
@@ -102,7 +102,7 @@ let log () = Log.create ~keeper_name:"keeper.one" ~request_id:"tui-req-1" ~start
 let test_seq_dedup_and_none_never_dedupes () =
   let t = log () in
   check bool "first add" true (Log.add t ~seq:(Some 0) Live.Run_started);
-  check bool "same seq is a duplicate" false (Log.add t ~seq:(Some 0) (Live.Text "again"));
+  check bool "same seq is a duplicate" false (Log.add t ~seq:(Some 0) (Live.Text {text="again"; stream_scope=None}));
   let revision = Log.revision t in
   check bool "duplicate leaves the revision alone" true (Log.revision t = revision);
   check bool "an id-less delta is added" true (Log.add t ~seq:None (Live.Accepted { admission = Live.Running; queue_length = 1; interactive = None }));
@@ -113,17 +113,17 @@ let test_seq_dedup_and_none_never_dedupes () =
 let test_resume_position_follows_the_highest_held () =
   let t = log () in
   check position "empty log: the whole turn" Journal.Whole_turn (Log.resume_position t);
-  ignore (Log.add t ~seq:(Some 4) (Live.Text "a") : bool);
-  ignore (Log.add t ~seq:(Some 2) (Live.Text "b") : bool);
+  ignore (Log.add t ~seq:(Some 4) (Live.Text {text="a"; stream_scope=None}) : bool);
+  ignore (Log.add t ~seq:(Some 2) (Live.Text {text="b"; stream_scope=None}) : bool);
   check position "gaps do not matter, order does not matter" (Journal.After_seq 4)
     (Log.resume_position t)
 
 let test_attempt_advances_on_runtime_attempt_started () =
   let t = log () in
   ignore (Log.add t ~seq:(Some 0) Live.Run_started : bool);
-  ignore (Log.add t ~seq:(Some 1) (Live.Text "first try") : bool);
+  ignore (Log.add t ~seq:(Some 1) (Live.Text {text="first try"; stream_scope=None}) : bool);
   ignore (Log.add t ~seq:(Some 2) (Live.Runtime_attempt_started { runtime_id = None; attempt_index = None }) : bool);
-  ignore (Log.add t ~seq:(Some 3) (Live.Text "second try") : bool);
+  ignore (Log.add t ~seq:(Some 3) (Live.Text {text="second try"; stream_scope=None}) : bool);
   check int "current attempt" 1 (Log.attempt t);
   check (list int) "each entry keeps the attempt it arrived in"
     [ 0; 0; 1; 1 ]
@@ -171,7 +171,7 @@ let test_operation_and_journal_read_order () =
   List.iter (fun initial ->
     let terminal = Succeeded {completed_at=3.;outcome_ref="result"} in
     let states = ref [initial; terminal] in
-    let first = [line 0 1.0 (E.Text_delta "retained partial output")] in
+    let first = [line 0 1.0 (E.Text_delta {text="retained partial output"; stream_scope=None})] in
     let journals = ref [Ok first; Error Log.Journal_pruned] in
     let read_operation () = match !states with
       | x :: xs -> states := xs; Ok (Some x)
@@ -197,7 +197,7 @@ let test_failed_operation_recheck_keeps_the_working_observation () =
   List.iter (fun refreshed ->
     List.iter (fun initial ->
       let states = ref [Ok (Some initial); refreshed] in
-      let first = [line 0 1.0 (E.Text_delta "retained working output")] in
+      let first = [line 0 1.0 (E.Text_delta {text="retained working output"; stream_scope=None})] in
       let reads = ref 0 in
       let read_operation () = match !states with
         | x :: xs -> states := xs; x
@@ -234,7 +234,7 @@ let test_decode_exact_operation_state () =
 let test_decode_events_page () =
   let lines =
     [ line 0 1.0 (E.Run_started { run_id = "r"; thread_id = "keeper:keeper.one" })
-    ; line 1 1.5 (E.Text_delta "hello")
+    ; line 1 1.5 (E.Text_delta {text="hello"; stream_scope=None})
     ]
   in
   (match
@@ -329,23 +329,23 @@ let test_add_journaled_holds_undrawn_positions () =
     Log.add_journaled t
       [ line 0 1.0 (E.Run_started { run_id = "r"; thread_id = "keeper:keeper.one" })
       ; line 1 1.1 (E.Text_message_start { message_id = "m"; role = E.Assistant })
-      ; line 2 1.2 (E.Text_delta "hi")
+      ; line 2 1.2 (E.Text_delta {text="hi"; stream_scope=None})
       ]
   in
   check (list tagged) "start and delta are entries, message start is not"
-    [ (Some 0, Live.Run_started); (Some 2, Live.Text "hi") ]
+    [ (Some 0, Live.Run_started); (Some 2, Live.Text {text="hi"; stream_scope=None}) ]
     (List.map (fun (entry : Log.entry) -> (entry.seq, entry.delta)) (Log.entries t));
   check taken "the fold hands back the taken lines with their deltas and times"
-    [ ((0, 1.0), Live.Run_started); ((2, 1.2), Live.Text "hi") ]
+    [ ((0, 1.0), Live.Run_started); ((2, 1.2), Live.Text {text="hi"; stream_scope=None}) ]
     (taken_to_tagged first);
   check position "the undrawn seq still counts as held" (Journal.After_seq 2)
     (Log.resume_position t);
   check bool "a live frame for the undrawn seq is a duplicate" false
-    (Log.add t ~seq:(Some 1) (Live.Text "late"));
+    (Log.add t ~seq:(Some 1) (Live.Text {text="late"; stream_scope=None}));
   let before = Log.revision t in
   let again =
     Log.add_journaled t
-      [ line 2 1.2 (E.Text_delta "hi"); line 3 1.3 E.Agent_core_stream_ping ]
+      [ line 2 1.2 (E.Text_delta {text="hi"; stream_scope=None}); line 3 1.3 E.Agent_core_stream_ping ]
   in
   check taken "a line already held and an undrawn line are not handed back" []
     (taken_to_tagged again);
@@ -374,7 +374,7 @@ let golden : E.keeper_chat_event list =
       ; execution_id = (match Keeper_chat_operation.Operation_id.of_string "batch-owner" with Ok id -> id | Error detail -> fail detail) }
   ; E.Agent_core_stream_connected
   ; E.Agent_core_stream_message_start
-      { provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = None }
+      { stream_scope = 0; provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = None }
   ; E.Agent_core_content_block_start
       { index = 0; content_type = "thinking"; tool_call_id = None; tool_call_name = None }
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
@@ -382,7 +382,7 @@ let golden : E.keeper_chat_event list =
   ; E.Agent_core_thinking_signature_delta { index = 0; signature_bytes = 42 }
   ; E.Agent_core_content_block_stop { index = 0 }
   ; E.Agent_core_stream_ping
-  ; E.Text_delta "Let me "
+  ; E.Text_delta {text="Let me "; stream_scope=None}
   ; E.Tool_call_start
       { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = "grep" }
   ; E.Tool_call_args { occurrence = occurrence_anon; tool_call_id = None; delta = "{\"pat\":\"x\"}" }
@@ -415,7 +415,7 @@ let golden : E.keeper_chat_event list =
   ; E.Status_block { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
   ; E.Continuation_checkpoint { message = "checkpoint"; request_id = Some "req-2" }
   ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
-  ; E.Text_delta "look."
+  ; E.Text_delta {text="look."; stream_scope=None}
   ; E.External_effect_completed
       { target = Masc.Keeper_surface_post.Delivered_to_slack { channel_id = "C1"; thread_ts = None } }
   ; E.Reply_details
@@ -424,12 +424,12 @@ let golden : E.keeper_chat_event list =
       ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:3
       }
   ; E.Text_message_end
-  ; E.Agent_core_stream_message_delta { stop_reason = None; usage = None }
+  ; E.Agent_core_stream_message_delta { stream_scope = 0; stop_reason = None; usage = None }
     (* Both facts the delta can carry, so the golden comparison says the
        journal and the wire read them the same way rather than agreeing on an
        event that carries nothing. *)
   ; E.Agent_core_stream_message_delta
-      { stop_reason = Some Agent_core.Types.MaxTokens
+      { stream_scope = 0; stop_reason = Some Agent_core.Types.MaxTokens
       ; usage =
           Some
             { Agent_core.Types.input_tokens = Some 1200
@@ -446,7 +446,7 @@ let golden : E.keeper_chat_event list =
 let failed_turn : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-failed"; thread_id = "keeper:keeper.one" }
   ; E.Text_message_start { message_id = "msg-2"; role = E.Assistant }
-  ; E.Text_delta "partial"
+  ; E.Text_delta {text="partial"; stream_scope=None}
   ; E.Text_message_end
   ; E.Event_error { message = "boom" }
   ]
@@ -482,7 +482,7 @@ let test_wire_timestamps_match_journal_and_survive_reconnect () =
         (E.Run_started { run_id = "run-timed"; thread_id = "keeper:keeper.one" })
     ; line 1 (started_at +. 0.1)
         (E.Text_message_start { message_id = "message-timed"; role = E.Assistant })
-    ; line 2 text_at (E.Text_delta "timed reply")
+    ; line 2 text_at (E.Text_delta {text="timed reply"; stream_scope=None})
     ]
   in
   let _, body =
@@ -516,7 +516,7 @@ let test_wire_timestamps_match_journal_and_survive_reconnect () =
   let observed = list (pair (pair (option int) (option (float 0.000001))) delta) in
   let expected =
     [ ((Some 0, Some started_at), Live.Run_started)
-    ; ((Some 2, Some text_at), Live.Text "timed reply")
+    ; ((Some 2, Some text_at), Live.Text {text="timed reply"; stream_scope=None})
     ]
   in
   check observed "wire keeps the producer's fractional epoch seconds"
@@ -628,7 +628,7 @@ let test_events_query_spells_both_cursors () =
    the page before handed back, and stops at the first error. *)
 let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let asked = ref [] in
-  let l seq = line seq (float_of_int seq) (E.Text_delta (string_of_int seq)) in
+  let l seq = line seq (float_of_int seq) (E.Text_delta {text=(string_of_int seq); stream_scope=None}) in
   let offset value =
     match Journal.page_start_of_wire (Some value) with
     | Some start -> start
@@ -692,7 +692,7 @@ let test_read_whole_journal_pages_until_the_position_stops_moving () =
   asked := [];
   let stuck ~since_seq ~since_offset =
     asked := (since_seq, Journal.page_start_to_wire since_offset) :: !asked;
-    page ~events:[ line 0 1.0 (E.Text_delta "0") ] ~has_more:true ~next_since_seq:since_seq
+    page ~events:[ line 0 1.0 (E.Text_delta {text="0"; stream_scope=None}) ] ~has_more:true ~next_since_seq:since_seq
       ~next_since_offset:(Journal.page_start_offset since_offset)
   in
   (match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch:stuck with
@@ -852,7 +852,7 @@ let test_a_journal_page_fills_the_log_like_the_wire_does () =
    file would still pass. *)
 let test_a_blank_reason_is_not_a_reason () =
   let delta stop_reason usage =
-    Log.delta_of_journaled (E.Agent_core_stream_message_delta { stop_reason; usage })
+    Log.delta_of_journaled (E.Agent_core_stream_message_delta { stream_scope = 0; stop_reason; usage })
   in
   (match delta (Some (Agent_core.Types.Unknown "")) None with
    | None -> ()
@@ -869,12 +869,58 @@ let test_a_blank_reason_is_not_a_reason () =
          ; cache_read_input_tokens = None
          })
   with
-  | Some (Live.Stream_details { usage = Some usage; stop_reason = None }) ->
+  | Some (Live.Stream_details { usage = Some usage; stop_reason = None; _ }) ->
       check (option int) "the counters the same delta carried are kept" (Some 7)
         usage.Live.input_tokens
   | other ->
       failf "a blank reason survived beside the counters: %s"
         (match other with None -> "no row" | Some delta -> delta_to_string delta)
+
+let test_missing_start_text_scope_survives_journal_and_wire () =
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  List.iter (fun (earlier, stopped_scope) ->
+    let events =
+      [E.Run_started {run_id="scope-run"; thread_id="keeper:keeper.one"};
+       E.Text_message_start {message_id="scope-message"; role=E.Assistant}]
+      @ (if earlier then [E.Text_delta {text="Earlier progress."; stream_scope=Some 1}] else [])
+      @ [E.Text_delta {text="Do"; stream_scope=Some 2};
+         (* The original start was lost; this surviving equal start follows text. *)
+         E.Agent_core_stream_message_start {stream_scope=2; provider_message_id="response-2";
+           model="observed"; usage=None};
+         E.Text_delta {text="ne"; stream_scope=Some 2};
+         E.Agent_core_stream_message_delta {stream_scope=stopped_scope;
+           stop_reason=Some Agent_core.Types.EndTurn; usage=None};
+         E.Reply_details {reply="Done"; turn_outcome=Outcome.Visible_reply;
+           turn_ref=Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:3}]
+      |> List.mapi (fun seq event ->
+        let wire = Journal.keeper_chat_event_to_json event
+          |> Yojson.Safe.to_string |> Yojson.Safe.from_string in
+        let event = match Journal.keeper_chat_event_of_json wire with
+          | Ok event -> event | Error detail -> fail detail in
+        seq, event) in
+    let journal = journal_tagged_deltas events in
+    let wire = wire_tagged_deltas events in
+    check (list tagged) "serialized journal and live text retain the same scope" journal wire;
+    List.iter (fun deltas ->
+      let transcript = Transcript.create ~keeper_name:"keeper.one" ~request_id:"scope-request"
+          ~started_at:1000. in
+      List.iter (fun (_, delta) -> Transcript.apply ~now:1001. transcript delta) deltas;
+      Transcript.note_skill_activity transcript
+        (Transcript.make_skill_activity ~invocation:Transcript.Instruction_read
+          ~skill_name:"source-review" ~skill_tool_use_id:"missing-read" ~turn_ref:"trace-1#3"
+          ~state:Transcript.Skill_delivered ~actions:[] ());
+      let rows = List.map (fun (item : Transcript.drawn_item) -> match item.drawn with
+        | Transcript.Drawn_text text -> "text:" ^ text
+        | Drawn_reply text -> "reply:" ^ text
+        | Drawn_skill _ -> "skill"
+        | Drawn_status _ | Drawn_error _ | Drawn_tools _ | Drawn_thinking _ -> "other")
+          (Transcript.drawn transcript) in
+      check (list string) "only a matching terminal text scope replaces the final stretch"
+        ((if earlier then ["text:Earlier progress."] else [])
+         @ (if stopped_scope=2 then [] else ["text:Done"])
+         @ ["skill"; "reply:Done"]) rows) [journal; wire])
+    [false, 2; true, 2; true, 3]
+;;
 
 let () =
   run "tui keeper chat log"
@@ -908,7 +954,9 @@ let () =
             test_read_whole_journal_pages_until_the_position_stops_moving
         ] )
     ; ( "golden"
-      , [ test_case "journal equals wire" `Quick test_golden_journal_equals_wire
+      , [ test_case "missing start retains scoped text through journal and live wire" `Quick
+            test_missing_start_text_scope_survives_journal_and_wire
+        ; test_case "journal equals wire" `Quick test_golden_journal_equals_wire
         ; test_case "wire timestamps match journal and survive reconnect" `Quick
             test_wire_timestamps_match_journal_and_survive_reconnect
         ; test_case "journal equals wire in chunks" `Quick

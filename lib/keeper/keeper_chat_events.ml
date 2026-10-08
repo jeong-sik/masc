@@ -68,7 +68,7 @@ type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
-  | Text_delta of string
+  | Text_delta of { text : string; stream_scope : int option }
   | Text_message_end
   | External_effect_completed of
       { target : Keeper_surface_post.delivery_target }
@@ -82,12 +82,14 @@ type keeper_chat_event =
       ; attempt_index : int option
       }
   | Agent_core_stream_message_start of
-      { provider_message_id : string
+      { stream_scope : int
+      ; provider_message_id : string
       ; model : string
       ; usage : Agent_core.Types.api_usage option
       }
   | Agent_core_stream_message_delta of
-      { stop_reason : Agent_core.Types.stop_reason option
+      { stream_scope : int
+      ; stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option
       }
   | Agent_core_stream_message_stop

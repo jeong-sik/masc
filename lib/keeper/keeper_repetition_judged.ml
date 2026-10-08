@@ -1,64 +1,74 @@
-(* The loop guard's seed from checkpoint history stops where the guard has
-   already judged. See the .mli. *)
+module Index = Keeper_tool_call_index
 
+type history_generation = Initial | Rewritten of string
+
+type t = { history_generation : history_generation; history_pairs : int; ledger_frontier : Index.frontier }
 type error = Invalid_record of string
 
 let error_to_string = function
   | Invalid_record detail -> "keeper repetition judged record: " ^ detail
-;;
 
-let context_key = "keeper_repetition_judged"
+let context_key = "keeper_repetition_boundary"
+let empty = { history_generation = Initial; history_pairs = 0; ledger_frontier = Index.empty_frontier }
+
+let generation_of_json = function
+  | `Null -> Ok Initial
+  | `String value ->
+    Random_id.parse_uuid_v7 value
+    |> Result.map (fun generation -> Rewritten generation)
+    |> Result.map_error (fun detail -> Invalid_record detail)
+  | _ -> Error (Invalid_record "invalid history generation")
 
 let decode = function
   | `Assoc fields ->
-    (match List.assoc_opt "history_pairs" fields with
-     | Some (`Int pairs) when pairs >= 0 -> Ok pairs
-     | Some (`Int pairs) ->
-       Error (Invalid_record (Printf.sprintf "history_pairs is negative: %d" pairs))
-     | Some _ -> Error (Invalid_record "history_pairs is not an integer")
-     | None -> Error (Invalid_record "history_pairs is missing"))
+    (match List.assoc_opt "history_generation" fields,
+           List.assoc_opt "history_pairs" fields, List.assoc_opt "ledger_frontier" fields with
+     | Some generation, Some (`Int history_pairs), Some ledger when history_pairs >= 0 ->
+       Result.bind (generation_of_json generation) (fun history_generation ->
+         Index.frontier_of_json ledger
+         |> Result.map (fun ledger_frontier -> {history_generation; history_pairs; ledger_frontier})
+         |> Result.map_error (fun detail -> Invalid_record detail))
+     | _ -> Error (Invalid_record "expected history generation, nonnegative history_pairs and ledger_frontier"))
   | _ -> Error (Invalid_record "not an object")
-;;
 
-let encode pairs = `Assoc [ "history_pairs", `Int pairs ]
+let encode boundary = `Assoc
+  [ "history_generation", (match boundary.history_generation with
+      | Initial -> `Null | Rewritten generation -> `String generation)
+  ; "history_pairs", `Int boundary.history_pairs
+  ; "ledger_frontier", Index.frontier_to_json boundary.ledger_frontier ]
 
-let held context =
+let read context =
   match Agent_core.Context.get_scoped context Agent_core.Context.Session context_key with
-  | None -> Ok 0
+  | None -> Ok empty
   | Some json -> decode json
-;;
 
-let record context pairs =
-  Agent_core.Context.set_scoped context Agent_core.Context.Session context_key (encode pairs)
-;;
+let record context boundary =
+  Agent_core.Context.set_scoped context Agent_core.Context.Session context_key (encode boundary)
 
-(* The larger of the two, and only ever written up: the durable one is what
-   an AGENT_CORE checkpoint carried, the live one what a yield on a lane
-   that persists no checkpoint recorded into the loop-lived context since.
-   Pairs are only appended, so the larger is the later fact. *)
+let reset_history context =
+  Result.map (fun boundary ->
+    let context = Agent_core.Context.copy context in
+    record context { boundary with
+      history_generation = Rewritten (Random_id.uuid_v7 ()); history_pairs = 0 };
+    context) (read context)
+
 let restore ~source ~target =
-  match held source, held target with
+  match read source, read target with
   | Error _ as error, _ -> error
   | Ok _, (Error _ as error) -> error
   | Ok durable, Ok live ->
-    let pairs = max durable live in
-    if pairs > live then record target pairs;
-    Ok pairs
-;;
-
-(* The history pair count the next setup will see for this run's calls:
-   what the seeder counts is a ToolUse answered by a ToolResult whose
-   digest succeeded, and the live hook records exactly those calls with
-   both fingerprints present. *)
-let pairs_judged_by ~history_pairs_at_setup (tool_calls : Keeper_agent_result.tool_call_detail list) =
-  let fingerprinted =
-    List.length
-      (List.filter
-         (fun (call : Keeper_agent_result.tool_call_detail) ->
-           Option.is_some call.input_fingerprint && Option.is_some call.output_fingerprint)
-         tool_calls)
-  in
-  history_pairs_at_setup + fingerprinted
+    let history =
+      match Agent_core.Context.get_scoped source Agent_core.Context.Session context_key with
+      | None -> live
+      | Some _ when durable.history_generation = live.history_generation ->
+        { durable with history_pairs = max durable.history_pairs live.history_pairs }
+      | Some _ -> durable
+    in
+    let boundary =
+      { history with
+        ledger_frontier = Index.merge_frontiers durable.ledger_frontier live.ledger_frontier } in
+    if boundary <> live then record target boundary;
+    Ok boundary
 ;;
 
 let seed_beyond ~judged pairs =

@@ -2284,6 +2284,20 @@ let default_context_overflow_shrink_capacity ~capacity =
   capacity / context_overflow_shrink_divisor
 ;;
 
+(* The refusals the shrink ladder answers: the provider's context overflow and
+   its refusal of the request body. Both say the request outgrew what carries
+   it, so a smaller view of the same conversation can still answer the turn.
+   [context_overflow_should_try_next] names only the window fact, which the
+   rotation walk reads; the ladder also answers a body refusal, which the Codex
+   app-server reports for an oversized [turn/start] input ([input_too_large],
+   lowered to [Request_body_refused_by_provider] at the client boundary). *)
+let shrinkable_refusal = function
+  | Agent_core.Error.Api (ContextOverflow _)
+  | Agent_core.Error.Api
+      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) -> true
+  | _ -> false
+;;
+
 (* The shrink-retry policy is expressed over an injected [attempt] callback
    so it stays testable without an Eio-backed provider: the official-client
    lanes wire their real attempt for production; tests can inject a canned
@@ -2318,8 +2332,7 @@ let context_overflow_shrink_sequence
     match attempt ~capacity with
     | Ok _ as ok -> ok
     | Error error as failed ->
-      if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
-         && same_run_retry_authorized ()
+      if shrinkable_refusal error && same_run_retry_authorized ()
       then (
         let default_capacity =
           default_context_overflow_shrink_capacity ~capacity

@@ -294,11 +294,78 @@ let test_the_shrink_stops_at_the_first_inadmissible_step () =
     (List.rev !attempted_capacities)
 ;;
 
+let request_body_refused () =
+  Agent_core.Error.Api
+    (Agent_core.Retry.InvalidRequest
+       { message = "input_too_large"
+       ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
+       })
+;;
+
+(* The Codex app-server refuses an oversized turn/start input before any tool
+   runs; the typed body refusal walks the same ladder as a window overflow. *)
+let test_body_refusal_shrinks_until_success () =
+  let attempted_capacities = ref [] in
+  let attempt ~capacity =
+    attempted_capacities := capacity :: !attempted_capacities;
+    if capacity <= 256 then Ok "done" else Error (request_body_refused ())
+  in
+  let result =
+    Try_provider.context_overflow_shrink_sequence
+      ~starting_capacity:1024
+      ~same_run_retry_authorized:always_authorized
+      ~shrink_admits_history:always_admits_history
+      ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity:_ -> ())
+      ~attempt
+      ()
+  in
+  check bool "eventually succeeds" true (result = Ok "done");
+  check (list int) "capacity halves on each body refusal" [ 1024; 512; 256 ]
+    (List.rev !attempted_capacities)
+;;
+
+(* After a tool effect the retry authority is closed: a body refusal must not
+   replay the turn on a smaller view. *)
+let test_body_refusal_after_effect_never_shrinks () =
+  let attempts = ref 0 in
+  let attempt ~capacity:_ =
+    incr attempts;
+    Error (request_body_refused ())
+  in
+  let result =
+    Try_provider.context_overflow_shrink_sequence
+      ~starting_capacity:1024
+      ~same_run_retry_authorized:(fun () -> false)
+      ~shrink_admits_history:always_admits_history
+      ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity ->
+        no_shrink_expected ~capacity)
+      ~attempt
+      ()
+  in
+  check int "attempted exactly once" 1 !attempts;
+  check bool "the body refusal propagates unchanged" true
+    (match result with
+     | Error
+         (Agent_core.Error.Api
+           (Agent_core.Retry.InvalidRequest
+             { reason = Agent_core.Retry.Request_body_refused_by_provider _; _ })) ->
+       true
+     | _ -> false)
+;;
+
 let () =
   run
     "keeper_context_overflow_shrink"
     [ ( "context_overflow_shrink_sequence"
       , [ test_case
+            "a body refusal shrinks until success"
+            `Quick
+            test_body_refusal_shrinks_until_success
+        ; test_case
+            "a body refusal after an effect never shrinks"
+            `Quick
+            test_body_refusal_after_effect_never_shrinks
+        ; test_case
             "halves capacity on repeated overflow until success"
             `Quick
             test_halves_capacity_on_repeated_overflow_until_success

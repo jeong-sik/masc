@@ -2,6 +2,7 @@
     package supplies barriers; no model response or Docker daemon is involved. *)
 open Alcotest
 open Masc
+module Host_runtime = Runtime
 module Runtime = struct
   include Lane_addon_runtime
   let dispatch ?caller ?access ~config ~operation args =
@@ -175,11 +176,11 @@ let with_fixture ?acquire ?observe_step f =
               let state, backend = make_backend ?observe_step () in
               let backend = match acquire with None -> backend | Some acquire -> {backend with acquire} in
               Runtime.For_testing.with_backend backend (fun () ->
-                let saved_runtime = Masc.Runtime.For_testing.snapshot () in
-                Fun.protect ~finally:(fun () -> Masc.Runtime.For_testing.restore saved_runtime) (fun () ->
+                let saved_runtime = Host_runtime.For_testing.snapshot () in
+                Fun.protect ~finally:(fun () -> Host_runtime.For_testing.restore saved_runtime) (fun () ->
                   let path = Filename.concat dir "runtime-fixture.toml" in
                   write path (machine_runtime_config ~enabled:true);
-                  ignore (unwrap (Masc.Runtime.init_default ~config_path:path));
+                  ignore (unwrap (Host_runtime.init_default ~config_path:path));
                   f env sw (Workspace.default_config dir) dir state)))))))
 
 let test_hang_error_coalescing_and_primary_progress () = with_fixture (fun env sw config dir state ->

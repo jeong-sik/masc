@@ -131,12 +131,45 @@ let test_every_source_mergeable_absorbs_as_answered () =
   let facts = List.map fact sources in
   let absorbed = absorbed_into merged facts in
   let evaluate, requests, _ = table ~noul_of:(fun _ -> 0.9) in
-  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check int) "both absorptions go through" 2 (List.length j.absorbed);
   Alcotest.(check int) "none kept current" 0 (List.length j.left);
   Alcotest.(check int) "both counted as conveyed" 2 (List.length j.conveyed);
   Alcotest.(check int) "one request per complete source" 2 !requests;
   Alcotest.(check int) "the same is reported" 2 j.requests
+;;
+
+let test_observations_reach_judgment_without_becoming_the_candidate () =
+  let source = fact "Incident A17 was under investigation." in
+  let candidate = fact "Incident A17 was investigated and subsequently resolved." in
+  let observations = [`Assoc ["id", `String "probe-a17";
+    "text", `String "A17 recovery probe succeeded after the fix."]] in
+  let evaluate ~state ~questions =
+    Alcotest.(check string) "source observations are passed intact"
+      (Yojson.Safe.to_string (`List observations))
+      (Yojson.Safe.to_string (Yojson.Safe.Util.member "new_observations" state));
+    Alcotest.(check string) "proposed memory remains separate" candidate.claim
+      (Yojson.Safe.Util.member "proposed_memory" state |> Yojson.Safe.Util.to_string);
+    Ok { T.model = "fixture"; usage = None;
+         answers = List.map (fun (qid, _) -> qid, choice_answer "mergeable") questions } in
+  let result = judged (Gate.judge ~new_observations:observations ~evaluate
+    ~facts:[source] ~new_claims:[candidate] ~absorbed:(absorbed_into candidate [source])) in
+  Alcotest.(check int) "supported transition can absorb its original" 1 (List.length result.absorbed)
+;;
+
+let test_oversized_observations_leave_the_pass_pending () =
+  let source = fact "Incident A17 was under investigation." in
+  let candidate = fact "Incident A17 was resolved." in
+  let evaluate ~state:_ ~questions:_ = Alcotest.fail "oversized evidence must not dispatch" in
+  let absorbed = absorbed_into candidate [source] in
+  match Gate.judge ~new_observations:[`String (String.make Gate.request_bytes_limit 'x')]
+          ~evaluate ~facts:[source] ~new_claims:[candidate] ~absorbed with
+  | Gate.Judged _ -> Alcotest.fail "oversized evidence is not completed consolidation"
+  | Gate.Failed { kind; absorbed; unjudgeable; _ } ->
+    Alcotest.(check bool) "capacity failure is typed for source narrowing" true
+      (kind = Gate.Input_capacity_exceeded);
+    Alcotest.(check int) "no source retired" 0 (List.length absorbed);
+    Alcotest.(check int) "source retained as unjudgeable" 1 (List.length unjudgeable)
 ;;
 
 let test_knowledge_loss_keeps_its_memory_current () =
@@ -155,7 +188,7 @@ let test_knowledge_loss_keeps_its_memory_current () =
       (* The claim says nothing about paging the operator. *)
       if contains statement "pages the operator" then 0.2 else 0.95)
   in
-  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check (list string))
     "only the alpha memory is absorbed"
     [ id (List.nth facts 0) ]
@@ -184,7 +217,7 @@ let test_only_mergeable_permits_absorption () =
        | _ -> Alcotest.fail "forward consolidation must ask a typed choice");
       Ok { T.model = "context-fixture"; usage = None
          ; answers = List.map (fun (qid, _) -> qid, choice_answer decision) questions } in
-    let j = judged (Gate.judge ~evaluate ~facts:[source] ~new_claims:[merged]
+    let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts:[source] ~new_claims:[merged]
       ~absorbed:(absorbed_into merged [source])) in
     Alcotest.(check int) (decision ^ " absorption")
       (if decision = "mergeable" then 1 else 0) (List.length j.absorbed);
@@ -202,13 +235,13 @@ let test_the_model_not_answering_keeps_the_sources () =
   let facts = List.map fact sources in
   let absorbed = absorbed_into merged facts in
   let evaluate ~state:_ ~questions:_ = Error "HTTP 529" in
-  (match Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
+  (match Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
    | Gate.Failed { reason; absorbed = applied; _ } ->
      Alcotest.(check string) "the reason is carried" "HTTP 529" reason;
      Alcotest.(check int) "unconfirmed sources stay current" 0 (List.length applied)
    | Gate.Judged _ -> Alcotest.fail "expected failed judgment");
   let missing ~state:_ ~questions:_ = Ok { T.model = "jev-test"; answers = []; usage = None } in
-  match Gate.judge ~evaluate:missing ~facts ~new_claims:[ merged ] ~absorbed with
+  match Gate.judge ~new_observations:[] ~evaluate:missing ~facts ~new_claims:[ merged ] ~absorbed with
   | Gate.Failed _ -> ()
   | Gate.Judged _ -> Alcotest.fail "an answer without the questions is not a judgment"
 ;;
@@ -220,7 +253,7 @@ let test_an_absorption_the_pass_cannot_place_stays_current () =
   let stranger = fact "a memory the pass did not carry" in
   let absorbed = absorbed_into merged (facts @ [ stranger ]) in
   let evaluate, _, asked = table ~noul_of:(fun _ -> 0.9) in
-  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check (list string))
     "the conveyed memory is absorbed, the unjudged stranger stays current"
     [ id (List.hd facts) ]
@@ -236,7 +269,7 @@ let test_an_absorption_into_a_restated_memory_is_judged () =
   let facts = List.map fact (sources @ [ merged.claim ]) in
   let absorbed = absorbed_into merged (List.map fact sources) in
   let evaluate, requests, _ = table ~noul_of:(fun _ -> 0.9) in
-  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[] ~absorbed) in
+  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[] ~absorbed) in
   Alcotest.(check int) "both absorptions judged and conveyed" 2 (List.length j.conveyed);
   Alcotest.(check int) "none passed through unjudged" 0 (List.length j.unjudged);
   Alcotest.(check int) "each source is judged against the restated memory" 2 !requests
@@ -252,7 +285,7 @@ let test_complete_sources_are_asked_separately () =
   let facts = List.init 5 (fun i -> fact (Printf.sprintf "%s copy %d" many.Types.claim i)) in
   let absorbed = absorbed_into merged facts in
   let evaluate, requests, asked = table ~noul_of:(fun _ -> 1.0) in
-  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check (list string)) "complete source memories are judged once"
     (List.map (fun (source : Types.fact) -> source.claim) facts) (List.rev !asked);
   Alcotest.(check bool) "one request per complete source" true (!requests = List.length facts);
@@ -273,7 +306,7 @@ let test_a_missing_seventeenth_statement_keeps_the_whole_memory () =
   in
   let j =
     judged
-      (Gate.judge ~evaluate ~facts:[ source ] ~new_claims:[ claim ]
+      (Gate.judge ~new_observations:[] ~evaluate ~facts:[ source ] ~new_claims:[ claim ]
          ~absorbed:(absorbed_into claim [ source ]))
   in
   Alcotest.(check (list string)) "the exception is judged within its complete source"
@@ -730,7 +763,7 @@ let test_an_invalid_choice_confidence_keeps_the_source () =
         T.Choice_answer { T.choice = "mergeable"; confidence = 2.
           ; probabilities = [ "mergeable", 1.; "different_context", 0.
                             ; "loses_knowledge", 0.; "uncertain", 0. ] }) questions } in
-  match Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
+  match Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
   | Gate.Failed _ -> ()
   | Gate.Judged _ -> Alcotest.fail "2.0 is not a probability"
 ;;
@@ -756,7 +789,7 @@ let test_a_rejection_completed_before_a_later_failure_is_kept () =
     else Error "HTTP 529"
   in
   match
-    Gate.judge ~evaluate ~facts:[ first; second ] ~new_claims:[ merged; other ] ~absorbed
+    Gate.judge ~new_observations:[] ~evaluate ~facts:[ first; second ] ~new_claims:[ merged; other ] ~absorbed
   with
   | Gate.Failed { absorbed = applied; left; _ } ->
     Alcotest.(check (list string)) "the rejected source stays current"
@@ -781,7 +814,7 @@ let test_a_conveyed_verdict_survives_a_later_failure () =
          ; answers = List.map (fun (qid, _) -> qid, choice_answer "mergeable") questions }
     else Error "HTTP 529"
   in
-  let outcome = Gate.judge ~evaluate ~facts:[ first; second ]
+  let outcome = Gate.judge ~new_observations:[] ~evaluate ~facts:[ first; second ]
       ~new_claims:[ merged; other ] ~absorbed in
   let run = Gate.Evaluated { outcome; copy_checks = []; evaluations = [] } in
   Alcotest.(check (list string)) "only completed positive absorptions apply"
@@ -803,7 +836,7 @@ let test_failure_preserves_unjudged_from_unvisited_groups () =
   let missing_source : Types.absorbed_statement = { absorbed = "absent-source"; into = id merged } in
   let missing_claim : Types.absorbed_statement = { absorbed = id source; into = "absent-claim" } in
   let absorbed = absorbed_into merged [ source ] @ [ missing_source; missing_claim ] in
-  let outcome = Gate.judge ~evaluate:(fun ~state:_ ~questions:_ -> Error "HTTP 503")
+  let outcome = Gate.judge ~new_observations:[] ~evaluate:(fun ~state:_ ~questions:_ -> Error "HTTP 503")
       ~facts:[ source ] ~new_claims:[ merged ] ~absorbed in
   let run = Gate.Evaluated { outcome; copy_checks = []; evaluations = [] } in
   Alcotest.(check int) "all unconfirmed sources remain current" 0
@@ -939,7 +972,7 @@ let test_run_records_the_destination_passed_over () =
     } @@ fun () ->
   let first = fact (List.nth sources 0) in
   let absorbed = absorbed_into merged [ first ] in
-  let run = Gate.run ~clock ~keeper_id:"reserve-fixture" ~superseding:[] ~facts:[ first ]
+  let run = Gate.run ~new_observations:[] ~clock ~keeper_id:"reserve-fixture" ~superseding:[] ~facts:[ first ]
       ~new_claims:[ merged ] ~absorbed () in
   let report = Gate.run_result_to_yojson run in
   match J.member "evaluations" report |> J.to_list with
@@ -999,7 +1032,7 @@ let test_run_uses_one_destination_and_model_snapshot () =
   let other = fact "beta ships on fridays and pages the operator" in
   let absorbed = absorbed_into merged [ first ] @ absorbed_into other [ second ] in
   let observations = ref [] in
-  let run = Gate.run ~clock ~keeper_id:"snapshot-fixture" ~superseding:[] ~facts:[ first; second ]
+  let run = Gate.run ~new_observations:[] ~clock ~keeper_id:"snapshot-fixture" ~superseding:[] ~facts:[ first; second ]
       ~observe:(fun observation -> observations := observation :: !observations)
       ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ ->
         events := "started" :: !events;
@@ -1112,7 +1145,7 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
     (try
        Eio.Cancel.sub (fun cancellation ->
          Eio.Promise.resolve resolve_context cancellation;
-         match Gate.run ~clock ~keeper_id:"cancel-observation-fixture" ~superseding:[]
+         match Gate.run ~new_observations:[] ~clock ~keeper_id:"cancel-observation-fixture" ~superseding:[]
              ~observe:(fun observation -> observed := observation :: !observed)
              ~before_evaluate
              ~after_evaluate:(fun ~evaluation_id evaluation ->
@@ -1207,7 +1240,7 @@ let test_cancellation_during_terminal_callback_settles_registry () =
   let raised = ref false in
   let source = fact (List.hd sources) in
   (try Eio.Cancel.sub (fun cancellation ->
-     ignore (Gate.run ~clock ~keeper_id:"terminal-cancel-fixture" ~superseding:[]
+     ignore (Gate.run ~new_observations:[] ~clock ~keeper_id:"terminal-cancel-fixture" ~superseding:[]
        ~facts:[source] ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])
        ~before_evaluate:(fun ~direction ~destinations ~state ~questions ->
          Runs.register_running registry ~run_id ~lane:Runs.Librarian
@@ -1263,7 +1296,7 @@ let test_cancellation_during_finish_callback_still_publishes_the_observation () 
   let observed = ref [] in
   let raised = ref false in
   (try Eio.Cancel.sub (fun cancellation ->
-     ignore (Gate.run ~clock ~keeper_id:"finish-cancel-fixture" ~superseding:[]
+     ignore (Gate.run ~new_observations:[] ~clock ~keeper_id:"finish-cancel-fixture" ~superseding:[]
        ~facts:[source] ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])
        ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> "run")
        ~after_evaluate:(fun ~evaluation_id:_ _ ->
@@ -1303,7 +1336,7 @@ let test_cancellation_during_failure_settlement_propagates_as_cancelled () =
   let aborted = ref 0 in
   let outcome =
     try Eio.Cancel.sub (fun cancellation ->
-      ignore (Gate.run ~clock ~keeper_id:"failure-cancel-fixture" ~superseding:[]
+      ignore (Gate.run ~new_observations:[] ~clock ~keeper_id:"failure-cancel-fixture" ~superseding:[]
         ~facts:[source] ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])
         ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> "run")
         ~after_evaluate:(fun ~evaluation_id:_ _ ->
@@ -1328,7 +1361,7 @@ let test_cancellation_during_failure_settlement_propagates_as_cancelled () =
 
 let test_skipped_run_publishes_its_completed_observation () =
   let observed = ref [] in
-  let run = Gate.run ~keeper_id:"empty-observation-fixture" ~superseding:[] ~facts:[] ~new_claims:[]
+  let run = Gate.run ~new_observations:[] ~keeper_id:"empty-observation-fixture" ~superseding:[] ~facts:[] ~new_claims:[]
       ~absorbed:[] ~observe:(fun value -> observed := value :: !observed) () in
   match !observed with
   | [ Gate.Complete result ] ->
@@ -1353,7 +1386,7 @@ let test_an_excluded_keeper_is_applied_as_answered_without_a_request () =
     ; absorb_gate = true
     ; excluded_keepers = [ "kept-home" ]
     } @@ fun () ->
-  match Gate.run ~keeper_id:"kept-home" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~new_observations:[] ~keeper_id:"kept-home" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Keeper_excluded; absorbed = applied } ->
     Alcotest.(check int) "every absorption is applied" (List.length absorbed) (List.length applied)
   | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
@@ -1376,7 +1409,7 @@ let test_a_gate_declared_on_without_a_lane_keeps_the_sources_current () =
         , [] )
     ; absorb_gate = true
     } @@ fun () ->
-  match Gate.run ~keeper_id:"meant-to-judge" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~new_observations:[] ~keeper_id:"meant-to-judge" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Lane_disabled; absorbed = applied } ->
     Alcotest.(check int) "no absorption is applied" 0 (List.length applied);
     Alcotest.(check bool) "there was something to withhold" true (absorbed <> [])
@@ -1394,7 +1427,7 @@ let test_a_gate_declared_off_applies_as_answered_even_without_a_lane () =
   Masc_test_deps.with_typesafeai_policy
     { Runtime_schema.default_typesafeai with lane_enabled = false; absorb_gate = false }
   @@ fun () ->
-  match Gate.run ~keeper_id:"told-not-to" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~new_observations:[] ~keeper_id:"told-not-to" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Absorb_gate_disabled; absorbed = applied } ->
     Alcotest.(check int) "every absorption is applied" (List.length absorbed) (List.length applied)
   | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
@@ -1429,7 +1462,7 @@ let test_rejected_response_retains_every_typed_answer () =
   @@ fun () ->
   let facts = List.map fact sources in
   List.iter (fun (label, expected) ->
-    let run = Gate.run ~clock ~keeper_id:"invalid-answer-fixture" ~superseding:[] ~facts
+    let run = Gate.run ~new_observations:[] ~clock ~keeper_id:"invalid-answer-fixture" ~superseding:[] ~facts
         ~new_claims:[ merged ] ~absorbed:(absorbed_into merged facts) () in
     Alcotest.(check int) "invalid responses cannot authorize absorption" 0
       (List.length (Gate.absorbed_of_run run));
@@ -1469,7 +1502,7 @@ let test_complete_source_before_failure ~first_rejected () =
         })
     else Error "HTTP 529"
   in
-  match Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
+  match Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
   | Gate.Failed { absorbed = applied; left; _ } ->
     Alcotest.(check int) "two requests were attempted" 2 !calls;
     Alcotest.(check (list string)) "only completed negative evidence is reported"
@@ -1487,7 +1520,7 @@ let test_a_claim_over_the_state_bound_keeps_all_its_absorptions_current () =
   let facts = List.map fact sources in
   let absorbed = absorbed_into wide facts in
   let evaluate, requests, _asked = table ~noul_of:(fun _ -> 1.0) in
-  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[ wide ] ~absorbed) in
+  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ wide ] ~absorbed) in
   Alcotest.(check int) "nothing is absorbed" 0 (List.length j.absorbed);
   Alcotest.(check int) "every memory is reported as too large to judge"
     (List.length sources) (List.length j.unjudgeable);
@@ -1501,7 +1534,7 @@ let test_an_oversized_memory_stays_current_when_another_request_fails () =
   let small = fact (List.hd sources) in
   let absorbed = absorbed_into merged [ huge; small ] in
   let evaluate ~state:_ ~questions:_ = Error "HTTP 529" in
-  match Gate.judge ~evaluate ~facts:[ huge; small ] ~new_claims:[ merged ] ~absorbed with
+  match Gate.judge ~new_observations:[] ~evaluate ~facts:[ huge; small ] ~new_claims:[ merged ] ~absorbed with
   | Gate.Failed { absorbed = applied; _ } ->
     Alcotest.(check (list string)) "neither oversized nor unconfirmed memory is absorbed"
       []
@@ -1517,7 +1550,7 @@ let test_a_statement_too_large_to_judge_keeps_its_memory_current () =
   let facts = [ huge; small ] in
   let absorbed = absorbed_into merged facts in
   let evaluate, requests, asked = table ~noul_of:(fun _ -> 1.0) in
-  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check (list string)) "only the small memory is absorbed"
     [ id small ]
     (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) j.absorbed);
@@ -1552,7 +1585,7 @@ let recording evaluate =
 
 let copy_checks ~evaluate ~claim ~superseding =
   let absorbed = absorbed_into claim copy_sources in
-  let j = judged (Gate.judge ~evaluate ~facts:copy_sources ~new_claims:[ claim ] ~absorbed) in
+  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts:copy_sources ~new_claims:[ claim ] ~absorbed) in
   Alcotest.(check int) "the forward question absorbed nothing" 0 (List.length j.absorbed);
   let checks =
     Gate.judge_copies ~evaluate ~facts:copy_sources ~new_claims:[ claim ] ~superseding
@@ -1664,7 +1697,7 @@ let test_a_gate_without_a_lane_applies_every_claim () =
     ; absorb_gate = true
     } @@ fun () ->
   let run =
-    Gate.run ~keeper_id:"reverse-unavailable" ~superseding:[] ~facts:copy_sources
+    Gate.run ~new_observations:[] ~keeper_id:"reverse-unavailable" ~superseding:[] ~facts:copy_sources
       ~new_claims:[ copy_claim ] ~absorbed ()
   in
   Alcotest.(check int) "nothing is absorbed" 0 (List.length (Gate.absorbed_of_run run));
@@ -1681,7 +1714,7 @@ let test_a_claim_with_an_absorption_applied_is_not_asked_back () =
       if String.equal statement first.claim then 0.9 else 0.1)
   in
   let absorbed = absorbed_into copy_claim copy_sources in
-  let j = judged (Gate.judge ~evaluate ~facts:copy_sources ~new_claims:[ copy_claim ] ~absorbed) in
+  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts:copy_sources ~new_claims:[ copy_claim ] ~absorbed) in
   Alcotest.(check (list string)) "one source absorbed" [ id first ]
     (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) j.absorbed);
   let before = !requests in
@@ -1720,7 +1753,7 @@ let test_a_restated_memory_is_not_asked_back () =
   let facts = restated :: copy_sources in
   let absorbed = absorbed_into restated copy_sources in
   let evaluate, requests, _ = table ~noul_of:(fun _ -> 0.1) in
-  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[] ~absorbed) in
+  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[] ~absorbed) in
   let before = !requests in
   let checks =
     Gate.judge_copies ~evaluate ~facts ~new_claims:[] ~superseding:[] ~absorbed
@@ -2336,6 +2369,10 @@ let () =
         ; Alcotest.test_case "only mergeable permits absorption" `Quick test_only_mergeable_permits_absorption
         ; Alcotest.test_case "the model not answering preserves the originals" `Quick
             test_the_model_not_answering_keeps_the_sources
+        ; Alcotest.test_case "new observations accompany the source and candidate" `Quick
+            test_observations_reach_judgment_without_becoming_the_candidate
+        ; Alcotest.test_case "oversized observations leave the whole pass pending" `Quick
+            test_oversized_observations_leave_the_pass_pending
         ; Alcotest.test_case "an absorption the pass cannot place stays current" `Quick
             test_an_absorption_the_pass_cannot_place_stays_current
         ; Alcotest.test_case "an absorption into a restated memory is judged" `Quick

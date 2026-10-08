@@ -55,13 +55,33 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
     Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
       ~now:100. ~source ~facts () |> require in
   let input : Librarian.input =
-    { turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1
-    ; historical_task_contexts = []; goal_context = Librarian.No_task
+    { turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:9
+    ; historical_task_contexts =
+        (if observer_checks then
+           let module Context = Keeper_librarian_task_context in
+           [ { Context.scope =
+                 { source = Context.Atom_span { trace_id = keeper_id; start_atom = 0; end_atom = 1 }
+                 ; attribution = Context.Observed
+                     { turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:3
+                     ; task_context = Keeper_turn_task_context.No_task } }
+             ; first_message = 0; after_message = 1
+             ; first_tool_observation = 0; after_tool_observation = 1 }
+           ; { Context.scope =
+                 { source = Context.Atom_span { trace_id = keeper_id; start_atom = 1; end_atom = 2 }
+                 ; attribution = Context.Unattributed }
+             ; first_message = 1; after_message = 2
+             ; first_tool_observation = 1; after_tool_observation = 1 } ]
+         else [])
+    ; goal_context = Librarian.No_task
     ; keeper_id = Masc_test_deps.keeper_id_fixture keeper_id
     ; keeper_instructions = "Keep both service deployment instructions."
     ; current = Some { Librarian.facts = seeded.facts }
     ; working_context = Keeper_librarian_context.empty
-    ; messages = []; tool_observations = []; counterpart_observations = [] } in
+    ; messages =
+        [ Agent_core.Types.user_msg "The alpha deployment completed; beta is only planned."
+        ; Agent_core.Types.user_msg "Beta remains unverified." ]
+    ; tool_observations = [{ Librarian.tool_name = "deployment_probe"; outcome = Librarian.Unknown }]
+    ; counterpart_observations = [] } in
   let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
   let before_bytes = Fs_compat.load_file current_path in
   let claim text token =
@@ -184,6 +204,36 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
   Alcotest.(check int) "one actual Librarian request" 1 (Fixture.post_count librarian);
   Alcotest.(check int) "only the intended JEV requests were sent"
     (match stage with Provider | After_failed_completion -> 0 | Second_judgment | After_commit | After_completion -> 2) (Fixture.post_count jev);
+  List.iter (fun body ->
+    let state = Yojson.Safe.from_string body |> member "state" in
+    let observations = member "new_observations" state |> Yojson.Safe.Util.to_list in
+    Alcotest.(check int) "source observations and available historical ranges reach each real request"
+      (if observer_checks then 4 else 3)
+      (List.length observations);
+    let conversation = List.nth observations 0 in
+    let second_conversation = List.nth observations 1 in
+    let tool = List.nth observations 2 in
+    List.iter (fun observation ->
+      check_json "request identifies its batch, not each source's turn"
+        (Ids.Turn_ref.to_yojson input.turn_ref) (member "batch_turn_ref" observation);
+      check_json "no individual turn is invented" `Null (member "turn_ref" observation))
+      observations;
+    Alcotest.(check int) "first message has a local position" 0
+      (member "local_position" conversation |> Yojson.Safe.Util.to_int);
+    Alcotest.(check int) "next message position is local to the selected batch" 1
+      (member "local_position" second_conversation |> Yojson.Safe.Util.to_int);
+    Alcotest.(check string) "conversation is host-attributed source data"
+      "[local_position=0 role=user speaker=unknown] The alpha deployment completed; beta is only planned."
+      (member "text" conversation |> string);
+    if observer_checks then (
+      let historical = List.nth observations 3 in
+      Alcotest.(check string) "historical provenance is a separate observation"
+        "historical_task_contexts" (member "kind" historical |> string);
+      check_json "witnessed turns, unattributed gaps and original ranges are preserved"
+        (Keeper_librarian_task_context.to_json input.historical_task_contexts)
+        (member "ranges" historical));
+    Alcotest.(check string) "unknown execution outcome stays unknown" "unknown"
+      (member "outcome" tool |> string)) (Fixture.request_bodies jev);
   let after_bytes = Fs_compat.load_file current_path in
   Printf.printf "POST_COMMIT_OBSERVATION keeper=%s callback=%b memory_changed=%b\n%!"
     keeper_id !memory_committed (after_bytes <> before_bytes);

@@ -393,7 +393,7 @@ let handle_keeper_tool_approval ~actor state request reqd =
             match
               Keeper_late_approval.remember_late
                 (Keeper_late_approval.shared ())
-                ~keeper_name ~tool_call_id ~actor decision ()
+                ~base_path ~keeper_name ~tool_call_id ~actor decision ()
             with
             | Keeper_late_approval.Remembered _ -> true
             | Keeper_late_approval.No_matching_ask -> false
@@ -2105,6 +2105,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       ~publish:(fun event -> push_worker_event (Stream_chat_event event))
       ~redact_text
       ~clock
+      ~base_path
       ~keeper_name:payload.name
       ~timeout_sec:keeper_tool_approval_timeout_sec
   in

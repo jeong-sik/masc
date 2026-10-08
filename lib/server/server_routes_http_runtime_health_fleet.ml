@@ -204,9 +204,9 @@ let keeper_hitl_gate_health_json () =
       ; timed_out_total } =
     Keeper_tool_approval_registry.outcome_totals registry
   in
-  let late_uncertain = 0 in
-  (* The approval journal (design D2) has no producer yet; D2 wires its
-     count here. *)
+  let late_uncertain =
+    Keeper_late_approval.journal_uncertain (Keeper_late_approval.shared ())
+  in
   match current_server_state_opt () with
   | None ->
     Keeper_hitl_gate_health.no_workspace_json ~waits ~answered_total

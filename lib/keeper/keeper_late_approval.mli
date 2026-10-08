@@ -51,6 +51,36 @@ type t
 
 val create : unit -> t
 
+val bind_to_journal :
+  ?now:float -> base_path:string -> t -> unit
+(** Bind the store to the gate root's decision journal
+    ({!Keeper_gate_path.late_approval_log}) and restore its view from the
+    journal synchronously, before any turn can consult the store (design
+    D2): a remembered answer must already stand when the first identical
+    retry after a restart arrives, and a lazy restore could answer an ask
+    the operator already settled.
+
+    Restore is best-effort on unreadable rows — a row the current build
+    cannot decode is skipped, the way a torn tail is cut — but a bound
+    store durably appends every mutation. The server binds the shared
+    store once at boot; tests bind per-store temp directories. Calling it
+    twice rebinds and re-restores (the second read is the journal plus
+    whatever the first bound period appended). The [?now] injection exists
+    so tests can restore with a fixed clock, matching the other
+    operations. *)
+
+val journal_uncertain : t -> int
+(** The count of consumed late answers whose deliver row is missing — the
+    outcome-unknown window design D2 names. [take] returns the decision and
+    then appends [op=deliver]; a crash between the two leaves a consume
+    whose delivery cannot be separated from a dispatch the tool already
+    made. Restores surface that window here, and health's
+    [keeper_hitl_gate.late_uncertain] carries the count to the operator
+    (acked later by the D4 recover surface; an ack is a warning
+    acknowledgement, never a re-authorization). A consume older than
+    {!ttl_sec} reads as aged history, not as an open question — the same
+    authorization ceiling the live memories keep. *)
+
 val shared : unit -> t
 (** The store the running server uses.
 
@@ -74,6 +104,7 @@ val ttl_sec : float
 val note_timed_out :
   t ->
   ?now:float ->
+  base_path:string ->
   keeper_name:string ->
   tool_call_id:string ->
   tool_name:string ->
@@ -86,6 +117,13 @@ val note_timed_out :
     description is taken from the ask itself, never from the answering
     client, so a late answer cannot attach itself to a call it was not
     shown.
+
+    [base_path] is the asking workspace the gate runs under, part of the
+    ask's identity: workspaces that share the gate root cannot have their
+    asks answered by each other's operators (design D2). When the store is
+    {!bind_to_journal}-bound, the record is durably appended first and the
+    memory only holds what the journal acknowledged; an append failure
+    keeps no memory, so the identical retry is asked about again.
 
     [now] defaults to the wall clock at this I/O boundary; the gate passes
     its own clock's reading so ages are measured against the same clock
@@ -105,6 +143,7 @@ type remember_outcome =
 val remember_late :
   t ->
   ?now:float ->
+  base_path:string ->
   keeper_name:string ->
   tool_call_id:string ->
   actor:string ->
@@ -112,11 +151,17 @@ val remember_late :
   unit ->
   remember_outcome
 (** Attribute an answer whose wait is gone. Only an ask that actually timed
-    out here (recorded by {!note_timed_out}) and is no older than {!ttl_sec}
+    out here (recorded by {!note_timed_out}) under the same [base_path], and
+    is no older than {!ttl_sec}
     matches, so the remembered decision always descends from a question the
-    operator was really shown. Timed-out asks are matched newest-first: if
+    operator was really shown. Timed-out asks
+    are matched newest-first: if
     a provider recycles a call id, the answer attaches to the most recent
-    ask that carried it, which is the prompt the operator saw last.
+    ask that carried it, which is the prompt the operator saw last. When
+    bound, the decision is journaled before it
+    stands; an append failure reports [No_matching_ask] so the caller tells
+    the operator the answer could not be kept rather than silently dropping
+    it.
 
     [actor] is the authenticated caller recorded at the HTTP boundary
     (task-1662) — who made this decision outlives the HTTP request, so it is
@@ -125,18 +170,25 @@ val remember_late :
 val take :
   t ->
   ?now:float ->
+  base_path:string ->
   keeper_name:string ->
   tool_name:string ->
   args:Yojson.Safe.t ->
   unit ->
   Keeper_tool_approval_registry.decision option
-(** The remembered answer for this exact call, if one stands. A hit is
-    removed: the operator approved this call once, not every call that
-    looks like it.
+(** The remembered answer for this exact call under this [base_path], if one
+    stands. A hit is removed: the operator approved this call once, not
+    every call that looks like it.
 
-    Entries older than {!ttl_sec} are reaped before the lookup, so a stale
-    memory reads as [None] — no memory — and the call is asked about
-    again. *)
+    The consume is durably journaled before the decision is returned (design
+    D2's order contract): an append failure reads as [None] and changes
+    nothing, so a restart re-offers the decision rather than silently
+    dropping it — the safe side of "duplicate authorization is worse than
+    re-asking". After the decision is returned an [op=deliver] row is
+    appended; a crash before it lands the consume in
+    {!journal_uncertain}'s outcome-unknown window. Entries older than
+    {!ttl_sec} are reaped before the lookup, so a stale memory reads as
+    [None] — no memory — and the call is asked about again. *)
 
 (** {1 Decision attribution}
 

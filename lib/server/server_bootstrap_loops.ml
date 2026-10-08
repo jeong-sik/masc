@@ -883,6 +883,24 @@ let prepare_keeper_persistence_owned
        Log.Keeper.warn
          "fusion_delivery: startup recovery examined=%d projected=%d pending=%d"
        report.examined report.projected report.pending);
+  (* Design D2 (task-1665): bind the late-approval store to its journal and
+     restore synchronously at boot, before any turn can consult it — a
+     remembered answer must already stand when the first identical retry
+     after this restart arrives, and a lazy restore could answer an ask the
+     operator already settled. The uncertain count (consume rows whose
+     deliver row never landed) is reported, not silently dropped: the tool
+     those decisions returned to may have dispatched already. *)
+  let late_uncertain =
+    let store = Keeper_late_approval.shared () in
+    Keeper_late_approval.bind_to_journal ~base_path store;
+    Keeper_late_approval.journal_uncertain store
+  in
+  if late_uncertain > 0 then
+    Log.Keeper.warn
+      "late_approval_journal: restored with uncertain_consume=%d \
+       (decision delivered to its caller but no deliver row followed; \
+       operator confirmation required, never reapplied)"
+      late_uncertain;
   let prepared =
     { base_path = base_path_identity
     ; report =

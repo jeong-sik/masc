@@ -2054,8 +2054,19 @@ let test_blank_completion_rejected_without_losing_session () =
             ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
          | Error error ->
              (match Keeper_internal_error.classify_masc_internal_error error with
-              | Some (Keeper_internal_error.Accept_rejected _) -> ()
-              | _ -> fail ("blank completion was not an acceptance rejection: "
+              (* Claude's spawned process cannot prove absence of native
+                 effects. The driver fences automatic retry while preserving
+                 the exact typed acceptance cause and the settled session. *)
+              | Some (Keeper_internal_error.Provider_attempt_effect_fenced
+                  { runtime_id = "claude.claude"
+                  ; effect_disposition = Keeper_provider_attempt_effect.Observation_unavailable
+                  ; cause = Keeper_internal_error.Fenced_masc
+                      (Keeper_internal_error.Accept_rejected
+                        { reason_kind = Some Accept_no_usable_progress
+                        ; response_shape = Some Accept_response_blank_text_only
+                        ; stop_reason = Some Agent_core.Types.EndTurn
+                        ; _ }) }) -> ()
+              | _ -> fail ("blank completion was not a fenced blank-progress rejection: "
                            ^ Agent_core.Error.to_string error))
          | Ok _ -> fail "blank completion was accepted as progress");
         let module Store = Keeper_official_client_session_store in

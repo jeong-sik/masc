@@ -3230,7 +3230,7 @@ let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
             check string "exact task replay adds no callback" "new-start" bound.observation.uuid;
             (match bound.evidence with
              | Keeper_claude_task_binding.Command_inherited witness ->
-                 check string "command provenance is the real prior root stamp" "assistant-command-stamp" witness.stamp_uuid;
+                 check string "command provenance is the real prior root stamp" "assistant-command-stamp-stamp-message" witness.stamp_uuid;
                  check string "command witness belongs to the actual input" bound.ticket.client_uuid witness.group.primary
              | Explicit_group _ | Response_inherited _ -> fail "complete-only command inheritance required")
         | _ -> fail "exactly the witnessed new native owner must bind"))

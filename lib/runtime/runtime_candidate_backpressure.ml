@@ -25,6 +25,9 @@ type recorder = State.recorder
 
 let keeper_recorder = State.keeper_recorder
 let same_recorder = State.same_recorder
+let recorder_keeper_name = State.recorder_keeper_name
+let attempt_failure_to_wire_name = State.attempt_failure_to_wire_name
+let attempt_failure_of_wire_name = State.attempt_failure_of_wire_name
 
 type failed_attempt = State.failed_attempt =
   | Failed_attempt of { noted_at : float; failure : attempt_failure; recorded_by : recorder }

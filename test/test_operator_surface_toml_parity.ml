@@ -69,15 +69,26 @@ let has_schema name schemas =
   List.exists (fun (s : Masc_domain.tool_schema) -> String.equal s.name name) schemas
 ;;
 
-(* The masc_config category enum is a literal in the TOML now, so nothing
-   derives it from its owner. This is what fails when a category is added to
-   one side only. *)
+(* The masc_config category enum is a literal in the TOML. This is what fails
+   when a category is added to it or to Env_config_snapshot only. *)
 let test_config_category_enum_matches_its_owner () =
+  let published =
+    let open Yojson.Safe.Util in
+    match
+      (loaded "masc_config").input_schema
+      |> member "properties"
+      |> member "category"
+      |> member "enum"
+    with
+    | `List values -> List.map to_string values
+    | other ->
+      Alcotest.failf "masc_config category has no enum: %s" (Yojson.Safe.to_string other)
+  in
   check
     (list string)
-    "the enum matches Env_config_snapshot.valid_config_category_strings"
+    "the published enum matches Env_config_snapshot.valid_config_category_strings"
     Env_config_snapshot.valid_config_category_strings
-    Tool_schemas_specs_types.config_category_enum_strings
+    published
 ;;
 
 let test_keeper_spawn_is_not_published () =

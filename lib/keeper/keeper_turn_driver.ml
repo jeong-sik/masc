@@ -866,7 +866,8 @@ let attempt_runtime_candidates
        (* HTTP 429 and coarse Provider.RateLimit do not identify the
           exhausted resource. Keep that unknown scope and the optional
           provider hint as candidate-only ordering evidence. A shared
-          credential quota requires the distinct HardQuota/402 contract. *)
+          credential quota rests on the distinct HardQuota/402 contract, or
+          on the provider's usage read after a 429 that states no wait. *)
        let note_quota retry_after =
          (* A hint the provider did not really state -- zero, negative, NaN --
             named no reset. Planting it as a window would date the quota to a
@@ -941,7 +942,18 @@ let attempt_runtime_candidates
        (match route with
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Rate_limited; retry_after } ->
-          note_rate_limit retry_after
+          note_rate_limit retry_after;
+          (* A 429 that states no wait does not say whether a throttle or a
+             spent usage window refused the account, and alone it rests the
+             path only the throttle floor. Ollama Cloud answers a spent
+             session window this way (2026-10-05 and 10-06: 2,185 refusals,
+             each keeper on the lane calling again about once a minute for
+             62 and then 105 minutes). The declared [usage-read] answers it
+             as it answers a 403, below. A 429 that states its wait has
+             already said how long the path rests. *)
+          (match Keeper_runtime_failure_route.usable_retry_after retry_after with
+           | Some _ -> ()
+           | None -> read_usage_after_account_refusal candidate)
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after } ->
           note_quota retry_after
@@ -2589,6 +2601,10 @@ let run_named
                  run_result.Runtime_agent.stop_reason,
                  run_result.response.content
                with
+               | Runtime_agent.Completed, [] ->
+                 (* Factual successful tool evidence also admits a terminal
+                    with no assistant item; absence is not a quiet final. *)
+                 Ok run_result
                | Runtime_agent.Completed, [ Agent_core.Types.Text text ]
                  when String.trim text = "" ->
                  Ok run_result

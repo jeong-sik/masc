@@ -363,11 +363,11 @@ let reader_unauthenticated = function
 (* The sentence itself belongs to Masc_tui_credential, which every refusal
    surface shares. What is specific here is the consequence: a refused read
    says nothing about the operation, so the operator needs to know it survived
-   and how to come back to it. *)
+   and what to run to read it again. *)
 let refused_reader_remedy ~credential_sent reason =
   Printf.sprintf
     "the operation could not be read back: %s. The operation itself is \
-     untouched on the server, so %s, then press Ctrl-R to settle this request."
+     untouched on the server, so %s."
     (Masc_tui_credential.refusal_cause ~credential_sent reason)
     Masc_tui_credential.remedy
 
@@ -456,6 +456,36 @@ let error_certainty ?(was_unverified = false) error =
   match was_unverified, certainty with
   | true, Verified_rejected -> Outcome_unverified
   | false, _ | true, (Verified_failed | Outcome_unverified) -> certainty
+
+type operation_record =
+  | Operation_succeeded
+  | Operation_failed
+  | Operation_cancelled
+
+let operation_record_of_result = function
+  | Ok (Replayed_succeeded _) -> Some Operation_succeeded
+  | Ok (Turn_completed _) -> None
+  | Error (Protocol_error { stream_error = Replayed_failed; _ }) ->
+      Some Operation_failed
+  | Error (Protocol_error { stream_error = Replayed_cancelled; _ }) ->
+      Some Operation_cancelled
+  | Error
+      ( Transport_error _
+      | Http_error _
+      | Protocol_error
+          { stream_error =
+              ( Malformed_event _ | Request_id_mismatch _ | Duplicate_acceptance
+              | Duplicate_reply_details | Duplicate_terminal
+              | Event_before_acceptance _ | Event_identity_mismatch _
+              | Unknown_event_type _ | Unknown_custom_event _
+              | Tool_event_without_start _ | Tool_result_without_start _
+              | Quarantined_tool_result _ | Conflicting_tool_result _
+              | Reused_tool_execution_id _ | Duplicate_run_start
+              | Missing_run_start _ | Missing_acceptance | Stream_interrupted _
+              | Missing_reply_details | Missing_text_end | Run_failed _ )
+          ; _
+          } ) ->
+      None
 
 let unique_object_fields ~surface = function
   | `Assoc fields ->

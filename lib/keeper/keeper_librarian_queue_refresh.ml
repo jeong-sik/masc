@@ -587,9 +587,15 @@ let run_with_readers ~durable ~continuity ~base_path ~keeper_name =
 let run_memory_cleanup ~base_path ~keeper_name =
   match Keeper_memory_cleanup.run ~base_path ~keeper_name with
   | Disabled | Within_limits | Already_reviewed -> ()
-  | Reviewed { remaining_excess } ->
+  | Reviewed Limits_reached ->
     Log.Keeper.info ~keeper_name
-      "Librarian memory count cleanup completed; remaining_excess=%b" remaining_excess
+      "Librarian memory count cleanup reached the configured limits"
+  | Reviewed Progress_with_excess ->
+    Log.Keeper.info ~keeper_name
+      "Librarian memory count cleanup reduced excess; next pass requested"
+  | Reviewed Excess_retained ->
+    Log.Keeper.info ~keeper_name
+      "Librarian memory count cleanup retained excess; awaiting a later wake"
   | Unavailable detail ->
     Log.Keeper.warn ~keeper_name "Librarian memory count cleanup unavailable: %s" detail
 ;;

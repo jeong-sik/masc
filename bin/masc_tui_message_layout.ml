@@ -127,6 +127,9 @@ type entry = {
           has the pane's width and draws this instead. *)
   role_label : string;
   role_label_mark_cells : int;
+  diagnostics : string list;
+      (** Explicitly expanded technical metadata, wrapped and measured separately
+          from the original speech body. Empty in the default chat view. *)
   request_label : string;
   body : string;
   journal : journal_line list;
@@ -145,6 +148,7 @@ type metadata =
       speaker : string;
       role_label : string;
     }
+  | Diagnostic
   | Continued_at of { clock : string }
 
 type row_kind =
@@ -1908,8 +1912,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
      budget like any other word: no row exceeds [body_width], and the block
      keeps the same wrap width as the rows it sits among. *)
   let body_chunks =
-    match entry.span_clock, entry.turn_rail with
-    | Some span, Rail_opens -> wrap_words ~max_cells:body_width span @ body_chunks
+    match origin, entry.span_clock, entry.turn_rail with
+    | (Origin_inline | Origin_row), Some span, Rail_opens ->
+        wrap_words ~max_cells:body_width span @ body_chunks
     | _ -> body_chunks
   in
   let body_rows =
@@ -1939,7 +1944,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
              the rows under it continue the line the stub started rather than
              each standing alone. *)
           | Rail_stands -> if index = 0 then Rail_stands else Rail_says
-          | Rail_closes -> if index = last then Rail_closes else Rail_says
+          | Rail_closes -> if index = last && (last > 0 || entry.diagnostics = []) then Rail_closes else Rail_says
           (* Only the first row joins. A wrapped arrival keeps its body under
              the join without drawing a second one, and it never picks up the
              turn's own line: the turn it landed inside did not produce it. *)
@@ -1970,17 +1975,42 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       ; action = (if index = 0 then entry.action else Action_none)
       })
   in
-  let message_rows =
+  let diagnostic_rows =
+    let chunks = entry.diagnostics
+      |> List.concat_map (fun text ->
+           text |> String.split_on_char '\n'
+           |> List.concat_map (split_cells ~max_cells:body_width)) in
+    let margin, rail_cells, _, _ = Option.value gutter ~default:("", 0, 0, 0) in
+    let blank = fit_width "" (display_width margin) in
+    List.mapi (fun index text ->
+      let rail = match entry.turn_rail with
+        | Rail_none | Rail_joins _ -> Rail_none
+        | Rail_closes when List.length body_rows = 1 && index = List.length chunks - 1 -> Rail_closes
+        | Rail_opens | Rail_says | Rail_does | Rail_stands | Rail_closes -> Rail_says in
+      { style = Status; kind = Metadata Diagnostic; shade = Shade_none;
+        text = "  " ^ text;
+        gutter = (if rail_cells = 0 then "" else turn_rail_gutter rail)
+          ^ String.make indent ' ' ^ blank;
+        gutter_rail_cells = rail_cells + indent; gutter_clock_cells = 0;
+        gutter_label_at = rail_cells + indent; action = Action_none }) chunks
+  in
+  let body_with_diagnostics = match body_rows with
+    | [] -> diagnostic_rows
+    | first :: rest -> first :: diagnostic_rows @ rest in
+  let message_rows = (
     match origin with
-    | Origin_inline | Origin_bare -> body_rows
+    | Origin_inline | Origin_bare -> body_with_diagnostics
     | Origin_row -> (
         match metadata_row ~previous ~inner_width ~indent entry with
-        | None -> body_rows
-        | Some metadata -> metadata :: body_rows)
+        | None -> body_with_diagnostics
+        | Some metadata -> metadata :: body_with_diagnostics))
   in
-  match timeline_break_row ~previous ~inner_width:pane_width entry with
-  | None -> message_rows
-  | Some timeline_break -> timeline_break :: message_rows
+  match origin with
+  | Origin_bare -> message_rows
+  | Origin_inline | Origin_row ->
+      match timeline_break_row ~previous ~inner_width:pane_width entry with
+      | None -> message_rows
+      | Some timeline_break -> timeline_break :: message_rows
 
 let viewport_gap_text ~inner_width hidden_rows =
   let candidates =

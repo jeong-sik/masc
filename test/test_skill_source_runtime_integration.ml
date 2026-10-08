@@ -182,34 +182,6 @@ let test_publication_logs_each_config_state_change_once () =
     (publish runtime_with_skills)
 ;;
 
-(* The unreadable arm: nothing Skills can use was read, so every Keeper's
-   catalog is empty, and the line names the detail and the file. *)
-let test_unreadable_publication_is_an_error () =
-  with_workspace_dir "skill-unreadable-" @@ fun base_path ->
-  let path = Filename.concat base_path "runtime.toml" in
-  let detail = "fixture read failed" in
-  let workspace =
-    match Skill_catalog_snapshot_service.workspace_of_base_path ~base_path with
-    | Ok workspace -> workspace
-    | Error _ -> fail "fixture workspace was rejected"
-  in
-  let unreadable () =
-    Skill_catalog_snapshot_service.refresh
-      ~workspace
-      ~user_home:None
-      ~read_config:(fun () -> Skill_catalog_snapshot_service.Config_unreadable { path; detail })
-  in
-  (match logged_by ~path unreadable with
-   | [ entry ] ->
-     check string "an unreadable configuration is an error" "ERROR"
-       (Log.level_to_string entry.level);
-     check bool "the error names the detail" true
-       (String_util.contains_substring entry.message detail)
-   | entries -> fail (Printf.sprintf "an unreadable publication wrote %d lines" (List.length entries)));
-  check (list string) "a readable configuration after it is logged once" [ "INFO" ]
-    (levels (logged_by ~path (refresh ~base_path ~path runtime_with_skills)))
-;;
-
 let () =
   run
     "skill_source_runtime_integration"
@@ -226,8 +198,6 @@ let () =
             test_boot_warns_with_reason_and_file
         ; test_case "publication logs each config state change once" `Quick
             test_publication_logs_each_config_state_change_once
-        ; test_case "unreadable publication is an error" `Quick
-            test_unreadable_publication_is_an_error
 
         ] )
     ]

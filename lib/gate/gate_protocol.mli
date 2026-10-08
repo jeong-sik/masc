@@ -100,7 +100,9 @@ val validate :
   inbound_message ->
   (unit, validation_error) result
 (** Pure structural validation. Durable idempotency belongs to the selected
-    Keeper Owner operation store, after dispatch. *)
+    Keeper Owner operation store, after dispatch. Whitespace-only content is
+    empty; the length limit counts all bytes of nonblank content, including
+    its leading and trailing whitespace. Validation never rewrites content. *)
 
 (** {1 Errors} *)
 

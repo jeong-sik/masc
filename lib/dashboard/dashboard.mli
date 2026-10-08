@@ -22,10 +22,10 @@ type section = {
   empty_msg : string;
 }
 
-type scope = Tool_schemas_specs_types.dashboard_scope =
+type scope =
   | Dashboard_scope_all
   | Dashboard_scope_current
-(** Same vocabulary the descriptor generator emits as the [scope] enum. *)
+(** The [scope] argument of the [masc_dashboard] tool. *)
 
 type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
   workspace_id : string;

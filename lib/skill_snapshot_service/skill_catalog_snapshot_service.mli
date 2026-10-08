@@ -4,14 +4,9 @@ type workspace
 type workspace_error = Config_dir_resolver.canonical_base_path_error
 
 type config_observation =
-  | Config_text of
-      { path : string
-      ; source_text : string
-      }
-  | Config_unreadable of
-      { path : string
-      ; detail : string
-      }
+  { path : string
+  ; source_text : string
+  }
 (** What was read and from where. [path] is the runtime.toml the snapshot is
     built from; it is stored with the published snapshot and named in its log
     line and health reasons. *)
@@ -49,8 +44,8 @@ val refresh :
   publication
 (** Serialize the complete config observation, scan, reduction, and publish
     transaction for one workspace. [read_config] runs after the workspace lock
-    is acquired, so an older read failure cannot arrive after and replace a
-    newer valid observation. Cancellation abandons the transaction and releases
+    is acquired, so an older observation cannot arrive after and replace a
+    newer one. Cancellation abandons the transaction and releases
     the lock without publishing.
 
     Every publication, from here or from [update_additional_sources], is

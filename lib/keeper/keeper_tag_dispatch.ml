@@ -131,12 +131,12 @@ let dispatch
     | Mod_misc ->
       let candle operation = Some (Keeper_candle_tools.handle ~operation
         ~base_path:config.base_path ~keeper_name ~tool_name:name ~start_time ~args) in
-      (match Tool_schemas_misc.misc_operation_of_tool_name name with
-       | Some Tool_schemas_misc.Misc_candle_balance -> candle Keeper_candle_tools.Balance
-       | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
-       | Some Tool_schemas_misc.Misc_candle_purchase -> candle Keeper_candle_tools.Purchase
-       | Some Tool_schemas_misc.Misc_candle_equip -> candle Keeper_candle_tools.Equip
-       | Some _ | None ->
+      (match
+         Option.bind (Tool_schemas_misc.misc_operation_of_tool_name name)
+           Keeper_candle_tools.operation_of_misc
+       with
+       | Some operation -> candle operation
+       | None ->
          let run () = Tool_misc.dispatch
            ~lane_access:(Lane_addon_sources.Keeper keeper_name)
            { Tool_misc.config

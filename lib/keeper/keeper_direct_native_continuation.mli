@@ -36,8 +36,11 @@ val load : binding:binding -> (admission, string) result
 val runtime_id : resumed -> string
 val system_prompt : resumed -> string
 val checkpoint : resumed -> Agent_core.Checkpoint.t
+(** Exact retained checkpoint with in-memory reconciliation of this native
+    call's missing repetition observations from canonical settled results.
+    Stored checkpoint artifacts/references are not rewritten by loading. *)
 val restored_context : resumed -> Agent_core.Context.t
-(** A fresh Eio context containing the exact retained checkpoint entries.
+(** A fresh Eio context containing the reconciled checkpoint entries.
     Restore once before constructing tools, hooks or context injectors, then
     pass this same object in [Runtime_agent.config.context]. [prepare]
     preserves an explicitly supplied context, including setup mutations. *)

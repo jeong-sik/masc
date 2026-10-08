@@ -210,8 +210,17 @@ let test_a_layout_this_reader_does_not_know_is_refused () =
     ; "an address with a password", "ws://operator:secret@127.0.0.1:9222/session"
     ; "an address on another machine", "ws://203.0.113.7:9222/session"
     ; "an address with a line break", address ^ "\nmore"
+    (* The URI parser raises on this host instead of answering. The reader
+       still answers, with a refusal. *)
+    ; "an address whose host is a number no machine has", "ws://127.0.0.99999999999999999999:9222/session"
     ];
-  refused "a client ID that is no lane client ID" (`Assoc (replaced "client_id" (`String "holder-client") fields))
+  refused "a client ID that is no lane client ID" (`Assoc (replaced "client_id" (`String "holder-client") fields));
+  (* A reason longer than the limit is one the host cut, and it marks the cut. *)
+  List.iter
+    (fun (name, reason) -> refused name (with_ending (replaced "reason" (`String reason))))
+    [ "a reason one byte past the limit", String.make 513 'a'
+    ; "a reason as long as a cut one, with no mark", String.make 515 'a'
+    ]
 
 (* A time read from the record is written back as the text it was read from.
    Cut instead of rounded, about half of all millisecond values lost one
@@ -314,6 +323,8 @@ let on_disk lane =
 (* The reader in one process, the host's own writer in another. *)
 let test_a_reader_follows_a_host_from_start_to_death () =
   with_workspace @@ fun ~base ~lane ->
+  check string "the path a reader names is the file the host writes"
+    (Filename.concat lane "bidi-host.json") (Record.record_path ~base_path:base);
   check state "before any host" Record.Never_started (Record.observe ~base_path:base);
   let pid, from_holder, tell = start_holder base in
   let finish () =
@@ -510,6 +521,21 @@ let test_the_address_is_kept_without_what_it_could_carry () =
   let held = taken ~pid:100 ~bidi_url:"ws://127.0.0.1:9222/session?token=not-for-the-record" base in
   check string "the query is left out" address (on_disk lane).bidi_url;
   released held;
+  (* Whatever address a host is let in with, the record it writes is one the
+     reader takes: a host whose own record read as unreadable would be told
+     to be stopped. *)
+  List.iter
+    (fun bidi_url ->
+      with_workspace @@ fun ~base ~lane:_ ->
+      let held = taken ~pid:100 ~bidi_url base in
+      (match Record.observe ~base_path:base with
+       | Record.Running _ -> ()
+       | other -> failf "a host let in with %s reads as %s" bidi_url (said other));
+      released held)
+    [ "ws://[::1]:9222/session"; "ws://localhost:9222/session"; "ws://LOCALHOST:9222/session"
+    ; "ws://127.0.0.1:9222/"; "ws://127.0.0.1:9222/a%20b"; "ws://127.0.0.1:9222/session?"
+    ; "ws://127.0.0.1:09222/session"; "ws://127.0.0.1:9222/session;token=x"
+    ];
   with_workspace @@ fun ~base ~lane ->
   List.iter
     (fun (name, bidi_url) ->
@@ -522,7 +548,35 @@ let test_the_address_is_kept_without_what_it_could_carry () =
     [ "an address with a password", "ws://operator:secret@127.0.0.1:9222/session"
     ; "an address on another machine", "ws://203.0.113.7:9222/session"
     ; "an address that is no WebSocket", "http://127.0.0.1:9222/session"
+    (* The URI parser raises on this one. A host given it is refused like
+       any other bad address, not ended by an exception. *)
+    ; "an address whose host is a number no machine has", "ws://127.0.0.99999999999999999999:9222/session"
     ]
+
+(* A lock that cannot be asked leaves a record without an ending unsaid: the
+   host may run or be dead. It takes nothing from what does not turn on it. *)
+let test_a_lock_that_cannot_be_asked_costs_only_what_turns_on_it () =
+  if Unix.geteuid () = 0 then skip ()
+  else
+    with_workspace @@ fun ~base ~lane ->
+    let lock = Filename.concat lane "bidi-host.lock" in
+    let held = taken ~pid:100 base in
+    released held;
+    let unasked () =
+      Unix.chmod lock 0o000;
+      Fun.protect ~finally:(fun () -> Unix.chmod lock 0o600) (fun () -> Record.observe ~base_path:base)
+    in
+    (match unasked () with
+     | Record.Unreadable { held = None; _ } -> ()
+     | other -> failf "a record without an ending, its lock unasked, reads as %s" (said other));
+    let again = taken ~pid:100 base in
+    written (Record.ended again ~reason:"stopped by SIGINT" ~session:Record.No_session_left ~now:1_791_000_060.);
+    released again;
+    (match unasked () with
+     | Record.Ended (_, { reason; _ }) -> check string "the ending is read all the same" "stopped by SIGINT" reason
+     | other -> failf "a record with its ending, its lock unasked, reads as %s" (said other));
+    Sys.remove (Filename.concat lane "bidi-host.json");
+    check state "and so is the absence of a record" Record.Never_started (unasked ())
 
 (* A host that cannot write its first record does not hold the workspace,
    and what its predecessor left is still there to read. *)
@@ -573,6 +627,8 @@ let () =
               test_a_host_writes_its_ending_and_the_next_replaces_it
           ; test_case "a reason is written as printable ASCII" `Quick
               test_a_reason_is_written_as_printable_ascii
+          ; test_case "a lock that cannot be asked costs only what turns on it" `Quick
+              test_a_lock_that_cannot_be_asked_costs_only_what_turns_on_it
           ; test_case "the address is kept without what it could carry" `Quick
               test_the_address_is_kept_without_what_it_could_carry
           ; test_case "a host that cannot write its record leaves the last one" `Quick

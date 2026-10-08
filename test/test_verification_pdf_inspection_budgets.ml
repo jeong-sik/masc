@@ -334,6 +334,79 @@ let test_h5_production_pdf_reader_marks_a_spent_budget_unavailable () =
       check bool "with the budget reason" true (contains ~needle:"budget_spent" text);
       check bool "no extracted text invented" false (contains ~needle:"Page One" text))
 
+(* H5-S2, real Poppler. One page, one fact that exists only in the PDF text:
+   "The ledger year is 1987." Runs for real wherever pdftotext/pdftoppm are
+   installed (the Test workflow installs poppler-utils); otherwise it says it was
+   skipped, as the other Poppler cases here do. A skip is not a pass. *)
+let h5_ledger_pdf = {hpdf|%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 67 >>
+stream
+BT /F1 12 Tf 20 100 Td (H5 fixture. The ledger year is 1987.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000358 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+428
+%%EOF
+|hpdf}
+
+let test_h5_real_poppler_extracts_the_pdf_only_fact () =
+  if not poppler_available then skipped "H5 real extraction"
+  else
+    with_base_path (fun base_path ->
+      match
+        Pdf.extract_text ~deadline:(Monotonic_deadline.after ~seconds:60.) ~budget_sec:60.
+          ~base_path ~bytes:h5_ledger_pdf ()
+      with
+      | Error error -> failf "the fixture must extract: %s" (Pdf.error_to_string error)
+      | Ok pages ->
+        check int "one page" 1 (List.length pages);
+        check bool "the PDF-only fact came back" true
+          (contains ~needle:"ledger year is 1987" (List.hd pages));
+        check (list string) "the capture directory was removed" [] (leftover_capture_dirs base_path))
+
+let test_h5_real_poppler_reaches_the_projection () =
+  if not poppler_available then skipped "H5 real projection"
+  else
+    with_base_path (fun base_path ->
+      let blocks =
+        Masc.Keeper_media_reading.project_blocks
+          ~base_path ~keeper_name:"h5-real-pdf" ~needs_projection:(fun _ -> true)
+          ~deadline:(Monotonic_deadline.after ~seconds:60.)
+          ~read:(Masc.Keeper_media_reading.production_reader ~base_path ~budget_sec:60.)
+          [ Agent_core.Types.document_block ~media_type:"application/pdf"
+              ~data:(Base64.encode_string h5_ledger_pdf)
+              ~source_type:Agent_core.Types.Base64 () ]
+      in
+      let text = text_of blocks in
+      check bool "status is read" true (contains ~needle:"status=read" text);
+      check bool "the fact is in the projection" true
+        (contains ~needle:"ledger year is 1987" text);
+      check bool "bound to the source bytes" true
+        (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_ledger_pdf) text))
+
 let () =
   run "verification pdf inspection budgets"
     [ ( "budgets"
@@ -363,5 +436,9 @@ let () =
             test_h5_production_pdf_reader_projects_the_document_text
         ; test_case "H5 production PDF reader marks a spent budget unavailable" `Quick
             test_h5_production_pdf_reader_marks_a_spent_budget_unavailable
+        ; test_case "H5 real Poppler extracts the PDF-only fact" `Quick
+            test_h5_real_poppler_extracts_the_pdf_only_fact
+        ; test_case "H5 real Poppler reaches the projection" `Quick
+            test_h5_real_poppler_reaches_the_projection
         ] )
     ]

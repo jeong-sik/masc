@@ -18,6 +18,8 @@ module Snapshot_read : sig
   val invalidate : t -> t
   (** Retire a pending owner without reusing its request number. *)
   val settle : t -> request -> t option
+  (** Whether a request is on the wire for this source right now. *)
+  val in_flight : t -> bool
 end = struct
   type request = int
   type t = { next : int; pending : request option }
@@ -38,6 +40,8 @@ end = struct
     match state.pending with
     | Some pending when pending = request -> Some { state with pending = None }
     | Some _ | None -> None
+
+  let in_flight state = Option.is_some state.pending
 end
 
 (** TUI shared types — split from masc_tui.ml (#3808) *)
@@ -144,8 +148,14 @@ let workspace_identity_of_refresh ~local_base_path reading =
   | Ok identity ->
     let local_base_path = canonical_path local_base_path in
     let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
+    (* The server reports its cluster-aware masc root ([<base>/.masc] for the
+       default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
+       the local one with the same function from the same cluster selection:
+       a plain [<base>/.masc] calls every healthy non-default-cluster server
+       a mismatch, and every Keeper message is refused. *)
     let local_masc_root = canonical_path
-      (Filename.concat local_base_path Common.masc_dirname) in
+      (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
+         ~cluster_name:(Env_config_core.cluster_name ())) in
     let server_masc_root = canonical_path identity.sid_masc_root in
     if String.equal local_base_path "" || String.equal server_base_path ""
        || String.equal server_masc_root "" || server_is_booting reading
@@ -3140,6 +3150,8 @@ type code_history_entry =
 
 type code_history_listing = {
   chl_entries: code_history_entry list;
+  chl_git_error: string option;
+      (** None means the Git read succeeded, including an empty result. *)
   chl_activity_note: string;
       (** Coverage or failure of the durable Keeper-change read. Git commits
           remain visible when this says unavailable. *)
@@ -5728,6 +5740,10 @@ type state = {
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
   mutable approvals_error: string option;
+  (* Ticket for the confirm-queue read outside the refresh bundle. The count
+     on Home draws from [approval_snapshot] alone, so a refused refresh answer
+     needs a read of its own to recover the count before the next cadence. *)
+  mutable approvals_summary_read: Snapshot_read.t;
   (* Questions Keepers put to a human, drawn beside the approvals. [None]
      means nothing has been read yet, which is not the same as a fleet with
      no open questions. *)
@@ -6079,6 +6095,7 @@ type state = {
   mutable runtime_lane_replacement_selection:
     (slot_editor_target * slot_editor_identity * slot_editor_identity) option;
   mutable runtime_lane_write: runtime_lane_write;
+  mutable runtime_dim_refusals: bool;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -7794,20 +7811,10 @@ let keeper_chat_control_generation state keeper_name =
 
 (* These messages never paused the server. Explicit local resume authorizes
    their first POST; an actual stop still needs the server's resume receipt. *)
-let resume_preflight_keeper_input ~owner_paused state keeper_name =
+let can_resume_preflight_keeper_input state keeper_name =
   let holds = List.filter_map (fun (name, _, intervention) ->
     if name = keeper_name then Some intervention else None) state.keeper_interactive_waiting in
-  if not owner_paused
-     && List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
-  then begin
-    let generation = keeper_chat_control_generation state keeper_name in
-    state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
-      let intervention = match intervention with
-        | Retained_before_dispatch when name = keeper_name -> Awaiting_control {generation; target=None}
-        | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
-      name, id, intervention) state.keeper_interactive_waiting;
-    true
-  end else false
+  List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
 
 (* The holds a queue keeps when its chat survives an unread identity: a hold
    it already had stays as it was, and a steer queued behind a stop is held
@@ -7831,10 +7838,9 @@ let advance_keeper_chat_control state keeper_name =
     List.remove_assoc keeper_name state.keeper_chat_control_generations;
   generation
 
-let begin_keeper_chat_control state keeper_name =
-  let generation = advance_keeper_chat_control state keeper_name in
-  state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
-  state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+(* A server control that stops or resumes the owner supersedes the priority
+   requests still waiting locally for that Keeper. *)
+let clear_keeper_priority_requests state keeper_name =
   state.keeper_run_next_pending <- List.filter
     (fun (request : Masc_tui_keeper_chat_projection.request) ->
        not (String.equal request.keeper_name keeper_name))
@@ -7843,6 +7849,21 @@ let begin_keeper_chat_control state keeper_name =
     (fun (request : Masc_tui_keeper_chat_projection.request) ->
        not (String.equal request.keeper_name keeper_name))
     state.keeper_run_next_ready;
+  state.keeper_auto_priority_pending <- List.filter
+    (fun (name, _) -> not (String.equal name keeper_name))
+    state.keeper_auto_priority_pending
+
+(* [preserve_priority_requests] is for a resume that first reads the owner's
+   state: when the read fails or the owner is already running, no server
+   control happened, so waiting priority requests stay. The caller clears them
+   with [clear_keeper_priority_requests] once a server resume is confirmed. *)
+let begin_keeper_chat_control ?(preserve_input_holds = false)
+    ?(preserve_priority_requests = false) state keeper_name =
+  let previous_generation = keeper_chat_control_generation state keeper_name in
+  let generation = advance_keeper_chat_control state keeper_name in
+  state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
+  state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  if not preserve_priority_requests then clear_keeper_priority_requests state keeper_name;
   (* Keep acknowledged evidence and active callbacks until the control's
      semantic result arrives. The token callback alone is not that result. *)
   let previous = List.concat_map (fun (name, control) ->
@@ -7856,12 +7877,15 @@ let begin_keeper_chat_control state keeper_name =
   state.keeper_priority_controls <-
     (keeper_name, { priority_generation = generation; priority_requests = requests }) ::
     state.keeper_priority_controls;
-  state.keeper_auto_priority_pending <- List.filter
-    (fun (name, _) -> not (String.equal name keeper_name))
-    state.keeper_auto_priority_pending;
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
-    name, id, (if name = keeper_name then Retained_after_stop else intervention))
-    state.keeper_interactive_waiting;
+    let intervention =
+      if name <> keeper_name then intervention
+      else if not preserve_input_holds then Retained_after_stop
+      else match intervention with
+        | Awaiting_control held when held.generation = previous_generation ->
+            Awaiting_control {held with generation}
+        | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
+    name, id, intervention) state.keeper_interactive_waiting;
   generation
 
 let keeper_run_next_receipt_provisional state request =
@@ -7930,9 +7954,13 @@ let finish_keeper_chat_control state keeper_name ~generation =
   end
 
 let release_retained_keeper_input state keeper_name =
-  state.keeper_interactive_waiting <- List.filter (fun (name, _, intervention) ->
-    name <> keeper_name || match intervention with
-    | Retained_after_stop | Retained_before_dispatch -> false | Awaiting_control _ -> true)
+  let generation = keeper_chat_control_generation state keeper_name in
+  state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+    let intervention = match intervention with
+      | Retained_after_stop | Retained_before_dispatch when name = keeper_name ->
+          Awaiting_control {generation; target=None}
+      | Retained_after_stop | Retained_before_dispatch | Awaiting_control _ -> intervention in
+    name, id, intervention)
     state.keeper_interactive_waiting
 
 (* A receipt callback finishes control before its outcome arrives, advancing
@@ -8807,6 +8835,7 @@ let create_state
   transport_error = None;
   approval_snapshot = None;
   approvals_error = None;
+  approvals_summary_read = Snapshot_read.idle;
   asks_snapshot = None;
   asks_error = None;
   ask_answer_mode = Ask_browsing;
@@ -8994,6 +9023,7 @@ let create_state
   runtime_lane_cursor_after_write = None;
   runtime_lane_replacement_selection = None;
   runtime_lane_write = Lane_write_idle;
+  runtime_dim_refusals = true;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
@@ -11552,6 +11582,19 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
 
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
+
+let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
+  state.runtime_dim_refusals
+  && (runtime_option_refusing option
+      || match state.runtime_surface with
+         | None -> false
+         | Some snapshot ->
+             (match runtime_spent_usage snapshot.Tui_decode.rss_resolved option with
+              | Ok (_ :: _) -> true
+              | Ok [] | Error _ -> false))
+
+let toggle_runtime_dim_refusals state =
+  state.runtime_dim_refusals <- not state.runtime_dim_refusals
 
 let runtime_quota_label (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_quota_exhausted then None

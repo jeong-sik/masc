@@ -17,6 +17,7 @@ val record_validation_error_metric :
 val resolve_connector_status_name : ?name:string -> unit -> string option
 
 val respond_keeper_tool_json :
+  ?config:Workspace.config ->
   ?project:(Yojson.Safe.t -> Yojson.Safe.t) ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

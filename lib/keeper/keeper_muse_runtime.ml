@@ -437,30 +437,12 @@ let system_instructions_label () =
 let current_goal_label () = required_label (Antigravity_input_frame.current_goal_label ())
 let prompt_section_separator = Antigravity_input_frame.section_separator
 
-let measure_model_input_message_bytes (message : Agent_core.Types.message) =
-  String.length (Host.history_role_label message.role)
-  + String.length (Host.encode_history_message message)
-  + String.length prompt_section_separator
-;;
-
-let prompt_section_framing_reserved_bytes () =
-  String.length (system_instructions_label ())
-  + String.length (current_goal_label ())
-  + (2 * String.length prompt_section_separator)
-;;
-
-let reserved_prompt_bytes ~system_prompt ~goal =
-  String.length system_prompt
-  + String.length goal
-  + prompt_section_framing_reserved_bytes ()
-;;
-
 (* The carried front is a position in durable checkpoint history, so admit it
    before the source projection appends its bounded Gate replay reference.
-   The byte window runs last and charges every message that can reach the
-   host. Its observation maps back to the durable history, as on the
-   Antigravity lane. *)
-let bounded_history_projection ~capacity_bytes ~reserved_bytes
+   The range goes out as composed, as on Claude Code's first attempt, and
+   the host compacts its own input. The observation maps back to the durable
+   history, as on the Antigravity lane. *)
+let carried_history_projection
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
@@ -468,6 +450,9 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
   fun history_messages ->
   let* librarian_front = Host.read_librarian_front librarian_front history_messages in
   let carried_front_seed = Host.read_seed_once carried_front_seed in
+  (* Nothing cuts the range, so a working state a Librarian snapshot names
+     displaces none of its atoms and goes in front of it
+     ([Host.compose_librarian_range], RFC-0460). *)
   let compose librarian_front =
     let carried =
       Host.carried_start_range
@@ -479,12 +464,12 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
         ~turn_start
         history_messages
     in
-    Host.window_carried_range
-      ~measure_message_bytes:measure_model_input_message_bytes
-      ~capacity_bytes
-      ~reserved_bytes
-      ?source_projection
-      carried
+    let* sent =
+      match source_projection with
+      | None -> Ok carried.Host.messages
+      | Some project -> project carried.Host.messages
+    in
+    Ok { Host.carried; sent; atoms_kept = Host.carried_atoms carried }
   in
   let* windowed =
     Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
@@ -505,36 +490,6 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
             (Host.windowed_projection windowed)))
     on_model_input_window_observation;
   Ok windowed.Host.sent
-;;
-
-let capacity_bounded_model_input_projection ~capacity_bytes ~system_prompt ~goal
-    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
-    ~turn_start ~keeper_name ~runtime_id source_projection
-  =
-  let reserved_bytes = reserved_prompt_bytes ~system_prompt ~goal in
-  if reserved_bytes >= capacity_bytes
-  then
-    Error
-      (config_error
-         ~field:"prompt_ceiling_bytes"
-         (Printf.sprintf
-            "Muse Code fixed prompt sections measure %d bytes, at or above the prompt \
-             ceiling %d"
-            reserved_bytes
-            capacity_bytes))
-  else
-    Ok
-      (bounded_history_projection
-         ~capacity_bytes
-         ~reserved_bytes
-         ?on_model_input_window_observation
-         ?carried_front_seed
-         ?librarian_front
-         ?on_carried_front
-         ~turn_start
-         ~keeper_name
-         ~runtime_id
-         source_projection)
 ;;
 
 let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.prepared_turn) =
@@ -839,7 +794,7 @@ let phase_name : Session_store.phase -> string = function
 
 let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
-    ~prompt_capacity ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
+    ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
     ~turn_start ~pre_tool_rejects ~base_path ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
@@ -1045,18 +1000,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
              "Muse Code turn carries goal images but the runtime does not accept image input")
       | [], (true | false) | _ :: _, true -> Ok ()
     in
-    (* The host rewrites an oversized input instead of refusing it, so a turn
-       without a ceiling is refused rather than sent. *)
-    let* capacity_bytes =
-      match prompt_capacity with
-      | Ok capacity_bytes -> Ok capacity_bytes
-      | Error error ->
-        Error
-          (config_error
-             ~field:"max_context"
-             ("Muse Code has no prompt ceiling: "
-              ^ Runtime_muse_prompt_capacity.error_to_string error))
-    in
     let reasoning_effort =
       Host.effective_reasoning_effort
         ~runtime_label
@@ -1080,11 +1023,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         in
         Ok { prepared with messages }
       else
-        let* capacity_projection =
-          capacity_bounded_model_input_projection
-            ~capacity_bytes
-            ~system_prompt:prepared.system_prompt
-            ~goal
+        let project =
+          carried_history_projection
             ?on_model_input_window_observation
             ?carried_front_seed
             ?librarian_front
@@ -1095,7 +1035,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             model_input_projection
         in
         let* messages =
-          try capacity_projection prepared.messages with
+          try project prepared.messages with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
             Error
@@ -1135,29 +1075,16 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let context_frontier = { context_frontier with held_context } in
     let* prompt = prompt_for_turn ?composed_context ~held ~is_resume ~goal prepared in
-    let* () =
-      if String.length prompt <= capacity_bytes
-      then Ok ()
-      else
-        Error
-          (config_error
-             ~field:"prompt_ceiling_bytes"
-             (Printf.sprintf
-                "Muse Code final prompt measures %d bytes, above the prompt ceiling %d"
-                (String.length prompt)
-                capacity_bytes))
-    in
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d goal_bytes=%d \
-       images=%d prompt_capacity_bytes=%d"
+       images=%d"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
       (String.length prepared.system_prompt)
       (String.length goal)
-      (List.length goal_images)
-      capacity_bytes;
+      (List.length goal_images);
     let client_config : Serve.config =
       { config with
         prepared_home = Some prepared_home
@@ -1781,7 +1708,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
 ;;
 
 let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
-    ?official_client_continuation ~runtime_id ~prompt_capacity ~configured_reasoning_effort
+    ?official_client_continuation ~runtime_id ~configured_reasoning_effort
     ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
     ?(loading_plan = Keeper_official_client_host.All_on_demand)
@@ -1819,7 +1746,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         ~required_native_posture
         ~official_client_continuation
         ~runtime_id
-        ~prompt_capacity ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
+        ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
         ~keeper_name
         ~on_model_input_window_observation
         ~carried_front_seed
@@ -1948,7 +1875,5 @@ module For_testing = struct
     prompt_for_turn ~held:[] ~is_resume:false ~goal prepared
   ;;
 
-  let reserved_prompt_bytes = reserved_prompt_bytes
-  let measure_model_input_message_bytes = measure_model_input_message_bytes
   let native_posture_note = native_posture_note
 end

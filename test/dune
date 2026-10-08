@@ -9875,3 +9875,5 @@
  (name test_runtime_native_tasks)
  (modules test_runtime_native_tasks)
  (libraries alcotest yojson masc.runtime))
+
+(include stanzas/test_native_task_http.inc)

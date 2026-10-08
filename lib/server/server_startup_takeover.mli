@@ -111,9 +111,12 @@ val pid_lock_path : int -> string
 (** Deterministic external lease path for an already-canonical BasePath and
     host run root. The path is below the current effective UID's private lease
     directory; the full SHA-256 digest is a filesystem-safe index. Collisions
-    fail closed by contending on the same lease file. This function derives a
-    path only; [acquire_base_path_lock] establishes and validates the private
-    directory. *)
+    fail closed by contending on the same lease file. This is the v1
+    path-digest name that releases before the lease format changed and is
+    kept as the upgrade fence: a current lease locks this file for its whole
+    life, so an old and a new server still refuse to share one BasePath.
+    This function derives a path only; [acquire_base_path_lock] establishes
+    and validates the private directory. *)
 val base_path_lock_path :
   run_dir:string ->
   canonical_base_path:string ->

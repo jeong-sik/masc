@@ -5,6 +5,11 @@ type acquire_result =
 type base_path_lease =
   { fd : Unix.file_descr
   ; path : string
+  ; (* The v1 path-digest lease file of the same directory. A v2 lease holds
+       its kernel lock for as long as the lease lives, so an old server
+       (v1-only) and a new server (v2) still refuse to share one BasePath
+       across an upgrade; both descriptors are closed together. *)
+    legacy_fd : Unix.file_descr option
   }
 
 type base_path_lock_rejection =
@@ -216,6 +221,33 @@ let close_acquisition_fd ~operation ~path ~context fd =
     Error rejection
 ;;
 
+(* The v1 fence is closed outside the lease table: a failed close there must
+   not fabricate a table entry, because the fence has no key of its own and
+   the acquisition decision is already made when this runs. The kernel
+   reclaims the descriptor with the process; a fence that outlives its
+   decision is fail-closed, so it is logged, not fatal. *)
+let close_legacy_fence_fd ~path fd =
+  (try
+     let (_ : int) = Unix.lseek fd 0 Unix.SEEK_SET in
+     Unix.lockf fd Unix.F_ULOCK 0
+   with
+   | Unix.Unix_error (error, syscall, argument) ->
+     Log.Server.error
+       "BasePath legacy fence unlock failed: path=%s error=%s syscall=%s argument=%s"
+       path
+       (Unix.error_message error)
+       syscall
+       argument);
+  try Unix.close fd with
+  | Unix.Unix_error (error, syscall, argument) ->
+    Log.Server.error
+      "BasePath legacy fence close failed: path=%s error=%s syscall=%s argument=%s"
+      path
+      (Unix.error_message error)
+      syscall
+      argument
+;;
+
 let pid_lock_path port =
   Filename.concat (Host_config.host ()).run_dir (Printf.sprintf "masc-%d.pid" port)
 ;;
@@ -229,10 +261,23 @@ let base_path_lease_directory ~run_dir ~owner_uid =
     (Printf.sprintf "%s-%d" private_lease_directory_prefix owner_uid)
 ;;
 
+(* The lease used to be named by the digest of the canonical BasePath
+   string. macOS answers [Unix.realpath] with two different strings for one
+   directory (/private/tmp/X and /System/Volumes/Data/private/tmp/X), so two
+   servers could hold two leases for the same directory. The lease is now
+   named by the digest of the directory's own (st_dev, st_ino) identity, and
+   the v1 name remains the migration fence: a v2 lease holds the v1 file's
+   kernel lock for its whole life, so an old server started before an
+   upgrade and a new server started after it still refuse to share one
+   directory. Legacy digests also stop a v2 server from reporting a v1
+   holder as nobody. *)
+let base_path_lock_digest_of_stats (stat : Unix.stats) =
+  Printf.sprintf "masc-base-path-lease:%ld:%ld" stat.st_dev stat.st_ino
+  |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
+;;
+
 let base_path_lock_path_for_owner ~run_dir ~canonical_base_path ~owner_uid =
-  let digest =
-    Digestif.SHA256.(digest_string canonical_base_path |> to_hex)
-  in
+  let digest = Digestif.SHA256.(digest_string canonical_base_path |> to_hex) in
   Filename.concat
     (base_path_lease_directory ~run_dir ~owner_uid)
     (Printf.sprintf "masc-base-path-owner-v1-%s.lease" digest)
@@ -892,6 +937,12 @@ let release_base_path_lease lease =
             argument;
           false
       in
+      (* The v1 fence dies with the lease: while the v2 lease lives, the old
+         server's lease file stays locked, and releasing the BasePath must
+         let an old server start again. *)
+      (match lease.legacy_fd with
+       | None -> ()
+       | Some fence -> close_legacy_fence_fd ~path:lease.path fence);
       (* A failed close leaves descriptor ownership ambiguous. Retain the
          process-local fence in that case; admitting an alias after a failed
          release would be worse than an explicit fail-closed leak. *)
@@ -904,7 +955,25 @@ let prepare_base_path_lease_exec_handoff lease =
     | Some (Active_lease current) when current == lease ->
       (try
          Unix.clear_close_on_exec lease.fd;
-         Ok ()
+         let cleared_fence =
+           match lease.legacy_fd with
+           | None -> Ok ()
+           | Some fence ->
+             (try Unix.clear_close_on_exec fence; Ok () with
+              | exn ->
+                (* cancel-guard-ok: Unix.clear_close_on_exec performs no Eio
+                   operation. *)
+                Error (Printexc.to_string exn))
+         in
+         match cleared_fence with
+         | Error reason ->
+           Error
+             (Lease_io_failed
+                { operation = "prepare_exec_handoff"
+                ; path = lease.path
+                ; reason
+                })
+         | Ok () -> Ok ()
        with
        | exn -> (* cancel-guard-ok: Unix.clear_close_on_exec performs no Eio operation. *)
          Error
@@ -931,6 +1000,7 @@ type prepared_base_path_lock =
   ; lease_directory_stat : Unix.stats
   ; runtime_directory : string
   ; path : string
+  ; legacy_path : string
   ; owner_uid : int
   }
 
@@ -1175,6 +1245,12 @@ let prepare_base_path_lock ~run_dir base_path =
     ; runtime_directory =
         Filename.concat canonical_base_path Common.masc_dirname
     ; path =
+        Filename.concat
+          lease_directory
+          (Printf.sprintf
+             "masc-base-path-owner-v2-%s.lease"
+             (base_path_lock_digest_of_stats base_path_stat))
+    ; legacy_path =
         base_path_lock_path_for_owner
           ~run_dir:run_directory
           ~canonical_base_path
@@ -1436,6 +1512,62 @@ let parsed_pid_fd fd =
     None
 ;;
 
+(* Open and try to lock the v1 path-digest lease file of the same directory,
+   before any v2 lease file is touched. A missing v1 file fences nothing
+   (first start after the format change); a held one means an old server
+   already owns this directory, and its holder identity is read from the v1
+   file so the report says who, not nobody. Returns the locked fence
+   descriptor, to be closed together with the lease it guards. *)
+let open_legacy_lease_fence prepared =
+  match
+    (try
+       Ok (Some (Unix.openfile prepared.legacy_path [ Unix.O_RDWR ] 0))
+     with
+     | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+     | exn ->
+       (* cancel-guard-ok: Unix.openfile performs no Eio operation. *)
+       Error
+         (Lease_io_failed
+            { operation = "open_legacy_lease_fence"
+            ; path = prepared.legacy_path
+            ; reason = Printexc.to_string exn
+            }))
+  with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some fd) ->
+    (try
+       Unix.lockf fd Unix.F_TLOCK 0;
+       Ok (Some fd)
+     with
+     | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
+       let pid = parsed_pid_fd fd in
+       let locked_by_other =
+         Base_path_already_owned
+           { owner = base_path_owner_of_recorded pid
+           ; lock_path = prepared.legacy_path
+           }
+       in
+       (match
+          close_acquisition_fd
+            ~operation:"close_contended_legacy_lease_fence"
+            ~path:prepared.legacy_path
+            ~context:
+              "kernel lease on the v1 path-digest file is owned by another process"
+            fd
+        with
+        | Ok () -> Error locked_by_other
+        | Error rejection -> Error rejection)
+     | exn ->
+       (* cancel-guard-ok: Unix.lockf performs no Eio operation. *)
+       Error
+         (Lease_io_failed
+            { operation = "lock_legacy_lease_fence"
+            ; path = prepared.legacy_path
+            ; reason = Printexc.to_string exn
+            }))
+;;
+
 let acquire_base_path_lock_with
       ~before_lease_open
       ~before_commit_identity_check
@@ -1449,9 +1581,10 @@ let acquire_base_path_lock_with
     before_lease_open ();
     (* [lockf] locks are process-associated on POSIX, so a second descriptor in
        this process may successfully acquire the same kernel lock. The key is
-       a full SHA-256 projection of the canonical BasePath into the validated,
-       current-UID private lease directory. A digest collision remains
-       fail-closed because both identities contend on the same lease file. *)
+       a full SHA-256 projection of the directory's (st_dev, st_ino) identity
+       into the validated, current-UID private lease directory. A digest
+       collision remains fail-closed because both identities contend on the
+       same lease file. *)
     Mutex.protect base_path_lease_mu (fun () ->
       match Hashtbl.find_opt base_path_leases prepared.path with
       | Some (Active_lease _) ->
@@ -1460,102 +1593,180 @@ let acquire_base_path_lock_with
           { owner = Owner_this_process (Unix.getpid ()); lock_path = prepared.path }
       | Some (Failed_close (_, rejection)) -> Base_path_rejected rejection
       | None ->
-        (match open_lease_file prepared with
+        (* The v1 path-digest file is opened and locked before the v2 lease
+           file so an old (v1-only) server started on the same directory
+           loses the race it would have won before this upgrade; the reverse
+           order would let two servers hold one directory while both files
+           were lockable. *)
+        (match open_legacy_lease_fence prepared with
          | Error rejection -> Base_path_rejected rejection
-         | Ok fd ->
-           (try
-              Unix.lockf fd Unix.F_TLOCK 0;
-              before_commit_identity_check ();
-              (* Establish [.masc] only after the external lifetime lease is
-                 held. OCaml's portable Unix surface has no directory-relative
-                 no-follow open. The private lease directory blocks other-UID
-                 path replacement; same-UID mutation remains an explicit
-                 composition-root invariant tracked by #24344. *)
-              (match verify_open_lease_file prepared fd None with
-               | Error rejection -> Base_path_rejected rejection
-               | Ok fd ->
-                 (match establish_runtime_directory prepared with
+         | Ok legacy_fence ->
+           (match open_lease_file prepared with
+            | Error rejection ->
+              (match legacy_fence with
+               | None -> ()
+               | Some fence ->
+                 close_legacy_fence_fd ~path:prepared.path fence);
+              Base_path_rejected rejection
+            | Ok fd ->
+              (match
+                 (try Ok (Unix.lockf fd Unix.F_TLOCK 0) with
+                  | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
+                    let pid = parsed_pid_fd fd in
+                    (match
+                       close_acquisition_fd
+                         ~operation:"close_contended_lease_file"
+                         ~path:prepared.path
+                         ~context:"kernel lease is owned by another process"
+                         fd
+                     with
+                     | Ok () ->
+                       (match legacy_fence with
+                        | None -> ()
+                        | Some fence ->
+                          close_legacy_fence_fd ~path:prepared.path fence);
+                       Base_path_already_owned
+                         { owner = base_path_owner_of_recorded pid
+                         ; lock_path = prepared.path
+                         }
+                     | Error rejection -> Base_path_rejected rejection)
+                  | exn ->
+                    (* cancel-guard-ok: Unix.lockf performs no Eio operation. *)
+                    Error
+                      (Lease_io_failed
+                         { operation = "commit_base_path_lease"
+                         ; path = prepared.path
+                         ; reason = Printexc.to_string exn
+                         }))
+               with
+               | Error rejection ->
+                 (match legacy_fence with
+                  | None -> ()
+                  | Some fence ->
+                    close_legacy_fence_fd ~path:prepared.path fence);
+                 Base_path_rejected rejection
+               | Ok () ->
+                 before_commit_identity_check ();
+                 (* Establish [.masc] only after the external lifetime lease is
+                    held. OCaml's portable Unix surface has no directory-relative
+                    no-follow open. The private lease directory blocks other-UID
+                    path replacement; same-UID mutation remains an explicit
+                    composition-root invariant tracked by #24344. *)
+                 (match verify_open_lease_file prepared fd None with
                   | Error rejection ->
                     (match
                        close_acquisition_fd
-                         ~operation:"close_failed_runtime_establishment"
+                         ~operation:"close_rejected_lease_file"
                          ~path:prepared.path
                          ~context:
                            (base_path_lock_rejection_to_string rejection)
                          fd
                      with
-                     | Ok () -> Base_path_rejected rejection
-                     | Error close_rejection -> Base_path_rejected close_rejection)
-                  | Ok runtime_directory_stat ->
-                    before_runtime_identity_check ();
-                    (match
-                       verify_directory_identity
-                         ~path:prepared.runtime_directory
-                         ~expected:runtime_directory_stat
-                     with
+                     | Ok () ->
+                       (match legacy_fence with
+                        | None -> ()
+                        | Some fence ->
+                          close_legacy_fence_fd ~path:prepared.path fence);
+                       Base_path_rejected rejection
+                     | Error close_rejection ->
+                       (match legacy_fence with
+                        | None -> ()
+                        | Some fence ->
+                          close_legacy_fence_fd ~path:prepared.path fence);
+                       Base_path_rejected close_rejection)
+                  | Ok fd ->
+                    (match establish_runtime_directory prepared with
                      | Error rejection ->
                        (match
                           close_acquisition_fd
-                            ~operation:"close_retargeted_runtime_directory"
+                            ~operation:"close_failed_runtime_establishment"
                             ~path:prepared.path
                             ~context:
                               (base_path_lock_rejection_to_string rejection)
                             fd
                         with
-                        | Ok () -> Base_path_rejected rejection
+                        | Ok () ->
+                          (match legacy_fence with
+                           | None -> ()
+                           | Some fence ->
+                             close_legacy_fence_fd ~path:prepared.path fence);
+                          Base_path_rejected rejection
                         | Error close_rejection ->
+                          (match legacy_fence with
+                           | None -> ()
+                           | Some fence ->
+                             close_legacy_fence_fd ~path:prepared.path fence);
                           Base_path_rejected close_rejection)
-                     | Ok () ->
-                       (match verify_open_lease_file prepared fd None with
-                        | Error rejection -> Base_path_rejected rejection
-                        | Ok fd ->
-                          (* NDT-OK: persist the OS lease holder identity for operator observation. *)
-                          let pid = Unix.getpid () in
-                          let payload = Printf.sprintf "%d\n" pid in
-                          Unix.ftruncate fd 0;
-                          let (_ : int) = Unix.lseek fd 0 Unix.SEEK_SET in
-                          write_all fd payload;
-                          Unix.fsync fd;
-                          let lease = { fd; path = prepared.path } in
-                          Hashtbl.add
-                            base_path_leases
-                            prepared.path
-                            (Active_lease lease);
-                          Base_path_acquired lease))))
-            with
-            | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
-              let pid = parsed_pid_fd fd in
-              (match
-                 close_acquisition_fd
-                   ~operation:"close_contended_lease_file"
-                   ~path:prepared.path
-                   ~context:"kernel lease is owned by another process"
-                   fd
-               with
-               | Ok () ->
-                 Base_path_already_owned
-                   { owner = base_path_owner_of_recorded pid
-                   ; lock_path = prepared.path
-                   }
-               | Error rejection -> Base_path_rejected rejection)
-            | exn ->
-              let commit_rejection =
-                Lease_io_failed
-                  { operation = "commit_base_path_lease"
-                  ; path = prepared.path
-                  ; reason = Printexc.to_string exn
-                  }
-              in
-              (match
-                 close_acquisition_fd
-                   ~operation:"close_failed_lease_commit"
-                   ~path:prepared.path
-                   ~context:
-                     (base_path_lock_rejection_to_string commit_rejection)
-                   fd
-               with
-               | Ok () -> Base_path_rejected commit_rejection
-               | Error rejection -> Base_path_rejected rejection))))
+                     | Ok runtime_directory_stat ->
+                       before_runtime_identity_check ();
+                       (match
+                          verify_directory_identity
+                            ~path:prepared.runtime_directory
+                            ~expected:runtime_directory_stat
+                        with
+                        | Error rejection ->
+                          (match
+                             close_acquisition_fd
+                               ~operation:"close_retargeted_runtime_directory"
+                               ~path:prepared.path
+                               ~context:
+                                 (base_path_lock_rejection_to_string rejection)
+                               fd
+                           with
+                           | Ok () ->
+                             (match legacy_fence with
+                              | None -> ()
+                              | Some fence ->
+                                close_legacy_fence_fd ~path:prepared.path fence);
+                             Base_path_rejected rejection
+                           | Error close_rejection ->
+                             (match legacy_fence with
+                              | None -> ()
+                              | Some fence ->
+                                close_legacy_fence_fd ~path:prepared.path fence);
+                             Base_path_rejected close_rejection)
+                        | Ok () ->
+                          (match verify_open_lease_file prepared fd None with
+                           | Error rejection ->
+                             (match
+                                close_acquisition_fd
+                                  ~operation:"close_rejected_lease_file"
+                                  ~path:prepared.path
+                                  ~context:
+                                    (base_path_lock_rejection_to_string
+                                       rejection)
+                                  fd
+                              with
+                              | Ok () ->
+                                (match legacy_fence with
+                                 | None -> ()
+                                 | Some fence ->
+                                   close_legacy_fence_fd ~path:prepared.path
+                                     fence);
+                                Base_path_rejected rejection
+                              | Error close_rejection ->
+                                (match legacy_fence with
+                                 | None -> ()
+                                 | Some fence ->
+                                   close_legacy_fence_fd ~path:prepared.path
+                                     fence);
+                                Base_path_rejected close_rejection)
+                           | Ok fd ->
+                             (* NDT-OK: persist the OS lease holder identity for operator observation. *)
+                             let pid = Unix.getpid () in
+                             let payload = Printf.sprintf "%d\n" pid in
+                             Unix.ftruncate fd 0;
+                             let (_ : int) = Unix.lseek fd 0 Unix.SEEK_SET in
+                             write_all fd payload;
+                             Unix.fsync fd;
+                             let lease =
+                               { fd; path = prepared.path; legacy_fd = legacy_fence }
+                             in
+                             Hashtbl.add
+                               base_path_leases
+                               prepared.path
+                               (Active_lease lease);
+                             Base_path_acquired lease)))))))
 ;;
 
 let acquire_base_path_lock =
@@ -1580,9 +1791,48 @@ let capture_existing_owner ~run_dir ~base_path =
   | Ok prepared ->
     Mutex.protect base_path_lease_mu (fun () ->
       if Hashtbl.mem base_path_leases prepared.path then Error Current_process_owner
-      else match open_lease_file prepared with
+      else
+        (* A v1-only server, started before the lease format changed, holds
+           only the path-digest file. When the v2 file has no holder, the v1
+           file is queried before reporting No_owner: a v2 lease holder
+           fences both files for its whole life, so the fallback can only
+           observe a pre-upgrade owner. *)
+        match open_lease_file prepared with
         | Error rejection -> Error (Owner_lease_rejected rejection)
         | Ok fd ->
           Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-            Owner_process_identity.capture ~lease_fd:fd
-            |> Result.map_error (fun error -> Owner_identity_unavailable error)))
+            match Owner_process_identity.capture ~lease_fd:fd with
+            | Ok owner -> Ok owner
+            | Error Owner_process_identity.No_owner ->
+              (match
+                 (try
+                    Ok
+                      (Some
+                         (Unix.openfile prepared.legacy_path [ Unix.O_RDWR ] 0))
+                  with
+                  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+                  | exn ->
+                    (* cancel-guard-ok: Unix.openfile performs no Eio operation. *)
+                    Error (Printexc.to_string exn))
+               with
+               | Error reason ->
+                 Log.Server.error
+                   "BasePath legacy owner query failed: path=%s error=%s"
+                   prepared.legacy_path reason;
+                 Error (Owner_identity_unavailable Owner_process_identity.No_owner)
+               | Ok None ->
+                 Error
+                   (Owner_identity_unavailable Owner_process_identity.No_owner)
+               | Ok (Some legacy_fd) ->
+                 Fun.protect
+                   ~finally:(fun () ->
+                     (try Unix.close legacy_fd with
+                      | Unix.Unix_error _ -> ()))
+                   (fun () ->
+                     match Owner_process_identity.capture ~lease_fd:legacy_fd with
+                     | Ok owner -> Ok owner
+                     | Error _ ->
+                       Error
+                         (Owner_identity_unavailable
+                            Owner_process_identity.No_owner)))
+            | Error other -> Error (Owner_identity_unavailable other)))

@@ -26,9 +26,11 @@ class BatchFixture(_keyboard_chat.AtomicChatFixture):
             if position <= 3:
                 with self.admitted:
                     if not self.admitted.wait_for(
-                        lambda: len(self.submitted) >= 3, timeout=10
+                        lambda: self.closed or len(self.submitted) >= 3, timeout=10
                     ):
                         raise AssertionError("three batch members were not admitted")
+                    if self.closed:
+                        return
                     execution_id = self.submitted[0]["request_id"]
                 event = {
                     "type": "CUSTOM",
@@ -94,8 +96,7 @@ def run(executable: str) -> None:
             _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
         finally:
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
 
     _keyboard_harness.run_terminal_scenario(
         executable,

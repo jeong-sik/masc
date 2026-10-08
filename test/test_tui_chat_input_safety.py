@@ -199,8 +199,7 @@ def queued_attachments(binary: str) -> None:
             )
             assert fixture.operations[0]["operation_id"] == first_id, fixture.operations
         finally:
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
             os.killpg(process.pid, signal.SIGTERM)
 
     _keyboard_harness.run_terminal_scenario(

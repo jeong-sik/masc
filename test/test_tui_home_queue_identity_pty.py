@@ -143,9 +143,7 @@ def queue_identity_journey(executable):
                                     needle=b"Continue with alpha")
             os.write(fd, b"q")
         finally:
-            fixture.release_first_acceptance.set()
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
 
     h.run_terminal_scenario(
         executable, description="Home queue retains identity across unread settlement",

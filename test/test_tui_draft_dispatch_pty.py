@@ -83,8 +83,7 @@ def run(executable, *, visit_other_keeper):
         finally:
             for gate in gates:
                 gate.release.set()
-            fixture.release.set()
-            fixture.release_interrupt.set()
+            fixture.close()
 
     h.run_terminal_scenario(executable,
         description=f"Delayed dispatch preserves independently authored {mode} draft",

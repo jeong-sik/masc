@@ -32,6 +32,17 @@ class AcceptedQueueReconnectFixture:
         self.attempts = []
         self.lock = threading.Lock()
         self.acceptance = None
+        self.server_execution_id = None
+        self.fixtures["/api/v1/keepers/turns"] = self.turns
+
+    def turns(self):
+        with self.queue.lock:
+            status, payload = self.queue.turns()
+            turn = payload["keepers"][0]["turn"]
+            if self.server_execution_id is not None and turn is not None:
+                turn["lane"] = "chat_operation"
+                turn["preview"]["text_tail"] = "Accepted execution active"
+            return status, payload
 
     def stream(self, body):
         request = json.loads(body)
@@ -45,6 +56,16 @@ class AcceptedQueueReconnectFixture:
                 chunks = response.chunks()
                 try:
                     self.acceptance = next(chunks)
+                    # The queued receipt is a snapshot before execution. The
+                    # old turn now settles and this operation starts while the
+                    # owner is still unpaused, but transport withholds its
+                    # RUN_STARTED until reconnect. Publish its exact current
+                    # turn token through the observer before the operator Esc.
+                    if not self.queue.start_execution(request["request_id"]):
+                        return
+                    with self.queue.lock:
+                        self.queue.turn_token = "1ed48ab9-11a3-49e2-af82-31f6029ca2d3"
+                        self.server_execution_id = request["request_id"]
                     yield self.acceptance
                     if not self.disconnect.wait(timeout=30):
                         raise AssertionError("accepted stream was never disconnected")
@@ -67,6 +88,11 @@ class AcceptedQueueReconnectFixture:
             def run_then_terminal():
                 if self.acceptance is None:
                     raise AssertionError("reconnect preceded the initial acceptance")
+                with self.queue.lock:
+                    if request["request_id"] not in self.queue.started_requests:
+                        raise AssertionError("reconnect cannot start an execution while paused")
+                # This is the start already recorded before Esc, not a new
+                # execution admitted through the paused owner.
                 # A re-subscription repeats acceptance, then exposes only
                 # RUN_STARTED. No reply or terminal event can explain the
                 # ensuing reduction in the pending count.
@@ -75,6 +101,9 @@ class AcceptedQueueReconnectFixture:
                     raise AssertionError("reconnect terminal gate was never released")
                 self.terminal_sent.set()
                 yield b"\n\n".join(blocks[2:]) + b"\n\n"
+                with self.queue.admitted:
+                    self.queue.finished_requests.add(request["request_id"])
+                    self.queue.admitted.notify_all()
 
             return _keyboard_harness.StreamingHttpResponse(run_then_terminal)
         if attempt != 2 or request["message"] != "held-local-next":
@@ -85,8 +114,7 @@ class AcceptedQueueReconnectFixture:
         self.disconnect.set()
         self.release_run_start.set()
         self.release_terminal.set()
-        self.queue.release_interrupt.set()
-        self.queue.release.set()
+        self.queue.close()
 
 
 def run(executable: str, evidence_dir: Path | None = None) -> None:
@@ -211,6 +239,8 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             _keyboard_chat.wait_for_atomic_admissions(process, fd, output, fixture, 3)
             start = len(output)
             fixture.release.set()
+            _keyboard_chat.wait_for_atomic_paused_requests(process, fd, output, fixture, fixture.submitted)
+            _keyboard_chat.resume_atomic_queue(process, fd, output)
             replies = (b"reply-queued-one", b"reply-queued-two", b"reply-local-three")
             for reply in replies:
                 _keyboard_harness.wait_for_output(process, fd, output, reply, start=start, timeout=10)
@@ -229,10 +259,8 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             os.write(fd, b"q")
         finally:
-            fixture.release_first_acceptance.set()
             release_second_acceptance.set()
-            fixture.release_interrupt.set()
-            fixture.release.set()
+            fixture.close()
 
     _keyboard_harness.run_terminal_scenario(
         executable,
@@ -273,6 +301,10 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             if b"Queue (1 pending" not in accepted or b"rechecking delivery" in accepted:
                 raise AssertionError("initial queued receipt was not visible: " + repr(accepted))
 
+            # Polling names the already running direct execution before its
+            # withheld SSE start. Esc must target that exact observed turn.
+            _keyboard_harness.wait_for_output(process, fd, output,
+                b"Accepted execution active", start=0, timeout=5)
             # This explicit control receipt, not reconnect state, is what
             # keeps the next Enter local across RUN_STARTED and terminal.
             os.write(fd, b"\x1b")
@@ -317,6 +349,9 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             reconnect.queue.release.set()
             reconnect.queue.release_interrupt.set()
             _keyboard_chat.wait_for_atomic_admissions(process, fd, output, reconnect.queue, 2)
+            _keyboard_chat.wait_for_atomic_paused_requests(
+                process, fd, output, reconnect.queue, reconnect.queue.submitted[1:])
+            _keyboard_chat.resume_atomic_queue(process, fd, output)
             local_reply = b"reply-held-local-next"
             _keyboard_harness.wait_for_output(process, fd, output, local_reply, start=local_reply_from, timeout=10)
             local_reply_end = _keyboard_harness.end_of_needle(output, local_reply, local_reply_from)
@@ -420,8 +455,7 @@ def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_prior
             os.write(fd, b"q")
         finally:
             priority_release.set()
-            fixture.release.set()
-            fixture.release_interrupt.set()
+            fixture.close()
 
     _keyboard_harness.run_terminal_scenario(executable,
         description="Compact chat pending input priority refusal" if fail_priority else "Compact chat pending input confirmed priority",

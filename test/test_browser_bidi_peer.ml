@@ -160,7 +160,7 @@ let test_held_open_completion outcome () =
       let clock=Eio.Stdenv.clock env in
       let listener=Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:1
         (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
-      let port=match Eio.Net.listening_addr listener with `Tcp (_,port)->port|_->fail "TCP expected" in
+      let port=match Eio.Net.listening_addr listener with `Tcp (_,port)->port| `Unix _->fail "Unix socket expected" in
       let eof,eof_u=Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun ()->Eio.Switch.run (fun peer_sw ->
         let flow,_=Eio.Net.accept ~sw:peer_sw listener in
@@ -424,7 +424,7 @@ let test_refused_upgrade_is_the_connections_error () =
       let clock=Eio.Stdenv.clock env in
       let listener=Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:1
         (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
-      let port=match Eio.Net.listening_addr listener with `Tcp (_,port)->port|_->fail "TCP expected" in
+      let port=match Eio.Net.listening_addr listener with `Tcp (_,port)->port| `Unix _->fail "Unix socket expected" in
       Eio.Fiber.fork ~sw (fun ()->Eio.Switch.run (fun peer_sw ->
         let flow,_=Eio.Net.accept ~sw:peer_sw listener in
         ignore (Ws_direct_eio.Driver.read_head ~clock flow : string);

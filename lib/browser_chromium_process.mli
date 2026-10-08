@@ -50,6 +50,12 @@ val browser_ws_url : port:int -> path:string -> string
 
 type leftover = Stop_recorded_browser of int | Not_the_recorded_browser
 
+(** The browser lane's directory under a workspace root:
+    [<masc_root>/browser-lane/], without the [.masc] part a caller spells
+    with {!Common.masc_dirname}. One name for where every browser lane keeps
+    its files. *)
+val lane_dir : masc_root:string -> string
+
 (** [command] is what the process table shows for [owner.pid] now, [None] when
     no such process exists. Only a process that is the recorded executable
     running on the recorded profile is stopped: a pid handed to another

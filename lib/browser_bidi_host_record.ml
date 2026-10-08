@@ -51,7 +51,7 @@ let file_permissions = 0o600
 let schema = 1
 
 let directory base_path =
-  List.fold_left Filename.concat base_path [ Common.masc_dirname; "browser-lane" ]
+  Browser_chromium_process.lane_dir ~masc_root:(Filename.concat base_path Common.masc_dirname)
 
 let path base_path name = Filename.concat (directory base_path) name
 let record_path ~base_path = path base_path record_name

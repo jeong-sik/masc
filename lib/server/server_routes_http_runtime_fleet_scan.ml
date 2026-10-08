@@ -564,52 +564,7 @@ let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).co
 type keeper_execution_owner =
   { keeper_name : string
   ; truth : Keeper_activation_readiness.owner_execution_truth
-  ; non_executable_cause : keeper_non_executable_cause option
   }
-and keeper_non_executable_cause =
-  | Cause_owner_absent_from_snapshot
-  | Cause_owner_unregistered
-  | Cause_no_keeper_binding
-  | Cause_fiber_dead
-  | Cause_lane_exited
-  | Cause_completion_settled
-  | Cause_autoboot_disabled
-  | Cause_proactive_disabled
-  | Cause_lifecycle_denied
-  | Cause_runtime_terminal
-  | Cause_shutdown_fenced
-  | Cause_metadata_unavailable
-  | Cause_runtime_not_live
-
-
-
-let non_executable_cause ~registry_entry = function
-  | Keeper_activation_readiness.Executable -> None
-  | Keeper_activation_readiness.Recoverable ->
-    Some
-      (match registry_entry with
-       | None -> Cause_owner_unregistered
-       | Some (entry : Keeper_registry.registry_entry) ->
-         if not entry.conditions.fiber_alive then Cause_fiber_dead
-         else if Keeper_registry.lane_has_exited entry then Cause_lane_exited
-         else if Option.is_some (Eio.Promise.peek entry.done_p) then
-           Cause_completion_settled
-         else Cause_runtime_not_live)
-  | Keeper_activation_readiness.Retained_disabled
-      Keeper_activation_readiness.Retained_autoboot_disabled ->
-    Some Cause_autoboot_disabled
-  | Keeper_activation_readiness.Retained_disabled
-      Keeper_activation_readiness.Retained_proactive_disabled ->
-    Some Cause_proactive_disabled
-  | Keeper_activation_readiness.Paused_dead
-      (Keeper_activation_readiness.Persisted_lifecycle_denied _) ->
-    Some Cause_lifecycle_denied
-  | Keeper_activation_readiness.Paused_dead
-      (Keeper_activation_readiness.Runtime_terminal _) ->
-    Some Cause_runtime_terminal
-  | Keeper_activation_readiness.Shutdown_fenced _ -> Some Cause_shutdown_fenced
-  | Keeper_activation_readiness.Unknown _ -> Some Cause_metadata_unavailable
-;;
 
 type keeper_execution_snapshot =
   { owners : keeper_execution_owner list
@@ -663,7 +618,6 @@ let keeper_execution_snapshot ?profile_snapshot config =
         {
           keeper_name;
           truth;
-          non_executable_cause = non_executable_cause ~registry_entry truth;
         })
       owner_names
   in

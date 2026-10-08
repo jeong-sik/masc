@@ -418,7 +418,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'provider_runtime_error',
   'official_client_recovery_required',
   'fiber_unresolved',
-  'stale_termination_storm',
   'heartbeat_failures',
   'turn_failures',
   'exception',

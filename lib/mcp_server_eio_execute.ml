@@ -464,17 +464,15 @@ let execute_tool_eio
                    (* Identity, profile membership and tool authorization have
                       passed above. The controller execution boundary shared
                       by Keeper calls and the play routes comes next. *)
-                   (match Tool_schemas_misc.misc_operation_of_tool_name name with
-                    | Some Tool_schemas_misc.Misc_candle_balance -> candle Keeper_candle_tools.Balance
-                    | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
-                    | Some Tool_schemas_misc.Misc_candle_purchase -> candle Keeper_candle_tools.Purchase
-                    | Some Tool_schemas_misc.Misc_candle_equip -> candle Keeper_candle_tools.Equip
+                   let misc_operation = Tool_schemas_misc.misc_operation_of_tool_name name in
+                   (match misc_operation, Option.bind misc_operation Keeper_candle_tools.operation_of_misc with
+                    | _, Some operation -> candle operation
                     (* Keeper-only, like spawn and code_query above: the
                        portrait is the Keeper's own, drawn from its name, and
                        this endpoint has no Keeper turn to name. The name is
                        registered and this endpoint cannot run it, so it says
                        that rather than answering "Unknown tool". *)
-                    | Some Tool_schemas_misc.Misc_portrait_read ->
+                    | Some Tool_schemas_misc.Misc_portrait_read, None ->
                       Some
                         (Tool_result.error
                            ~failure_class:Tool_result.Workflow_rejection
@@ -485,7 +483,7 @@ let execute_tool_eio
                                (a Keeper's portrait is drawn from its own name, which this \
                                endpoint does not have)"
                               name))
-                    | Some _ | None ->
+                    | (Some _ | None), None ->
                       (match
                          Keeper_dos_controller.execute ~config ~who:agent_name ~name
                            ~args:coerced_args ~run:dispatch

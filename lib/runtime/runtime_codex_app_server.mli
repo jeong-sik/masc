@@ -144,7 +144,10 @@ type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
-  ; text : string
+  ; text : string option
+    (** Observed assistant text, including an explicit empty final. [None]
+        means a tool-only terminal without an assistant message. Tool-call
+        count does not prove that any of those calls succeeded. *)
   ; dynamic_tool_calls : int
   ; scheduling_handoff : handoff_state
   ; subscription : subscription
@@ -201,6 +204,8 @@ type elicitation_mode = Form | Openai_form | Url
 
 type elicitation_cancel_reason = Host_input_unavailable
 
+type reasoning_part = Summary of int | Content of int
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -214,6 +219,13 @@ type stream_event =
           agentMessage item the piece belongs to, so a reader can tell two
           assistant messages of one turn apart. [None] when the frame omits
           it or sends it blank; the delta still streams (#28010). *)
+  | Thinking_delta of
+      { item_id : string
+      ; part : reasoning_part
+      ; delta : string
+      }
+      (** Provider-exposed reasoning text, identified by item and summary/content
+          part. Completed items contribute only the suffix not already streamed. *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string

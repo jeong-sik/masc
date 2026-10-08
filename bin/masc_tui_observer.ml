@@ -131,6 +131,8 @@ type event =
       ; frame : string option
       ; at : float
       }
+  | Keeper_turn_stream_frame of
+      { keeper : string; turn_ref : Ids.Turn_ref.t; seq : int; at : float }
   | Keeper_waiting_inventory_changed of
       { keeper : string; queue_kind : string option; at : float }
   (* Server push, not a keeper act: a fusion deliberation changed stage or
@@ -174,7 +176,7 @@ let chat_appended_keeper = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Lane_resource _
   | Snapshot _ | Other _ ->
       None
@@ -453,6 +455,19 @@ let decode_keeper_chat_operation_event fields =
   let* seq = optional_int_field fields "seq" ~event in
   Ok (Keeper_chat_stream_frame { keeper; operation_id; seq; frame; at })
 
+let decode_keeper_turn_stream_event fields =
+  let event = "keeper_turn_stream_event" in
+  let* keeper = required string_field fields "name" ~event in
+  let* raw = required string_field fields "turn_ref" ~event in
+  let* turn_ref = match Ids.Turn_ref.of_string raw with
+    | Some turn_ref -> Ok turn_ref
+    | None -> Error "keeper_turn_stream_event has invalid turn_ref" in
+  let* at = required float_field fields "ts_unix" ~event in
+  let* seq = optional_int_field fields "seq" ~event in
+  match seq with
+  | Some seq when seq >= 0 -> Ok (Keeper_turn_stream_frame {keeper; turn_ref; seq; at})
+  | Some _ | None -> Error "keeper_turn_stream_event requires a nonnegative seq"
+
 (* Names the keeper in [keeper_name] rather than [name] -- the one broadcast
    in this family that does. Reading the field it actually sends is why this
    needs its own decoder instead of [decode_named_keeper_event]. *)
@@ -511,6 +526,7 @@ let reading_of_type type_name =
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_composite_changed { keeper; at }))
   | "keeper_chat_operation_event" -> From_fields decode_keeper_chat_operation_event
+  | "keeper_turn_stream_event" -> From_fields decode_keeper_turn_stream_event
   | "keeper_waiting_inventory_changed" ->
       From_fields decode_keeper_waiting_inventory_changed
   | "fusion_run_status" ->

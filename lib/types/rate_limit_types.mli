@@ -32,12 +32,3 @@ type rate_limit_config =
   ; task_ops_per_minute : int
   }
 [@@deriving show]
-
-(** Returned when a rate limit is exceeded. *)
-type rate_limit_error =
-  { limit : int
-  ; current : int
-  ; wait_seconds : int
-  ; category : rate_limit_category
-  }
-[@@deriving show]

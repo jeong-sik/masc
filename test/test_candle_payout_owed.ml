@@ -301,6 +301,35 @@ let test_a_confirmation_time_is_not_read_when_nothing_is_owed () =
   no_ledger "nothing to pay for" config
 ;;
 
+(* #40054: confirmation owes while the lane is unavailable. The Snapshot is
+   left first with the lane up only to keep the two steps separate; the owed
+   row must not wait for the lane. Recording sees Enabled; only
+   appraiser-gated readers (settlement, [Candle_status.current]) see
+   Disabled. *)
+let test_a_confirmation_owes_while_the_appraiser_is_unavailable () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  pass config;
+  Fun.protect
+    ~finally:(fun () -> Candle_status.install_appraiser_check (fun () -> Ok ()))
+    (fun () ->
+      Candle_status.install_appraiser_check (fun () -> Error "publication unavailable");
+      check
+        bool
+        "settlement view is disabled"
+        true
+        (match Candle_status.current ~base_path:(base_path_of config) with
+         | Candle_config.Disabled _ -> true
+         | Candle_config.Off | Candle_config.Enabled _ -> false);
+      is_ok "owed records" (confirm config);
+      check
+        (list string)
+        "the Snapshot, then the PayoutOwed"
+        [ "snapshot"; "payout_owed" ]
+        (kinds config))
+;;
+
 let () =
   run
     "candle_payout_owed"
@@ -348,6 +377,10 @@ let () =
             "a confirmation time is not read when nothing is owed"
             `Quick
             test_a_confirmation_time_is_not_read_when_nothing_is_owed
+        ; test_case
+            "a confirmation owes while the appraiser is unavailable"
+            `Quick
+            test_a_confirmation_owes_while_the_appraiser_is_unavailable
         ] )
     ]
 ;;

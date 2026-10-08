@@ -14,7 +14,21 @@ scenes, document references, and semantic interactions; command arguments are
 JSON data, never supplied JavaScript.
 
 Screenshot coordinate input uses the existing document/viewport guard followed
-by BiDi pointer or wheel actions. This is not an atomic snapshot/input
+by BiDi pointer or wheel actions. `hover_at` uses one `pointerMove`, with no
+button press, on the selected live BiDi tab or the automation lane. Copy the
+observed `expectedUrl`, `viewport` and normalized `point` from a fresh capture.
+Extension-only live clients reject this action before injecting input with
+`trusted_hover_requires_live_bidi_connection`; the operator must explicitly
+attach the already-enabled loopback Remote Agent with `--bidi-url`. Live-client
+discovery reports `transport: "web_extension"` or `"webdriver_bidi"` alongside
+each `clientId`, including the ambiguity response and
+`/api/v1/dashboard/browser-lane/clients`. Select the `webdriver_bidi` client,
+read that client's tabs, and capture again; extension tab IDs are not converted
+to BiDi tab IDs. The host declares its mode with `x-browser-transport`. An
+installed host that omits this header uses the WebExtension poll contract;
+BiDi hosts declare `webdriver_bidi`. The server rejects empty or unknown values
+and a transport change on an existing client ID. Interaction receipts identify
+the resolved tab with `tabId`. Stagehand rejects trusted hover before input. This is not an atomic snapshot/input
 transaction: the operator can still change the page after validation. There is
 no write replay. An unknown outcome stops this live client. Reads and interactions
 share the existing host command deadline; connection setup has that same bound.

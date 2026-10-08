@@ -45,14 +45,14 @@ let test_json_shape () =
   let captured = ref "" in
   Exec_tap.enable ~writer:(fun line -> captured := line);
   Exec_tap.record
-    ~kind:Exec_tap.Unix_create_process
+    ~kind:Exec_tap.Process_eio_run_argv
     ~argv:[ "ls"; "-la" ]
     ~env:[| "PATH=/usr/bin"; "HOME=/root" |]
     ~cwd:"/tmp" ();
   let line = !captured in
   Exec_tap.disable ();
   must_contain ~tag:"trailing newline" line "}\n";
-  must_contain ~tag:"kind field" line "\"kind\":\"Unix.create_process\"";
+  must_contain ~tag:"kind field" line "\"kind\":\"Process_eio.run_argv\"";
   must_contain ~tag:"argv[1]" line "\"-la\"";
   must_contain ~tag:"env_keys only" line "\"env_keys\":[\"PATH\",\"HOME\"]";
   must_contain ~tag:"cwd" line "\"cwd\":\"/tmp\"";

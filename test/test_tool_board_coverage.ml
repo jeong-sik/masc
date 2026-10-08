@@ -565,7 +565,6 @@ let test_post_create_typed_attachments () =
         ~mime:"application/octet-stream"
     with
     | Tool_output.Stored reference -> reference
-    | Tool_output.Inline _ -> Alcotest.fail "artifact was not stored"
   in
   let artifact =
     `Assoc
@@ -725,7 +724,6 @@ let test_attachment_artifact_read_bound () =
         ~mime:"application/octet-stream"
     with
     | Tool_output.Stored reference -> reference
-    | Tool_output.Inline _ -> Alcotest.fail "artifact was not stored"
   in
   let entries =
     [ { Board_tool_attachment.kind = Board_tool_attachment.Image
@@ -1580,6 +1578,28 @@ let test_board_curation_submit_roundtrips_to_read () =
   Alcotest.(check string) "read returns latest summary"
     "Board has one high-priority routing item."
     Yojson.Safe.Util.(read_json |> member "summary" |> to_string)
+
+(* The MCP path names a new post by the id in the result's typed data. It used
+   to parse the id back out of the message text, so a message that merely
+   contained a JSON object with an "id" also counted. *)
+let test_created_post_id_reads_typed_data () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let created =
+    dispatch_result "masc_board_post"
+      (make_args [ ("author", `String "poster"); ("content", `String "typed id") ])
+  in
+  Alcotest.(check bool) "post created" true (Tool_result.is_success created);
+  let expected = Yojson.Safe.Util.(Tool_result.data created |> member "id" |> to_string) in
+  Alcotest.(check (option string)) "id comes from the created post" (Some expected)
+    (Mcp_tool_runtime_board.For_testing.created_post_id created);
+  let text_only =
+    Tool_result.make_ok ~tool_name:"masc_board_post" ~start_time:(Tool_timing.start ())
+      ~data:(`String {|posted {"id":"p-from-text"}|}) ()
+  in
+  Alcotest.(check (option string)) "an id in text is not a post" None
+    (Mcp_tool_runtime_board.For_testing.created_post_id text_only)
 
 let mcp_runtime_board_dispatch name args =
   let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
@@ -3508,6 +3528,8 @@ let () =
             "model-visible Board maintenance dispatches in process"
             `Quick
             test_model_visible_board_maintenance_dispatches_in_process;
+          Alcotest.test_case "created post id reads typed data" `Quick
+            test_created_post_id_reads_typed_data;
           Alcotest.test_case "masc_board_close checks author permission" `Quick
             test_masc_board_close_requires_the_post_author;
           Alcotest.test_case "configured moderator can close and reopen" `Quick

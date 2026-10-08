@@ -59,7 +59,7 @@ type dispatch_fn =
 (* ── Configuration ──────────────────────────────────────────── *)
 
 (* [max 1] for the same reason as the sibling below: the caller compares
-   [String.length trimmed > max_content_length ()], so a non-positive setting
+   [String.length content > max_content_length ()], so a non-positive setting
    would reject every inbound message instead of raising the ceiling. *)
 let max_content_length () =
   Env_config_core.get_int ~default:4000 "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
@@ -111,7 +111,7 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
           ~keeper_name:keeper
           ~idempotency_key:msg.idempotency_key
           ~metadata:msg.metadata
-          ~content:(String.trim msg.content)
+          ~content:msg.content
       in
       (match result with
        | Gate_protocol.Reply { content = reply; structured; stats; message_request } ->

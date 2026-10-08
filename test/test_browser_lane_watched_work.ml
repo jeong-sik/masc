@@ -23,7 +23,7 @@ let info browser : Lane.client_info =
     | Ok id -> id
     | Error error -> fail error
   in
-  { client_id; browser; version = "1.0"; engine_version = "155.0.1" }
+  { client_id; browser; version = "1.0"; transport = Browser_lane.Web_extension; engine_version = "155.0.1" }
 ;;
 
 let payload = `Assoc [ "ok", `Bool true; "data", `String "the answer" ]

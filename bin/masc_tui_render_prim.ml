@@ -678,6 +678,15 @@ let slash_hint_text ~restore draft =
   | [] -> None
   | spans -> Some (String.concat "" (List.map paint spans))
 
+let composer_draft_window state ~cols ~prompt =
+  let draft = Terminal_text.single_line (Masc_tui_message_input.contents state.msg_input) in
+  (* Editing stops at whole grapheme boundaries, so this prefix cannot end
+     inside a ZWJ/variation-selector sequence whose escaping needs its suffix. *)
+  let before = Terminal_text.single_line (Masc_tui_message_input.before_cursor state.msg_input) in
+  Message_layout.input_window
+    ~max_cells:(max 0 (cols - Message_layout.display_width prompt))
+    ~cursor:(String.length before) draft
+
 let composer_line state ~cols =
   if state.view = Overview && not state.composer_focused then
     Theme.recede () ^ fit_width " Choose a Keeper before writing · i:choose" cols ^ Ansi.reset
@@ -692,12 +701,12 @@ let composer_line state ~cols =
   let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
   let tone =
     match (composer.Composer.focus, composer.Composer.target) with
-    | Composer.Focused, _ -> (Theme.info ())
+    | Composer.Focused, _ -> Ansi.default_fg
     | Composer.Unfocused, Composer.Ready _ -> Ansi.dim
     | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) ->
         Ansi.dim
   in
-  let draft = Terminal_text.single_line composer.Composer.draft in
+  let draft, _ = composer_draft_window state ~cols ~prompt in
   let hint =
     match (composer.Composer.focus, composer.Composer.target) with
     (* A focused row draws the draft alone; the voice keys are on the key
@@ -714,7 +723,7 @@ let composer_line state ~cols =
      placed after the draft, does not move. *)
   let slash_hint =
     match composer.Composer.focus with
-    | Composer.Focused -> slash_hint_text ~restore:tone draft
+    | Composer.Focused -> slash_hint_text ~restore:tone composer.Composer.draft
     | Composer.Unfocused -> None
   in
   let body =
@@ -748,10 +757,8 @@ let composer_cursor state ~rows ~cols =
         Message_layout.display_width
           (composer_prompt_text ~voice:(voice_meter_text state) composer)
       in
-      let draft_cells =
-        Message_layout.display_width
-          (Terminal_text.single_line composer.Composer.draft)
-      in
+      let _, draft_cells = composer_draft_window state ~cols
+        ~prompt:(composer_prompt_text ~voice:(voice_meter_text state) composer) in
       Frame_presenter.Visible_at
         { row = rows
         ; column = Composer.cursor_column ~prompt_cells ~draft_cells ~terminal_cols:cols
@@ -1241,8 +1248,10 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
-  Buffer.add_string framed (composer_line state ~cols:full_cols ^ "\n");
-  let cursor = composer_cursor state ~rows ~cols:full_cols in
+  Buffer.add_string framed
+    ((if state.keeper_navigation_open then "" else composer_line state ~cols:full_cols) ^ "\n");
+  let cursor = if state.keeper_navigation_open then Frame_presenter.Hidden
+    else composer_cursor state ~rows ~cols:full_cols in
   Masc_tui_frame_timing.finish_stage ~name:"surface.chrome" chrome_started;
   Masc_tui_frame_timing.time_stage ~name:"surface.strip_frame" (fun () ->
     finish_frame_with_strip state ?clamped ~surface_key
@@ -1330,10 +1339,13 @@ let surface_window_height state ~terminal_rows ~count =
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
     ~overflow_takes_row:true
 
-let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
+let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let full_cols = cols in
+  let sidebar_cols = match sidebar with None -> 0 | Some (width, _) -> width in
+  let cols = cols - sidebar_cols in
   let buf = Buffer.create 4096 in
   let top, line, line_styled, line_selected, divider, empty, bottom =
     match frame with
@@ -1370,7 +1382,8 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     ; push_divider = (fun () -> hold (fun () -> divider buf cols))
     ; push_empty = (fun () -> hold (fun () -> empty buf cols))
     ; next_origin =
-        (fun () -> (body_top + List.length !pushed, Masc_tui_ansi.framed_content_column))
+        (fun () -> (body_top + List.length !pushed,
+                    sidebar_cols + Masc_tui_ansi.framed_content_column))
     }
   in
   body ~budget body_pushers;
@@ -1422,8 +1435,17 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     empty buf cols
   done;
   bottom buf cols;
-  Buffer.add_string buf (footer_line ?status state ~max_cells:cols ~hints);
-  finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols buf
+  let buf = match sidebar with
+    | None -> buf
+    | Some (left_cols, draw) ->
+        let left = Buffer.create 1024 in
+        draw ~rows:(lines_ended_since buf ~start:0) left;
+        let combined = Buffer.create (Buffer.length left + Buffer.length buf) in
+        write_two_panes combined ~left_cols ~left ~right:buf;
+        combined
+  in
+  Buffer.add_string buf (footer_line ?status state ~max_cells:full_cols ~hints);
+  finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 
 let connection_status_badge (status : Masc_tui_types.connection_status) =
@@ -1496,7 +1518,7 @@ let count_frame_lines buf =
     else !n + 1
 
 
-(* Resolve the chat default or explicit choice before applying the terminal's
+(* Resolve navigation visibility and the explicit choice before applying the terminal's
    width constraint; resizing never overwrites the reader's preference. *)
 let keeper_roster_pane_shown (state : state) ~cols =
   Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols
@@ -1555,62 +1577,105 @@ let fit_runtime_id width runtime_id =
   else Message_layout.fit_middle width runtime_id
 
 
-(* A narrow roster beside the detail: position context, not a second input
-   surface -- the keys keep their detail meaning. The window follows the
-   cursor the way the detail follows the selection. *)
+(* Keeper and document indexes share one quiet edge. The row, including its
+   padding, owns its background and selection; the separator never reverses. *)
+let sidebar_line ?(style = "") buf ~cols text =
+  Buffer.add_string buf
+    (Theme.side_pane_background () ^ style ^ fit_width text (max 0 (cols - 1))
+     ^ Ansi.reset ^ Theme.recede () ^ "│" ^ Ansi.reset ^ "\n")
+
+let sidebar_rule ~cols = "  " ^ draw_hline (max 0 (cols - 5)) ^ "  "
+
+let sidebar_heading ~cols ~title ~count =
+  let title = "  " ^ Terminal_text.single_line title in
+  let count = Terminal_text.single_line count in
+  let count_cells = Message_layout.display_width count in
+  let title_cells = max 0 (cols - 1 - count_cells - 3) in
+  fit_width title title_cells ^ " " ^ count ^ "  "
+
+(* A quiet rail beside the conversation. Only the cursor row gets a band when
+   this pane owns the keys; the selected Keeper's readings sit below the list.
+   [rows] includes the caller's footer, as it does for the detail/chat panes. *)
 let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
-  framed_top buf cols;
-  let title = " KEEPERS" in
-  let hint =
-    if focused then "ENTER OPEN" else Masc_tui_keys.roster_toggle_key ^ " HIDE"
+  let height = max 0 (rows - 1) in
+  let inner = max 0 (cols - 1) in
+  let ground = Theme.side_pane_background () in
+  let restore = Ansi.reset ^ ground in
+  let draw ?style text = sidebar_line ?style buf ~cols text in
+  let rule = sidebar_rule ~cols in
+  let details =
+    if not focused then []
+    else match selected_keeper state with
+      | None -> []
+      | Some keeper ->
+          let reading = keeper_reading state keeper in
+          let health = Keeper_control.health_label reading in
+          let status = if reading.paused then "paused · " ^ health else health in
+          let runtime = match reading.liveness with
+            | Keeper_control.Present runtime -> runtime.kr_runtime_id
+            | Unobserved | Absent | Invalid _ -> "Runtime unavailable"
+          in
+          let label =
+            if state.view = Keepers Keeper_message
+               && state.msg_target_keeper_name = Some keeper.k_name then "현재 대화"
+            else "선택한 Keeper"
+          in
+          [ Theme.recede (), rule
+          ; Theme.recede (), "  " ^ label
+          ; Ansi.bold, "  " ^ Message_layout.fit_middle (max 0 (inner - 4))
+              (Terminal_text.single_line keeper.k_name)
+          ; "", "  " ^ keeper_action_color (Keeper_control.next_action reading)
+              ^ keeper_state_glyph ~paused:reading.paused
+                  ~health:(Keeper_control.health reading)
+              ^ restore ^ " " ^ Theme.recede () ^ status
+          ; Theme.recede (), "  " ^ fit_runtime_id (max 0 (inner - 4))
+              (Terminal_text.single_line runtime)
+          ]
   in
-  let title_gap = max 1 (framed_inner_width cols - String.length title - String.length hint) in
-  let title_row = title ^ String.make title_gap ' ' ^ hint in
-  framed_line buf cols
-    (if focused then Theme.selection ^ title_row ^ Ansi.reset
-     else
-       Ansi.bold ^ title ^ Ansi.reset ^ String.make title_gap ' ' ^ Ansi.dim
-       ^ hint ^ Ansi.reset);
-  framed_divider buf cols;
-  let content_height = max 0 (rows - framed_chrome_rows) in
-  let first =
-    if state.keeper_cursor < content_height then 0
-    else state.keeper_cursor - content_height + 1
+  let header_rows = min 3 height in
+  let available = height - header_rows in
+  let count = List.length state.keepers in
+  (* Supplementary details get no more rows than the list keeps, unless the
+     entire fleet already fits beside them. Short viewports favor the list. *)
+  let detail_rows = List.length details in
+  let details =
+    if available >= detail_rows + min count detail_rows then details else []
   in
-  let keepers_window = Rows.of_list ~first:first ~height:content_height state.keepers in
-  for i = 0 to content_height - 1 do
-    match Rows.at keepers_window (first + i) with
-    | Some (k : keeper) ->
+  let capacity = available - List.length details in
+  let first = max 0 (min (state.keeper_cursor - capacity + 1) (count - capacity)) in
+  let window = Rows.of_list ~first ~height:capacity state.keepers in
+  let count_label =
+    if count > capacity && capacity > 0 then
+      Printf.sprintf "%d–%d/%d" (first + 1) (first + Rows.length window) count
+    else string_of_int count
+  in
+  let header = [ ""; sidebar_heading ~cols ~title:"KEEPERS" ~count:count_label; rule ] in
+  List.iter (draw ~style:(Theme.recede ())) (List.take header_rows header);
+  for i = 0 to capacity - 1 do
+    match Rows.at window (first + i) with
+    | Some (keeper : keeper) ->
         let selected = first + i = state.keeper_cursor in
-        let name = Terminal_text.single_line k.k_name in
-        let name =
-          Masc_tui_roster_pane.name_window ~selected
-            ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7)) name
-        in
-        (* The same glyph the Keepers surface draws, for the same reading.
-           Without it the pane says a keeper exists and nothing else, so a
-           roster of ten looks identical whether one of them is offline. *)
-        let reading = keeper_reading state k in
-        let glyph =
-          keeper_state_glyph
-            ~paused:reading.Keeper_control.paused
-            ~health:(Keeper_control.health reading)
-        in
-        (* Reverse video is the one selection signal every terminal
-           renders, colour or not, and it owns the whole row: a glyph
-           tinted inside it reads as a second highlight. *)
-        let line =
-          if selected then
-            Theme.selection ^ " " ^ glyph ^ " " ^ name ^ Ansi.reset
-          else
-            " "
-            ^ keeper_action_color (Keeper_control.next_action reading)
-            ^ glyph ^ Ansi.reset ^ " " ^ Ansi.dim ^ name ^ Ansi.reset
-        in
-        framed_line buf cols line
-    | None -> framed_empty buf cols
+        let name = Masc_tui_roster_pane.name_window ~selected
+          ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7))
+          (Terminal_text.single_line keeper.k_name) in
+        let reading = keeper_reading state keeper in
+        let glyph = keeper_state_glyph ~paused:reading.paused
+          ~health:(Keeper_control.health reading) in
+        if selected && focused then
+          draw ~style:(Theme.sidebar_selection ()) (" › " ^ glyph ^ " " ^ name ^ " ")
+        else
+          let caret = if selected then " › " else "   " in
+          draw (caret ^ keeper_action_color (Keeper_control.next_action reading)
+                ^ glyph ^ restore ^ " "
+                ^ name ^ restore ^ " ")
+    | None when i = 0 && count = 0 ->
+        draw ~style:(Theme.recede ())
+          (match state.keeper_roster_error with
+           | Some error -> "  " ^ Terminal_text.single_line error
+           | None -> "  No Keepers listed")
+    | None -> draw ""
   done;
-  framed_bottom buf cols
+  List.iter (fun (style, text) -> draw ~style text) details
 
 
 (* What a boxed listing draws under its rows: the scroll line -- a row whether
@@ -1665,17 +1730,12 @@ let list_count_text ~loaded ~holding =
    where leaving it out could not be told from forgetting. *)
 let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
     ~labels ~selection =
-  framed_top buf cols;
-  (* Focus wears a caret, not a key list: which keys work is the footer's
-     sentence; which pane hears them is this one glyph. *)
-  framed_line buf cols
-    ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " %s%s %s"
-         (if focused then Masc_tui_theme.Glyph.current_entry ^ " " else "")
-         title
-         (list_count_text ~loaded:(List.length labels) ~holding)
-     ^ Ansi.reset);
-  framed_divider buf cols;
+  let draw ?style text = sidebar_line ?style buf ~cols text in
+  draw "";
+  draw ~style:(Theme.recede ())
+    (sidebar_heading ~cols ~title
+       ~count:(list_count_text ~loaded:(List.length labels) ~holding));
+  draw ~style:(Theme.recede ()) (sidebar_rule ~cols);
   let content_height = max 0 (rows - framed_chrome_rows) in
   let first =
     match selection with
@@ -1698,27 +1758,20 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
          read "#verification Approved task...", three "#verification Verify:
          wkbl ..." -- and folding from the middle leaves all fifty distinct.
 
-         Every row folds to the same room whether or not the cursor is on it.
-         The caret takes two cells more than the plain lead, so a label
-         fitted to the wider room re-folded as the cursor passed over it. *)
+         Every row uses the same lead and folding width, whether or not
+         the cursor is on it. Moving the caret never shifts the label. *)
       let drawn =
         Message_layout.fit_middle
           (max 1 (framed_inner_width cols - sidebar_row_lead_cells))
           (Terminal_text.single_line label)
       in
-      framed_line buf cols
-        (if Option.equal Int.equal selection (Some (first + i)) then
-           if focused then
-             Theme.selection ^ " " ^ drawn
-             ^ String.make
-                 (max 0 (cols - 5 - Message_layout.display_width drawn))
-                 ' '
-             ^ Ansi.reset
-           else Ansi.bold ^ sidebar_caret_lead ^ drawn ^ Ansi.reset
-         else " " ^ drawn)
-    | None -> framed_empty buf cols
+      if Option.equal Int.equal selection (Some (first + i)) then
+        draw ~style:(if focused then Theme.sidebar_selection () else "")
+          (sidebar_caret_lead ^ drawn)
+      else draw (String.make sidebar_row_lead_cells ' ' ^ drawn)
+    | None -> draw ""
   done;
-  framed_bottom buf cols
+  draw ""
 
 (* The same index for a list whose open row is always in it. *)
 let write_list_sidebar buf ~rows ~cols ~title ~focused ~holding ~labels

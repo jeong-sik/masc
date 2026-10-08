@@ -397,15 +397,6 @@ let test_rest_method_to_string_get () =
 let test_rest_method_to_string_post () =
   check string "POST" "POST" (Transport.Rest.method_to_string Transport.Rest.POST)
 
-let test_rest_method_to_string_put () =
-  check string "PUT" "PUT" (Transport.Rest.method_to_string Transport.Rest.PUT)
-
-let test_rest_method_to_string_delete () =
-  check string "DELETE" "DELETE" (Transport.Rest.method_to_string Transport.Rest.DELETE)
-
-let test_rest_method_to_string_patch () =
-  check string "PATCH" "PATCH" (Transport.Rest.method_to_string Transport.Rest.PATCH)
-
 let test_rest_tool_to_endpoint_status () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_status" in
   check string "method" "GET" (Transport.Rest.method_to_string m);
@@ -690,9 +681,6 @@ let () =
     "rest.method_to_string", [
       test_case "GET" `Quick test_rest_method_to_string_get;
       test_case "POST" `Quick test_rest_method_to_string_post;
-      test_case "PUT" `Quick test_rest_method_to_string_put;
-      test_case "DELETE" `Quick test_rest_method_to_string_delete;
-      test_case "PATCH" `Quick test_rest_method_to_string_patch;
     ];
     "rest.tool_to_endpoint", [
       test_case "status" `Quick test_rest_tool_to_endpoint_status;

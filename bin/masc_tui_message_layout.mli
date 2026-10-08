@@ -285,11 +285,11 @@ type origin_display =
   | Origin_row  (** The origin keeps a row of its own, above the body. *)
   | Origin_inline
       (** The origin folds into the body's left margin, clock included. *)
-  | Origin_bare  (** The same margin without the clock. *)
-(** Where a message's origin is drawn. [Origin_inline] is the chat default
-    (see [Masc_tui_types.create_state]); its clock is drawn only on the rows
-    where the minute moved. [Origin_bare] drops that clock, and [Origin_row]
-    gives each turn a heading row with the speaker and the full timestamp. Folding headings into the
+  | Origin_bare  (** The same margin without clocks, spans or time separators. *)
+(** Where a message's origin is drawn. [Origin_bare] is the chat default
+    (see [Masc_tui_types.create_state]). [Origin_inline] draws a short clock
+    only where the minute moved. [Origin_row] gives each turn a heading row
+    with the speaker and the full timestamp. Folding headings into the
     gutter hands their rows back to the conversation: eight speakers taking
     turns otherwise spend eight rows of a forty-row pane on headings.
 
@@ -527,6 +527,19 @@ val input_viewport : max_cells:int -> string -> string
 (** Keep the complete input when it fits. Overflow uses a leading […] and the
     newest complete-scalar suffix that fits in the remaining cells. *)
 
+val input_boundaries : string -> int list
+(** Byte offsets surrounding complete displayed graphemes, including 0 and
+    the end. Input editing and display use the same Unicode segmentation. *)
+
+val input_window : max_cells:int -> cursor:int -> string -> string * int
+(** Horizontally fit a draft around its byte cursor. Return the visible text
+    and the cursor column in cells, relative to that text. *)
+
+type composer_window = { lines : string list; cursor_row : int; cursor_cells : int }
+val composer_window : max_rows:int -> max_cells:int -> cursor:int -> string -> composer_window
+(** A newline-separated window containing the cursor. [cursor_row] is zero-based;
+    the number of rows is the same as {!composer_lines}. *)
+
 val scroll_hint : scrolled_back:int -> older_exist:bool -> string
 (** The footer's scrolling keys: which ones move the pane. How far back it
     sits is {!scroll_position}, which travels beside these as
@@ -546,8 +559,8 @@ val scroll_position : scrolled_back:int -> older_exist:bool -> string option
     the footer without a row whose presence the pane's own height depends
     on. *)
 
-val input_cursor_column : terminal_cols:int -> input:string -> int
-(** One-based cursor column after the visible input, clamped to the spacer
+val input_cursor_column : terminal_cols:int -> input_cells:int -> int
+(** One-based cursor column after [input_cells] visible cells, clamped to the spacer
     immediately before the right border. Measured from the prefix the pane
     renders ([chat_input_prompt_prefix]), so the caret lands where the typed
     text ends. *)

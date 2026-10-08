@@ -24,10 +24,7 @@ type value_range =
       }
 
 type reload_class =
-  | Hot
   | Next_turn
-  | Next_cycle
-  | Fiber_restart
   | Process_restart
 
 type exposure =

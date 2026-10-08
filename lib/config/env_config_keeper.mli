@@ -141,6 +141,14 @@ module KeeperMemoryOs : sig
 
   val librarian_env_key : string
   val facts_max_bytes_env_key : string
+  val category_cap_env_key : string
+  val facts_per_category_cap_env_key : string
+
+  val category_cap : unit -> int
+  val facts_per_category_cap : unit -> int
+  (** Positive item-count targets for the ordinary current working set,
+      including custom categories. Both default to 30. These guide Librarian
+      consolidation and report excess; they do not delete or reject facts. *)
 
   val facts_max_bytes : unit -> int
   (** Fixed upper bound on the rendered current facts of one Keeper, ordinary

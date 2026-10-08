@@ -236,12 +236,6 @@ let materialize ~store ~addresses ~pending messages =
                        (match Tool_blob_store.put_addressed address with
                         | Tool_output.Stored _ as stored ->
                           with_content block (Tool_output.encode_for_agent_core stored)
-                        | Tool_output.Inline _ ->
-                          (* The store declined to externalize. Emitting a
-                             marker for bytes it did not persist would dangle,
-                             so the body goes back. *)
-                          incr reverted;
-                          with_content block (body ())
                         (* [put_addressed] documents Sys_error as its failure
                            mode (disk full, EACCES). Anything else is not a
                            storage outcome and must not be turned into one

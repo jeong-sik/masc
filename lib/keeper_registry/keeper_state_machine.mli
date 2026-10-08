@@ -90,7 +90,6 @@ type event =
     }
   | Operator_pause
   | Operator_resume
-  | Operator_stop of { remove_meta : bool }
   | Stop_requested
   | Drain_complete
   | Fiber_started
@@ -100,7 +99,6 @@ type event =
       ; http_status : int option
       }
   | Supervisor_restart_attempt of { attempt : int }
-  | Credential_archived
   | Operator_clear_requested of { preserve_system : bool; reason : string }
     (** Operator invoked [masc_keeper_clear]. Last-resort: drops
         conversation context entirely; conditions reset in-place.
@@ -111,18 +109,10 @@ val event_to_string : event -> string
 (** {1 Transition} *)
 
 (** Entry actions — side-effect descriptors emitted on state entry.
-    Runtime contract:
-    - [Publish_lifecycle] is executed by the registry integration as an
-      observability-only SSE/log side effect.
-    - The remaining variants remain descriptive placeholders for
-      supervisor-owned work and are intentionally ignored by the registry. *)
+    The registry executes [Publish_lifecycle] as an observability-only
+    log side effect. *)
 type entry_action =
-  | Start_drain
-  | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of { event_name : string; detail : string }
-  | Cleanup_and_unregister
-  | Trigger_immediate_cleanup
-  | Cancel_pending_agent_core
 
 (** Result of applying an event. *)
 type transition_result = {

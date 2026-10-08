@@ -8229,6 +8229,7 @@ let keeper_turns_json =
                 , `Assoc
                     [ ("lane", `String "autonomous")
                     ; ("interrupt_token", `String "echo-turn-token")
+                    ; ("turn_ref", Ids.Turn_ref.to_yojson (Ids.Turn_ref.make ~trace_id:"autonomous" ~absolute_turn:3))
                     ; ("started_at_unix", `Float 1787828193.5)
                     ] )
               ]
@@ -8254,12 +8255,16 @@ let test_decode_keeper_turns () =
         running.Tui_decode.ktr_keeper_name;
       (match running.ktr_state with
        | Tui_decode.Keeper_turn_running
-           { lane; started_at_unix; interrupt_token; _ } ->
+           { lane; started_at_unix; interrupt_token; turn_ref; _ } ->
            Alcotest.(check bool) "autonomous lane" true
              (lane = Tui_decode.Turn_lane_autonomous);
            Alcotest.(check (float 0.001)) "started at" 1787828193.5
              started_at_unix;
-           Alcotest.(check string) "stop handle" "echo-turn-token" interrupt_token
+           Alcotest.(check string) "stop handle" "echo-turn-token" interrupt_token;
+           Alcotest.(check bool) "autonomous journal identity" true
+             (match turn_ref with
+              | Some turn_ref -> Ids.Turn_ref.equal turn_ref (Ids.Turn_ref.make ~trace_id:"autonomous" ~absolute_turn:3)
+              | None -> false)
        | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ ->
            Alcotest.fail "running keeper decoded as not running");
       Alcotest.(check bool) "idle keeper" true
@@ -8396,6 +8401,7 @@ let picker_default_runtime =
     ; ("is_default", `Bool false)
     ; ("rate_limited", `Bool false)
     ; ("rate_limit_resets_at", `Null)
+    ; ("failed_attempt", `Null)
     ]
 
 let picker_exact_runtime =
@@ -8413,6 +8419,7 @@ let picker_exact_runtime =
     ; ("is_default", `Bool false)
     ; ("rate_limited", `Bool false)
     ; ("rate_limit_resets_at", `Null)
+    ; ("failed_attempt", `Null)
     ]
 
 let runtime_resolved_json =
@@ -8449,6 +8456,60 @@ let runtime_resolved_json =
               ]
           ] )
     ]
+
+(* The failed attempt the lane walk orders by. A failure name this build does
+   not know is kept by name; a value that is not an object or null is a broken
+   payload, and so is a row that leaves the field out. *)
+let test_runtime_failed_attempt_is_read_typed () =
+  let row value =
+    match picker_default_runtime with
+    | `Assoc fields ->
+      let fields = List.remove_assoc "failed_attempt" fields in
+      `Assoc (match value with None -> fields | Some value -> ("failed_attempt", value) :: fields)
+    | _ -> Alcotest.fail "runtime fixture must be an object"
+  in
+  let decode value =
+    runtime_resolved_json
+    |> replace_assoc_field "default_runtime" (row value)
+    |> replace_assoc_field "runtimes" (`List [ row value; picker_exact_runtime ])
+    |> Tui_decode.decode_runtime_resolved
+    |> Result.map (fun (rows, _) ->
+         (List.find
+            (fun (row : Tui_decode.runtime_option) ->
+              String.equal row.ro_id "ollama_cloud.deepseek")
+            rows).Tui_decode.ro_failed_attempt)
+  in
+  let attempt failure =
+    `Assoc
+      [ ("noted_at", `Float 1790000000.)
+      ; ("failure", `String failure)
+      ; ("recorded_by", `String "alpha")
+      ]
+  in
+  (match decode (Some (attempt "provider_timeout")) with
+   | Ok
+       (Some
+         { Tui_decode.rfa_failure =
+             Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout
+         ; rfa_recorded_by = "alpha"
+         ; rfa_noted_at = 1790000000.
+         }) -> ()
+   | Ok _ -> Alcotest.fail "a known failure was not read as its kind"
+   | Error detail -> Alcotest.fail detail);
+  (match decode (Some (attempt "quota_drift")) with
+   | Ok (Some { Tui_decode.rfa_failure = Tui_decode.Unrecognised_attempt_failure "quota_drift"; _ }) -> ()
+   | Ok _ -> Alcotest.fail "an unknown failure was not kept by name"
+   | Error detail -> Alcotest.fail detail);
+  (match decode (Some `Null) with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "null read as a failed attempt"
+   | Error detail -> Alcotest.fail detail);
+  List.iter
+    (fun value ->
+       match decode value with
+       | Ok _ -> Alcotest.fail "a missing or malformed failed_attempt decoded"
+       | Error _ -> ())
+    [ None; Some (`String "provider_timeout") ]
 
 let test_runtime_rate_limit_requires_an_observation () =
   let row value =
@@ -8784,6 +8845,7 @@ let resolved_runtime id provider model =
     ; "is_default", `Bool false
     ; "rate_limited", `Bool false
     ; "rate_limit_resets_at", `Null
+    ; "failed_attempt", `Null
     ]
 
 let runtime_lane ?(declared = true) id runtime_ids =
@@ -11401,10 +11463,35 @@ let test_decode_gate_null_queue_is_empty_with_modes () =
         (List.length snapshot.Tui_decode.gs_pending);
       match snapshot.Tui_decode.gs_modes with
       | Some modes ->
-          Alcotest.check Alcotest.string "workspace lane" "always_allow"
-            modes.Tui_decode.glm_workspace;
-          Alcotest.check Alcotest.string "external lane" "manual"
-            modes.Tui_decode.glm_external
+          Alcotest.check Alcotest.bool "workspace lane" true
+            (modes.Tui_decode.glm_workspace
+             = Tui_decode.Gate_mode Keeper_gate_mode.Always_allow);
+          Alcotest.check Alcotest.bool "external lane" true
+            (modes.Tui_decode.glm_external
+             = Tui_decode.Gate_mode Keeper_gate_mode.Manual)
+      | None -> Alcotest.fail "the lanes went missing")
+
+(* A lane word this build does not know is kept by name. The snapshot that
+   carries it also carries the queue, so refusing the word would take the
+   operator's pending decisions off the screen with it. *)
+let test_decode_gate_unknown_lane_mode_is_kept_by_name () =
+  let hitl =
+    `Assoc
+      [ ("gate_mode", `Assoc [ ("mode", `String "escalate_to_human") ]);
+        ("external_gate_mode", `Assoc [ ("mode", `String "manual") ]);
+      ]
+  in
+  match Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:`Null ~hitl ()) with
+  | Error message -> Alcotest.failf "an unknown lane word failed the snapshot: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_modes with
+      | Some modes ->
+          Alcotest.check Alcotest.bool "kept as the server wrote it" true
+            (modes.Tui_decode.glm_workspace
+             = Tui_decode.Unrecognised_gate_mode "escalate_to_human");
+          Alcotest.check Alcotest.bool "the known lane still reads" true
+            (modes.Tui_decode.glm_external
+             = Tui_decode.Gate_mode Keeper_gate_mode.Manual)
       | None -> Alcotest.fail "the lanes went missing")
 
 let test_decode_gate_unreadable_queue_carries_the_detail () =
@@ -11480,8 +11567,8 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
   match Tui_decode.decode_keeper_gate_settings keeper_gate_settings_json with
   | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
   | Ok (modes, exact_lanes) ->
-    Alcotest.(check (list (pair string string)))
-      "modes" [ ("echo", "manual") ] modes;
+    Alcotest.(check bool)
+      "modes" true (modes = [ ("echo", Tui_decode.Gate_mode Keeper_gate_mode.Manual) ]);
     Alcotest.(check (list (pair string (pair string string))))
       "exact lanes" [ ("echo", ("hitl_auto_judge", "glm-coding.glm-5-turbo")) ]
       (List.map
@@ -11491,6 +11578,22 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
     Alcotest.(check (list bool)) "offered is carried, not defaulted" [ false ]
       (List.map (fun (first : Tui_decode.keeper_exact_lane_first) -> first.Tui_decode.kel_offered)
          exact_lanes)
+
+let test_decode_keeper_gate_settings_keeps_an_unknown_mode_by_name () =
+  let json =
+    `Assoc
+      [ ( "modes"
+        , `List
+            [ `Assoc [ ("keeper_name", `String "echo"); ("mode", `String "escalate_to_human") ] ] )
+      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+      ; ("exact_lanes", `List [])
+      ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
+      ]
+  in
+  match Tui_decode.decode_keeper_gate_settings json with
+  | Ok ([ ("echo", Tui_decode.Unrecognised_gate_mode "escalate_to_human") ], []) -> ()
+  | Ok _ -> Alcotest.fail "the unknown mode was not kept by name"
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
 
 (* An unreadable store answers an empty list beside state=unavailable. Read
    as the list alone, that is "nobody singled out". *)
@@ -12803,6 +12906,8 @@ let () =
     ( "decode_runtime_resolved",
       [ Alcotest.test_case "requires a rate-limit observation" `Quick
           test_runtime_rate_limit_requires_an_observation;
+        Alcotest.test_case "reads the failed attempt typed" `Quick
+          test_runtime_failed_attempt_is_read_typed;
         Alcotest.test_case "carries runtimes and assignments" `Quick
           test_decode_runtime_resolved;
         Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick
@@ -13429,6 +13534,8 @@ let () =
           test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper;
         Alcotest.test_case "refuses an unavailable store" `Quick
           test_decode_keeper_gate_settings_refuses_an_unavailable_store;
+        Alcotest.test_case "keeps an unknown mode by name" `Quick
+          test_decode_keeper_gate_settings_keeps_an_unknown_mode_by_name;
       ] );
     ( "keeper_secret_projection",
       [
@@ -13476,6 +13583,8 @@ let () =
           test_decode_gate_row_of_another_operation_keeps_its_preview;
         Alcotest.test_case "a null queue is empty with modes" `Quick
           test_decode_gate_null_queue_is_empty_with_modes;
+        Alcotest.test_case "an unknown lane mode is kept by name" `Quick
+          test_decode_gate_unknown_lane_mode_is_kept_by_name;
         Alcotest.test_case "an unreadable queue carries the detail" `Quick
           test_decode_gate_unreadable_queue_carries_the_detail;
         Alcotest.test_case "a ready queue state is not a warning" `Quick

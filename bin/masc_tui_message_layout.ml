@@ -873,6 +873,41 @@ let input_viewport ~max_cells input =
     cut_mark
     ^ cell_suffix_of_pieces input pieces (Int.max 0 (max_cells - cut_mark_cells))
 
+let input_window ~max_cells ~cursor input =
+  let max_cells = max 0 max_cells in
+  let cursor = max 0 (min cursor (String.length input)) in
+  let before = String.sub input 0 cursor in
+  (* Keep a cell for the caret even when it sits just after the final glyph. *)
+  let visible_before = input_viewport ~max_cells:(max 0 (max_cells - 1)) before in
+  let cursor_cells = display_width visible_before in
+  let after = String.sub input cursor (String.length input - cursor) in
+  let visible_after, _, _ = cell_prefix after (max 0 (max_cells - cursor_cells)) in
+  visible_before ^ visible_after, cursor_cells
+
+let input_boundaries input =
+  0 :: List.map (fun piece -> piece.end_offset) (display_pieces input)
+
+type composer_window = { lines : string list; cursor_row : int; cursor_cells : int }
+
+let composer_window ~max_rows ~max_cells ~cursor input =
+  let cursor = max 0 (min cursor (String.length input)) in
+  let before = String.sub input 0 cursor |> String.split_on_char '\n' in
+  let row = List.length before - 1 in
+  let column = match List.rev before with [] -> 0 | last :: _ -> String.length last in
+  let all_lines = String.split_on_char '\n' input in
+  let height = min (max 1 max_rows) (List.length all_lines) in
+  let first = min row (max 0 (List.length all_lines - height)) in
+  let cursor_cells = ref 0 in
+  let lines = all_lines |> List.drop first |> List.take height
+    |> List.mapi (fun index line ->
+      if first + index = row then begin
+        let visible, cells = input_window ~max_cells ~cursor:column line in
+        cursor_cells := cells;
+        visible
+      end else input_viewport ~max_cells line)
+  in
+  { lines; cursor_row = row - first; cursor_cells = !cursor_cells }
+
 (* The chat pane draws the composer's first line with this prefix and wraps
    continuation lines to the same width, so the caret column is measured from
    the prefix the pane actually renders — not from a hand-copied constant that
@@ -932,7 +967,7 @@ let scroll_position ~scrolled_back ~older_exist =
     Some (Printf.sprintf "(%d back \xc2\xb7 more\xe2\x86\x91)" scrolled_back)
   else Some "(start)"
 
-let input_cursor_column ~terminal_cols ~input =
+let input_cursor_column ~terminal_cols ~input_cells =
   let last_column = Int.max 1 (terminal_cols - 1) in
   (* Three things sit left of the caret: the box, the prompt, and what was
      typed -- and the caret goes one cell past the last of them. Deriving this
@@ -940,7 +975,7 @@ let input_cursor_column ~terminal_cols ~input =
      text, because the constant it replaced was all three added up rather than
      the prompt's width. *)
   Int.min last_column
-    (chat_input_box_cells + chat_input_prompt_cells + display_width input + 1)
+    (chat_input_box_cells + chat_input_prompt_cells + input_cells + 1)
 
 (* Metadata rows read down the pane as a column: [timestamp] From [origin]
    request. Origins vary in width, so every label is padded to one badge and
@@ -1873,8 +1908,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
      budget like any other word: no row exceeds [body_width], and the block
      keeps the same wrap width as the rows it sits among. *)
   let body_chunks =
-    match entry.span_clock, entry.turn_rail with
-    | Some span, Rail_opens -> wrap_words ~max_cells:body_width span @ body_chunks
+    match origin, entry.span_clock, entry.turn_rail with
+    | (Origin_inline | Origin_row), Some span, Rail_opens ->
+        wrap_words ~max_cells:body_width span @ body_chunks
     | _ -> body_chunks
   in
   let body_rows =
@@ -1943,9 +1979,12 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
         | None -> body_rows
         | Some metadata -> metadata :: body_rows)
   in
-  match timeline_break_row ~previous ~inner_width:pane_width entry with
-  | None -> message_rows
-  | Some timeline_break -> timeline_break :: message_rows
+  match origin with
+  | Origin_bare -> message_rows
+  | Origin_inline | Origin_row ->
+      match timeline_break_row ~previous ~inner_width:pane_width entry with
+      | None -> message_rows
+      | Some timeline_break -> timeline_break :: message_rows
 
 let viewport_gap_text ~inner_width hidden_rows =
   let candidates =

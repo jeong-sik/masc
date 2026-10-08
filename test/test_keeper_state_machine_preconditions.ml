@@ -53,13 +53,11 @@ let event_tag : SM.event -> string = function
   | SM.Context_measured _ -> "context_measured"
   | SM.Operator_pause -> "operator_pause"
   | SM.Operator_resume -> "operator_resume"
-  | SM.Operator_stop _ -> "operator_stop"
   | SM.Stop_requested -> "stop_requested"
   | SM.Drain_complete -> "drain_complete"
   | SM.Fiber_started -> "fiber_started"
   | SM.Fiber_terminated _ -> "fiber_terminated"
   | SM.Supervisor_restart_attempt _ -> "supervisor_restart_attempt"
-  | SM.Credential_archived -> "credential_archived"
   | SM.Operator_clear_requested _ -> "operator_clear_requested"
 ;;
 
@@ -76,22 +74,20 @@ let all_events : SM.event list =
       }
   ; SM.Operator_pause
   ; SM.Operator_resume
-  ; SM.Operator_stop { remove_meta = false }
   ; SM.Stop_requested
   ; SM.Drain_complete
   ; SM.Fiber_started
   ; SM.Fiber_terminated
       { outcome = "ok"; provider_id = None; http_status = None }
   ; SM.Supervisor_restart_attempt { attempt = 1 }
-  ; SM.Credential_archived
   ; SM.Operator_clear_requested { preserve_system = true; reason = "probe" }
   ]
 ;;
 
 (* A coverage list shorter than the variant would silently test less. *)
 let test_event_witnesses_cover_the_variant () =
-  check int "one witness per event constructor" 15 (List.length all_events);
-  check int "witness tags are distinct" 15
+  check int "one witness per event constructor" 13 (List.length all_events);
+  check int "witness tags are distinct" 13
     (List.length (List.sort_uniq String.compare (List.map event_tag all_events)))
 ;;
 

@@ -17,10 +17,7 @@ type value_range =
       }
 
 type reload_class =
-  | Hot
   | Next_turn
-  | Next_cycle
-  | Fiber_restart
   | Process_restart
 
 type exposure =
@@ -529,6 +526,26 @@ let all =
       ~category:"memory"
       "Maximum rendered current facts bytes per Keeper"
   ; setting
+      ~range:(int_range ~min:1 ())
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMemoryOs.category_cap ())))
+      ~env_name:Env_config_keeper.KeeperMemoryOs.category_cap_env_key
+      ~exposure:(Toml_and_env "memory.category_cap")
+      ~value_kind:Integer
+      ~default:"30"
+      ~consumers:[ "Keeper_librarian"; "Keeper_tool_memory_runtime" ]
+      ~category:"memory"
+      "Ordinary current category count target, including custom categories; advisory"
+  ; setting
+      ~range:(int_range ~min:1 ())
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMemoryOs.facts_per_category_cap ())))
+      ~env_name:Env_config_keeper.KeeperMemoryOs.facts_per_category_cap_env_key
+      ~exposure:(Toml_and_env "memory.facts_per_category_cap")
+      ~value_kind:Integer
+      ~default:"30"
+      ~consumers:[ "Keeper_librarian"; "Keeper_tool_memory_runtime" ]
+      ~category:"memory"
+      "Ordinary current items per category target; advisory, not a token budget"
+  ; setting
       ~reload_class:Next_turn
       ~effective:
         (Reader
@@ -895,17 +912,14 @@ let value_range_label = function
 ;;
 
 let reload_class_label = function
-  | Hot -> "hot"
   | Next_turn -> "next_turn"
-  | Next_cycle -> "next_cycle"
-  | Fiber_restart -> "fiber_restart"
   | Process_restart -> "process_restart"
 ;;
 
 let requires_restart setting =
   match setting.reload_class with
-  | Hot | Next_turn | Next_cycle -> false
-  | Fiber_restart | Process_restart -> true
+  | Next_turn -> false
+  | Process_restart -> true
 ;;
 
 let duplicates ~identity rows =

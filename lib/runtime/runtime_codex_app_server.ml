@@ -167,7 +167,7 @@ type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
-  ; text : string
+  ; text : string option
   ; dynamic_tool_calls : int
   ; scheduling_handoff : handoff_state
   ; subscription : subscription
@@ -219,6 +219,8 @@ type elicitation_mode = Form | Openai_form | Url
 
 type elicitation_cancel_reason = Host_input_unavailable
 
+type reasoning_part = Summary of int | Content of int
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -226,6 +228,11 @@ type stream_event =
       }
   | Text_delta of
       { item_id : string option
+      ; delta : string
+      }
+  | Thinking_delta of
+      { item_id : string
+      ; part : reasoning_part
       ; delta : string
       }
   | Dynamic_tool_started of
@@ -981,8 +988,9 @@ let agent_message_content_of_item ~stage item =
   | Some (`String "agentMessage") ->
     (* The app-server schema requires [text] to be a string, not a non-empty
        string. In particular, a tool-only turn may complete an agent-message
-       item with empty text after the tool result has been committed. Such an
-       item is valid protocol but is not a visible assistant-message candidate. *)
+       item with empty text after the tool result has been committed. An
+       explicit final_answer may also choose no update; keep that distinct
+       from a completed turn with no assistant item at all. *)
     let* text = required_string_any stage "text" fields in
     let* phase = optional_string stage "phase" fields in
     Ok (Some (phase, text))
@@ -991,11 +999,15 @@ let agent_message_content_of_item ~stage item =
   | None -> protocol_error stage "item is missing type"
 ;;
 
+let retained_agent_message = function
+  | Some (Some "final_answer", _) as message -> message
+  | Some (_, text) when String.trim text = "" -> None
+  | message -> message
+;;
+
 let agent_message_of_item ~stage item =
   let* message = agent_message_content_of_item ~stage item in
-  match message with
-  | Some (_, text) when String.trim text = "" -> Ok None
-  | _ -> Ok message
+  Ok (retained_agent_message message)
 ;;
 
 (* Model items and host-owned dynamic calls do not prove a native effect.
@@ -1009,6 +1021,7 @@ type item_kind =
   | Mcp_tool_call
   | Sleep
   | Model_item
+  | Reasoning_item
   | Compaction_item
   | Dynamic_tool_item
   | Unclassified_item of string
@@ -1021,7 +1034,8 @@ let item_kind_of_item ~stage item =
   | Some (`String "mcpToolCall") -> Ok Mcp_tool_call
   | Some (`String "sleep") -> Ok Sleep
   | Some (`String "contextCompaction") -> Ok Compaction_item
-  | Some (`String ("userMessage" | "agentMessage" | "plan" | "reasoning")) -> Ok Model_item
+  | Some (`String ("userMessage" | "agentMessage" | "plan")) -> Ok Model_item
+  | Some (`String "reasoning") -> Ok Reasoning_item
   | Some (`String "dynamicToolCall") -> Ok Dynamic_tool_item
   | Some (`String kind) -> Ok (Unclassified_item kind)
   | Some _ -> protocol_error stage "item type must be a string"
@@ -1068,7 +1082,7 @@ let tool_item_of_item ~stage item =
         ; origin = Runtime_native_tools.Mcp_wrapper
         })
   | Sleep -> tool_item ~observation:(fun _ -> None)
-  | Model_item | Compaction_item | Dynamic_tool_item -> Ok None
+  | Model_item | Reasoning_item | Compaction_item | Dynamic_tool_item -> Ok None
   | Unclassified_item kind -> tool_item ~observation:(built_in kind)
 ;;
 
@@ -1237,8 +1251,8 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
         in
         let text =
           match
-            visible_text terminal_final,
-            visible_text seen_final,
+            terminal_final,
+            seen_final,
             visible_text terminal_fallback,
             visible_text seen_fallback
           with
@@ -1247,8 +1261,8 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
           | None, None, None, None -> None
         in
         (match text with
-         | Some text -> Ok text
-         | None when tool_calls_observed -> Ok ""
+         | Some text -> Ok (Some text)
+         | None when tool_calls_observed -> Ok None
          | None -> protocol_error stage "completed turn has no assistant message")
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
@@ -1468,8 +1482,41 @@ let with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id run =
 
 type streamed_texts =
   { buffers : (string option, Buffer.t) Hashtbl.t
+  ; reasoning_buffers : (string * reasoning_part, Buffer.t) Hashtbl.t
   ; mutable current_item : string option
   }
+
+let complete_reasoning_item ~stage ~on_stream_event streamed_texts item =
+  let* fields = assoc_at stage item in
+  let* item_id = required_string stage "id" fields in
+  let complete_parts field part =
+    let* parts = match List.assoc_opt field fields with
+      | None -> Ok []
+      | Some (`List values) -> Ok values
+      | Some _ -> protocol_error stage (field ^ " must be an array") in
+    List.fold_left (fun result (index, value) ->
+      let* () = result in
+      let* text = match value with
+        | `String text -> Ok text
+        | _ -> protocol_error stage (field ^ " entries must be strings") in
+      let part = part index in
+      let key = item_id, part in
+      let buffer = match Hashtbl.find_opt streamed_texts.reasoning_buffers key with
+        | Some buffer -> buffer
+        | None -> let buffer = Buffer.create 256 in
+            Hashtbl.add streamed_texts.reasoning_buffers key buffer; buffer in
+      let prefix = Buffer.contents buffer in
+      if String.starts_with ~prefix text then begin
+        let delta = String.sub text (String.length prefix) (String.length text - String.length prefix) in
+        Buffer.add_string buffer delta;
+        if delta <> "" then emit_stream_event on_stream_event (Thinking_delta {item_id; part; delta});
+        Ok ()
+      end else protocol_error stage "completed reasoning conflicts with streamed content")
+      (Ok ()) (List.mapi (fun index value -> index, value) parts)
+  in
+  let* () = complete_parts "summary" (fun index -> Summary index) in
+  complete_parts "content" (fun index -> Content index)
+;;
 
 let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
     ~seen_fallback ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event =
@@ -1567,6 +1614,26 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_usage
       ~open_tool_call_ids:[]
       ~streamed_texts ~on_stream_event
+  | Notification
+      { method_ = (("item/reasoning/summaryTextDelta" | "item/reasoning/textDelta") as method_)
+      ; params
+      } ->
+    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    let* fields = assoc_at method_ params in
+    let* item_id = required_string method_ "itemId" fields in
+    let* part = match method_ with
+      | "item/reasoning/summaryTextDelta" ->
+          let* index = required_count method_ "summaryIndex" fields in Ok (Summary index)
+      | _ -> let* index = required_count method_ "contentIndex" fields in Ok (Content index) in
+    let key = item_id, part in
+    let buffer = match Hashtbl.find_opt streamed_texts.reasoning_buffers key with
+      | Some buffer -> buffer
+      | None -> let buffer = Buffer.create 256 in
+          Hashtbl.add streamed_texts.reasoning_buffers key buffer; buffer in
+    Buffer.add_string buffer delta;
+    if delta <> "" then emit_stream_event on_stream_event (Thinking_delta {item_id; part; delta});
+    io.set_receive_phase Model_turn;
+    continue ()
   | Notification { method_ = "item/plan/delta" as method_; params } ->
     let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
     io.set_receive_phase Model_turn;
@@ -1633,10 +1700,11 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
     let stage = "item/completed" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
     let* kind = item_kind_of_item ~stage item in
-    (match kind with
-     | Compaction_item -> emit_stream_event on_stream_event Compaction_observed
+    let* () = match kind with
+     | Compaction_item -> emit_stream_event on_stream_event Compaction_observed; Ok ()
+     | Reasoning_item -> complete_reasoning_item ~stage ~on_stream_event streamed_texts item
      | Command_execution | File_change | Mcp_tool_call | Sleep | Model_item
-     | Dynamic_tool_item | Unclassified_item _ -> ());
+     | Dynamic_tool_item | Unclassified_item _ -> Ok () in
     let* tool_item = tool_item_of_item ~stage item in
     let open_tool_call_ids =
       match tool_item with
@@ -1688,9 +1756,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
             Ok ()
           end else protocol_error stage "completed agent message conflicts with streamed text"
     in
-    let message = match message with
-      | Some (_, text) when String.trim text = "" -> None
-      | _ -> message in
+    let message = retained_agent_message message in
     let seen_final, seen_fallback =
       match message with
       | Some (Some "final_answer", text) -> Some text, seen_fallback
@@ -2116,10 +2182,11 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
       ~seen_fallback:None
       ~seen_usage:None
       ~open_tool_call_ids:[]
-      ~streamed_texts:{buffers=Hashtbl.create 8; current_item=None}
+      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8; current_item=None}
       ~on_stream_event)
   in
-  emit_stream_event on_stream_event (Turn_finished { text });
+  emit_stream_event on_stream_event
+    (Turn_finished { text = Option.value text ~default:"" });
   Ok
     { thread_id
     ; turn_id

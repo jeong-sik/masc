@@ -517,7 +517,7 @@ Closed by building, 2026-08-30:
   offending lexeme, so a tag is an observation. Longest match orders `<<<`
   against `<<` against `<`, which the list was hand-simulating. `redirect`
   survives, meaning only the operators the grammar does not spell (`&>`,
-  `>|`, `<>`, `>&-`), and its disposition is `Spell_it_as "> file 2>&1"`.
+  `>|`, `<>`, `>&-`).
 
 Open:
 

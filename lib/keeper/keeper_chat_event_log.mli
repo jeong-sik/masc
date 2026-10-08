@@ -49,6 +49,17 @@ val events_dir : base_dir:string -> string
 (** [<base>/.masc/keeper_chat_events]: the root every keeper's journals live
     under, [<events_dir>/<keeper>/<operation_id>.jsonl]. *)
 
+val turn_events_dirname : string
+(** Separate store for autonomous turn journals, keyed by typed turn reference. *)
+
+val turn_journal_path :
+  base_dir:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t -> string
+
+val open_turn_journal :
+  base_dir:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t -> unit -> journal
+(** Same envelope and failure policy as operation journals, without inventing
+    a chat operation for an autonomous turn. *)
+
 val journal_path :
   base_dir:string -> keeper_name:string -> operation_id:string -> string
 (** [<base>/.masc/keeper_chat_events/<keeper>/<operation_id>.jsonl], with both
@@ -76,6 +87,14 @@ val append :
     ([ts], [cost_usd], [duration_sec]) would emit invalid JSON, so such an
     event is logged and skipped instead of appended. Only
     [Eio.Cancel.Cancelled] propagates. *)
+
+val append_result :
+  journal -> seq:int -> ts:float -> Keeper_chat_events.keeper_chat_event ->
+  (unit, string) result
+(** The same durable append with its commit result exposed. [Ok ()] confirms
+    the event was written and synced; a descriptor cleanup failure after that
+    commit is logged separately. [Error] never authorizes a live replay cursor.
+    Only [Eio.Cancel.Cancelled] propagates. *)
 
 (** Why a read of a journal produced no entries. *)
 type read_failure =
@@ -115,6 +134,46 @@ val next_sequence : ?require_existing:bool -> journal -> (int, read_failure) res
     corrupt, unreadable or torn journals refuse resume. A retained continuation
     also requires a durable last Run_finished/Event_error boundary, so a dropped
     final append cannot reuse a sequence already delivered to a live reader. *)
+
+(** What {!record_terminal_error} left in the journal. *)
+type terminal_error_receipt =
+  | Recorded_terminal_error of { seq : int; ts : float }
+      (** This call appended the terminal. *)
+  | Existing_terminal_error of { seq : int; ts : float; message : string }
+      (** The journal already ended in an [Event_error]; nothing was written
+          and [message] is the one it carries. *)
+
+type restart_settlement =
+  { operation_id : Keeper_chat_operation.Operation_id.t
+  ; completed_at : float
+  }
+(** Identity of the immutable restart failure in the operation store. *)
+
+type terminal_error_segment = Existing_segment | Restart_settlement of restart_settlement
+(** A restart terminal stores its exact settlement identity in the journal
+    envelope. Earlier segment errors cannot acknowledge it; retrying the same
+    durable settlement reuses its terminal even after another process exit. *)
+
+val find_restart_terminal :
+  journal -> settlement:restart_settlement -> (terminal_error_receipt option, string) result
+(** Read the matching final restart terminal. Missing or different settlement
+    metadata returns [None]; malformed metadata is an error. *)
+
+val record_terminal_error :
+  ?segment:terminal_error_segment -> journal -> ts:float -> message:string -> (terminal_error_receipt, string) result
+(** Ends a settled operation's journal with an [Event_error] unless [Existing_segment] already
+    ends in one. [Restart_settlement] appends unless that exact durable
+    settlement already owns the last error. A [Run_finished] earlier in the journal is a continuation
+    boundary, not a record of this failure, so it does not stop the append.
+    Every settlement path that has no live stream to carry its terminal
+    (Owner settlement, restart recovery) records it here, so a reader that
+    reopens the operation finds the terminal the settled record already holds.
+    A fragment after the last newline (an append the crash cut) is not a row:
+    the terminal takes the sequence after the last complete row and the append
+    cuts the fragment, so a crashed append does not leave the journal without
+    its terminal. [Error] names a journal that could not be read or appended; the caller
+    decides whether that blocks anything. [ts] is the caller's clock, as for
+    {!append}. *)
 
 (** {1 Replay position} *)
 

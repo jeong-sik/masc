@@ -244,21 +244,7 @@ module For_testing = struct
   let surface_context_to_instructions = surface_context_to_instructions
 end
 
-type invocation_surface =
-  | Direct_message
-  | Keeper_delegate
-
-let invocation_tool_name = function
-  | Direct_message -> Keeper_tool_name.(to_string Keeper_msg)
-  | Keeper_delegate -> Keeper_tool_name.(to_string Keeper_delegate)
-;;
-
-let invocation_turn_type = function
-  | Direct_message -> "direct"
-  | Keeper_delegate -> "delegate"
-;;
-
-let turn_resources_error ~surface failure =
+let turn_resources_error failure =
   let detail =
     Keeper_publication_recovery_scope.failure_to_string failure
   in
@@ -277,7 +263,7 @@ let turn_resources_error ~surface failure =
     { result =
         tool_result_error_data
           ~class_
-          ~tool_name:(invocation_tool_name surface)
+          ~tool_name:Keeper_tool_name.(to_string Keeper_msg)
           (`Assoc
              [ "error", `String "keeper_turn_resources_unavailable"
              ; ( "failure_class"
@@ -420,8 +406,8 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    or a concurrent turn can clobber the checkpoint and regress
    [total_turns] (2026-06-10 RCA, RFC-0225 §1).
 
-   Precondition: the caller runs in the Keeper Owner child. Public direct-message
-   and typed-delegate entrypoints construct a valid invocation request before
+   Precondition: the caller runs in the Keeper Owner child. The public
+   direct-message entrypoint constructs a valid invocation request before
    reaching this function. *)
 let run_keeper_invocation_turn_admitted_inner
       ~observation_token
@@ -434,17 +420,16 @@ let run_keeper_invocation_turn_admitted_inner
       ?approval_gate
       ?event_bus
       ?continuation_channel
-      ~surface
-      ~request
-      ?direct_message
+      ~direct_message
       ctx
   : dispatch
   =
+  let request = Keeper_invocation_contract.direct_message_request direct_message in
   with_span
     ~name:"keeper_turn"
     ~attrs:[
       "keeper.name", `String (Keeper_invocation_contract.target_name request);
-      "masc.turn_type", `String (invocation_turn_type surface);
+      "masc.turn_type", `String "direct";
     ]
     (fun _trace_id ->
   let on_event =
@@ -465,25 +450,25 @@ let run_keeper_invocation_turn_admitted_inner
   let repetition_execution =
     Keeper_repetition_scope.Execution.direct_operation operation_id
   in
-  let turn_instructions, direct_reply, channel_session_key, channel, user_blocks =
-    match direct_message with
-    | None -> None, false, None, "", None
-    | Some direct_message ->
-      let turn_instructions =
-        match
-          Keeper_invocation_contract.direct_message_turn_instructions direct_message
-        with
-        | Some _ as instructions -> instructions
-        | None ->
-          Option.bind
-            (Keeper_invocation_contract.direct_message_surface_context direct_message)
-            surface_context_to_instructions
-      in
-      ( turn_instructions
-      , Keeper_invocation_contract.direct_message_direct_reply direct_message
-      , Keeper_invocation_contract.direct_message_channel_session_key direct_message
-      , Keeper_invocation_contract.direct_message_channel direct_message
-      , Keeper_invocation_contract.direct_message_user_agent_core_blocks direct_message )
+  let turn_instructions =
+    match
+      Keeper_invocation_contract.direct_message_turn_instructions direct_message
+    with
+    | Some _ as instructions -> instructions
+    | None ->
+      Option.bind
+        (Keeper_invocation_contract.direct_message_surface_context direct_message)
+        surface_context_to_instructions
+  in
+  let direct_reply =
+    Keeper_invocation_contract.direct_message_direct_reply direct_message
+  in
+  let channel_session_key =
+    Keeper_invocation_contract.direct_message_channel_session_key direct_message
+  in
+  let channel = Keeper_invocation_contract.direct_message_channel direct_message in
+  let user_blocks =
+    Keeper_invocation_contract.direct_message_user_agent_core_blocks direct_message
   in
     match ensure_keeper_exists
       ~ctx ~name
@@ -501,7 +486,7 @@ let run_keeper_invocation_turn_admitted_inner
            ~base_path:ctx.config.base_path
            ~keeper_name:meta0.name
        with
-       | Error failure -> turn_resources_error ~surface failure
+       | Error failure -> turn_resources_error failure
        | Ok { entry; publication_recovery } ->
       (match
          Keeper_unified_turn_pre_dispatch.turn_profile_and_meta
@@ -526,7 +511,30 @@ let run_keeper_invocation_turn_admitted_inner
             in
       let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let session_dir = Filename.concat base_dir session_id in
-      (match (match Keeper_direct_gate_continuation.load
+      let native_admission =
+        let ( let* ) = Result.bind in
+        let* operation = Keeper_owner_registry.exact_operation
+            ~base_path:ctx.config.base_path ~keeper_name:meta.name operation_id
+          |> Result.map_error Keeper_owner_registry.command_error_to_string in
+        let* operation = match operation with
+          | Some operation -> Ok operation
+          | None -> Error "direct native admission has no owning operation" in
+        let binding : Keeper_direct_native_continuation.binding =
+          { base_path = ctx.config.base_path
+          ; keeper_name = meta.name
+          ; operation_id
+          ; execution_digest = operation.execution_digest
+          ; session_dir
+          ; session_id
+          } in
+        let* admission = Keeper_direct_native_continuation.load ~binding in
+        match admission with
+        | Keeper_direct_native_continuation.Resume resumed ->
+          Ok (binding, Some resumed, None)
+        | Keeper_direct_native_continuation.Terminal_pending _ ->
+          Error "native execution is terminal and awaiting Owner acknowledgement; it cannot be dispatched again"
+        | Keeper_direct_native_continuation.No_pending ->
+          let* direct_resume = (match Keeper_direct_gate_continuation.load
           ~config:ctx.config ~meta ~operation_id ~session_dir with
         | Error _ as error -> error
         | Ok (Some admission) -> Ok (Some (Keeper_agent_run.Gate_continuation admission))
@@ -538,13 +546,16 @@ let run_keeper_invocation_turn_admitted_inner
            | Ok None -> Keeper_direct_runtime_continuation.load
                ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
                ~session_dir ~session_id
-               |> Result.map (Option.map (fun admission -> Keeper_agent_run.Runtime_continuation admission)))) with
+               |> Result.map (Option.map (fun admission -> Keeper_agent_run.Runtime_continuation admission)))) in
+          Ok (binding, None, direct_resume)
+      in
+      (match native_admission with
        | Error detail ->
          dispatch_failed
            ~class_:Tool_result.Runtime_failure
            (Keeper_request_failure.Turn_continuation_unpersisted
               { stage = Keeper_request_failure.Continuation_load; detail })
-       | Ok direct_resume ->
+       | Ok (native_binding, native_resume, direct_resume) ->
       let deferred_lane = ref None in
       let produced_checkpoint = ref None in
       let gate_ids = ref [] in
@@ -582,7 +593,7 @@ let run_keeper_invocation_turn_admitted_inner
         | Keeper_agent_run.Runtime_continuation _ -> None) in
       let user_blocks =
         if Option.is_some official_checkpoint_resume then None
-        else if Option.is_some direct_resume then user_blocks else
+        else if Option.is_some native_resume || Option.is_some direct_resume then user_blocks else
         Option.map
           (Keeper_vision_ingest.evict_blocks
              ~base_path:ctx.config.base_path
@@ -610,9 +621,11 @@ let run_keeper_invocation_turn_admitted_inner
       in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
-      let selected_runtime = match official_checkpoint_resume with
+      let selected_runtime = match native_resume with
+        | Some resumed -> Ok (Keeper_direct_native_continuation.runtime_id resumed)
+        | None -> (match official_checkpoint_resume with
         | Some checkpoint -> Ok checkpoint.Keeper_semantic_execution.runtime_id
-        | None -> resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume in
+        | None -> resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume) in
       match selected_runtime with
       | Error detail ->
         Progress.stop_tracking turn_task_id;
@@ -802,6 +815,7 @@ let run_keeper_invocation_turn_admitted_inner
                       Keeper_agent_run.run_turn
                                       ~observation_token
                                       ?direct_resume
+                                      ~native_continuation:{ binding = native_binding; resumed = native_resume }
                                       ?official_task_reference
                                       ?hitl_resolution:(Option.map Keeper_direct_gate_continuation.resolution gate_resume)
                                       ~on_gate_deferred:(fun approval_id -> gate_ids := approval_id :: !gate_ids)
@@ -1143,14 +1157,12 @@ let run_keeper_invocation_turn_admitted
       ?approval_gate
       ?event_bus
       ?continuation_channel
-      ~surface
-      ~request
-      ?direct_message
+      ~direct_message
       ctx
   : dispatch
   =
   let base_path = ctx.config.base_path in
-  let name = Keeper_invocation_contract.target_name request in
+  let name = Keeper_invocation_contract.direct_message_target_name direct_message in
   let observation_token = Keeper_turn_observation_token.fresh () in
   Keeper_registry.mark_turn_started
     ~observation_token
@@ -1189,9 +1201,7 @@ let run_keeper_invocation_turn_admitted
       ?approval_gate
       ?event_bus
       ?continuation_channel
-      ~surface
-      ~request
-      ?direct_message
+      ~direct_message
       ctx
   with
   | result ->
@@ -1216,9 +1226,6 @@ let handle_keeper_msg_admitted
       ctx
       direct_message
   =
-  let request =
-    Keeper_invocation_contract.direct_message_request direct_message
-  in
   run_keeper_invocation_turn_admitted
     ~operation_id
     ~input_speaker
@@ -1229,8 +1236,6 @@ let handle_keeper_msg_admitted
     ?approval_gate
     ?event_bus
     ?continuation_channel
-    ~surface:Direct_message
-    ~request
     ~direct_message
     ctx
 ;;

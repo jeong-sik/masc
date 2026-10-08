@@ -88,8 +88,8 @@ description: "masc TUI 채팅 화면이 무엇을 어떤 기호로 그리는지 
    (시계 칸의 경계는 `gutter_clock_cells`).
 3. **마크 + 띄움 + 라벨** — 라벨 칸은 `chat_role_label_column = 10`. 마크 칸은 라벨 칸 안에서 뺀다.
    이름이 넘치면 가운데를 줄인다(`fit_middle`). 마크는 줄이는 범위 밖에 있어서 긴 이름에서도 남는다.
-   도구·스킬·생각 줄은 라벨 단어를 쓰지 않는다 — 마크가 이미 레인을 말한다.
-   칸은 그대로 두고 마크와 띄움만 그린다.
+   도구·스킬·생각 줄은 각각 `TOOLS`·`SKILL`·`THINKING` 라벨을 함께 쓴다.
+   기본 화면에서 기호를 외우지 않아도 레인의 뜻을 읽을 수 있어야 한다.
 4. **인용 막대** — 남이 쓴 글(`Tool`·`Skill`·`Status`·`Local`)은 흐린 `│`, `Journal` 은 `┊`,
    말(`User`·`Inbound`·`Keeper`·`Error`·`Thinking`)은 빈칸 두 칸이다.
 5. **본문**
@@ -108,18 +108,28 @@ description: "masc TUI 채팅 화면이 무엇을 어떤 기호로 그리는지 
 
 | 단계 | 모양 |
 |---|---|
-| `Origin_inline` (기본) | 출처를 여백에 접고, 분이 바뀐 줄에 짧은 시계를 단다 |
+| `Origin_inline` | 출처를 여백에 접고, 분이 바뀐 줄에 짧은 시계를 단다 |
 | `Origin_row` | 헤더 한 줄: 이름 전체, 오른쪽 끝 recede 시계, 사이 rule |
-| `Origin_bare` | 시계를 떼고 마크와 이름만 남긴다 |
+| `Origin_bare` (기본) | 시각·턴 시간 범위·시간 구분선·진행 타이머를 숨기고 마크와 이름을 남긴다 |
 
 Origin_row 헤더의 시각 칸이 비면(`timeline_bucket = None`) 시계를 안 그리고 `--:--:--`
 자리표도 쓰지 않는다. 같은 화자가 이어지는 행은 이름 없이 rule 과 시계만 그린다
 (`metadata_row`, `bin/masc_tui_render_chat.ml` 의 `origin_heading`).
 
-Ctrl-F 는 `Origin_inline → Origin_row → Origin_bare → Origin_inline` 으로 돈다
+Ctrl-F 는 `Origin_bare → Origin_inline → Origin_row → Origin_bare` 으로 돈다
 (`Masc_tui_types.next_origin_display`). 기본값은 `Masc_tui_types` 의 상태 생성에서 정한다.
 
 기본값 하나만으로 읽을 수 있어야 한다. "Ctrl-F 누르면 보인다" 는 기본값이 모자란다는 뜻이다.
+
+연속한 요청 묶음의 첫 줄에는 요청 식별자를 표시한다. 실제 턴 번호가 기록된 줄이면
+`TURN #번호`를 함께 표시한다. 여러 입력을 한 실행이 처리하면 `입력 N건`을 붙인다.
+식별자는 표시할 때만 줄인다. 그룹을 묶는 키는 원래의 전체 식별자다.
+
+아직 처리 시작을 확인하지 못한 입력은 `대기 입력 N건` 아래에 두고 `›` 마크를 쓴다.
+`대기`·`전송 중`·`접수됨`·`미확인`을 각 입력에 표시하며, 접수는 턴 반영을 뜻하지 않는다.
+`입력 반영됨`은 영속된 입력 또는 해당 실행의 `Run_started`를 확인한 경우에만 쓴다.
+Thinking은 기본적으로 접어서 표시한다. `Ctrl-R`은 접힘 → 전체 → 숨김 순서로 돈다.
+Thinking·답변 델타를 실제로 받으면 진행줄에 `THINKING`·`STREAMING`을 표시한다.
 
 ## 끝난 일은 접힌다
 

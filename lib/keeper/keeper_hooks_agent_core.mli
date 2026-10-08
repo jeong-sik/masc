@@ -209,6 +209,10 @@ type tool_stream_observation =
           calls without an explicit producer receipt stay delivery-only;
           no ordinal or provider-id guess may attach a canonical execution. *)
 
+type tool_result_commit_policy = Require_commit | Observe_commit
+(** A chat delivery requires its tool receipt. Autonomous visibility observes
+    committed receipts without making a failed observation stop execution. *)
+
 (** [observation_token] is captured for registry callbacks. Omission disables
     registry turn observation; it never adopts a currently active turn. *)
 val make_hooks :

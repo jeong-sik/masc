@@ -6,7 +6,7 @@
    modes a stub could introduce:
 
    1. the closed-sum helpers must classify the new [Fusion_completed] variant
-      (label / is_board_signal / reaction-ledger kind); and
+      (label / reaction-ledger kind); and
    2. a completed fusion must become a NON-EMPTY [pending_board_event] carrying
       the resolved answer — returning [] (like the Bootstrap
       arms) would compile but silently drop the result, defeating the RFC. *)
@@ -274,7 +274,6 @@ let schedule_stimulus ?schedule_id ?due_at ?payload_digest ?title ?message ()
 let test_closed_sum_helpers () =
   let p = Keeper_event_queue.Fusion_completed (fusion_payload ()) in
   check string "payload_kind_label" "fusion_completed" (Keeper_event_queue.payload_kind_label p);
-  check bool "is_board_signal is false" false (Keeper_event_queue.is_board_signal p);
   check
     string
     "reaction_ledger stimulus_kind_to_string"

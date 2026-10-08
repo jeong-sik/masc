@@ -24,7 +24,7 @@ let test_tool_input_recovery () =
       let client_id = match Browser_lane.client_id_of_string valid_id with
         | Ok id -> id | Error detail -> fail detail in
       let info : Browser_lane.client_info =
-        {client_id;browser=Browser_lane.Firefox;version="fixture";engine_version="fixture"} in
+        {client_id;browser=Browser_lane.Firefox;version="fixture";transport=Browser_lane.Web_extension; engine_version="fixture"} in
       Eio.Switch.on_release sw (fun () -> ignore (Browser_lane.disconnect_client ~client_id));
       ignore (Browser_lane.take_command ~client_info:info ~window_sec:0.001);
       let input_id id = `Assoc ["lane",`String "live";"clientId",`String id] in
@@ -217,7 +217,7 @@ let test_live_read_pins_client_between_hops () =
       let info raw browser : Browser_lane.client_info =
         let client_id = match Browser_lane.client_id_of_string raw with
           | Ok id -> id | Error error -> fail error in
-        {client_id; browser; version="fixture"; engine_version="155.0.1"} in
+        {client_id; browser; version="fixture"; transport=Browser_lane.Web_extension; engine_version="155.0.1"} in
       let first = info "10000000-0000-4000-8000-000000000001" Browser_lane.Firefox in
       let second = info "10000000-0000-4000-8000-000000000002" Browser_lane.Zen in
       List.iter (fun info -> Eio.Switch.on_release sw (fun () ->
@@ -256,7 +256,7 @@ let test_keeper_discovers_clients_without_dispatch () =
       let info raw browser : Browser_lane.client_info =
         let client_id = match Browser_lane.client_id_of_string raw with
           | Ok id -> id | Error error -> fail error in
-        {client_id; browser; version="fixture"; engine_version="155.0.1"} in
+        {client_id; browser; version="fixture"; transport=Browser_lane.Web_extension; engine_version="155.0.1"} in
       let clients = [
         info "20000000-0000-4000-8000-000000000001" Browser_lane.Firefox;
         info "20000000-0000-4000-8000-000000000002" Browser_lane.Zen] in
@@ -311,7 +311,7 @@ let test_off_precedes_client_guidance () =
         let raw = Printf.sprintf "50000000-0000-4000-8000-%012d" n in
         let client_id = match Lane.client_id_of_string raw with
           | Ok id -> id | Error detail -> fail detail in
-        {client_id;browser=Lane.Firefox;version="fixture";engine_version="fixture"} in
+        {client_id;browser=Lane.Firefox;version="fixture";transport=Browser_lane.Web_extension; engine_version="fixture"} in
       let connect client =
         ignore (Lane.take_command ~client_info:client ~window_sec:0.001);
         Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:client.Lane.client_id)) in
@@ -441,7 +441,7 @@ let test_keeper_hears_why_no_browser_is_connected () =
   let polling_id = match Browser_lane.client_id_of_string "40000000-0000-4000-8000-000000000002" with
     | Ok id -> id | Error error -> fail error in
   let polling : Browser_lane.client_info =
-    {client_id=polling_id; browser=Browser_lane.Firefox; version="fixture"; engine_version="fixture"} in
+    {client_id=polling_id; browser=Browser_lane.Firefox; version="fixture"; transport=Browser_lane.Web_extension; engine_version="fixture"} in
   ignore (Browser_lane.take_command ~client_info:polling ~window_sec:0.001);
   let data = rejected (fst (interact ())) in
   ignore (Browser_lane.disconnect_client ~client_id:polling_id);

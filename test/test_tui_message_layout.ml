@@ -679,7 +679,7 @@ let test_input_viewport_keeps_latest_complete_scalars () =
 
 let test_input_cursor_uses_visible_terminal_cells () =
   let column terminal_cols input =
-    Layout.input_cursor_column ~terminal_cols ~input
+    Layout.input_cursor_column ~terminal_cols ~input_cells:(Layout.display_width input)
   in
   (* The caret is measured from the prefix the pane renders ("  > "), so what
      the operator typed and what the screen shows end at the same column. *)
@@ -931,23 +931,20 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
   let cache_capacity = 2 in
   let cache = Markdown_cache.create ~capacity:cache_capacity in
   let markdown ~(entry : Layout.entry) ~width =
-    let source =
-      match entry.markdown_source with
-      | Layout.Markdown_stable
-          { keeper_name; request_id; observed_at; entry_index } ->
-          Markdown_cache.Stable_source
-            { identity = keeper_name, request_id, observed_at, entry_index;
-              text = entry.body;
-            }
-      | Layout.Markdown_growing _
-      | Layout.Markdown_streaming ->
-          Markdown_cache.Streaming_source entry.body
+    let renderer ~width text =
+      rendered := entry.request_label :: !rendered;
+      Layout.wrap_words ~max_cells:width text
     in
-    Markdown_cache.render cache ~theme_revision:1 ~palette_generation:0 ~width
-      ~renderer:(fun ~width text ->
-        rendered := entry.request_label :: !rendered;
-        Layout.wrap_words ~max_cells:width text)
-      ~source
+    match entry.markdown_source with
+    | Layout.Markdown_stable
+        { keeper_name; request_id; observed_at; entry_index } ->
+        Markdown_cache.render cache ~theme_revision:1 ~palette_generation:0
+          ~width ~renderer
+          ~identity:(keeper_name, request_id, observed_at, entry_index)
+          ~text:entry.body
+    | Layout.Markdown_growing _
+    | Layout.Markdown_streaming ->
+        renderer ~width entry.body
   in
   let stable index =
     entry
@@ -1537,7 +1534,7 @@ let test_oversized_hour_group_counts_its_deferred_rail () =
   | _ -> fail "the deferred hour rail was not reachable in scrollback"
 ;;
 
-let test_compact_origin_modes_keep_and_reach_the_hour_rail () =
+let test_clock_modes_control_the_hour_rail () =
   let newest =
     entry ~timeline_bucket:(timeline_bucket 19) Layout.Keeper "keeper.one"
       "turn-19" "latest body"
@@ -1559,7 +1556,15 @@ let test_compact_origin_modes_keep_and_reach_the_hour_rail () =
       with
       | [ { Layout.kind = Layout.Metadata (Layout.Timeline_break _); _ } ] -> ()
       | _ -> fail (name ^ " made a cramped hour rail unreachable by scrolling"))
-    [ "inline", Layout.Origin_inline; "bare", Layout.Origin_bare ]
+    [ "inline", Layout.Origin_inline ];
+  let newest = { newest with Layout.span_clock = Some "19:00→19:01";
+      turn_rail = Layout.Rail_opens } in
+  let bare = Layout.visible_rows ~origin:Layout.Origin_bare
+      ~inner_width:60 ~height:10 [newest] in
+  check (list string) "bare mode keeps only the message body"
+    ["  latest body"] (List.map (fun (row : Layout.row) -> row.text) bare);
+  check int "bare mode reserves no clock or hour rows" 1
+    (Layout.total_rows ~origin:Layout.Origin_bare ~inner_width:60 [newest])
 ;;
 
 let test_repeated_dst_hour_has_distinct_rails () =
@@ -3060,8 +3065,8 @@ let () =
             `Quick test_tiny_viewport_keeps_message_over_hour_rail
         ; test_case "oversized hour groups count their deferred rail" `Quick
             test_oversized_hour_group_counts_its_deferred_rail
-        ; test_case "compact origin modes keep and reach the hour rail" `Quick
-            test_compact_origin_modes_keep_and_reach_the_hour_rail
+        ; test_case "clock modes control the hour rail" `Quick
+            test_clock_modes_control_the_hour_rail
         ; test_case "DST fallback hours remain visibly distinct" `Quick
             test_repeated_dst_hour_has_distinct_rails
         ; test_case "a load failure keeps its address at eighty columns"

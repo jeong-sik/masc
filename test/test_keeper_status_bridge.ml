@@ -382,7 +382,6 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
 let every_failure_reason : Keeper_registry.failure_reason list =
   [ Keeper_registry.Heartbeat_consecutive_failures 3
   ; Keeper_registry.Turn_consecutive_failures 2
-  ; Keeper_registry.Stale_termination_storm { count = 4 }
   ; Keeper_registry.Provider_runtime_error
       { code = "api_error_500"
       ; detail = "boom"
@@ -411,7 +410,6 @@ let every_failure_reason : Keeper_registry.failure_reason list =
       ; field = Some "OLLAMA_CLOUD_API_KEY"
       ; detail = "required environment variable is missing"
       }
-  ; Keeper_registry.Turn_overflow_failure
   ; Keeper_registry.Operator_interrupt
   ; Keeper_registry.Exception "boom"
   ]
@@ -489,10 +487,8 @@ let test_undecodable_blocker_classes_are_named_not_counted () =
     ; "heartbeat_failures"
     ; "operator_interrupt"
     ; "provider_runtime_error"
-    ; "stale_termination_storm"
     ; "turn_failures"
     ; "turn_configuration_error"
-    ; "turn_overflow_failure"
     ]
     undecodable
 ;;

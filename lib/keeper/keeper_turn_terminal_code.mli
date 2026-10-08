@@ -21,24 +21,14 @@ type t =
   | Healthy
   (** Turn ended without error and reached the configured terminal
           runtime. *)
-  | Stale_termination_storm
-  (** [Keeper_registry.Stale_termination_storm]: cohort window
-          escalation threshold reached. *)
   | Provider_runtime_error of string
   (** [Keeper_registry.Provider_runtime_error]: payload is the
           original [code] field. *)
   | Fiber_unresolved (** [Keeper_registry.Fiber_unresolved]. *)
-  | Turn_overflow_failure
-  (** [Keeper_registry.Turn_overflow_failure]: the turn's request
-          exceeded the context window; the failure is recorded without
-          changing Keeper pause state. *)
   | Operator_interrupt
   (** [Keeper_registry.Operator_interrupt]: the current turn was cancelled
           by an explicit operator request, typically from the dashboard
           "stop current turn" action. *)
-  | Exception_unhandled of string
-  (** [Keeper_registry.Exception]: payload is the exception
-          message. *)
   | Agent_core_error of
       { wire : string
       ; timeout : agent_core_timeout option

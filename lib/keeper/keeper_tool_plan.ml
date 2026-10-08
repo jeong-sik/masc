@@ -918,15 +918,24 @@ let error_to_json error =
     tag "dependency_cycle" [ "node_ids", node_ids_to_json node_ids ]
 ;;
 
+type branch_failure_policy =
+  | Fail_fast
+  | Continue_independent
+
+let default_branch_failure_policy = Fail_fast
+
 type t =
   { identity : int
   ; nodes : node list
   ; descriptors : (string * Keeper_tool_descriptor.t) list
+  ; branch_failure_policy : branch_failure_policy
   }
 
 let next_plan_identity = Atomic.make 0
 
 let nodes plan = plan.nodes
+
+let branch_failure_policy plan = plan.branch_failure_policy
 
 let stable_unique_node_ids ids =
   List.fold_left
@@ -1193,7 +1202,7 @@ let validate_terminal_dependency_boundary descriptors nodes =
       nodes
 ;;
 
-let create ~descriptors nodes =
+let create ~descriptors ?(branch_failure_policy = default_branch_failure_policy) nodes =
   match nodes with
   | [] -> Error Empty_plan
   | _ ->
@@ -1232,6 +1241,7 @@ let create ~descriptors nodes =
                                  { identity = Atomic.fetch_and_add next_plan_identity 1
                                  ; nodes
                                  ; descriptors
+                                 ; branch_failure_policy
                                  })))))))))
 ;;
 

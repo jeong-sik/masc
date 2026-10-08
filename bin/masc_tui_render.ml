@@ -8956,10 +8956,22 @@ let browser_lane_source_hint view =
        | (Located _ | Invalid _) as source ->
            Some (Masc.Browser_source_context.label source))
 
+let browser_lane_unserved_gesture_rows (view : Browser_lane_view.t) =
+  match view.unserved_gesture with
+  | None -> []
+  | Some unserved -> Browser_lane_view.unserved_gesture_rows unserved
+
 let browser_lane_fixed_rows view =
   (* Status, selection, tab, URL, divider and text position are always drawn.
-     A source hint contributes a row only when the selected node has one. *)
+     A source hint contributes a row only when the selected node has one, and
+     a refused gesture its rows until the next input. *)
   6 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
+  + List.length (browser_lane_unserved_gesture_rows view)
+
+(* The picker's rows besides its choices: the status row, the heading and the
+   divider above them, the detail row for the highlighted choice below them,
+   and the row an empty connection list explains itself on. *)
+let browser_picker_frame_rows = 5
 
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -8993,7 +9005,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   in
   let title = Printf.sprintf "%s  %s  %s[%s]%s"
       (screen_title " MASC Browser Lane") (source_name view.source ^ " · "
-       ^ Option.value (browser_label view) ~default:"no browser")
+       ^ Option.value (connection_label view) ~default:"no browser")
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
@@ -9077,7 +9089,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";
           c.push_divider ();
-          let room = max 1 (budget - 4) in
+          let room = max 1 (budget - browser_picker_frame_rows) in
           let start = max 0 (cursor - room + 1) in
           browser_choices view |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
@@ -9085,15 +9097,23 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                 ^ (if browser_choice_selected view choice then " (current)" else "") in
               if index = cursor then c.push_selected line
               else c.push_styled ~style:Ansi.reset line);
+          (* One row whatever the choice, so the rows below do not move with
+             the cursor. *)
+          c.push_styled ~style:(Theme.recede ())
+            ("  " ^ Option.value ~default:""
+               (Option.bind (List.nth_opt (browser_choices view) cursor) browser_choice_detail));
           (match browser_lane_picker_empty_line view with
            | None -> ()
            | Some line ->
             c.push_styled ~style:(Theme.recede ()) line;
             if awaiting_browser view then (
               c.push_styled ~style:(Theme.info ()) "  Live requires the MASC extension and its registered native host.";
-              c.push_styled ~style:(Theme.recede ()) "  Setup: connectors/browser/host/README.md";
+              c.push_styled ~style:(Theme.recede ())
+                ("  " ^ transport_setup_row [Browser_lane.Web_extension]);
               c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh."))
       | None ->
+      List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ row))
+        (browser_lane_unserved_gesture_rows view);
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft
@@ -9105,10 +9125,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                     label (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
               | None -> "  No observed elements in this viewport • Ctrl-O:image")
          | None -> match view.source with
-             | Live ->
-               (match browser_label view with
-                | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation • c:stagehand"
-                | None -> "  Live • b:choose browser • a:automation • c:stagehand")
+             | Live -> live_connection_row view
              | Automation -> "  Independent browser • b:choose browser • g:URL • o:open / x:close • l:live • c:stagehand"
              | Stagehand -> "  Stagehand Chromium • b:choose browser • g:URL • o:open / x:close • l:live • a:automation");
       let tabs, page = match view.reading with
@@ -12028,13 +12045,13 @@ let preset_detail_lines (state : state) ~cols ~selected =
        if String.equal line "" then [""]
        else Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2)) line)
 
-let preset_pane_heights (state : state) ~rows ~count =
+let preset_pane_heights (state : state) ~rows ~count ~presets_count =
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
   let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
   (* Top, title, divider, list/detail divider, bottom, and footer. The error
      is outside the selection list, so a retained list keeps its full slot. *)
   let combined_height = max 2 (rows - 6 - error_rows - entry_rows) in
-  let list_height = min 8 (max 1 (combined_height / 3)) in
+  let list_height = min (max 1 presets_count) (min 8 (max 1 (combined_height / 3))) in
   let detail_rows = max 1 (combined_height - list_height) in
   let detail_height = Masc_tui_scroll.content_height ~rows:detail_rows ~chrome:0
       ~count ~preview_keep:None ~overflow_takes_row:true
@@ -12049,7 +12066,8 @@ let presets_viewport (state : state) =
   let selected = List.nth_opt presets cursor in
   let count = List.length (preset_detail_lines state ~cols ~selected) in
   let _, height = preset_pane_heights state
-      ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows) ~count in
+      ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows) ~count
+      ~presets_count:(List.length presets) in
   count, height
 
 let render_presets (state : state) =
@@ -12079,7 +12097,7 @@ let render_presets (state : state) =
   box_divider buf cols;
   let detail = preset_detail_lines state ~cols ~selected in
   let count = List.length detail in
-  let list_height, detail_height = preset_pane_heights state ~rows ~count in
+  let list_height, detail_height = preset_pane_heights state ~rows ~count ~presets_count:total in
   let preset_rows = list_height in
   let first = if cursor < preset_rows then 0 else cursor - preset_rows + 1 in
   (match state.presets_error with

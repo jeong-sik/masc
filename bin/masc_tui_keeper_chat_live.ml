@@ -85,6 +85,7 @@ type delta =
       { reply : string
       ; turn_outcome : Masc.Keeper_turn_outcome.t
       ; turn_ref : string
+      ; terminal_stream_scope : int option
       }
   | Run_failed of { message : string }
   | Run_finished
@@ -108,6 +109,12 @@ let nonnegative_int_field fields name =
   match List.assoc_opt name fields with
   | Some (`Int value) when value >= 0 -> Some value
   | Some _ | None -> None
+
+let optional_stream_scope fields name =
+  match List.filter (fun (key, _) -> key = name) fields with
+  | [] -> Ok None
+  | [(_, `Int scope)] when scope >= 0 -> Ok (Some scope)
+  | _ -> Error (name ^ " must be one nonnegative integer")
 
 (* The one place that reads a usage object, for both the live wire arm and the
    journal replay in {!Masc_tui_keeper_chat_log}: the producer writes the same
@@ -373,8 +380,8 @@ let custom_deltas_unvalidated fields =
   | Some "KEEPER_CONTINUATION_CHECKPOINT" -> [ Checkpoint ]
   | Some "KEEPER_EXTERNAL_EFFECT_COMPLETED" -> [ External_effect_completed ]
   | Some "KEEPER_REPLY_DETAILS" -> (
-      (* The same three fields the strict decoder requires
-         (decode_reply_details); read leniently here, as every other event. *)
+      (* The recorded reply and optional terminal stream provenance use the
+         same schema as the strict completion decoder. *)
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_REPLY_DETAILS value is not an object" ]
       | Some value -> (
@@ -382,12 +389,14 @@ let custom_deltas_unvalidated fields =
             ( string_field value "reply"
             , Option.bind (string_field value "turn_outcome")
                 Masc.Keeper_turn_outcome.of_label
-            , Option.bind (string_field value "turn_ref") Ids.Turn_ref.of_string )
+            , Option.bind (string_field value "turn_ref") Ids.Turn_ref.of_string
+            , optional_stream_scope value "terminal_stream_scope" )
           with
-          | Some reply, Some turn_outcome, Some turn_ref ->
+          | Some reply, Some turn_outcome, Some turn_ref, Ok terminal_stream_scope ->
               [ Reply_details
-                  { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref }
+                  { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope }
               ]
+          | _, _, _, Error detail -> [Undecodable detail]
           | _ ->
               [ Undecodable
                   "KEEPER_REPLY_DETAILS needs reply, a known turn_outcome and \

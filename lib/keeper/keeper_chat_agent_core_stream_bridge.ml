@@ -62,6 +62,7 @@ type state =
   ; scope_disposition : scope_disposition
   ; current_message_has_text : bool
   ; last_completed_message_has_text : bool
+  ; last_completed_stream_scope : int option
   ; message_open : bool
   ; current_provider_message_id : string option
   ; current_message_start :
@@ -93,6 +94,7 @@ let empty_state () =
   ; scope_disposition = Scope_live
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
+  ; last_completed_stream_scope = None
   ; message_open = false
   ; current_provider_message_id = None
   ; current_message_start = None
@@ -110,6 +112,7 @@ let reset_runtime_attempt_state state =
   ; scope_disposition = Scope_live
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
+  ; last_completed_stream_scope = None
   ; message_open = false
   ; current_provider_message_id = None
   ; current_message_start = None
@@ -137,6 +140,14 @@ let terminal_message_had_text state =
   if state.message_open
   then state.current_message_has_text
   else state.last_completed_message_has_text
+
+let terminal_text_scope state =
+  if state.message_open then
+    if state.current_message_has_text then state.current_stream_scope else None
+  else if state.last_completed_message_has_text
+          && state.last_completed_stream_scope = state.current_stream_scope then
+    state.last_completed_stream_scope
+  else None
 
 let stream_block_for_index bridge_state index =
   List.assoc_opt index bridge_state.blocks_by_index
@@ -835,6 +846,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
              ; current_message_has_text = false
              ; last_completed_message_has_text =
                  bridge_state.current_message_has_text
+             ; last_completed_stream_scope = bridge_state.current_stream_scope
              ; message_open = false
              }
          ; chat_events = closed.chat_events @ [ Agent_core_stream_message_stop ]

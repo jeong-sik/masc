@@ -1872,6 +1872,9 @@ in place:
   not be rendered, and fleet rows that lost even their address. `Enter` on a commit answers with its pull
   request link (the subject's `(#N)` against the registered remote). `Enter`
   on a Keeper change returns to the file at its producer-recorded line. A
+  Git and Keeper reads are independent: if either fails, the other remains
+  visible with the failed source named. `r` in History retries both sources;
+  reopening `H` alone keeps the existing reading. A
   project tree is joined automatically only when the server base path exactly
   matches one registered repository's resolved path; otherwise it keeps Git
   history and explicitly says why Keeper activity cannot be joined.

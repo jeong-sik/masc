@@ -4,13 +4,13 @@ module Policy = Masc.Keeper_tool_approval_policy
 module Descriptor = Masc.Keeper_tool_descriptor
 
 let asks ~composition_plan_index ~tool_name ~input =
-  match Policy.verdict_for ~composition_plan_index ~tool_name ~input with
+  match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index ~tool_name ~input with
   | Policy.Ask _ -> true
   | Policy.Run _ -> false
 
 let because ~composition_plan_index ~tool_name ~input =
   Policy.verdict_because
-    (Policy.verdict_for ~composition_plan_index ~tool_name ~input)
+    (Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index ~tool_name ~input)
 
 let no_input = `Assoc []
 
@@ -210,7 +210,7 @@ let test_an_in_process_write_runs () =
   List.iter
     (fun tool_name ->
        match
-         Policy.verdict_for
+         Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty
            ~composition_plan_index:None
            ~tool_name
            ~input:no_input
@@ -222,7 +222,7 @@ let test_an_in_process_write_runs () =
 ;;
 
 let test_internal_filesystem_name_delegates () =
-  match Policy.verdict_for ~composition_plan_index:None
+  match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None
           ~tool_name:"tool_edit_file"
           ~input:(`Assoc [ "file_path", `String "lib/a.ml" ])
   with

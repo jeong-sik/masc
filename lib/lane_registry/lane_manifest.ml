@@ -107,6 +107,8 @@ let lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builti
   | Tool_schemas_misc.Misc_msx_meta
   | Tool_schemas_misc.Misc_msx_checkpoint_info -> [ Lane_id.Machine Machine_lane.Msx ]
   | Tool_schemas_misc.Misc_dos_load
+  | Tool_schemas_misc.Misc_dos_meta
+  | Tool_schemas_misc.Misc_dos_inventory
   | Tool_schemas_misc.Misc_dos_eject
   | Tool_schemas_misc.Misc_dos_screen
   | Tool_schemas_misc.Misc_dos_step

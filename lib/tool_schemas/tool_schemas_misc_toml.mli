@@ -38,6 +38,8 @@ val candle_equip : Masc_domain.tool_schema
 val candle_gift : Masc_domain.tool_schema
 
 val dos_load : Masc_domain.tool_schema
+val dos_meta : Masc_domain.tool_schema
+val dos_inventory : Masc_domain.tool_schema
 val dos_eject : Masc_domain.tool_schema
 val dos_screen : Masc_domain.tool_schema
 val dos_step : Masc_domain.tool_schema

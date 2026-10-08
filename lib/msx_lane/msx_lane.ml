@@ -946,7 +946,7 @@ let change_disk ~path ~backup_path =
    _build/default/lib/identity/msx_core_identity.ml. The digest covers only
    lib/ top-level (dune plus *.ml/*.mli, by base name), so an additive-only
    core change in a subdirectory keeps the value. *)
-let pinned_core_source_digest = "c4e0ede25fe25a717fc758569a5b2f0c"
+let pinned_core_source_digest = "cc6489f2ddae4a48596b4879b3c0e368"
 
 type core = {
   source_digest : string;

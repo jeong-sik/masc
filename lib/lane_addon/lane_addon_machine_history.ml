@@ -37,7 +37,7 @@ let retain t ~store ~instance_id ~max_response_bytes ~call (output : output) =
           if before <= previous then Ok (List.rev oldest_first)
           else
             let* () = if max_bytes > 0 then Ok () else Error "machine history RPC envelope is too small" in
-            let* result = call ~name:Machine_input_history.tool_name ~arguments:(`Assoc [
+            let* (result : S.tool_result) = call ~name:Machine_input_history.tool_name ~arguments:(`Assoc [
               "incarnation",`String incarnation;"entry_count",`Int count;
               "before",`Int before;"max_bytes",`Int max_bytes]) in
             let* fields = if result.is_error = Some true then Error (Agent_core.Mcp.text_of_tool_result result)

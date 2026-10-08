@@ -45,6 +45,7 @@ type tool_outcome =
 type native_progress =
   { output_bytes : int option
   ; message : string option
+  ; provider_elapsed_seconds : int option
   ; updated_at : float
   ; elapsed : float option
   }
@@ -702,11 +703,12 @@ let native_activity_summary (activity : tool_activity) =
 
 let native_progress_summary (activity : tool_activity) =
   Option.map (fun progress ->
-    let observation = match progress.message, progress.output_bytes with
-      | Some message, _ -> safe_line message
-      | None, Some _ when activity.outcome=Native_running -> "output arriving"
-      | None, Some _ -> "output observed"
-      | None, None -> "native activity observed" in
+    let observation = match progress.message, progress.output_bytes, progress.provider_elapsed_seconds with
+      | Some message, _, _ -> safe_line message
+      | None, Some _, _ when activity.outcome=Native_running -> "output arriving"
+      | None, Some _, _ -> "output observed"
+      | None, None, Some seconds -> Printf.sprintf "heartbeat · provider elapsed %ds" seconds
+      | None, None, None -> "native activity observed" in
     match progress.elapsed with
     | None -> observation
     | Some elapsed -> observation ^ " · updated +" ^ Masc_tui_message_layout.span_text elapsed)
@@ -2307,16 +2309,20 @@ let apply_delta ~now t (delta : Live.delta) =
         else
           let previous_bytes = Option.bind call.native_progress (fun previous -> previous.output_bytes) in
           let previous_message = Option.bind call.native_progress (fun previous -> previous.message) in
+          let previous_elapsed = Option.bind call.native_progress (fun previous -> previous.provider_elapsed_seconds) in
           let updated = match progress with
             | Runtime_native_tools.Output_observed {byte_count} ->
                 let previous = Option.value previous_bytes ~default:0 in
                 if byte_count <= 0 || byte_count > max_int - previous then None
-                else Some (Some (previous + byte_count), previous_message)
-            | Runtime_native_tools.Message_reported {message} -> Some (previous_bytes, Some message) in
+                else Some (Some (previous + byte_count), previous_message, previous_elapsed)
+            | Runtime_native_tools.Message_reported {message} -> Some (previous_bytes, Some message, previous_elapsed)
+            | Runtime_native_tools.Heartbeat_reported {elapsed_seconds} ->
+                if elapsed_seconds < 0 then None
+                else Some (previous_bytes, previous_message, Some elapsed_seconds) in
           match updated with
-          | None -> note_unreadable t "native progress byte count is invalid"; call
-          | Some (output_bytes, message) ->
-              {call with native_progress=Some {output_bytes; message; updated_at=now;
+          | None -> note_unreadable t "native progress measurement is invalid"; call
+          | Some (output_bytes, message, provider_elapsed_seconds) ->
+              {call with native_progress=Some {output_bytes; message; provider_elapsed_seconds; updated_at=now;
                 elapsed=(if now >= call.started_at then Some (now -. call.started_at) else None)}}) with
        | Call_updated | Call_ambiguous -> ()
        | Call_missing | Call_conflicting -> note_unreadable t "native progress has no matching provider occurrence")

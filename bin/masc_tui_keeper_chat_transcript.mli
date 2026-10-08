@@ -79,6 +79,7 @@ val all_outcomes : tool_outcome list
 type native_progress =
   { output_bytes : int option (** Cumulative received output bytes; no raw output. *)
   ; message : string option (** Latest redacted full MCP message; sanitized at render. *)
+  ; provider_elapsed_seconds : int option (** Provider report, independent of local elapsed; may decrease. *)
   ; updated_at : float (** Consumer-supplied event time; normal live input uses SSE time or receipt fallback. *)
   ; elapsed : float option (** Time between observed start and update, if ordered; not provider duration. *)
   }

@@ -475,6 +475,14 @@ function validateNativeToolProgress(payload: unknown): SafeParseResult<true> {
         ? ok(true)
         : fail(`${path}.byte_count`, 'Expected positive native output byte count')
     }
+    case 'heartbeat_reported': {
+      const object = exactCustomObject(payload, 'native heartbeat', ['kind', 'elapsed_seconds'], path)
+      if (!object.success) return object
+      return typeof payload.elapsed_seconds === 'number'
+        && Number.isSafeInteger(payload.elapsed_seconds) && payload.elapsed_seconds >= 0
+        ? ok(true)
+        : fail(`${path}.elapsed_seconds`, 'Expected nonnegative provider elapsed seconds')
+    }
     case 'message_reported': {
       const object = exactCustomObject(payload, 'native progress message', ['kind', 'message'], path)
       if (!object.success) return object

@@ -5084,7 +5084,7 @@ let test_native_progress_reaches_tui () =
            with
            | Eio.Cancel.Cancelled _ as exn -> raise exn
            | exn -> callback_failures := exn :: !callback_failures)
-      | Output_observed _ | Message_reported _ -> () in
+      | Output_observed _ | Message_reported _ | Heartbeat_reported _ -> () in
     with_fixture
       [init_result; account_chatgpt; thread_result; turn_result;
        output "before-start"; mcp "before-start";

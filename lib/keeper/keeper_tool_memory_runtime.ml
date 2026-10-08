@@ -1235,6 +1235,7 @@ type memory_write_error_kind =
   | Supersedes_not_current
   | Supersedes_not_authored
   | Supersedes_premise_of_successor
+  | Pending_admission_persistence_failed
   | Persistence_failed of fact_store
   | Commit_receipt_inconsistent
   | No_memory_write_error
@@ -1258,6 +1259,7 @@ let memory_write_error_kind_to_string = function
   | Supersedes_not_authored -> "supersedes_not_authored"
   | Supersedes_premise_of_successor -> "supersedes_premise_of_successor"
   | Persistence_failed (Ordinary_current | Source_bound_current) -> "persistence_failed"
+  | Pending_admission_persistence_failed -> "pending_admission_persistence_failed"
   | Commit_receipt_inconsistent -> "commit_receipt_inconsistent"
   | No_memory_write_error -> ""
 ;;
@@ -1296,6 +1298,7 @@ let class_of_memory_write_error_kind = function
   | Source_read_failed
       ( Keeper_memory_source_current.Source_io_failed _
       | Keeper_memory_source_current.Source_endpoint_unanswered _ )
+  | Pending_admission_persistence_failed
   | Persistence_failed (Ordinary_current | Source_bound_current) ->
     Tool_result.Dependency_unavailable
   (* The store committed and then did not show what it committed: a
@@ -1340,6 +1343,13 @@ let memory_write_failure_effect = function
     ( Tool_result.Proven_post_effect
     , "A new snapshot revision was committed, but this claim is not in it. Search \
        memory for the claim before writing it again." )
+  | Pending_admission_persistence_failed ->
+    ( Tool_result.Effect_outcome_unknown
+    , "The candidate may or may not have been saved to the pending admission queue. \
+       Current Memory search cannot establish whether it is pending. Inspect the \
+       pending queue using this receipt request_id before retrying; another tool \
+       call creates a new request and may duplicate the candidate. Admission has \
+       not been confirmed." )
   | Persistence_failed Ordinary_current ->
     ( Tool_result.Effect_outcome_unknown
     , "The claim may or may not have been committed. Search memory for it before \
@@ -1368,8 +1378,8 @@ let memory_write_failure_effect = function
 let premise_id_expectation =
   Printf.sprintf
     "A memory identity is %s. keeper_memory_search returns one as memory_id for \
-     each match it finds, and a successful keeper_memory_write returns the \
-     memory_id it committed."
+     current match it finds. A current-store keeper_memory_write receipt returns the \
+     identity it committed; a pending admission request_id is not a memory identity."
     Keeper_memory_os_types.memory_id_shape
 ;;
 
@@ -1432,13 +1442,14 @@ let memory_write_rejection_fields error_kind =
          premise_id
          premise_id_expectation)
   (* The store holds no fact under these identities, so this claim cannot rest
-     on them yet. Writing a premise returns the memory_id to cite. *)
+     on them yet. Admission must finish before a candidate can be a premise. *)
   | Unsupported_derivation ->
     at
       "premise_ids"
-      "The ids under missing_premise_ids name no fact in the store. Write those \
-       premises first and cite the memory_id each write returns, or write this \
-       claim without rule_id and premise_ids as the observation it is."
+      "The ids under missing_premise_ids name no current fact in the store. Search \
+       current Memory for supported premise identities. Newly submitted observations \
+       must pass admission first; their pending request_ids are not premises. Only \
+       submit this claim without derivation when it is itself an observation."
   | Supersedes_invalid ->
     at
       "supersedes"
@@ -1481,6 +1492,7 @@ let memory_write_rejection_fields error_kind =
   | Board_comment_without_post
   | Board_ref_with_derivation_unsupported
   | Board_ref_with_source_path_unsupported
+  | Pending_admission_persistence_failed
   | Persistence_failed (Ordinary_current | Source_bound_current)
   | Commit_receipt_inconsistent
   | No_memory_write_error -> []
@@ -1783,7 +1795,7 @@ let support_invalidation_receipt
    answer ([memory_write_answer_of_output]) keeps exactly [answer], so the two
    cannot drift apart without the compiler seeing it. Snapshot stamps
    ([revision], [recorded_at]), counts and prose ([rows_written],
-   [what_committed]) are not answer keys. *)
+   [what_committed]) and pending request_id/sequence are not answer keys. *)
 module Write_receipt_key = struct
   let ok = "ok"
   let error_kind = "error_kind"
@@ -1938,8 +1950,46 @@ let keeper_memory_write_with_outcome
       Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path
     in
-    (match source_path with
-     | Some source_path ->
+    (match source_path, basis, supersedes with
+     | None, Keeper_memory_os_types.Observed _, None ->
+       let request_id = Random_id.prefixed ~prefix:"memory-admission-" ~bytes:16 in
+       let now = Time_compat.now () in
+       let fact : Keeper_memory_os_types.fact =
+         { claim = body; category = Keeper_memory_os_types.Fact;
+           first_seen = now; last_seen = now;
+           origin = { kind = Keeper_memory_os_types.Authored;
+             trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id };
+           basis } in
+       let saved =
+         try Keeper_memory_admission_queue.append ~keepers_dir
+             ~keeper_id:meta.name ~request_id fact with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Error (Printexc.to_string exn) in
+       (match saved with
+        | Error detail ->
+          Log.Keeper.warn "pending memory admission write failed keeper=%s request_id=%s: %s"
+            meta.name request_id detail;
+          respond ~ok:false ~error_kind:Pending_admission_persistence_failed
+            [ "request_id", `String request_id;
+              Write_receipt_key.store, `String "pending_memory_admission";
+              Write_receipt_key.detail, `String detail ]
+        | Ok candidate ->
+          (* Notification failure cannot turn the committed queue append into
+             a failed save. The signal logs recoverable failures; startup and
+             subsequent wakes can discover this same pending candidate. *)
+          Keeper_librarian_queue_signal.changed
+            ~base_path:config.Workspace.base_path ~keeper_name:meta.name;
+          respond ~ok:true ~error_kind:No_memory_write_error
+            [ Write_receipt_key.outcome, `String "persisted_pending_admission";
+              Write_receipt_key.store, `String "pending_memory_admission";
+              "request_id", `String candidate.request_id;
+              "sequence", `Int candidate.sequence;
+              "recorded_at", `Float candidate.fact.last_seen;
+              "rows_written", `Int 1;
+              Write_receipt_key.basis, memory_write_basis_receipt candidate.fact.basis;
+              "what_committed", `String
+                "The candidate was persisted for Librarian admission. This receipt acknowledges pending input and does not confirm admission or a current Memory identity; the worker may already have processed it. This request_id is not a memory_id and cannot be a premise or supersedes target. Search current Memory for an admitted premise identity; supersedes additionally requires origin authored." ])
+     | Some source_path, _, _ ->
        (match
           Keeper_memory_source_current.upsert_file_fact
             ~ordinary_facts:(fun () ->
@@ -2018,7 +2068,7 @@ let keeper_memory_write_with_outcome
             meta.name
             detail;
           respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ Write_receipt_key.detail, `String detail ])
-     | None ->
+     | None, _, Some _ | None, Keeper_memory_os_types.Derived _, None ->
     (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis ~supersedes with
      | Ok (snapshot, supersession) ->
        let written_fact =

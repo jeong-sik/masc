@@ -86,7 +86,7 @@ let delta_to_string : Live.delta -> string = function
         queue_length
   | Live.Checkpoint -> "checkpoint"
   | Live.External_effect_completed -> "external_effect_completed"
-  | Live.Reply_details { reply; turn_outcome; turn_ref } ->
+  | Live.Reply_details { reply; turn_outcome; turn_ref; _ } ->
       Printf.sprintf "reply_details(%s,%s,%s)" reply (Outcome.to_label turn_outcome) turn_ref
   | Live.Run_failed { message } -> "run_failed(" ^ message ^ ")"
   | Live.Run_finished -> "run_finished"
@@ -428,7 +428,7 @@ let golden : E.keeper_chat_event list =
   ; E.External_effect_completed
       { target = Masc.Keeper_surface_post.Delivered_to_slack { channel_id = "C1"; thread_ts = None } }
   ; E.Reply_details
-      { reply = "Let me look."
+      { terminal_stream_scope = Some 7; reply = "Let me look."
       ; turn_outcome = Outcome.Visible_reply
       ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:3
       }

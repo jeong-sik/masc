@@ -12369,6 +12369,10 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
+    if state.msx_open && state.machine_source = Masc.Machine_lane.Msx
+       && state.msx_live = Masc_tui_machine_live.Unread
+       && Option.is_none state.msx_live_in_flight then
+      launch_msx_live_read state ~mailbox;
     (* The surface on view asks again from the list it reads on arrival.
        Its request went out under the old authority, and a surface outside
        the bundle has no tick of its own to recover it. *)

@@ -355,7 +355,7 @@ let test_search_pin_before_first_frame_and_at_tail () = at_sizes (fun origin ->
         (Option.is_none state.msg_scroll_pin)) [""; "/"])
     [false; true])
 
-let admission_log state ~id ~at =
+let admission_log (state : T.state) ~id ~at =
   let sent_request = { (Chat.create_request ~keeper_name:"alpha" ~message:"input" ()) with
       Chat.request_id=id } in
   let held = T.turn_log_create ~keeper_name:"alpha" ~request_id:id ~started_at:at in

@@ -88,6 +88,7 @@ class LaneState:
         self.result_received = threading.Event()
         self.disconnected = threading.Event()
         self.refuse_registration = False
+        self.drop_next_poll = threading.Event()
         self.poll_wait_sec = POLL_WAIT_SEC
         # Statuses, or bodies the host cannot read, for the next polls.
         self.poll_answers = queue.Queue()
@@ -148,6 +149,10 @@ class Lane(http.server.BaseHTTPRequestHandler):
             state.polled.set()
             if state.refuse_registration:
                 self.send_error(400)
+                return
+            if state.drop_next_poll.is_set():
+                state.drop_next_poll.clear()
+                self.drop()
                 return
             try:
                 scripted = state.poll_answers.get_nowait()
@@ -471,6 +476,20 @@ class BidiHostLink(unittest.TestCase):
         self.assertTrue(self.call(moved)["ok"])
         self.assertEqual(self.firefox.state.methods.count("session.new"), 1)
 
+    def test_a_result_from_a_stopped_issuer_is_not_retried_on_the_new_server(self):
+        self.attach(fixed=False)
+        self.lane.state.drop_next_result.set()
+        self.lane.state.commands.put({"id": str(uuid.uuid4()), "verb": "tabs.list", "args": {}})
+        self.assertTrue(self.lane.state.result_received.wait(EXIT_WAIT_SEC), self.host_log())
+        self.stop(self.lane)
+        moved, _ = self.lane_on(0)
+        self.connection.write_text(f"[server]\nhttp_port = {moved.server_port}\n")
+        self.assertTrue(moved.state.polled.wait(RETRY_WAIT_SEC), self.host_log())
+        self.assertIn("result not delivered: the server that issued the request stopped answering",
+                      self.host_log())
+        self.assertEqual(len(moved.state.result_posts), 0, "the old result is not replayed to a new issuer")
+        self.assertTrue(self.call(moved)["ok"])
+
     def test_a_result_the_server_never_handled_is_sent_again_not_run_again(self):
         # The connection closed before the server handled the request at
         # all. The server is still the same one, so the result sent again is
@@ -513,6 +532,16 @@ class BidiHostLink(unittest.TestCase):
         answer = self.call(self.lane)
         self.assertTrue(answer["ok"], answer)
         self.assertEqual(self.firefox.state.methods.count("session.new"), 1)
+
+    def test_a_poll_closed_without_a_response_is_asked_again(self):
+        self.attach(fixed=True)
+        polls = len(self.lane.state.polls)
+        self.lane.state.drop_next_poll.set()
+        self.wait_until(lambda: len(self.lane.state.polls) >= polls + 2,
+                        "the host did not retry a poll closed without a response",
+                        within=RETRY_WAIT_SEC)
+        self.assertIsNone(self.process.poll(), self.host_log())
+        self.assertTrue(self.call(self.lane)["ok"])
 
     def test_firefox_leaving_ends_a_host_that_waits_for_work(self):
         # The lane holds an empty poll longer than the host is given to exit,
@@ -588,6 +617,29 @@ class BidiHostLink(unittest.TestCase):
         finally:
             self.lane.state.release_ack.set()
         self.assertEqual(len(self.lane.state.result_posts), 1, "answered once")
+
+    def test_an_unreadable_token_holds_polling_until_the_token_returns(self):
+        self.attach(fixed=True)
+        token = self.base / ".masc/browser-lane/token"
+        token.unlink()
+        self.wait_until(lambda: "poll failed: cannot read lane token file" in self.host_log(),
+                        "the unreadable token was not reported", within=RETRY_WAIT_SEC)
+        polls = len(self.lane.state.polls)
+        self.assert_stays()
+        self.assertEqual(len(self.lane.state.polls), polls)
+        token.write_text(TOKEN)
+        self.assertTrue(self.call(self.lane)["ok"])
+
+    def test_an_unreadable_token_drops_the_last_result_and_disconnect(self):
+        self.attach(fixed=True)
+        token = self.base / ".masc/browser-lane/token"
+        token.unlink()
+        self.firefox.state.leave_on = "browsingContext.getTree"
+        self.lane.state.commands.put({"id": str(uuid.uuid4()), "verb": "tabs.list", "args": {}})
+        self.assert_ends("BiDi connection ended: BiDi EOF")
+        self.assertIn("result not delivered: cannot read lane token file", self.host_log())
+        self.assertEqual(self.lane.state.result_posts, [])
+        self.assertFalse(self.lane.state.disconnected.is_set())
 
     def test_a_refused_registration_ends_the_host(self):
         self.lane.state.refuse_registration = True

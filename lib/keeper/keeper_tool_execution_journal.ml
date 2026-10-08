@@ -203,6 +203,8 @@ let record_path ~dir ~request_id ~node_id =
   if
     String.length request_id > 0
     && String.length node_id > 0
+    && request_id <> "." && request_id <> ".."
+    && node_id <> "." && node_id <> ".."
     && String.for_all (fun c ->
            match c with
            | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.' -> true
@@ -221,22 +223,25 @@ let read_record ~dir ~request_id ~node_id =
   match record_path ~dir ~request_id ~node_id with
   | None -> Error (Corrupt_record "unsafe path components")
   | Some path -> (
-      match open_in_bin path with
-      | exception Sys_error _ -> Ok None
-      | exception _ -> Error (Directory_unreadable path)
-      | channel -> (
-          let bytes =
-            really_input_string channel (in_channel_length channel)
-          in
-          close_in channel;
-          match Yojson.Safe.from_string bytes with
-          | exception Yojson.Json_error reason -> Error (Corrupt_record reason)
-          | json -> (
-              match record_of_json json with
-              | Ok record -> Ok (Some record)
-              | Error ((Corrupt_record _ | Schema_mismatch _) as error) -> Error error
-              | Error (Directory_unreadable _) ->
-                Error (Corrupt_record "confused read error"))))
+      match Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+      | exception Unix.Unix_error _ -> Error (Directory_unreadable path)
+      | fd ->
+          let channel = Unix.in_channel_of_descr fd in
+          match Fun.protect ~finally:(fun () -> close_in_noerr channel)
+              (fun () -> really_input_string channel (in_channel_length channel)) with
+          | exception (Sys_error _ | End_of_file | Unix.Unix_error _) ->
+              Error (Directory_unreadable path)
+          | bytes ->
+              match Yojson.Safe.from_string bytes with
+              | exception Yojson.Json_error reason -> Error (Corrupt_record reason)
+              | json ->
+                  match record_of_json json with
+                  | Error error -> Error error
+                  | Ok record when String.equal record.request_id request_id
+                                   && String.equal record.node_id node_id ->
+                      Ok (Some record)
+                  | Ok _ -> Error (Corrupt_record "record request/node IDs differ from its path"))
 ;;
 
 let write_record ~dir record =
@@ -250,39 +255,31 @@ let write_record ~dir record =
       |> Result.map_error Keeper_fs.durable_write_error_to_string)
 ;;
 
-(* 재개 판정: identity 가 이번 재시도와 묶여 있고(disposition 결속은 identity
-   일치가 전제), 기록된 disposition 이 효과 전임을 증명하는 경우에만 재실행. *)
-let resume_decision_of_record ~identity record =
-  match record.status with
-  | Settled -> Skip_node_settled record
-  | Attempting -> (
-      let mismatch () =
-        Identity_mismatch
-          { stored_plan_revision = record.plan_revision
-          ; stored_input_sha = record.input_sha
-          ; stored_owner = record.owner
-          ; given_plan_revision = identity.plan_revision
-          ; given_input_sha = identity.input_sha
-          ; given_owner = identity.owner
-          }
-      in
-      if
-        not
-          (String.equal record.plan_revision identity.plan_revision
-          && digests_equal record.input_sha identity.input_sha
-          && String.equal record.owner identity.owner)
-      then mismatch ()
-      else
-        match record.effect_disposition with
-        | Tool_result.Proven_pre_effect -> Redo_node_pre_effect record
-        | Tool_result.Effect_outcome_unknown | Tool_result.Proven_post_effect ->
-          Refuse_unknown_effect record)
-;;
-
 let identity_matches ~(identity : identity) (record : record) : bool =
   String.equal record.plan_revision identity.plan_revision
   && digests_equal record.input_sha identity.input_sha
   && String.equal record.owner identity.owner
+;;
+
+(* Settled and Attempting both belong to the recorded plan/input/owner. *)
+let resume_decision_of_record ~identity record =
+  if not (identity_matches ~identity record) then
+    Identity_mismatch
+      { stored_plan_revision = record.plan_revision
+      ; stored_input_sha = record.input_sha
+      ; stored_owner = record.owner
+      ; given_plan_revision = identity.plan_revision
+      ; given_input_sha = identity.input_sha
+      ; given_owner = identity.owner
+      }
+  else
+    match record.status with
+    | Settled -> Skip_node_settled record
+    | Attempting ->
+        match record.effect_disposition with
+        | Tool_result.Proven_pre_effect -> Redo_node_pre_effect record
+        | Tool_result.Effect_outcome_unknown | Tool_result.Proven_post_effect ->
+          Refuse_unknown_effect record
 ;;
 
 (* 노드가 실제로 dispatch 되기 전에 부른다. 기존 레코드가 있으면 그 판정을,

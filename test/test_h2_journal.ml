@@ -18,6 +18,9 @@ let stage name = log "STAGE %s" name
 let fail message = failwith message
 ;;
 
+let failf fmt = Printf.ksprintf fail fmt
+;;
+
 let journal_dir () =
   Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_h2_journal_%d" (Unix.getpid ()))
@@ -177,10 +180,14 @@ let identity_for ~plan ~input =
    request_id 의 저널로 재개. 저널 연결부(dispatch 전 begin_node, 정산 후
    settle_node)는 dispatch 내부에서 실제 순서로 통과한다. *)
 
-let run_attempt ~dir ~request_id ~crash_marker ~crash_flag_file =
+let run_attempt ~dir ~request_id ~crash_marker ~crash_flag_file ~expected_search_input =
   let plan, _a, _b = make_plan () in
   let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
     let id = node_id_string node.Plan.id in
+    (match expected_search_input with
+     | Some expected when id = "search" && input <> expected ->
+         fail "dependent node did not receive the saved upstream result"
+     | Some _ | None -> ());
     (* 저널: dispatch 전 begin_node. lane 은 readonly 라 dispatch-전 분류가
        Proven_pre_effect(중단 뒤 redo 안전), search 는 효과 가능이라 unknown.
        Skip 면 dispatch 없이 저장 결과로 정산하고, Refuse 면 dispatch 없이
@@ -215,7 +222,9 @@ let run_attempt ~dir ~request_id ~crash_marker ~crash_flag_file =
     (match journal_decision with
      | Journal.Skip_node_settled record ->
        log "JOURNAL_SKIP %s (settled, no re-dispatch)" id;
-       ignore record;
+       let data = match record.Journal.result_json with
+         | Some data -> data
+         | None -> fail "settled node has no stored result" in
        (* 저장 결과로 정산: dispatch·효과 없음. *)
        Executor.dispatch_result
          (Tool_result.make_ok
@@ -264,7 +273,7 @@ let run_attempt ~dir ~request_id ~crash_marker ~crash_flag_file =
             ~result_json:data ~identity ()
         with
         | Ok () -> ()
-        | Error error -> log "JOURNAL_SETTLE_ERROR %s %s" id error);
+        | Error error -> failf "JOURNAL_SETTLE_ERROR %s %s" id error);
        Executor.dispatch_result
          (Tool_result.make_ok
             ~tool_name:node.Plan.tool_name
@@ -285,6 +294,12 @@ let run_attempt ~dir ~request_id ~crash_marker ~crash_flag_file =
         `Failed)
 ;;
 
+let read_bytes path =
+  let channel = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+;;
+
 let journal_s1 () =
   stage "s1: crash during search (lane settled), resume same request id";
   let dir = fresh_dir () in
@@ -295,15 +310,19 @@ let journal_s1 () =
   close_out oc;
   (* 1차: lane 은 dispatch+정산(settled)되고 search dispatch 중 crash.
      search 는 attempting/unknown 잔여로 남는다. *)
-  let first = run_attempt ~dir ~request_id ~crash_marker:(Some "search") ~crash_flag_file in
+  let first = run_attempt ~dir ~request_id ~crash_marker:(Some "search") ~crash_flag_file ~expected_search_input:None in
   let lane_after_first = count "effect:lane" (effect_file dir) in
   let search_after_first = count "effect:search" (effect_file dir) in
   (* 2차: 같은 request_id. settled lane 은 dispatch 없이 저장 결과로 정산되고,
      attempting/unknown search 는 fail-closed 로 거절된다 — 턴은 incomplete 로
      끝나고 어떤 효과도 두 번 나지 않는다. *)
-  let second = run_attempt ~dir ~request_id ~crash_marker:None ~crash_flag_file in
+  let second = run_attempt ~dir ~request_id ~crash_marker:None ~crash_flag_file ~expected_search_input:None in
+  if first <> `Failed || second <> `Failed then fail "interrupted/unknown effect resumed as complete";
   let lane_effects_total = count "effect:lane" (effect_file dir) in
   let search_effects_total = count "effect:search" (effect_file dir) in
+  if lane_after_first <> 1 || search_after_first <> 1
+     || lane_effects_total <> 1 || search_effects_total <> 1 then
+    fail "crash replay changed the expected single effect counts";
   log "S1_RESULT first=%s lane=%d search=%d | second=%s lane_total=%d search_total=%d lane_redispatched=%b search_redispatched=%b"
     (match first with `Completed -> "completed" | `Failed -> "failed")
     lane_after_first
@@ -331,8 +350,8 @@ let journal_s1 () =
      log "S1 journal lane decision=Skip_node_settled disposition=%s result_json_present=%b"
        (Journal.effect_disposition_to_string record.Journal.effect_disposition)
        (Option.is_some record.Journal.result_json)
-   | Ok other -> log "S1 journal lane decision=%s" (decision_name other)
-   | Error _ -> log "S1 journal lane read error");
+   | Ok other -> failf "S1 journal lane decision=%s" (decision_name other)
+   | Error _ -> fail "S1 journal lane read error");
   (* attempting+pre_effect 노드는 redo, attempting+unknown 노드는 거절. *)
   let redo_identity =
     { Journal.plan_revision = digest "plan-redo"
@@ -359,10 +378,10 @@ let journal_s1 () =
       with
       | Ok Journal.(Redo_node_pre_effect _) ->
         log "S1 attempting+pre_effect decision=Redo_node_pre_effect (re-dispatch safe)"
-      | Ok other -> log "S1 attempting decision=%s (expected Redo)" (decision_name other)
-      | Error _ -> log "S1 attempting read error")
-   | Ok other -> log "S1 fresh pre_effect node decision=%s (expected Redo)" (decision_name other)
-   | Error _ -> log "S1 fresh pre_effect node read error");
+      | Ok other -> failf "S1 attempting decision=%s (expected Redo)" (decision_name other)
+      | Error _ -> failf "S1 attempting read error")
+   | Ok other -> failf "S1 fresh pre_effect node decision=%s (expected Redo)" (decision_name other)
+   | Error _ -> failf "S1 fresh pre_effect node read error");
   let refuse_identity =
     { Journal.plan_revision = digest "plan-refuse"
     ; input_sha = digest "input-refuse"
@@ -388,10 +407,10 @@ let journal_s1 () =
       with
       | Ok Journal.(Refuse_unknown_effect _) ->
         log "S1 attempting+unknown decision=Refuse_unknown_effect (fail-closed)"
-      | Ok other -> log "S1 unknown decision=%s (expected Refuse)" (decision_name other)
-      | Error _ -> log "S1 unknown read error")
-   | Ok other -> log "S1 fresh unknown node decision=%s (expected Redo-then-Refuse)" (decision_name other)
-   | Error _ -> log "S1 fresh unknown node read error")
+      | Ok other -> failf "S1 unknown decision=%s (expected Refuse)" (decision_name other)
+      | Error _ -> failf "S1 unknown read error")
+   | Ok other -> failf "S1 fresh unknown node decision=%s (expected Redo-then-Refuse)" (decision_name other)
+   | Error _ -> failf "S1 fresh unknown node read error")
 ;;
 
 (* journal_s2: 손상 레코드 → 거부, 재작성 없음. *)
@@ -409,8 +428,8 @@ let journal_s2 () =
    | Error (Corrupt_record reason) -> log "S2 corrupt refused: %s" reason
    | Error (Schema_mismatch { found }) -> log "S2 schema refused: %s" found
    | Error (Directory_unreadable path) -> log "S2 unreadable: %s" path
-   | Ok _ -> log "S2 UNEXPECTED read ok");
-  let before = (Unix.stat path).st_size in
+   | Ok _ -> failf "S2 UNEXPECTED read ok");
+  let before = read_bytes path in
   (match
      Journal.begin_node
        ~dir
@@ -424,14 +443,15 @@ let journal_s2 () =
          }
    with
    | Error _ -> log "S2 begin_node refused the corrupt record"
-   | Ok _ -> log "S2 UNEXPECTED begin_node accepted corrupt");
-  let after = (Unix.stat path).st_size in
+   | Ok _ -> failf "S2 UNEXPECTED begin_node accepted corrupt");
+  let after = read_bytes path in
+  if before <> after then fail "corrupt refusal rewrote original bytes";
   log "S2_RESULT size_before=%d size_after=%d rewritten=%b (incomplete preserved=%b)"
-    before after (not (Int.equal before after)) (Int.equal before after)
+    (String.length before) (String.length after) (before <> after) (before = after)
 ;;
 
 (* journal_s3: 효과 직후·정산 기록 전 중단을 readback 으로 1회 확정한다.
-   1차 프로세스(함수 호출 경계)가 search 효과 직후 죽은 상태를 파일로 만들고
+   같은 프로세스의 첫 호출이 search 효과 직후 중단된 상태를 파일로 만들고
    (attempting/unknown 잔여), 재개 쪽이 목적지 readback 으로 효과 존재를
    증명하면 attempting 기록이 settled 로 승격되고 저장 결과로 정산된다 —
    효과는 여전히 1회. prove_effect=false 면 기록이 그대로 남아(조용한
@@ -457,8 +477,8 @@ let journal_s3 () =
        ~identity
    with
    | Ok Journal.(Redo_node_pre_effect _) -> append_marker (effect_file dir) "effect:search"
-   | Ok other -> log "S3 UNEXPECTED begin decision=%s" (decision_name other)
-   | Error _ -> log "S3 UNEXPECTED begin error");
+   | Ok other -> failf "S3 UNEXPECTED begin decision=%s" (decision_name other)
+   | Error _ -> failf "S3 UNEXPECTED begin error");
   let effects_before_readback = count "effect:search" (effect_file dir) in
   (* 2차(재개): 목적지 readback 이 효과 존재를 증명 → settled 승격. *)
   let prove_true () = Some true in
@@ -474,11 +494,13 @@ let journal_s3 () =
   in
   (match promoted with
    | Ok (Some Journal.(Skip_node_settled record)) ->
+     if record.Journal.result_json <> Some stored_result then
+       fail "readback promotion lost the supplied stored result";
      log "S3 readback promoted attempting→settled, result_json_present=%b"
        (Option.is_some record.Journal.result_json)
-   | Ok (Some other) -> log "S3 UNEXPECTED readback decision=%s" (decision_name other)
-   | Ok None -> log "S3 UNEXPECTED readback found nothing"
-   | Error _ -> log "S3 UNEXPECTED readback error");
+   | Ok (Some other) -> failf "S3 UNEXPECTED readback decision=%s" (decision_name other)
+   | Ok None -> failf "S3 UNEXPECTED readback found nothing"
+   | Error _ -> failf "S3 UNEXPECTED readback error");
   (* 승격 뒤 재개 판정: Skip (1회 확정) — 이 노드는 다시 dispatch 되지 않는다. *)
   (match
      Journal.begin_node
@@ -488,10 +510,12 @@ let journal_s3 () =
        ~pre_effect_disposition:Tool_result.Effect_outcome_unknown
        ~identity
    with
-   | Ok Journal.(Skip_node_settled _) ->
+   | Ok Journal.(Skip_node_settled record) ->
+     if record.Journal.result_json <> Some stored_result then
+       fail "post-readback replay lost the stored result";
      log "S3 post-readback decision=Skip_node_settled (single confirmation holds)"
-   | Ok other -> log "S3 UNEXPECTED post-readback decision=%s" (decision_name other)
-   | Error _ -> log "S3 UNEXPECTED post-readback error");
+   | Ok other -> failf "S3 UNEXPECTED post-readback decision=%s" (decision_name other)
+   | Error _ -> failf "S3 UNEXPECTED post-readback error");
   (* 부정 경로: prove_effect 가 증명하지 못하면(Some false/None) 기록은 그대로
      — 다음 재개는 Refuse 로 fail-closed. 별도 dir2 로 긍정 경로의 계수 파일을
      지키고, 효과 흔적도 dir2 쪽에 남긴다. *)
@@ -507,8 +531,12 @@ let journal_s3 () =
        ~identity:identity_neg
    with
    | Ok Journal.(Redo_node_pre_effect _) -> append_marker (effect_file dir2) "effect:search-neg"
-   | Ok other -> log "S3 UNEXPECTED neg begin decision=%s" (decision_name other)
-   | Error _ -> log "S3 UNEXPECTED neg begin error");
+   | Ok other -> failf "S3 UNEXPECTED neg begin decision=%s" (decision_name other)
+   | Error _ -> failf "S3 UNEXPECTED neg begin error");
+  let negative_path = match Journal.record_path ~dir:dir2
+      ~request_id:"req-h2-journal-s3neg" ~node_id:"search" with
+    | Some path -> path | None -> fail "negative fixture path refused" in
+  let negative_before = read_bytes negative_path in
   let prove_false () = Some false in
   (match
      Journal.confirm_effect_via_readback
@@ -530,12 +558,16 @@ let journal_s3 () =
        with
        | Ok Journal.(Refuse_unknown_effect _) ->
          log "S3 unproven effect stays refuse-closed (no silent rewrite)"
-       | Ok other -> log "S3 UNEXPECTED neg decision=%s" (decision_name other)
-       | Error _ -> log "S3 UNEXPECTED neg error")
-   | Ok (Some _) -> log "S3 UNEXPECTED neg promoted"
-   | Error _ -> log "S3 UNEXPECTED neg error");
+       | Ok other -> failf "S3 UNEXPECTED neg decision=%s" (decision_name other)
+       | Error _ -> failf "S3 UNEXPECTED neg error")
+   | Ok (Some _) -> failf "S3 UNEXPECTED neg promoted"
+   | Error _ -> failf "S3 UNEXPECTED neg error");
+  if read_bytes negative_path <> negative_before then
+    fail "unproven readback rewrote the attempting record";
   let lane_s3 = count "effect:search" (effect_file dir) in
   let neg_s3 = count "effect:search-neg" (effect_file dir2) in
+  if lane_s3 <> 1 || neg_s3 <> 1 || effects_before_readback <> 1 then
+    fail "readback replay changed single effect counts";
   log "S3_RESULT pos_effects=%d neg_effects=%d (positive single effect holds=%b, negative isolated=%b)"
     lane_s3 neg_s3
     (Int.equal effects_before_readback lane_s3)
@@ -564,10 +596,13 @@ let journal_s4 () =
        ~identity:base
    with
    | Ok Journal.(Redo_node_pre_effect _) -> append_marker (effect_file dir) "effect:lane"
-   | Ok other -> log "S4 UNEXPECTED begin decision=%s" (decision_name other)
-   | Error _ -> log "S4 UNEXPECTED begin error");
+   | Ok other -> failf "S4 UNEXPECTED begin decision=%s" (decision_name other)
+   | Error _ -> failf "S4 UNEXPECTED begin error");
+  let path = match Journal.record_path ~dir ~request_id ~node_id:"lane" with
+    | Some path -> path | None -> fail "identity fixture path refused" in
+  let before = read_bytes path in
   let check label identity =
-    match
+    (match
       Journal.begin_node
         ~dir
         ~request_id
@@ -584,14 +619,142 @@ let journal_s4 () =
         (String.escaped m.given_plan_revision)
         (String.escaped m.given_input_sha)
         (String.escaped m.given_owner)
-    | Ok other -> log "S4 %s UNEXPECTED decision=%s" label (decision_name other)
-    | Error _ -> log "S4 %s UNEXPECTED error" label
+    | Ok other -> failf "S4 %s UNEXPECTED decision=%s" label (decision_name other)
+    | Error _ -> failf "S4 %s UNEXPECTED error" label);
+    if read_bytes path <> before then fail "attempting identity refusal rewrote proof"
   in
   check "different-plan" { base with plan_revision = digest "plan-4-OTHER" };
   check "different-input" { base with input_sha = digest "input-4-OTHER" };
   check "different-owner" { base with owner = "h2j-owner-b" };
   let effects = count "effect:lane" (effect_file dir) in
+  if effects <> 1 then fail "identity mismatch changed effect count";
   log "S4_RESULT effect_count=%d (no cross-identity reuse=%b)" effects (Int.equal effects 1)
+;;
+
+(* These refusal checks assert both the decision and the original durable bytes. *)
+
+
+let journal_s5 () =
+  stage "s5: settled identity and unreadable records retain their proof";
+  let dir = fresh_dir_s "refusal" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () ->
+    let identity : Journal.identity =
+      {plan_revision="plan-a"; input_sha=digest "input-a"; owner="owner-a"} in
+    let node_id = "settled" in
+    let stored_result = `String "the original result" in
+    (match Journal.settle_node ~dir ~request_id ~node_id ~identity
+        ~effect_disposition:Tool_result.Proven_post_effect ~result_json:stored_result () with
+     | Ok () -> () | Error reason -> fail reason);
+    let path = match Journal.record_path ~dir ~request_id ~node_id with
+      | Some path -> path | None -> fail "fixture path refused" in
+    let original = read_bytes path in
+    let begin_with identity = Journal.begin_node ~dir ~request_id ~node_id ~identity
+        ~pre_effect_disposition:Tool_result.Proven_pre_effect in
+    List.iter (fun changed ->
+      (match begin_with changed with
+       | Ok (Journal.Identity_mismatch _) -> ()
+       | Ok other -> fail ("settled mismatch accepted: " ^ decision_name other)
+       | Error _ -> fail "identity mismatch returned a read error");
+      if read_bytes path <> original then fail "identity refusal rewrote original record")
+      [{identity with plan_revision="plan-b"};
+       {identity with input_sha=digest "input-b"};
+       {identity with owner="owner-b"}];
+    (match begin_with identity with
+     | Ok (Journal.Skip_node_settled record) when record.result_json = Some stored_result -> ()
+     | _ -> fail "matching identity did not reuse the original stored result");
+    if read_bytes path <> original then fail "matching replay rewrote original record";
+    let require_unreadable () = match begin_with identity with
+      | Error (Journal.Directory_unreadable _) -> ()
+      | Error _ -> fail "unreadable record returned the wrong error"
+      | Ok other -> fail ("unreadable record accepted: " ^ decision_name other) in
+    (* Root can bypass mode bits; do not report a chmod denial as tested there. *)
+    if Unix.geteuid () = 0 then log "S5 SKIP chmod denial: requires non-root uid"
+    else begin
+      Unix.chmod path 0o000;
+      Fun.protect ~finally:(fun () -> Unix.chmod path 0o600) require_unreadable;
+      if read_bytes path <> original then fail "read denial overwrote settled proof"
+    end;
+    (* ELOOP is a deterministic non-ENOENT open failure even with privileged uid.
+       Keep the actual record aside and prove the unreadable entry is not replaced. *)
+    let retained = path ^ ".retained" in
+    Unix.rename path retained;
+    Unix.symlink path path;
+    require_unreadable ();
+    if (Unix.lstat path).st_kind <> Unix.S_LNK || Unix.readlink path <> path then
+      fail "unreadable entry was replaced";
+    if read_bytes retained <> original then fail "retained record bytes changed";
+    Unix.unlink path;
+    Unix.rename retained path;
+    (* Actual absence still admits a new pre-effect record. *)
+    match Journal.begin_node ~dir ~request_id ~node_id:"new" ~identity
+        ~pre_effect_disposition:Tool_result.Proven_pre_effect with
+    | Ok (Journal.Redo_node_pre_effect _) -> ()
+    | _ -> fail "absent record no longer admits the first dispatch")
+;;
+
+let journal_s6 () =
+  stage "s6: reject path traversal and foreign records without rewriting";
+  let root = fresh_dir_s "path_identity" in
+  Fun.protect ~finally:(fun () -> remove_tree root) (fun () ->
+    let dir = Filename.concat root "journal" in
+    Unix.mkdir dir 0o755;
+    let identity : Journal.identity =
+      {plan_revision="plan-a"; input_sha=digest "input-a"; owner="owner-a"} in
+    List.iter (fun (request_id, node_id) ->
+      let target = Filename.concat (Filename.concat dir request_id) (node_id ^ ".json") in
+      (match Journal.begin_node ~dir ~request_id ~node_id ~identity
+          ~pre_effect_disposition:Tool_result.Proven_pre_effect with
+       | Error (Journal.Corrupt_record _) -> ()
+       | _ -> fail "dot path component admitted");
+      if Sys.file_exists target then fail "refused path created a record")
+      [".", "node"; "..", "node"; "request", "."; "request", ".."];
+    let node_id = "node" in
+    (match Journal.settle_node ~dir ~request_id ~node_id ~identity
+        ~effect_disposition:Tool_result.Proven_post_effect ~result_json:(`String "stored") () with
+     | Ok () -> () | Error reason -> fail reason);
+    let path = match Journal.record_path ~dir ~request_id ~node_id with
+      | Some path -> path | None -> fail "fixture path refused" in
+    let original = Yojson.Safe.from_string (read_bytes path) in
+    List.iter (fun (field, foreign) ->
+      let json = match original with
+        | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+            key, if key = field then `String foreign else value) fields)
+        | _ -> fail "fixture is not an object" in
+      let channel = open_out_bin path in
+      Fun.protect ~finally:(fun () -> close_out_noerr channel)
+        (fun () -> output_string channel (Yojson.Safe.to_string json));
+      let before = read_bytes path in
+      (match Journal.read_record ~dir ~request_id ~node_id with
+       | Error (Journal.Corrupt_record _) -> ()
+       | _ -> fail "foreign record was read as this node's proof");
+      (match Journal.begin_node ~dir ~request_id ~node_id ~identity
+          ~pre_effect_disposition:Tool_result.Proven_pre_effect with
+       | Error (Journal.Corrupt_record _) -> ()
+       | _ -> fail "foreign record authorized resume");
+      if read_bytes path <> before then fail "foreign record was overwritten")
+      ["request_id", "other-request"; "node_id", "other-node"])
+;;
+
+let journal_s7 () =
+  stage "s7: executor skip returns saved data to the dependent node";
+  let dir = fresh_dir_s "saved_result" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () ->
+    ensure_markers dir;
+    let plan, _, _ = make_plan () in
+    let identity = identity_for ~plan ~input:(`Assoc []) in
+    let data = `Assoc ["profile", `String "saved-profile";
+      "lane", `Null; "endpoint", `Null; "probe", `Null;
+      "last_dispatch", `Null; "operator_action", `Null] in
+    (match Journal.settle_node ~dir ~request_id ~node_id:"lane" ~identity
+        ~effect_disposition:Tool_result.Proven_pre_effect ~result_json:data () with
+     | Ok () -> () | Error reason -> fail reason);
+    let outcome = run_attempt ~dir ~request_id ~crash_marker:None
+        ~crash_flag_file:(Filename.concat dir "unused-crash-flag")
+        ~expected_search_input:(Some (`Assoc ["query", `String "saved-profile"])) in
+    if outcome <> `Completed then fail "saved-result replay did not complete";
+    if count "effect:lane" (effect_file dir) <> 0
+       || count "effect:search" (effect_file dir) <> 1 then
+      fail "saved-result replay dispatched the settled node")
 ;;
 
 let () =
@@ -603,9 +766,15 @@ let () =
     journal_s1 ();
     journal_s2 ();
     journal_s3 ();
-    journal_s4 ()
+    journal_s4 ();
+    journal_s5 ();
+    journal_s6 ();
+    journal_s7 ()
   | "s1" -> journal_s1 ()
   | "s2" -> journal_s2 ()
   | "s3" -> journal_s3 ()
   | "s4" -> journal_s4 ()
+  | "s5" -> journal_s5 ()
+  | "s6" -> journal_s6 ()
+  | "s7" -> journal_s7 ()
   | other -> fail ("unknown scenario: " ^ other)

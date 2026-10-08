@@ -35,7 +35,8 @@ val speak_via_http_tts_to_file
   -> (int, string) result
 
 val transcribe_via_http_stt
-  :  Voice_config.endpoint
+  :  ?deadline:Monotonic_deadline.t
+  -> Voice_config.endpoint
   -> audio_file:string
   -> model:string
   -> (Yojson.Safe.t, string) result
@@ -75,9 +76,14 @@ val speak_via_command_to_file
 
     A file whose first bytes name a container whisper-cli does not read
     (WebM, Ogg Opus, AIFF, MP4) is refused before the command runs, with the
-    container named; so is a file that cannot be read. *)
+    container named; so is a file that cannot be read.
+
+    With [deadline], the command is not started once it has passed
+    ([Error "budget_spent"]) and its process timeout is the configured one
+    capped by the time left. Without it nothing changes. *)
 val transcribe_via_command
-  :  Voice_config.endpoint
+  :  ?deadline:Monotonic_deadline.t
+  -> Voice_config.endpoint
   -> audio_file:string
   -> model:string
   -> (string, string) result

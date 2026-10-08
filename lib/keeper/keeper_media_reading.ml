@@ -33,7 +33,7 @@ let audio_extension media_type =
    trip through a temporary file that is removed whether the call answers or
    not. Cancellation is not caught: [Fun.protect] removes the file and the
    exception continues. *)
-let transcribe_bytes ~media_type ~bytes =
+let transcribe_bytes ~deadline ~media_type ~bytes =
   match Filename.temp_file "keeper-media-" (audio_extension media_type) with
   | exception Sys_error detail -> Error ("temp_file_failed: " ^ detail)
   | path ->
@@ -46,8 +46,13 @@ let transcribe_bytes ~media_type ~bytes =
         with
         | exception Sys_error detail -> Error ("temp_write_failed: " ^ detail)
         | () ->
-          (match Voice_bridge.transcribe_audio ~audio_file:path () with
-           | Error detail -> Error ("stt_failed: " ^ detail)
+          (match Voice_bridge.transcribe_audio ~audio_file:path ~deadline () with
+           | Error detail ->
+             (* A chain stopped by the shared deadline says so in its first
+                word; anything else is an endpoint failure. *)
+             if Monotonic_deadline.passed deadline
+             then Error "budget_spent"
+             else Error ("stt_failed: " ^ detail)
            | Ok json ->
              (match Json_util.get_string json "status", Json_util.get_string json "text" with
               | Some "transcribed", Some text when String.trim text <> "" -> Ok text
@@ -88,7 +93,7 @@ let production_reader ~base_path ~budget_sec ~deadline ~kind ~media_type ~bytes 
   | Audio ->
     if Monotonic_deadline.passed deadline
     then Error "budget_spent"
-    else transcribe_bytes ~media_type ~bytes
+    else transcribe_bytes ~deadline ~media_type ~bytes
   | Document ->
     if String.lowercase_ascii media_type = "application/pdf"
     then extract_pdf ~base_path ~budget_sec ~deadline ~bytes

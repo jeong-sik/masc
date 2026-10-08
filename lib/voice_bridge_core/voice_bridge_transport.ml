@@ -104,6 +104,22 @@ let run_voice_command ~timeout_sec argv =
   | Error refusal -> Error refusal
 ;;
 
+(* The time one STT process may take. Without a [deadline] it is the configured
+   per-call timeout, exactly as before. With one, it is the configured timeout
+   capped by what is left of that shared deadline, so a chain of endpoints
+   cannot start a new budget at each one. *)
+let stt_timeout_sec ?deadline () =
+  let configured = Env_config_runtime.Voice.http_request_timeout_sec in
+  match deadline with
+  | None -> configured
+  | Some deadline -> Float.min configured (Monotonic_deadline.remaining_seconds deadline)
+;;
+
+let stt_deadline_spent = function
+  | Some deadline -> Monotonic_deadline.passed deadline
+  | None -> false
+;;
+
 let command_name = function
   | command :: _ -> command
   | [] -> "the command"
@@ -291,7 +307,7 @@ let leading_bytes ~count path =
    command cannot be asked afterwards: whisper-cli answers a container it does
    not decode with exit 0 and an empty transcript, the same answer silence
    gets. See {!Voice_runtime_overlay.whisper_cli_input}. *)
-let transcribe_via_command endpoint ~audio_file ~model =
+let transcribe_via_command ?deadline endpoint ~audio_file ~model =
   let* request =
     Voice_runtime_overlay.stt_command_for_endpoint endpoint ~audio_file ~model
   in
@@ -312,9 +328,12 @@ let transcribe_via_command endpoint ~audio_file ~model =
               command
               (Voice_runtime_overlay.audio_container_name container)))
   in
+  if stt_deadline_spent deadline
+  then Error "budget_spent"
+  else
   match
     run_voice_command
-      ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+      ~timeout_sec:(stt_timeout_sec ?deadline ())
       request.Voice_runtime_overlay.argv
   with
   | Error refusal -> Error (command_refusal_reason ~command refusal)
@@ -355,7 +374,7 @@ let list_voices_via_command endpoint =
     Error (Printf.sprintf "%s stopped by signal %d" command sig_num)
 ;;
 
-let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
+let run_stt_multipart_request ?deadline (req : Voice_runtime_overlay.stt_request) =
   let header_args =
     List.concat_map
       (fun (key, value) -> [ "-H"; Printf.sprintf "%s: %s" key value ])
@@ -368,14 +387,24 @@ let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
   in
   let field_name, file_path = req.file_field in
   let file_arg = [ "-F"; Printf.sprintf "%s=@%s" field_name file_path ] in
+  (* curl's own cap stays 30 s as before; under a shared deadline it is also
+     capped by what is left, rounded up to a whole second, so curl and the
+     process wrapper agree on the same end. *)
+  let max_time =
+    match deadline with
+    | None -> "30"
+    | Some deadline ->
+      string_of_int
+        (max 1 (int_of_float (Float.ceil (Float.min 30. (Monotonic_deadline.remaining_seconds deadline)))))
+  in
   let argv =
-    [ "curl"; "-sS"; "--fail-with-body"; "--max-time"; "30"; "-X"; "POST"; req.url ]
+    [ "curl"; "-sS"; "--fail-with-body"; "--max-time"; max_time; "-X"; "POST"; req.url ]
     @ header_args
     @ form_args
     @ file_arg
   in
   let status, body =
-    run_voice_status ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec argv
+    run_voice_status ~timeout_sec:(stt_timeout_sec ?deadline ()) argv
   in
   match status with
   | Unix.WEXITED 0 ->
@@ -517,10 +546,13 @@ let list_voices_via_http endpoint =
     ~fetch_page:run_voice_listing_request request
 ;;
 
-let transcribe_via_http_stt endpoint ~audio_file ~model =
-  let* api_key = resolve_api_key endpoint in
-  let* request =
-    Voice_runtime_overlay.stt_request_for_endpoint endpoint ~api_key ~audio_file ~model
-  in
-  run_stt_multipart_request request
+let transcribe_via_http_stt ?deadline endpoint ~audio_file ~model =
+  if stt_deadline_spent deadline
+  then Error "budget_spent"
+  else
+    let* api_key = resolve_api_key endpoint in
+    let* request =
+      Voice_runtime_overlay.stt_request_for_endpoint endpoint ~api_key ~audio_file ~model
+    in
+    run_stt_multipart_request ?deadline request
 ;;

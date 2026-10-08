@@ -228,6 +228,7 @@ val capture_status_of_string : string -> capture_status option
 val transcribe_audio :
   audio_file:string ->
   ?language_code:string ->
+  ?deadline:Monotonic_deadline.t ->
   unit ->
   (Yojson.Safe.t, string) result
 (** Transcribe [audio_file] through the enabled STT endpoint chain.
@@ -236,7 +237,13 @@ val transcribe_audio :
     ([Error "no enabled STT endpoints configured"]), and a config with
     no [stt] section is refused by name before any endpoint is asked.
     If every enabled endpoint fails, the returned error names each
-    attempted endpoint and its failure. *)
+    attempted endpoint and its failure.
+
+    [deadline] is one wall-clock budget for the whole chain. It starts no new
+    clock per endpoint: each call is capped by the time left, an endpoint is
+    not started once the deadline has passed, and a chain stopped that way
+    answers an error beginning [budget_spent]. Without [deadline] behaviour is
+    unchanged. *)
 
 (** {1 Microphone capture thresholds}
 

@@ -34,10 +34,10 @@ val reader_version : string
 
 val production_reader : base_path:string -> budget_sec:float -> reader
 (** Audio goes through {!Voice_bridge.transcribe_audio} (the configured STT
-    endpoint chain) from a temporary file. The STT chain takes no deadline: it
-    is not started once [deadline] has passed, but an STT call already running
-    is bounded only by its own per-endpoint transport timeouts, and the chain
-    can spend several of them. That is an open gap, not a bound.
+    endpoint chain) from a temporary file, with the shared [deadline]: the chain
+    starts no new clock per endpoint, caps each call by the time left, starts no
+    endpoint once the deadline has passed, and a call it stopped is marked
+    [budget_spent].
 
     A PDF goes through {!Verification_pdf_inspection.extract_text} with the
     shared [deadline]; [budget_sec] is only what its budget error reports. Other

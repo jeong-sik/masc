@@ -252,3 +252,19 @@ same `Fs_compat.remove_tree` on release after `extract_text` is factored out.
   curl `--max-time 30`) and can spend several. The audio reader refuses to
   start after the deadline but cannot stop a running STT call at it. H5-S1's
   time bound is therefore not measured.
+
+## Audio STT now takes the shared deadline (leader c-ede6adaa4d64e397022716bb33ce46af)
+`Voice_bridge.transcribe_audio` gained `?deadline` (default: none, behaviour
+unchanged). With it: each endpoint's process timeout is the configured
+`http_request_timeout_sec` capped by the time left (and curl `--max-time` is
+capped to the same remaining seconds, rounded up); no endpoint starts once the
+deadline has passed; an endpoint running at the deadline is ended by the
+process timeout and the chain stops instead of trying the next endpoint with a
+fresh budget. `Keeper_media_reading.production_reader` passes the projection's
+deadline, so the closed gap above is the STT chain's own, now bounded by the
+same clock as the PDF reader.
+Still not measured: a real STT endpoint; the fake-command chain in
+test_voice_runtime_overlay.ml covers a slow first endpoint, a spent deadline
+and unchanged failover without a deadline.
+Unchanged on purpose: the microphone-capture and probe paths do not pass a
+deadline.

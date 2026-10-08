@@ -1244,6 +1244,10 @@ let run_turn
   | Error e ->
     Keeper_agent_result.not_dispatched e
   | Ok s ->
+    let approval_gate = Option.map
+      (fun (gate : Keeper_tool_approval_gate.t) ->
+        { gate with identity_tool_index = s.Keeper_run_tools.identity_tool_index })
+      approval_gate in
     let original_gate_message = user_message in
     let prepared_gate_input = s.Keeper_run_tools.model_message in
     let user_message = prepared_gate_input.text in

@@ -963,7 +963,7 @@ status: reference
   (실행 경로 이름)와 이름이 겹치지만 다른 축이다.
   → [keeper_runtime_failure_route](../../lib/keeper_runtime/keeper_runtime_failure_route.mli)
 
-**Candidate Fault (후보 책임 판정)**
+**Candidate Fault (후보 귀속 판정)**
 : 한 후보(provider·모델·자격 증명·계정을 묶은 바인딩)가 실패했을 때, 그 실패가 이 후보 쪽 일인지 답하는 닫힌 판정(`Candidate_fault.t`). exact 후보 순회(Librarian·`verifier_exact`·HITL
   판정·Board attention)와 Keeper 후보 순회가 같은 오류에 같은 답을 하도록 둘 다 이 판정 하나를
   읽는다(#38913). 값은 셋이다.
@@ -1317,19 +1317,6 @@ status: reference
   선언을 바꾸는 것이지, 그 순서로 이미 도는 turn을 바꾸는 게 아니다.
   → [Runtime.replace_exact_output_lane_slot](../../lib/runtime/runtime.mli) ·
   [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli)
-
-**Client Start-prompt Ceiling (클라이언트 시작 프롬프트 상한)**
-: MASC 가 공식 클라이언트의 첫 턴에 심는 history(시작 프롬프트)의 바이트 상한.
-  넘친 입력을 typed 오류로 알리지 않는 클라이언트에만 있다.
-  Antigravity 는 끝까지 간 실측 2,078,915 바이트와 `2 × max-context` 중 작은
-  값이다. 토큰당 2바이트는 보장이 아니라 어림값이다. agy 는 공개하지 않은
-  저장 한도를 넘으면 세션을 지우고(agy 1.2.6 changelog), 그 아래에서도 스스로
-  대화를 압축한다. Muse Code 는 넘친 입력을 조용히 요약하므로 상한을
-  `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(`Runtime_muse_prompt_capacity`).
-  Claude Code·Codex 는 이 상한이 없다. 넘치면 provider 가 typed overflow 로
-  알리고, keeper 는 이어 보낼 범위를 줄여 다시 보낸다. 운영자가 바이트 수를
-  적는 설정은 없다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다.
-  → [Runtime_client_prompt_ceiling](../../lib/runtime/runtime_client_prompt_ceiling.mli)
 
 **Attempt Dispatch (실제로 보냈는지 여부)**
 : Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,

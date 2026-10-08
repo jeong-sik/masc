@@ -1,7 +1,7 @@
 ---
 rfc: "browser-live-one-connection"
 title: "Let one live connection do a whole browser task"
-status: Draft
+status: Accepted
 created: 2026-10-08
 updated: 2026-10-08
 author: vincent + claude
@@ -259,12 +259,18 @@ B 의 순서:
 5. 받는 쪽 확인: `kidsnote-incoming-dd-manager` 가 실제 Slack 에서 리액션 하나를 달고,
    다시 찍은 화면에서 그 리액션을 확인한다. 이것이 #41594 의 완료 조건이다.
 
-## 7. 운영자가 정할 것
+## 7. 운영자 결정 (2026-10-08)
 
-1. 로그인된 Firefox 를 `--remote-debugging-port` 로 띄우는 것을 평소 운영으로 받아들이는가.
-   받아들이지 않으면 B 도 A 도 리액션 일을 못 한다.
-   가운데 길도 있다. Slack 처럼 Keeper 가 일하는 곳만 로그인한 Firefox 프로필을 따로 두고 그 프로필만 플래그로 띄운다.
-   그 포트로 읽을 수 있는 쿠키가 그 프로필 것으로 줄어든다. 대신 운영자가 그 프로필에 한 번 로그인해야 한다.
-2. BiDi 의 탭 앞으로 가져오기는 창 포커스를 가져간다. 이 동작을 `activate_tab` 으로 허용하는가,
-   다른 이름의 동작으로 두는가, 넣지 않는가.
-3. B 뒤에도 A 가 필요한 일이 떠오르는가. 있으면 그 일을 이 RFC 에 적는다.
+세 가지를 물었고 운영자가 이렇게 정했다.
+
+1. **Firefox 를 `--remote-debugging-port` 로 띄우는 것: 전용 프로필로 한다.**
+   Keeper 가 일하는 곳(Slack 등)만 로그인한 Firefox 프로필을 따로 두고, 그 프로필만 플래그로 띄운다.
+   평소 쓰는 프로필은 플래그 없이 그대로 둔다.
+   그 포트로 읽을 수 있는 쿠키는 전용 프로필 것뿐이다. 운영자가 그 프로필에 한 번 로그인한다.
+   이 프로필에는 확장을 붙이지 않아도 된다. BiDi 연결 하나가 `activate_tab` 을 뺀 모든 일을 한다(§2.1).
+2. **BiDi 의 탭 앞으로 가져오기: 넣지 않는다.**
+   BiDi 연결은 `activate_tab` 을 계속 거절한다. 리액션 흐름에는 필요 없다.
+3. **A(두 연결을 한 쌍으로 묶기): 지금은 하지 않는다.**
+   B 만 진행한다. A 가 꼭 필요한 일이 실제로 나오면 이 RFC 를 다시 연다.
+
+남은 구현은 §5 의 1번이다: 붙이는 명령과 TUI 상태 표시, 그리고 BiDi host 가 서버 재시작에 끝나지 않고 다시 붙는 것(§3.B 의 4).

@@ -792,11 +792,14 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
     message_id = f"keeper-operation-message-{request_id}"
     reply = f"reply-{message}"
     thread_id = f"keeper:{keeper_name}"
+    # These are fresh HTTP events. A fixed epoch would turn a live model
+    # activity timestamp into an invented multi-decade silence in the UI.
+    timestamp = time.time()
     events = [
         {
             "type": "CUSTOM",
             "threadId": "default",
-            "timestamp": 1.0,
+            "timestamp": timestamp,
             "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
             "value": {
                 "operation_id": request_id,
@@ -807,13 +810,13 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
         {
             "type": "RUN_STARTED",
             "threadId": thread_id,
-            "timestamp": 1.0,
+            "timestamp": timestamp,
             "runId": run_id,
         },
         {
             "type": "TEXT_MESSAGE_START",
             "threadId": thread_id,
-            "timestamp": 1.0,
+            "timestamp": timestamp,
             "runId": run_id,
             "messageId": message_id,
             "role": "assistant",
@@ -821,7 +824,7 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
         {
             "type": "TEXT_MESSAGE_CONTENT",
             "threadId": thread_id,
-            "timestamp": 1.0,
+            "timestamp": timestamp,
             "runId": run_id,
             "messageId": message_id,
             "delta": reply,
@@ -829,7 +832,7 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
         {
             "type": "CUSTOM",
             "threadId": thread_id,
-            "timestamp": 1.0,
+            "timestamp": timestamp,
             "runId": run_id,
             "name": "KEEPER_REPLY_DETAILS",
             "value": {
@@ -841,14 +844,14 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
         {
             "type": "TEXT_MESSAGE_END",
             "threadId": thread_id,
-            "timestamp": 1.0,
+            "timestamp": timestamp,
             "runId": run_id,
             "messageId": message_id,
         },
         {
             "type": "RUN_FINISHED",
             "threadId": thread_id,
-            "timestamp": 1.0,
+            "timestamp": timestamp,
             "runId": run_id,
         },
     ]
@@ -1270,6 +1273,88 @@ def resume_atomic_queue(process, master_fd, output) -> None:
     send_and_wait(process, master_fd, output, b"\r", b"Server confirmed queue resume")
 
 
+def observe_atomic_replies(process, master_fd, output, replies: tuple[bytes, ...]) -> None:
+    """Find each short fixture reply in completed, real terminal frames.
+
+    End follows current arrivals; /find QUERY restarts at the newest match,
+    while /find without an argument walks older matches. Search notices can
+    contain the query too, so only an exact alpha speech row counts. These
+    unbatched, single-line replies have distinct request labels; layout does
+    not suppress their speaker as a continuation of the preceding request.
+    Replies need not coexist in one viewport. Server completion is not visibility.
+    """
+    seen: set[bytes] = set()
+    patterns = {reply: re.compile(rb"\xe2\x97\x8f alpha[ \t]+" + re.escape(reply) + rb"[ \t]*$")
+                for reply in replies}
+    # Include the current completed screen, then every new completed frame.
+    # Earlier transient paints are not needed: /find can expose them again.
+    scanned_to = max(0, output.rfind(FRAME_END))
+
+    def observe_frames() -> None:
+        nonlocal scanned_to
+        while (end := output.find(FRAME_END, scanned_to)) >= 0:
+            scanned_to = end + len(FRAME_END)
+            rows = screen_rows(bytes(output[:scanned_to])).values()
+            for reply, pattern in patterns.items():
+                if any(pattern.search(row) for row in rows):
+                    seen.add(reply)
+
+    observe_frames()
+    for reply in replies:
+        # Same per-reply observation budget as the replaced wait_for_output.
+        # No retry count, delay or extra execution time is granted to /find.
+        deadline = time.monotonic() + 10
+
+        def remaining() -> float:
+            value = deadline - time.monotonic()
+            if value <= 0:
+                raise AssertionError(f"reply never appeared as alpha speech: {reply!r}: {bytes(output)!r}")
+            return value
+
+        def gesture(keys: bytes, needle) -> None:
+            read_available(master_fd, output)
+            start = len(output)
+            write_all(master_fd, output, keys)
+            wait_for_output(process, master_fd, output, needle, start=start,
+                            timeout=min(3.0, remaining()))
+            needle_end = end_of_needle(output, needle, start)
+            wait_for_output(process, master_fd, output, FRAME_END, start=needle_end,
+                            timeout=min(3.0, remaining()))
+            observe_frames()
+
+        if reply in seen:
+            continue
+        query = b"/find " + reply
+        # CSI F is the supported End key. The nonempty command makes the
+        # input paint observable even when End was already at the tail.
+        gesture(b"\x1b[F\x15" + query, composer_showing(query))
+        while reply not in seen:
+            gesture(b"\r", composer_showing(b""))
+            if reply in seen:
+                break
+            # Read this search's newest LOCAL result at the live edge. Its
+            # echo is never a reply witness. Keep the draft unsubmitted until
+            # choosing whether to restart or continue the older-match cursor.
+            gesture(b"\x1b[F/find ", composer_showing(b"/find "))
+            if reply in seen:
+                break
+            current = unwrapped(screen_text(bytes(output[:scanned_to])))
+            marker = query + " — ".encode()
+            at = current.rfind(marker)
+            if at < 0:
+                raise AssertionError(f"completed /find result is not visible: {current!r}")
+            result = current[at + len(marker):]
+            exhausted = result.startswith((b"nothing in this conversation", b"no older match;"))
+            if exhausted:
+                gesture(reply, composer_showing(query))
+            # Otherwise the prepared /find draft continues the older cursor.
+            # Do not clear/retype that same draft: a retained frame may then
+            # emit no bytes because neither the viewport nor input changed.
+    # A response may arrive while the next search draft is being painted.
+    # Clear that unsubmitted draft. An already empty composer need not repaint.
+    write_all(master_fd, output, b"\x15")
+
+
 def chat_queue_interaction(fixture: AtomicChatFixture) -> Interaction:
     """Plain Enter admits every message; /queue edits durable pending input."""
     def interact(process, master_fd, _slave_fd, output, _base_path):
@@ -1300,12 +1385,8 @@ def chat_queue_interaction(fixture: AtomicChatFixture) -> Interaction:
             if len(fixture.submitted) != 2 or fixture.operations[0]["operation_id"] != first_id:
                 raise AssertionError("edit submitted a replacement operation instead of retaining its identity")
             fixture.release.set()
-            # Replies stay in their original request blocks. The later /queue
-            # inspections fill the bottom viewport, so inspect older blocks
-            # with the same PageUp gesture an operator uses.
-            os.write(master_fd, b"\x1b[5~" * 5)
-            wait_for_output(process, master_fd, output, b"reply-queued-one-fixed", start=0, timeout=10)
-            wait_for_output(process, master_fd, output, b"reply-queued-two", start=0, timeout=10)
+            observe_atomic_replies(process, master_fd, output,
+                                   (b"reply-queued-one-fixed", b"reply-queued-two"))
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
@@ -1512,20 +1593,8 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
                 raise AssertionError("separate Enter sends shared a request identity")
             if fixture.submitted[1].get("admission_intent") is not None:
                 raise AssertionError("resumed retained input invented fresh Enter authority")
-            # Queue inspections are newer LOCAL rows; neither reply moves
-            # below them when its stream settles. Read the original request
-            # blocks with the same PageUp gesture used by the queue scenario.
-            reply_start = len(output)
-            os.write(master_fd, b"\x1b[5~" * 5)
-            replies = (b"reply-explicit-followup", b"reply-retained-original")
-            for reply in replies:
-                wait_for_output(process, master_fd, output, reply, start=reply_start, timeout=10)
-            reply_end = max(end_of_needle(output, reply, reply_start) for reply in replies)
-            wait_for_output(process, master_fd, output, FRAME_END, start=reply_end, timeout=5)
-            frame_end = output.rfind(FRAME_END) + len(FRAME_END)
-            reply_screen = screen_text(bytes(output[:frame_end]))
-            if not all(reply in reply_screen for reply in replies):
-                raise AssertionError("resumed replies are not visible in their request blocks: " + repr(reply_screen))
+            observe_atomic_replies(process, master_fd, output,
+                                   (b"reply-explicit-followup", b"reply-retained-original"))
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")

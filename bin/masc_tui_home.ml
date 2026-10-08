@@ -237,6 +237,15 @@ let home_initial_reading_ready state selected =
       && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
   | Some Home_agenda | None -> false
 
+let home_notice_lines state =
+  let clean = Masc_tui_ansi.Terminal_text.single_line in
+  (match state.opening_notice with
+   | None -> []
+   | Some notice -> [" " ^ clean notice])
+  @ (match state.home_decision_receipt with
+     | None -> []
+     | Some (_, receipt) -> [" Last decision receipt · " ^ clean receipt])
+
 let home_decision_window state ~budget =
   let decisions = home_decision_rows state in
   let continuation = home_continue_rows state in
@@ -244,7 +253,8 @@ let home_decision_window state ~budget =
   let warning_rows =
     if Option.is_some state.home_selected && Option.is_none selected then 1 else 0
   in
-  let capacity = max 0 (budget - List.length continuation - 2 - warning_rows) in
+  let capacity = max 0 (budget - List.length (home_notice_lines state)
+      - List.length continuation - 2 - warning_rows) in
   let first = max 0 (min state.home_decision_scroll (List.length decisions - capacity)) in
   let first = match List.find_index (fun (action, _) -> Some action = selected) decisions with
     | Some index when index < first -> index

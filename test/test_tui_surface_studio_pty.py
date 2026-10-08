@@ -74,8 +74,7 @@ def run(executable, no_color=False):
         _keyboard_harness.wait_for_output(process,fd,output,b"Health: ",start=0,timeout=10)
         key(b":go Work\r",b"plan-alpha-29424")
         wide=capture("work-wide",36,160,b"Goals")
-        for needle in ("Goals · measured outcomes".encode(),"Tasks · Backlog:".encode(),
-                b"done=15", b"cancelled=16"):
+        for needle in (b"Goals:", b"Backlog:", b"done=15", b"cancelled=16"):
             if needle not in wide:
                 raise AssertionError(f"Work omitted {needle!r}")
         medium=capture("work-medium",24,120,b"plan-alpha-29424")
@@ -128,8 +127,9 @@ def run(executable, no_color=False):
                 if needle not in visible:
                     raise AssertionError(f"40x16 Work hid {needle!r}")
         for heading in ("Goals · measured outcomes".encode(), "Tasks · Backlog:".encode()):
-            if heading in narrow:
-                raise AssertionError("Narrow Work retained wide summary cards")
+            for width, screen in ((160, wide), (120, medium), (80, narrow)):
+                if heading in screen:
+                    raise AssertionError(f"Work retained removed summary cards at {width} columns")
         key(b":go Workspace\r",b"/srv/masc/workspace/masc")
         for name,rows,cols in (("workspace-wide",32,160),("workspace-narrow",24,80)):
             screen=capture(name,rows,cols,b"Keepers: alpha")

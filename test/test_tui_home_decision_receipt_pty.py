@@ -69,8 +69,8 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         held_rows.clear()
         return 200, {"settled": True, "remembered": False}
 
+    fixtures[cards.HELD_PATH] = lambda: (200, {"pending": copy.deepcopy(held_rows)})
     if followed_by_held:
-        fixtures[cards.HELD_PATH] = lambda: (200, {"pending": copy.deepcopy(held_rows)})
         fixtures[held_path] = h.RequestHttpResponse(answer_held)
 
     def interact(process, fd, _slave, output, _base):
@@ -104,6 +104,17 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         assert DEFERRED in visible, visible
         assert b"Confirmed:" not in visible and b"No decision is waiting" not in visible
         cards.assert_selected(output, b"[home-a]")
+        # Fill more than this fixture terminal's rows. The receipt must keep
+        # its own row before the selected decision window is sized.
+        held_rows.extend(cards.held(f"crowded-{index}", "crowded receipt queue")
+                         for index in range(32))
+        h.send_and_wait(process, fd, output, b"r", b"rows ")
+        crowded = cards.frame(process, fd, output, "receipt-before-crowded-window")
+        assert b"rows " in crowded and b"[home-a]" in crowded, crowded
+        assert DEFERRED in crowded, crowded
+        cards.assert_selected(output, b"[home-a]")
+        held_rows.clear()
+        h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 1 need you")
         # Reopen the retained Home identity; navigating cannot replay the POST.
         h.send_and_wait(process, fd, output, b"\r", b"home-receipt-exact-reason")
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")

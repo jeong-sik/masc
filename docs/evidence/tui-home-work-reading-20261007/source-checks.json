@@ -1,0 +1,43 @@
+{
+  "scope": "Source syntax only; no application build or PTY execution",
+  "checks": [
+    {
+      "path": "bin/masc_tui_render.ml",
+      "sha256": "36b2220a3eb65697cd5b3d7580054319aab9baacf0b505899a1de4ae32f468c4",
+      "check": "ocamlc -stop-after parsing -impl bin/masc_tui_render.ml",
+      "result": "PASS"
+    },
+    {
+      "path": "test/tui_keyboard_planning.py",
+      "sha256": "1a525c35e031dc608bb7408c92429ed677fc1f0b02db10f9c251205c68cf6f6e",
+      "check": "Python ast.parse",
+      "result": "PASS"
+    },
+    {
+      "path": "bin/masc_tui_home.ml",
+      "sha256": "474bc09e8f67f218b622d60c4352c43a202aac5abfbbea6b20955bc8d0db1411",
+      "check": "ocamlc -stop-after parsing -impl bin/masc_tui_home.ml",
+      "result": "PASS"
+    },
+    {
+      "path": "bin/masc_tui_home.mli",
+      "sha256": "559ae491cf3ca38add80755e3e6fd6131f5c789ac98037fcec32ff0420281724",
+      "check": "ocamlc -stop-after parsing -intf bin/masc_tui_home.mli",
+      "result": "PASS"
+    },
+    {
+      "path": "test/test_tui_home_decision_receipt_pty.py",
+      "sha256": "febdbe9ab5932b4b98e46ae1ca97870d7e8459fb57df147479fcd076a49ae0c3",
+      "check": "Python ast.parse",
+      "result": "PASS"
+    },
+    {
+      "path": "test/test_tui_surface_studio_pty.py",
+      "sha256": "2b091c43122de7afc175f747ab8e666cbec9fa690dda43b7718509074a0e4734",
+      "check": "Python ast.parse",
+      "result": "PASS"
+    }
+  ],
+  "whitespace": "git diff --check PASS",
+  "refresh_scope": "All listed syntax checks rerun on these file hashes; no native, PTY or previous behavioral evidence rerun."
+}

@@ -934,26 +934,26 @@ let test_private_visibility_crosses_declared_output_graph () = with_fixture (fun
     let stored = view owner |> list "instances" |> List.find (fun row -> text "instance_id" row = id) in
     check string "durable policy retains authoritative Fusion owner through graph" owner
       (stored |> member "visibility" |> text "keeper")) ids;
-  let document caller access = Lane_addon_runtime.read_declaration ~caller ~access ~config
+  let document access = Lane_addon_runtime.read_declaration ~access ~config
     (`Assoc ["source_path",`String source_path]) in
   check bool "owner can read own saved declaration" true
-    (Result.is_ok (document owner (Lane_addon_sources.Keeper owner)));
+    (Result.is_ok (document (Lane_addon_sources.Keeper owner)));
   check bool "foreign declaration read is refused" true
-    (Result.is_error (document "foreign" (Lane_addon_sources.Keeper "foreign")));
+    (Result.is_error (document (Lane_addon_sources.Keeper "foreign")));
   let new_source = Printf.sprintf {|id="keeper-saved"
 run_id="world"
 manifest_path=%S
 [binding]
 sources=%s
 |} package (fusion_source run_id) in
-  let save caller access = Lane_addon_runtime.save_declaration ~caller ~access ~config
+  let save access = Lane_addon_runtime.save_declaration ~access ~config
     (`Assoc ["mode",`String "create";"file_name",`String "keeper-saved.toml";"source_text",`String new_source]) in
-  check bool "unverified attribution cannot save an owned-looking Fusion declaration" true
-    (Result.is_error (save owner Lane_addon_sources.Unauthenticated));
+  check bool "unauthenticated access cannot save an owned-looking Fusion declaration" true
+    (Result.is_error (save Lane_addon_sources.Unauthenticated));
   check bool "foreign Keeper cannot persist a private declaration" true
-    (Result.is_error (save "foreign" (Lane_addon_sources.Keeper "foreign")));
+    (Result.is_error (save (Lane_addon_sources.Keeper "foreign")));
   check bool "actual owner can save the configuration" true
-    (Result.is_ok (save owner (Lane_addon_sources.Keeper owner)));
+    (Result.is_ok (save (Lane_addon_sources.Keeper owner)));
   reconcile config directory;
   let saved = active config "keeper-saved" |> text "instance_id" in
   check bool "operator reconciliation preserves saving Keeper read access" true
@@ -962,34 +962,34 @@ sources=%s
   let saved_path = Filename.concat directory "keeper-saved.toml" in
   write saved_path "id = [";
   reconcile config directory;
-  let saved_document caller access = Lane_addon_runtime.read_declaration ~caller ~access ~config
+  let saved_document access = Lane_addon_runtime.read_declaration ~access ~config
     (`Assoc ["source_path",`String saved_path]) in
-  let broken = saved_document owner (Lane_addon_sources.Keeper owner) in
+  let broken = saved_document (Lane_addon_sources.Keeper owner) in
   let current_revision = Store.digest "id = [" in
   check bool "prior ownership does not disclose unadmitted malformed bytes" true
     (Result.is_error broken);
   check bool "foreign Keeper cannot read malformed private bytes" true
-    (Result.is_error (saved_document "foreign" (Lane_addon_sources.Keeper "foreign")));
-  let repair caller access = Lane_addon_runtime.save_declaration ~caller ~access ~config
+    (Result.is_error (saved_document (Lane_addon_sources.Keeper "foreign")));
+  let repair access = Lane_addon_runtime.save_declaration ~access ~config
     (`Assoc ["mode",`String "save";"file_name",`String "keeper-saved.toml";
       "expected_source_revision",`String current_revision;
       "source_text",`String new_source]) in
   check bool "foreign Keeper cannot repair another owner's malformed declaration" true
-    (Result.is_error (repair "foreign" (Lane_addon_sources.Keeper "foreign")));
+    (Result.is_error (repair (Lane_addon_sources.Keeper "foreign")));
   let unowned_path = Filename.concat directory "unowned.toml" in
   write unowned_path "id = [";
   check bool "malformed file without an applied owner grants no raw read" true
-    (Result.is_error (Lane_addon_runtime.read_declaration ~caller:owner
+    (Result.is_error (Lane_addon_runtime.read_declaration
       ~access:(Lane_addon_sources.Keeper owner) ~config
       (`Assoc ["source_path",`String unowned_path])));
   check bool "malformed file without an applied owner grants no replacement" true
-    (Result.is_error (Lane_addon_runtime.save_declaration ~caller:owner
+    (Result.is_error (Lane_addon_runtime.save_declaration
       ~access:(Lane_addon_sources.Keeper owner) ~config
       (`Assoc ["mode",`String "save";"file_name",`String "unowned.toml";
         "expected_source_revision",`String (Lane_addon_store.digest "id = [");
         "source_text",`String new_source])));
   check bool "applied owner can commit corrected declaration with exact CAS" true
-    (Result.is_ok (repair owner (Lane_addon_sources.Keeper owner)));
+    (Result.is_ok (repair (Lane_addon_sources.Keeper owner)));
   check string "repair wrote the authorized bytes" new_source
     (In_channel.with_open_bin saved_path In_channel.input_all))
 
@@ -1092,7 +1092,7 @@ manifest_path=%S
 [binding]
 sources=%s
 |} package (fusion_source run) in
-    let save ?revision bytes = Lane_addon_runtime.save_declaration ~caller:owner
+    let save ?revision bytes = Lane_addon_runtime.save_declaration
       ~access:(Lane_addon_sources.Keeper owner) ~config (`Assoc ([
         "mode",`String (if Option.is_none revision then "create" else "save");
         "file_name",`String "owned.toml"; "source_text",`String bytes] @
@@ -1100,7 +1100,7 @@ sources=%s
     let require_document = function Ok value -> value | Error error -> fail error.Lane_addon_declaration.message in
     ignore (save (source old_run) |> require_document);
     let path = Filename.concat directory "owned.toml" in
-    let read keeper = Lane_addon_runtime.read_declaration ~caller:keeper
+    let read keeper = Lane_addon_runtime.read_declaration
       ~access:(Lane_addon_sources.Keeper keeper) ~config (`Assoc ["source_path",`String path]) in
     let operator_path = declare directory package "operator-created" (fusion_source old_run) in
     reconcile config directory;
@@ -1132,7 +1132,7 @@ sources=%s
     let malformed = "id = \"unfinished" in
     write operator_path malformed;
     check bool "operator-created malformed replacement is not disclosed to prior owner" true
-      (Result.is_error (Lane_addon_runtime.read_declaration ~caller:owner
+      (Result.is_error (Lane_addon_runtime.read_declaration
         ~access:(Lane_addon_sources.Keeper owner) ~config
         (`Assoc ["source_path",`String operator_path])));
     write path malformed;
@@ -1167,7 +1167,7 @@ let test_pending_document_owner_rejects_replaced_source () =
     let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     unwrap (Lane_addon_document_owner.prepare ~root:store_root ~source_path:path ~keeper:"owner"
       ~prior_revision:None ~proposed_revision:(Store.digest bytes));
-    let read () = Lane_addon_runtime.read_declaration ~caller:"owner"
+    let read () = Lane_addon_runtime.read_declaration
       ~access:(Lane_addon_sources.Keeper "owner") ~config (`Assoc ["source_path",`String path]) in
     check bool "pending admission authorizes only exact proposed bytes" true (Result.is_ok (read ()));
     write path (bytes ^ "\nforeign = true\n");

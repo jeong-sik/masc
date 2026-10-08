@@ -8,9 +8,9 @@ module Runtime = struct
     | None -> Lane_addon_sources.Operator_configuration
     | Some keeper -> Lane_addon_sources.Keeper keeper)
   let read_declaration ?caller ?access ~config args =
-    Lane_addon_runtime.read_declaration ?caller ~access:(fixture_access caller access) ~config args
+    Lane_addon_runtime.read_declaration ~access:(fixture_access caller access) ~config args
   let save_declaration ?caller ?access ~config args =
-    Lane_addon_runtime.save_declaration ?caller ~access:(fixture_access caller access) ~config args
+    Lane_addon_runtime.save_declaration ~access:(fixture_access caller access) ~config args
   let dispatch ?caller ?access ~config ~operation args =
     let access = Option.value ~default:(match caller with
       | None -> Lane_addon_sources.Operator_configuration

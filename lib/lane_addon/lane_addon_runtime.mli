@@ -126,9 +126,9 @@ val inventory : config:Workspace.config -> inventory
     Does not create a manager/store, start workers, reconcile or clean resources.
     [owner_present=false] means no manager has been observed in this process,
     not that there are no retained bindings or declarations. *)
-val read_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
+val read_declaration : ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
-val save_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
+val save_declaration : ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
 (** Declaration reads and writes use the same explicit authority boundary as
     [dispatch]; an omitted [access] grants no private authority. *)

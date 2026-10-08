@@ -5414,7 +5414,6 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
                      Keeper_runtime_failure_route.Terminal_effect_runtime_failure
-                 ; provenance = Keeper_runtime_failure_route.Masc_internal_error
                  ; _
                  } ->
                ()
@@ -5439,7 +5438,6 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
                      Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable
-                 ; provenance = Keeper_runtime_failure_route.Masc_internal_error
                  ; _
                  } ->
                ()
@@ -9059,7 +9057,7 @@ let test_native_filesystem_approval_preserves_producer_boundary () =
       (match Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual with
        | Ok _ -> () | Error detail -> fail detail);
       let invoke name input =
-        (match Masc.Keeper_tool_approval_policy.verdict_for ~composition_plan_index:None
+        (match Masc.Keeper_tool_approval_policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None
            ~tool_name:name ~input with
          | Masc.Keeper_tool_approval_policy.Run _ -> ()
          | Masc.Keeper_tool_approval_policy.Ask _ -> fail "duplicate native approval intercepted filesystem call");

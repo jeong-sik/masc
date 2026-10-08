@@ -14,13 +14,9 @@ type cancel_reason =
   | Cancelled_external
       (** Parent fiber or enclosing switch cancelled the turn without a
           Keeper supervisor stop signal. *)
-  | Cancelled_phase_gate_close
-      (** Phase transition closed an in-flight turn. *)
   | Cancelled_provider_timeout
       (** Underlying provider (CLI subprocess or HTTP) timed out
           past the cooperative-cancel deadline. *)
-  | Cancelled_fleet_shutdown
-      (** Process is exiting; no more turns will be dispatched. *)
   | Cancelled_input_required
       (** Agent paused to request human input (InputRequired). *)
 
@@ -28,10 +24,6 @@ type failure_reason =
   | Failure_runtime_unavailable of {
       base : string;
       resolved : string option;
-    }
-  | Failure_no_capable_provider of {
-      runtime_id : string;
-      detail : string;
     }
   | Failure_provider_error of { kind : string; detail : string }
   | Failure_receipt_lost of {
@@ -77,7 +69,6 @@ type transition_action =
   | StreamComplete
   | FinishTurn
   | ReceiptLost
-  | NoToolCapableProvider
   | ProviderError
   | GenericFail
   | SupervisorRequestsStop

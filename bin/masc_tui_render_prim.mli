@@ -243,6 +243,7 @@ val surface_chrome :
   overflow:overflow ->
   ?frame:chrome_frame ->
   ?status:Masc_tui_footer.status_item list ->
+  ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->
@@ -251,6 +252,8 @@ val surface_chrome :
   hints:string ->
   body:(budget:int -> chrome_body -> unit) ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+(** [sidebar] reserves its width from [cols] and draws beside the body,
+    above the full-width footer. The body must wrap for the remaining width. *)
 
 val connection_badge : Masc_tui_types.state -> string
 
@@ -274,6 +277,11 @@ val count_frame_lines : Buffer.t -> int
     out around a block it has already drawn. A last line with no newline after
     it counts as a row: the terminal draws it, and a footer is written that
     way. *)
+
+val composer_draft_window :
+  Masc_tui_types.state -> cols:int -> prompt:string -> string * int
+(** The sanitized shared-composer text and its cursor column in display cells.
+    Drawing and caret placement use the same horizontally fitted window. *)
 
 val slash_hint_text : restore:string -> string -> string option
 (** What the slash word at the start of a draft is -- the command it names,
@@ -313,7 +321,9 @@ val write_list_sidebar :
     board of a hundred and ninety-eight -- and the row spells the pair the way
     the surface's own header does. A list that is filtered rather than paged
     passes [None]; it is asked of every caller so that a list with nothing
-    more to hold says so. *)
+    more to hold says so. The index has one quiet right separator and keeps
+    the same label columns whether focused or not. A focused selection fills
+    its row; an unfocused selection keeps a caret without claiming focus. *)
 
 val write_list_sidebar_selection :
   Buffer.t ->

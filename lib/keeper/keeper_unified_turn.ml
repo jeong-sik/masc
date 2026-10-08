@@ -527,15 +527,6 @@ let continuation_channel_of_wake = function
 ;;
 
 
-(* The walk dispatches a deferred suffix verbatim and otherwise the lane of
-   the keeper's assignment ([Keeper_turn_driver.run_named]); the
-   briefing is sized over the same list, read through the same function. *)
-let briefing_candidates_for_turn ~deferred_runtime_lane ~assigned_route =
-  match deferred_runtime_lane with
-  | Some hint ->
-    Deferred_candidates (Keeper_turn_driver.deferred_runtime_ids hint)
-  | None -> Lane_of_route assigned_route
-
 let run_keeper_cycle
       ~(before_dispatch_authority : unit -> (unit, string) result)
       ~(execution_path : Keeper_unified_metrics_decision.execution_path)
@@ -896,13 +887,9 @@ let run_keeper_cycle
                      (Keeper_playground_checkouts.scan_error_to_string scan_error);
                    []
                in
-               let context_budget_bytes =
-                 world_state_briefing_budget_bytes
-                   (briefing_candidates_for_turn
-                      ~deferred_runtime_lane
-                      ~assigned_route:(Keeper_meta_contract.runtime_id_of_meta meta))
-               in
-               let render_prompt observation =
+               let recent_work = Keeper_recent_work.collect ~config ~meta in
+               let render_prompt tools observation =
+                 let recent_work = Keeper_recent_work.transmit ~base_path:config.base_path ~tools recent_work in
                  Keeper_unified_prompt.build_prompt
                      ~turn_decision
                      ?previous_turn_stop
@@ -912,25 +899,24 @@ let run_keeper_cycle
                      ~workspace_memory
                      ~lane_updates
                      ~repository_freshness
-                     ?context_budget_bytes
+                     ~recent_work
                      ~observation
                      ()
                in
                let prompt_parts =
-                 Eio_guard.with_named_switch "turn:prompt" (fun () -> render_prompt observation)
+                 Eio_guard.with_named_switch "turn:prompt" (fun () -> render_prompt [] observation)
                in
                let { Keeper_unified_prompt.world_state; user_message } = prompt_parts in
-               let dynamic_context_for_tools = match meta.input_policy, observation.own_recent_actions with
-                 | Keeper_input_policy.Small, Ok turns ->
-                   Some (fun tools ->
-                     if Result.is_error (Keeper_recovery_transmission.require_reader tools)
-                     then world_state
-                     else Domain_pool_ref.submit_io_or_inline (fun () ->
+               let dynamic_context_for_tools = Some (fun tools ->
+                 Domain_pool_ref.submit_io_or_inline (fun () ->
+                   let observation = match meta.input_policy, observation.own_recent_actions with
+                     | Keeper_input_policy.Small, Ok turns ->
                        let own_recent_actions = Keeper_own_recent_actions.externalize_failures
                          ~base_path:config.base_path ~keeper_name:meta.name
                          ~policy:meta.input_policy ~tools turns in
-                       (render_prompt {observation with own_recent_actions=Ok own_recent_actions}).world_state))
-                 | Wide, _ | Small, Error _ -> None in
+                       {observation with own_recent_actions=Ok own_recent_actions}
+                     | Wide, _ | Small, Error _ -> observation in
+                   (render_prompt tools observation).world_state)) in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
                (* Ensure session dir tree for trace artifacts. *)
@@ -972,8 +958,8 @@ let run_keeper_cycle
                  : Keeper_agent_run.turn_prompt
                  =
                  sent_system_prompt_bytes := Some (String.length base_system_prompt);
-                 Keeper_unified_prompt.emit_prompt_metrics
-                   ~meta ~system_prompt:base_system_prompt prompt_parts;
+                 (* Request metrics are emitted by the pre-request hook after
+                    the offered tool surface selects the transmitted context. *)
                  (* The observation frame rides [dynamic_context]: rebuilt fresh
                     every turn and composed into the per-turn system prompt, so
                     it never enters the persisted AGENT_CORE conversation. Persisting

@@ -156,15 +156,9 @@ val init_jsonl : unit -> unit
 val reset_for_test : unit -> unit
 (** Drop the in-memory backend. Test-only. *)
 
-val force_flusher_start_cas_conflicts_for_test : int -> unit
-(** Force the next [n] flusher-start CAS attempts to lose. Test-only. *)
-
 val flusher_started_for_test : unit -> bool
 (** [true] iff the active backend has marked its flusher daemon as started.
-    Test-only. *)
-
-val flusher_start_backoff_delay_for_test : attempt:int -> float
-(** Exponential backoff delay used after a flusher-start CAS loss. Test-only. *)
+    Read-only; test-only. *)
 
 val backend_name : unit -> string
 (** ["jsonl"] when initialised, ["uninitialized"] otherwise. *)
@@ -216,7 +210,12 @@ val update_post :
   unit ->
   (Board.post, Board.board_error) Result.t
 
+val read_post : post_id:string -> (Board.post, Board.board_read_error) Result.t
+(** The post with [post_id], from the in-memory store. A read answers no I/O
+    failure; see {!Board.board_read_error}. *)
+
 val get_post : post_id:string -> (Board.post, Board.board_error) Result.t
+(** {!read_post} as a [board_error] result, for callers that also write. *)
 
 val list_posts_by_run_origin : unit -> Board.post list
 (** Exact run-origin index snapshot, newest publication first. *)
@@ -303,9 +302,17 @@ val add_comment :
   unit ->
   (Board.comment, Board.board_error) Result.t
 
+val read_comments :
+  post_id:string ->
+  (Board.comment list, Board.board_read_error) Result.t
+(** The comments on [post_id], oldest first, from the in-memory store. A post
+    that does not exist answers [Ok []], the same as a post with no comments;
+    use {!read_post} to tell them apart. *)
+
 val get_comments :
   post_id:string ->
   (Board.comment list, Board.board_error) Result.t
+(** {!read_comments} as a [board_error] result. *)
 
 val require_persisted_sources_readable : unit -> (unit, Board.board_error) result
 (** Evidence requires complete post/comment source loads. Ordinary Board reads

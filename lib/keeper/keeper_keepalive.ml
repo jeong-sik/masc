@@ -38,10 +38,8 @@ module StringMap = Set_util.StringMap
 let set_bus bus = Event_bus_slots.set_keeper bus
 (* ── gRPC directive processing ── *)
 
-let keeper_entry_by_identity_opt identity = Keeper_registry_lookup.find_by_name identity
-
-let with_keeper_entry_by_identity ~identity ~on_missing f =
-  match keeper_entry_by_identity_opt identity with
+let with_keeper_entry_by_identity ~base_path ~identity ~on_missing f =
+  match Keeper_registry.get ~base_path identity with
   | Some entry -> f entry
   | None -> on_missing ()
 ;;
@@ -168,8 +166,8 @@ let log_directive_agent_not_in_registry ~agent_name ~action =
   )
 ;;
 
-let set_keeper_paused_state ~agent_name paused =
-  with_keeper_entry_by_identity
+let set_keeper_paused_state ~base_path ~agent_name paused =
+  with_keeper_entry_by_identity ~base_path
     ~identity:agent_name
     ~on_missing:(fun () ->
       let action = if paused then "pause" else "resume" in
@@ -258,8 +256,8 @@ let set_keeper_paused_state ~agent_name paused =
                ~keeper_name:entry.name)))
 ;;
 
-let wakeup_keeper_by_agent_name ~agent_name =
-  with_keeper_entry_by_identity
+let wakeup_keeper_by_agent_name ~base_path ~agent_name =
+  with_keeper_entry_by_identity ~base_path
     ~identity:agent_name
     ~on_missing:(fun () ->
       Otel_metric_store.inc_counter
@@ -270,8 +268,8 @@ let wakeup_keeper_by_agent_name ~agent_name =
     (fun entry -> wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
-let assign_keeper_task_from_directive ~agent_name ~task_id =
-  with_keeper_entry_by_identity
+let assign_keeper_task_from_directive ~base_path ~agent_name ~task_id =
+  with_keeper_entry_by_identity ~base_path
     ~identity:agent_name
     ~on_missing:(fun () ->
       Otel_metric_store.inc_counter
@@ -309,7 +307,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
 
 (** Apply one typed runtime directive. Parsing belongs to the transport
     boundary; this domain path cannot receive an unknown command. *)
-let process_directive ~agent_name directive =
+let process_directive ~base_path ~agent_name directive =
   match directive with
   | Keeper_directive.Pause ->
     Log.Keeper.emit
@@ -317,7 +315,7 @@ let process_directive ~agent_name directive =
       ~category:Log.Directive
       ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "pause" ])
       (Printf.sprintf "directive: pausing keeper %s" agent_name);
-    set_keeper_paused_state ~agent_name true
+    set_keeper_paused_state ~base_path ~agent_name true
   | Keeper_directive.Wakeup ->
     (* Wakeup is only a scheduling signal. It must never clear an operator
        pause: paused-work disposition belongs to the receipt-first
@@ -328,7 +326,7 @@ let process_directive ~agent_name directive =
       ~category:Log.Directive
       ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup" ])
       (Printf.sprintf "directive: waking up %s" agent_name);
-    wakeup_keeper_by_agent_name ~agent_name
+    wakeup_keeper_by_agent_name ~base_path ~agent_name
   | Keeper_directive.Assign_task task_id ->
     let task_id_string = Keeper_id.Task_id.to_string task_id in
     Log.Keeper.emit
@@ -344,7 +342,7 @@ let process_directive ~agent_name directive =
          "directive: server assigned task %s to %s"
          task_id_string
          agent_name);
-    assign_keeper_task_from_directive ~agent_name ~task_id
+    assign_keeper_task_from_directive ~base_path ~agent_name ~task_id
 ;;
 
 (* ── gRPC heartbeat stream ── *)
@@ -1065,13 +1063,6 @@ let rec start_keepalive
            ~rollback:Keeper_keepalive_launch_transaction.Remove_registered
            launch_registered
        with
-       | Error (Keeper_keepalive_launch_transaction.Shutdown_reserved operation_id) ->
-         Log.Keeper.warn
-           "start_keepalive: skipped %s because shutdown operation %s owns admission"
-           m.name
-           (Keeper_shutdown_types.Operation_id.to_string operation_id);
-         Keepalive_registration_rejected
-           (Keeper_registry.Registration_shutdown_reserved operation_id)
        | Error Keeper_keepalive_launch_transaction.Intake_token_not_live ->
          Log.Keeper.error
            "start_keepalive: inactive durable-intake token rejected %s"

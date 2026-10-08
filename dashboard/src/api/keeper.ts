@@ -797,13 +797,12 @@ export async function editQueuedKeeperChatOperation(
   if (operation.state.kind !== 'queued' || !operation.input) {
     throw new Error('Only a queued Keeper chat operation can be edited')
   }
-  const trimmed = message.trim()
-  if (!trimmed) throw new Error('Keeper chat operation message must not be blank')
-  const wire: Record<string, unknown> = { ...operation.input.wire, message: trimmed }
+  if (!message.trim()) throw new Error('Keeper chat operation message must not be blank')
+  const wire: Record<string, unknown> = { ...operation.input.wire, message }
   const rawBlocks = wire.user_blocks
   if (!Array.isArray(rawBlocks)) throw new Error('Keeper chat operation user_blocks are invalid')
   const nonText = rawBlocks.filter(block => !isRecord(block) || block.type !== 'text')
-  wire.user_blocks = [...nonText, { type: 'text', text: trimmed }]
+  wire.user_blocks = [...nonText, { type: 'text', text: message }]
   return mutateQueuedKeeperChatOperation(keeperName, operation.operationId, 'edit', { input: wire })
 }
 

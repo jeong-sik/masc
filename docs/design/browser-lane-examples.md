@@ -184,8 +184,8 @@ BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"
 텍스트나 이미지에서 selector를 추측하지 않는다. `BrowserRead mode=elements`로
 현재 DOM 컨트롤과 selector를 관측하거나 `mode=scene`의 documentId/nodeId를 쓴다.
 좌표 클릭·스크롤은 screenshot의 현재 `viewport`와 정규화된 `point`를 전달하는
-`click_at`·`scroll_at`으로 수행한다. live 클릭은 DOM activation이며 trusted drag는
-automation에서만 지원된다. fill은
+`click_at`·`scroll_at`으로 수행한다. `web_extension` 연결의 클릭은 DOM activation이다.
+trusted `hover_at`·`drag`는 automation과 live의 `webdriver_bidi` 연결이 한다. fill은
 input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는다.
 페이지의 이벤트 핸들러는 동작할 수 있으므로 결과를 다시 읽거나 캡처한다.
 

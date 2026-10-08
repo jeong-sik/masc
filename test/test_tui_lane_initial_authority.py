@@ -44,6 +44,11 @@ def run(executable):
                 process, master, output, b"Librarian", start=0, timeout=3.0
             )
             _keyboard_harness.send_and_wait(process, master, output, b"/Librarian", b"Librarian")
+            # The Librarian detail takes typed text, so q does not arm the exit
+            # while it is open. Esc closes it; q then arms and the harness
+            # confirms.
+            os.write(master, b"\x1b")
+            _keyboard_harness.drain_until_quiet(process, master, output)
             os.write(master, b"q")
         finally:
             health.release.set()

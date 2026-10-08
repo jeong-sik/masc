@@ -59,6 +59,69 @@ let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh) name 
   | Error e -> Alcotest.fail e
 ;;
 
+let test_prompt_metrics_follow_request_tool_projection () =
+  let meta = make_meta "request-tool-projection-metrics" in
+  let system_prompt = "system instructions" in
+  let user_message = "continue the requested review" in
+  let reader = Agent_core.Tool.create ~name:"keeper_artifact_read"
+      ~description:"read saved evidence" ~parameters:[]
+      (fun _ -> Ok { Agent_core.Types.content = ""; content_blocks = None; _meta = None }) in
+  let project tools =
+    match tools with
+    | [] -> "Recent work: unavailable reader"
+    | [_] -> "Recent work: retrievable artifact abc123, next inspect consumer"
+    | _ -> fail "unexpected offered surface"
+  in
+  let world_bytes () = Otel_metric_store_core.get_metric_value
+      Keeper_metrics.(to_string PromptSegmentBytes)
+      ~labels:["keeper",meta.name; "segment","world_state"] () in
+  let instruction_hash () = Otel_metric_store_core.get_metric_value
+      Keeper_metrics.(to_string KeeperTurnInstructionHash)
+      ~labels:["keeper",meta.name] () in
+  let prepare ?(turn_kind = Turn_record.Autonomous) ?(post_tool_round = false)
+      ?(projection = project) tools =
+    Masc.Keeper_run_tools_hooks.prepare_request_dynamic_context
+      ~meta ~turn_kind ~system_prompt ~user_message ~post_tool_round
+      ~dynamic_context:"unprojected placeholder"
+      ~dynamic_context_for_tools:(Some projection) tools in
+  let check_metric text =
+    check (option (float 0.)) "world bytes describe returned request body"
+      (Some (Float.of_int (String.length text))) (world_bytes ());
+    let hex = Digestif.SHA256.(digest_string (system_prompt ^ text ^ user_message) |> to_hex) in
+    let expected = Int32.to_float (Int32.of_string ("0x" ^ String.sub hex 0 8)) in
+    check (option (float 0.)) "instruction hash describes returned request body"
+      (Some expected) (instruction_hash ());
+    List.iter (fun (segment, body) ->
+      check (option (float 0.)) (segment ^ " matches request input")
+        (Some (Float.of_int (String.length body)))
+        (Otel_metric_store_core.get_metric_value
+           Keeper_metrics.(to_string PromptSegmentBytes)
+           ~labels:["keeper",meta.name; "segment",segment] ()))
+      ["system_prompt",system_prompt; "user_message",user_message]
+  in
+  let projected, emit = prepare [reader] in
+  check string "actual offered reader selects evidence" (project [reader]) projected;
+  check bool "projection alone is not a prepared request" true (world_bytes () = None);
+  emit ();
+  check_metric projected;
+  let unavailable, emit = prepare [] in
+  check string "another request uses its own tool surface" (project []) unavailable;
+  emit ();
+  check_metric unavailable;
+  let exception Projection_failed in
+  let fail_projection _ = raise Projection_failed in
+  (match prepare ~projection:fail_projection [reader] with
+   | exception Projection_failed -> ()
+   | _ -> fail "failed projection unexpectedly produced a request");
+  check_metric unavailable;
+  let _, emit = prepare ~post_tool_round:true ~projection:fail_projection [reader] in
+  emit ();
+  check_metric unavailable;
+  let _, emit = prepare ~turn_kind:Turn_record.Direct [reader] in
+  emit ();
+  check_metric unavailable
+;;
+
 (* #23469: relative tool paths anchor at the keeper's playground sandbox
    root, mirroring the file tools' own resolution; absolute paths pass
    through. masc#28582: a pathless call answers [None] — it names no
@@ -681,6 +744,69 @@ let test_failed_tool_observer_releases_next_completion () =
 ;;
 
 
+(* Claude Code, Antigravity and Muse answer MASC tools through an MCP server
+   that can run calls concurrently, so receipts are keyed by call id. A
+   held producer's receipts wait for [release] and keep commit order. *)
+let test_official_receipts_hold_and_key_by_call_id () =
+  let module Receipts = Masc.Keeper_official_client_tool_receipts in
+  let module Join = Masc.Keeper_execution_join in
+  Fun.protect ~finally:Join.For_testing.clear @@ fun () ->
+  Eio_main.run @@ fun _env ->
+  let received = ref [] in
+  let receipts = Receipts.create ~delivery:Receipts.Held_until_released
+      ~notify:(fun ~block_index ~tool_call_id ~execution_id ->
+        received :=
+          Printf.sprintf "%d %s %s" block_index tool_call_id
+            (Ids.Execution_id.to_string execution_id) :: !received) in
+  let hooks = Receipts.hooks receipts Agent_core.Hooks.empty in
+  let invoke hook event = match hook with
+    | Some hook -> ignore (hook event) | None -> fail "receipt hook missing" in
+  let invocation call_id = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:call_id ~turn:1
+      ~completion:Agent_core.Tool_contract.Continue_after_success
+      ~schedule:{planned_index=0; batch_index=0; batch_size=1;
+                 execution_mode=Agent_core.Tool_contract.Serial} in
+  let pre invocation = invoke hooks.pre_tool_use (Agent_core.Hooks.PreToolUse {
+      invocation; tool_name="Read"; input=`Assoc []; accumulated_cost_usd=0. }) in
+  let commit invocation execution_id =
+    Join.record ~invocation ~execution_id;
+    invoke hooks.post_tool_use (Agent_core.Hooks.PostToolUse {
+      invocation; tool_name="Read"; input=`Assoc [];
+      output=Ok {Agent_core.Types.content="ok"; content_blocks=None; _meta=None};
+      result_bytes=2; duration_ms=1. }) in
+  let delivered () = List.rev !received in
+  Receipts.start receipts ~call_id:"call-a" ~block_index:1;
+  Receipts.start receipts ~call_id:"call-b" ~block_index:2;
+  let a = invocation "call-a" and b = invocation "call-b" in
+  pre a;
+  pre b;
+  commit b "exec-b";
+  check (list string) "a held receipt waits for release" [] (delivered ());
+  Receipts.release receipts;
+  check (list string) "release delivers the waiting receipt" ["2 call-b exec-b"] (delivered ());
+  commit a "exec-a";
+  check (list string) "after release a receipt is delivered at commit"
+    ["2 call-b exec-b"; "1 call-a exec-a"] (delivered ());
+  Receipts.release receipts;
+  check int "a second release delivers nothing again" 2 (List.length (delivered ()));
+  check bool "an open call id cannot open a second block" true
+    (match Receipts.start receipts ~call_id:"call-a" ~block_index:3 with
+     | () -> false
+     | exception Failure _ -> true);
+  Receipts.finish receipts ~call_id:"call-a";
+  Receipts.finish receipts ~call_id:"call-b";
+  check bool "a closed call id has no block to close" true
+    (match Receipts.finish receipts ~call_id:"call-a" with
+     | () -> false
+     | exception Failure _ -> true);
+  Receipts.start receipts ~call_id:"call-a" ~block_index:3;
+  let again = invocation "call-a" in
+  pre again;
+  commit again "exec-a2";
+  check (list string) "a reused call id reports its new block"
+    ["2 call-b exec-b"; "1 call-a exec-a"; "3 call-a exec-a2"] (delivered ())
+;;
+
 (* A call refused before the handler runs used to leave only a counter. The
    keeper's own history showed nothing, so it repeated the same malformed call
    every turn. An executed failure must still be written once, not twice:
@@ -688,7 +814,7 @@ let test_failed_tool_observer_releases_next_completion () =
 let test_codex_receipts_reach_live_and_cancelled_history () =
   with_temp_base_path @@ fun base_path ->
   let module Log = Masc.Keeper_tool_call_log in
-  let module Receipts = Masc.Keeper_codex_tool_receipts in
+  let module Receipts = Masc.Keeper_official_client_tool_receipts in
   let module Accum = Masc.Keeper_stream_tool_accum in
   let module Bridge = Masc.Keeper_chat_agent_core_stream_bridge in
   let module Events = Masc.Keeper_chat_events in
@@ -713,7 +839,7 @@ let test_codex_receipts_reach_live_and_cancelled_history () =
       in
       feed (Agent_core.Types.MessageStart { id="codex-turn"; model="fixture"; usage=None });
       let received = ref [] in
-      let receipts = Receipts.create ~notify:(fun ~block_index ~tool_call_id ~execution_id ->
+      let receipts = Receipts.create ~delivery:Receipts.Immediate ~notify:(fun ~block_index ~tool_call_id ~execution_id ->
         let rows = match Log.read_recent ~keeper_name:"codex-receipts" () with
           | Ok rows -> rows | Error (Log.Index_unavailable detail) -> fail detail in
         check bool "receipt only after readable log commit" true
@@ -914,7 +1040,25 @@ let test_the_turn_observation_names_its_keeper_turn () =
    repeated by a response with usage, so no row; a response without usage
    (a host stop) still records the missing usage, under no scope. An
    AGENT_CORE response is one request; without usage its row has no scope
-   either. *)
+   either. Only an AGENT_CORE response is a reading of the turn's spend, so
+   only its row records the observation. *)
+let spend_observation_of_row json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt Masc.Keeper_spend_observation.field fields with
+     | Some `Null -> "none"
+     | Some observation ->
+       (match Masc.Keeper_spend_observation.of_json observation with
+        | Ok (Masc.Keeper_spend_observation.Agent_core_response { usage = Some _; _ }) ->
+          "agent_core_response"
+        | Ok (Masc.Keeper_spend_observation.Agent_core_response { usage = None; _ }) ->
+          "agent_core_response_without_usage"
+        | Ok (Masc.Keeper_spend_observation.Client_report _) -> "client_report"
+        | Error error -> failf "spend observation: %s" error)
+     | None -> fail "the row has no spend observation field")
+  | _ -> fail "a cost row must be an object"
+;;
+
 let test_the_completion_hook_rows_by_attempt () =
   let rows_for ~attempt ~usage =
     with_temp_base_path @@ fun base_path ->
@@ -945,9 +1089,10 @@ let test_the_completion_hook_rows_by_attempt () =
       match Cost_ledger.of_json json with
       | Ok { Cost_ledger.usage_projection = Cost_ledger.Raw_observation scope; usage; _ } ->
         ( Runtime_usage_scope.to_string scope
-        , match usage with
-          | Cost_ledger.Usage_missing -> "missing"
-          | Cost_ledger.Usage_reported _ -> "reported" )
+        , (match usage with
+           | Cost_ledger.Usage_missing -> "missing"
+           | Cost_ledger.Usage_reported _ -> "reported")
+        , spend_observation_of_row json )
       | Ok
           { Cost_ledger.usage_projection =
               Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _
@@ -960,20 +1105,71 @@ let test_the_completion_hook_rows_by_attempt () =
     ; cache_read_input_tokens = 800; cost_usd = None } in
   let client ~reported =
     Some (Masc.Keeper_hooks_agent_core.Client_stream_attempt { reported }) in
-  check (list (pair string string)) "a reported client response is not written again" []
+  let rows = list (triple string string string) in
+  check rows "a reported client response is not written again" []
     (rows_for ~attempt:(client ~reported:true) ~usage:(Some usage));
-  check (list (pair string string)) "a client response without usage after reports"
-    [ "unavailable", "missing" ]
+  check rows "a client response without usage after reports"
+    [ "unavailable", "missing", "none" ]
     (rows_for ~attempt:(client ~reported:true) ~usage:None);
-  check (list (pair string string)) "a client response no report preceded"
-    [ "unavailable", "missing" ]
+  check rows "a client response no report preceded"
+    [ "unavailable", "missing", "none" ]
     (rows_for ~attempt:(client ~reported:false) ~usage:None);
-  check (list (pair string string)) "an AGENT_CORE response is one request"
-    [ "per_request", "reported" ]
+  check rows "an AGENT_CORE response is one request"
+    [ "per_request", "reported", "agent_core_response" ]
     (rows_for ~attempt:(Some Masc.Keeper_hooks_agent_core.Agent_core_attempt) ~usage:(Some usage));
-  check (list (pair string string)) "an AGENT_CORE response without usage has no scope"
-    [ "unavailable", "missing" ]
+  check rows "an AGENT_CORE response without usage has no scope"
+    [ "unavailable", "missing", "agent_core_response_without_usage" ]
     (rows_for ~attempt:(Some Masc.Keeper_hooks_agent_core.Agent_core_attempt) ~usage:None)
+;;
+
+(* An official client's report is the turn's reading of its stream, and its
+   row records the report as it was observed, a replaced count included. *)
+let test_a_client_report_row_records_the_report () =
+  let row_for (report : Masc.Keeper_client_usage_report.t) =
+    with_temp_base_path @@ fun base_path ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    let masc_root =
+      Masc.Workspace.masc_root_dir (Masc.Workspace.default_config base_path) in
+    Masc.Keeper_hooks_agent_core.emit_client_usage_report
+      ~trajectory_acc:
+        (Some
+           (Trajectory.create_accumulator
+              ~masc_root ~keeper_name:"client-keeper" ~trace_id:"client-trace" ()))
+      ~agent_name:"client-keeper" ~trace_id:"client-trace" ~keeper_turn_id:3
+      ~runtime_attempt:("run-1", "codex.fixture", 0)
+      report;
+    match Dated_jsonl.read_recent (Cost_ledger.store_of_masc_root masc_root) 10 with
+    | [ `Assoc fields ] ->
+      (match List.assoc_opt Masc.Keeper_spend_observation.field fields with
+       | Some observation -> observation
+       | None -> fail "the row has no spend observation field")
+    | rows -> failf "expected one row, got %d" (List.length rows)
+  in
+  let report count : Masc.Keeper_client_usage_report.t =
+    { official_turn = 2
+    ; response_id = "turn-2"
+    ; model = "gpt-fixture"
+    ; conversation_id = "thread-1"
+    ; position = Masc.Keeper_usage_resolution.Resumed
+    ; usage_scope = Runtime_usage_scope.Turn_total
+    ; count
+    ; vendor_total_tokens = Some 1200
+    } in
+  let usage : Agent_core.Types.api_usage =
+    { input_tokens = 900; output_tokens = 7; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 800; cost_usd = Some 0.01 } in
+  List.iter
+    (fun (label, report) ->
+       check string label
+         (Yojson.Safe.to_string
+            (Masc.Keeper_spend_observation.to_json
+               (Masc.Keeper_spend_observation.Client_report report)))
+         (Yojson.Safe.to_string (row_for report)))
+    [ "a running count", report (Masc.Keeper_client_usage_report.Running_count usage)
+    ; "a replaced count", report Masc.Keeper_client_usage_report.Count_replaced
+    ]
 ;;
 
 let test_plain_tool_commits_before_hook_returns ~success () =
@@ -1279,7 +1475,7 @@ let test_validation_rejection_notifies_after_exact_log_commit () =
 let test_codex_cancelled_hooks_only_report_committed_rows () =
   with_temp_base_path @@ fun base_path ->
   let module Log = Masc.Keeper_tool_call_log in
-  let module Receipts = Masc.Keeper_codex_tool_receipts in
+  let module Receipts = Masc.Keeper_official_client_tool_receipts in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_execution_join.For_testing.clear ();
@@ -1290,7 +1486,7 @@ let test_codex_cancelled_hooks_only_report_committed_rows () =
       List.iter (fun validation ->
         List.iter (fun commit ->
           let received = ref [] in
-          let receipts = Receipts.create
+          let receipts = Receipts.create ~delivery:Receipts.Immediate
               ~notify:(fun ~block_index:_ ~tool_call_id:_ ~execution_id ->
                 Eio.Fiber.check ();
                 received := execution_id :: !received) in
@@ -1387,12 +1583,13 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
            ()
        in
        let received = ref [] in
-       let receipts = Masc.Keeper_codex_tool_receipts.create
+       let receipts = Masc.Keeper_official_client_tool_receipts.create
+           ~delivery:Masc.Keeper_official_client_tool_receipts.Immediate
            ~notify:(fun ~block_index:_ ~tool_call_id:_ ~execution_id ->
              (* Delivery must survive an already-cancelled hook context. *)
              Eio.Fiber.check ();
              received := execution_id :: !received) in
-       let hooks = Masc.Keeper_codex_tool_receipts.hooks receipts
+       let hooks = Masc.Keeper_official_client_tool_receipts.hooks receipts
            { hooks with pre_tool_use = None } in
        let post_tool_use =
          match hooks.Agent_core.Hooks.post_tool_use with
@@ -1412,7 +1609,7 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
                ; execution_mode = Agent_core.Tool_contract.Serial
                }
          in
-         Masc.Keeper_codex_tool_receipts.start receipts
+         Masc.Keeper_official_client_tool_receipts.start receipts
            ~call_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
            ~block_index:planned_index;
          (match hooks.pre_tool_use with
@@ -1466,7 +1663,7 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
        check (list string) "receipt identifies the durably committed row"
          (List.map Ids.Execution_id.to_string !received)
          (List.map (fun row -> Yojson.Safe.Util.(row |> member "execution_id" |> to_string)) rows);
-       Masc.Keeper_codex_tool_receipts.finish receipts ~call_id:"cancel-observer-0";
+       Masc.Keeper_official_client_tool_receipts.finish receipts ~call_id:"cancel-observer-0";
        (match post_tool_use (event 1) with
         | Agent_core.Hooks.Continue -> ()
         | _ -> fail "later production post-tool hook did not continue");
@@ -1940,6 +2137,10 @@ let () =
     "keeper_run_tools_hooks"
     [ ( "post_tool_round"
       , [ test_case
+            "prompt metrics measure offered-tool projection at request assembly"
+            `Quick
+            test_prompt_metrics_follow_request_tool_projection
+        ; test_case
             "the predicate is positional, not containment"
             `Quick
             test_ends_with_tool_results_is_positional
@@ -2052,7 +2253,9 @@ let () =
       , [ test_case "the turn observation names its keeper turn" `Quick
             test_the_turn_observation_names_its_keeper_turn
         ; test_case "the completion hook rows by attempt" `Quick
-            test_the_completion_hook_rows_by_attempt ] )
+            test_the_completion_hook_rows_by_attempt
+        ; test_case "a client report row records the report" `Quick
+            test_a_client_report_row_records_the_report ] )
     ; ( "rejected_tool_calls"
       , [ test_case "autonomous plain success commits before completion" `Quick
             (test_plain_tool_commits_before_hook_returns ~success:true)
@@ -2128,6 +2331,8 @@ let () =
     ; ( "Codex result delivery"
       , [ test_case "committed tools reach live and cancelled history" `Quick
             test_codex_receipts_reach_live_and_cancelled_history
+        ; test_case "official receipts hold and key by call id" `Quick
+            test_official_receipts_hold_and_key_by_call_id
         ; test_case "interrupted hooks report only committed rows" `Quick
             test_codex_cancelled_hooks_only_report_committed_rows ] )
     ; ( "Skills block"

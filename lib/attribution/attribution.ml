@@ -1,8 +1,8 @@
 (** See [Attribution.mli] for documentation. *)
 
-type origin = Det | NonDet
+type origin = Det
 
-let string_of_origin = function Det -> "det" | NonDet -> "nondet"
+let string_of_origin = function Det -> "det"
 
 type outcome =
   | Passed

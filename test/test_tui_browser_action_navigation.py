@@ -89,7 +89,7 @@ def run(binary):
         return 200, {"ok": True, "data": {"clicked": True}}
 
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {
-        "clients": [{"clientId": client, "browser": "zen"}]}})
+        "clients": [{"clientId": client, "browser": "zen", "transport": "web_extension"}]}})
     for verb, handler in (("read", read), ("scene", scene), ("interact", click)):
         fixtures[f"/api/v1/dashboard/browser-lane/{verb}"] = h.RequestHttpResponse(handler)
 

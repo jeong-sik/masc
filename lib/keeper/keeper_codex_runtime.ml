@@ -342,12 +342,13 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
           record_usage_windows ~quota_scope report
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
-        | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
         | Compaction_observed | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
+    let thinking_indexes = Hashtbl.create 8 in
     let tool_indexes = Hashtbl.create 8 in
     let native_tool_indexes = Hashtbl.create 8 in
     (* Each agentMessage item is one assistant message; a commentary item and
@@ -365,13 +366,24 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
         | Runtime_codex_app_server.Text_delta { item_id; delta } ->
           emit_text
             (Keeper_official_client_text_stream.forward text_stream ~message:item_id delta)
+        | Runtime_codex_app_server.Thinking_delta { item_id; part; delta } ->
+          let key = item_id, part in
+          let index = match Hashtbl.find_opt thinking_indexes key with
+            | Some index -> index
+            | None ->
+                let index = !next_tool_index in
+                incr next_tool_index;
+                Hashtbl.add thinking_indexes key index;
+                index in
+          emit (Agent_core.Types.ContentBlockDelta
+            { index; delta = Agent_core.Types.ThinkingDelta delta })
         | Runtime_codex_app_server.Dynamic_tool_started
             { call_id; tool_name; arguments } ->
           Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
           Option.iter
-            (fun receipts -> Keeper_codex_tool_receipts.start receipts ~call_id ~block_index:index)
+            (fun receipts -> Keeper_official_client_tool_receipts.start receipts ~call_id ~block_index:index)
             receipts;
           Hashtbl.replace tool_indexes call_id index;
           emit
@@ -389,7 +401,7 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
                      (Yojson.Safe.to_string arguments)
                })
         | Runtime_codex_app_server.Dynamic_tool_finished { call_id } ->
-          Option.iter (fun receipts -> Keeper_codex_tool_receipts.finish receipts ~call_id) receipts;
+          Option.iter (fun receipts -> Keeper_official_client_tool_receipts.finish receipts ~call_id) receipts;
           Option.iter
             (fun index ->
                Hashtbl.remove tool_indexes call_id;
@@ -404,11 +416,17 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
             ~raw_trace_run
             ~phase:`Started
             observation;
-          let index = !next_tool_index in
-          incr next_tool_index;
-          Option.iter
-            (fun identity -> Hashtbl.replace native_tool_indexes identity index)
-            observation.identity;
+          let index =
+            match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
+            | Some index -> index
+            | None ->
+                let index = !next_tool_index in
+                incr next_tool_index;
+                Option.iter
+                  (fun identity -> Hashtbl.add native_tool_indexes identity index)
+                  observation.identity;
+                index
+          in
           emit
             (Agent_core.Types.ContentBlockStart
                { index
@@ -761,12 +779,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          "Codex app-server runtime requires the initialized Eio clock")
   | Some env, Some clock ->
     let receipts =
-      Option.map (fun notify -> Keeper_codex_tool_receipts.create ~notify) on_tool_execution
+      Option.map (fun notify -> Keeper_official_client_tool_receipts.create ~delivery:Keeper_official_client_tool_receipts.Immediate ~notify) on_tool_execution
     in
     let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
     let hooks =
       match receipts with
-      | Some receipts -> Keeper_codex_tool_receipts.hooks receipts hooks
+      | Some receipts -> Keeper_official_client_tool_receipts.hooks receipts hooks
       | None -> hooks
     in
     let owner_epoch = Keeper_official_client_session_store.process_epoch () in
@@ -1315,7 +1333,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               | Runtime_codex_app_server.Counted { last = Context_estimate _; _ }
               | Context_window_filled _ -> settled_held_context := []
               | Counted { last = Request_usage _; _ } -> ())
-           | Turn_started _ | Text_delta _ | Dynamic_tool_started _
+           | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _
            | Dynamic_tool_finished _ | Elicitation_cancelled _
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
@@ -1458,7 +1476,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          { Agent_core.Types.id = turn.turn_id
          ; model = turn.model
          ; stop_reason = EndTurn
-         ; content = [ Text turn.text ]
+         ; content = (match turn.text with None -> [] | Some text -> [ Text text ])
          ; usage = spend
          ; telemetry =
              Some

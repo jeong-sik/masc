@@ -101,7 +101,10 @@ val list :
   (invite list, list_error) result
 (** Every current named [Player] credential, expired ones included, by name.
     Surviving UUID/alias data does not revive an invite. Unavailable current
-    storage or an invalid expiry returns [Error], never a fabricated row. *)
+    storage or an invalid expiry returns [Error], never a fabricated row.
+    File inventories run on a system thread when called from Eio. Credential
+    transaction admission stays in the calling fiber so a cancelled request
+    stops waiting for a publisher; current-owner reads run inside that admission. *)
 
 type revoked =
   | Deleted  (** the invite's credential was there and is gone *)

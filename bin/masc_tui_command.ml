@@ -67,6 +67,8 @@ type t =
   | Preset_restore_missing_name
   | Preset_show of string
   | Preset_show_missing_name
+  | Preset_delete of string
+  | Preset_delete_missing_name
   | Unknown of string
 
 (* One list, drawn by /help and kept beside the parser so a new command
@@ -217,9 +219,9 @@ let catalog =
     }
   ; { word = "preset"
     ; aliases = []
-    ; args = "[show <name> | save <name> [description] | restore <name>]"
+    ; args = "[show <name> | save <name> [description] | restore <name> | delete <name>]"
     ; summary = "list prompt presets; show what one holds; save the live state; restore one \
-         (autosaves first)"
+         (autosaves first); delete one, readable or not"
     }
   ; { word = "errors"
     ; aliases = []
@@ -473,6 +475,8 @@ let parse text =
         | "restore", name -> Preset_restore name
         | "show", "" -> Preset_show_missing_name
         | "show", name -> Preset_show name
+        | "delete", "" -> Preset_delete_missing_name
+        | "delete", name -> Preset_delete name
         | verb, _ -> Unknown ("preset " ^ verb))
     | word, _ -> Unknown word
 

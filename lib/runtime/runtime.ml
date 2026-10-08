@@ -849,6 +849,9 @@ type materialized_config =
   ; typesafeai : Runtime_schema.typesafeai
   ; browser : Browser_configuration.t
   ; machines : Machine_configuration.t
+  ; admission_allowances : Llm_provider.Provider_admission.published_allowances
+      (** One agreed allowance per provider account, published to provider
+          admission by [set_loaded]. *)
   }
 
 let degrade_loaded_for_missing_catalog
@@ -1064,6 +1067,22 @@ let materialize_config
   in
   let* () = validate_runtime_context_marks runtimes in
   let* () = validate_muse_prompt_ceilings runtimes in
+  (* Every runtime on one provider account must declare the account's
+     allowance alike: admission keeps one allowance per account. *)
+  let* admission_allowances =
+    Llm_provider.Provider_admission.allowances_of_configs
+      (List.filter_map
+         (fun (runtime : t) ->
+            match runtime.execution with
+            | Runtime_execution.Agent_core config -> Some (runtime.id, config)
+            | Runtime_execution.Codex_app_server _
+            | Runtime_execution.Claude_code _
+            | Runtime_execution.Antigravity_cli _
+            | Runtime_execution.Muse_serve _ -> None)
+         runtimes)
+    |> Result.map_error (fun disagreements ->
+      Admission_allowances_disagree disagreements)
+  in
   (* The AGENT_CORE catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
      Startup callers choose fail-closed [init_default_strict] or server-visible
@@ -1079,6 +1098,7 @@ let materialize_config
     ; typesafeai = cfg.typesafeai
     ; browser = cfg.browser
     ; machines = cfg.machines
+    ; admission_allowances
     }
   in
   Ok (loaded, cfg.exact_output_lane_decls)
@@ -1218,6 +1238,9 @@ let set_loaded
     | Some declared -> declared
     | None -> loaded.media_failover
   in
+  (* Before the runtimes are published, so a request on a new runtime is
+     admitted under the account allowance it was configured with. *)
+  Llm_provider.Provider_admission.publish loaded.admission_allowances;
   publish_loaded_state
     { default_runtime = Some rt
     ; default_route = Some loaded.default_route
@@ -1456,47 +1479,6 @@ let prepare_degraded_loaded ~config_path
     , declared_media_failover )
 ;;
 
-(* Runtimes whose account this process already admits under another
-   allowance, counting only what [runtimes] changes: a runtime the loaded
-   state already ran with the same disagreement is not this change's doing.
-   With nothing admitted yet, as at boot, there is none. *)
-let introduced_admitted_allowance_changes runtimes =
-  let change_of (runtime : t) =
-    match runtime.execution with
-    | Runtime_execution.Agent_core config ->
-      Llm_provider.Provider_admission.admitted_allowance_change ~config
-    | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _
-    | Runtime_execution.Antigravity_cli _
-    | Runtime_execution.Muse_serve _ -> None
-  in
-  let loaded = (Atomic.get loaded_state_ref).runtimes in
-  List.filter_map
-    (fun (runtime : t) ->
-       match change_of runtime with
-       | None -> None
-       | Some change ->
-         let already_loaded =
-           List.exists
-             (fun (previous : t) ->
-                String.equal previous.id runtime.id && change_of previous = Some change)
-             loaded
-         in
-         if already_loaded
-         then None
-         else Some { Runtime_config_error.runtime_id = runtime.id; change })
-    runtimes
-;;
-
-(* The running process keeps an account's first allowance, so publishing a
-   runtime that declares another would make every request on it raise. Every
-   path that publishes into a live process checks this first. *)
-let validate_admitted_allowance_change runtimes =
-  match introduced_admitted_allowance_changes runtimes with
-  | [] -> Ok ()
-  | changes -> Error (Runtime_config_error.Admitted_allowances_changed changes)
-;;
-
 let initialize_degraded_loaded ~config_path parsed =
   let* parsed =
     Result.map_error
@@ -1506,11 +1488,6 @@ let initialize_degraded_loaded ~config_path parsed =
   let* (loaded : materialized_config), exact_output_lane_decls, startup_degradation, declared_media_failover =
     prepare_degraded_loaded ~config_path parsed
     |> Result.map_error (fun msg -> Runtime_config_error msg)
-  in
-  let* () =
-    validate_admitted_allowance_change loaded.runtimes
-    |> Result.map_error (fun failure ->
-      Runtime_config_error (to_diagnostic_text ~config_path failure))
   in
   set_loaded
     ?startup_degradation
@@ -2017,54 +1994,6 @@ let entry_runtime_id_of_route (route : string) : string option =
      (* A lane with no candidates is refused while loading the configuration. *)
      | [] -> None)
   | `Unavailable _ | `Missing -> None
-;;
-
-
-
-(* A lane walks past its head: a candidate that fails is demoted behind its
-   siblings (RFC-0458 §3.4, #36935), so any candidate the walk holds may
-   serve the turn. A request sized for the whole walk therefore fits the
-   smallest ceiling any of those candidates declares, not the entry's alone.
-
-   A candidate without a ceiling ([prompt_capacity_bytes]) has no byte bound
-   in any admission path: Claude Code and the HTTP formats start unbounded and
-   shrink only on the provider's own refusal, and a Muse or Antigravity
-   candidate whose window cannot be resolved fails its own turn with that
-   cause. It adds no bound here, and it does not erase a bound a sibling
-   has.
-
-   An id the loaded catalog does not hold adds no bound either: the walk
-   cannot dispatch it, so it cannot serve the turn. *)
-let smallest_prompt_capacity_bytes (runtimes : t list) candidate_ids =
-  let ceilings =
-    List.filter_map
-      (fun (runtime : t) ->
-         if List.mem runtime.id candidate_ids
-         then prompt_capacity_bytes runtime
-         else None)
-      runtimes
-  in
-  match ceilings with
-  | [] -> None
-  | first :: rest -> Some (List.fold_left min first rest)
-;;
-
-(* One snapshot answers both the lane and its bindings: [validate_lanes]
-   refuses a configuration whose lane names a runtime it does not declare,
-   so every candidate of a lane resolved from [state] is in
-   [state.runtimes]. *)
-let smallest_prompt_capacity_bytes_of_route (route : string) : int option =
-  let state = runtime_state () in
-  match resolve_assignment_in state route with
-  | `Lane lane ->
-    smallest_prompt_capacity_bytes
-      state.runtimes
-      (Runtime_lane.ordered_candidates lane)
-  | `Unavailable _ | `Missing -> None
-;;
-
-let smallest_prompt_capacity_bytes_of_runtime_ids (ids : string list) : int option =
-  smallest_prompt_capacity_bytes (runtime_state ()).runtimes ids
 ;;
 
 let resolve_max_context_of_runtime_id (id : string)
@@ -2592,11 +2521,6 @@ let validate_save_text ~config_path content =
   let* validated = parse_and_validate_config_text ~config_path content in
   let* () =
     validate_exact_slot_body_deadline_change ~config_path ~validated
-    |> Result.map_error (to_diagnostic_text ~config_path)
-  in
-  let* () =
-    let (loaded : materialized_config), _, _, _ = validated in
-    validate_admitted_allowance_change loaded.runtimes
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
   let* () = validate_fusion_change ~config_path content in

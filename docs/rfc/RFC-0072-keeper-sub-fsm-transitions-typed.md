@@ -86,9 +86,9 @@ Out of scope for this RFC: compaction axis (separate audit needed — variants a
 
 ## 4. Design
 
-### 4.1 GADT pattern (precedent: existing `Decision_transition` module)
+### 4.1 GADT pattern
 
-`lib/keeper/keeper_registry.ml` already defines `Decision_transition` GADT enumerating the 9 valid cross-state decision transitions (currently unused in production). The runtime axis mirrors this with **18 valid transitions**:
+The runtime axis enumerates its **18 valid transitions** as GADT constructors:
 
 ```ocaml
 module Runtime_transition = struct
@@ -237,7 +237,7 @@ What ships:
 
 ### 6.1 GADT introduces complexity
 
-GADTs are an advanced OCaml feature. Future maintainers without GADT familiarity may misunderstand the pattern. Mitigation: each GADT module has docstring linking back to this RFC + to `Decision_transition` (precedent module). The 18-pair enumeration is more transparent than the witness-type pattern alone.
+GADTs are an advanced OCaml feature. Future maintainers without GADT familiarity may misunderstand the pattern. Mitigation: each GADT module has docstring linking back to this RFC. The 18-pair enumeration is more transparent than the witness-type pattern alone.
 
 ### 6.2 `resolve_runtime_transition`'s `Error` case at runtime
 
@@ -266,13 +266,11 @@ The audit in §2.4 counted explicit `set_turn_runtime_state` calls. There may be
 
 1. **OQ-1**: Should `Compaction_transition` GADT be added in this RFC or deferred? — Recommendation: defer to amendment after Phase 1-4 lands.
 2. **OQ-2** (resolved by Phase 5): `resolve_*_transition` returns the `*_resolve_outcome` sum; the violation arm carries the `*_transition_spec_violation` variant, and that variant is re-raised on the typed `*_transition_violation` exception. Carrying the TLA+ action name was not needed — the `*_transition_spec_violation` constructor name *is* a stable identifier for the violated pair, and the `Printexc` printer renders it. Escalate only if TLA+ trace integration later wants the action name verbatim.
-3. **OQ-3**: Should the existing `Decision_transition` GADT also be activated (PR-7 of this RFC) for symmetry, or left as standalone documentation? — Recommendation: defer; #14887 already closed the decision axis via input refinement, and GADT activation would force from-state threading without semantic gain.
 
 ## 9. Precedent + references
 
 - **PR #14887** (`fix(keeper_registry): make set_turn_decision_stage's forbidden _to_undecided unrepresentable`) — decision-axis input refinement pattern.
 - **PR #14893** (`refactor(keeper_registry): make validate_decision_transition compile-time enforced`) — decision-axis validator → compile-time fixture pattern.
-- **`Decision_transition` GADT** (lib/keeper/keeper_registry.ml:349) — existing GADT pattern, unused, serves as template for `Runtime_transition` and `Turn_phase_transition`.
 - **RFC-0003** (Keeper Composite Lifecycle Observer) — defines the 4-axis composite FSM.
 - **RFC-0039** (Keeper Turn FSM — Streaming Escape & Cross-Axis Synchronization) — turn_phase axis context.
 - **RFC-0042** (Closed sum type for keeper turn terminal code) — closed-sum enforcement precedent in adjacent surface.

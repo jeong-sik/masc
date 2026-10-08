@@ -126,7 +126,11 @@ readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # 052f50b reverts ocaml-msx #41 (#44): 0x0024 is BIOS ENASLT, not SNSMAT, and
 # serving it as an implicit CALSLT restored ppi_a after every slot switch, so
 # a Sangokushi II warm-boot drew only black from #41 through #43.
-readonly OCAML_MSX_SHA="052f50b4bc57b54632dbd19b33a9acb64ef73072"
+# ab17a2b is the squash merge of ocaml-msx #47. It persists the WD2793
+# drive state in save-state format v3, including in-flight sector reads, so
+# restoring a live disk campaign does not cold-reset the FDC. The core's
+# top-level lib source digest at this pin is cc6489f2ddae4a48596b4879b3c0e368.
+readonly OCAML_MSX_SHA="ab17a2bcd82a3c1cee44121d65e50ccb313e6f22"
 # DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
 # Path-pinned locally for core development; SHA-pinned here for CI.
 # d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and
@@ -160,12 +164,19 @@ readonly OCAML_MSX_SHA="052f50b4bc57b54632dbd19b33a9acb64ef73072"
 # all the time, so the old core wiped that page and a carried-over war came
 # back as one ruler against himself; the all-AI game then never asked for a key
 # again. The snapshot format stays 3, so checkpoints from 1d51834 restore.
+# a7b1ad6 = ocaml-dos #42: INT 33h AX=0x0C keeps the mask (CX) and address
+# (ES:DX) the guest registered, and set_mouse far-calls the handler when an
+# event lands in the mask (AX events, BX buttons, CX/DX position, SI/DI
+# movement, consumed like AX=0x0B). Dos_snapshot moves to format 4 carrying
+# the registration, which refuses format 3: checkpoints written under e570d41
+# are refused on restore, and a game starts fresh (its own save files still
+# load). AX=0x0C returns nothing on the chip, so AX is left alone.
 # Bump Dos_lane.pinned_core_source_digest (lib/dos_lane/dos_lane.ml) with this
 # SHA. test_dos_tools names this file, so the PR that moves the SHA runs it, and
 # it fails with the new digest in its message until the two agree. A build that
 # says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
 # than #32: re-run this script with --install, or vendor the pinned core.
-readonly OCAML_DOS_SHA="e570d41f8e10447b0a188c401a0b687fee8ab9c5"
+readonly OCAML_DOS_SHA="a7b1ad660b2780e6b03c15db0ffbbd68af9eaa36"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

@@ -18,7 +18,17 @@ The server's `workspace/executeCommand` classification remains
 The focused CodeMirror regression [fails on the parent](tests-before.txt) because
 the rendered cursor is `pointer`. On the candidate, the complete LSP client suite
 [passes all 44 tests](tests-after.txt), including the 43 existing tests. Scoped
-ESLint and `git diff --check` passed. No full dashboard build or native build ran.
+ESLint was reported as passing. The earlier `git diff --check` pass claim is
+withdrawn: checking artifact commit `338a11c889` against its parent reports
+`new blank line at EOF` in both `tests-after.txt` and `tests-before.txt`.
+The historical logs are preserved byte-for-byte; their test results do not
+establish a clean whitespace check. No full dashboard build or native build ran.
+
+Reproduce the artifact check:
+
+```sh
+git diff-tree --check 338a11c889^ 338a11c889 -- docs/evidence/2026-10-04-ide-codelens-audit
+```
 
 The [Chromium result](codelens-browser-result.json) and
 [screenshot](codelens-source-fixture.png) come from a real CodeMirror editor with

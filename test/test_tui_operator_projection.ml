@@ -423,6 +423,42 @@ let test_workspace_withdrawal_releases_only_its_owner () =
   check bool "successor completion owns its action" true owned;
   check bool "successor completion releases it" false (Projection.Flow.action_inflight finished)
 
+(* #41763: A recovery confirm-queue read dispatched during initial identity
+   recovery must not supersede a newer full refresh answer that landed first,
+   even though both reads target the same workspace. *)
+let test_recovery_listing_superseded_by_newer_refresh () =
+  let flow = Projection.Flow.initial in
+  let order = Projection.Listing_order.initial in
+  (* Recovery GET A dispatches first *)
+  let order, recovery_ticket = Projection.Listing_order.dispatch order flow in
+  (* Full refresh B dispatches next *)
+  let order, refresh_ticket = Projection.Listing_order.dispatch order flow in
+  (* B arrives first and applies *)
+  let order, admitted_b = Projection.Listing_order.admit order flow refresh_ticket in
+  check bool "newer refresh answer B is accepted" true admitted_b;
+  (* Recovery GET A arrives late; its sequence is older than B's *)
+  let _order, admitted_a = Projection.Listing_order.admit order flow recovery_ticket in
+  check bool "stale recovery answer A arriving after B is rejected" false admitted_a
+
+(* #41763: A recovery confirm-queue read dispatched before an operator action
+   must not supersede the action outcome when arriving after the action commits,
+   preventing already-handled rows from reappearing. *)
+let test_recovery_listing_superseded_by_action () =
+  let order, recovery_ticket =
+    Projection.Listing_order.dispatch Projection.Listing_order.initial
+      Projection.Flow.initial
+  in
+  let flow, generation =
+    match Projection.Flow.begin_action Projection.Flow.initial with
+    | Ok value -> value
+    | Error `Already_inflight -> fail "action must be available"
+  in
+  let closed, owned = Projection.Flow.finish_action flow generation in
+  check bool "action finish owns completion" true owned;
+  let _order, admitted = Projection.Listing_order.admit order closed recovery_ticket in
+  check bool "recovery read dispatched before action is rejected after action commits"
+    false admitted
+
 let () =
   run "tui_operator_projection"
     [ ( "operator approvals"
@@ -448,6 +484,10 @@ let () =
             test_listings_do_not_supersede_each_other
         ; test_case "press supersedes a listing answer" `Quick
             test_listing_order_press_supersedes
+        ; test_case "recovery listing superseded by newer refresh (#41763)" `Quick
+            test_recovery_listing_superseded_by_newer_refresh
+        ; test_case "recovery listing superseded by action (#41763)" `Quick
+            test_recovery_listing_superseded_by_action
         ; test_case "two-key safety gate" `Quick test_two_key_gate
         ; test_case "refresh preserves selected token" `Quick
             test_refresh_preserves_selected_token

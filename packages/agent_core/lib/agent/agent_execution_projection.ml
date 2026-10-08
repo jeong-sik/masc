@@ -18,6 +18,15 @@ module Run_id = Event.Run_id
 module Node_id = Event.Node_id
 module Correlation_id = Event.Correlation_id
 
+type settled_tool_invocation =
+  { invocation : Tool_contract.Invocation.t
+  ; tool_name : string
+  ; input : Yojson.Safe.t
+  ; result : Llm_provider.Types.content_block
+  ; attempt_admitted : bool
+  ; settlement_seq : int
+  }
+
 type output_block_kind =
   | Text_block
   | Thinking_block
@@ -643,6 +652,107 @@ let beginning_cursor t = { scope_id = t.scope_id; seq = 0 }
 let current_cursor t =
   let+ snapshot = refresh t in
   { scope_id = t.scope_id; seq = Durable.last_seq snapshot.durable }
+;;
+
+let settled_tool_invocations t =
+  let* snapshot = refresh t in
+  let invalid detail =
+    Error (Semantic_failure { seq = Durable.last_seq snapshot.durable; detail })
+  in
+  let read id =
+    match Journal.Reducer.find_node snapshot.reducer id with
+    | Some view -> Ok view
+    | None -> invalid "settled invocation descendant disappeared"
+  in
+  let* root = match Journal.Reducer.find_run snapshot.reducer t.locator_run_id with
+    | None -> Error (Locator_not_found t.locator_run_id)
+    | Some view -> Ok (Journal.run_root view.run)
+  in
+  let settlement_sequence (view : Journal.node_view) =
+    let sequences = List.filter_map
+        (fun (update : Event.node_update Journal.event_record) ->
+           match update.value with
+           | Event.Tool_result _ -> Some (Event.seq update.event)
+           | Event.Provider_event _ | Event.Provider_response_snapshot _
+           | Event.Output_delta _ | Event.Output_snapshot _
+           | Event.Tool_input_delta _ | Event.Tool_input_snapshot _
+           | Event.Tool_progress _ -> None)
+        view.updates in
+    match sequences with
+    | [sequence] -> Ok sequence
+    | [] | _ :: _ :: _ -> invalid "settled invocation has no unique result event"
+  in
+  let rec visit records = function
+    | [] -> Ok (List.sort (fun a b -> Int.compare a.settlement_seq b.settlement_seq) records)
+    | (id, turn) :: rest ->
+      Eio.Fiber.yield ();
+      let* view = read id in
+      if not (Event.Run_id.equal (Event.node_run_id view.node) t.locator_run_id)
+      then visit records rest
+      else
+        let children turn =
+          List.map (fun (child : Event.node Journal.event_record) ->
+            Event.node_id child.value, turn) view.children @ rest
+        in
+        match Event.node_kind view.node with
+        | Event.Agent_turn {ordinal} -> visit records (children (Some ordinal))
+        | Event.Agent_run _ | Event.Provider_attempt _ -> visit records (children turn)
+        | Event.Output_block _ | Event.Tool_attempt -> visit records rest
+        | Event.Tool_invocation {tool_name; schedule; completion; _} ->
+          match view.materialized with
+          | Journal.Tool_invocation_state {result=None; _} -> visit records rest
+          | Journal.Tool_invocation_state {input=Some (Llm_provider.Types.ToolUse use);
+                                          result=Some (Llm_provider.Types.ToolResult result as block)} ->
+            let* turn = match turn with
+              | Some turn -> Ok turn
+              | None -> invalid "settled invocation has no owning turn" in
+            let* () = if String.equal use.name tool_name && String.equal use.id result.tool_use_id
+              then Ok () else invalid "settled invocation input and result identities differ" in
+            let* settlement_seq = settlement_sequence view in
+            let attempt_admitted = List.exists
+                (fun (child : Event.node Journal.event_record) ->
+                   match Event.node_kind child.value with
+                   | Event.Tool_attempt -> true
+                   | Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _
+                   | Event.Output_block _ | Event.Tool_invocation _ -> false)
+                view.children in
+            let invocation = Tool_contract.Invocation.create ~tool_use_id:use.id ~turn
+                ~schedule ~completion in
+            visit ({invocation; tool_name; input=use.input; result=block;
+                    attempt_admitted; settlement_seq} :: records) rest
+          | Journal.Tool_invocation_state {input=None; result=Some _}
+          | Journal.Tool_invocation_state
+              {input=Some (Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _
+                          | RedactedThinking _ | ToolResult _ | Image _ | Document _ | Audio _);
+               result=Some _}
+          | Journal.Tool_invocation_state
+              {input=Some (Llm_provider.Types.ToolUse _);
+               result=Some (Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _
+                           | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _)}
+          | Journal.Agent_run_state | Journal.Agent_turn_state
+          | Journal.Provider_attempt_state _ | Journal.Output_block_state _
+          | Journal.Tool_attempt_state ->
+            invalid "settled invocation has invalid canonical input or result"
+  in
+  visit [] [root, None]
+;;
+
+let terminal_recovery t =
+  let* snapshot = refresh t in
+  match Journal.Reducer.find_run snapshot.reducer t.locator_run_id with
+  | None -> Error (Locator_not_found t.locator_run_id)
+  | Some {Journal.status=Running; _} -> Ok None
+  | Some {Journal.status=Finished terminal; run; _} ->
+    let+ recovery = Execution_agent_scope.recovery_evidence_from_tree
+      ~root:(Journal.run_root run)
+      ~read_node:(fun node ->
+        Eio.Fiber.yield ();
+        match Journal.Reducer.find_node snapshot.reducer node with
+        | Some view -> Ok view
+        | None -> Error (Semantic_failure
+            {seq=Durable.last_seq snapshot.durable;
+             detail="terminal execution descendant disappeared"})) in
+    Some (terminal.value, recovery)
 ;;
 
 let cursor_matches scope_id (cursor : cursor) =

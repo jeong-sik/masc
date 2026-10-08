@@ -8,7 +8,6 @@ type fiber_drop_cause =
 type failure_reason =
     Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Stale_termination_storm of { count : int; }
   | Provider_runtime_error of { code : string; detail : string;
       provider_id : string option; http_status : int option;
       runtime_id : string option;
@@ -20,6 +19,5 @@ type failure_reason =
   | Official_client_recovery_required of Keeper_internal_error.official_client_recovery
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string
-  | Turn_overflow_failure
   | Operator_interrupt
 val failure_reason_to_string : failure_reason -> string

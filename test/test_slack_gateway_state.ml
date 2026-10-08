@@ -534,6 +534,17 @@ let test_text_only_message_is_untouched () =
     "unchanged" "just words"
     (S.text_with_files ~text:"just words" ~files:[])
 
+let test_file_caption_keeps_paragraphs () =
+  let text = "    첫 줄\n    둘째 줄  \n\n" in
+  let files =
+    [ { S.if_id = "F1"; if_name = Some "notes.txt"; if_mimetype = None
+      ; if_size = None; if_permalink = None; if_access = None } ]
+  in
+  check string "caption and file boundary" (text ^ "\n[file] notes.txt")
+    (S.text_with_files ~text ~files);
+  check string "whitespace-only caption stays absent" "[file] notes.txt"
+    (S.text_with_files ~text:" \n\t " ~files)
+
 let test_parse_envelope_events_api_missing_payload_rejected () =
   let json = `Assoc [ ("type", `String "events_api") ] in
   match S.parse_envelope ~bot_user_id:None json with
@@ -680,6 +691,8 @@ let () =
             test_withheld_file_says_it_is_withheld
         ; test_case "text-only message is untouched" `Quick
             test_text_only_message_is_untouched
+        ; test_case "file caption keeps whitespace and paragraphs" `Quick
+            test_file_caption_keeps_paragraphs
         ; test_case "decode message missing fields errors" `Quick
             test_decode_event_message_missing_fields
         ; test_case "decode reaction_added" `Quick

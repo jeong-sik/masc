@@ -101,6 +101,46 @@ let base_observation : WO.world_observation =
     own_recent_actions = Ok [];
   }
 
+let test_quiet_permission_preserves_incoming_work () =
+  let module Speaker = Masc.Keeper_input_speaker in
+  let wake = Speaker.Host_prompt (Autonomous_wake {answered_asks=[]}) in
+  let permits ?(speaker=wake) ?hitl observation =
+    Masc.Keeper_agent_run.For_testing.response_policy_for_turn
+      ~turn_kind:Turn_record.Autonomous ~input_speaker:speaker
+      ~world_observation:observation ~hitl_resolution:hitl
+    = Keeper_tooling.Response.Allow_quiet_final in
+  let channel = match Keeper_continuation_channel.dashboard ~thread_id:"fresh-input" with
+    | Ok channel -> channel | Error detail -> fail detail in
+  let schedule : Keeper_event_queue.scheduled_wake =
+    {occurrence_id="occurrence"; schedule_instance_id="instance"; schedule_id="schedule";
+     due_at=1.; payload_digest="digest"; title=None;
+     message="Continue the authorized work; no unchanged waiting report."; result_delivery=None} in
+  let event event_kind : WO.pending_board_event =
+    {event_kind; post_id="event"; author="operator"; title="work"; preview="new input";
+     hearth=None; post_kind=Masc.Board.System_post; updated_at=1.; explicit_mention=true;
+     matched_targets=[]; replies_after_own_comment=None;
+     latest_external_author=None; latest_external_preview=None} in
+  let with_event kind = Some {base_observation with pending_board_events=[event kind]} in
+  check bool "periodic no-input wake permits model-selected quiet" true
+    (permits (Some base_observation));
+  check bool "unavailable observation cannot prove no incoming work" false (permits None);
+  check bool "schedule without delivery still lets the model choose useful work or quiet" true
+    (permits (with_event (WO.Schedule_due schedule)));
+  check bool "scheduled result delivery remains a reply obligation" false
+    (permits (with_event (WO.Schedule_due {schedule with result_delivery=Some channel})));
+  check bool "new board activity must be processed" false
+    (permits (with_event WO.Board_post_created));
+  check bool "new Keeper message must be processed" false
+    (permits (Some {base_observation with pending_messages=
+      [{message_id="fresh"; speaker="other-keeper"; content="Please review the PR."; kind=Scope}]}));
+  check bool "an answered Ask must be processed" false
+    (permits ~speaker:(Speaker.Host_prompt (Autonomous_wake {answered_asks=[Owner]}))
+      (Some base_observation));
+  check bool "a Gate answer must be processed" false
+    (permits ~hitl:{Keeper_event_queue.approval_id="approval"; decision=Hitl_approved; channel}
+      (Some base_observation))
+;;
+
 let meta_of_json json =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok m -> m
@@ -376,15 +416,10 @@ let test_no_digest_without_failures () =
 
 (* --- 1. Current Task layer --- *)
 
-let test_small_failed_payloads_remain_retrievable () =
+let artifact_reader ~base_path =
   let open Masc in
-  let module Actions = Masc.Keeper_own_recent_actions in
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs env#fs;
-  let base_path = Filename.temp_dir "small-action-payloads-" "" in
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
   let schema = Masc.Keeper_runtime_schemas_toml.artifact_read in
-  let reader = Tool_bridge.agent_core_tool_of_masc_with_execution_env
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~base_path
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
@@ -396,7 +431,17 @@ let test_small_failed_payloads_remain_retrievable () =
           ~start_time:(Tool_timing.start ()) ?data:execution.data ()
       | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name
           ~class_ ~start_time:(Tool_timing.start ()) execution.raw_output
-      | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred") in
+      | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred")
+;;
+
+let test_small_failed_payloads_remain_retrievable () =
+  let open Masc in
+  let module Actions = Masc.Keeper_own_recent_actions in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  let base_path = Filename.temp_dir "small-action-payloads-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let reader = artifact_reader ~base_path in
   let payload = "{\"patch\":\"" ^ String.make 32000 'x' ^ "\"}" in
   let detail = "Patch rejected: " ^ String.make 16000 'd' in
   let failed = call ~tool:"Edit" ~input:payload ~outcome:(Actions.Failed_call (Some detail)) in
@@ -768,6 +813,39 @@ let test_direct_turn_discovers_published_workspace_memory () =
     check bool "unavailable direct reply does not reuse a stale read target" false
       (contains ~needle:ledger_sha256 unavailable))
 
+let test_workspace_memory_observation_distinguishes_briefing_states () =
+  let module Ledger = Masc.Workspace_memory_ledger in
+  let module Briefing = Masc.Workspace_memory_briefing in
+  let text = "Board claims require checking the original source before acting." in
+  let summary : Briefing.summary = { source_ids = ["c1"]; text } in
+  let render briefing =
+    Prompt.format_workspace_memory_observation
+      (Ledger.Available
+         { ledger_sha256 = "briefing-sha"; claim_count = 1; conflict_count = 0;
+           classified_count = 1; briefing })
+    |> Option.get in
+  let current = render (Ok (Briefing.Current summary)) in
+  check bool "current semantic briefing is delivered" true (contains ~needle:text current);
+  check bool "current status is explicit" true (contains ~needle:"current for" current);
+  let stale = render (Ok (Briefing.Stale summary)) in
+  check bool "stale summary remains available as prior context" true (contains ~needle:text stale);
+  check bool "stale status names the previous publication" true
+    (contains ~needle:"last completed version" stale);
+  check bool "stale summary is not presented as current" false
+    (contains ~needle:"current for" stale);
+  let pending = render (Ok Briefing.Missing) in
+  check bool "not yet published is explicit" true
+    (contains ~needle:"has not published" pending);
+  let unavailable = render (Error "briefing storage read failed") in
+  check bool "failed summary read is explicit" true
+    (contains ~needle:"could not be read" unavailable);
+  List.iter (fun rendered ->
+    check bool "missing or unreadable summaries do not invent text" false
+      (contains ~needle:text rendered);
+    check bool "readable ledger remains available without a briefing" true
+      (contains ~needle:"briefing-sha" rendered
+       && contains ~needle:"keeper_workspace_memory_read" rendered)) [pending; unavailable]
+
 let test_open_goal_store_keeps_one_stable_safety_contract () =
   let meta_with_goal =
     meta_of_json
@@ -1068,6 +1146,83 @@ let test_task_identities_are_parsed_once_per_backlog_list () =
   | Ok identities -> check int "and answers for that list" 1 (List.length identities)
   | Error reason -> fail reason
 
+let test_autonomous_turn_recovers_task_free_work_from_history () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_dir "autonomous-work-context-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let config = Masc.Workspace.default_config base_path in
+    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    let session = Masc.Keeper_context_core.create_session ~session_id:trace_id
+      ~base_dir:(Masc.Keeper_fs.session_store_path config) in
+    let turn n = Ids.Turn_ref.make ~trace_id ~absolute_turn:n in
+    let persist n source role text metadata =
+      Masc.Keeper_context_core_history.persist_message ~keeper_name:meta.name
+        ~turn_ref:(turn n) ~source session
+        {Agent_core.Types.role; content=[Text text]; name=None; tool_call_id=None; metadata} in
+    let attribution = Masc.Keeper_input_speaker.metadata
+        (Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner) in
+    persist 1 "direct_user" User "Review PR-ongoing through verdict" attribution;
+    persist 1 "direct_assistant" Assistant "Read producer; consumer remains" [];
+    persist 2 "internal_assistant" Assistant "Consumer inspected; publish pending verdict next" [];
+    let source = Masc.Keeper_recent_work.collect ~config ~meta in
+    let tools = [artifact_reader ~base_path] in
+    let project ?(tools=tools) ?(base_path=base_path) source =
+      Masc.Keeper_recent_work.transmit ~base_path ~tools source in
+    let read_evidence = function
+      | Masc.Keeper_recent_work.Evidence text ->
+        (match Tool_output.decode_from_agent_core text with
+         | Tool_output.Decoded reference ->
+           let result = Masc.Keeper_artifact_read.handle ~base_path
+             ~args:(`Assoc ["sha256",`String reference.sha256; "offset",`Int 0;
+                           "max_bytes",`Int Masc.Keeper_artifact_read.maximum_max_bytes]) in
+           (match result.disposition,result.data with
+            | Tool_result.Completed (),Some json -> Yojson.Safe.Util.(json |> member "content" |> to_string)
+            | _ -> fail "the offered artifact reader could not recover recent work")
+         | Tool_output.Not_marker -> text
+         | Tool_output.Invalid_marker _ -> fail "invalid work artifact")
+      | Absent | Preview _ | Unavailable _ -> fail "work evidence missing" in
+    let recent_work = project source in
+    let evidence = read_evidence recent_work in
+    let decision = WO.keeper_cycle_decision
+        ~event_queue_triggers:[WO.Bootstrap_stimulus] ~meta base_observation in
+    let prompt = Prompt.build_prompt ~turn_decision:decision
+        ~current_task:Inputs.No_current_task ~recent_work ~observation:base_observation () in
+    List.iter (fun text -> check bool ("history recovered: " ^ text) true
+        (contains ~needle:text evidence))
+      ["Review PR-ongoing through verdict"; "Read producer; consumer remains";
+       "Consumer inspected; publish pending verdict next"; Ids.Turn_ref.to_string (turn 2)];
+    check bool "host attribution remains off provider and artifact" false
+      (contains ~needle:Agent_core.Types.Input_speaker.key (prompt.world_state ^ evidence));
+    let preview = Prompt.build_prompt_preview ~current_task:Inputs.No_current_task
+        ~recent_work ~observation:base_observation () in
+    (match recent_work with Evidence text ->
+      check bool "actual prompt carries the retrievable excerpt" true (contains ~needle:text prompt.world_state);
+      check bool "preview renderer preserves transmission" true (contains ~needle:text preview.world_state)
+     | _ -> fail "fixture has no excerpt");
+    let unavailable = { source with Masc.Keeper_recent_work.autonomous_reply=Error "history unreadable" } in
+    let degraded = read_evidence (project unavailable) in
+    check bool "read failure remains visible" true (contains ~needle:"history unreadable" degraded);
+    check bool "other source survives failure" true
+      (contains ~needle:"Review PR-ongoing through verdict" degraded);
+    let large_text = String.make 8000 'x' ^ " resume the remaining review" in
+    persist 3 "direct_user" User large_text attribution;
+    let large = Masc.Keeper_recent_work.collect ~config ~meta in
+    let transmitted = project large in
+    check bool "large request remains retrievable" true (contains ~needle:large_text (read_evidence transmitted));
+    (match transmitted with Evidence text ->
+       check bool "raw large body is not pinned" false (contains ~needle:large_text text);
+       check bool "reference is smaller than original" true (String.length text < String.length large_text)
+     | _ -> fail "large request did not produce a reference");
+    (match project ~tools:[] large with Unavailable _ -> () | _ -> fail "missing reader admitted large pinned text");
+    let blocked = Filename.concat base_path "blocked-blob-root" in
+    Out_channel.with_open_bin blocked (fun out -> output_string out "not a directory");
+    match project ~base_path:blocked large with
+    | Unavailable _ -> ()
+    | _ -> fail "storage failure admitted large pinned text")
+
+;;
+
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
@@ -1075,6 +1230,8 @@ let () =
     [
       ( "current task layer",
         [
+          test_case "quiet permission preserves incoming work" `Quick
+            test_quiet_permission_preserves_incoming_work;
           test_case "renders id, status, and handoff" `Quick
             test_current_task_section_renders;
           test_case "absent without a held task" `Quick
@@ -1099,9 +1256,13 @@ let () =
             test_direct_turn_carries_held_task_skills;
           test_case "direct reply discovers shared proposal with source uncertainty" `Quick
             test_direct_turn_discovers_published_workspace_memory;
+          test_case "workspace memory distinguishes briefing freshness and availability" `Quick
+            test_workspace_memory_observation_distinguishes_briefing_states;
           test_case "unresolved goal keeps one stable safety contract" `Quick
             test_open_goal_store_keeps_one_stable_safety_contract;
         ] );
+      ( "work continuation", [test_case "task-free work reaches the next autonomous prompt" `Quick
+          test_autonomous_turn_recovers_task_free_work_from_history] );
       ( "threaded turn decision",
         [
           test_case "stimulus decision renders wake reason" `Quick

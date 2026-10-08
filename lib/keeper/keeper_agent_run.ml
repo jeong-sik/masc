@@ -13,6 +13,11 @@ include Keeper_agent_error
 module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
+type native_continuation =
+  { binding : Keeper_direct_native_continuation.binding
+  ; resumed : Keeper_direct_native_continuation.resumed option
+  }
+
 type direct_continuation =
   | Checkpoint_continuation of Keeper_direct_checkpoint_continuation.admission
   | Runtime_continuation of Keeper_direct_runtime_continuation.admission
@@ -27,8 +32,37 @@ let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
 
+let response_policy_for_turn ~turn_kind ~input_speaker
+    ~(world_observation : Keeper_world_observation.world_observation option)
+    ~hitl_resolution =
+  let open Keeper_tooling.Response in
+  match turn_kind, input_speaker, hitl_resolution, world_observation with
+  | Turn_record.Autonomous,
+    Keeper_input_speaker.Host_prompt (Autonomous_wake { answered_asks = [] }),
+    None, Some observation ->
+    (* Only a schedule without an authorized result delivery may end quietly.
+       Its substantive instructions still reach the model; this permits a
+       model-chosen no-update result, not skipping scheduled work. Every other
+       delivered event, unacknowledged message, and Gate/Ask answer keeps the
+       response contract. A pending Ask is not an input here and never disables
+       other work or changes its wake schedule. *)
+    let reminder_only (event : Keeper_world_observation.pending_board_event) =
+      match event.event_kind with
+      | Schedule_due wake -> Option.is_none wake.result_delivery
+      | Board_post_created | Board_post_updated | Board_comment_added _
+      | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
+      | Delegate_completed | Ask_answered_row _ | Composition_completed
+      | External_attention _ | Completion_authority_rejected _
+      | Task_outcome _ | Task_cancelled _ -> false in
+    if observation.pending_messages = []
+       && List.for_all reminder_only observation.pending_board_events
+    then Allow_quiet_final
+    else Require_progress
+  | (Direct | Autonomous), _, _, _ -> Require_progress
+;;
 
 let normalize_response_text_for_finalization
+      ?(response_policy = Keeper_tooling.Response.Require_progress)
       ~runtime_id
       ~initial_messages:_
       ~(run_result : Runtime_agent.run_result)
@@ -50,6 +84,14 @@ let normalize_response_text_for_finalization
   else
     match Keeper_tooling.Response.normalize_response_text ~text ~tool_names () with
   | Ok response_text -> Ok response_text
+  | Error _ when
+      (match run_result.stop_reason with
+       | Runtime_agent.Completed ->
+         Keeper_tooling.Response.is_quiet_final
+           ~policy:response_policy run_result.response
+       | InputRequired _ | Yielded_to_operation_queued _
+       | Yielded_to_durable_stimulus _ | Yielded_after_repeated_tool_call _
+       | Yielded_after_repeated_assistant_text _ -> false) -> Ok ""
   | Error _ ->
     (* Finalization exposes the typed accept-rejected response itself. Tool
        execution history stays in the AGENT_CORE checkpoint; it is not projected into
@@ -757,6 +799,7 @@ module For_testing = struct
     Contract_helpers.progress_keeper_tool_names_for_contract
   let normalize_response_text_for_finalization =
     normalize_response_text_for_finalization
+  let response_policy_for_turn = response_policy_for_turn
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
@@ -839,9 +882,11 @@ let run_turn
       ?on_event
       ?on_tool_stream_observation
       ?on_tool_result_ready
+      ?tool_result_commit_policy
       ?approval_gate
       ?(trajectory_acc : Trajectory.accumulator option)
       ?direct_resume
+      ?native_continuation
       ?official_task_reference
       ?on_gate_evidence_admitted
       ?deferred_runtime_lane
@@ -862,6 +907,15 @@ let run_turn
       ()
   : Keeper_agent_result.turn_settlement
   =
+  let native_binding, native_resume = match native_continuation with
+    | None -> None, None
+    | Some { binding; resumed } -> Some binding, resumed in
+  (* Restore the whole native context before prompt/tool setup closes over
+     it. The same object must reach Core so new load receipts, repetition
+     observations and injector updates are persisted together. *)
+  let shared_context = match native_resume with
+    | Some resumed -> Some (Keeper_direct_native_continuation.restored_context resumed)
+    | None -> shared_context in
   let preview = Some (Keeper_turn_preview.reset ~keeper_name:meta.name
       ~now:(Time_compat.now ())
       ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path
@@ -870,6 +924,8 @@ let run_turn
   (* RFC-0468 §3.2: the speaker of the User message this turn creates. Stamped
      where that message is born and never changed afterwards. *)
   let input_metadata = Keeper_input_speaker.metadata input_speaker in
+  let response_policy = response_policy_for_turn
+      ~turn_kind ~input_speaker ~world_observation ~hitl_resolution in
   let deferred_runtime_lane_ref = ref None in
   let record_produced_checkpoint ~runtime_id ~attempt checkpoint =
     Option.iter (fun callback -> callback ~runtime_id ~attempt checkpoint) on_produced_checkpoint in
@@ -942,7 +998,9 @@ let run_turn
   Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ())
   @@ fun () ->
   let runtime_id_string = runtime_id in
-  let direct_resume_checkpoint = Option.bind direct_resume direct_checkpoint in
+  let direct_resume_checkpoint = match native_resume with
+    | Some resumed -> Some (Keeper_direct_native_continuation.checkpoint resumed)
+    | None -> Option.bind direct_resume direct_checkpoint in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   (* Not a [let*] bind. Result.bind put every later expression -- including the
@@ -1077,7 +1135,8 @@ let run_turn
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
-    match direct_resume, hitl_resolution with
+    if Option.is_some native_resume then Keeper_run_prompt.Skip_already_checkpointed_user_turn
+    else match direct_resume, hitl_resolution with
     | Some _, _ | None, Some _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
     | None, None -> user_turn_record
   in
@@ -1094,7 +1153,9 @@ let run_turn
       ~user_turn_record:prompt_user_turn_record
       ~start_turn_count
   in
-  let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
+  let turn_system_prompt = match native_resume with
+    | Some resumed -> Keeper_direct_native_continuation.system_prompt resumed
+    | None -> prompt_ctx.Keeper_run_prompt.turn_system_prompt in
   let dynamic_context = prompt_ctx.Keeper_run_prompt.dynamic_context in
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
@@ -1140,6 +1201,7 @@ let run_turn
       ?continuation_channel
       ?on_tool_stream_observation
       ?on_tool_result_ready
+      ?tool_result_commit_policy
       ?hitl_resolution
       ?on_gate_deferred
       ?composition_plan_index
@@ -1182,6 +1244,10 @@ let run_turn
   | Error e ->
     Keeper_agent_result.not_dispatched e
   | Ok s ->
+    let approval_gate = Option.map
+      (fun (gate : Keeper_tool_approval_gate.t) ->
+        { gate with identity_tool_index = s.Keeper_run_tools.identity_tool_index })
+      approval_gate in
     let original_gate_message = user_message in
     let prepared_gate_input = s.Keeper_run_tools.model_message in
     let user_message = prepared_gate_input.text in
@@ -1240,10 +1306,12 @@ let run_turn
       Keeper_agent_result.not_dispatched
         (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok admitted_checkpoint ->
-    let admitted_checkpoint = match admitted_checkpoint, direct_resume with
+    let admitted_checkpoint = match native_resume with
+      | Some resumed -> Some (Keeper_direct_native_continuation.checkpoint resumed)
+      | None -> (match admitted_checkpoint, direct_resume with
       | Some checkpoint, _ -> Some checkpoint
       | None, Some admission -> direct_checkpoint admission
-      | None, None -> None in
+      | None, None -> None) in
     let evidence_admission = match on_gate_evidence_admitted, admitted_checkpoint with
       | None, _ -> Ok ()
       | Some callback, Some checkpoint -> callback checkpoint
@@ -1702,16 +1770,25 @@ let run_turn
                 | Error _ as error -> error
          in
          let call_run_named ~raw_trace ~initial_messages () =
+                let dispatch_input ~dispatch = match native_resume with
+                  | Some resumed ->
+                    (* Core's journal owns completion of an interrupted tool
+                       cycle. Do not synthesize results before settled effects
+                       have been replayed into its exact retained checkpoint. *)
+                    let checkpoint = Keeper_direct_native_continuation.checkpoint resumed in
+                    dispatch ~checkpoint:(Some checkpoint) checkpoint.messages
+                  | None -> dispatch_after_provider_transcript_admission
+                      ~messages:initial_messages ~checkpoint:resume_agent_core_checkpoint ~dispatch in
                 (* Keeper does not impose a cumulative turn, time, token, or cost
                    budget. Explicit cancellation and provider/tool progress
                    boundaries settle the lane, while usage remains observational. *)
-                dispatch_after_provider_transcript_admission
-                  ~messages:initial_messages
-                  ~checkpoint:resume_agent_core_checkpoint
+                dispatch_input
                   ~dispatch:(fun ~checkpoint initial_messages ->
                     Keeper_turn_driver.run_named
                       ~input_policy:meta.input_policy
-                      ~runtime_id:runtime_id_string
+                      ~runtime_id:(match native_resume with
+                        | None -> runtime_id_string
+                        | Some _ -> Keeper_meta_contract.runtime_id_of_meta meta)
                       ~base_path:config.base_path
                       ~keeper_name:meta.name
                       ~walk_owner:
@@ -1720,6 +1797,7 @@ let run_turn
                               ~keeper_name:meta.name))
                       ~pre_tool_rejects
                       ~continue_from_checkpoint
+                      ?native_binding
                       ~goal:user_message
                       ?goal_blocks:user_blocks
                       ~goal_metadata:input_metadata
@@ -1749,7 +1827,7 @@ let run_turn
                       ?on_deferred_runtime_consumed
                       ~temperature
                       ~accept:
-                        Keeper_tooling.Response.response_has_text_or_tool_progress
+                        (Keeper_tooling.Response.accepts_response ~policy:response_policy)
                       ?on_event
                       ~on_yield
                       ~on_resume
@@ -2084,6 +2162,7 @@ let run_turn
                      world_observation;
                      (match
                         normalize_response_text_for_finalization
+                          ~response_policy
                           ~runtime_id:selected_runtime_id
                           ~initial_messages:history_messages
                           ~run_result:result

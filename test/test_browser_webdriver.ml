@@ -397,6 +397,29 @@ let test_pointer_release_recovery () =
     check int "wheel recovers only older remote release" 3 !releases;
     check int "recovery never replays previous input" 1 !gestures)
 
+let test_pointer_guard_failure_rejects_before_effect () =
+  Eio_main.run (fun _ ->
+    let actions = ref 0 in
+    let request ~method_ ~path ~body:_ = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET, "/session/owned/window" -> Ok (`String "tab")
+      | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" -> Error (Driver.Transport "page_url_changed")
+      | `POST, "/session/owned/actions" -> incr actions; Ok `Null
+      | _ -> fail ("unexpected pointer request: " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    let point : Lane.Pointer.point = {x=0.5;y=0.5} in
+    let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
+    let hover = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+      action=Lane.Hover_at {point;viewport}} in
+    check bool "failed hover guard is rejected before effect" true
+      (match Driver.execute driver hover with Lane.Rejected_before_effect _ -> true | _ -> false);
+    check int "failed hover guard sends no pointer input" 0 !actions)
+
 let test_optional_document_never_selects_or_blocks_owner () =
   Eio_main.run (fun _ ->
     let calls = ref [] in
@@ -510,6 +533,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "optional document never selects or blocks owner" `Quick test_optional_document_never_selects_or_blocks_owner;
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
   test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;
+  test_case "pointer guard failure rejects before effect" `Quick test_pointer_guard_failure_rejects_before_effect;
   test_case "download setup cancellation rolls back session" `Quick test_download_setup_cancellation;
   test_case "session ownership and crash recovery" `Quick test_session_lifecycle;
   test_case "session status answers while closed" `Quick test_session_status_answers_while_closed;

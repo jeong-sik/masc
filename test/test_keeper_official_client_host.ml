@@ -309,6 +309,61 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
     check (option string) "host stop is not a terminal error" None !terminal_error)
 ;;
 
+(* The host's own counter runs when no boundary is installed, and it hashes
+   the result text. A memory rewrite answers with a new [revision] and
+   [recorded_at] every call (2026-10-05: twelve claims rewritten 1,861 times),
+   so the counter compares the answer the tool reads, not the receipt. *)
+let memory_rewrite_receipt ~memory_id ~revision =
+  Printf.sprintf
+    {|{"ok":true,"error_kind":"","identity_disposition":"reobserved","what_committed":"w","rows_written":1,"revision":%d,"recorded_at":"2026-10-05T21:%02d:00Z","outcome":"persisted_current_snapshot","store":"current_memory_snapshot","memory_id":%S,"basis":{"kind":"observed"}}|}
+    revision revision memory_id
+;;
+
+let test_repeated_memory_rewrite_aborts_on_its_answer () =
+  let run ~memory_id_of_call =
+    with_active_raw_trace (fun ~path:_ ~active ->
+      let executions = ref 0 in
+      let tool, terminal_error =
+        one_dynamic_tool ~active ~name:"keeper_memory_write" (fun _input ->
+          incr executions;
+          Ok
+            { Agent_core.Types.content =
+                memory_rewrite_receipt
+                  ~memory_id:(memory_id_of_call !executions)
+                  ~revision:(3760 + !executions)
+            ; content_blocks = None
+            ; _meta = None
+            })
+      in
+      let input = `Assoc [ "title", `String "t"; "content", `String "c" ] in
+      let results =
+        List.map
+          (fun index -> tool.call ~call_id:(Printf.sprintf "rewrite-%d" index) input)
+          [ 1; 2; 3 ]
+      in
+      check int "three calls executed" 3 !executions;
+      check (option string) "no terminal error" None !terminal_error;
+      results)
+  in
+  (match run ~memory_id_of_call:(fun _ -> "sha256:aa") with
+   | [ first; second; third ] ->
+     check bool "first rewrite continues" true (Option.is_none first.abort_turn);
+     check bool "second rewrite continues" true (Option.is_none second.abort_turn);
+     (match third.abort_turn with
+      | Some (Repeated_tool_call { tool_name; repeated_count }) ->
+        check string "repeated tool" "keeper_memory_write" tool_name;
+        check int "repeat count" 3 repeated_count
+      | Some (Terminal_tool_boundary _) ->
+        fail "a memory rewrite produced a terminal-tool stop"
+      | None -> fail "a third identical rewrite did not stop the turn")
+   | _ -> fail "expected three results");
+  (* Another claim each call is another answer, so the counter restarts. *)
+  List.iter
+    (fun (result : Host.dynamic_tool_result) ->
+      check bool "a different claim continues" true (Option.is_none result.abort_turn))
+    (run ~memory_id_of_call:(Printf.sprintf "sha256:%02d"))
+;;
+
 let scoped_observation : Masc.Keeper_agent_result.tool_call_detail =
   let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
   { tool_name = "effect"; provider = "fixture"; execution_outcome = Tool_result.Ok
@@ -2779,6 +2834,10 @@ let () =
             "repeated exact dynamic tool call aborts the turn"
             `Quick
             test_repeated_exact_dynamic_tool_call_aborts_the_turn
+        ; test_case
+            "repeated memory rewrite aborts on its answer"
+            `Quick
+            test_repeated_memory_rewrite_aborts_on_its_answer
         ; test_case "scope repetition survives official provider replacement" `Quick
             test_scoped_boundary_spans_official_attempts
         ; test_case

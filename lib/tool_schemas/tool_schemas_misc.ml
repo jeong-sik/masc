@@ -39,6 +39,8 @@ let msx_schemas : tool_schema list =
   ; Tool_schemas_misc_toml.msx_restore
   ; Tool_schemas_misc_toml.msx_change_disk
   ; Tool_schemas_misc_toml.msx_screen
+  ; Tool_schemas_misc_toml.msx_meta
+  ; Tool_schemas_misc_toml.msx_checkpoint_info
   ; Tool_schemas_misc_toml.msx_press
   ; Tool_schemas_misc_toml.msx_step
   ; Tool_schemas_misc_toml.msx_step_until_change
@@ -51,6 +53,8 @@ let msx_schemas : tool_schema list =
    guessing a settled screen. *)
 let dos_schemas : tool_schema list =
   [ Tool_schemas_misc_toml.dos_load
+  ; Tool_schemas_misc_toml.dos_meta
+  ; Tool_schemas_misc_toml.dos_inventory
   ; Tool_schemas_misc_toml.dos_eject
   ; Tool_schemas_misc_toml.dos_screen
   ; Tool_schemas_misc_toml.dos_step
@@ -104,7 +108,8 @@ let schemas : tool_schema list =
     ; Tool_schemas_misc_toml.candle_balance
     ; Tool_schemas_misc_toml.candle_catalog
     ; Tool_schemas_misc_toml.candle_purchase
-    ; Tool_schemas_misc_toml.candle_equip ]
+    ; Tool_schemas_misc_toml.candle_equip
+    ; Tool_schemas_misc_toml.candle_gift ]
   @ Tool_schemas_operator_surface.schemas
 
 type mcp_runtime_operation =
@@ -190,6 +195,8 @@ type misc_operation =
   | Misc_msx_restore
   | Misc_msx_change_disk
   | Misc_msx_screen
+  | Misc_msx_meta
+  | Misc_msx_checkpoint_info
   | Misc_msx_press
   | Misc_msx_step
   | Misc_msx_step_until_change
@@ -200,7 +207,10 @@ type misc_operation =
   | Misc_candle_catalog
   | Misc_candle_purchase
   | Misc_candle_equip
+  | Misc_candle_gift
   | Misc_dos_load
+  | Misc_dos_meta
+  | Misc_dos_inventory
   | Misc_dos_eject
   | Misc_dos_screen
   | Misc_dos_step
@@ -236,10 +246,11 @@ let dos_controller_need = function
   | Misc_web_search | Misc_browser_tabs | Misc_browser_read | Misc_browser_session
   | Misc_browser_goto | Misc_browser_act | Misc_browser_interact
   | Misc_browser_instruct | Misc_msx_load | Misc_msx_eject | Misc_msx_save
-  | Misc_msx_restore | Misc_msx_change_disk | Misc_msx_screen | Misc_msx_press
+  | Misc_msx_restore | Misc_msx_change_disk | Misc_msx_screen | Misc_msx_meta
+  | Misc_msx_checkpoint_info | Misc_msx_press
   | Misc_msx_step | Misc_msx_step_until_change | Misc_msx_peek | Misc_msx_ram_diff
-  | Misc_dos_screen | Misc_dos_peek | Misc_dos_save | Misc_portrait_read
-  | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase | Misc_candle_equip ->
+  | Misc_dos_meta | Misc_dos_inventory | Misc_dos_screen | Misc_dos_peek | Misc_dos_save | Misc_portrait_read
+  | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase | Misc_candle_equip | Misc_candle_gift ->
     No_controller
 
 let misc_tool_name = function
@@ -277,6 +288,8 @@ let misc_tool_name = function
   | Misc_msx_restore -> "masc_msx_restore"
   | Misc_msx_change_disk -> "masc_msx_change_disk"
   | Misc_msx_screen -> "masc_msx_screen"
+  | Misc_msx_meta -> "masc_msx_meta"
+  | Misc_msx_checkpoint_info -> "masc_msx_checkpoint_info"
   | Misc_msx_press -> "masc_msx_press"
   | Misc_msx_step -> "masc_msx_step"
   | Misc_msx_step_until_change -> "masc_msx_step_until_change"
@@ -287,7 +300,10 @@ let misc_tool_name = function
   | Misc_candle_catalog -> "keeper_candle_catalog"
   | Misc_candle_purchase -> "keeper_candle_purchase"
   | Misc_candle_equip -> "keeper_candle_equip"
+  | Misc_candle_gift -> "keeper_candle_gift"
   | Misc_dos_load -> "masc_dos_load"
+  | Misc_dos_meta -> "masc_dos_meta"
+  | Misc_dos_inventory -> "masc_dos_inventory"
   | Misc_dos_eject -> "masc_dos_eject"
   | Misc_dos_screen -> "masc_dos_screen"
   | Misc_dos_step -> "masc_dos_step"
@@ -335,6 +351,8 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_msx_restore
   | Misc_msx_change_disk
   | Misc_msx_screen
+  | Misc_msx_meta
+  | Misc_msx_checkpoint_info
   | Misc_msx_press
   | Misc_msx_step
   | Misc_msx_step_until_change
@@ -345,7 +363,10 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_candle_catalog
   | Misc_candle_purchase
   | Misc_candle_equip
+  | Misc_candle_gift
   | Misc_dos_load
+  | Misc_dos_meta
+  | Misc_dos_inventory
   | Misc_dos_eject
   | Misc_dos_screen
   | Misc_dos_step

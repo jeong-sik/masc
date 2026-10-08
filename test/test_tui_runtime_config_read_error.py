@@ -8,7 +8,7 @@ import tui_keyboard_runtime as _keyboard_runtime
 
 
 
-ERROR_PREFIX = b"runtime config load failed: fetch:"
+ERROR_PREFIX = b"fetch:"
 ERROR_CAUSE = ERROR_PREFIX + b" HTTP 503: fixture config unavailable"
 
 
@@ -50,8 +50,15 @@ def run_invalid_model_projection(executable: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     config = _keyboard_runtime.runtime_config_read_metadata()
     config["validation"]["valid"] = False
+    # The decoder refuses a validation result that contradicts its issues
+    # (bin/masc_tui_runtime_config_view.ml:85): valid=False requires at least
+    # one error issue. Name the key the source actually carries.
+    config["validation"]["issues"] = [{
+        "key": "unsupported_config_key", "kind": "unknown_key",
+        "severity": "error", "detail": "unknown key",
+    }]
     config.update(path="/fixture/runtime.toml",
-                  source_text='unsupported_config_key = "operator-repair-marker"\n')
+                  source_text='[models.alpha]\nunsupported_config_key = "operator-repair-marker"\n')
     fixtures[_keyboard_runtime.RUNTIME_CONFIG_RAW_PATH] = (200, config)
 
     def interact(process, fd, _slave, output, _base):

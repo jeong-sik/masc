@@ -686,10 +686,14 @@ function name(el) {
   const labels=Array.from(el.labels || []).map(label=>label.innerText || '').filter(Boolean).join(' ');
   return el.getAttribute('aria-label') || labelledBy || labels || el.getAttribute('placeholder') || '';
 }
+// The first [points] characters of [text]. A character is at most two UTF-16
+// units, so only that much of a long text is split into characters, and the
+// cut never leaves half of one.
+const head = (text, points) => Array.from(text.slice(0, points * 2)).slice(0, points).join('');
 function observe(el) {
   const result = {selector:selector(el),tag:el.localName,
     role:effectiveRole(el),type:el.getAttribute('type'),name:name(el),
-    text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:disabled(el)};
+    text:head(el.innerText || '', 500),href:el.href || null,disabled:disabled(el)};
   const target=(el.localName==='label' && el.control) || el;
   if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
     result.checked=!!target.checked;
@@ -829,7 +833,6 @@ function interactInPage(args) {
     location.assign(destination.href);
     return result;
   }
-  if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
   if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
     if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))
@@ -990,7 +993,7 @@ async function pageInteract(args, deadlineMs, signal) {
   // A later executeScript rejection can lose a result after a page effect.
   try {
     if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
-    if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+    if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at'].includes(args.action)) throw new Error("unknown_interaction_action");
     const tab = await browser.tabs.get(args.tabId);
     signal?.throwIfAborted();
     if (args.expectedUrl !== undefined && tab.url !== args.expectedUrl) throw new Error('page_url_changed');

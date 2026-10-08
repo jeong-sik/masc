@@ -358,15 +358,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                   meta
                   reg)
           with
-          | Error (Keeper_keepalive_launch_transaction.Shutdown_reserved operation_id) ->
-            Log.Keeper.warn
-              "%s: restart skipped because shutdown operation %s owns admission"
-              old_entry.name
-              (Keeper_shutdown_types.Operation_id.to_string operation_id);
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string RestartOutcomes)
-              ~labels:[ "keeper", old_entry.name; "outcome", "shutdown_reserved" ]
-              ()
           | Error Keeper_keepalive_launch_transaction.Intake_token_not_live ->
             Log.Keeper.error
               "%s: restart transaction rejected an inactive durable-intake token"

@@ -260,7 +260,7 @@ let test_invalid_name_is_refused () =
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
     check bool "a path segment is not a name" false (Preset.is_valid_name "../x");
     check bool "an empty name is refused" false (Preset.is_valid_name "");
-    check bool "a stamp is a name" true (Preset.is_valid_name "_autosave-20260903T120000Z");
+    check bool "the autosave name is a name" true (Preset.is_valid_name Preset.autosave_name);
     (match Preset.capture ~base_path ~name:"bad name" ~description:"" with
      | Error _ -> ()
      | Ok _ -> fail "a name with a space captured"))
@@ -287,8 +287,7 @@ let test_restore_puts_the_saved_state_back () =
      | Preset.Runtime_unchanged -> ()
      | Preset.Runtime_committed -> fail "runtime.toml did not drift, nothing to commit"
      | Preset.Runtime_failed message -> fail ("runtime part failed: " ^ message));
-    check bool "the autosave carries the prefix" true
-      (String.starts_with ~prefix:Preset.autosave_prefix report.Preset.autosave);
+    check string "the restore names the autosave" Preset.autosave_name report.Preset.autosave;
     let autosave = or_fail (Preset.load ~base_path report.Preset.autosave) in
     check string "the autosave holds the state from before the restore" "Afternoon override."
       (List.hd autosave.Preset.prompt_overrides).Override.value;
@@ -377,20 +376,84 @@ let test_override_that_cannot_render_is_skipped_with_the_reason () =
       (Prompt_registry.get_prompt prompt_key))
 ;;
 
-let test_two_restores_keep_two_autosaves () =
+(* A restore replaces the autosave rather than adding one: however many
+   restores run, the list holds one autosave, and it holds the state from
+   before the latest. *)
+let test_a_second_restore_replaces_the_autosave () =
   let open Alcotest in
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    set_override ~base_path "Morning override.";
     let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
     or_fail (Preset.save ~base_path morning);
-    let first = or_fail (Preset.restore ~base_path "morning") in
+    set_override ~base_path "Noon override.";
+    let _first = or_fail (Preset.restore ~base_path "morning") in
+    set_override ~base_path "Evening override.";
     let second = or_fail (Preset.restore ~base_path "morning") in
-    check bool "the second autosave has its own name" true
-      (not (String.equal first.Preset.autosave second.Preset.autosave));
+    check string "the second restore writes the same autosave" Preset.autosave_name
+      second.Preset.autosave;
     let names =
       List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) (Preset.list ~base_path).Preset.presets
     in
-    check bool "both autosaves are listed" true
-      (List.mem first.Preset.autosave names && List.mem second.Preset.autosave names))
+    check (list string) "one autosave beside the saved preset"
+      [ Preset.autosave_name; "morning" ] (List.sort String.compare names);
+    let autosave = or_fail (Preset.load ~base_path Preset.autosave_name) in
+    check string "the autosave holds the state from before the latest restore"
+      "Evening override." (List.hd autosave.Preset.prompt_overrides).Override.value)
+;;
+
+(* A save that fails partway leaves the preset it was replacing whole. The
+   autosave is the one copy of the state from before a restore, so a restore
+   whose autosave fails must not cost the previous one. The instruction file
+   for a keeper name longer than a file name may be fails after the overrides
+   and runtime files are written. *)
+let test_a_failed_save_keeps_the_preset_it_was_replacing () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    set_override ~base_path "Morning override.";
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    let broken =
+      { morning with
+        Preset.prompt_overrides = []
+      ; instructions = [ String.make 300 'k', "Never written." ]
+      }
+    in
+    (match Preset.save ~base_path broken with
+     | Ok () -> fail "an instruction file with a 304-byte name was written"
+     | Error _ -> ());
+    let kept = or_fail (Preset.load ~base_path "morning") in
+    check string "the saved override is still there" "Morning override."
+      (List.hd kept.Preset.prompt_overrides).Override.value;
+    check (list (pair string string)) "the saved instructions are still there"
+      morning.Preset.instructions kept.Preset.instructions;
+    let listing = Preset.list ~base_path in
+    check (list string) "only the saved preset is listed" [ "morning" ]
+      (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
+    check (list string) "nothing is unreadable" [] (List.map fst listing.Preset.unreadable);
+    let staging = Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging" in
+    check (array string) "no holder is left behind" [||] (Sys.readdir staging))
+;;
+
+(* Restoring the autosave undoes the latest restore: the state from before it
+   comes back, and the autosave then holds the state the undo replaced. *)
+let test_restoring_the_autosave_undoes_the_latest_restore () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    set_override ~base_path "Morning override.";
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    set_override ~base_path "Evening override.";
+    let _restore = or_fail (Preset.restore ~base_path "morning") in
+    check string "the morning override is live" "Morning override."
+      (Prompt_registry.get_prompt prompt_key);
+    let undo = or_fail (Preset.restore ~base_path Preset.autosave_name) in
+    check string "the evening override is back" "Evening override."
+      (Prompt_registry.get_prompt prompt_key);
+    check string "the undo reports the autosave as restored" Preset.autosave_name
+      undo.Preset.restored;
+    let autosave = or_fail (Preset.load ~base_path Preset.autosave_name) in
+    check string "the autosave now holds the state the undo replaced" "Morning override."
+      (List.hd autosave.Preset.prompt_overrides).Override.value)
 ;;
 
 (* The list and the detail read a preset one way. A preset whose overrides
@@ -422,6 +485,72 @@ let test_a_preset_that_does_not_load_is_listed_as_unreadable () =
       (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
     check (list (pair string string)) "the other is unreadable, for the reason load gives"
       [ ("evening", reason) ] listing.Preset.unreadable)
+;;
+
+(* Delete removes a preset whether or not it loads. A preset saved in an
+   older overrides format cannot be restored, so deleting it is what the
+   operator can still do with it; the list then holds neither. *)
+let test_delete_removes_a_preset_whether_or_not_it_loads () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    let evening = or_fail (Preset.capture ~base_path ~name:"evening" ~description:"") in
+    or_fail (Preset.save ~base_path evening);
+    write_file
+      (Filename.concat (Preset.source_directory ~base_path evening) "prompt_overrides.json")
+      {|{"schema_version":1,"overrides":[]}|};
+    let delete name =
+      match Preset.delete ~base_path name with
+      | Ok () -> ()
+      | Error error -> fail (Preset.delete_error_to_string error)
+    in
+    delete "morning";
+    delete "evening";
+    let listing = Preset.list ~base_path in
+    check (list string) "no preset is listed" []
+      (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
+    check (list string) "no preset is unreadable" []
+      (List.map fst listing.Preset.unreadable);
+    check bool "the directory is gone" false
+      (Sys.file_exists (Preset.source_directory ~base_path evening));
+    let staging = Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging" in
+    check (array string) "no holder is left behind" [||] (Sys.readdir staging);
+    (match Preset.delete ~base_path "morning" with
+     | Error (Preset.Delete_not_found "morning") -> ()
+     | Error error -> fail ("wrong refusal: " ^ Preset.delete_error_to_string error)
+     | Ok () -> fail "a preset deleted twice was found the second time"))
+;;
+
+(* A link left at a preset's place whose target is gone is listed as
+   unreadable, so delete removes it too. *)
+let test_delete_removes_a_dangling_link () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    let presets = Filename.dirname (Preset.source_directory ~base_path morning) in
+    Unix.symlink (Filename.concat presets "never-there") (Filename.concat presets "ghost");
+    check (list string) "the link is listed as unreadable" [ "ghost" ]
+      (List.map fst (Preset.list ~base_path).Preset.unreadable);
+    (match Preset.delete ~base_path "ghost" with
+     | Ok () -> ()
+     | Error error -> fail (Preset.delete_error_to_string error));
+    check (list string) "nothing is unreadable" []
+      (List.map fst (Preset.list ~base_path).Preset.unreadable))
+;;
+
+let test_delete_refuses_a_missing_or_invalid_name () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    (match Preset.delete ~base_path "never-saved" with
+     | Error (Preset.Delete_not_found "never-saved") -> ()
+     | Error error -> fail ("wrong refusal: " ^ Preset.delete_error_to_string error)
+     | Ok () -> fail "a preset that was never saved was deleted");
+    (match Preset.delete ~base_path ".." with
+     | Error (Preset.Delete_invalid_name "..") -> ()
+     | Error error -> fail ("wrong refusal: " ^ Preset.delete_error_to_string error)
+     | Ok () -> fail "the parent directory name was accepted"))
 ;;
 
 (* A preset is opened, listed and restored by its directory's name. A
@@ -583,11 +712,141 @@ let test_restore_preserves_lane_activity_and_autosave () =
         (librarian autosave.lanes).enabled)) [false; true]
 ;;
 
+let test_default_baseline_survives_drift_and_restore () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let prompts_dir = Filename.concat base_path "prompts" in
+    write_file (Filename.concat prompts_dir "test.unoverridden.md")
+      "---\ndescription: unoverridden\ncategory: test\n---\nUntouched default.\n";
+    Prompt_registry.set_markdown_dir prompts_dir;
+    set_override ~base_path "Saved override.";
+    let saved = or_fail (Preset.capture ~base_path ~name:"baseline" ~description:"") in
+    let saved_hash = match saved.default_revisions with
+      | Some rows -> List.assoc prompt_key rows
+      | None -> Alcotest.fail "capture must record default bodies" in
+    let body = Option.get (Prompt_registry.resolve_prompt prompt_key).file_value in
+    let untouched_body = Option.get (Prompt_registry.resolve_prompt "test.unoverridden").file_value in
+    Alcotest.(check bool) "unoverridden defaults are also recorded" true
+      (match saved.default_revisions with
+       | None -> false
+       | Some rows -> List.assoc_opt "test.unoverridden" rows =
+           Some (Override.default_revision ~body:untouched_body));
+    Alcotest.(check string) "hash is the default, not the override"
+      (Override.default_revision ~body) saved_hash;
+    or_fail (Preset.save ~base_path saved);
+    let loaded = or_fail (Preset.load ~base_path "baseline") in
+    Alcotest.(check bool) "baseline loads unchanged" true
+      (loaded.default_revisions = saved.default_revisions);
+    Alcotest.(check bool) "defaults initially match" true
+      (Preset.compare_defaults loaded = Preset.Defaults_match);
+    let path = Filename.concat (Filename.concat base_path "prompts") (prompt_key ^ ".md") in
+    write_file path "---\ndescription: changed\ncategory: test\n---\nNew default body.\n";
+    let current = Option.get (Prompt_registry.resolve_prompt prompt_key).file_value in
+    let expected = Preset.Defaults_differ
+      [prompt_key, Some saved_hash, Some (Override.default_revision ~body:current)] in
+    Alcotest.(check bool) "detail sees changed default" true
+      (Preset.compare_defaults loaded = expected);
+    set_override ~base_path "Current override.";
+    let report = or_fail (Preset.restore ~base_path "baseline") in
+    Alcotest.(check bool) "restore reports drift" true (report.default_comparison = expected);
+    Alcotest.(check string) "drift does not prevent override restore" "Saved override."
+      (Prompt_registry.resolve_prompt prompt_key).effective;
+    Alcotest.(check (option string)) "default body is never restored" (Some current)
+      (Prompt_registry.resolve_prompt prompt_key).file_value;
+    let autosave = or_fail (Preset.load ~base_path report.autosave) in
+    Alcotest.(check bool) "autosave records current defaults" true
+      (Preset.compare_defaults autosave = Preset.Defaults_match);
+    Sys.remove path;
+    Alcotest.(check bool) "missing default is visible" true
+      (Preset.compare_defaults loaded = Preset.Defaults_differ [prompt_key, Some saved_hash, None]);
+    let no_defaults = { saved with default_revisions = Some [] } in
+    write_file path prompt_fixture;
+    Alcotest.(check bool) "new defaults are visible" true
+      (match Preset.compare_defaults no_defaults with
+       | Preset.Defaults_differ rows -> List.exists (fun (key, before, after) ->
+           key = prompt_key && before = None && Option.is_some after) rows
+       | Preset.Defaults_unknown | Preset.Defaults_match -> false))
+;;
+
+let test_unreadable_default_does_not_block_preset_operations () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let unreadable_key = "test.unreadable" in
+    let prompts_dir = Filename.concat base_path "prompts" in
+    let path = Filename.concat prompts_dir (unreadable_key ^ ".md") in
+    write_file path "---\ndescription: becomes unreadable\ncategory: test\n---\nAuxiliary default.\n";
+    Prompt_registry.set_markdown_dir prompts_dir;
+    set_override ~base_path "Saved override.";
+    let saved = or_fail (Preset.capture ~base_path ~name:"baseline" ~description:"") in
+    or_fail (Preset.save ~base_path saved);
+    let hash = match saved.default_revisions with
+      | Some rows -> List.assoc unreadable_key rows
+      | None -> Alcotest.fail "baseline must include readable auxiliary default" in
+    (* A socket behind the registered path reliably refuses ordinary file
+       reads regardless of permission privileges. A short temporary leaf keeps
+       its bind address independent of the longer preset fixture directory. *)
+    Sys.remove path;
+    let socket_path = Filename.temp_file "p" ".sock" in
+    Sys.remove socket_path;
+    let socket = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+    Fun.protect ~finally:(fun () ->
+      Unix.close socket;
+      ignore (Fs_compat.unlink_if_exists path);
+      ignore (Fs_compat.unlink_if_exists socket_path)) (fun () ->
+      Unix.bind socket (Unix.ADDR_UNIX socket_path);
+      Unix.symlink socket_path path;
+      let captured = or_fail (Preset.capture ~base_path ~name:"unreadable" ~description:"") in
+      (match captured.default_revisions with
+       | Some rows ->
+           Alcotest.(check (option string)) "unreadable default alone is omitted" None
+             (List.assoc_opt unreadable_key rows);
+           Alcotest.(check bool) "healthy default still has its revision" true
+             (List.mem_assoc prompt_key rows)
+       | None -> Alcotest.fail "read error must not discard healthy baselines");
+      or_fail (Preset.save ~base_path captured);
+      let expected = Preset.Defaults_differ [unreadable_key, Some hash, None] in
+      Alcotest.(check bool) "comparison reports unreadable default without throwing" true
+        (Preset.compare_defaults saved = expected);
+      set_override ~base_path "Current override.";
+      let report = or_fail (Preset.restore ~base_path "baseline") in
+      Alcotest.(check bool) "restore reports informational baseline difference" true
+        (report.default_comparison = expected);
+      Alcotest.(check string) "healthy override is restored" "Saved override."
+        (Prompt_registry.resolve_prompt prompt_key).effective;
+      let autosave = or_fail (Preset.load ~base_path report.autosave) in
+      Alcotest.(check string) "autosave retained the pre-restore override" "Current override."
+        (List.assoc prompt_key (List.map (fun (entry : Override.entry) -> entry.key, entry.value)
+          autosave.prompt_overrides))))
+;;
+
+let test_default_baseline_missing_or_invalid () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let saved = or_fail (Preset.capture ~base_path ~name:"baseline" ~description:"") in
+    or_fail (Preset.save ~base_path saved);
+    let path = Filename.concat (Preset.source_directory ~base_path saved) "manifest.json" in
+    let fields = match Yojson.Safe.from_file path with
+      | `Assoc fields -> List.remove_assoc "default_revisions" fields
+      | _ -> Alcotest.fail "manifest must be an object" in
+    write_file path (Yojson.Safe.to_string (`Assoc fields));
+    let loaded = or_fail (Preset.load ~base_path "baseline") in
+    Alcotest.(check bool) "no baseline means unknown" true
+      (Preset.compare_defaults loaded = Preset.Defaults_unknown);
+    let report = or_fail (Preset.restore ~base_path "baseline") in
+    Alcotest.(check bool) "missing baseline does not block restore" true
+      (report.default_comparison = Preset.Defaults_unknown);
+    write_file path (Yojson.Safe.to_string (`Assoc
+      (("default_revisions", `Assoc [prompt_key, `String "invalid"]) :: fields)));
+    Alcotest.(check bool) "corrupt hashes are refused" true
+      (Result.is_error (Preset.load ~base_path "baseline")))
+;;
+
 let () =
   Alcotest.run
     "Prompt_preset"
     [ ( "presets"
-      , [ Alcotest.test_case "legacy lane activity loads; mistyped activity is refused" `Quick test_saved_lane_activity_shape
+      , [ Alcotest.test_case "default baseline survives drift and restore" `Quick test_default_baseline_survives_drift_and_restore
+        ; Alcotest.test_case "unreadable baseline cannot block preset capture or restore" `Quick
+            test_unreadable_default_does_not_block_preset_operations
+        ; Alcotest.test_case "missing baseline is unknown; corrupt hashes are refused" `Quick test_default_baseline_missing_or_invalid
+        ; Alcotest.test_case "legacy lane activity loads; mistyped activity is refused" `Quick test_saved_lane_activity_shape
         ; Alcotest.test_case "activity restore and autosave roundtrip" `Quick test_restore_preserves_lane_activity_and_autosave
         ; Alcotest.test_case "capture, save, load, list round trip" `Quick
             test_capture_save_load_round_trip
@@ -612,8 +871,18 @@ let () =
             test_override_written_against_an_older_default_still_restores
         ; Alcotest.test_case "an override that cannot render is skipped with the reason" `Quick
             test_override_that_cannot_render_is_skipped_with_the_reason
-        ; Alcotest.test_case "two restores keep two autosaves" `Quick
-            test_two_restores_keep_two_autosaves
+        ; Alcotest.test_case "delete removes a preset whether or not it loads" `Quick
+            test_delete_removes_a_preset_whether_or_not_it_loads
+        ; Alcotest.test_case "delete removes a dangling link" `Quick
+            test_delete_removes_a_dangling_link
+        ; Alcotest.test_case "delete refuses a missing or invalid name" `Quick
+            test_delete_refuses_a_missing_or_invalid_name
+        ; Alcotest.test_case "a second restore replaces the autosave" `Quick
+            test_a_second_restore_replaces_the_autosave
+        ; Alcotest.test_case "a failed save keeps the preset it was replacing" `Quick
+            test_a_failed_save_keeps_the_preset_it_was_replacing
+        ; Alcotest.test_case "restoring the autosave undoes the latest restore" `Quick
+            test_restoring_the_autosave_undoes_the_latest_restore
         ] )
     ]
 ;;

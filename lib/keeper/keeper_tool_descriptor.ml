@@ -7,14 +7,10 @@ type executor =
 
 type backend =
   | Ocaml_runtime
-  | Host_process
   | Sandbox_process
 
 type sandbox =
   | No_sandbox
-  | Host_sandbox_roots
-  | Turn_sandbox
-  | Docker_profile
   | Backend_selected
 
 type keeper_model_projection =
@@ -202,15 +198,11 @@ let executor_to_string = function
 
 let backend_to_string = function
   | Ocaml_runtime -> "ocaml_runtime"
-  | Host_process -> "host_process"
   | Sandbox_process -> "sandbox_process"
 ;;
 
 let sandbox_to_string = function
   | No_sandbox -> "none"
-  | Host_sandbox_roots -> "host_sandbox_roots"
-  | Turn_sandbox -> "turn_sandbox"
-  | Docker_profile -> "docker_profile"
   | Backend_selected -> "backend_selected"
 ;;
 
@@ -1993,15 +1985,37 @@ let masc_board_descriptor board_name =
           but leave the keeper model surface: no keeper called them in the
           August .masc/tool_calls log, and every turn carried their schemas.
           The board's own core and dashboard paths do not go through this
-          projection. *)
+          projection.
+          [Board_cleanup] deletes up to 50 posts by any author and sits at
+          CanAdmin in Tool_catalog; the keeper lane does not read that
+          permission, so only the projection keeps it off Keepers.
+          [Board_delete] is also CanAdmin but its handler refuses a caller who
+          is not the post's author. *)
        ~keeper_model_projection:
          (match board_name with
-          | Tool_name.Board_name.Board_sub_board_create
-          | Tool_name.Board_name.Board_sub_board_update
-          | Tool_name.Board_name.Board_sub_board_delete
-          | Tool_name.Board_name.Board_sub_board_get
-          | Tool_name.Board_name.Board_sub_board_list -> Operator_only
-          | _ -> Internal_name)
+          | Tool_name.Board_name.Board_cleanup
+          | Board_sub_board_create
+          | Board_sub_board_update
+          | Board_sub_board_delete
+          | Board_sub_board_get
+          | Board_sub_board_list -> Operator_only
+          | Board_close
+          | Board_comment
+          | Board_comment_vote
+          | Board_curation_read
+          | Board_curation_submit
+          | Board_delete
+          | Board_hearths
+          | Board_list
+          | Board_post
+          | Board_post_get
+          | Board_post_update
+          | Board_profile
+          | Board_reaction
+          | Board_reopen
+          | Board_search
+          | Board_stats
+          | Board_vote -> Internal_name)
        ~input_schema_source
        ~id:("masc.board." ^ Tool_name.Board_name.operation_name board_name)
        ~name
@@ -2046,8 +2060,9 @@ let masc_board_descriptors =
   List.map masc_board_descriptor Tool_name.Board_name.all
 ;;
 
-let voice_descriptor name ~readonly =
+let voice_descriptor ?ordinary_execution_mode name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("keeper.voice." ^ String.sub name (String.length "keeper_voice_")
@@ -2229,6 +2244,20 @@ let masc_agent_timeline_descriptor
 
 let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
   let schema : Masc_domain.tool_schema = definition.schema in
+  (* The three reads share Schedule_store's whole-file loads: writers take the
+     schedules-path file lock, readers hold no shared mutable state, so
+     sibling fibers only ever re-read the file. Matched on the closed action
+     so a new read stays Serial until it is audited like these were. *)
+  let ordinary_execution_mode =
+    match (definition : Tool_schemas_schedule.definition).action with
+    | Tool_schemas_schedule.List_requests
+    | Tool_schemas_schedule.Get_request
+    | Tool_schemas_schedule.List_notes -> Concurrent
+    | Tool_schemas_schedule.Create_request
+    | Tool_schemas_schedule.Update_request
+    | Tool_schemas_schedule.Cancel_request
+    | Tool_schemas_schedule.Add_note -> Serial
+  in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
@@ -2238,6 +2267,7 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
     ~name:schema.name
     ~description:schema.description
     ~handler:Tool_masc_schedule_dispatch
+    ~ordinary_execution_mode
     ~readonly:definition.read_only
     ()
 ;;
@@ -2272,6 +2302,9 @@ let keeper_spawn_descriptor (definition : Tool_schemas_spawn.definition) =
       ~readonly:definition.read_only
       ()
   in
+  (* Serial throughout, including the read: Spawn_registry entries live in a
+     bare Hashtbl shared with start/stop writers, so a read on a sibling
+     fiber could meet a concurrent mutation. B4 audited this and left it. *)
   match definition.action with
   | Tool_schemas_spawn.Start ->
     with_composable_output (Json_output { schema = spawn_start_output_schema }) descriptor
@@ -2293,6 +2326,9 @@ let keeper_code_query_descriptor () =
        turn's pool owns that and ends it; the caller is left holding an answer
        or a refusal. The wait is the pool's own bound, not one a caller states,
        so the reason keeper_spawn_wait is not read-only does not apply. *)
+    (* Concurrent: the turn pool's server table is Eio.Mutex-guarded, so
+       sibling fibers share servers rather than race for them. *)
+    ~ordinary_execution_mode:Concurrent
     ~readonly:true
     ()
 ;;
@@ -2311,6 +2347,9 @@ let keeper_webmcp_list_descriptor () =
     ~description:schema.description
     ~handler:Tool_keeper_webmcp_dispatch
     (* Discovery only: reads the page's registered tool catalog. *)
+    (* Concurrent: one bridge subprocess per call; the only shared state is
+       the mutex-guarded script-path cache. *)
+    ~ordinary_execution_mode:Concurrent
     ~readonly:true
     ()
 ;;
@@ -2334,6 +2373,7 @@ let keeper_webmcp_call_descriptor () =
 
 let masc_keeper_descriptor
     ?(polling_read = false)
+    ?ordinary_execution_mode
     ~keeper_model_projection
     id
     name
@@ -2348,6 +2388,7 @@ let masc_keeper_descriptor
     | None -> invalid_arg ("missing Keeper surface schema for " ^ name)
   in
   cluster_descriptor_with_schema_source
+    ?ordinary_execution_mode
     ~polling_read
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection
@@ -2381,6 +2422,17 @@ let masc_library_descriptor (definition : Tool_schemas_library.definition) =
       Keeper_projection, projection.description, projection.input_schema
     | None -> Canonical_registry, schema.description, schema.input_schema
   in
+  (* List, read and search are directory listing plus whole-file reads in
+     Tool_library, which holds no shared mutable state -- the same ground the
+     keeper_library_* pair already stands on. Matched on the closed operation
+     so a new read stays Serial until it is audited like these were. *)
+  let ordinary_execution_mode =
+    match (definition : Tool_schemas_library.definition).operation with
+    | Tool_schemas_library.List_documents
+    | Tool_schemas_library.Read_document
+    | Tool_schemas_library.Search_documents -> Concurrent
+    | Tool_schemas_library.Add_document -> Serial
+  in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection
@@ -2390,6 +2442,7 @@ let masc_library_descriptor (definition : Tool_schemas_library.definition) =
     ~name:schema.name
     ~description
     ~handler:Tool_masc_library_dispatch
+    ~ordinary_execution_mode
     ~readonly:definition.read_only
     ()
 ;;
@@ -2401,20 +2454,19 @@ let masc_library_descriptors =
 let masc_local_runtime_descriptor
       (definition : Tool_schemas_local_runtime.definition) =
   let schema = definition.schema in
-  let keeper_model_projection =
-    match Tool_schemas_local_runtime.keeper_model_exposure definition.operation with
-    | Tool_schemas_local_runtime.Keeper_callable -> Internal_name
-    | Tool_schemas_local_runtime.Operator_diagnostic -> Operator_only
-  in
   let execution_policy =
     Tool_schemas_local_runtime.execution_policy definition.operation
   in
   let policy =
     policy ~readonly:execution_policy.read_only ()
   in
+  (* Operator diagnostics: registered in the catalog, never in the Keeper
+     model's per-turn tool list. Both operations can load a model and need
+     Admin. The metadata-only dashboard runtime probe has its own
+     [CanReadState] route and does not reuse these tool identities. *)
   in_process_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection
+    ~keeper_model_projection:Operator_only
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
     ~id:
@@ -2485,11 +2537,11 @@ let internal_descriptors : t list =
       ~name:"keeper_context_status"
       ~description:context_status_schema.description
       ~input_schema:context_status_schema.input_schema
-      (* Serial, deliberately: the memory section runs
-         Keeper_memory_source_current.revalidate, which persists pending
-         invalidations under the source-store lock — a write during read.
-         The read-only policy hint below covers approval, not batch
-         admission; do not promote this to Concurrent on its strength. *)
+      (* Concurrent: file reads plus a revalidate whose write-during-read is
+         serialized by the source-store file lock, so sibling fibers queue
+         rather than interleave; event and decision-log appends ride the
+         per-path mutex. The audit that promoted this is B4's. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_context_status
       ()
@@ -2528,6 +2580,9 @@ let internal_descriptors : t list =
       ~name:Keeper_runtime_schemas_toml.skill_validate.name
       ~description:Keeper_runtime_schemas_toml.skill_validate.description
       ~input_schema:Keeper_runtime_schemas_toml.skill_validate.input_schema
+      (* Concurrent: an artifact fetch plus static validation; the catalog's
+         snapshot cache is an Atomic over immutable values. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_skill_validate
       ()
@@ -2562,11 +2617,12 @@ let internal_descriptors : t list =
       ~name:"keeper_memory_search"
       ~description:memory_search_schema.description
       ~input_schema:memory_search_schema.input_schema
-      (* Serial, deliberately: the memory/all sources run
-         Keeper_memory_source_current.revalidate, which persists pending
-         invalidations under the source-store lock — a write during read.
-         The read-only policy hint below covers approval, not batch
-         admission; do not promote this to Concurrent on its strength. *)
+      (* Concurrent: file reads and pure ranking, plus a revalidate whose
+         write-during-read is serialized by the source-store file lock;
+         Retrieved-event and decision-log appends ride the per-path mutex,
+         and the log-once flag is an Atomic. The audit that promoted this
+         overrides the older Serial-deliberately note (B4). *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_memory_search
       ()
@@ -2782,6 +2838,9 @@ let internal_descriptors : t list =
       ~name:Keeper_runtime_schemas_toml.file_list.Masc_domain.name
       ~description:Keeper_runtime_schemas_toml.file_list.Masc_domain.description
       ~input_schema:Keeper_runtime_schemas_toml.file_list.Masc_domain.input_schema
+      (* Concurrent: one HTTPS list call plus pure row rendering; no shared
+         mutable state on the path. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_masc_file_dispatch
       ()
@@ -2797,6 +2856,9 @@ let internal_descriptors : t list =
       ~name:Keeper_runtime_schemas_toml.keeper_analyze_image.name
       ~description:Keeper_runtime_schemas_toml.keeper_analyze_image.description
       ~input_schema:Keeper_runtime_schemas_toml.keeper_analyze_image.input_schema
+      (* Concurrent: a read-only vision sub-call over net; call-ledger writes
+         ride the store's Eio.Mutex like every other tool's. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_analyze_image
       ()
@@ -2807,10 +2869,12 @@ let internal_descriptors : t list =
   ; voice_descriptor
       "keeper_voice_listen"
       ~readonly:false
-  ; voice_descriptor
+  (* Concurrent: both read the voice session manager, whose state is an
+     Atomic over an immutable map; neither starts, ends, nor speaks. *)
+  ; voice_descriptor ~ordinary_execution_mode:Concurrent
       "keeper_voice_agent"
       ~readonly:true
-  ; voice_descriptor
+  ; voice_descriptor ~ordinary_execution_mode:Concurrent
       "keeper_voice_sessions"
       ~readonly:true
   ; voice_descriptor
@@ -2904,10 +2968,8 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_task_descriptor "set_goal" "masc_task_set_goal"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_plan_* current-task trio (3 entries).
-     The five plan-document tools (init/update/get + note_add/deliver)
-     were retired with their planning/<task_id> store; only the
-     current-task session pointer remains. ── *)
+  (* ── RFC-0182 §3.1 — masc_plan_* current-task trio (3 entries): the
+     session pointer to the Keeper's current task. ── *)
   ; masc_plan_descriptor ~keeper_model_projection:Operator_only
        "set_task" "masc_plan_set_task"
        ~readonly:false
@@ -2925,8 +2987,11 @@ let internal_descriptors : t list =
      |> with_composable_output (Json_output { schema = run_list_output_schema }))
   ; masc_run_descriptor "masc_run_get"
       ~readonly:false
+  (* readonly:false: Run_eio.update_plan writes run.json and the plan
+     mirror. It was declared readonly:true; the write would have been
+     admittable to Concurrent batches and Async admission on that hint. *)
   ; masc_run_descriptor "masc_run_plan"
-       ~readonly:true
+       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries) ────────── *)
   ; (masc_agent_descriptor ~keeper_model_projection:Operator_only
         ~ordinary_execution_mode:Concurrent
@@ -2966,8 +3031,9 @@ let internal_descriptors : t list =
      calls it through MCP, [GET /api/v1/status] maps to it, and it remains in
      the public MCP surface for CLI clients. Only the Keeper model projection
      goes. *)
-  ; masc_workspace_descriptor
+  ; masc_workspace_descriptor ~ordinary_execution_mode:Concurrent
       ~keeper_model_projection:Operator_only
+      (* Concurrent: backlog reads under the file lock plus pure rendering. *)
       "status"
       "masc_status"
        ~readonly:true
@@ -2975,7 +3041,9 @@ let internal_descriptors : t list =
       "heartbeat"
       "masc_heartbeat"
        ~readonly:false
-  ; masc_workspace_descriptor ~keeper_model_projection:Operator_only
+  ; masc_workspace_descriptor ~ordinary_execution_mode:Concurrent
+      ~keeper_model_projection:Operator_only
+      (* Concurrent: backlog reads plus assertion evaluation; nothing written. *)
       "check" "masc_check"
        ~readonly:true
   ; (masc_workspace_descriptor ~ordinary_execution_mode:Concurrent
@@ -3012,6 +3080,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "candle_catalog" "keeper_candle_catalog" ~readonly:true
   ; masc_misc_descriptor "candle_purchase" "keeper_candle_purchase" ~readonly:false
   ; masc_misc_descriptor "candle_equip" "keeper_candle_equip" ~readonly:false
+  ; masc_misc_descriptor "candle_gift" "keeper_candle_gift" ~readonly:false
   (* MSX lane (RFC-0439 §3.5): the shared machine is one piece of state, so
      none of these opts into concurrent batches. *)
   ; masc_misc_descriptor "msx_load" "masc_msx_load" ~readonly:false
@@ -3021,6 +3090,9 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "msx_change_disk" "masc_msx_change_disk" ~readonly:false
   ; (masc_misc_descriptor "msx_screen" "masc_msx_screen" ~readonly:true
      |> with_composable_output (Json_output { schema = msx_screen_output_schema }))
+  ; masc_misc_descriptor "msx_meta" "masc_msx_meta" ~readonly:true
+  ; masc_misc_descriptor "msx_checkpoint_info" "masc_msx_checkpoint_info"
+      ~readonly:true
   ; masc_misc_descriptor "msx_press" "masc_msx_press" ~readonly:false
   ; masc_misc_descriptor "msx_step" "masc_msx_step" ~readonly:false
   ; masc_misc_descriptor "msx_step_until_change" "masc_msx_step_until_change"
@@ -3028,6 +3100,8 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "msx_peek" "masc_msx_peek" ~readonly:true
   ; masc_misc_descriptor "msx_ram_diff" "masc_msx_ram_diff" ~readonly:true
   ; masc_misc_descriptor "dos_load" "masc_dos_load" ~readonly:false
+  ; masc_misc_descriptor "dos_meta" "masc_dos_meta" ~readonly:true
+  ; masc_misc_descriptor "dos_inventory" "masc_dos_inventory" ~readonly:true
   ; masc_misc_descriptor "dos_eject" "masc_dos_eject" ~readonly:false
   ; masc_misc_descriptor "dos_screen" "masc_dos_screen" ~readonly:true
   ; masc_misc_descriptor "dos_step" "masc_dos_step" ~readonly:false
@@ -3038,7 +3112,10 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "dos_pass" "masc_dos_pass" ~readonly:false
   ; masc_misc_descriptor "dos_save" "masc_dos_save" ~readonly:false
   ; masc_misc_descriptor "dos_restore" "masc_dos_restore" ~readonly:false
-  ; masc_misc_descriptor "dashboard" "masc_dashboard"
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "dashboard"
+       "masc_dashboard"
+       (* Concurrent: config reads plus pure text generation; the dashboard
+          module holds no shared mutable state. *)
        ~readonly:true
   ; cluster_descriptor
       ~capability_identity:Internal_name_identity
@@ -3046,13 +3123,19 @@ let internal_descriptors : t list =
       ~id:"masc.misc.keeper_waiting_inventory"
       ~name:"masc_keeper_waiting_inventory"
       ~handler:Tool_masc_misc_dispatch
+      (* Concurrent: approval-queue reads are Atomics over immutable maps;
+         the only tables built are function-local. *)
+      ~ordinary_execution_mode:Concurrent
       ~readonly:true
       ()
   ; masc_misc_descriptor ~keeper_model_projection:Operator_only
        ~ordinary_execution_mode:Concurrent
        "tool_help" "masc_tool_help"
        ~readonly:true
-  ; masc_misc_descriptor "gc" "masc_gc"
+  (* Tool_catalog keeps masc_gc at CanAdmin and the keeper lane has no other
+     permission check, so a model-visible name let any Keeper sweep the
+     workspace (a 09-20 call removed 3,462 messages). *)
+  ; masc_misc_descriptor ~keeper_model_projection:Operator_only "gc" "masc_gc"
       ~readonly:false
   (* The ask chain — store, operator surfaces, answer→wake — was reachable
      only from the MCP lane: nothing in this registry named the tools, so the
@@ -3063,7 +3146,10 @@ let internal_descriptors : t list =
      refusal still applies. *)
   ; masc_misc_descriptor "ask" "masc_ask"
       ~readonly:false
-  ; masc_misc_descriptor "ask_status" "masc_ask_status"
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "ask_status"
+      "masc_ask_status"
+      (* Concurrent: ask-store file reads behind a mutex-guarded version
+         cache; pure row filtering after that. *)
       ~readonly:true
   ; masc_misc_descriptor "ask_withdraw" "masc_ask_withdraw"
       ~readonly:false
@@ -3091,14 +3177,21 @@ let internal_descriptors : t list =
   @ [ keeper_webmcp_list_descriptor (); keeper_webmcp_call_descriptor () ]
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
-    masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" Keeper_tool_name.(to_string Keeper_list)
+    masc_keeper_descriptor ~keeper_model_projection:Operator_only
+      ~ordinary_execution_mode:Concurrent "list" Keeper_tool_name.(to_string Keeper_list)
+      (* Concurrent: registry and roster reads; the list cache is an Atomic
+         over an immutable record with CAS install. *)
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_status" Keeper_tool_name.(to_string Keeper_delegate_status)
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      ~ordinary_execution_mode:Concurrent "delegate_status" Keeper_tool_name.(to_string Keeper_delegate_status)
+      (* Concurrent: owner-registry reads behind its Eio.Mutex; pure render. *)
       ~readonly:true
       ~polling_read:true
   ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" Keeper_tool_name.(to_string Keeper_delegate_cancel)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "delegate_list" Keeper_tool_name.(to_string Keeper_delegate_list)
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only
+      ~ordinary_execution_mode:Concurrent "delegate_list" Keeper_tool_name.(to_string Keeper_delegate_list)
+      (* Concurrent: owner-registry reads behind its Eio.Mutex; pure render. *)
       ~readonly:true
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "clear" Keeper_tool_name.(to_string Keeper_clear)
       ~readonly:false
@@ -3108,9 +3201,15 @@ let internal_descriptors : t list =
       ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "reset" Keeper_tool_name.(to_string Keeper_reset)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "audit" Keeper_tool_name.(to_string Keeper_audit)
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only
+      ~ordinary_execution_mode:Concurrent "audit" Keeper_tool_name.(to_string Keeper_audit)
+      (* Concurrent: keeper file reads plus pure check evaluation; no shared
+         mutable state on the path. *)
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "status" Keeper_tool_name.(to_string Keeper_status)
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only
+      ~ordinary_execution_mode:Concurrent "status" Keeper_tool_name.(to_string Keeper_status)
+      (* Concurrent: keeper meta and roster reads; no shared mutable state
+         on the path. *)
       ~readonly:true
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "down" Keeper_tool_name.(to_string Keeper_down)
       ~readonly:false

@@ -432,7 +432,7 @@ def scoped_roster_authority(binary: str, *, matching_c: bool = False) -> None:
         refresh=30.0, terminal_cols=80)
 
 
-def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
+def queued_workspace_inputs(binary: str, *, root_only=False, paused_before_resume=False) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
     wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH), root_only=root_only)
     queued = b"retained-workspace-a-queued-payload"
@@ -444,10 +444,13 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             self.held_once = False
             self.phases = []
             self.directives = []
+            self.protocol = []
         def directive(self, body):
             self.directives.append(json.loads(body))
+            self.protocol.append("resume")
             return super().directive(body)
         def stream(self, body):
+            self.protocol.append("admission")
             with wire.lock:
                 self.phases.append(wire.phase)
             if not self.held_once:
@@ -456,8 +459,23 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
                 assert self.release_admission.wait(timeout=30), "admission fixture was not released"
             return super().stream(body)
     admission = HeldAdmission()
+    pause_published = threading.Event()
+    release_roster = threading.Event()
+    def roster():
+        response = wire.roster()
+        if pause_published.is_set():
+            # Keep the client's cached active row until it handles /queue
+            # resume. A live read must discover the other client's pause.
+            assert release_roster.wait(timeout=30), "paused roster was not released"
+            payload = response[1]
+            assert isinstance(payload, dict)
+            for row in payload["keepers"]:
+                if row["name"] == "alpha":
+                    row["paused"] = admission.paused
+                    row["meta"]["paused"] = admission.paused
+        return response
     fixtures.update(admission.fixtures)
-    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+    fixtures.update({ROSTER_PATH: roster, "/health": wire.health,
                      "/health?full=1": wire.health, HISTORY_PATH: wire.history,
                      MEMORY_PATH: wire.memory})
     def interact(process, fd, _slave, output, _base):
@@ -477,7 +495,7 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, admission.held_received,
                 timeout=WAIT_SECONDS), "first admission was not held"
             _keyboard_harness.send_and_wait(process, fd, output, queued, _keyboard_harness.composer_showing(queued))
-            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"NEXT 1")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", "전송 대기".encode())
             wire.publish("b")
             await_screen(lambda text: b"b.current" in text and b"[workspace mismatch]" in text,
                          "B authority did not become visible")
@@ -490,28 +508,45 @@ def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
                          "A authority was not restored")
             _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
             _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
-            await_screen(lambda text: b"NEXT 1" in text and queued in text,
+            await_screen(lambda text: "전송 대기".encode() in text and queued in text,
                          "the original queued input was not restored for A")
             assert admission.phases == ["a"], "returning automatically dispatched retained input"
             _keyboard_harness.send_and_wait(process, fd, output, b"/queue resume", _keyboard_harness.composer_showing(b"/queue resume"))
+            if paused_before_resume:
+                admission.paused = True
+                pause_published.set()
             os.write(fd, b"\r")
+            if paused_before_resume:
+                assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                    lambda: b"Reading server queue" in screen(output)
+                        or len(admission.phases) == 2,
+                    timeout=WAIT_SECONDS), "resume was not handled"
+                release_roster.set()
             _keyboard_chat.wait_for_atomic_admissions(process, fd, output, admission, 2)
-            assert admission.directives == [], "local input resume issued a server directive"
+            # Local resume reads the owner's pause from the server first: an
+            # active owner needs no directive, one another client paused gets
+            # the server resume before the retained input goes out.
+            assert admission.protocol == (["admission", "resume", "admission"]
+                if paused_before_resume else ["admission", "admission"]), admission.protocol
             assert admission.phases == ["a", "a-returned"], admission.phases
+            assert admission.submitted[0]["message"] == "first-workspace-a-request"
             assert admission.submitted[1]["message"] == queued.decode(), admission.submitted
             assert admission.submitted[1].get("admission_intent") is None
             leave_chat_for_roster(process, fd, output)
             os.write(fd, b"q")
         finally:
+            release_roster.set()
             admission.release_admission.set()
             admission.release.set()
             admission.release_interrupt.set()
     _keyboard_harness.run_terminal_scenario(binary,
         description=("MASC-root-only change" if root_only else "workspace change")
-            + " suspends complete unsent inputs until explicit resume in A",
+            + " suspends complete unsent inputs until explicit resume in A"
+            + (" after another client pauses" if paused_before_resume else ""),
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
-    assert admission.directives == [], "local resume sent a late server directive"
+    assert [request["action"] for request in admission.directives] == (
+        ["resume"] if paused_before_resume else []), admission.directives
 
 
 def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
@@ -602,9 +637,12 @@ def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
 
 def armed_schedule_and_runtime_workspace(binary: str) -> None:
     """Same schedule ID on B needs a fresh arm; the old runtime picker closes."""
-    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    roster = fixtures[ROSTER_PATH]
-    fixtures.update(_keyboard_schedule.schedule_detail_http_fixtures())
+    # The schedule fixtures must land first: they carry the Overview
+    # defaults, whose empty roster would otherwise overwrite the two-row
+    # roster this scenario wires its workspace identities through (the last
+    # writer wins for the same fixture key).
+    fixtures = _keyboard_schedule.schedule_detail_http_fixtures()
+    fixtures.update(_keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current"))
     wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
     schedule_template = _keyboard_harness.json_payload_fixture(fixtures, _keyboard_schedule.SCHEDULES_PATH)
     unknown_health = threading.Event()
@@ -1867,6 +1905,7 @@ if __name__ == "__main__":
     run(binary, captures)
     queued_workspace_inputs(binary)
     queued_workspace_inputs(binary, root_only=True)
+    queued_workspace_inputs(binary, paused_before_resume=True)
     scoped_roster_authority(binary)
     scoped_roster_authority(binary, matching_c=True)
     staged_payload_workspace_inputs(binary)

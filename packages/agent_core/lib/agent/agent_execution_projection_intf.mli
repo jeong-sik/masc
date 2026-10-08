@@ -228,6 +228,24 @@ module type S = sig
 
   type t
 
+  type settled_tool_invocation =
+    { invocation : Tool_contract.Invocation.t
+    ; tool_name : string
+    ; input : Yojson.Safe.t
+    ; result : Llm_provider.Types.content_block
+    ; attempt_admitted : bool
+    ; settlement_seq : int
+    }
+
+  val settled_tool_invocations : t -> (settled_tool_invocation list, error) result
+  (** Canonically settled invocations of this root run, in journal settlement
+      order. The invocation carries its original turn and planned occurrence;
+      provider tool-use IDs alone are not identity. Nested runs stay behind
+      their enclosing invocation's result. Unsettled invocations are omitted,
+      not declared safe to retry. [attempt_admitted] distinguishes a rejected
+      pre-execution gate from an admitted attempt; admitted validation errors
+      can still precede the handler. This is observation, not replay authority. *)
+
   val beginning_cursor : t -> cursor
   val current_cursor : t -> (cursor, error) result
 

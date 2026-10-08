@@ -61,16 +61,6 @@ type response =
   | Turn_completed of completed_turn
   | Replayed_succeeded of acceptance
 
-type operation_reconciliation =
-  | Operation_pending of acceptance_state
-  | Operation_succeeded of { outcome_ref : string }
-  | Operation_failed of {
-      failure_kind : string;
-      detail : string;
-      outcome_ref : string option;
-    }
-  | Operation_cancelled
-
 type tool_occurrence =
   { stream_scope : int
   ; block_index : int
@@ -209,8 +199,6 @@ val terminal_safe_text : ?preserve_newlines:bool -> string -> string
 val decode_response : request:request -> string -> (response, stream_error) result
 val decode_response_with_provenance :
   request:request -> string -> (response, protocol_error) result
-val decode_operation_reconciliation :
-  request:request -> Yojson.Safe.t -> (operation_reconciliation, stream_error) result
 val stream_error_to_string : stream_error -> string
 val error_to_string : error -> string
 
@@ -221,6 +209,20 @@ val unverified_retry_notice : request_id:string -> error -> string
 val protocol_error : ?acceptance_observed:bool -> stream_error -> error
 val error_acceptance_observed : error -> bool
 val error_certainty : ?was_unverified:bool -> error -> error_certainty
+
+(** What the server's operation record says about a request whose closing
+    event never reached this screen. *)
+type operation_record =
+  | Operation_succeeded
+  | Operation_failed
+  | Operation_cancelled
+
+(** The operation record a result was read from, when the result carries no
+    closing event of its own: the server answered a repeat of an operation it
+    had already settled ([Replayed_succeeded], [Replayed_failed],
+    [Replayed_cancelled]). [None] for every result whose stream delivered the
+    ending, and for every failure that proves nothing about the operation. *)
+val operation_record_of_result : (response, error) result -> operation_record option
 
 (** Whether the failure means this process could not authenticate, rather than
     anything about the operation it asked about. Reconciliation reads use this:

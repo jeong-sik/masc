@@ -96,16 +96,24 @@ val selected_declaration : t -> declaration option
 val selected_document : t -> Document.session option
 val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
+val toggle_flow : t -> t
+(** Toggle Flow and Summary, keeping overview navigation on visible instances. *)
 val select_initial_result : t -> t
 (** Choose the declared reading, or first record, for the pinned detail after
     its first scoped read. Refreshes preserve the existing row identity. *)
 val open_selected_instance : t -> t
+val open_declaration : t -> string -> t
+(** The view an inventory declaration opens to, with the configuration cursor
+    on that declaration so actions target it; [-1] when the snapshot does not
+    list it. *)
 (** Enter the selected worker or unresolved installation. A worker pins its
     incarnation; an installation opens its existing TOML detail section. *)
 val overview_count : ?mode:overview_mode -> snapshot -> int
 (** Selectable current workers/declarations, or retained runs in history mode. *)
 val toggle_history : t -> t
 (** Explicitly switch the overview list. Detail keeps its pinned incarnation. *)
+val move_instance : t -> int -> t
+(** Move among visible entries in the current overview mode and presentation. *)
 val move_record : t -> int -> t
 (** Move only among records belonging to the pinned detail incarnation. *)
 val selected_source_path : t -> string option

@@ -30,6 +30,19 @@ type board_error =
         to a 403-class rejection rather than a generic input error. *)
 [@@deriving show]
 
+(** What a Board read answers when it has no row to give: the id did not
+    parse, or nothing has it. Reads are served from the in-memory store, so no
+    read answers an I/O failure; persistence failures come from writes, as
+    {!board_error}. *)
+type board_read_error =
+  | Read_invalid_id of string
+  | Read_post_not_found of string
+  | Read_comment_not_found of string
+[@@deriving show]
+
+val board_error_of_read_error : board_read_error -> board_error
+(** For a caller that carries reads and writes in one [board_error] result. *)
+
 (** {1 Safe ID Modules — Parse, Don't Validate} *)
 
 (* The shared alphanumeric regex [^[a-zA-Z0-9_-]+$] is not exported.
@@ -45,6 +58,8 @@ module Post_id : sig
   type t
   val of_string : string -> (t, board_error) result
   (** Validates [a-zA-Z0-9_-]+, length 1–64. *)
+  val of_string_for_read : string -> (t, board_read_error) result
+  (** The same parse, answered as a read error. *)
   val to_string : t -> string
   val generate : unit -> t
   (** Cryptographic random id, prefix ["p-"]. *)
@@ -59,6 +74,8 @@ module Comment_id : sig
   (** Accepts exactly the shape {!generate} mints: ["c-"] followed by 32
       lowercase hex characters (trimmed). Anything else is [Invalid_id] with
       {!accepted_format} in the message. *)
+  val of_string_for_read : string -> (t, board_read_error) result
+  (** The same parse, answered as a read error. *)
   val to_string : t -> string
   val generate : unit -> t
   (** Cryptographic random id, prefix ["c-"], 16 random bytes as 32 hex

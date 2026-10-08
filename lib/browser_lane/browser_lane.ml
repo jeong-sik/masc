@@ -25,6 +25,7 @@ type scene_view = Content | Regions
 
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
+  | Hover_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Click_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
   | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport }
@@ -84,6 +85,8 @@ let interaction_args ~tab_id ~expected_url action =
     | Scroll_at {point;viewport;x;y} -> ["action", `String "scroll_at";
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport;
         "x",`Int x; "y",`Int y]
+    | Hover_at {point;viewport} -> ["action", `String "hover_at";
+        "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
     | Click_at {point;viewport} -> ["action", `String "click_at";
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
     | Drag {from;to_;viewport} -> ["action", `String "drag";
@@ -164,23 +167,81 @@ let verb_json = function
 
    - [verb_is_read]: does this leave browser content and lifecycle unchanged?
      Interaction, navigation, and session changes are writes.
-   - [verb_allowed_on_live]: may this run against the operator's browser?
-     Readers and explicit-tab interactions are supported. Session ownership
-     and direct navigation remain with the automation backend. *)
+   - [live_capability]: what does this ask of the operator's browser, if it
+     may run there at all? Readers and explicit-tab interactions are
+     supported. Session ownership and direct navigation remain with the
+     automation backend. *)
 let verb_is_read = function
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _ | Page_downloads _
   | Session_status | Page_locate _ | Page_extract _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ | Page_instruct _ -> false
 ;;
 
-let verb_allowed_on_live = function
-  | Page_context _ | Page_downloads _ -> false
-  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_interact _ -> true
+(* What the live lane asks of the operator's browser, named by what the
+   connection must be able to do there. The two live transports reach the
+   browser differently and each serves a different part of this list;
+   [live_transport_serves] is the one place that says which. *)
+type live_capability =
+  | Tab_listing
+  | Text_read
+  | Document_source
+  | Element_inventory
+  | Viewport_capture
+  | Scene_read
+  | Dom_interaction
+  | Point_click
+  | Point_scroll
+  | Trusted_hover
+  | Trusted_drag
+  | Tab_activation
+[@@deriving enumerate]
+
+let live_capability_to_wire = function
+  | Tab_listing -> "tab_listing"
+  | Text_read -> "text_read"
+  | Document_source -> "document_source"
+  | Element_inventory -> "element_inventory"
+  | Viewport_capture -> "viewport_capture"
+  | Scene_read -> "scene_read"
+  | Dom_interaction -> "dom_interaction"
+  | Point_click -> "point_click"
+  | Point_scroll -> "point_scroll"
+  | Trusted_hover -> "trusted_hover"
+  | Trusted_drag -> "trusted_drag"
+  | Tab_activation -> "tab_activation"
+;;
+
+let live_capability_of_wire raw =
+  List.find_opt
+    (fun capability -> String.equal (live_capability_to_wire capability) raw)
+    all_of_live_capability
+;;
+
+let live_capability_of_interaction = function
+  | Activate_tab -> Tab_activation
+  | Click _ | Fill _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
+  | Click_at _ -> Point_click
+  | Scroll_at _ -> Point_scroll
+  | Hover_at _ -> Trusted_hover
+  | Drag _ -> Trusted_drag
+;;
+
+let live_capability = function
+  | Tabs_list -> Some Tab_listing
+  | Page_read _ -> Some Text_read
+  | Page_document _ -> Some Document_source
+  | Page_elements _ -> Some Element_inventory
+  | Page_capture _ -> Some Viewport_capture
+  | Page_scene _ -> Some Scene_read
+  | Page_interact { action; _ } -> Some (live_capability_of_interaction action)
+  | Page_context _ | Page_downloads _ -> None
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
-  | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _ -> false
-  | Page_instruct _ | Page_locate _ | Page_extract _ -> false
+  | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _ -> None
+  | Page_instruct _ | Page_locate _ | Page_extract _ -> None
 ;;
+
+let verb_allowed_on_live verb = Option.is_some (live_capability verb)
 
 (* The WebDriver backend has no model to hand a sentence to. *)
 let verb_allowed_on_automation = function
@@ -258,7 +319,57 @@ let client_id_of_string value =
   match Uuidm.of_string value with
   | Some id when String.equal (Uuidm.to_string id) value -> Ok id
   | _ -> Error "invalid_client_id"
-type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string }
+type live_transport = Web_extension | Webdriver_bidi [@@deriving enumerate]
+let live_transport_to_string = function
+  | Web_extension -> "web_extension"
+  | Webdriver_bidi -> "webdriver_bidi"
+let live_transport_of_string = function
+  | "web_extension" -> Ok Web_extension
+  | "webdriver_bidi" -> Ok Webdriver_bidi
+  | _ -> Error "unsupported_browser_transport"
+
+(* Which live work each transport serves. Every pair is spelled out, so a new
+   capability or transport does not compile until this table answers for it.
+
+   The extension acts through DOM calls inside the page, so it has no pointer
+   the browser treats as the operator's: it cannot hover or drag, and its
+   point click is the element's own [click()]. The BiDi peer sends pointer
+   and wheel input through the browser. It does not implement tab activation
+   (Browser_bidi_peer.dispatch): BiDi's own activation also takes window
+   focus. test_browser_bidi_peer holds this table to what that peer does. *)
+let live_transport_serves transport capability =
+  match transport, capability with
+  | ( (Web_extension | Webdriver_bidi)
+    , ( Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture
+      | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
+  | Web_extension, Tab_activation -> true
+  | Web_extension, (Trusted_hover | Trusted_drag) -> false
+  | Webdriver_bidi, (Trusted_hover | Trusted_drag) -> true
+  | Webdriver_bidi, Tab_activation -> false
+;;
+
+let live_transports_serving capability =
+  List.filter (fun transport -> live_transport_serves transport capability) all_of_live_transport
+;;
+
+(* Where the steps for attaching a connection of this transport are written. *)
+let live_transport_setup_doc = function
+  | Web_extension -> "connectors/browser/host/README.md"
+  | Webdriver_bidi -> "docs/design/browser-bidi-live-host.md"
+;;
+
+(* What adds a connection of each kind. Both are the operator's to do. *)
+let live_transport_setup transport =
+  let steps = match transport with
+    | Web_extension ->
+      "the operator loads the browser-lane extension and its native host in that browser"
+    | Webdriver_bidi ->
+      "the operator attaches that browser's Remote Agent with masc-browser-host --bidi-url" in
+  Printf.sprintf "%s (%s)" steps (live_transport_setup_doc transport)
+;;
+
+type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string;
+  transport : live_transport }
 type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
@@ -272,6 +383,7 @@ let command_uuid = Uuidm.v4_gen (Random.State.make_self_init ())
 let lane_connected_window_sec = 120.
 let connected client = not client.closed && not (Monotonic_deadline.passed client.connected_until)
 let same_info left right = left.browser = right.browser
+  && left.transport = right.transport
   && String.equal left.version right.version && String.equal left.engine_version right.engine_version
 let retire_unlocked key client =
   client.closed <- true;
@@ -293,8 +405,43 @@ let active_clients () =
        (client_id_to_string left.client_id) (client_id_to_string right.client_id))
 let client_json info = `Assoc ["clientId", `String (client_id_to_string info.client_id);
   "browser", `String (browser_name info.browser); "version", `String info.version;
-  "engineVersion", `String info.engine_version]
+  "engineVersion", `String info.engine_version;
+  "transport", `String (live_transport_to_string info.transport)]
 let target_client_id = function Automation | Stagehand -> None | Live_client client -> Some client.info.client_id
+(* Where an answer came from, as every successful answer states it: a live
+   connection's ID and how its browser is reached. The server's own browsers
+   have no client, and no transport to name. *)
+let client_id_field = "clientId"
+let transport_field = "transport"
+let connection_field_names = [client_id_field; transport_field]
+let live_connection_fields ~client_id ~transport =
+  [client_id_field, `String (client_id_to_string client_id);
+   transport_field, `String (live_transport_to_string transport)]
+let target_connection_fields = function
+  | Live_client client ->
+    live_connection_fields ~client_id:client.info.client_id ~transport:client.info.transport
+  | Automation | Stagehand -> [client_id_field, `Null]
+(* Those fields read back from an answer, for a holder that keeps only what
+   it can check. An answer states no connection, the server's own browser, or
+   a live connection together with its transport. A client ID without its
+   transport, or a transport without its client, is none of the three. *)
+let connection_fields_of_json fields =
+  match List.assoc_opt client_id_field fields, List.assoc_opt transport_field fields with
+  | None, None -> Ok []
+  | Some `Null, None -> Ok [client_id_field, `Null]
+  | Some (`String client_id), Some (`String transport) ->
+    Result.bind (client_id_of_string client_id) (fun client_id ->
+      Result.map (fun transport -> live_connection_fields ~client_id ~transport)
+        (live_transport_of_string transport))
+  | Some (`String client_id), None ->
+    Result.bind (client_id_of_string client_id) (fun _ -> Error "client_without_transport")
+  | Some _, _ | None, Some _ -> Error "invalid_connection_fields"
+(* The route's own values replace anything a page or backend supplied under
+   the same names, so a reader that takes the first key and one that takes the
+   last see the same connection. *)
+let with_connection_fields target fields =
+  target_connection_fields target
+  @ List.filter (fun (key, _) -> not (List.mem key connection_field_names)) fields
 let target_lane = function
   | Automation -> Lane_name.Automation
   | Live_client _ -> Lane_name.Live
@@ -314,8 +461,10 @@ let route_lane_name = function
 (* What an absent backend means on each lane, and where the operator looks. *)
 let lane_absent_message = function
   | Lane_name.Live ->
-    "no browser lane connected: the live lane needs the operator's browser \
-     running with the browser-lane extension and host (connectors/browser)"
+    Printf.sprintf
+      "no browser lane connected: the live lane needs the operator's browser running with the \
+       browser-lane extension and host (%s)"
+      (live_transport_setup_doc Web_extension)
   | Lane_name.Automation ->
     "the automation lane has no WebDriver: configure browser.automation.geckodriver, or \
      read the server log for why it did not start"
@@ -332,17 +481,52 @@ type selection_error =
   | No_live_client
   | Selected_client_disconnected of client_id
   | Ambiguous_clients of client_id list
+  (* The chosen browser is connected, and its connection does not serve this
+     work. Another connection may: that is the caller's next choice. *)
+  | Transport_unsupported of
+      { client_id : client_id; transport : live_transport; capability : live_capability }
 
-let selection_error_code = function
-  | Activity_rejected (Lane_off _) -> "browser_lane_off"
-  | Activity_rejected Activity_unavailable -> "browser_activity_unavailable"
-  | No_live_client -> "no_live_client"
-  | Selected_client_disconnected _ -> "selected_client_disconnected"
-  | Ambiguous_clients _ -> "ambiguous_browser_clients"
+(* The refusal's name without its details: what a reader of a recorded
+   rejection recovers from the code. *)
+type selection_case =
+  | Lane_off_case
+  | Activity_unavailable_case
+  | No_live_client_case
+  | Selected_client_disconnected_case
+  | Ambiguous_clients_case
+  | Transport_unsupported_case
+[@@deriving enumerate]
+
+let selection_case = function
+  | Activity_rejected (Lane_off _) -> Lane_off_case
+  | Activity_rejected Activity_unavailable -> Activity_unavailable_case
+  | No_live_client -> No_live_client_case
+  | Selected_client_disconnected _ -> Selected_client_disconnected_case
+  | Ambiguous_clients _ -> Ambiguous_clients_case
+  | Transport_unsupported _ -> Transport_unsupported_case
+
+let selection_case_code = function
+  | Lane_off_case -> "browser_lane_off"
+  | Activity_unavailable_case -> "browser_activity_unavailable"
+  | No_live_client_case -> "no_live_client"
+  | Selected_client_disconnected_case -> "selected_client_disconnected"
+  | Ambiguous_clients_case -> "ambiguous_browser_clients"
+  | Transport_unsupported_case -> "live_transport_unsupported"
+
+let selection_case_of_code code =
+  List.find_opt (fun case -> String.equal (selection_case_code case) code) all_of_selection_case
+
+let selection_error_code error = selection_case_code (selection_case error)
 
 let selection_error_message = function
   | Activity_rejected rejection -> activity_rejection_message rejection
-  | error -> selection_error_code error
+  | Transport_unsupported { transport; capability; _ } as error ->
+    Printf.sprintf "%s: this browser is connected over %s, which does not serve %s; a %s connection does"
+      (selection_error_code error) (live_transport_to_string transport)
+      (live_capability_to_wire capability)
+      (String.concat " or " (List.map live_transport_to_string (live_transports_serving capability)))
+  | (No_live_client | Selected_client_disconnected _ | Ambiguous_clients _) as error ->
+    selection_error_code error
 
 (* Check activity before offering connection/selection remedies. Dispatch still
    checks again so a target resolved while on cannot admit new work after off. *)
@@ -420,15 +604,21 @@ let disconnect_client ~client_id =
     | Some client -> retire_unlocked key client; Ok ())
 (* A browser whose lease ended after its target was resolved is the same
    selection failure as naming it when it had already gone, so the caller
-   answers both from one place. *)
+   answers both from one place. Work this connection's transport does not
+   serve is a selection failure too: nothing is queued, and another
+   connection is the remedy. *)
 let issue_live_with ~activity_check ?(only_if_idle = false) client ~verb ~timeout_sec =
   match activity_check verb with
   | Some refusal -> Ok refusal
   | None -> if not (connected client) then
     Error (Selected_client_disconnected client.info.client_id)
-  else if not (verb_allowed_on_live verb) then
+  else match live_capability verb with
+  | None ->
     Ok (Rejected_before_effect "session ownership, direct navigation and sentence verbs belong to the server's lanes")
-  else
+  | Some capability when not (live_transport_serves client.info.transport capability) ->
+    Error (Transport_unsupported
+      { client_id = client.info.client_id; transport = client.info.transport; capability })
+  | Some _ ->
     Ok (Eio.Switch.run (fun sw ->
       let id = Uuidm.to_string (command_uuid ()) in
       let promise, resolver = Eio.Promise.create () in
@@ -608,8 +798,7 @@ let issue_document_if_idle ~target ~tab_id ~timeout_sec =
      | Ok (Answered (`Assoc fields)) ->
        (match List.assoc_opt "data" fields with
         | Some (`Assoc data) ->
-          let data = `Assoc (("clientId", `String (client_id_to_string client.info.client_id))
-                            :: List.remove_assoc "clientId" data) in
+          let data = `Assoc (with_connection_fields target data) in
           Ok (Answered (`Assoc (("data", data) :: List.remove_assoc "data" fields)))
         | Some _ | None -> Ok (Answered (`Assoc fields)))
      | answer -> answer)

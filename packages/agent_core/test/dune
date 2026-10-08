@@ -543,6 +543,17 @@
  (modules test_slot_scheduler_priority)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
 
+; Changing a scheduler's allowance while slots are held and waiters queue.
+(test
+ (name test_slot_scheduler_reconfigure)
+ (modules test_slot_scheduler_reconfigure)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+
+(test
+ (name test_slot_scheduler_queue_watch)
+ (modules test_slot_scheduler_queue_watch)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+
 (test
  (name test_under_deadline)
  (modules test_under_deadline)

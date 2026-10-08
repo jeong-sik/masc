@@ -283,12 +283,11 @@ let runtime_skip_reason = function
   | Invalid_answer_run | Memory_write_failure -> None
 ;;
 
-let run_runtime_evidence ?fixture_dir () =
+let run_runtime_evidence () =
   let module Librarian = Masc.Keeper_librarian in
   let module Current = Masc.Keeper_memory_os_current in
   let module Absorbed = Masc.Keeper_memory_absorbed in
   let module Runs = Masc.Exact_lane_run_registry in
-  let module Projection = Server_standalone_lane_projection in
   let module Fixture = Exact_output_fixture in
   let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
   let member = Yojson.Safe.Util.member in
@@ -660,17 +659,7 @@ let run_runtime_evidence ?fixture_dir () =
     Alcotest.(check (list string)) "only applied originals are archived"
       (List.sort String.compare archived)
       (List.sort String.compare (List.map (fun (r : Absorbed.record) -> r.fact.claim) records));
-    Option.iter (fun directory ->
-      let detail = match Projection.For_testing.run_detail_json_with
-        ~run_id:replayed.run_id ~exact_runs:[ replayed ]
-        ~verification_runs:[] ~goal_verification_runs:[] with
-        | Projection.Detail_found detail -> detail
-        | Detail_not_found | Detail_ambiguous -> Alcotest.fail "replayed run has no HTTP detail" in
-      let page = Projection.For_testing.recent_run_page_json_with
-        ~limit:1 ~before:None ~lane:(Some "librarian_exact") ~run_kind:None
-        ~exact_runs:[ replayed ] ~verification_runs:[] ~goal_verification_runs:[] |> require in
-      Yojson.Safe.to_file (Filename.concat directory (case_name ^ ".json"))
-        (`Assoc [ "scenario", `String case_name; "detail", detail; "page", page ])) fixture_dir)
+    Librarian_run_tui_reading.check replayed)
     [ Judged_run; Gate_disabled_run; Lane_disabled_run; Missing_key_run; Excluded_run
     ; Http_failure; Invalid_json_run; Invalid_response_run; Nonfinite_response_run
     ; Duplicate_response_run; Nonutf8_response_run
@@ -1036,6 +1025,31 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
   let second = fact (List.nth sources 1) in
   let other = fact "beta ships on fridays and pages the operator" in
   let observed = ref [] in
+  let module Runs = Masc.Exact_lane_run_registry in
+  let registry_dir = Filename.temp_dir "absorb-cancel-registry-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree registry_dir);
+  let registry_path = Filename.concat registry_dir Runs.storage_filename in
+  let registry = Runs.create ~path:registry_path () in
+  let registered = ref [] in
+  let before_evaluate ~direction ~destinations ~state ~questions =
+    let run_id = Printf.sprintf "cancel-evaluation-%d" (List.length !registered) in
+    let started_at = Time_compat.now () in
+    let started_ns = Mtime_clock.elapsed_ns () in
+    Runs.register_running registry ~run_id ~lane:Runs.Librarian
+      ~actor:"cancel-observation-fixture" ~started_at
+      ~input:(Runs.Exact_input (Gate.evaluation_request_to_yojson
+        ~direction ~destinations ~state ~questions));
+    registered := !registered @ [ run_id ];
+    run_id, started_ns
+  in
+  let finish (run_id, started_ns) outcome output =
+    let elapsed_s = Int64.to_float
+        (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000_000. in
+    match Runs.mark_completed registry ~run_id ~outcome ~elapsed_s
+        ~selected_slot:None ~output with
+    | Ok () -> ()
+    | Error error -> Alcotest.fail (Runs.completion_error_to_string error)
+  in
   let raised_by_gate = ref false in
   let returned = ref false in
   let context, resolve_context = Eio.Promise.create () in
@@ -1046,6 +1060,13 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
          Eio.Promise.resolve resolve_context cancellation;
          match Gate.run ~clock ~keeper_id:"cancel-observation-fixture" ~superseding:[]
              ~observe:(fun observation -> observed := observation :: !observed)
+             ~before_evaluate
+             ~after_evaluate:(fun ~evaluation_id evaluation ->
+               finish evaluation_id Runs.Succeeded
+                 (Gate.observation_to_yojson (Gate.Incomplete [ evaluation ])))
+             ~on_evaluation_aborted:(fun ~evaluation_id -> function
+               | `Cancelled -> finish evaluation_id Runs.Cancelled `Null
+               | `Failed detail -> Alcotest.fail detail)
              ~facts:[ first; second ] ~new_claims:[ merged; other ]
              ~absorbed:(absorbed_into merged [ first ] @ absorbed_into other [ second ]) () with
          | _ -> returned := true
@@ -1064,6 +1085,18 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
   Alcotest.(check bool) "Gate.run itself propagates the original cancellation" true !raised_by_gate;
   Alcotest.(check bool) "cancellation is not turned into a returned disposition" false !returned;
   Alcotest.(check int) "the second request reached HTTP before cancellation" 2 (F.post_count server);
+  let cancelled_id = match !registered with
+    | [ _completed; cancelled ] -> cancelled
+    | _ -> Alcotest.fail "expected two registered evaluations" in
+  let check_cancelled label registry =
+    match Runs.get registry ~run_id:cancelled_id with
+    | Some { status = Runs.Completed { outcome = Runs.Cancelled; elapsed_s; output = `Null; _ };
+             output_availability = Some Runs.Available; _ } ->
+      Alcotest.(check bool) (label ^ " retains measured cancellation duration") true (elapsed_s > 0.)
+    | _ -> Alcotest.fail (label ^ " did not retain the exact cancelled subrun and its payload")
+  in
+  check_cancelled "live durable registry" registry;
+  check_cancelled "disk replay" (Runs.replay registry_path);
   match List.rev !observed with
   | [ Gate.Incomplete [ evaluation ] as observation ] ->
     let sent = List.hd (F.request_bodies server) in
@@ -1097,6 +1130,146 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
       Alcotest.(check bool) ("no final " ^ field) true (member field report = `Null))
       [ "applied_absorptions"; "conveyed"; "left"; "conveyed_boundary" ]
   | _ -> Alcotest.fail "cancellation must leave one incomplete snapshot and no Complete"
+;;
+
+let test_cancellation_during_terminal_callback_settles_registry () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module F = Exact_output_fixture in
+  let module Runs = Masc.Exact_lane_run_registry in
+  let server = F.start_server ~sw ~net ~clock (F.Reply
+      {|{"model":"response-model","answers":{"s0_0":{"type":"noul","noul":0.9}}}|}) in
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with destinations =
+        ({ Runtime_schema.endpoint = server.base_url; model = "request-model";
+           api_key_env = "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
+  let directory = Filename.temp_dir "absorb-terminal-cancel-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
+  let path = Filename.concat directory Runs.storage_filename in
+  let registry = Runs.create ~path () in
+  let run_id = "terminal-cancel-evaluation" in
+  let events = ref [] in
+  let callback_started, start_callback = Eio.Promise.create () in
+  let callback_finished, finish_callback = Eio.Promise.create () in
+  let raised = ref false in
+  let source = fact (List.hd sources) in
+  (try Eio.Cancel.sub (fun cancellation ->
+     ignore (Gate.run ~clock ~keeper_id:"terminal-cancel-fixture" ~superseding:[]
+       ~facts:[source] ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])
+       ~before_evaluate:(fun ~direction ~destinations ~state ~questions ->
+         Runs.register_running registry ~run_id ~lane:Runs.Librarian
+           ~actor:"terminal-cancel-fixture" ~started_at:(Time_compat.now ())
+           ~input:(Runs.Exact_input (Gate.evaluation_request_to_yojson
+             ~direction ~destinations ~state ~questions));
+         run_id)
+       ~after_evaluate:(fun ~evaluation_id evaluation ->
+         (match evaluation.Gate.result with
+          | Ok _ -> () | Error failure -> Alcotest.fail (Masc.Typesafeai_client.failure_to_string failure));
+         Eio.Promise.resolve start_callback ();
+         events := "before completion" :: !events;
+         Eio.Cancel.cancel cancellation Cancel_gate_fixture;
+         (* A pending cancellation must not interrupt the terminal payload's
+            cooperative boundary before the registry receives its outcome. *)
+         Eio.Fiber.yield ();
+         (match Runs.mark_completed registry ~run_id:evaluation_id ~outcome:Runs.Succeeded
+             ~elapsed_s:0. ~selected_slot:None
+             ~output:(Gate.observation_to_yojson (Gate.Incomplete [evaluation])) with
+          | Ok () -> () | Error error -> Alcotest.fail (Runs.completion_error_to_string error));
+         events := "after completion" :: !events;
+         Eio.Promise.resolve finish_callback ())
+       ~on_evaluation_aborted:(fun ~evaluation_id:_ _ ->
+         Alcotest.fail "completed provider response must settle through its finish callback")
+       ~observe:(fun _ -> Eio.Fiber.yield ()) ());
+     Alcotest.fail "Gate.run returned despite terminal cancellation")
+   with Eio.Cancel.Cancelled Cancel_gate_fixture -> raised := true);
+  Alcotest.(check bool) "original cancellation propagates" true !raised;
+  F.await_within_fixture_budget ~clock ~failure:"terminal callback never started" callback_started;
+  F.await_within_fixture_budget ~clock ~failure:"terminal callback did not finish" callback_finished;
+  Alcotest.(check (list string)) "entire terminal callback settled"
+    ["before completion"; "after completion"] (List.rev !events);
+  List.iter (fun (label, registry) ->
+    match Runs.get registry ~run_id with
+    | Some {status=Runs.Completed {outcome=Runs.Succeeded; _};
+            output_availability=Some Runs.Available; _} -> ()
+    | _ -> Alcotest.fail (label ^ " retained a Running evaluation or unavailable terminal payload"))
+    ["live", registry; "replayed", Runs.replay path]
+;;
+
+(* The observer is what the parent Librarian run reads, so a cancellation
+   that arrives while the finish callback runs must not skip it. *)
+let test_cancellation_during_finish_callback_still_publishes_the_observation () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module F = Exact_output_fixture in
+  let server = F.start_server ~sw ~net ~clock (F.Reply
+      {|{"model":"response-model","answers":{"s0_0":{"type":"noul","noul":0.9}}}|}) in
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with destinations =
+        ({ Runtime_schema.endpoint = server.base_url; model = "request-model";
+           api_key_env = "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
+  let source = fact (List.hd sources) in
+  let observed = ref [] in
+  let raised = ref false in
+  (try Eio.Cancel.sub (fun cancellation ->
+     ignore (Gate.run ~clock ~keeper_id:"finish-cancel-fixture" ~superseding:[]
+       ~facts:[source] ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])
+       ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> "run")
+       ~after_evaluate:(fun ~evaluation_id:_ _ ->
+         Eio.Cancel.cancel cancellation Cancel_gate_fixture)
+       ~on_evaluation_aborted:(fun ~evaluation_id:_ _ -> ())
+       ~observe:(fun observation -> observed := observation :: !observed) ());
+     Alcotest.fail "Gate.run returned despite cancellation")
+   with Eio.Cancel.Cancelled Cancel_gate_fixture -> raised := true);
+  Alcotest.(check bool) "original cancellation propagates" true !raised;
+  match List.rev !observed with
+  | [ Gate.Incomplete [ _ ] ] -> ()
+  | _ -> Alcotest.fail "the completed evaluation was not published before the cancellation"
+;;
+
+(* A provider that raises while the abort callback settles the row: the
+   cancellation that arrived meanwhile wins over the provider's exception. *)
+let test_cancellation_during_failure_settlement_propagates_as_cancelled () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock:real_clock ->
+  let module F = Exact_output_fixture in
+  let server = F.start_server ~sw ~net ~clock:real_clock (F.Reply {|{}|}) in
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with destinations =
+        ({ Runtime_schema.endpoint = server.base_url; model = "request-model";
+           api_key_env = "TYPESAFEAI_API_KEY" }, []) } @@ fun () ->
+  (* The request window sleeps on this clock; raising from it is how the
+     fixture makes the provider call raise instead of returning [Error]. *)
+  let clock =
+    let module Raising = struct
+      type t = unit
+      type time = float
+      let now () = 0.
+      let sleep_until () _ = failwith "fixture clock raised"
+    end in
+    Eio.Resource.T ((), Eio.Time.Pi.clock (module Raising))
+  in
+  let source = fact (List.hd sources) in
+  let aborted = ref 0 in
+  let outcome =
+    try Eio.Cancel.sub (fun cancellation ->
+      ignore (Gate.run ~clock ~keeper_id:"failure-cancel-fixture" ~superseding:[]
+        ~facts:[source] ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])
+        ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> "run")
+        ~after_evaluate:(fun ~evaluation_id:_ _ ->
+          Alcotest.fail "a raising provider has no completed evaluation")
+        ~on_evaluation_aborted:(fun ~evaluation_id:_ -> function
+          | `Failed _ ->
+            incr aborted;
+            Eio.Cancel.cancel cancellation Cancel_gate_fixture
+          | `Cancelled -> Alcotest.fail "the provider raised before any cancellation")
+        ());
+      `Returned)
+    with
+    | Eio.Cancel.Cancelled Cancel_gate_fixture -> `Cancelled
+    | exn -> `Other (Printexc.to_string exn)
+  in
+  Alcotest.(check int) "the failed row settled once" 1 !aborted;
+  match outcome with
+  | `Cancelled -> ()
+  | `Returned -> Alcotest.fail "Gate.run returned"
+  | `Other detail -> Alcotest.failf "provider exception escaped instead of Cancelled: %s" detail
 ;;
 
 let test_skipped_run_publishes_its_completed_observation () =
@@ -1878,7 +2051,7 @@ let test_the_runtime_does_not_save_a_copy () =
 (* A payment failure must leave the same sources and proposed claim pending
    across repeated Librarian turns. The durable failure journal is the
    operator-visible receipt for each refused judgment. *)
-let test_payment_failure_does_not_multiply_current_claims () =
+let check_failed_absorb_evaluations ~status ~body ~failure_code ~diagnostic () =
   let module Librarian = Masc.Keeper_librarian in
   let module Current = Masc.Keeper_memory_os_current in
   let module Fixture = Exact_output_fixture in
@@ -1897,7 +2070,7 @@ let test_payment_failure_does_not_multiply_current_claims () =
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Masc.Prompt_defaults.init ();
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let keeper_id = "payment-failure-runtime" in
+  let keeper_id = "absorb-failure-" ^ failure_code in
   let a = fact (List.nth sources 0) in
   let b = fact (List.nth sources 1) in
   let source : Current.source = { kind = Current.Librarian; trace_id = "fixture" } in
@@ -1917,11 +2090,11 @@ let test_payment_failure_does_not_multiply_current_claims () =
   let librarian = Fixture.start_server ~sw ~net ~clock
     (Fixture.Reply (Fixture.openai_response answer)) in
   let requests = ref 0 in
-  let handler _conn _request body =
-    ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all));
+  let handler _conn _request request_body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:max_int request_body |> take_all));
     incr requests;
-    Cohttp_eio.Server.respond_string ~status:`Payment_required
-      ~body:{|{"error":{"type":"billing_error","message":"credits exhausted"}}|} () in
+    Eio.Time.sleep clock 0.01;
+    Cohttp_eio.Server.respond_string ~status ~body () in
   let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
     (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
   let port = match Eio.Net.listening_addr socket with
@@ -1969,7 +2142,22 @@ let test_payment_failure_does_not_multiply_current_claims () =
     Alcotest.(check (list string)) "no proposed copy saved beside its sources"
       (List.map id seeded.facts) (List.map id stored.facts)
   done;
-  Alcotest.(check int) "each pass asked the actual 402 stub" 3 !requests;
+  let module Registry = Masc.Exact_lane_run_registry in
+  let registry = Registry.global () in
+  let evaluations = Registry.list_runs registry
+    |> List.filter (fun (run : Registry.run) -> String.equal run.actor keeper_id)
+    |> List.filter_map (fun (run : Registry.run) -> Registry.get registry ~run_id:run.run_id)
+    |> List.filter (fun (run : Registry.run) -> match run.input with
+         | Registry.Exact_input (`Assoc fields) -> List.mem_assoc "direction" fields
+         | Registry.Exact_input _ -> false) in
+  Alcotest.(check int) "one recorded evaluation per pass" 3 (List.length evaluations);
+  List.iter (fun (run : Registry.run) -> match run.status with
+    | Registry.Completed { outcome = Registry.Failed { code; _ }; elapsed_s; _ } ->
+      Alcotest.(check string) "decoded judgment failure is not transport success" failure_code code;
+      Alcotest.(check bool) "elapsed includes the delayed provider response" true (elapsed_s >= 0.01)
+    | Registry.Running | Registry.Completed _ | Registry.Completion_persistence_failed _ ->
+      Alcotest.fail "failed judgment must have a completed failure receipt") evaluations;
+  Alcotest.(check int) "each pass asked the actual failure stub" 3 !requests;
   Alcotest.(check int) "each pass reached the Librarian" 3 (Fixture.post_count librarian);
   (* 851 failures a day in #39443: each one is one WARN line, not one per
      layer it passes through. *)
@@ -1985,8 +2173,8 @@ let test_payment_failure_does_not_multiply_current_claims () =
       | Ok _ | Error _ -> None) in
   Alcotest.(check int) "one durable failure receipt per pass" 3 (List.length failures);
   List.iter (fun detail ->
-    Alcotest.(check bool) "receipt names HTTP 402" true
-      (String_util.contains_substring detail "HTTP 402");
+    Alcotest.(check bool) "receipt preserves the judgment failure diagnostic" true
+      (String_util.contains_substring detail diagnostic);
     Alcotest.(check bool) "receipt names the judgment failure" true
       (String_util.contains_substring detail "absorb judgment failed")) failures
 ;;
@@ -2066,10 +2254,21 @@ let test_persisted_evaluation_request_survives_restart () =
       |> to_string = "does the claim convey the statement"))
 ;;
 
+let test_payment_failure_does_not_multiply_current_claims () =
+  check_failed_absorb_evaluations
+    ~status:`Payment_required
+    ~body:{|{"error":{"type":"billing_error","message":"credits exhausted"}}|}
+    ~failure_code:"absorb_gate_provider_failure" ~diagnostic:"HTTP 402" ()
+;;
+
+let test_invalid_answer_records_failed_evaluation_and_elapsed () =
+  check_failed_absorb_evaluations
+    ~status:`OK ~body:{|{"model":"missing-answer","answers":{}}|}
+    ~failure_code:"absorb_gate_invalid_answer" ~diagnostic:"no answer" ()
+;;
+
 let () =
-  if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) "--emit-tui-fixtures"
-  then run_runtime_evidence ~fixture_dir:Sys.argv.(2) ()
-  else Alcotest.run
+  Alcotest.run
     "keeper_librarian_absorb_gate"
     [ ( "statements"
       , [ Alcotest.test_case "the cut matches the golden" `Quick test_statements_match_the_golden ] )
@@ -2107,8 +2306,14 @@ let () =
             test_run_records_the_destination_passed_over
         ; Alcotest.test_case "cancelled next request retains its completed observation" `Quick
             test_cancelled_next_request_keeps_the_completed_observation
+        ; Alcotest.test_case "finish callback cancellation still publishes the observation" `Quick
+            test_cancellation_during_finish_callback_still_publishes_the_observation
+        ; Alcotest.test_case "failure settlement cancellation propagates as Cancelled" `Quick
+            test_cancellation_during_failure_settlement_propagates_as_cancelled
         ; Alcotest.test_case "skipped run publishes its completed observation" `Quick
             test_skipped_run_publishes_its_completed_observation
+        ; Alcotest.test_case "terminal callback settles before cancellation propagates" `Quick
+            test_cancellation_during_terminal_callback_settles_registry
         ; Alcotest.test_case "an excluded keeper is applied as answered without a request" `Quick
             test_an_excluded_keeper_is_applied_as_answered_without_a_request
         ; Alcotest.test_case "a gate declared on without a lane keeps the sources current" `Quick
@@ -2133,6 +2338,8 @@ let () =
             test_payment_failure_does_not_multiply_current_claims
         ; Alcotest.test_case "a pre-dispatch evaluation row survives a restart with its request" `Quick
             test_persisted_evaluation_request_survives_restart
+        ; Alcotest.test_case "invalid answers record failed evaluations and measured elapsed" `Quick
+            test_invalid_answer_records_failed_evaluation_and_elapsed
         ] )
     ; ( "reverse"
       , [ Alcotest.test_case "a claim its sources convey is not applied" `Quick

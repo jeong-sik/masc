@@ -31,6 +31,7 @@ let create_tool_observer_serialization () : tool_observer_serialization =
 type agent_setup =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   ; agent_cell : Agent_core.Agent.t option ref
@@ -115,6 +116,7 @@ type ctx =
   ; skill_activation_context : Keeper_skill_activation_recorder.t
   ; tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   }
@@ -405,6 +407,29 @@ let skill_compositions_block ~compositions ~deferred ~on_the_wire =
   match on_turn_line @ to_load_line with
   | [] -> None
   | lines -> Some (String.concat "\n" lines)
+;;
+
+(* The source prepared before tool selection may contain an unavailable-reader
+   placeholder. Measure the request's projection only after its offered tools
+   are known. Defer publication until the caller finishes assembling the hook:
+   a failed projection/assembly must not publish that placeholder as a request.
+   These gauges describe prepared input, not successful provider delivery. *)
+let prepare_request_dynamic_context
+      ~meta ~turn_kind ~system_prompt ~user_message ~post_tool_round
+      ~dynamic_context ~dynamic_context_for_tools (tools : Agent_core.Tool.t list) =
+  let dynamic_context =
+    match dynamic_context_for_tools with
+    | Some project when not post_tool_round -> project tools
+    | Some _ | None -> dynamic_context
+  in
+  let emit_metrics () =
+    match turn_kind with
+    | Turn_record.Autonomous when not post_tool_round ->
+      Keeper_unified_prompt.emit_prompt_metrics ~meta ~system_prompt
+        { world_state = dynamic_context; user_message }
+    | Autonomous | Direct -> ()
+  in
+  dynamic_context, emit_metrics
 ;;
 
 let assemble_hooks
@@ -954,26 +979,19 @@ let assemble_hooks
                     ~current_tool_choice:current_params.tool_choice
                     ()
                 in
+                let offered_tools = Keeper_agent_tool_surface.for_request
+                    ~enabled:!active_tool_surface_enabled
+                    ~tool_choice:current_params.tool_choice ~schema_names:schema_filter
+                    ~agent_cell:turn_agent_cell ~built:built_tools in
                 let recall_tool_available name =
-                  !active_tool_surface_enabled
-                  && (match current_params.tool_choice with
-                      | Some Agent_core.Types.None_ -> false
-                      | None | Some (Agent_core.Types.Auto | Agent_core.Types.Any | Agent_core.Types.Tool _) -> true)
-                  && List.mem name schema_filter
-                  && List.exists (fun (tool : Agent_core.Tool.t) ->
-                       String.equal tool.schema.name name)
-                       (Keeper_agent_tool_surface.on_the_wire
-                          ~agent_cell:turn_agent_cell ~built:built_tools)
+                  List.exists (fun (tool : Agent_core.Tool.t) ->
+                    String.equal tool.schema.name name) offered_tools
                 in
-                let dynamic_context =
-                  match dynamic_context_for_tools with
-                  | Some project when not post_tool_round ->
-                    let offered = Keeper_agent_tool_surface.on_the_wire
-                        ~agent_cell:turn_agent_cell ~built:built_tools
-                      |> List.filter (fun (tool : Agent_core.Tool.t) ->
-                        List.mem tool.schema.name schema_filter) in
-                    project offered
-                  | Some _ | None -> dynamic_context in
+                let dynamic_context, emit_request_prompt_metrics =
+                  prepare_request_dynamic_context
+                    ~meta ~turn_kind ~system_prompt:turn_system_prompt ~user_message
+                    ~post_tool_round ~dynamic_context ~dynamic_context_for_tools
+                    offered_tools in
                 (if String.trim dynamic_context <> ""
                  then record_block Prompt_block_id.Dynamic_context dynamic_context);
                 (* The Librarian publishes this small index in its own lane.
@@ -1275,6 +1293,7 @@ let assemble_hooks
                        ~built:built_tools)
                   ();
                 Eio.Fiber.yield ();
+                emit_request_prompt_metrics ();
                 Agent_core.Hooks.AdjustParams
                   { current_params with
                     extra_system_context = ctx
@@ -1296,6 +1315,7 @@ let assemble_hooks
     Ok
       { tools = built_tools
       ; agent_core_tools = ctx.agent_core_tools
+      ; identity_tool_index = ctx.identity_tool_index
       ; on_demand_tool_names = ctx.on_demand_tool_names
       ; result_bounds = ctx.result_bounds
       ; agent_cell = ctx.agent_cell

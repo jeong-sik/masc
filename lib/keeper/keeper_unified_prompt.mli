@@ -133,8 +133,11 @@ val emit_prompt_metrics :
   system_prompt:string ->
   turn_prompt_parts ->
   unit
-(** Publish the per-segment byte gauges and the instruction hash for one
-    autonomous turn. [system_prompt] is the one the turn sends. *)
+(** Publish the per-segment byte gauges and the instruction hash after an
+    autonomous request has been assembled using its offered tool surface.
+    Inputs are the request's system prompt, projected world state and model
+    message, not the pre-tool source placeholder. This observes prepared input,
+    not provider delivery; omitted post-tool context does not replace it. *)
 
 (** Build the per-turn channels of the unified prompt: the observation frame
     and the user message. The system prompt is not built here; the turn sends
@@ -150,7 +153,7 @@ val build_prompt :
   ?workspace_memory:Workspace_memory_ledger.observation ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
-  ?context_budget_bytes:int ->
+  ?recent_work:Keeper_recent_work.transmission ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts
@@ -172,6 +175,9 @@ val build_prompt :
       §2.3 row 6): a failed world or task-linked source renders its reason,
       file, mirror and reset step without blocking other context. A Keeper
       holding no task reaches Goals through [masc_goal_list].
+    - [?recent_work]: recent attributed conversation and the latest autonomous
+      conclusion, read from the selected Keeper trace. Historical context only;
+      missing history and unavailable sources do not infer work completion.
     - [?repository_freshness]: rows for the Repository Checkouts layer,
       measured by {!Keeper_sandbox_control.checkout_freshness_rows}. Omitted
       or empty, the layer is absent. *)
@@ -183,6 +189,7 @@ val build_prompt_preview :
   ?workspace_memory:Workspace_memory_ledger.observation ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
+  ?recent_work:Keeper_recent_work.transmission ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts

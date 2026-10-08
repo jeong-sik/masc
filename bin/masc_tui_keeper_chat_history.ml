@@ -522,11 +522,11 @@ let text_with_attachments ~format_bytes ~text ~notes =
          else "")
         dimensions
     in
-    let body = String.trim text in
-    String.concat "\n"
-      (if body = ""
-       then List.mapi line notes
-       else body :: List.mapi line notes)
+    let files = String.concat "\n" (List.mapi line notes) in
+    if String.trim text = "" then files
+    else
+      let separator = if text.[String.length text - 1] = '\n' then "" else "\n" in
+      text ^ separator ^ files
 
 let attachment_notes_of fields =
   match List.assoc_opt "attachments" fields with
@@ -1330,7 +1330,10 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                   { at
                   ; structural_id = structural_id_of_fields fields "failure"
                   ; turn_sequence
-                  ; turn_id
+                  ; turn_id =
+                      (match turn_id with
+                       | Some _ -> turn_id
+                       | None -> origin_request_id)
                   ; (* The failure is the operation's: the key it was stored
                        under names it even when the row carries no transcript
                        slot for the provenance reader. *)

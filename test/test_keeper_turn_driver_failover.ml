@@ -182,113 +182,6 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
-(* The head has a large prompt ceiling, the fallback a small one, and a third
-   binding has none. Both ceilings come from the model's window through an
-   Antigravity provider ([Runtime_client_prompt_ceiling]); [roomy] and
-   [tight] are what the briefing-budget tests read back. An HTTP binding has
-   no ceiling. *)
-let roomy_window = 524_288
-let tight_window = 65_536
-let roomy_prompt_bytes =
-  Runtime_client_prompt_ceiling.antigravity_start_prompt_bytes ~max_context:roomy_window
-let tight_prompt_bytes =
-  Runtime_client_prompt_ceiling.antigravity_start_prompt_bytes ~max_context:tight_window
-
-let runtime_toml_with_uneven_prompt_ceilings =
-  Printf.sprintf
-    {|
-[runtime]
-default = "primary.roomy_model"
-
-[runtime.lanes.uneven]
-candidates = [ "primary.roomy_model", "fallback.tight_model" ]
-
-[runtime.lanes.ceilingless_head]
-candidates = [ "open.open_model", "fallback.tight_model" ]
-
-[runtime.lanes.ceilingless_only]
-candidates = [ "open.open_model" ]
-
-[runtime.lanes.three_deep]
-candidates = [ "open.open_model", "primary.roomy_model", "fallback.tight_model" ]
-
-[runtime.lanes.http_sibling]
-candidates = [ "primary.roomy_model", "open.open_model" ]
-
-[runtime.lanes.codex_sibling]
-candidates = [ "fallback.tight_model", "codex.codex_model" ]
-
-[providers.primary]
-display-name = "Primary Provider"
-protocol = "antigravity-cli"
-command = "/fixture-must-not-run-a-model"
-is-non-interactive = true
-timeout-s = 180.0
-
-[providers.primary.credentials]
-type = "file"
-path = "/fixture-antigravity-token"
-
-[providers.fallback]
-display-name = "Fallback Provider"
-protocol = "antigravity-cli"
-command = "/fixture-must-not-run-a-model"
-is-non-interactive = true
-timeout-s = 180.0
-
-[providers.fallback.credentials]
-type = "file"
-path = "/fixture-antigravity-token"
-
-[providers.open]
-display-name = "Open Provider"
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:3"
-
-[providers.codex]
-display-name = "Codex Provider"
-protocol = "codex-app-server"
-command = "/fixture-must-not-run-a-model"
-is-non-interactive = true
-
-[models.roomy_model]
-api-name = "roomy-model"
-max-context = %d
-tools-support = true
-streaming = true
-
-[models.tight_model]
-api-name = "tight-model"
-max-context = %d
-tools-support = true
-streaming = true
-
-[models.open_model]
-api-name = "open-model"
-max-context = 200000
-tools-support = true
-streaming = true
-
-[models.codex_model]
-api-name = "codex-model"
-max-context = 400000
-
-[primary.roomy_model]
-is-default = true
-max-concurrent = 1
-
-[fallback.tight_model]
-max-concurrent = 1
-
-[open.open_model]
-max-concurrent = 1
-
-[codex.codex_model]
-max-concurrent = 1
-|}
-    roomy_window
-    tight_window
-
 let runtime_toml_quota_lane_with_shared_credential
     ?(candidate_ids = ["shared_a.test_model"; "shared_b.test_model"; "other.test_model"])
     shared_credential =
@@ -728,117 +621,6 @@ let test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens () =
       "the lane name itself names no binding, which is why this exists"
       true
       (Option.is_none (Runtime.get_runtime_by_id "resilient")))
-
-(* The briefing is rendered before the lane walk picks a candidate, and a
-   failed head is demoted behind its siblings, so the fallback can serve the
-   turn. Its budget must fit the smallest ceiling the lane declares, not the
-   head's: sized from the head, the fallback receives a briefing no cut of
-   history can bring under its own ceiling. *)
-let briefing_share_of cap =
-  cap * Masc.Keeper_config.keeper_context_briefing_share_percent () / 100
-
-module Budget = Masc.Keeper_turn_runtime_budget
-
-let briefing_budget_of_route route =
-  Budget.world_state_briefing_budget_bytes (Budget.Lane_of_route route)
-
-let test_briefing_budget_fits_the_smallest_lane_ceiling () =
-  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
-    Alcotest.(check (option int))
-      "the lane smallest ceiling"
-      (Some tight_prompt_bytes)
-      (Runtime.smallest_prompt_capacity_bytes_of_route "uneven");
-    match briefing_budget_of_route "uneven" with
-    | None -> Alcotest.fail "a lane whose candidates have ceilings is bounded"
-    | Some budget ->
-      Alcotest.(check int)
-        "the briefing is a share of the fallback's ceiling"
-        (briefing_share_of tight_prompt_bytes)
-        budget)
-
-(* A candidate with no ceiling has none in any admission path. It
-   adds no bound, and it must not erase the bound a sibling has. *)
-let test_briefing_budget_a_candidate_without_a_ceiling_adds_no_bound () =
-  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
-    Alcotest.(check (option int))
-      "a head without a ceiling does not erase the fallback's ceiling"
-      (Some (briefing_share_of tight_prompt_bytes))
-      (briefing_budget_of_route "ceilingless_head");
-    Alcotest.(check (option int))
-      "a lane whose candidates have none gets no bound"
-      None
-      (briefing_budget_of_route "ceilingless_only");
-    Alcotest.(check (option int))
-      "a bare runtime route is bounded by its own ceiling"
-      (Some (briefing_share_of roomy_prompt_bytes))
-      (briefing_budget_of_route "primary.roomy_model");
-    Alcotest.(check (option int))
-      "a route that names nothing gets no bound"
-      None
-      (briefing_budget_of_route "no-such-route"))
-
-(* Lane [open (none); roomy; tight]. The undeclared head failed and the
-   deferred hint names roomy next with tight after it. The walk dispatches
-   both, so the briefing must fit tight, not only the next candidate. *)
-let test_briefing_budget_spans_the_whole_deferred_suffix () =
-  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
-    let hint =
-      Driver.restore_deferred_runtime_lane
-        ~assignment_id:"three_deep"
-        ~failed_runtime_id:"open.open_model"
-        ~next_runtime_id:"primary.roomy_model"
-        ~later_runtime_ids:[ "fallback.tight_model" ]
-        ~failure:(Agent_core.Error.Internal "head refused")
-    in
-    let candidates =
-      Masc.Keeper_unified_turn.briefing_candidates_for_turn
-        ~deferred_runtime_lane:(Some hint)
-        ~assigned_route:"three_deep"
-    in
-    Alcotest.(check (option int))
-      "the briefing fits the last candidate of the deferred walk"
-      (Some (briefing_share_of tight_prompt_bytes))
-      (Budget.world_state_briefing_budget_bytes candidates);
-    Alcotest.(check (option int))
-      "without a hint the whole lane of the assignment bounds it"
-      (Some (briefing_share_of tight_prompt_bytes))
-      (Budget.world_state_briefing_budget_bytes
-         (Masc.Keeper_unified_turn.briefing_candidates_for_turn
-            ~deferred_runtime_lane:None
-            ~assigned_route:"three_deep")))
-
-(* An HTTP candidate has no prompt ceiling: the provider checks request size
-   itself. It must not become the lane's minimum, so a lane holding one still
-   gives the ceiling of its other candidate, and two ceilings give their
-   minimum ([uneven]). *)
-let test_briefing_budget_ignores_a_candidate_without_a_ceiling () =
-  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
-    Alcotest.(check (option int))
-      "an HTTP sibling does not lower or erase the ceiling"
-      (Some roomy_prompt_bytes)
-      (Runtime.smallest_prompt_capacity_bytes_of_route "http_sibling");
-    Alcotest.(check (option int))
-      "a lone HTTP candidate has no ceiling"
-      None
-      (Runtime.smallest_prompt_capacity_bytes_of_runtime_ids [ "open.open_model" ]);
-    Alcotest.(check (option int))
-      "two ceilings give their minimum"
-      (Some tight_prompt_bytes)
-      (Runtime.smallest_prompt_capacity_bytes_of_route "uneven"))
-
-(* Codex sends the whole range and relies on the provider's typed overflow,
-   so it has no ceiling of its own and a lane holding one still gives the
-   ceiling of its other candidate. *)
-let test_briefing_budget_ignores_a_codex_candidate () =
-  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
-    Alcotest.(check (option int))
-      "a lone Codex candidate has no ceiling"
-      None
-      (Runtime.smallest_prompt_capacity_bytes_of_runtime_ids [ "codex.codex_model" ]);
-    Alcotest.(check (option int))
-      "a Codex sibling does not lower or erase the ceiling"
-      (Some tight_prompt_bytes)
-      (Runtime.smallest_prompt_capacity_bytes_of_route "codex_sibling"))
 
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
@@ -3320,7 +3102,7 @@ let with_refusal_lane ~toml f =
         f ())))
 ;;
 
-let account_refusal_case ~toml ~usages_body check =
+let refused_walk_case ~toml ~usages_body ~refusal check =
   with_refusal_lane ~toml (fun () ->
     let head = "shared_a.test_model"
     and sibling = "shared_b.test_model"
@@ -3330,12 +3112,6 @@ let account_refusal_case ~toml ~usages_body check =
       ~scope:(Option.get (Runtime.quota_scope_of_runtime_id head));
     Alcotest.(check (list string)) "the unmarked last candidate leads while the heads rest"
       [ refused; head; sibling ] (backpressure_order lane);
-    let account_refusal = kimi_account_refusal () in
-    (match account_refusal with
-     | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _) -> ()
-     | other ->
-       Alcotest.failf "the 403 is not an authorization error: %s"
-         (Agent_core.Error.to_string other));
     let fetched = ref [] in
     let fetch ~api_key:_ url =
       fetched := url :: !fetched;
@@ -3344,18 +3120,31 @@ let account_refusal_case ~toml ~usages_body check =
     (match
        walk_once
          ~read_usage_after_account_refusal:(read_usage_with ~fetch)
-         (fun _ -> Error account_refusal)
+         (fun _ -> Error refusal)
          [ refused ]
      with
      | Error _ -> ()
      | Ok () -> Alcotest.fail "the refused candidate unexpectedly answered");
-    Alcotest.check attempt_failure "a 403 is never a failed attempt" None
-      (failed_attempt_of refused);
     check
       ~fetched:(List.rev !fetched)
+      ~refused
       ~refused_scope:(Option.get (Runtime.quota_scope_of_runtime_id refused))
       ~order:(backpressure_order lane)
       ~lane)
+;;
+
+let account_refusal_case ~toml ~usages_body check =
+  let account_refusal = kimi_account_refusal () in
+  (match account_refusal with
+   | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _) -> ()
+   | other ->
+     Alcotest.failf "the 403 is not an authorization error: %s"
+       (Agent_core.Error.to_string other));
+  refused_walk_case ~toml ~usages_body ~refusal:account_refusal
+    (fun ~fetched ~refused ~refused_scope ~order ~lane ->
+      Alcotest.check attempt_failure "a 403 is never a failed attempt" None
+        (failed_attempt_of refused);
+      check ~fetched ~refused_scope ~order ~lane)
 ;;
 
 let test_a_403_with_a_spent_window_rests_until_its_reset () =
@@ -3398,6 +3187,103 @@ let test_a_403_without_usage_read_rests_nothing () =
       Alcotest.(check (list string)) "nothing is read without usage-read" [] fetched;
       Alcotest.(check bool) "the status alone rests nothing" false
         (Runtime_quota_window.is_exhausted ~scope:refused_scope ~now:(Unix.gettimeofday ())))
+;;
+
+(* Ollama Cloud answered a spent session window with this 429 on 2026-10-05
+   and 10-06 (the account name and the request ref are the test's). It states
+   no wait: no [Retry-After] header and no [retry_after] in the body. *)
+let ollama_session_limit_429_body =
+  {|{"error":{"message":"you (fixture) have reached your session usage limit, add usage credits: https://ollama.com/settings","type":"api_error","code":null}}|}
+;;
+
+let ollama_rate_limit ?retry_after_header () =
+  Agent_core.Provider_failure_attribution.core_error_of_http_error
+    ~provider:"ollama_cloud"
+    (Llm_provider.Http_client.HttpError
+       { code = 429
+       ; body = Llm_provider.Http_client.Received ollama_session_limit_429_body
+       ; retry_after_header
+       })
+;;
+
+let runtime_toml_quota_lane_with_ollama_balance =
+  runtime_toml_quota_lane
+  ^ {|
+[providers.other.usage-read]
+shape = "ollama-balance"
+url = "https://127.0.0.1/api/balance"
+|}
+;;
+
+(* The legacy-plan shape GET /api/balance answers; the percentages and the
+   resets are the test's. *)
+let ollama_balance_body ~session_remaining ~session_reset =
+  Printf.sprintf
+    {|{"included":{"session":{"remaining_percent":%s,"resets_at":"%s"},"weekly":{"remaining_percent":40.5,"resets_at":"2099-10-12T00:00:00Z"}},"purchased":{"balance_usd":0}}|}
+    session_remaining session_reset
+;;
+
+let rate_limit_case ?retry_after_header ~usages_body check =
+  let refusal = ollama_rate_limit ?retry_after_header () in
+  (match refusal with
+   | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _) -> ()
+   | other ->
+     Alcotest.failf "the 429 is not a rate limit: %s" (Agent_core.Error.to_string other));
+  refused_walk_case
+    ~toml:runtime_toml_quota_lane_with_ollama_balance
+    ~usages_body
+    ~refusal
+    (fun ~fetched ~refused ~refused_scope ~order:_ ~lane:_ ->
+      check ~fetched ~refused ~refused_scope ~now:(Unix.gettimeofday ()))
+;;
+
+(* 2026-10-05 and 10-06: after the session window ran out, every keeper on
+   the lane called Ollama again about once a minute, because a 429 that
+   states no wait rests a path only the throttle floor. *)
+let test_a_429_without_a_wait_and_a_spent_window_rests_until_its_reset () =
+  let resets_at = Float.round (Unix.gettimeofday () +. 3600.0) in
+  rate_limit_case
+    ~usages_body:
+      (ollama_balance_body ~session_remaining:"0" ~session_reset:(rfc3339_of_epoch resets_at))
+    (fun ~fetched ~refused ~refused_scope ~now ->
+      Alcotest.(check (list string)) "the declared usage endpoint is read once"
+        [ "https://127.0.0.1/api/balance" ] fetched;
+      Alcotest.(check (option (float 0.0))) "the scope rests until the spent window resets"
+        (Some resets_at)
+        (Runtime_quota_window.active_until ~scope:refused_scope ~now);
+      match Driver.path_rest ~now refused with
+      | Driver.Path_resting { release_at; walk_promotes_at_release = _ } ->
+        Alcotest.(check (float 0.0)) "the path rests until the reset, not the throttle floor"
+          resets_at release_at
+      | Driver.Path_serving -> Alcotest.fail "the refused path serves again")
+;;
+
+let test_a_429_without_a_wait_and_headroom_rests_only_the_floor () =
+  rate_limit_case
+    ~usages_body:
+      (ollama_balance_body ~session_remaining:"31.5" ~session_reset:"2099-10-07T08:00:00Z")
+    (fun ~fetched ~refused ~refused_scope ~now ->
+      Alcotest.(check int) "the usage endpoint is read" 1 (List.length fetched);
+      Alcotest.(check bool) "a throttle with headroom is not a spent quota" false
+        (Runtime_quota_window.is_exhausted ~scope:refused_scope ~now);
+      match Driver.path_rest ~now refused with
+      | Driver.Path_resting { release_at; walk_promotes_at_release = _ } ->
+        Alcotest.(check bool) "the path rests the throttle floor" true
+          (Float.compare
+             release_at
+             (now +. Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec)
+           <= 0)
+      | Driver.Path_serving -> Alcotest.fail "a throttled path serves at once")
+;;
+
+let test_a_429_that_states_its_wait_reads_nothing () =
+  rate_limit_case
+    ~retry_after_header:30.0
+    ~usages_body:(ollama_balance_body ~session_remaining:"0" ~session_reset:"2099-10-07T08:00:00Z")
+    (fun ~fetched ~refused:_ ~refused_scope ~now ->
+      Alcotest.(check (list string)) "a stated wait is not asked about" [] fetched;
+      Alcotest.(check bool) "the stated wait rests the path, not the scope" false
+        (Runtime_quota_window.is_exhausted ~scope:refused_scope ~now))
 ;;
 
 (* The seams of the production read: no Eio context, a raising GET, one read
@@ -6385,26 +6271,6 @@ let () =
             `Quick
             test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
           Alcotest.test_case
-            "the briefing budget fits the smallest lane ceiling"
-            `Quick
-            test_briefing_budget_fits_the_smallest_lane_ceiling;
-          Alcotest.test_case
-            "an undeclared candidate adds no bound and erases none"
-            `Quick
-            test_briefing_budget_a_candidate_without_a_ceiling_adds_no_bound;
-          Alcotest.test_case
-            "the briefing budget spans the whole deferred suffix"
-            `Quick
-            test_briefing_budget_spans_the_whole_deferred_suffix;
-          Alcotest.test_case
-            "the briefing budget ignores a candidate without a ceiling"
-            `Quick
-            test_briefing_budget_ignores_a_candidate_without_a_ceiling;
-          Alcotest.test_case
-            "briefing budget ignores a Codex candidate"
-            `Quick
-            test_briefing_budget_ignores_a_codex_candidate;
-          Alcotest.test_case
             "a bare runtime assignment walks only itself"
             `Quick
             test_bare_runtime_assignment_walks_only_itself;
@@ -6572,6 +6438,13 @@ let () =
             test_a_403_with_headroom_rests_nothing;
           Alcotest.test_case "a 403 without usage-read rests nothing" `Quick
             test_a_403_without_usage_read_rests_nothing;
+          Alcotest.test_case "a 429 without a wait and a spent window rests until its reset"
+            `Quick
+            test_a_429_without_a_wait_and_a_spent_window_rests_until_its_reset;
+          Alcotest.test_case "a 429 without a wait and headroom rests only the floor" `Quick
+            test_a_429_without_a_wait_and_headroom_rests_only_the_floor;
+          Alcotest.test_case "a 429 that states its wait reads nothing" `Quick
+            test_a_429_that_states_its_wait_reads_nothing;
           Alcotest.test_case "the read after a 403 skips and contains its failures" `Quick
             test_the_read_after_a_403_skips_and_contains_its_failures;
           Alcotest.test_case "the read after a 403 does not refresh a credential" `Quick

@@ -96,8 +96,6 @@ let test_dequeue_only_consumes_enqueued () =
 (* Typed payload (RFC-0020): the kind is carried as a closed variant,
    not classified from a JSON-prefixed string. *)
 let test_typed_payload_surface () =
-  let stay = make_stim "p8" in
-  assert (not (is_board_signal stay.payload));
   let board =
     make_stim
       ~payload:
@@ -111,7 +109,6 @@ let test_typed_payload_surface () =
            })
       "p9"
   in
-  assert (is_board_signal board.payload);
   assert (String.equal (payload_kind_label board.payload) "board_signal")
 
 let test_durable_comment_identity () =

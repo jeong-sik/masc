@@ -32,7 +32,7 @@ let pocket sources context : Context.pocket =
   {id = "fixture"; sources; context; next_steps = ["Read the original request"];
    merge_contexts = []; completeness = Context.Current}
 
-let test_case ~base_path ~registry ?fixture_dir scenario () =
+let test_case ~base_path ~registry scenario () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
@@ -271,17 +271,7 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
   let replayed_run = Runs.get replayed ~run_id:run.run_id |> Option.get in
   check_json "Context review and write survive durable registry replay"
     (Runs.run_to_yojson run) (Runs.run_to_yojson replayed_run);
-  let module Projection = Server_standalone_lane_projection in
-    let detail = match Projection.For_testing.run_detail_json_with ~run_id:run.run_id
-      ~exact_runs:[replayed_run] ~verification_runs:[] ~goal_verification_runs:[] with
-      | Projection.Detail_found detail -> detail | _ -> Alcotest.fail "missing run detail" in
-    let page = Projection.For_testing.recent_run_page_json_with ~limit:1 ~before:None
-      ~lane:(Some "librarian_exact") ~run_kind:None ~exact_runs:[replayed_run]
-      ~verification_runs:[] ~goal_verification_runs:[] |> require in
-    let fixture = `Assoc ["scenario", `String (name scenario); "detail", detail; "page", page] in
-    Printf.printf "CONTEXT_REVIEW_FIXTURE %s\n%!" (Yojson.Safe.to_string fixture);
-    Option.iter (fun directory ->
-      Yojson.Safe.to_file (Filename.concat directory (name scenario ^ ".json")) fixture) fixture_dir
+  Librarian_run_tui_reading.check replayed_run
 
 let () =
   Masc_test_deps.ensure_rng_initialized ();
@@ -309,8 +299,6 @@ let () =
        prompts_dir (String.concat ", " missing);
      exit 2);
   let cases = [Faithful; Rejected; Uncertain; Missing; Invalid; Http_failure; Excluded; Stale; Cancel_absorb; Cancel_review] in
-  if Array.length Sys.argv = 3 && Sys.argv.(1) = "--emit-tui-fixtures" then
-    List.iter (fun scenario -> test_case ~base_path ~registry ~fixture_dir:Sys.argv.(2) scenario ()) cases
-  else Alcotest.run "Librarian Context review"
+  Alcotest.run "Librarian Context review"
     ["real runtime", List.map (fun scenario -> Alcotest.test_case (name scenario) `Quick
       (test_case ~base_path ~registry scenario)) (cases @ [Context_only; Conversation_queue])]

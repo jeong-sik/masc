@@ -1934,21 +1934,19 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
     ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
     }
   in
-  (match Tool_schemas_misc.misc_operation_of_tool_name name with
-   | Some Tool_schemas_misc.Misc_msx_screen ->
+  let misc_operation = Tool_schemas_misc.misc_operation_of_tool_name name in
+  (match misc_operation, Option.bind misc_operation Keeper_candle_tools.operation_of_misc with
+   | _, Some operation -> candle operation
+   | Some Tool_schemas_misc.Misc_msx_screen, None ->
      Some (Keeper_msx_screen.handle ~keeper_name:meta.name
        ~tool_name:name ~start_time:(Tool_timing.start ()) args)
-   | Some Tool_schemas_misc.Misc_portrait_read ->
+   | Some Tool_schemas_misc.Misc_portrait_read, None ->
      Some (Keeper_portrait_read.handle ~base_path:config.base_path ~keeper_name:meta.name ~tool_name:name
        ~start_time:(Tool_timing.start ()) ~args)
-   | Some Tool_schemas_misc.Misc_candle_balance -> candle Keeper_candle_tools.Balance
-   | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
-   | Some Tool_schemas_misc.Misc_candle_purchase -> candle Keeper_candle_tools.Purchase
-   | Some Tool_schemas_misc.Misc_candle_equip -> candle Keeper_candle_tools.Equip
-   | Some Tool_schemas_misc.Misc_dos_screen ->
+   | Some Tool_schemas_misc.Misc_dos_screen, None ->
      Some (Keeper_dos_screen.handle ~keeper_name:meta.name ~base_path:config.base_path
        ~tool_name:name ~start_time:(Tool_timing.start ()) args)
-   | Some _ | None ->
+   | (Some _ | None), None ->
      (match Keeper_dos_controller.execute ~config ~who:meta.name ~name ~args
          ~run:(fun () -> Tool_misc.dispatch
            ~lane_access:(Lane_addon_sources.Keeper meta.name) ctx ~name ~args) with

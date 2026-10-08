@@ -105,7 +105,6 @@ let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s ~output_schem
   ; cwd = base_dir
   ; model = execution.model
   ; native = Runtime_native_tools.claude_code_default
-  ; setting_sources = []
   ; system_prompt
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
@@ -430,7 +429,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        ~mgr ~clock ~cwd config ~prompt ~images:(List.map (fun (image : image_input) ->
            ({ media_type = image.media_type; base64_data = image.base64_data }
             : Runtime_codex_app_server.image_input)) images) with
-     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = (match result.usage with
+     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = Option.value result.text ~default:""; model = result.model; usage = (match result.usage with
          | Some Runtime_codex_app_server.Thread_count_replaced -> !observed_usage
          | usage -> optional_usage codex_usage usage) }
      | Error error -> codex_failed error)
@@ -547,7 +546,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Some reported -> reported
          | None -> execution.model
        in
-       succeeded { text = result.text; model; usage = optional_usage muse_usage result.usage }
+       succeeded
+         { text = Option.value result.text ~default:""
+         ; model; usage = optional_usage muse_usage result.usage }
      | Error error -> Error (Muse_failure error))
 ;;
 

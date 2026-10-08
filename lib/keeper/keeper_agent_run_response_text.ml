@@ -24,5 +24,5 @@ let finalize ~stop_reason ~raw_response_text ?suppress_response_text ()
     | Some suppress -> suppress
     | None -> control_checkpoint
   in
-  { response_text = String.trim raw_response_text; withheld_from_replay }
+  { response_text = raw_response_text; withheld_from_replay }
 ;;

@@ -23,10 +23,50 @@ let rec remove path =
     Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path
   | _ -> Unix.unlink path
 
-let test_http_effect_checkpoint_owner_restart_alternate ?(interleave = false) ?(lose_retained = false) ?(projection_failure = false) () =
+(* This capability is owned by the fixture's application switch, just as
+   bootstrap owns it in production. Ordinary unit helpers remain pool-free. *)
+let initialize_native_execution ~sw env =
+  Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+  |> Result.map_error Runtime_agent_execution_runtime.initialization_error_to_string
+  |> require "native execution runtime"
+
+let native_state (binding : Keeper_direct_native_continuation.binding) =
+  Registry.direct_native_call ~base_path:binding.base_path
+    ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
+  |> require "read native Owner authority"
+
+let check_native_retired binding outcome =
+  match native_state binding with
+  | Keeper_native_call.Terminal_unacknowledged (_, disposition) ->
+    check bool "Core terminal disposition is durable before host acknowledgement" true
+      (disposition = {Agent_core.Agent.outcome; recovery=Agent_core.Agent.Retire})
+  | Keeper_native_call.No_native_call | Keeper_native_call.Active _ ->
+    fail "Core returned without retaining its terminal disposition"
+
+let check_native_acknowledged binding =
+  check bool "Owner checkpoint/outcome acceptance atomically acknowledges the native call" true
+    (Keeper_native_call.equal_state Keeper_native_call.No_native_call (native_state binding))
+
+let observe_native_provider_request binding calls_seen () =
+  let call = match native_state binding with
+    | Keeper_native_call.Active call -> call
+    | Keeper_native_call.No_native_call | Keeper_native_call.Terminal_unacknowledged _ ->
+      fail "provider effect preceded active native receipt publication" in
+  check string "receipt belongs to the admitted operation input"
+    binding.Keeper_direct_native_continuation.execution_digest call.operation_digest;
+  List.iter (fun reference ->
+    let exact = Checkpoint.load_retained_exact_snapshot
+        ~session_dir:binding.session_dir ~reference |> require "retained native checkpoint" in
+    check bool "retained checkpoint matches its exact Owner reference" true
+      (Keeper_checkpoint_ref.equal reference (Checkpoint.exact_snapshot_reference exact)))
+    [call.seed_checkpoint; call.checkpoint];
+  calls_seen := call.call_id :: !calls_seen
+
+let test_http_effect_checkpoint_owner_restart_alternate ?(durable_native = false) ?(interleave = false) ?(lose_retained = false) ?(projection_failure = false) () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
+  if durable_native then initialize_native_execution ~sw env;
   Fs_compat.set_fs env#fs;
   ignore (Server_startup_state.mark_state_ready ());
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -39,8 +79,10 @@ let test_http_effect_checkpoint_owner_restart_alternate ?(interleave = false) ?(
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     remove base_path);
   let primary_requests = ref 0 and alternate_bodies = ref [] and effects = ref 0 in
+  let observe_native_request = ref (fun () -> ()) and native_calls_seen = ref [] in
   let callback _connection request body =
     let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    !observe_native_request ();
     if String.starts_with ~prefix:"/primary" (Cohttp.Request.resource request) then (
       incr primary_requests;
       if !primary_requests = 1 then
@@ -183,7 +225,15 @@ is-default = true
       let deferred = ref None in
       Option.iter (fun admission -> Continuation.consume ~base_path ~keeper_name ~operation_id admission
         |> require "consume same checkpoint") admission;
-      let result = Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      let native_binding =
+        if not durable_native then None else
+          Some { Keeper_direct_native_continuation.base_path; keeper_name; operation_id;
+                 execution_digest=operation.execution_digest; session_dir; session_id } in
+      Option.iter (fun binding ->
+        check_native_acknowledged binding;
+        observe_native_request := observe_native_provider_request binding native_calls_seen)
+        native_binding;
+      let result = Keeper_turn_driver.run_named ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
         ~keeper_name ~base_path ~session_id ~goal:"Finish original task"
         ~system_prompt:"Use the effect receipt to finish the original task."
@@ -198,8 +248,10 @@ is-default = true
       match result, !deferred with
       | Error _, Some lane ->
         check bool "only the original attempt may defer" false resume;
+        Option.iter (fun binding -> check_native_retired binding Agent_core.Agent.Terminal_failed) native_binding;
         Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispatch_snapshot lane
           |> require "durable direct deferral";
+        Option.iter check_native_acknowledged native_binding;
         ready := false;
         Server_routes_http_keeper_stream.For_testing.operation_execution_of_outcome
           ~operation_state ~pending_continuation:(fun () -> Keeper_direct_gate_continuation.pending
@@ -209,6 +261,7 @@ is-default = true
             else Server_routes_http_keeper_stream.Delivered {outcome_ref="checkpointed-retry"}))
           ~delivery:(Ok ())
       | Ok _, None ->
+        Option.iter (fun binding -> check_native_retired binding Agent_core.Agent.Terminal_succeeded) native_binding;
         check bool "alternate resumes after owner restart" true resume;
         Owner.Operation_succeeded {outcome_ref="alternate-http-completion"}
       | Error error, None -> fail (Agent_core.Error.to_string error)
@@ -231,6 +284,11 @@ is-default = true
     if not resume then Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source ~input
       |> require "submit original operation" |> ignore;
     (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail);
+    if durable_native then
+      check bool "Owner settlement leaves no unacknowledged native call" true
+        (Registry.direct_native_call ~base_path ~keeper_name ~operation_id
+         |> require "read settled native authority"
+         |> Keeper_native_call.equal_state Keeper_native_call.No_native_call);
     if resume && lose_retained then (
       let fresh = Keeper_chat_operation.Operation_id.of_string "kmsg-new-admission-after-recovery"
         |> require "new admission ID" in
@@ -291,6 +349,9 @@ is-default = true
   write runtime_path (runtime_config ~with_removed:false);
   Runtime.init_default ~config_path:runtime_path |> require "remove frozen first runtime";
   run_phase ~resume:true;
+  if durable_native then (
+    check int "each admitted native API call owns its own durable scope" 2
+      (List.length (List.sort_uniq String.compare !native_calls_seen)));
   check int "completed effect not replayed" 1 !effects;
   check int "restart does not repeat the refused primary call" 2 !primary_requests;
   if lose_retained then (
@@ -330,10 +391,11 @@ is-default = true
    that same path. After an owner restart the same operation resumes on it from
    the saved tool result. When the resumed call fails before any tool runs,
    nothing new was saved to resume from, and the operation fails. *)
-let test_http_same_path_resume_after_tool_result ~resume_fails () =
+let test_http_same_path_resume_after_tool_result ?(durable_native = false) ~resume_fails () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
+  if durable_native then initialize_native_execution ~sw env;
   Fs_compat.set_fs env#fs;
   ignore (Server_startup_state.mark_state_ready ());
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -346,11 +408,13 @@ let test_http_same_path_resume_after_tool_result ~resume_fails () =
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     remove base_path);
   let request_bodies = ref [] and effects = ref 0 in
+  let observe_native_request = ref (fun () -> ()) and native_calls_seen = ref [] in
   let bad_gateway () =
     Cohttp_eio.Server.respond_string ~status:`Bad_gateway
       ~body:{|{"error":{"message":"fixture upstream dropped the call","type":"server_error"}}|} () in
   let callback _connection _request body =
     let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    !observe_native_request ();
     request_bodies := !request_bodies @ [body];
     match List.length !request_bodies with
     | 1 ->
@@ -452,7 +516,15 @@ is-default = true
       let deferred = ref None in
       Option.iter (fun admission -> Continuation.consume ~base_path ~keeper_name ~operation_id admission
         |> require "consume same checkpoint") admission;
-      let result = Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      let native_binding =
+        if not durable_native then None else
+          Some { Keeper_direct_native_continuation.base_path; keeper_name; operation_id;
+                 execution_digest=operation.execution_digest; session_dir; session_id } in
+      Option.iter (fun binding ->
+        check_native_acknowledged binding;
+        observe_native_request := observe_native_provider_request binding native_calls_seen)
+        native_binding;
+      let result = Keeper_turn_driver.run_named ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~checkpoint_progress
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
         ~keeper_name ~base_path ~session_id ~goal:"Finish original task"
@@ -474,14 +546,18 @@ is-default = true
       | Error _, Some lane ->
         check bool "only the original attempt defers" false resume;
         deferred_lanes := lane :: !deferred_lanes;
+        Option.iter (fun binding -> check_native_retired binding Agent_core.Agent.Terminal_failed) native_binding;
         Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispatch_snapshot lane
           |> require "durable same-path deferral";
+        Option.iter check_native_acknowledged native_binding;
         ready := false;
         outcome_execution (Server_routes_http_keeper_stream.Delivered {outcome_ref="same-path-retry"}) (Ok ())
       | Ok _, None ->
+        Option.iter (fun binding -> check_native_retired binding Agent_core.Agent.Terminal_succeeded) native_binding;
         check bool "the same path completes after the restart" true (resume && not resume_fails);
         Owner.Operation_succeeded {outcome_ref="same-path-completion"}
       | Error error, None when resume && resume_fails ->
+        Option.iter (fun binding -> check_native_retired binding Agent_core.Agent.Terminal_failed) native_binding;
         ready := false;
         let detail = Agent_core.Error.to_string error in
         let execution = outcome_execution
@@ -502,7 +578,12 @@ is-default = true
       ~on_turn_slot_released:None config |> require "install owner" |> ignore;
     if not resume then Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source ~input
       |> require "submit original operation" |> ignore;
-    (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail)
+    (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail);
+    if durable_native then
+      check bool "Owner settlement leaves no unacknowledged native call" true
+        (Registry.direct_native_call ~base_path ~keeper_name ~operation_id
+         |> require "read settled native authority"
+         |> Keeper_native_call.equal_state Keeper_native_call.No_native_call)
   in
   run_phase ~resume:false;
   check int "the tool ran before the 502" 1 !effects;
@@ -523,6 +604,8 @@ is-default = true
     (Store.has_claimable_queued store ~now:(Time_compat.now ()) |> require "has_claimable_queued");
   Store.close store |> require "close store";
   run_phase ~resume:true;
+  if durable_native then check int "same-path continuation allocates a fresh native scope" 2
+    (List.length (List.sort_uniq String.compare !native_calls_seen));
   check int "the saved tool is not run again" 1 !effects;
   check int "one resumed call on the same path" 3 (List.length !request_bodies);
   let resumed = List.nth !request_bodies 2 |> Yojson.Safe.from_string in
@@ -616,6 +699,14 @@ let () = run "direct runtime continuation" ["http", [test_case
     (test_http_effect_checkpoint_owner_restart_alternate ~interleave:true ~lose_retained:false ~projection_failure:true);
   test_case "missing original checkpoint terminalizes and releases queued peer after restart" `Quick
     (test_http_effect_checkpoint_owner_restart_alternate ~interleave:true ~lose_retained:true ~projection_failure:false)];
+  "native Owner integration", [
+    test_case "native receipt survives effects and is acknowledged before alternate restart" `Quick
+      (test_http_effect_checkpoint_owner_restart_alternate ~durable_native:true
+        ~interleave:false ~lose_retained:false ~projection_failure:false);
+    test_case "native callback checkpoint and same-path Owner continuation are joined" `Quick
+      (test_http_same_path_resume_after_tool_result ~durable_native:true ~resume_fails:false);
+    test_case "native terminal failure is acknowledged after resumed provider failure" `Quick
+      (test_http_same_path_resume_after_tool_result ~durable_native:true ~resume_fails:true)];
   "same path", [test_case
     "a 502 after a tool result resumes the same operation on its only path" `Quick
     (test_http_same_path_resume_after_tool_result ~resume_fails:false);

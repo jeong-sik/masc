@@ -30,19 +30,6 @@ val decision_stage_active_to_packed
 
 val packed_decision_stage_label : packed_decision_stage -> string
 
-module Decision_transition : sig
-  type ('from, 'to_) t =
-    | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
-    | Undecided_to_tool_policy_selected :
-        (decision_undecided, decision_tool_policy_selected) t
-    | Guard_ok_to_tool_policy_selected :
-        (decision_guard_ok, decision_tool_policy_selected) t
-    | Tool_policy_selected_to_guard_ok :
-        (decision_tool_policy_selected, decision_guard_ok) t
-
-  val to_tag : ('from, 'to_) t -> string
-end
-
 val validate_decision_transition
   :  from:decision_stage
   -> to_:decision_stage_active

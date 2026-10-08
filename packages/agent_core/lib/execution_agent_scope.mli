@@ -66,6 +66,26 @@ type error =
   | Settlement_failed of Execution_tool_settlement.error
 
 val error_to_string : error -> string
+
+type recovery_evidence =
+  { recovery : recovery_action
+  ; has_tool_attempts : bool
+  ; settled_tool_results : Llm_provider.Types.content_block list
+  }
+
+val recovery_evidence_from_tree :
+  read_node:(Execution_event.Node_id.t -> (Execution_journal.node_view, 'error) result) ->
+  root:Execution_event.Node_id.t -> (recovery_evidence, 'error) result
+(** The settled results belong to this root Agent run. Recursive child results
+    stay behind their enclosing root invocation's own result. *)
+
+val recovery_action_from_tree :
+  read_node:(Execution_event.Node_id.t -> (Execution_journal.node_view, 'error) result) ->
+  root:Execution_event.Node_id.t -> (recovery_action, 'error) result
+(** Shared canonical recovery derivation for writer settlement and read-only
+    restart inspection. [read_node] supplies one authoritative journal view;
+    an admitted invocation with children but no result requires repair. *)
+
 val start : writer:Execution_lane_writer.t -> agent_name:string -> (t, error) result
 val scope_locator : t -> scope_locator
 val scope_locator_run_id : scope_locator -> Execution_event.Run_id.t

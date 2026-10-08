@@ -3505,8 +3505,8 @@ describe('fetchKeeperConfig', () => {
         keepalive_running: 'true',
         registry_state: 'running',
         fiber_health: 'healthy',
-        runtime_blocker_class: 'stale_termination_storm',
-        runtime_blocker_summary: 'Fleet batch paused after stale termination storm.',
+        runtime_blocker_class: 'heartbeat_failures',
+        runtime_blocker_summary: 'Fleet batch paused after repeated heartbeat failures.',
       },
       runtime_trust: {
         disposition: 'Pass',
@@ -3569,8 +3569,8 @@ describe('fetchKeeperConfig', () => {
     expect(result.hooks?.slots.pre_tool_use?.features).toEqual(['tool_start_timing'])
     expect(result.sources.precedence).toEqual(['live_meta'])
     expect(result.metrics.total_cost_usd).toBe(0.12)
-    expect(result.runtime.runtime_blocker_class).toBe('stale_termination_storm')
-    expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after stale termination storm.')
+    expect(result.runtime.runtime_blocker_class).toBe('heartbeat_failures')
+    expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after repeated heartbeat failures.')
     expect(result.runtime_trust?.disposition).toBe('Pass')
     expect(result.field_presence?.present_paths).toContain('prompt.system_prompt_blocks.capabilities.text')
     expect(result.field_presence?.producer).toBe('dashboard-keeper-config.normalizer')

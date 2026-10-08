@@ -207,18 +207,6 @@ let test_broadcast_to_observers_only ~auth () =
   Sse.unregister "s-obs";
   Sse.unregister "s-workspace"
 
-let test_broadcast_to_agent_streams_only ~auth () =
-  reset ();
-  ignore (register_exn ~auth ~kind:Observer "s-obs2" ~last_event_id:0);
-  ignore (register_exn ~auth ~kind:Agent_stream "s-workspace2" ~last_event_id:0);
-  Sse.broadcast_to Agent_streams (jsonrpc_notification "notifications/test");
-  let got_obs = Sse.try_pop "s-obs2" in
-  let got_workspace = Sse.try_pop "s-workspace2" in
-  Alcotest.(check bool) "observer did not get event" true (got_obs = None);
-  Alcotest.(check bool) "agent_stream got event" true (got_workspace <> None);
-  Sse.unregister "s-obs2";
-  Sse.unregister "s-workspace2"
-
 let test_broadcast_to_all ~auth () =
   reset ();
   ignore (register_exn ~auth ~kind:Observer "s-all-obs" ~last_event_id:0);
@@ -321,7 +309,7 @@ let test_presence_broadcast_not_skipped_with_a_presence_session ~auth () =
       Alcotest.(check bool) "observer still excluded" true
         (Sse.try_pop "s-noskip-observer" = None))
 
-let test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth () =
+let test_non_jsonrpc_broadcast_does_not_reach_agent_stream_sessions ~auth () =
   reset ();
   let before_id = Sse.current_id () in
   ignore (register_exn ~auth ~kind:Observer "s-nonjson-obs" ~last_event_id:0);
@@ -349,10 +337,10 @@ let test_register_defaults_to_agent_stream ~auth () =
   reset ();
   (* Register without explicit kind *)
   ignore (register_exn ~auth "s-default" ~last_event_id:0);
-  (* Should be Agent_stream: receives Agent_streams-targeted broadcast *)
-  Sse.broadcast_to Agent_streams (jsonrpc_notification "notifications/test");
-  let got = Sse.try_pop "s-default" in
-  Alcotest.(check bool) "default kind is Agent_stream" true (got <> None);
+  Alcotest.(check int) "default kind is Agent_stream" 1
+    (Sse.client_count_by_kind Agent_stream);
+  Alcotest.(check int) "default kind is not Observer" 0
+    (Sse.client_count_by_kind Observer);
   (* Should not receive Observers-targeted broadcast *)
   Sse.broadcast_to Observers (`Assoc [("observer_only", `Bool true)]);
   let got2 = Sse.try_pop "s-default" in
@@ -417,7 +405,6 @@ let () =
           ( "broadcast_to_targeting",
             [
               Alcotest.test_case "observers only" `Quick (test_broadcast_to_observers_only ~auth);
-              Alcotest.test_case "agent_streams only" `Quick (test_broadcast_to_agent_streams_only ~auth);
               Alcotest.test_case "all targets" `Quick (test_broadcast_to_all ~auth);
               Alcotest.test_case "broadcast = broadcast_to All" `Quick (test_broadcast_equals_broadcast_to_all ~auth);
               Alcotest.test_case "broadcast All excludes presence" `Quick (test_broadcast_all_excludes_presence_sessions ~auth);
@@ -426,8 +413,8 @@ let () =
                 (test_presence_broadcast_skipped_without_a_presence_session ~auth);
               Alcotest.test_case "presence broadcast delivered with a presence session" `Quick
                 (test_presence_broadcast_not_skipped_with_a_presence_session ~auth);
-              Alcotest.test_case "non-JSON-RPC skips agent_streams" `Quick
-                (test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth);
+              Alcotest.test_case "non-JSON-RPC skips agent_stream sessions" `Quick
+                (test_non_jsonrpc_broadcast_does_not_reach_agent_stream_sessions ~auth);
               Alcotest.test_case "default kind is Agent_stream" `Quick (test_register_defaults_to_agent_stream ~auth);
             ] );
           ( "transport_snapshot",

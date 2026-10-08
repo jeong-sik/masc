@@ -4,6 +4,7 @@
    GET  /api/v1/presets/show     — ?name=<n>: everything that preset would change
    POST /api/v1/presets          — {name, description?}: snapshot the live state
    POST /api/v1/presets/restore  — {name}: autosave, then apply the preset
+   POST /api/v1/presets/delete   — {name}: remove the preset, readable or not
 
    Writes need CanAdmin, like the runtime assignment route. *)
 
@@ -47,7 +48,7 @@ let decode_save body =
         | Some _ -> Error "description must be a string"))
 ;;
 
-let decode_restore body =
+let decode_name_request body =
   match object_of_body body with
   | Error _ as error -> error
   | Ok fields -> name_field fields
@@ -121,7 +122,9 @@ let add_routes router =
                       snapshot.prompt_overrides in
                     ok_json [ "preset", Prompt_preset.snapshot_to_json snapshot;
                               "directory", `String (Prompt_preset.source_directory ~base_path snapshot);
-                              "saved_settings", matching; "prompt_files", `List files ])
+                              "saved_settings", matching; "prompt_files", `List files;
+                              "default_prompts", Prompt_preset.default_comparison_to_json
+                                (Prompt_preset.compare_defaults snapshot) ])
                | Error message ->
                  respond_json_value_with_cors
                    ~status:`Not_found
@@ -172,7 +175,7 @@ let add_routes router =
          ~permission:Masc_domain.CanAdmin
          (fun state _req reqd ->
            Http.Request.read_body_async reqd (fun body ->
-             match decode_restore body with
+             match decode_name_request body with
              | Error message ->
                respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
              | Ok name ->
@@ -189,6 +192,31 @@ let add_routes router =
                     request
                     reqd
                     (error_json message))))
+         request
+         reqd)
+  |> Http.Router.post "/api/v1/presets/delete" (fun request reqd ->
+       with_permission_auth
+         ~permission:Masc_domain.CanAdmin
+         (fun state _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             match decode_name_request body with
+             | Error message ->
+               respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+             | Ok name ->
+               (match Prompt_preset.delete ~base_path:(base_path_of state) name with
+                | Ok () ->
+                  respond_json_value_with_cors request reqd (ok_json [ "deleted", `String name ])
+                | Error error ->
+                  let message = Prompt_preset.delete_error_to_string error in
+                  let status =
+                    match error with
+                    | Prompt_preset.Delete_invalid_name _ -> `Bad_request
+                    | Prompt_preset.Delete_not_found _ -> `Not_found
+                    | Prompt_preset.Delete_failed _ ->
+                      Log.Pages.error "preset delete %s failed: %s" name message;
+                      `Internal_server_error
+                  in
+                  respond_json_value_with_cors ~status request reqd (error_json message))))
          request
          reqd)
 ;;

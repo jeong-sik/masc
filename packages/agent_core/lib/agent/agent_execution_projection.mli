@@ -11,3 +11,9 @@ val open_durable
   -> locator_run_id:Execution_event.Run_id.t
   -> unit
   -> (t, error) result
+
+val terminal_recovery :
+  t ->
+  ((Execution_event.terminal * Execution_agent_scope.recovery_evidence) option, error) result
+(** Inspect one refreshed, validated reducer snapshot without writer admission.
+    [None] means the top-level run is still running. *)

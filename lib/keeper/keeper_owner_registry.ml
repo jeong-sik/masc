@@ -163,10 +163,40 @@ let prepare_operation_store_path pool keeper_name =
    sentence; the prefix is the stream's [persisted_error_reply] shape, so the
    row renders as the failure it is and does not read as the keeper's own
    words (RFC-0454 D2). *)
-let restart_interrupted_reply =
-  "Keeper request failed: "
-  ^ Keeper_request_failure.summary
-      { Keeper_request_failure.cause = Keeper_request_failure.Server_restarted }
+let restart_interrupted_summary =
+  Keeper_request_failure.summary
+    { Keeper_request_failure.cause = Keeper_request_failure.Server_restarted }
+;;
+
+let restart_interrupted_reply = "Keeper request failed: " ^ restart_interrupted_summary
+;;
+
+(* The run the restart cut off journaled whatever it had produced and stopped,
+   and its stream died with the process. A client that reopens the operation
+   replays that journal and then finds the operation settled, so the journal
+   needs the terminal the stream would have carried. Recorded through the same
+   helper the Owner's settlement uses. Durable failed operations are retried
+   on every start; their exact journal settlement marker prevents duplicates.
+   An earlier segment's error cannot stand in for this restart. A journal that
+   cannot be written is logged and does not stop the owner from starting. *)
+let record_restart_terminal ~base_dir ~keeper_name ~settlement =
+  let operation_id = Keeper_chat_operation.Operation_id.to_string settlement.Keeper_chat_event_log.operation_id in
+  let journal =
+    Keeper_chat_event_log.open_journal ~base_dir ~keeper_name ~operation_id ()
+  in
+  match
+    Keeper_chat_event_log.record_terminal_error
+      ~segment:(Keeper_chat_event_log.Restart_settlement settlement) journal
+      ~ts:settlement.completed_at
+      ~message:restart_interrupted_summary
+  with
+  | Ok (Recorded_terminal_error _ | Existing_terminal_error _) -> ()
+  | Error detail ->
+    Log.Keeper.warn
+      ~keeper_name
+      "restart-interrupted operation %s left no journal terminal: %s"
+      operation_id
+      detail
 ;;
 
 (* A request the restart cut off is settled [Failed Interrupted_by_restart] in
@@ -185,6 +215,11 @@ let record_restart_interruptions pool ~keeper_name owner =
        let operation_id =
          Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
        in
+       (match operation.state with
+        | Failed {completed_at;failure={kind=Interrupted_by_restart;_}} ->
+            record_restart_terminal ~base_dir ~keeper_name
+              ~settlement:{Keeper_chat_event_log.operation_id=operation.operation_id;completed_at}
+        | Queued | Running _ | Succeeded _ | Failed _ | Cancelled _ -> ());
        let surface, conversation_id, broadcast_source =
          match Keeper_chat_operation_payload.source_of_json operation.source with
          | Ok source ->
@@ -218,12 +253,13 @@ let record_restart_interruptions pool ~keeper_name owner =
               ?conversation_id
               ()
           with
-          | Ok _ ->
+          | Ok (Keeper_chat_store.Appended _) ->
             Keeper_chat_broadcast.chat_appended
               ~keeper_name
               ~source:broadcast_source
               ~content:restart_interrupted_reply
               ()
+          | Ok (Keeper_chat_store.Already_present _) -> ()
           | Error detail ->
             Log.Keeper.warn
               ~keeper_name
@@ -723,6 +759,20 @@ let direct_checkpoint ~base_path ~keeper_name ~operation_id =
 let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_digest ~checkpoint =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.defer_direct_checkpoint owner ~operation_id ~execution_digest ~checkpoint)
+let direct_native_call ~base_path ~keeper_name ~operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_native_call owner ~operation_id)
+let bind_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~observed ~call =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.bind_direct_native_call owner ~operation_id ~execution_digest ~observed ~call)
+let checkpoint_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest ~call_id ~observed ~checkpoint)
+let terminal_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~call_id ~disposition =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.terminal_direct_native_call owner ~operation_id ~execution_digest ~call_id ~disposition)
+let acknowledge_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~call_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.acknowledge_direct_native_call owner ~operation_id ~execution_digest ~call_id)
 ;;
 let resume_direct_checkpoint ~base_path ~keeper_name ~operation_id ~observed =
   with_owner_command ~base_path ~keeper_name (fun owner ->

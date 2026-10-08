@@ -83,6 +83,7 @@ let lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builti
   | Tool_schemas_misc.Misc_candle_catalog
   | Tool_schemas_misc.Misc_candle_purchase
   | Tool_schemas_misc.Misc_candle_equip
+  | Tool_schemas_misc.Misc_candle_gift
   | Tool_schemas_misc.Misc_web_fetch
   | Tool_schemas_misc.Misc_web_search -> []
   | Tool_schemas_misc.Misc_browser_tabs
@@ -102,8 +103,12 @@ let lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builti
   | Tool_schemas_misc.Misc_msx_step
   | Tool_schemas_misc.Misc_msx_step_until_change
   | Tool_schemas_misc.Misc_msx_peek
-  | Tool_schemas_misc.Misc_msx_ram_diff -> [ Lane_id.Machine Machine_lane.Msx ]
+  | Tool_schemas_misc.Misc_msx_ram_diff
+  | Tool_schemas_misc.Misc_msx_meta
+  | Tool_schemas_misc.Misc_msx_checkpoint_info -> [ Lane_id.Machine Machine_lane.Msx ]
   | Tool_schemas_misc.Misc_dos_load
+  | Tool_schemas_misc.Misc_dos_meta
+  | Tool_schemas_misc.Misc_dos_inventory
   | Tool_schemas_misc.Misc_dos_eject
   | Tool_schemas_misc.Misc_dos_screen
   | Tool_schemas_misc.Misc_dos_step

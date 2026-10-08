@@ -90,6 +90,7 @@ type transport_failure =
   | Rate_limited of { http_status : int }
   | Overloaded of { http_status : int }
   | Server_error of { http_status : int }
+  | Output_limit_reached
   | Invalid_json_output
 
 type advance =

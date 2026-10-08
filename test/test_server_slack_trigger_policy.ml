@@ -480,11 +480,8 @@ let test_bound_message_queues_exact_slack_ts () =
         failure.Connector_ingress_lane.event_id.opaque_id;
       check string "typed source" "slack_triggered"
         failure.event_id.source;
-      (match failure.lane with
-       | Connector_ingress_lane.Keeper_lane keeper_name ->
-         check string "resolved Keeper lane" "luna" keeper_name
-       | Connector_ingress_lane.Connector_lane connector_id ->
-         failf "expected Keeper lane, got connector:%s" connector_id);
+      let (Connector_ingress_lane.Keeper_lane keeper_name) = failure.lane in
+      check string "resolved Keeper lane" "luna" keeper_name;
       Eio.Switch.fail sw Exit)
   with Exit -> ()
 ;;

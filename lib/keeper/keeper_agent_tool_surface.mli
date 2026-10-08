@@ -61,3 +61,14 @@ val on_the_wire :
   agent_cell:Agent_core.Agent.t option ref ->
   built:Agent_core.Tool.t list ->
   Agent_core.Tool.t list
+
+val for_request :
+  enabled:bool ->
+  tool_choice:Agent_core.Types.tool_choice option ->
+  schema_names:string list ->
+  agent_cell:Agent_core.Agent.t option ref ->
+  built:Agent_core.Tool.t list ->
+  Agent_core.Tool.t list
+(** Callable schemas for request-bound context references. Applies the active
+    surface switch, explicit no-tools choice and final schema filter to the
+    live agent/official-client surface. *)

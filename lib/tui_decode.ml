@@ -1724,6 +1724,18 @@ type runtime_context_source =
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
+(* Why a runtime's last attempt failed without answering. A name this build
+   does not know is kept as the server wrote it. *)
+type runtime_attempt_failure =
+  | Attempt_failure of Runtime_candidate_backpressure.attempt_failure
+  | Unrecognised_attempt_failure of string
+
+type runtime_failed_attempt = {
+  rfa_noted_at : float;
+  rfa_failure : runtime_attempt_failure;
+  rfa_recorded_by : string;
+}
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
@@ -1743,6 +1755,7 @@ type runtime_option = {
   ro_quota_scope_id : string option;
   ro_rate_limited : bool;
   ro_rate_limit_resets_at : float option;
+  ro_failed_attempt : runtime_failed_attempt option;
 }
 
 type runtime_resolved_lane = {
@@ -1989,6 +2002,22 @@ let decode_runtime_option ~usage ~default_id json =
   in
   let* ro_rate_limited = required_bool_field json "rate_limited" in
   let* ro_rate_limit_resets_at = optional_float_field json "rate_limit_resets_at" in
+  let* ro_failed_attempt =
+    match Json_util.assoc_member_opt "failed_attempt" json with
+    | None -> missing_field "failed_attempt"
+    | Some `Null -> Ok None
+    | Some (`Assoc _ as attempt) ->
+        let* rfa_noted_at = Json_util.require_float attempt "noted_at" in
+        let* failure = required_string_field attempt "failure" in
+        let* rfa_recorded_by = required_string_field attempt "recorded_by" in
+        let rfa_failure =
+          match Runtime_candidate_backpressure.attempt_failure_of_wire_name failure with
+          | Some failure -> Attempt_failure failure
+          | None -> Unrecognised_attempt_failure failure
+        in
+        Ok (Some { rfa_noted_at; rfa_failure; rfa_recorded_by })
+    | Some _ -> Error "runtime failed_attempt must be an object or null"
+  in
   let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
   Ok
     { ro_id
@@ -2009,6 +2038,7 @@ let decode_runtime_option ~usage ~default_id json =
     ; ro_quota_scope_id
     ; ro_rate_limited
     ; ro_rate_limit_resets_at
+    ; ro_failed_attempt
     }
 
 let decode_runtime_default_member json =
@@ -3722,12 +3752,6 @@ let decode_keeper_secret_projections json =
     items
   |> Result.map List.rev
 
-(* The counts are read with a default rather than required: the server adds
-   fields to this section over time, and a TUI that refuses the whole reading
-   because one counter is new would hide the fleet exactly when it changed.
-   The three that name the fleet's own verdict -- status, blocker, and whether
-   an operator has to act -- are required, because a reading without them says
-   nothing. *)
 let decode_keeper_tool_approval json =
   let* kta_keeper = required_string_field json "keeper" in
   let* kta_tool_call_id = required_string_field json "tool_call_id" in
@@ -3813,6 +3837,11 @@ type gate_pending = {
   gp_execution_sandbox : string option;
   gp_waiting_s : float option;
   gp_phase : gate_pending_phase;
+  gp_judge_advice : Keeper_approval_queue_rules_types.hitl_context_summary option;
+      (** What Auto Judge wrote when it handed the row to a person: its
+          rationale and the questions it wants answered. Present exactly when
+          the phase is [Gate_human_required]; the server sets that phase only
+          from such a summary. *)
   gp_auto_judge_detail : string option;
       (** The durable reason why Auto Judge handed this row back or stopped.
           It is intentionally separate from the phase: [blocked] without its
@@ -3824,9 +3853,18 @@ type gate_pending = {
           safely rearmed; it can still be decided by a human. *)
 }
 
+type gate_mode =
+  | Gate_mode of Keeper_gate_mode.t
+  | Unrecognised_gate_mode of string
+
+let gate_mode_of_wire raw =
+  match Keeper_gate_mode.of_string raw with
+  | Some mode -> Gate_mode mode
+  | None -> Unrecognised_gate_mode raw
+
 type gate_lane_modes = {
-  glm_workspace : string;
-  glm_external : string;
+  glm_workspace : gate_mode;
+  glm_external : gate_mode;
 }
 
 (* An always-allow rule standing behind the queue. It answers a request
@@ -4032,6 +4070,25 @@ let gate_auto_judge_detail_of_json json =
   | _, `String detail when String.trim detail <> "" -> Some detail
   | _ -> None
 
+(* The summary is read with the server's own decoder. A row the server put in
+   [human_required] always carries an available summary, so its absence is a
+   wire error, not a row to draw without the judge's reasons. *)
+let gate_judge_advice_of_json ~phase json =
+  match phase with
+  | Gate_human_required ->
+    (match
+       Keeper_approval_queue_rules_types.summary_status_of_yojson_with_error
+         (member "summary_status" json)
+     with
+     | Ok (Keeper_approval_queue_rules_types.Summary_available summary) -> Ok (Some summary)
+     | Ok
+         ( Keeper_approval_queue_rules_types.Summary_not_requested
+         | Keeper_approval_queue_rules_types.Summary_pending
+         | Keeper_approval_queue_rules_types.Summary_failed _ ) ->
+       Error "a human_required gate row carries no Auto Judge summary"
+     | Error detail -> Error ("gate summary_status: " ^ detail))
+  | Gate_queued | Gate_judging | Gate_blocked -> Ok None
+
 (* The server owns the full parser and repeats the compare-and-swap checks.
    The TUI only carries the exact five fields it observed, and only advertises
    rearm for the three dispositions the server explicitly permits. A failed
@@ -4076,6 +4133,7 @@ let decode_gate_pending json =
     | _ -> None
   in
   let* gp_phase = gate_pending_phase_of_json json in
+  let* gp_judge_advice = gate_judge_advice_of_json ~phase:gp_phase json in
   Ok
     {
       gp_id;
@@ -4093,16 +4151,20 @@ let decode_gate_pending json =
         snd (gate_execution_site ~operation:gp_operation input);
       gp_waiting_s;
       gp_phase;
+      gp_judge_advice;
       gp_auto_judge_detail = gate_auto_judge_detail_of_json json;
       gp_retry_request = gate_retry_request_of_json ~id:gp_id json;
     }
 
 let decode_gate_lane_modes json =
   let* workspace = required_object_field json "gate_mode" in
-  let* glm_workspace = required_string_field workspace "mode" in
+  let* workspace_mode = required_string_field workspace "mode" in
   let* external_lane = required_object_field json "external_gate_mode" in
-  let* glm_external = required_string_field external_lane "mode" in
-  Ok { glm_workspace; glm_external }
+  let* external_mode = required_string_field external_lane "mode" in
+  Ok
+    { glm_workspace = gate_mode_of_wire workspace_mode
+    ; glm_external = gate_mode_of_wire external_mode
+    }
 
 let decode_gate_rule json =
   let* gr_id = required_string_field json "id" in
@@ -4248,7 +4310,7 @@ let decode_keeper_gate_settings json =
     rows "modes" (fun item ->
       let* keeper = required_string_field item "keeper_name" in
       let* mode = required_string_field item "mode" in
-      Ok (keeper, mode))
+      Ok (keeper, gate_mode_of_wire mode))
   in
   let* exact_lanes =
     rows "exact_lanes" (fun item ->
@@ -4425,6 +4487,7 @@ type keeper_turn_state =
       lane : keeper_turn_lane;
       started_at_unix : float;
       interrupt_token : string;
+      turn_ref : Ids.Turn_ref.t option;
       preview : keeper_turn_preview option;
     }
   | Keeper_turn_unavailable of string
@@ -4471,6 +4534,15 @@ let decode_keeper_turn_row json =
             | None -> Error "turn is missing required field 'started_at_unix'"
           in
           let* interrupt_token = required_string_field turn_json "interrupt_token" in
+          let* turn_ref =
+            match Json_util.assoc_member_opt "turn_ref" turn_json with
+            | None | Some `Null -> Ok None
+            | Some (`String raw) ->
+                (match Ids.Turn_ref.of_string raw with
+                 | Some value -> Ok (Some value)
+                 | None -> Error "turn_ref must identify a durable Keeper turn")
+            | Some _ -> Error "turn_ref must be text or null"
+          in
           let* preview =
             match Json_util.assoc_member_opt "preview" turn_json with
             | None | Some `Null -> Ok None
@@ -4499,7 +4571,7 @@ let decode_keeper_turn_row json =
             {
               ktr_keeper_name;
               ktr_chat_control_token;
-              ktr_state = Keeper_turn_running { lane; started_at_unix; preview; interrupt_token };
+              ktr_state = Keeper_turn_running { lane; started_at_unix; preview; interrupt_token; turn_ref };
             }
       | Some other ->
           Error
@@ -4974,6 +5046,7 @@ type preset_detail =
   { pd_name : string
   ; pd_directory : string
   ; pd_settings_match : preset_settings_match
+  ; pd_default_prompts : Prompt_preset.default_comparison
   ; pd_prompt_files : (string * string option * prompt_source) list
   ; pd_overrides : (string * int) list  (** prompt key, bytes *)
   ; pd_instructions : (string * int) list  (** keeper TOML file name, bytes *)
@@ -4998,6 +5071,7 @@ type preset_restore_report =
   ; prr_prompt_overrides : preset_part
   ; prr_instructions : preset_part
   ; prr_runtime : preset_runtime_status
+  ; prr_default_prompts : Prompt_preset.default_comparison
   }
 
 (* The routes answer [{ok:false, error}] on a refused request; read that
@@ -5059,10 +5133,30 @@ let decode_preset_manifest json =
     }
 ;;
 
+let decode_preset_defaults json =
+  match member "default_prompts" json with
+  | `Null -> Ok Prompt_preset.Defaults_unknown
+  | defaults ->
+      let* status = required_string_field defaults "status" in
+      let* rows = required_list_field defaults "changes" in
+      let* changes = decode_list "default prompt changes" (fun row ->
+        let* key = required_string_field row "key" in
+        let* saved = required_nullable_string_field row "saved_sha256" in
+        let* current = required_nullable_string_field row "current_sha256" in
+        if saved = current then Error ("unchanged default prompt in changes: " ^ key)
+        else Ok (key, saved, current)) rows in
+      match status, changes with
+      | "unknown", [] -> Ok Prompt_preset.Defaults_unknown
+      | "matches", [] -> Ok Prompt_preset.Defaults_match
+      | "differs", (_ :: _ as changes) -> Ok (Prompt_preset.Defaults_differ changes)
+      | _ -> Error ("invalid default prompt comparison: " ^ status)
+;;
+
 let decode_preset_detail json =
   let* preset = required_object_field json "preset" in
   let* pd_name = required_string_field preset "name" in
   let* pd_directory = required_string_field json "directory" in
+  let* pd_default_prompts = decode_preset_defaults json in
   let* matching = required_object_field json "saved_settings" in
   let* match_status = required_string_field matching "status" in
   let* pd_settings_match = match match_status with
@@ -5120,7 +5214,7 @@ let decode_preset_detail json =
         items
     | _ -> []
   in
-  Ok { pd_name; pd_directory; pd_settings_match; pd_prompt_files; pd_overrides; pd_instructions; pd_assignments; pd_lanes }
+  Ok { pd_name; pd_directory; pd_settings_match; pd_default_prompts; pd_prompt_files; pd_overrides; pd_instructions; pd_assignments; pd_lanes }
 ;;
 
 let decode_name_reason_list json key ~name_key ~reason_key =
@@ -5157,6 +5251,11 @@ let decode_preset_saved json =
   match member "preset" json with
   | `Null -> Error "the save answer carries no preset"
   | preset -> decode_preset_manifest preset
+;;
+
+let decode_preset_deleted json =
+  let* () = preset_ok json in
+  required_string_field json "deleted"
 ;;
 
 let decode_preset_part json key =
@@ -5196,7 +5295,8 @@ let decode_preset_restore json =
     let* prr_prompt_overrides = decode_preset_part report "prompt_overrides" in
     let* prr_instructions = decode_preset_part report "instructions" in
     let* prr_runtime = decode_preset_runtime report in
-    Ok { prr_restored; prr_autosave; prr_prompt_overrides; prr_instructions; prr_runtime }
+    let* prr_default_prompts = decode_preset_defaults report in
+    Ok { prr_restored; prr_autosave; prr_prompt_overrides; prr_instructions; prr_runtime; prr_default_prompts }
 ;;
 
 type librarian_run_page =
@@ -7433,13 +7533,13 @@ let play_revoke_http_error ~status_code ~body =
       (Tui_terminal_text.sanitize_terminal_text detail) status_code
   | Error _ -> http_status_error ~status_code ~body
 
-(* The play routes refuse with [{error: <code>, message: <sentence>}] and add
-   what is missing ([missing]) or who holds the name ([taken_by]) as a further
-   field. [http_status_error] reads only [error], which is the code, and would
-   leave the operator with "HTTP 409: not_ready". A refusal about the
-   credential (401, 403) is worded where the credential is known, a status
-   that is not a client refusal is not a refusal, and a body with no sentence
-   in it has nothing to add, so all three answer [None]. *)
+(* The play routes refuse through [Server_refusal.json]:
+   [{error: <sentence>, code: <code>}] plus what is missing ([missing]) or who
+   holds the name ([taken_by]). [http_status_error] shows the sentence but
+   drops those two fields. A refusal about the credential (401, 403) is worded
+   where the credential is known, a status that is not a client refusal is not
+   a refusal, and a body with no sentence in it has nothing to add, so all
+   three answer [None]. *)
 let play_invite_refusal ~status_code ~body =
   if status_code < 400 || status_code >= 500 || status_code = 401 || status_code = 403
   then None
@@ -7467,5 +7567,5 @@ let play_invite_refusal ~status_code ~body =
           in
           Printf.sprintf "HTTP %d: %s%s" status_code sentence
             (if details = [] then "" else " (" ^ String.concat "; " details ^ ")"))
-        (text "message")
+        (text "error")
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)

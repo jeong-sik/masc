@@ -91,7 +91,7 @@ class ModelFixture:
         with self.lock:
             self.requests.append(request)
             (self.output / 'model-requests.json').write_text(json.dumps(self.requests, indent=2))
-            if request.get('model') != 'deepseek-v4-flash':
+            if request.get('model') != 'deepseek-v4.1-flash':
                 raise SmokeError('unexpected auxiliary model request: ' + str(request.get('model')))
             messages = request.get('messages', [])
             results = [m for m in messages if m.get('role') == 'tool'
@@ -112,7 +112,7 @@ class ModelFixture:
                         raise SmokeError('installed Keeper offered no Execute tool')
                     self.search_requested = True
                     return {'id': 'fixture-discovery', 'object': 'chat.completion',
-                            'model': 'deepseek-v4-flash', 'choices': [{'index': 0,
+                            'model': 'deepseek-v4.1-flash', 'choices': [{'index': 0,
                             'message': {'role': 'assistant', 'content': None, 'tool_calls': [{
                                 'id': 'first-turn-discovery', 'type': 'function', 'function': {
                                     'name': 'keeper_tool_search',
@@ -130,7 +130,7 @@ class ModelFixture:
                         'name': self.tool_name, 'arguments': json.dumps(args)}}]}
                 finish = 'tool_calls'
             return {'id': 'fixture-' + str(len(self.requests)), 'object': 'chat.completion',
-                    'model': 'deepseek-v4-flash', 'choices': [{'index': 0, 'message': message,
+                    'model': 'deepseek-v4.1-flash', 'choices': [{'index': 0, 'message': message,
                     'finish_reason': finish}], 'usage': {'prompt_tokens': 1, 'completion_tokens': 1,
                                                         'total_tokens': 2}}
 

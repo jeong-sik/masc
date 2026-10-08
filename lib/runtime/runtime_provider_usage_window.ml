@@ -18,7 +18,7 @@ type source =
   | Openrouter_key_read
   | Zai_quota_limit_read
   | Kimi_coding_usages_read
-  | Ollama_usage_read
+  | Ollama_balance_read
   | Antigravity_usage_read
   | Muse_subscription_usage
 
@@ -99,7 +99,7 @@ let source_to_string = function
   | Openrouter_key_read -> "openrouter.key"
   | Zai_quota_limit_read -> "zai.quota_limit"
   | Kimi_coding_usages_read -> "kimi_coding.usages"
-  | Ollama_usage_read -> "ollama.usage"
+  | Ollama_balance_read -> "ollama.balance"
   | Antigravity_usage_read -> "antigravity.usage"
   | Muse_subscription_usage -> "muse.subscription_usage"
 ;;
@@ -675,42 +675,90 @@ let decode_kimi_coding_usages json =
   distinct_windows ~path { source = Kimi_coding_usages_read; windows = windows @ plan_windows }
 ;;
 
-(* Ollama, GET https://ollama.com/api/usage (undocumented; the vendor's own
-   client calls it).  The observed session/weekly response reports [usage]
-   as a 0-1 fraction: masc live log 2026-09-24 shows 21 refusals "you have
-   reached your weekly usage limit" while weekly.usage was 1.  Other account
-   plans may return a different shape; refuse an unknown value with its path.
-   The observed response states no reset time and no session length. *)
-let ollama_window ~path ~kind name fields =
+(* Ollama, GET https://ollama.com/api/balance (ollama/ollama docs/api/balance.mdx,
+   read 2026-10-07). That day /api/usage stopped answering the session/weekly
+   limits; the remaining quota moved here. A legacy plan states
+   included.session and included.weekly as {remaining_percent, resets_at}:
+   remaining_percent runs 0..100 (75 means 75 % remains) and resets_at is the
+   next reset in UTC. A credit plan states included.balance_usd, allowance_usd
+   and period instead, and its model calls go on against purchased credits
+   once the allowance is spent, so no single window says when a call is
+   refused; that shape is refused by name.
+
+   Both shapes state purchased.balance_usd, the unexpired purchased credits.
+   Ollama spends the included allowance first and then the purchased balance
+   (ollama.com/pricing, read 2026-10-07), and its 429 for a spent session
+   window says "add usage credits". So a spent session or weekly window
+   refuses model calls only while that balance is zero; above zero the calls
+   it would refuse are paid from the balance. *)
+let ollama_balance_window ~path ~kind ~role name fields =
   let* entry = optional_object ~path name fields in
   match entry with
   | None -> Ok None
   | Some (path, entry_fields) ->
-    let* usage = required_as number_at ~path "usage" entry_fields in
-    let* usage =
-      within ~path:(member_path path "usage") ~expected:"within 0..1" ~low:0.0 ~high:1.0 usage
+    let* remaining = required_as number_at ~path "remaining_percent" entry_fields in
+    let* remaining =
+      within
+        ~path:(member_path path "remaining_percent")
+        ~expected:"within 0..100"
+        ~low:0.0
+        ~high:100.0
+        remaining
     in
+    let* resets_at = optional_rfc3339 ~path "resets_at" entry_fields in
     Ok
       (Some
          { limit_id = None
          ; kind
-         ; role = Gates_model_calls
-         ; utilization = Fraction usage
-         ; resets_at = None
+         ; role
+         ; utilization = Fraction ((100.0 -. remaining) /. 100.0)
+         ; resets_at
          })
 ;;
 
-let decode_ollama_usage json =
-  let path = "ollama-usage" in
-  let* fields = fields_at ~path json in
-  let* limits = required ~path "limits" fields in
-  let path = member_path path "limits" in
-  let* limit_fields = fields_at ~path limits in
-  let* session = ollama_window ~path ~kind:(Provider_label "session") "session" limit_fields in
-  let* weekly = ollama_window ~path ~kind:Seven_day "weekly" limit_fields in
-  distinct_windows
-    ~path
-    { source = Ollama_usage_read; windows = List.filter_map Fun.id [ session; weekly ] }
+let decode_ollama_balance json =
+  let root = "ollama-balance" in
+  let* fields = fields_at ~path:root json in
+  let* included = required ~path:root "included" fields in
+  let path = member_path root "included" in
+  let* included_fields = fields_at ~path included in
+  match List.assoc_opt "balance_usd" included_fields with
+  | Some _ ->
+    Error
+      (Unexpected_value
+         { path = member_path path "balance_usd"
+         ; expected = "absent: only a legacy plan's session and weekly windows are read"
+         })
+  | None ->
+    let* purchased = required ~path:root "purchased" fields in
+    let purchased_path = member_path root "purchased" in
+    let* purchased_fields = fields_at ~path:purchased_path purchased in
+    let* purchased_balance =
+      required_as number_at ~path:purchased_path "balance_usd" purchased_fields
+    in
+    let* purchased_balance =
+      within
+        ~path:(member_path purchased_path "balance_usd")
+        ~expected:"0 or more"
+        ~low:0.0
+        ~high:Float.infinity
+        purchased_balance
+    in
+    let role =
+      if Float.compare purchased_balance 0.0 > 0 then Counts_other_use else Gates_model_calls
+    in
+    let* session =
+      ollama_balance_window
+        ~path
+        ~kind:(Provider_label "session")
+        ~role
+        "session"
+        included_fields
+    in
+    let* weekly = ollama_balance_window ~path ~kind:Seven_day ~role "weekly" included_fields in
+    distinct_windows
+      ~path
+      { source = Ollama_balance_read; windows = List.filter_map Fun.id [ session; weekly ] }
 ;;
 
 (* Antigravity, [agy -p "/usage" --output-format json]. agy 1.1.11 answers
@@ -860,7 +908,7 @@ type report_shape = Complete_snapshot | Sparse_update
 
 let report_shape = function
   | Openrouter_key_read | Zai_quota_limit_read | Kimi_coding_usages_read
-  | Ollama_usage_read | Antigravity_usage_read
+  | Ollama_balance_read | Antigravity_usage_read
   | Muse_subscription_usage -> Complete_snapshot
   | Claude_code_rate_limit_event | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read -> Sparse_update

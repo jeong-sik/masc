@@ -156,6 +156,10 @@ type config =
     (** Caller-owned turn-boundary checkpoint sink, forwarded to
         [Builder.with_checkpoint_sink]. Allows consumers to persist
         checkpoints at AGENT_CORE turn boundaries. *)
+  ; execution_store : Agent_core.Agent.execution_store option
+    (** One caller-owned durable scope per native Agent API call. [None]
+        leaves scope selection to Core; locator and checkpoint recovery belong
+        to the host. *)
   }
 
 let default_config
@@ -205,6 +209,7 @@ let default_config
   ; min_p = provider_cfg.min_p
   ; on_run_complete = None
   ; checkpoint_sink = None
+  ; execution_store = None
   }
 ;;
 

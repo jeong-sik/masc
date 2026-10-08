@@ -154,8 +154,8 @@ describe('TlcResultsPanel', () => {
     setData([
       makeEntry({ spec_name: 'PassingSpec', status: 'passed' }),
       makeEntry({
-        spec_name: 'QueuedSpec',
-        status: 'queued',
+        spec_name: 'UnrunSpec',
+        status: 'not_run',
         states_explored: null,
         distinct_states: null,
         diameter: null,
@@ -164,9 +164,9 @@ describe('TlcResultsPanel', () => {
     ])
     render(html`<${TlcResultsPanel} />`)
 
-    fireEvent.click(screen.getByTestId('filter-chip-queued'))
+    fireEvent.click(screen.getByTestId('filter-chip-not_run'))
     const card = screen.getByTestId('card')
-    expect(card.textContent).toContain('QueuedSpec')
+    expect(card.textContent).toContain('UnrunSpec')
     expect(card.textContent).not.toContain('PassingSpec')
   })
 })

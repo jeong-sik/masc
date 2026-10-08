@@ -3,6 +3,7 @@ type outcome =
   ; settled_turns : int
   ; settled_readings : int
   ; unplaced_rows : int
+  ; undecodable : string list
   }
 
 (* A ledger line can be any JSON value; only an object has fields. *)
@@ -37,20 +38,11 @@ let unsettled_rows ~agent_name newest_first =
   take [] newest_first
 ;;
 
-(* One raw row, as the live execution observed it. *)
-type observed =
-  | Agent_core_response of
-      { ordinal : int
-      ; model : string
-      ; usage : Agent_core.Types.api_usage option
-      }
-  | Client_report of Keeper_client_usage_report.t
-
 type placed =
   { turn : string * int
   ; task_id : string option
   ; attempt : string * string * int
-  ; observed : observed
+  ; observation : Keeper_spend_observation.t
   }
 
 let int_member key json =
@@ -74,87 +66,55 @@ let attempt_of_json json =
   | _ -> None
 ;;
 
-(* The writer records a cost it was not given as 0.0 (the
-   [agent_core_cost_unreported] source), so 0.0 reads back as no report. *)
-let api_usage_of_row ~input_tokens ~output_tokens ~cost_usd json =
-  Keeper_usage_resolution.api_usage_of_sample
-    { input_tokens
-    ; output_tokens
-    ; cache_creation_input_tokens =
-        Option.value ~default:0 (int_member "cache_creation_tokens" json)
-    ; cache_read_input_tokens = Option.value ~default:0 (int_member "cache_read_tokens" json)
-    ; cost_usd = (if Float.equal cost_usd 0.0 then None else Some cost_usd)
-    }
+(* A row without the observation was written before rows carried one, or is
+   a count the spend did not read (an official client's own response); either
+   way there is nothing to observe again. A conversation-cumulative report is
+   read against the committed cursor, so the next count of its conversation
+   already covers it. An observation that does not decode is its own case: the
+   row says it was a reading, but not one this build can hand back. *)
+let observation_of_json json =
+  match member Keeper_spend_observation.field json with
+  | None | Some `Null -> Ok None
+  | Some observation_json ->
+    (match Keeper_spend_observation.of_json observation_json with
+     | Error error -> Error (Printf.sprintf "%s: %s" Keeper_spend_observation.field error)
+     | Ok (Keeper_spend_observation.Client_report { usage_scope = Runtime_usage_scope.Conversation_cumulative; _ }) ->
+       Ok None
+     | Ok
+         ((Keeper_spend_observation.Agent_core_response _
+          | Keeper_spend_observation.Client_report
+              { usage_scope =
+                  ( Runtime_usage_scope.Per_request
+                  | Runtime_usage_scope.Turn_total
+                  | Runtime_usage_scope.Usage_scope_unavailable )
+              ; _
+              }) as observation) -> Ok (Some observation))
 ;;
 
-(* A client report names its response and conversation; an Agent Core
-   response names neither (the writer leaves both null for it). *)
-let client_of_json json =
-  match string_member "response_id" json, string_member "conversation_id" json with
-  | Some response_id, Some conversation_id ->
-    (match string_member "conversation_position" json with
-     | None -> None
-     | Some position ->
-       (match Keeper_usage_resolution.position_of_string position with
-        | Ok position -> Some (response_id, conversation_id, position)
-        | Error _ -> None))
-  | _ -> None
-;;
-
-let observed_of_row (row : Cost_ledger.t) json ~ordinal scope =
-  let usage =
-    match row.usage with
-    | Cost_ledger.Usage_missing -> None
-    | Cost_ledger.Usage_reported { input_tokens; output_tokens; cost_usd } ->
-      Some (api_usage_of_row ~input_tokens ~output_tokens ~cost_usd json)
-  in
-  match scope, client_of_json json, usage with
-  | Runtime_usage_scope.Per_request, None, _ ->
-    Some (Agent_core_response { ordinal; model = row.model; usage })
-  | (Runtime_usage_scope.Per_request | Runtime_usage_scope.Turn_total),
-    Some (response_id, conversation_id, position), Some usage ->
-    Some
-      (Client_report
-         { official_turn = ordinal
-         ; response_id
-         ; model = row.model
-         ; conversation_id
-         ; position
-         ; usage_scope = scope
-         ; count = Keeper_client_usage_report.Running_count usage
-         ; vendor_total_tokens = int_member "vendor_total_tokens" json
-         })
-  (* A client count with no usage, and a client turn total with no client:
-     nothing to observe. *)
-  | (Runtime_usage_scope.Per_request | Runtime_usage_scope.Turn_total), Some _, None
-  | Runtime_usage_scope.Turn_total, None, _ -> None
-  (* Carried forward by the next count of the same conversation. *)
-  | Runtime_usage_scope.Conversation_cumulative, _, _ -> None
-  (* Counted nothing. *)
-  | Runtime_usage_scope.Usage_scope_unavailable, _, _ -> None
-;;
+type placement =
+  | Placed of placed
+  | Unplaced
+  | Undecodable of string
 
 let place json =
   match Cost_ledger.of_json json with
-  | Error _ -> None
+  | Error error -> Undecodable (Cost_ledger.decode_error_to_string error)
   | Ok row ->
     (match row.source, row.usage_projection with
-     | Cost_ledger.Auto_trajectory identity, Cost_ledger.Raw_observation scope ->
-       (match
-          attempt_of_json json,
-          observed_of_row row json ~ordinal:identity.agent_core_turn_ordinal scope
-        with
-        | Some attempt, Some observed ->
-          Some
+     | Cost_ledger.Auto_trajectory identity, Cost_ledger.Raw_observation _ ->
+       (match observation_of_json json, attempt_of_json json with
+        | Error error, _ -> Undecodable error
+        | Ok (Some observation), Some attempt ->
+          Placed
             { turn = identity.trace_id, identity.keeper_turn_id
             ; task_id = row.task_id
             ; attempt
-            ; observed
+            ; observation
             }
-        | None, _ | _, None -> None)
+        | Ok None, _ | Ok (Some _), None -> Unplaced)
      | Cost_ledger.Manual_cli, _
      | Cost_ledger.Auto_trajectory _, (Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _)
-       -> None)
+       -> Unplaced)
 ;;
 
 (* Keys in order of first appearance, each with its values in order. *)
@@ -172,13 +132,6 @@ let group_in_order key_of values =
   List.rev_map (fun key -> key, List.rev (List.assoc key table)) keys_rev
 ;;
 
-let observe spend placed =
-  match placed.observed with
-  | Agent_core_response { ordinal; model; usage } ->
-    Keeper_turn_spend.observe_agent_core_response spend ~response_id:"" ~ordinal ~model usage
-  | Client_report report -> Keeper_turn_spend.observe_client_report spend report
-;;
-
 let spend_of_attempts attempts =
   List.fold_left
     (fun spend ((routing_run_id, runtime_id, lane_attempt_index), rows) ->
@@ -187,7 +140,7 @@ let spend_of_attempts attempts =
        in
        List.fold_left
          (fun spend placed ->
-            match observe spend placed with
+            match Keeper_spend_observation.observe spend placed.observation with
             | Ok spend -> spend
             (* Unreachable: the attempt was started just above. *)
             | Error Keeper_turn_spend.No_attempt_started -> spend)
@@ -198,7 +151,21 @@ let spend_of_attempts attempts =
 ;;
 
 let settle_rows ~masc_root ~agent_name ~observed_at rows =
-  let placed = List.filter_map place rows in
+  let placements = List.map place rows in
+  let placed =
+    List.filter_map
+      (function
+        | Placed placed -> Some placed
+        | Unplaced | Undecodable _ -> None)
+      placements
+  in
+  let undecodable =
+    List.filter_map
+      (function
+        | Undecodable reason -> Some reason
+        | Placed _ | Unplaced -> None)
+      placements
+  in
   let turns = group_in_order (fun placed -> placed.turn) placed in
   let settled_readings =
     List.fold_left
@@ -225,7 +192,8 @@ let settle_rows ~masc_root ~agent_name ~observed_at rows =
   { scanned_rows = List.length rows
   ; settled_turns = List.length turns
   ; settled_readings
-  ; unplaced_rows = List.length rows - List.length placed
+  ; unplaced_rows = List.length rows - List.length placed - List.length undecodable
+  ; undecodable
   }
 ;;
 
@@ -261,11 +229,18 @@ let settle_before_execution ~masc_root ~agent_name =
   | exception exn ->
     Log.Keeper.warn ~keeper_name:agent_name
       "settling a cancelled execution's spend raised: %s" (Printexc.to_string exn)
-  | Ok { settled_readings = 0; unplaced_rows = 0; _ } -> ()
   | Ok outcome ->
-    Log.Keeper.info ~keeper_name:agent_name
-      "settled spend a cancelled execution left out: turns=%d readings=%d unplaced=%d scanned=%d"
-      outcome.settled_turns outcome.settled_readings outcome.unplaced_rows outcome.scanned_rows
+    if outcome.settled_readings > 0 || outcome.unplaced_rows > 0
+    then
+      Log.Keeper.info ~keeper_name:agent_name
+        "settled spend a cancelled execution left out: turns=%d readings=%d unplaced=%d scanned=%d"
+        outcome.settled_turns outcome.settled_readings outcome.unplaced_rows outcome.scanned_rows;
+    (match outcome.undecodable with
+     | [] -> ()
+     | oldest :: _ ->
+       Log.Keeper.warn ~keeper_name:agent_name
+         "%d raw cost rows a cancelled execution left do not decode and were not settled; oldest: %s"
+         (List.length outcome.undecodable) oldest)
   | Error error ->
     Log.Keeper.warn ~keeper_name:agent_name
       "could not read the cost ledger to settle a cancelled execution's spend: %s"

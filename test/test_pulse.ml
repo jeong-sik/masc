@@ -23,7 +23,6 @@ let () = test "create returns not-alive engine" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 1.0; min_s = 0.5; max_s = 5.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   assert (not (Pulse.is_alive t));
@@ -48,7 +47,6 @@ let () = test "run fires startup demand beat and can shutdown" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 0.1; min_s = 0.05; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Always_on
     ~consumers:[consumer]
   in
   Eio.Switch.run @@ fun sw ->
@@ -85,7 +83,6 @@ let () = test "nudge triggers immediate beat" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 10.0; min_s = 5.0; max_s = 20.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Always_on
     ~consumers:[consumer]
   in
   Eio.Switch.run @@ fun sw ->
@@ -101,39 +98,6 @@ let () = test "nudge triggers immediate beat" (fun () ->
   ) !triggers in
   if not has_nudge then
     failwith "expected a Nudge(test-nudge) trigger in beats"
-)
-
-(* ── Test: bounded lifecycle stops engine ──────────────────── *)
-
-let () = test "bounded lifecycle stops after predicate" (fun () ->
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  let beat_count = ref 0 in
-  let consumer = (module struct
-    let name = "counter"
-    let should_act _b = true
-    let on_beat _b =
-      incr beat_count;
-      Ok ()
-  end : Pulse.Consumer) in
-  (* Stop after 3 beats (including startup demand) *)
-  let lifecycle = Pulse.Bounded (fun b -> b.Pulse.seq >= 3) in
-  let t = Pulse.create
-    ~clock
-    ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.03; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle
-    ~consumers:[consumer]
-  in
-  Eio.Switch.run @@ fun sw ->
-  Pulse.run ~sw t;
-  (* Wait enough for several beats *)
-  Eio.Time.sleep clock 0.5;
-  (* Engine should have stopped *)
-  assert (not (Pulse.is_alive t));
-  let s = Pulse.stats t in
-  (* seq >= 3 at the point of stop, plus shutdown demand = seq >= 4 *)
-  if s.total_beats < 3 then
-    failwith (Printf.sprintf "expected >=3 beats, got %d" s.total_beats)
 )
 
 (* ── Test: consumer error doesn't crash pulse ─────────────── *)
@@ -157,7 +121,6 @@ let () = test "consumer error doesn't crash pulse" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.03; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Always_on
     ~consumers:[bad_consumer; good_consumer]
   in
   Eio.Switch.run @@ fun sw ->
@@ -174,26 +137,32 @@ let () = test "consumer error doesn't crash pulse" (fun () ->
 let () = test "should_act filters beats" (fun () ->
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
-  let even_count = ref 0 in
+  let seen = ref [] in
   let consumer = (module struct
     let name = "even-only"
     let should_act b = b.Pulse.seq mod 2 = 0
-    let on_beat _b =
-      incr even_count;
+    let on_beat b =
+      seen := b.Pulse.seq :: !seen;
       Ok ()
   end : Pulse.Consumer) in
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.03; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle:(Pulse.Bounded (fun b -> b.Pulse.seq >= 6))
     ~consumers:[consumer]
   in
   Eio.Switch.run @@ fun sw ->
   Pulse.run ~sw t;
   Eio.Time.sleep clock 0.8;
+  Pulse.shutdown t;
+  Eio.Time.sleep clock 0.1;
   (* Only even-numbered beats should have triggered the consumer *)
-  if !even_count = 0 then
-    failwith "even-only consumer was never called"
+  if !seen = [] then
+    failwith "even-only consumer was never called";
+  List.iter
+    (fun seq ->
+      if seq mod 2 <> 0 then
+        failwith (Printf.sprintf "even-only consumer ran on beat #%d" seq))
+    !seen
 )
 
 (* ── Test: add/remove consumer dynamically ─────────────────── *)
@@ -205,7 +174,6 @@ let () = test "add and remove consumer dynamically" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.03; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   Eio.Switch.run @@ fun sw ->
@@ -255,7 +223,6 @@ let () = test "stats tracks beats and nudges" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 10.0; min_s = 5.0; max_s = 20.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   Eio.Switch.run @@ fun sw ->
@@ -394,7 +361,6 @@ let () = test "nudge_coalescing" (fun () ->
     ~clock
     ~rhythm:{ Pulse.base_s = 100.0; min_s = 50.0; max_s = 200.0;
               quiet = (1, 6) }
-    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   Eio.Switch.run @@ fun sw ->
@@ -437,12 +403,13 @@ let () = test "failing consumer remains active" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.01; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle:(Pulse.Bounded (fun b -> b.seq >= 5))
     ~consumers:[fail_consumer; ok_consumer]
   in
   Eio.Switch.run @@ fun sw ->
   Pulse.run ~sw t;
   Eio.Time.sleep clock 1.0;
+  Pulse.shutdown t;
+  Eio.Time.sleep clock 0.1;
   assert (!fail_count >= 5);
   assert (!ok_count >= 5)
 )
@@ -455,7 +422,6 @@ let () = test "set_rhythm changes interval" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 100.0; min_s = 50.0; max_s = 200.0; quiet = (0, 0) }
-    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   Eio.Switch.run @@ fun sw ->
@@ -484,7 +450,6 @@ let () = test "get_rhythm returns current rhythm" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:Pulse.default_rhythm
-    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   let r = Pulse.get_rhythm t in
@@ -506,7 +471,6 @@ let () = test "concurrent shutdown is safe" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 10.0; min_s = 5.0; max_s = 20.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   Eio.Switch.run @@ fun sw ->
@@ -527,7 +491,6 @@ let () = test "concurrent nudges are safe" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 100.0; min_s = 50.0; max_s = 200.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   Eio.Switch.run @@ fun sw ->

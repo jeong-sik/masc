@@ -13,17 +13,27 @@ module Runtime = Server_routes_http_runtime
 module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
 (* Runtime prompt assets intentionally stay outside [Prompt_registry]: they
-   have no frontmatter contract and are not overrideable.  The prompt sync
+   have no frontmatter contract, so the prompt editor cannot override them.
+   The autonomous wake prompt takes its override from
+   MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT or runtime.toml instead.  The prompt sync
    owns the runtime directory, so enumerate the binary's [*.txt] inventory
    and then read the runtime projection.  A missing file stays visible rather
    than being silently omitted; that is the useful signal after a failed sync.
 *)
-let validate_board_workspace state args =
-  match Workspace.validate_expected_workspace
-          ~config:(Mcp_server.workspace_config state) args with
+let validate_write_workspace ~config args =
+  match Workspace.validate_expected_workspace ~config args with
   | Ok args -> Ok args
   | Error Workspace.Invalid_workspace_precondition -> Error "invalid expected_workspace precondition"
   | Error Workspace.Workspace_precondition_failed -> Error "workspace precondition failed"
+
+(* A Goal transition from the terminal names the workspace the operator saw.
+   A board write may omit it; a Goal transition may not, so a server swapped
+   on the same port after the terminal read the Goal refuses the transition
+   instead of applying it to another workspace's Goal. *)
+let validate_goal_workspace ~config = function
+  | `Assoc fields as args when List.mem_assoc "expected_workspace" fields ->
+      validate_write_workspace ~config args
+  | _ -> Error "expected_workspace precondition is required"
 
 let runtime_prompt_assets_json ~prompts_dir ~embedded_files =
   let prefix = "prompts/" in
@@ -1261,7 +1271,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
-             let* args = validate_board_workspace state args in
+             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
              let voter = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "voter" voter args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_vote" args in
@@ -1292,7 +1302,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
-             let* args = validate_board_workspace state args in
+             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
              let* args = json_reject_duplicate_meta args in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
@@ -1334,7 +1344,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
-             let* args = validate_board_workspace state args in
+             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment" args in
@@ -1354,7 +1364,7 @@ let add_routes ~sw ~clock router =
      supplied by an admitted token-less same-origin request. *)
   |> Http.Router.post "/api/v1/tools/masc_board_comment_vote" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_board_comment_vote"
-         (fun _state agent_name _req reqd ->
+         (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1368,6 +1378,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
+             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
              let voter = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "voter" voter args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment_vote" args in
@@ -1404,6 +1415,7 @@ let add_routes ~sw ~clock router =
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
              let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+             let* args = validate_goal_workspace ~config args in
              let ctx = { Workspace_types.config; agent_name } in
              let start_time = Tool_timing.start () in
              let result =

@@ -93,6 +93,7 @@ let make_gate_pending ~id ~keeper : Decode.gate_pending =
   ; gp_execution_sandbox = None
   ; gp_waiting_s = Some 10.0
   ; gp_phase = Decode.Gate_queued
+  ; gp_judge_advice = None
   ; gp_auto_judge_detail = None
   ; gp_retry_request = None
   }
@@ -161,7 +162,7 @@ let test_calculate_kpis_populated () =
   state.keepers <- [ make_keeper "running"; make_keeper ~paused:true "idle" ];
   state.keeper_turns <-
     [ { Decode.ktr_chat_control_token = None; ktr_keeper_name = "running";
-        ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; interrupt_token = "fixture-token"; preview = None } };
+        ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; interrupt_token = "fixture-token"; turn_ref = None; preview = None } };
       { Decode.ktr_chat_control_token = None; ktr_keeper_name = "idle"; ktr_state = Keeper_turn_idle };
       { Decode.ktr_chat_control_token = None; ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
   state.keeper_turns_observed_at <- Some 100.;

@@ -76,14 +76,25 @@ const point = {x:0.25,y:0.5}, observed = {tabId:7,expectedUrl:page.location.href
 assert.equal((await command({...observed,action:'click_at'})).ok,true);
 assert.equal(clicked,2);
 assert.equal((await command({...observed,action:'click_at',viewport:{...viewport,height:700}})).error,'observed_viewport_changed');
-assert.equal((await command({...observed,action:'drag',from:point,to:point})).error,'trusted_drag_requires_automation');
+// The server refuses trusted pointer work on an extension connection before it
+// queues a command (Browser_lane.live_transport_serves). Here those actions are
+// simply outside the extension's vocabulary, and neither reaches the page.
+for (const trusted of [{...observed,action:'drag',from:point,to:point},{...observed,action:'hover_at'}]) {
+  const beforeExecutions = executions;
+  const refused = await command(trusted);
+  assert.equal(refused.ok,false);
+  assert.equal(refused.error,'unknown_interaction_action');
+  assert.equal(refused.effectPhase,'not_started');
+  assert.equal(executions,beforeExecutions,`${trusted.action} never injects page input`);
+  assert.equal(clicked,2,`${trusted.action} refusal does not click`);
+}
 const pane = {scrollTop:0,scrollLeft:0,scrollHeight:1000,clientHeight:200,scrollWidth:100,clientWidth:100,
   parentElement:null,getRootNode:()=>({}),scrollBy({top}) {this.scrollTop=Math.max(-800,Math.min(0,this.scrollTop+top));}};
 button.parentElement=pane;
 page.getComputedStyle = el => ({display:'block',visibility:'visible',overflowY:el===pane?'auto':'visible',overflowX:'visible'});
 const nested = await command({...observed,action:'scroll_at',x:0,y:-120});
 assert.equal(nested.ok,true);assert.equal(pane.scrollTop,-120);
-console.log('PASS: extension dispatches screenshot point click, rejects stale viewport and unsupported drag, scrolls reverse-flow pane');
+console.log('PASS: extension dispatches screenshot point click, rejects stale viewport, keeps drag and hover out of the page, scrolls reverse-flow pane');
 
 const innerHost = {shadowRoot: {elementFromPoint: () => button}};
 const outerHost = {shadowRoot: {elementFromPoint: () => innerHost}};

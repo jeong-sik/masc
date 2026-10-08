@@ -477,11 +477,161 @@ let test_get_file_activity_resolves_the_project_checkout_exactly () =
       (json_string_member "file activity" "schema" data))
 ;;
 
+(* ── POST /api/v1/ide/asks ── M1: the IDE files a Todo task for the pool. *)
+
+let ask_body ?(question = "why does this retry?") ?file_path ?line ?context ?priority () =
+  `Assoc
+    ([ "question", `String question ]
+     @ (match file_path with None -> [] | Some p -> [ "file_path", `String p ])
+     @ (match line with None -> [] | Some l -> [ "line", `Int l ])
+     @ (match context with None -> [] | Some c -> [ "context", `String c ])
+     @ (match priority with None -> [] | Some p -> [ "priority", `Int p ]))
+  |> Yojson.Safe.to_string
+;;
+
+let post_ask ~router ~token body =
+  let request =
+    http_request ~meth:`POST ~path:"/api/v1/ide/asks" ~body ~token:(Some token) ()
+  in
+  dispatch router request
+;;
+
+let init_workspace_for_asks ~base_path ~state =
+  let config = Masc.Mcp_server.workspace_config state in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "ide-asks-test"))
+;;
+
+let test_post_asks_is_registered () =
+  let router = Server_ide_http.add_routes (Http.Router.create ()) in
+  check bool "POST /api/v1/ide/asks" true
+    (has_route `POST "/api/v1/ide/asks" router)
+;;
+
+let test_post_asks_requires_auth () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request ~meth:`POST ~path:"/api/v1/ide/asks" ~body:(ask_body ()) ()
+    in
+    let response = dispatch router request in
+    check int "POST asks without token returns 401" 401 (status_of_response response))
+;;
+
+let test_post_asks_requires_admin () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_worker_token base_path "ide-agent" in
+    let response = post_ask ~router ~token (ask_body ()) in
+    check int "POST asks with worker token returns 403" 403 (status_of_response response))
+;;
+
+let test_post_asks_files_a_todo_task () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let body =
+      ask_body ~file_path:"lib/a.ml" ~line:12 ~context:"third retry this week" ()
+    in
+    let response = post_ask ~router ~token body in
+    check_status "POST asks returns 202" 202 response;
+    let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
+    let ask_id = json_string_member "ask response" "ask_id" data in
+    check string "the ask starts as todo" "todo"
+      (json_string_member "ask response" "status" data);
+    (* The task the keeper fleet claims from carries the question as its
+       title, the file reference in its description, and ide as its author. *)
+    let config = Masc.Mcp_server.workspace_config state in
+    let backlog = Workspace.read_backlog config in
+    let contains haystack needle =
+      let hlen = String.length haystack in
+      let nlen = String.length needle in
+      let rec scan i =
+        i + nlen <= hlen
+        && (String.equal (String.sub haystack i nlen) needle || scan (i + 1))
+      in
+      scan 0
+    in
+    (match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id ask_id) backlog.tasks with
+     | None -> failf "ask task %s not found in backlog" ask_id
+     | Some task ->
+       check string "question becomes the title" "why does this retry?" task.title;
+       check bool "description names the file and line" true
+         (contains task.description "lib/a.ml:12");
+       check bool "description carries the context" true
+         (contains task.description "third retry");
+       check string "authored by the IDE" "ide"
+         (Option.value task.created_by ~default:"");
+       check int "default priority" 3 task.priority;
+       check bool "starts Todo" true (task.task_status = Masc_domain.Todo)))
+;;
+
+let test_post_asks_refuses_a_blank_question () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let response = post_ask ~router ~token (ask_body ~question:"   " ()) in
+    check_status "blank question returns 400" 400 response;
+    check string "invalid ask code" "invalid_ask" (error_code_of_response response))
+;;
+
+let test_post_asks_refuses_a_bad_priority () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let response = post_ask ~router ~token (ask_body ~priority:9 ()) in
+    check_status "priority 9 returns 400" 400 response;
+    check string "invalid ask code" "invalid_ask" (error_code_of_response response))
+;;
+
+let test_post_asks_refuses_a_mistyped_line () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let body =
+      `Assoc [ "question", `String "why?"; "line", `String "twelve" ]
+      |> Yojson.Safe.to_string
+    in
+    let response = post_ask ~router ~token body in
+    check_status "string line returns 400" 400 response)
+;;
+
+let test_post_asks_refuses_a_line_without_a_file () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let body =
+      `Assoc [ "question", `String "why?"; "line", `Int 12 ]
+      |> Yojson.Safe.to_string
+    in
+    let response = post_ask ~router ~token body in
+    check_status "line without file returns 400" 400 response;
+    check string "invalid ask code" "invalid_ask" (error_code_of_response response))
+;;
+
+let test_post_asks_refuses_non_json () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let response = post_ask ~router ~token "not json{" in
+    check_status "non-JSON body returns 400" 400 response)
+;;
+
+let test_post_asks_needs_an_initialized_workspace () =
+  (* No init: the backlog the ask would land in does not exist. *)
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_admin_token base_path "operator" in
+    let response = post_ask ~router ~token (ask_body ()) in
+    check_status "uninitialized workspace returns 500" 500 response;
+    check string "store unavailable code" "ask_store_unavailable"
+      (error_code_of_response response))
+;;
+
 let () =
   run
     "server_ide_http"
     [ ( "route_registration"
-      , [ test_case "read routes stay public" `Quick test_read_routes_stay_public ] )
+      , [ test_case "read routes stay public" `Quick test_read_routes_stay_public
+        ; test_case "POST asks is registered" `Quick test_post_asks_is_registered
+        ] )
     ; ( "presence_contract"
       , [ test_case
             "presence projects canonical keeper identity and status"
@@ -515,6 +665,26 @@ let () =
             test_get_file_activity_resolves_the_project_checkout_exactly
         ; test_case "GET file activity without a token returns 401" `Quick
             test_file_activity_requires_auth
+        ] )
+    ; ( "post_asks"
+      , [ test_case "POST asks without a token returns 401" `Quick
+            test_post_asks_requires_auth
+        ; test_case "POST asks with a worker token returns 403" `Quick
+            test_post_asks_requires_admin
+        ; test_case "POST asks files a Todo task" `Quick
+            test_post_asks_files_a_todo_task
+        ; test_case "POST asks refuses a blank question" `Quick
+            test_post_asks_refuses_a_blank_question
+        ; test_case "POST asks refuses a bad priority" `Quick
+            test_post_asks_refuses_a_bad_priority
+        ; test_case "POST asks refuses a mistyped line" `Quick
+            test_post_asks_refuses_a_mistyped_line
+        ; test_case "POST asks refuses a line without a file" `Quick
+            test_post_asks_refuses_a_line_without_a_file
+        ; test_case "POST asks refuses non-JSON" `Quick
+            test_post_asks_refuses_non_json
+        ; test_case "POST asks needs an initialized workspace" `Quick
+            test_post_asks_needs_an_initialized_workspace
         ] )
     ]
 ;;

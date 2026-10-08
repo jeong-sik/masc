@@ -24,6 +24,8 @@ type custom_event_name =
   | Tool_approval_requested
   | Tool_approval_settled
   | Tool_result_ready
+  | Native_tool_start
+  | Native_tool_end
 
 let initial =
   { thread_id = Ag_ui.default_thread_id
@@ -61,6 +63,8 @@ let custom_event_name_to_string = function
   | Tool_approval_requested -> "KEEPER_TOOL_APPROVAL_REQUESTED"
   | Tool_approval_settled -> "KEEPER_TOOL_APPROVAL_SETTLED"
   | Tool_result_ready -> "KEEPER_TOOL_RESULT_READY"
+  | Native_tool_start -> "KEEPER_NATIVE_TOOL_START"
+  | Native_tool_end -> "KEEPER_NATIVE_TOOL_END"
 
 let custom ~timestamp ~redact_json state name value =
   Ag_ui.make_event ~timestamp ~thread_id:state.thread_id ~run_id:state.run_id
@@ -81,6 +85,18 @@ let continuation_checkpoint_to_json ~redact_text
     ([ "message", `String (redact_text event.message) ]
      @ json_opt "request_id"
          (Option.map (fun value -> `String value) event.request_id))
+
+let native_tool_to_json (tool : Keeper_chat_events.native_tool) =
+  `Assoc
+    ([ "toolStreamScope", `Int tool.occurrence.stream_scope
+     ; "toolCallBlockIndex", `Int tool.occurrence.block_index
+     ]
+     @ json_opt "providerMessageId"
+         (Option.map (fun value -> `String value) tool.occurrence.provider_message_id)
+     @ json_opt "toolCallId"
+         (Option.map (fun value -> `String value) tool.tool_call_id)
+     @ json_opt "toolCallName"
+         (Option.map (fun value -> `String value) tool.tool_call_name))
 
 let project ~timestamp ~redact_text ~redact_json state event =
   let open Keeper_chat_events in
@@ -204,6 +220,10 @@ let project ~timestamp ~redact_text ~redact_json state event =
   | Continuation_checkpoint event ->
       state, Some (custom ~timestamp ~redact_json state Continuation_checkpoint
                      (continuation_checkpoint_to_json ~redact_text event))
+  | Native_tool_start tool ->
+      state, Some (custom ~timestamp ~redact_json state Native_tool_start (native_tool_to_json tool))
+  | Native_tool_end tool ->
+      state, Some (custom ~timestamp ~redact_json state Native_tool_end (native_tool_to_json tool))
   | Tool_call_start { occurrence; tool_call_id; tool_call_name } ->
       ( state
       , Some

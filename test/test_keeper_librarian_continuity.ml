@@ -652,8 +652,8 @@ let narrowing_atom_count = List.length narrowing_marks
    renders librarian.md, about 21.7 kB with its working_contexts rule spliced
    in and before the schema, so the output schema and the request envelope
    share the remaining 11 kB or so before two atoms stop fitting. That margin
-   is narrower than it looks. The context-only pass renders
-   librarian.continuity.md, about 2.7 kB. Eight atoms rather than four so that
+   is narrower than it looks. The context-only pass renders the
+   [continuity] slot of librarian.md, about 2.7 kB. Eight atoms rather than four so that
    six remain after the first committed unit: a pass that released the width
    on a commit would offer those six and be refused, which four atoms could
    not have shown. *)

@@ -168,6 +168,9 @@ let runtime_keys =
       (b Act "Right / Enter" "detail"
          ~help:"show the full runtime, lane, dispatch, and probe fields")
   ; Every_reading
+      (b Act "h" "dim refusals"
+         ~help:"toggle de-emphasis for exhausted, rate-limited, and spent runtimes")
+  ; Every_reading
       (b Act "v" "routes / status"
          ~help:"read complete default and media routes, boot admission and probe diagnostics")
   ; Reading_walk

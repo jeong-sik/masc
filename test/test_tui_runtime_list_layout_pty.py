@@ -1,5 +1,6 @@
 """Runtime candidate identity and route/probe survive narrow listings."""
 import os
+import re
 import sys
 import unicodedata
 import tui_keyboard_harness as _keyboard_harness
@@ -16,6 +17,10 @@ def screen(output):
     end = raw.rfind(_keyboard_harness.FRAME_END)
     assert end >= 0, "no completed terminal frame"
     return _keyboard_harness.screen_text(raw[:end + len(_keyboard_harness.FRAME_END)]).decode("utf-8", errors="strict")
+
+
+def style_codes(row):
+    return re.findall(rb"\x1b\[[0-9;]*m", row)
 
 
 def status_header_visible(columns, all_runtimes):
@@ -109,7 +114,7 @@ def run(executable, no_color):
             dimmed_off = dimmed_off_matches[0]
             assert _keyboard_harness.CSI_RE.sub(b"", dimmed_off) == initial_text, dimmed_off
             if not no_color:
-                assert dimmed_off != exhausted_row, (exhausted_row, dimmed_off)
+                assert style_codes(dimmed_off) != style_codes(exhausted_row), (exhausted_row, dimmed_off)
             normal_after_off = [
                 row for row in dimmed_off_rows.values()
                 if RUNTIME_ID[-4:].encode() in row
@@ -137,7 +142,7 @@ def run(executable, no_color):
             assert _keyboard_harness.CSI_RE.sub(b"", dimmed_on) == initial_text, dimmed_on
             assert normal_on_index < dimmed_on_index, dimmed_on_rows
             if not no_color:
-                assert dimmed_on == exhausted_row, (exhausted_row, dimmed_on)
+                assert style_codes(dimmed_on) == style_codes(exhausted_row), (exhausted_row, dimmed_on)
             assert normal_on_row == normal_row, (normal_row, normal_on_row)
             _keyboard_harness.send_and_wait(process, fd, output, b"p", b"Service lanes")
         for all_runtimes in (False, True):

@@ -419,7 +419,7 @@ let openrouter_credit_window ~path fields =
      | Some used when Float.is_finite used && used >= 0.0 ->
        Ok (Some
          { limit_id = None
-         ; kind = Provider_label "credit usage (all time)"
+         ; kind = Provider_label "API key usage (all time)"
          ; role = Counts_other_use
          ; utilization = Usd { used; limit = None }
          ; resets_at = None
@@ -442,7 +442,7 @@ let openrouter_credit_window ~path fields =
     Ok
       (Some
          { limit_id = None
-         ; kind = Provider_label "credit limit"
+         ; kind = Provider_label "API key credit limit"
          ; role = Gates_model_calls
          ; utilization = Usd { used = limit -. remaining; limit = Some limit }
          ; resets_at = None

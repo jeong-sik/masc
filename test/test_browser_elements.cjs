@@ -136,11 +136,18 @@ test('live elements retain tab identity and match native control observations', 
 // an escape that a strict reader refuses, and the whole inventory is lost.
 test('element text is cut by code point, never through a surrogate pair', async () => {
   const { context, text } = fixture();
+  const cuts = async () => [runNative(context), await runExtension(context)]
+    .map(observation => observation.elements[0].text);
   text.innerText = 'a'.repeat(499) + '\u{1F600}' + 'tail';
-  for (const observation of [runNative(context), await runExtension(context)]) {
-    const cut = observation.elements[0].text;
+  for (const cut of await cuts()) {
     assert.equal(cut.isWellFormed(), true);
     assert.equal(Array.from(cut).length, 500);
     assert.equal(cut.endsWith('\u{1F600}'), true);
   }
+  // 500 two-unit characters fill the 1000 units that are split, and a 501st
+  // starts right after them.
+  text.innerText = '\u{1F600}'.repeat(501);
+  for (const cut of await cuts()) assert.equal(cut, '\u{1F600}'.repeat(500));
+  text.innerText = 'short \u{1F600}';
+  for (const cut of await cuts()) assert.equal(cut, 'short \u{1F600}');
 });

@@ -686,10 +686,14 @@ function name(el) {
   const labels=Array.from(el.labels || []).map(label=>label.innerText || '').filter(Boolean).join(' ');
   return el.getAttribute('aria-label') || labelledBy || labels || el.getAttribute('placeholder') || '';
 }
+// The first [points] characters of [text]. A character is at most two UTF-16
+// units, so only that much of a long text is split into characters, and the
+// cut never leaves half of one.
+const head = (text, points) => Array.from(text.slice(0, points * 2)).slice(0, points).join('');
 function observe(el) {
   const result = {selector:selector(el),tag:el.localName,
     role:effectiveRole(el),type:el.getAttribute('type'),name:name(el),
-    text:Array.from(el.innerText || '').slice(0,500).join(''),href:el.href || null,disabled:disabled(el)};
+    text:head(el.innerText || '', 500),href:el.href || null,disabled:disabled(el)};
   const target=(el.localName==='label' && el.control) || el;
   if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
     result.checked=!!target.checked;

@@ -9792,6 +9792,7 @@
 (test
  (name test_tui_models_account_reading)
  (modules test_tui_models_account_reading)
- (libraries alcotest masc_tui_types masc_tui_render_prim))
+ (libraries alcotest masc_tui_types masc_tui_render_prim
+  masc_tui_runtime_config_view))
 
 (include stanzas/test_tui_code_history_sources_pty.inc)

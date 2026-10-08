@@ -156,6 +156,10 @@ type runtime_key =
   | Every_reading of binding
   | Keeper_lanes_only of binding
   | All_runtimes_only of binding
+  (* One key that does a different thing on each reading. The footer draws the
+     binding of the reading on screen; the sheet draws one row naming both, so
+     the key is listed once per surface. *)
+  | Per_reading of { all_runtimes : binding; keeper_lanes : binding }
   | Reading_walk
 
 let runtime_reading_walk_help =
@@ -174,12 +178,14 @@ let runtime_keys =
   ; Every_reading
       (b Navigate "c" "clients"
          ~help:"everyone attached to this workspace, off the ring under Runtime")
-  ; All_runtimes_only
-      (b Act "e" "model settings"
-         ~help:"open the selected binding in Config Models; Esc then c copies a variant")
-  ; Keeper_lanes_only
-      (b Act "e" "add candidate"
-         ~help:"append a candidate to the candidate order of the lane under the cursor (keeper lanes only)")
+  ; Per_reading
+      { all_runtimes =
+          b Act "e" "model settings"
+            ~help:"open the selected binding in Config Models; Esc then c copies a variant"
+      ; keeper_lanes =
+          b Act "e" "add candidate"
+            ~help:"append a candidate to the candidate order of the lane under the cursor (keeper lanes only)"
+      }
   ; Keeper_lanes_only
       (b Act "a" "new lane"
          ~help:"name a new lane, then pick its first runtime; e adds the rest")
@@ -214,6 +220,12 @@ let runtime_keys =
 
 let runtime_sheet_binding = function
   | Every_reading binding | Keeper_lanes_only binding | All_runtimes_only binding -> binding
+  | Per_reading { all_runtimes; keeper_lanes } ->
+    b Act all_runtimes.key
+      (all_runtimes.label ^ " / " ^ keeper_lanes.label)
+      ~help:
+        (String.concat "; "
+           (List.filter_map Fun.id [ all_runtimes.help; keeper_lanes.help ]))
   | Reading_walk ->
     b Navigate "p" "keeper lanes / all runtimes / service lanes"
       ~help:runtime_reading_walk_help
@@ -226,6 +238,10 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
      | Runtime_all -> None)
   | All_runtimes_only binding ->
     (match mode with Runtime_all -> Some binding | Runtime_lanes -> None)
+  | Per_reading { all_runtimes; keeper_lanes } ->
+    (match mode with
+     | Runtime_all -> Some all_runtimes
+     | Runtime_lanes -> Some keeper_lanes)
   | Reading_walk ->
     Some
       (b Navigate "p"

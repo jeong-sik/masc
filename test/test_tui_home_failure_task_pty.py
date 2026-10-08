@@ -281,13 +281,54 @@ def task_cancel_editor_replacement(executable):
         )
 
 
+class ReadCompletionGate:
+    """Admission set over the refresh tail's /health exchanges.
+
+    While armed, every exchange registers when its handler enters and
+    completes only after its response has been written, so [quiesced] --
+    nothing held and nothing registered for [span] seconds -- is a
+    completion boundary: the refresh chain's last identity exchange has
+    finished. Read counters cannot prove this; a quiet span over them is
+    how the original race passed its settle loop with a response still
+    outstanding.
+    """
+
+    def __init__(self, span=0.5):
+        self._lock = threading.Lock()
+        self.span = span
+        self.held = 0
+        self.exchanges = 0
+        self.durations = []
+        self.last_event = time.monotonic()
+        self.changed = threading.Event()
+
+    def register(self):
+        with self._lock:
+            self.held += 1
+            self.exchanges += 1
+            self.last_event = time.monotonic()
+            self.changed.set()
+
+    def complete(self, length):
+        with self._lock:
+            self.held -= 1
+            self.durations.append(length)
+            self.last_event = time.monotonic()
+            self.changed.set()
+
+    def quiesced(self):
+        with self._lock:
+            return self.held == 0 and time.monotonic() - self.last_event >= self.span
+
+
 def task_cancel_previous_workspace_receipt(executable):
     """Accepted A cancellation remains visible after a refresh observes B."""
     fixtures = quiet_fixtures()
     requests = []
     accepted = threading.Event()
     release = threading.Event()
-    state = {"foreign": False, "health_reads": 0, "history_reads": 0}
+    state = {"foreign": False, "health_reads": 0, "history_reads": 0,
+             "health_gate": None, "drill_delay": 0.0}
     transitions = []
     with tempfile.TemporaryDirectory(prefix="masc-task-cancel-receipt-") as directory:
         editor = Path(directory, "editor.py")
@@ -302,6 +343,21 @@ def task_cancel_previous_workspace_receipt(executable):
 
             def health():
                 state["health_reads"] += 1
+                gate = state["health_gate"]
+                if gate is not None:
+                    entered = time.monotonic()
+                    gate.register()
+                    try:
+                        drill = state["drill_delay"]
+                        if drill:
+                            state["drill_delay"] = 0.0
+                            # The rehearsal: this response lands later than
+                            # the whole quiet span the previous settle loop
+                            # trusted, and the window must still wait for
+                            # this completion.
+                            time.sleep(drill)
+                    finally:
+                        gate.complete(time.monotonic() - entered)
                 root = foreign if state["foreign"] else local
                 return h.RawHttpResponse(200, json.dumps({
                     "status": "ok", "paths": {
@@ -358,26 +414,47 @@ def task_cancel_previous_workspace_receipt(executable):
                 os.write(fd, b"x")
                 assert h.wait_for_fixture_event(process, fd, output, accepted, timeout=10)
                 state["foreign"] = True
-                h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
+                # The 'r' that observes the mismatch is also the TUI's manual
+                # refresh: it starts a revalidation pass whose scoped
+                # follow-up chains a second full pass, and every pass ends
+                # with a trailing identity re-read whose applied bundle then
+                # launches identity-probed side reads (the Gate snapshot and
+                # the held-approvals listing). The last identity exchange of
+                # that tail can complete long after the mismatch banner, so a
+                # quiet span over the read counters proves absence, not
+                # completion -- the original race. Gate the window on
+                # completions instead: arm before the press, and every
+                # /health exchange of the refresh chain registers an
+                # admission at handler entry and completes it only after its
+                # response is written. The window opens when nothing is held
+                # and no exchange has registered for 0.5s -- the chain's last
+                # identity exchange has then completed, and a tail released
+                # later than any quiet span is still held here. The drill
+                # holds the first exchange's response for 0.75s -- longer
+                # than the quiet span the old loop trusted -- to show the
+                # window opens on that completion, and still measures only
+                # the receipt afterwards.
+                gate = ReadCompletionGate()
+                state["health_gate"] = gate
+                state["drill_delay"] = 0.75
+                try:
+                    h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
+                    deadline = time.monotonic() + 15
+                    while not gate.quiesced():
+                        if time.monotonic() > deadline:
+                            raise AssertionError(
+                                "refresh tail did not reach its completion boundary: held="
+                                + str(gate.held) + " exchanges=" + str(gate.exchanges)
+                                + " reads=" + repr((state["health_reads"], state["history_reads"])))
+                        gate.changed.clear()
+                        h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
+                    assert any(length >= 0.5 for length in gate.durations), (
+                        "the completion gate never held the drill's slow exchange: "
+                        + repr(gate.durations))
+                finally:
+                    state["health_gate"] = None
+                    state["drill_delay"] = 0.0
                 h.drain_until_quiet(process, fd, output)
-                # The same key is the TUI's manual refresh, so pressing it to
-                # observe the mismatch starts a revalidation pass, and its
-                # scoped follow-up chains a second one. Both end with a
-                # trailing identity re-read; settle on that trailing read
-                # before opening the receipt window, so the window measures
-                # the receipt path alone and not the refresh tail.
-                for _ in range(4):
-                    before_settling = (state["health_reads"], state["history_reads"])
-                    h.drain_until_quiet(process, fd, output)
-                    time.sleep(0.5)
-                    h.drain_until_quiet(process, fd, output)
-                    after_settling = (state["health_reads"], state["history_reads"])
-                    if before_settling == after_settling:
-                        break
-                else:
-                    raise AssertionError(
-                        "refresh tail did not settle: "
-                        + repr((state["health_reads"], state["history_reads"])))
                 before = (state["health_reads"], state["history_reads"])
                 start = len(output)
                 release.set()

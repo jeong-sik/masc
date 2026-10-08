@@ -9577,13 +9577,6 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
       (fun entry -> String.equal entry.me_keeper_name keeper_name)
       state.msg_history
   in
-  let session = List.map (fun (row : msg_entry) ->
-      if is_user_row row
-         && Option.is_some (Option.bind
-              (settled_log_for_request state ~keeper_name row.me_request_id)
-              (fun log -> Masc_tui_keeper_chat_transcript.rejection log.tl_transcript))
-      then { row with me_text = "전송 거절됨\n" ^ row.me_text }
-      else row) session in
   let held =
     selected_source_logs_for_keeper state keeper_name
     |> List.filter turn_log_holds_the_turn
@@ -12691,7 +12684,7 @@ let keeper_message_activity_rows (state : state) =
                   && Masc_tui_keeper_chat_projection.same_request_identity
                     request entry.sent_request) waiting)
           | Turn_preflight _ | Turn_streaming -> false) own then
-        attention "메시지 전달 재확인 중";
+        attention "메시지 전송 확인 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
       if has_working then add "기존 작업 처리 중";
@@ -12704,7 +12697,7 @@ let keeper_message_activity_rows (state : state) =
               && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
               && Option.map fst (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript) = admission) own
           then add text)
-        [None, "메시지 접수 확인 중";
+        [None, "메시지 전송 확인 중";
          Some Masc_tui_keeper_chat_live.Running, "응답 시작 중";
          Some Settled, "완료된 응답을 다시 읽는 중"];
       if not has_working then
@@ -12721,8 +12714,8 @@ let keeper_message_activity_rows (state : state) =
         let count delivery = List.length (List.filter (fun (_, kind) -> kind = delivery) waiting) in
         List.iter (fun (delivery, text) -> let n = count delivery in
           if n > 0 then add (Printf.sprintf "%d건 %s" n text))
-          [Local_pending, "전송 전"; Awaiting_receipt, "접수 확인 중";
-           Rechecking_delivery, "전달 재확인 중"];
+          [Local_pending, "전송 대기"; Awaiting_receipt, "전송 중";
+           Rechecking_delivery, "전송 확인 중"];
         let requests = List.map fst waiting in
         let holds request = List.exists
           (Masc_tui_keeper_chat_projection.same_request_identity request) requests in
@@ -12738,9 +12731,9 @@ let keeper_message_activity_rows (state : state) =
         else if List.for_all (fun request -> List.exists (fun (received, result) ->
             Masc_tui_keeper_chat_projection.same_request_identity request received
             && Result.is_ok result) receipts) requests then
-          add "다음 순서로 접수됨"
-        else if receipts <> [] then add "일부 메시지 다음 순서로 접수됨"
-        else if count Keeper_queued > 0 then add "접수됨"
+          add "다음 순서로 전달 대기"
+        else if receipts <> [] then add "일부 메시지 다음 순서로 전달 대기"
+        else if count Keeper_queued > 0 then add "처리 대기"
       end;
       if List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_after_stop)

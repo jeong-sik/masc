@@ -25,6 +25,18 @@ val keeper_message_layout_entries :
   ?messages:Masc_tui_types.msg_entry list -> Masc_tui_types.state ->
   keeper_name:string -> chat_cols:int -> Message_layout.entry list
 
+val chat_tail_entries :
+  Masc_tui_types.state -> keeper_name:string -> role_label_column:int ->
+  Message_layout.entry list
+(** Pending inputs with delivery state in their labels and original text in
+    their bodies, preceded by the pending-section status entry. *)
+
+val polled_turn_output_entries :
+  Masc_tui_types.state -> keeper_name:string -> role_label_column:int ->
+  Message_layout.entry list
+(** A polled output excerpt and its separate observation status. Empty when
+    the journal already supplies the turn's text. *)
+
 val chat_body_with_previews :
   preview:(string -> Masc_tui_link_preview.og_preview) ->
   mode:[ `Rich | `Compact | `Off ] -> entry:Message_layout.entry ->

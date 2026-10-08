@@ -321,17 +321,17 @@ let test_compact_status_keeps_delivery_and_priority_truth () =
   let rows () = List.map (fun row -> row.Masc_tui_answering.lead ^ row.rest)
       (Tui.keeper_message_activity_rows state) in
   check (list string) "one quiet status preserves exact current queue count"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 접수됨"] (rows ());
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 처리 대기"] (rows ());
   state.keeper_run_next_inflight <- [second.sent_request];
   state.keeper_run_next_receipts <- [first.sent_request, Ok "confirmed first"];
   check (list string) "in-flight priority cannot claim confirmation"
     ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서 확인 중"] (rows ());
   state.keeper_run_next_inflight <- [];
   check (list string) "one receipt does not confirm both inputs"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 일부 메시지 다음 순서로 접수됨"] (rows ());
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 일부 메시지 다음 순서로 전달 대기"] (rows ());
   state.keeper_run_next_receipts <- [first.sent_request, Ok "first"; second.sent_request, Ok "second"];
   check (list string) "both exact receipts confirm priority"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서로 접수됨"] (rows ());
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서로 전달 대기"] (rows ());
   state.keeper_run_next_receipts <- [second.sent_request, Error "offline"];
   check bool "actual refusal retains attention" true (Tui.keeper_message_activity_needs_attention state);
   check (list string) "failure does not claim priority"
@@ -356,7 +356,7 @@ let test_compact_keeps_uncovered_execution_problems () =
   state.msg_inflight <- [active; {uncovered with phase=Tui.Turn_reconciling}];
   let text () = texts (Tui.keeper_message_activity_rows state) |> String.concat " | " in
   check bool "another running execution's reconciliation is visible without color" true
-    (Astring.String.is_infix ~affix:"메시지 전달 재확인 중" (text ()));
+    (Astring.String.is_infix ~affix:"메시지 전송 확인 중" (text ()));
   Tui.turn_log_add ~now:4. uncovered.log ~seq:(Some 2)
     (Live.Run_failed {message="fixture failure"});
   state.msg_inflight <- [active; uncovered];
@@ -374,7 +374,7 @@ let test_compact_keeps_uncovered_execution_problems () =
    | Error error -> fail error);
   let rows = texts (Tui.keeper_message_activity_rows state) in
   check (list string) "pending delivery evidence has one owner and exact counts"
-    ["현재 작업 확인 불가 · 내 메시지 2건 대기 · 1건 전송 전 · 1건 전달 재확인 중"] rows;
+    ["현재 작업 확인 불가 · 내 메시지 2건 대기 · 1건 전송 대기 · 1건 전송 확인 중"] rows;
   List.iter (fun terminal_cols ->
     check bool "pending delivery evidence fits without clipping" true
       (List.for_all (fun row ->
@@ -593,6 +593,23 @@ let test_historical_open_journal_cannot_own_progress () =
     ; Cancelled {completed_at=4.}
     ; Succeeded {completed_at=4.; outcome_ref="recorded-result"} ]
 
+(* Between continuation segments the request stays open and nothing is in
+   progress, so the compact band says nothing. *)
+let test_open_request_between_segments_has_no_banner () =
+  let state = state () in
+  state.msg_tool_visibility <- Tui.Tools_compact;
+  let entry = inflight ~request_id:"checkpointed" ~at:1. () in
+  List.iter (fun delta -> Tui.turn_log_add ~now:2. entry.log ~seq:None delta)
+    [ Live.Run_started
+    ; Live.Reply_details { reply = ""; turn_outcome = Continuation_checkpoint; turn_ref = "trace#1" }
+    ; Live.Run_finished ];
+  state.msg_inflight <- [entry];
+  check bool "the request waits for its next segment" true
+    (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript);
+  check (list string) "no progress banner between segments" []
+    (texts (Tui.keeper_message_activity_rows state))
+;;
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
@@ -605,6 +622,8 @@ let () =
       ; test_case "uncovered execution failures remain visible" `Quick test_compact_keeps_uncovered_execution_problems
       ; test_case "compact delivery and priority truth" `Quick test_compact_status_keeps_delivery_and_priority_truth
       ; test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
+      ; test_case "open request between segments has no banner" `Quick
+          test_open_request_between_segments_has_no_banner
 
       ; test_case "the band does not repeat the admission" `Quick
           test_the_band_does_not_repeat_the_admission

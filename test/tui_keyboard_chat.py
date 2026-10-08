@@ -1506,7 +1506,7 @@ def chat_reconcile_interaction(
             send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             completed = output.rfind(FRAME_END) + len(FRAME_END)
             pending_screen = screen_text(bytes(output[:completed]))
-            if "1건 전달 재확인 중".encode() not in pending_screen or "접수됨".encode() in pending_screen:
+            if "1건 전송 확인 중".encode() not in pending_screen or "처리 대기".encode() in pending_screen:
                 raise AssertionError("unknown admission was presented as confirmed queued: " + repr(pending_screen))
             before_release = [
                 json.loads(body).get("message")

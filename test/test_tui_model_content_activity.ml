@@ -157,7 +157,7 @@ let test_fresh_worker_generation_in_same_journal () =
   let replay = Log.create ~keeper_name:"fixture" ~request_id:"r" ~started_at:0. in
   ignore (Log.add_journaled replay lines);
   let _,wire = List.fold_left (fun (state,wire) (line:J.journaled_event) ->
-    let state,event = Server_keeper_chat_agui_projection.project ~timestamp:line.ts ~redact_text:Fun.id ~redact_json:Fun.id state line.event in
+    let state,event = Server_keeper_chat_agui_projection.project ~timestamp:line.ts ~redact_text:Fun.id state line.event in
     state,wire ^ Option.fold ~none:"" ~some:(Ag_ui.event_to_sse ~id:line.seq) event)
     (Server_keeper_chat_agui_projection.initial,"") lines in
   let live = Log.create ~keeper_name:"fixture" ~request_id:"r" ~started_at:0. in

@@ -264,6 +264,13 @@ type 'a next =
     and the publish-time clock reading. The journal line for this event (via
     [on_publish]) and every live projection of it carry the same [seq] and
     [ts], so a journal replay reproduces the live wire bytes. *)
+val redact_content :
+  redact_text:(string -> string) -> keeper_chat_event -> keeper_chat_event
+(** Redact human content leaves while preserving protocol keys, discriminants,
+    typed states and correlation identities. Shared by live AG-UI and durable
+    journal HTTP serialization. Arbitrary argument JSON has its separate
+    recursive key/value redaction boundary before becoming event content. *)
+
 type published =
   { seq : int
   ; ts : float

@@ -75,22 +75,22 @@ let custom ~timestamp state name value =
     ~custom_name:(Some (custom_event_name_to_string name))
     ~custom_value:(Some value) Ag_ui.Custom
 
-let reply_details_to_json ~redact_text
+let reply_details_to_json
     (event : Keeper_chat_events.reply_details) =
   `Assoc
-    [ "reply", `String (redact_text event.reply)
+    [ "reply", `String event.reply
     ; "turn_outcome", `String (Keeper_turn_outcome.to_label event.turn_outcome)
     ; "turn_ref", `String (Ids.Turn_ref.to_string event.turn_ref)
     ]
 
-let continuation_checkpoint_to_json ~redact_text
+let continuation_checkpoint_to_json
     (event : Keeper_chat_events.continuation_checkpoint) =
   `Assoc
-    ([ "message", `String (redact_text event.message) ]
+    ([ "message", `String event.message ]
      @ json_opt "request_id"
          (Option.map (fun value -> `String value) event.request_id))
 
-let native_tool_to_json ~redact_text ?progress ?completion (tool : Keeper_chat_events.native_tool) =
+let native_tool_to_json ?progress ?completion (tool : Keeper_chat_events.native_tool) =
   `Assoc
     ([ "toolStreamScope", `Int tool.occurrence.stream_scope
      ; "toolCallBlockIndex", `Int tool.occurrence.block_index
@@ -101,14 +101,12 @@ let native_tool_to_json ~redact_text ?progress ?completion (tool : Keeper_chat_e
          (Option.map (fun value -> `String value) tool.tool_call_id)
      @ json_opt "toolCallName"
          (Option.map (fun value -> `String value) tool.tool_call_name)
-     @ json_opt "completion" (Option.map (fun completion -> Runtime_native_tools.completion_to_json
-             (Runtime_native_tools.redact_completion redact_text completion)) completion)
-     @ json_opt "progress" (Option.map (fun progress -> Runtime_native_tools.progress_to_json
-             (Runtime_native_tools.redact_progress redact_text progress)) progress))
+     @ json_opt "completion" (Option.map Runtime_native_tools.completion_to_json completion)
+     @ json_opt "progress" (Option.map Runtime_native_tools.progress_to_json progress))
 
 let project ~timestamp ~redact_text state event =
   let open Keeper_chat_events in
-  match event with
+  match redact_content ~redact_text event with
   | Run_started { run_id; thread_id } ->
       let state = { state with thread_id; run_id = Some run_id } in
       ( state
@@ -200,7 +198,7 @@ let project ~timestamp ~redact_text state event =
                      (`Assoc [ "index", `Int index ]))
   | Agent_core_thinking_delta { index; delta } ->
       state, Some (custom ~timestamp state Thinking_delta
-                     (`Assoc [ "index", `Int index; "delta", `String (redact_text delta) ]))
+                     (`Assoc [ "index", `Int index; "delta", `String delta ]))
   | Agent_core_thinking_signature_delta { index; signature_bytes } ->
       state, Some (custom ~timestamp state Thinking_signature_delta
                      (`Assoc
@@ -216,29 +214,28 @@ let project ~timestamp ~redact_text state event =
                           , `String
                               (Agent_core.Types.media_source_kind_to_string
                                  source_type) )
-                        ; "media_ref", `String (redact_text media_ref)
+                        ; "media_ref", `String media_ref
                         ]))
   | Agent_core_stream_protocol_error error ->
       state, Some (custom ~timestamp state Stream_protocol_error
-                     (stream_protocol_error_to_json
-                        { error with reason = Option.map redact_text error.reason }))
+                     (stream_protocol_error_to_json error))
   | Reply_details event ->
       state, Some (custom ~timestamp state Reply_details
-                     (reply_details_to_json ~redact_text event))
+                     (reply_details_to_json event))
   | Batch_bound {operation_id; execution_id} ->
       state, Some (custom ~timestamp state Batch_bound
         (`Assoc ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string operation_id);
           "execution_id", `String (Keeper_chat_operation.Operation_id.to_string execution_id)]))
   | Continuation_checkpoint event ->
       state, Some (custom ~timestamp state Continuation_checkpoint
-                     (continuation_checkpoint_to_json ~redact_text event))
+                     (continuation_checkpoint_to_json event))
   | Native_tool_start tool ->
-      state, Some (custom ~timestamp state Native_tool_start (native_tool_to_json ~redact_text tool))
+      state, Some (custom ~timestamp state Native_tool_start (native_tool_to_json tool))
   | Native_tool_progress (tool, progress) ->
       state, Some (custom ~timestamp state Native_tool_progress
-        (native_tool_to_json ~redact_text ~progress tool))
+        (native_tool_to_json ~progress tool))
   | Native_tool_end (tool, completion) ->
-      let value = native_tool_to_json ~redact_text ~completion tool in
+      let value = native_tool_to_json ~completion tool in
       state, Some (custom ~timestamp state Native_tool_end value)
   | Tool_call_start { occurrence; tool_call_id; tool_call_name } ->
       ( state
@@ -284,9 +281,9 @@ let project ~timestamp ~redact_text state event =
              (`Assoc
                 [ ("tool_call_id", `String tool_call_id)
                 ; ("tool_call_name", `String tool_call_name)
-                ; ("args", `String (redact_text args))
-                ; ("question", `String (redact_text question))
-                ; ("because", `String (redact_text because))
+                ; ("args", `String args)
+                ; ("question", `String question)
+                ; ("because", `String because)
                 ])) )
   | Tool_approval_settled { tool_call_id; outcome } ->
       ( state
@@ -318,7 +315,7 @@ let project ~timestamp ~redact_text state event =
       ( state
       , Some
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~message:(Some (redact_text message))
+             ~run_id:state.run_id ~message:(Some message)
              Ag_ui.Run_error) )
   | Run_finished { run_id } ->
       let state = { state with run_id = Some run_id } in

@@ -1,6 +1,7 @@
 # Keeper chat wire boundaries
 
-`Keeper_chat_events` owns normalized events. `Keeper_chat_event_log` encodes the
+`Keeper_chat_events` owns normalized events and its exhaustive `redact_content`
+map owns content redaction for both live and journal serialization. `Keeper_chat_event_log` encodes the
 journal, and `Server_keeper_chat_agui_projection` produces AG-UI for live delivery
 and replay. Projection preserves protocol field names, closed enums and exact
 correlation identities. Secret redaction applies to human content leaves through
@@ -9,7 +10,7 @@ key/value redaction boundary. Do not apply that arbitrary JSON redactor to a
 serialized protocol envelope.
 
 `Runtime_json_integer.of_json` defines the numeric decoding boundary for native
-progress, native completion, model content identity, and journal occurrence/sequence.
+progress, native completion, model content identity, and journal and live TUI occurrence/sequence.
 JSON numeric values must be integral and exactly representable by both OCaml int
 and ECMAScript Number: the intersection with `[-(2^53-1), 2^53-1]`.
 `1`, `1.0` and `1e0` represent the same value. This is numeric representation,

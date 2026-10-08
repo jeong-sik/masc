@@ -1172,7 +1172,7 @@ let test_autonomous_turn_journal_is_live_and_replayable () =
         (Sys.file_exists (L.journal_path ~base_dir ~keeper_name:"k" ~operation_id:(Ids.Turn_ref.to_string turn_ref)));
       let page = {L.events=entries;has_more=false;next_offset=123} in
       let body = Server_dashboard_http_keeper_chat_operations.turn_events_page ~turn_ref
-          ~since_seq:L.Whole_turn  page in
+          ~since_seq:L.Whole_turn ~redact_text:Fun.id page in
       let open Yojson.Safe.Util in
       Alcotest.(check string) "typed autonomous wire schema" "masc.keeper_turn_events.v1"
         (body |> member "schema" |> to_string);

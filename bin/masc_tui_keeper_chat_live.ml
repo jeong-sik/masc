@@ -150,9 +150,13 @@ let optional_nonblank_string fields name =
   | Some _ -> Error (name ^ " must be a nonblank string when present")
 
 let tool_occurrence ~event fields =
+  let index field = Option.bind (List.assoc_opt field fields) (fun json ->
+    match Runtime_json_integer.of_json json with
+    | Ok value when value >= 0 -> Some value
+    | Ok _ | Error _ -> None) in
   match
-    nonnegative_int_field fields "toolStreamScope",
-    nonnegative_int_field fields "toolCallBlockIndex"
+    index "toolStreamScope",
+    index "toolCallBlockIndex"
   with
   | Some stream_scope, Some block_index ->
     (match
@@ -162,8 +166,8 @@ let tool_occurrence ~event fields =
      | Ok provider_message_id, Ok tool_call_id ->
        Ok { stream_scope; block_index; provider_message_id; tool_call_id }
      | Error detail, _ | _, Error detail -> Error (event ^ " " ^ detail))
-  | None, _ -> Error (event ^ " has no nonnegative toolStreamScope")
-  | _, None -> Error (event ^ " has no nonnegative toolCallBlockIndex")
+  | None, _ -> Error (event ^ " has no nonnegative safe integer toolStreamScope")
+  | _, None -> Error (event ^ " has no nonnegative safe integer toolCallBlockIndex")
 
 (* [required] reads one string field and names the event in the failure, so an
    Undecodable row says which event was short of what. *)

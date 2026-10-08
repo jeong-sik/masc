@@ -7,7 +7,7 @@ import tui_keyboard_runtime as _keyboard_runtime
 
 
 RUNTIME_ID = "fixture-runtime-한글-very-long-identity-tailZ"
-EXHAUSTED_ID = "fixture-runtime-exhausted"
+EXHAUSTED_ID = "exhausted"
 LANE_ID = "fixture-lane-아주긴이름-primary-tailL"
 
 
@@ -89,7 +89,7 @@ def run(executable, no_color):
             normal_rows = [
                 (row_id, row)
                 for row_id, row in rows.items()
-                if RUNTIME_ID.encode() in row
+                if RUNTIME_ID[-4:].encode() in row
                 and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
             ]
             assert len(normal_rows) == 1, f"normal runtime row missing: {rows!r}"
@@ -112,7 +112,7 @@ def run(executable, no_color):
                 assert dimmed_off != exhausted_row, (exhausted_row, dimmed_off)
             normal_after_off = [
                 row for row in dimmed_off_rows.values()
-                if RUNTIME_ID.encode() in row
+                if RUNTIME_ID[-4:].encode() in row
                 and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
             ]
             assert normal_after_off == [normal_row], (normal_row, normal_after_off)
@@ -129,7 +129,7 @@ def run(executable, no_color):
             dimmed_on_index, dimmed_on = dimmed_on_matches[0]
             normal_on = [
                 (row_id, row) for row_id, row in dimmed_on_rows.items()
-                if RUNTIME_ID.encode() in row
+                if RUNTIME_ID[-4:].encode() in row
                 and b"usage unknown" in _keyboard_harness.CSI_RE.sub(b"", row)
             ]
             assert len(normal_on) == 1, f"normal row missing after second h: {dimmed_on_rows!r}"

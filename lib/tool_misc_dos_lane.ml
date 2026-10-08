@@ -473,6 +473,14 @@ type announcement = { author : string; content : string; ready : bool Atomic.t }
 let announcements : announcement Queue.t = Queue.create ()
 let announcements_lock = Mutex.create ()
 let posting = Eio.Mutex.create ()
+(* A controller admission may invoke a normal DOS handler.  Those handlers
+   call [after_announcing] themselves, so a boolean on the queued notice is
+   not enough: a ready notice from the handler could otherwise be flushed
+   while the credential transaction is still held.  Keep a small process-wide
+   guard; an admitted call drains once its outer transaction has released the
+   guard.  Concurrent calls only postpone their board relay until that drain,
+   preserving the queue's machine order. *)
+let deferred_depth = Atomic.make 0
 
 let enqueue ~ready ~author content () =
   Mutex.protect announcements_lock (fun () -> Queue.push {author;content;ready} announcements)
@@ -484,7 +492,10 @@ let announce ~author content () = enqueue ~ready:(Atomic.make true) ~author cont
    every flusher until its Auth admission has exited, including on exception. *)
 let with_deferred_announcements f =
   let ready = Atomic.make false in
-  Fun.protect ~finally:(fun () -> Atomic.set ready true)
+  ignore (Atomic.fetch_and_add deferred_depth 1);
+  Fun.protect ~finally:(fun () ->
+    Atomic.set ready true;
+    ignore (Atomic.fetch_and_add deferred_depth (-1)))
     (fun () -> f (enqueue ~ready))
 ;;
 
@@ -511,7 +522,7 @@ let flush_announcements () =
 ;;
 
 let after_announcing result =
-  flush_announcements ();
+  if Atomic.get deferred_depth = 0 then flush_announcements ();
   result
 ;;
 

@@ -166,6 +166,30 @@ let before_move ~config ~who =
   Tool_misc_dos_lane.after_announcing released
 ;;
 
+type call_refusal =
+  | Refused of string
+  | Seats_unknown of string
+
+(* Keep the credential admission through the machine effect itself.  A
+   separate [before_move] followed by a lane call leaves a window in which a
+   concurrent play-session disconnect can mark the generation departed and
+   release its controller before the already-admitted caller reaches
+   [Dos_lane.with_control]. *)
+let with_move_admission ~config ~who ~run =
+  let recover_error error =
+    Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error) in
+  let result = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
+    Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+      let ( let* ) = Result.bind in
+      let* () = participation_admission ~transaction ~config ~who
+        |> Result.map_error recover_error in
+      recover_in_transaction ~announce ~transaction ~config ~who ();
+      Ok (run ()))
+    |> Result.map_error recover_error
+    |> Result.join) in
+  Tool_misc_dos_lane.after_announcing result
+;;
+
 let release_retired ~keeper_name ~by =
   match Tool_misc_dos_lane.release_retired_keeper ~holder:keeper_name ~by with
   | Ok (true | false) | Error Dos_lane.No_machine -> Ok ()
@@ -175,10 +199,6 @@ let release_retired ~keeper_name ~by =
        | Dos_lane.Other_program _ ) as err) ->
     Error (Dos_lane.error_to_string err)
 ;;
-
-type call_refusal =
-  | Refused of string
-  | Seats_unknown of string
 
 (* A pass to a name nobody sits under leaves the machine held by no one who
    can move it, so it is refused before anything happens. The name is read
@@ -231,9 +251,9 @@ let execute ~config ~who ~name ~args ~run =
       |> Result.map_error recover_error |> Result.join in
     Tool_misc_dos_lane.after_announcing result
   | Some _ | None ->
-    let recovered = match Option.map Tool_schemas_misc.dos_controller_need operation with
-      | Some Tool_schemas_misc.Takes_controller -> before_move ~config ~who |> Result.map_error recover_error
-      | Some Tool_schemas_misc.Hands_controller -> Error (Refused "unsupported DOS handoff operation")
-      | Some Tool_schemas_misc.No_controller | None -> Ok () in
-    Result.map (fun () -> run ()) recovered
+    (match Option.map Tool_schemas_misc.dos_controller_need operation with
+     | Some Tool_schemas_misc.Takes_controller ->
+       with_move_admission ~config ~who ~run
+     | Some Tool_schemas_misc.Hands_controller -> Error (Refused "unsupported DOS handoff operation")
+     | Some Tool_schemas_misc.No_controller | None -> Ok (run ()))
 ;;

@@ -4345,7 +4345,9 @@ let launch_lane_subscriptions state ~mailbox request =
   end
 
 let launch_lane_addons ?initial_detail state ~mailbox request =
-  if server_authority_ready state then begin
+  if not (server_authority_ready state) then
+    report_action state "error" "Lane request was not sent while workspace identity is unconfirmed; retry after reconnecting"
+  else begin
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then
@@ -8326,7 +8328,10 @@ let settle_retired_queue_inspections state =
          keeper_name)) retired
 
 let launch_keeper_queue state ~mailbox ~keeper_name action =
-  if server_authority_ready state then begin
+  if not (server_authority_ready state) then
+    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_failure
+      "/queue request was not sent while workspace identity is unconfirmed; retry after reconnecting"
+  else begin
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   let check_authority () =
@@ -12595,7 +12600,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
           | Board_list | Board_compose -> ())
      | Keepers Keeper_message ->
          Option.iter (fun keeper_name ->
-           launch_keeper_chat_file_changes_load ~force:true state ~mailbox ~keeper_name)
+           launch_keeper_chat_file_changes_load ~force:true state ~mailbox ~keeper_name;
+           if state.msg_tool_visibility <> Tools_compact then
+             launch_keeper_calls_load ~force:true state ~mailbox keeper_name)
            state.msg_target_keeper_name;
          let pending = state.msg_older_resume in
          state.msg_older_resume <- None;

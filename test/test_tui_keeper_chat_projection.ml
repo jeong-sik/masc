@@ -1257,7 +1257,7 @@ let test_batch_member_events_pass_request_bound_stream_decode () =
     ; Events.Batch_bound {operation_id=owner_id; execution_id=owner_id}
     ; Events.Text_message_start {message_id="keeper-operation-message-batch-owner"; role=Events.Assistant}
     ; Events.Text_delta {text="hello"; stream_scope=None}
-    ; Events.Reply_details {reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+    ; Events.Reply_details {terminal_stream_scope = Some 0; reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
         turn_ref=Ids.Turn_ref.make ~trace_id:"shared" ~absolute_turn:1}
     ; Events.Text_message_end
     ; Events.Run_finished {run_id="keeper-operation-run-batch-owner"} ] in

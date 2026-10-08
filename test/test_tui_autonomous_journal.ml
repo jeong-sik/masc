@@ -116,7 +116,7 @@ let test_autonomous_checkpoint_closes_its_source () =
   let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
   Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;
   Types.turn_log_add ~now:11. log ~seq:(Some 1)
-    (Masc_tui_keeper_chat_live.Reply_details {reply="";
+    (Masc_tui_keeper_chat_live.Reply_details {terminal_stream_scope = None; reply="";
       turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
       turn_ref=Ids.Turn_ref.to_string turn_ref});
   Types.turn_log_add ~now:12. log ~seq:(Some 2) Masc_tui_keeper_chat_live.Run_finished;

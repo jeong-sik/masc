@@ -72,6 +72,9 @@ type reply_details =
   { reply : string
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
+  ; terminal_stream_scope : int option
+      (** Stream scope whose terminal message emitted the recorded text.
+          [None] means that provenance was not observed. *)
   }
 
 type continuation_checkpoint =

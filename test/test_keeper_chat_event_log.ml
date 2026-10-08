@@ -68,7 +68,7 @@ let all_events : E.keeper_chat_event list =
   ; E.Run_finished { run_id = "run-1" }
   ; E.Event_error { message = "boom" }
   ; E.Reply_details
-      { reply = "done"
+      { terminal_stream_scope = Some 3; reply = "done"
       ; turn_outcome = Outcome.Visible_reply
       ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:3
       }
@@ -886,7 +886,7 @@ let golden_events : E.keeper_chat_event list =
           Surface.Delivered_to_slack { channel_id = "C123"; thread_ts = Some "1700.5" }
       }
   ; E.Reply_details
-      { reply = "Hello, world"
+      { terminal_stream_scope = None; reply = "Hello, world"
       ; turn_outcome = Outcome.Visible_reply
       ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-golden" ~absolute_turn:1
       }

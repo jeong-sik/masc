@@ -51,6 +51,7 @@ type reply_details =
   { reply : string
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
+  ; terminal_stream_scope : int option
   }
 
 type continuation_checkpoint =

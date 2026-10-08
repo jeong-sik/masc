@@ -34,7 +34,7 @@ let match_events =
   ; E.Tool_result_ready
       { occurrence; tool_call_id = Some "tc-1"; execution_id }
   ; E.Reply_details
-      { reply = "done"; turn_outcome = Outcome.Visible_reply; turn_ref }
+      { terminal_stream_scope = None; reply = "done"; turn_outcome = Outcome.Visible_reply; turn_ref }
   ; E.Text_message_end
   ; E.Run_finished { run_id = "run-1" }
   ]

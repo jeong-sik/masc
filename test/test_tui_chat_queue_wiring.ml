@@ -1212,7 +1212,7 @@ let test_new_input_preserves_running_output () =
     Tui_types.turn_log_add ~now:3.5 old.log ~seq:None
       (Live.Text {text="OLD_REPLY_STRETCH"; stream_scope=None});
     Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 3)
-      (Live.Reply_details {reply="OLD_FINAL_REPLY";
+      (Live.Reply_details {terminal_stream_scope = None; reply="OLD_FINAL_REPLY";
         turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="trace-1#1"});
     Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 4) Live.Run_finished;
     Tui_types.settle_turn_log state old;
@@ -1238,7 +1238,7 @@ let test_new_input_preserves_running_output () =
 
 let visible_reply reply =
   Live.Reply_details
-    { reply; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply; turn_ref = "trace-1#1" }
+    { terminal_stream_scope = None; reply; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply; turn_ref = "trace-1#1" }
 ;;
 
 let test_queue_summary_follows_admission_and_execution () =
@@ -1277,7 +1277,7 @@ let test_queue_summary_follows_admission_and_execution () =
     [second.sent_request.request_id; unsent.request_id] (waiting "alpha");
   List.iteri (fun seq delta -> Tui_types.turn_log_add ~now:6. second.log ~seq:(Some (seq+1)) delta)
     [Live.Run_started;
-     Live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+     Live.Reply_details {terminal_stream_scope = None; reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
        turn_ref="trace#1"}; Live.Run_finished];
   check (list string) "checkpoint wait is not a queued operator message"
     [unsent.request_id] (waiting "alpha");
@@ -1423,7 +1423,7 @@ let test_a_checkpoint_closed_by_the_record_does_not_claim_the_final_reply () =
       [ Live.Run_started
       ; Live.Text {text="before the checkpoint"; stream_scope=None}
       ; Live.Reply_details
-          { reply = ""
+          { terminal_stream_scope = None; reply = ""
           ; turn_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint
           ; turn_ref = "trace#1"
           }
@@ -1602,7 +1602,7 @@ let line seq ts event : Journal.journaled_event = { Journal.seq; ts; event }
 
 let journal_reply reply =
   E.Reply_details
-    { reply
+    { terminal_stream_scope = None; reply
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
     ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
     }
@@ -2070,7 +2070,7 @@ let test_a_settled_log_holds_its_turn_in_the_timeline () =
         ; Live.Thinking "thought about it"
         ; Live.Text {text="answered"; stream_scope=None}
         ; Live.Reply_details
-            { reply = "answered"
+            { terminal_stream_scope = None; reply = "answered"
             ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
             ; turn_ref = "trace-1#1"
             }
@@ -3466,7 +3466,7 @@ let test_succeeded_operation_with_checkpoint_only_keeps_final_history () =
   let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"checkpoint-only" ~started_at:1. in
   Tui_types.turn_log_add ~now:2. log ~seq:(Some 0) Live.Run_started;
   Tui_types.turn_log_add ~now:3. log ~seq:(Some 1)
-    (Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-checkpoint#1"});
+    (Live.Reply_details {terminal_stream_scope = None; reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-checkpoint#1"});
   Tui_types.turn_log_add ~now:4. log ~seq:(Some 2) Live.Run_finished;
   let terminal = Keeper_chat_operation.Succeeded {completed_at=8.; outcome_ref="final-result"} in
   Log.observe_operation_state log.tl_log (Some terminal);
@@ -3493,7 +3493,7 @@ let test_checkpoint_activities_have_exact_row_authority () =
      Live.Tool_ended {occurrence=skill}; Live.Tool_result {occurrence=skill; execution_id="skill-exec"};
      Live.Tool_started {occurrence=tool; tool_name="read_file"}; Live.Tool_ended {occurrence=tool};
      Live.Tool_result {occurrence=tool; execution_id="exec-1"};
-     Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-1#1"}; Live.Run_finished] in
+     Live.Reply_details {terminal_stream_scope = None; reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-1#1"}; Live.Run_finished] in
   let terminal = Keeper_chat_operation.Succeeded {completed_at=8.; outcome_ref="final"} in
   Log.observe_operation_state log.tl_log (Some terminal);
   Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
@@ -3541,7 +3541,7 @@ let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
       ; Live.Tool_args {occurrence; fragment=Live.Args_snapshot
           {|{"identity":{"name":"checkpoint-skill"}}|}}
       ; Live.Tool_ended {occurrence}; Live.Tool_result {occurrence; execution_id}
-      ; Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref}
+      ; Live.Reply_details {terminal_stream_scope = None; reply=""; turn_outcome=Continuation_checkpoint; turn_ref}
       ; Live.Run_finished] in
     let log = settled_log ~request_id
         (segment ~progress:true "trace-first#1" "skill-exec-first"
@@ -3611,7 +3611,7 @@ let test_checkpoint_remaining_skill_uses_its_own_state () =
       let log = settled_log ~request_id
         [Live.Run_started; Live.Tool_started {occurrence; tool_name="keeper_skill"};
          Live.Tool_ended {occurrence}; Live.Tool_result {occurrence; execution_id="skill-exec"};
-         Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-1#1"};
+         Live.Reply_details {terminal_stream_scope = None; reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-1#1"};
          Live.Run_finished] in
       Tui_types.hold_settled_log state log;
       let skill id skill_state actions =
@@ -4367,7 +4367,7 @@ let test_checkpoint_watcher_allows_new_input () =
     phase=Tui_types.Turn_streaming; log}];
   List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
     [Masc_tui_keeper_chat_live.Run_started;
-     Masc_tui_keeper_chat_live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"};
+     Masc_tui_keeper_chat_live.Reply_details {terminal_stream_scope = None; reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"};
      Masc_tui_keeper_chat_live.Run_finished];
   check bool "watcher remains attached" true (Option.is_some (Tui_types.inflight_for_keeper state "alpha"));
   check bool "new operator input can be sent" true
@@ -4521,7 +4521,7 @@ let test_batch_watchers_render_one_shared_settled_turn () =
     List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
       [Live.Run_started; Live.Batch_bound {operation_id=request_id; execution_id};
        Live.Text {text="shared answer"; stream_scope=None};
-       Live.Reply_details {reply="shared answer"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="batch#1"};
+       Live.Reply_details {terminal_stream_scope = None; reply="shared answer"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="batch#1"};
        Live.Run_finished];
     log in
   let leader = make "batch-owner" "batch-owner" in
@@ -4647,7 +4647,7 @@ let test_observed_checkpoint_retains_earlier_output () =
         [Live.Run_started; Live.Thinking "THINKING_BEFORE_CHECKPOINT";
          Live.Tool_started {occurrence; tool_name="Inspect_before_checkpoint"};
          Live.Tool_ended {occurrence}; Live.Text {text="TEXT_BEFORE_CHECKPOINT"; stream_scope=None};
-         Live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+         Live.Reply_details {terminal_stream_scope = None; reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
            turn_ref="trace-1#1"}; Live.Checkpoint; Live.Run_finished] in
     state.msg_settled_logs <- [log];
     let screen () =
@@ -4712,7 +4712,7 @@ let test_continuation_output_interleaves_at_its_event_time () =
     let add seq now delta = Tui_types.turn_log_add ~now log ~seq:(Some seq) delta in
     add 0 90. Live.Run_started;
     add 1 100. (Live.Text {text="BEFORE_CHECKPOINT"; stream_scope=None});
-    add 2 110. (Live.Reply_details {reply="";
+    add 2 110. (Live.Reply_details {terminal_stream_scope = None; reply="";
       turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace-1#1"});
     add 3 111. Live.Run_finished;
     add 4 190. Live.Run_started;
@@ -4753,7 +4753,7 @@ let test_every_request_of_a_held_batch_is_held_for_journal_reads () =
     List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
       [Live.Run_started; Live.Batch_bound {operation_id=request_id; execution_id};
        Live.Text {text="shared answer"; stream_scope=None};
-       Live.Reply_details {reply="shared answer"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="batch#1"};
+       Live.Reply_details {terminal_stream_scope = None; reply="shared answer"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="batch#1"};
        Live.Run_finished];
     Log.commit log.Tui_types.tl_log;
     log in

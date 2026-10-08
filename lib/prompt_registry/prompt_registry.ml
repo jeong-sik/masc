@@ -990,6 +990,18 @@ let list_prompts () =
       resolved)
   |> List.sort compare_prompt_items
 
+let default_revisions () =
+  let (_ : string option) = effective_markdown_dir () in
+  let keys =
+    with_mutex (fun () -> Hashtbl.fold (fun key _ acc -> key :: acc) meta_tbl [])
+  in
+  keys
+  |> List.filter_map (fun key ->
+       Option.map
+         (fun body -> key, Prompt_override_persistence.default_revision ~body)
+         (file_value_of_key key))
+  |> List.sort Stdlib.compare
+
 (** JSON export of all prompts for API *)
 let prompts_json () =
   `Assoc [

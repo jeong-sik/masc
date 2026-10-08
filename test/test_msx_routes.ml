@@ -385,6 +385,77 @@ let test_press_rejects_wrong_types () =
       ])
 ;;
 
+(* A change names the workspace the terminal read. Another workspace on the
+   same port is refused with 409 before any effect, a malformed precondition is
+   a 400, and the matching one is accepted and stripped before the strict
+   per-route decoders. *)
+let test_changes_are_bound_to_the_expected_workspace () =
+  with_tick_machine (fun () ->
+    Eio_main.run @@ fun _env ->
+    let base_path = Filename.temp_dir "msx-bound-route-" "" in
+    let config = Masc.Workspace.default_config base_path in
+    let masc_root = Masc.Workspace.masc_root_dir config in
+    (try Unix.mkdir masc_root 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    let expected ~base ~root =
+      Printf.sprintf {|"expected_workspace":{"base_path":%S,"masc_root":%S}|} base root
+    in
+    let here = expected ~base:(Unix.realpath base_path) ~root:(Unix.realpath masc_root) in
+    let elsewhere =
+      let other = Filename.temp_dir "msx-other-workspace-" "" in
+      expected ~base:(Unix.realpath other) ~root:(Unix.realpath other)
+    in
+    let relative = expected ~base:"relative/path" ~root:"relative/root" in
+    let before = current_frame_number () in
+    (* The routes answer with different status sets, so each is reduced to the
+       two refusal statuses this test distinguishes before it is compared. *)
+    let refusal = function
+      | `Conflict -> `Conflict
+      | `Bad_request -> `Bad_request
+      | `OK | `Internal_server_error | `Service_unavailable -> `Other
+    in
+    let check_refused label status_expected (status, response) =
+      check bool (label ^ ": status") true (refusal status = status_expected);
+      check
+        (option bool)
+        (label ^ ": ok is false")
+        (Some false)
+        (match member "ok" response with Some (`Bool b) -> Some b | _ -> None)
+    in
+    List.iter
+      (fun (label, precondition, status_expected) ->
+        check_refused
+          ("press " ^ label)
+          status_expected
+          (Route.press_response ~config ~who:"unit-presser"
+             ~body:(Printf.sprintf {|{%s,"keys":["space"]}|} precondition));
+        check_refused
+          ("load " ^ label)
+          status_expected
+          (Route.load_response ~config ~agent_name:"unit-presser"
+             ~body:(Printf.sprintf {|{%s,"cart":"game.rom"}|} precondition));
+        check_refused
+          ("save " ^ label)
+          status_expected
+          (Route.checkpoint_response ~config ~restore:false
+             ~body:(Printf.sprintf {|{%s,"slot":"quick"}|} precondition));
+        check_refused
+          ("restore " ^ label)
+          status_expected
+          (Route.checkpoint_response ~config ~restore:true
+             ~body:(Printf.sprintf {|{%s,"slot":"quick"}|} precondition)))
+      [ "another workspace", elsewhere, `Conflict
+      ; "a relative precondition", relative, `Bad_request
+      ];
+    check int "a refused change presses nothing" before (current_frame_number ());
+    check bool "a refused change reaches no ledger" true (ledger_whos () = []);
+    let status, _ =
+      Route.press_response ~config ~who:"unit-presser"
+        ~body:(Printf.sprintf {|{%s,"keys":["space"]}|} here)
+    in
+    check bool "the matching workspace is accepted" true (status = `OK);
+    check bool "the accepted press advanced the machine" true (current_frame_number () > before))
+;;
+
 let test_press_defaults_and_identity () =
   with_tick_machine (fun () ->
     Eio_main.run @@ fun _env ->
@@ -902,6 +973,10 @@ let () =
             "a field of the wrong type is a 400 naming the field"
             `Quick
             test_press_rejects_wrong_types
+        ; test_case
+            "changes are refused unless they name this workspace"
+            `Quick
+            test_changes_are_bound_to_the_expected_workspace
         ; test_case
             "absent fields default and the who is the caller's"
             `Quick

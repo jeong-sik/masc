@@ -114,6 +114,18 @@ let parse_keys names =
         | Error message -> Error message))
     (Ok []) names
 
+(* A change from the terminal names the workspace it read. A server swapped
+   onto the same port after that read answers 409 and applies nothing; a body
+   without the field (a keeper's tool, a script) is not bound to one. The field
+   is removed before the body reaches the strict per-route decoders. *)
+let admit_expected_workspace ~(config : Workspace.config) args =
+  match Workspace.validate_expected_workspace ~config args with
+  | Ok args -> Ok args
+  | Error Workspace.Invalid_workspace_precondition ->
+    Error (`Bad_request, "invalid expected_workspace precondition")
+  | Error Workspace.Workspace_precondition_failed ->
+    Error (`Conflict, "workspace precondition failed")
+
 (* The press body decoded and applied under [who], the identity the route's
    actor auth resolved. The route test drives it with its own workspace. *)
 let press_response ~config ~who ~body =
@@ -121,6 +133,9 @@ let press_response ~config ~who ~body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error message -> error `Bad_request ("invalid JSON: " ^ message)
   | json -> (
+    match admit_expected_workspace ~config json with
+    | Error (status, message) -> error status message
+    | Ok json ->
     let ( let* ) = Result.bind in
     let decoded =
       let* names = string_list_field "keys" json in
@@ -197,6 +212,9 @@ let load_response ~(config : Workspace.config) ~agent_name ~body =
   | exception Yojson.Json_error message ->
     `Bad_request, load_result_json ~ok:false ~message:("invalid JSON: " ^ message)
   | args ->
+    match admit_expected_workspace ~config args with
+    | Error (status, message) -> status, load_result_json ~ok:false ~message
+    | Ok args ->
     let result =
       (* Tool_timing.start is the one tool-start stamp Tool_misc.dispatch
          also uses; it reads Time_compat.now, the clock accessor the
@@ -399,6 +417,9 @@ let checkpoint_response ~(config : Workspace.config) ~restore ~body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error message -> error `Bad_request message
   | args ->
+    match admit_expected_workspace ~config args with
+    | Error (status, message) -> error status message
+    | Ok args ->
     (match Tool_misc_msx_lane.checkpoint_slot args with
      | Error message -> error `Bad_request message
      | Ok _ ->
@@ -433,6 +454,9 @@ let handle_change_disk ~(config : Workspace.config) request reqd =
     let status, json = match Yojson.Safe.from_string body with
       | exception Yojson.Json_error message -> error `Bad_request message
       | args -> (
+        match admit_expected_workspace ~config args with
+        | Error (status, message) -> error status message
+        | Ok args ->
         match Executor_pool_ref.submit_strict (fun () ->
           let result = Tool_misc_msx_lane.handle_change_disk ~tool_name:"masc_msx_change_disk"
               ~start_time:(Tool_timing.start ()) ~base_path:config.base_path args in

@@ -1638,6 +1638,47 @@ let capture_workspace_check state ~mailbox =
   let port = state.port in
   check_workspace_request state ~mailbox ~authority ~identity ~host ~port
 
+(* The cached identity only describes the last read. A machine mutation
+   revalidates its captured endpoint immediately before dispatch, and its
+   completion owns only the view and authority that requested it. *)
+let run_machine_change state ~mailbox ~deliver write =
+  let authority = state.workspace_authority in
+  let view = !msx_poll_view in
+  let port = state.port in
+  let identity = state.server_identity in
+  let check = capture_workspace_check state ~mailbox in
+  let current () =
+    authority = state.workspace_authority && view == !msx_poll_view && port = state.port
+  in
+  (* The identity the check confirmed is the one the request carries, so the
+     server compares it again at the moment it applies the change. *)
+  let admission =
+    try
+      if not (machine_changes_allowed state) then Error machine_change_refusal
+      else match identity, check () with
+      | _, Error detail -> Error detail
+      | None, Ok () -> Error "Workspace identity unavailable; MSX change withdrawn"
+      | Some expected, Ok () when current () && machine_changes_allowed state -> Ok expected
+      | Some _, Ok () -> Error "MSX control view or workspace authority withdrawn"
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  in
+  match admission with
+  | Error detail when current () ->
+      state.machine_interaction <- Observe_machine;
+      deliver None (Error detail)
+  | Error _ -> ()
+  | Ok expected_workspace ->
+      let result =
+        try write ~port ~expected_workspace with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      if current () then deliver (Some expected_workspace) result
+
+;;
+
 (* Retire the cancellation context synchronously at the authority boundary,
    including while a request is connecting. Completion stamps also reject a
    reply already queued before withdrawal; admitted server effects remain. *)
@@ -2658,27 +2699,44 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
   | Poll_ready Advancing ->
       let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority } in
       msx_pending_poll := Poll_pending request;
+      let check = capture_workspace_check state ~mailbox in
       let run () =
-        let frame =
-          try
-            if request.poll_authority <> state.workspace_authority || not (machine_changes_allowed state)
-            then Error machine_change_refusal
-            else Masc_tui_http.tick_msx ~host:server_peer_host ~port:request.poll_port
+        let admission =
+          try match check () with
+          | Error detail -> Error detail
+          | Ok () ->
+            if request.poll_authority <> state.workspace_authority
+               || request.poll_view != !msx_poll_view || request.poll_port <> state.port
+               || not (machine_changes_allowed state)
+               || not state.msx_open || state.msx_menu_open
+               || state.machine_source <> Masc.Machine_lane.Msx
+               || state.machine_interaction <> Control_machine
+            then Error "MSX control view or workspace authority withdrawn"
+            else Ok ()
+
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-              Error (Printexc.to_string exn)
+          | exn -> Error (Printexc.to_string exn)
         in
-        enqueue_async mailbox (Msx_frame_loaded (request, frame))
+        match admission with
+        | Error detail -> enqueue_async mailbox (Msx_tick_withdrawn (request, detail))
+        | Ok () ->
+          let frame =
+            try Masc_tui_http.tick_msx ~host:server_peer_host ~port:request.poll_port with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn)
+          in
+          enqueue_async mailbox (Msx_frame_loaded (request, frame))
       in
       (try
          match Eio_context.get_switch_opt () with
          | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-         | None -> enqueue_async mailbox (Msx_frame_loaded (request, Error "Eio switch is unavailable"))
+         | None -> enqueue_async mailbox (Msx_tick_withdrawn (request, "Eio switch is unavailable"))
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> enqueue_async mailbox
-           (Msx_frame_loaded (request, Error (Printexc.to_string exn))))
+           (Msx_tick_withdrawn (request, Printexc.to_string exn)))
+
 ;;
 
 
@@ -8367,13 +8425,27 @@ let msx_frame_of_live ~previous_live ~previous_frame
 (* A read of the MSX screen through the live route, asked with the counter
    of the picture drawn from the last one. An unchanged answer leaves the
    frame alone. *)
-let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
-  let result =
+let observe_msx_frame ?(clear_notice = false) ?expected_workspace
+    (state : Masc_tui_types.state) =
+  let read () =
     (* The decoder has checked that MSX has no activity feed. Only its
        picture answer is needed by the MSX view. *)
     Result.map fst
       (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
          Masc.Machine_lane.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
+  in
+  (* The read that follows a change the server admitted for [expected_workspace]
+     is applied only when the port named that workspace before and after it, so
+     a server swapped in between never draws its picture into this view. *)
+  let result =
+    match expected_workspace with
+    | None -> read ()
+    | Some expected ->
+        let ( let* ) = Result.bind in
+        let* () = probe_expected_workspace ~host:server_peer_host ~port:state.port expected in
+        let picture = read () in
+        let* () = probe_expected_workspace ~host:server_peer_host ~port:state.port expected in
+        picture
   in
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
@@ -15956,6 +16028,21 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                notice ~kind:Notice_failure
                  (Printf.sprintf "image %s: %s; browser: %s" title e opener_err)))
       end
+  | Msx_tick_withdrawn (request, detail) ->
+      (match !msx_pending_poll with
+       | Poll_pending pending when pending == request ->
+           (* No POST was attempted, so this receipt releases the pending
+              token without inventing an unknown server outcome. A later
+              control view still needs its own fresh identity admission. *)
+           msx_pending_poll := Poll_ready Advancing;
+           if request.poll_authority = state.workspace_authority
+              && request.poll_view == !msx_poll_view && request.poll_port = state.port
+              && state.msx_open && not state.msx_menu_open then begin
+             state.machine_interaction <- Observe_machine;
+             state.msx_notice <- Some ("No MSX tick sent: " ^ detail);
+             render_spectator state
+           end
+       | Poll_pending _ | Poll_ready _ | Poll_observing _ -> ())
   | Msx_frame_loaded (request, result) ->
       (match !msx_pending_poll with
        | Poll_pending pending when pending == request ->
@@ -20170,30 +20257,31 @@ and is loaded on demand through keeper_skill.
               (* Poll at once so the spectator opens on a fresh frame. *)
               state.msx_last_poll_ns <- 0L;
               render_spectator state
-          | (Load cart | Swap_disk cart) as choice -> (
-              if not (machine_changes_allowed state) then
-                Masc_tui_msx.render_menu ~write:write_to_terminal ~status:machine_change_refusal state
-              else begin
-              state.msx_notice <- None;
-              match
-                (match choice with
-                 | Swap_disk _ -> Masc_tui_http.post_msx_change_disk
-                     ~host:server_peer_host ~port:state.port ~disk:cart
-                 | _ -> Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port ~cart)
-              with
-              | Ok () ->
-                  (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
-                  state.machine_interaction <- Control_machine;
-                  state.msx_menu_open <- false;
-                  state.machine_source <- Masc.Machine_lane.Msx;
-                  observe_msx_frame state;
-                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  render_spectator state
-              | Error message ->
-                  (* Stay in the menu and say why, so the human can pick again. *)
-                  Masc_tui_msx.render_menu ~write:write_to_terminal
-                    ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state
-              end))
+          | (Load cart | Swap_disk cart) as choice ->
+              let swapping = match choice with
+                | Swap_disk _ -> true
+                | Load _ | Stay | Closed | Watch _ -> false
+              in
+              run_machine_change state ~mailbox:async_messages
+                ~deliver:(fun expected_workspace -> function
+                  | Ok () ->
+                      state.msx_notice <- (if swapping
+                        then Some "Disk changed; backup: before-disk-change" else None);
+                      state.machine_interaction <- Control_machine;
+                      state.msx_menu_open <- false;
+                      state.machine_source <- Masc.Machine_lane.Msx;
+                      observe_msx_frame ?expected_workspace state;
+                      state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                      render_spectator state
+                  | Error message ->
+                      Masc_tui_msx.render_menu ~write:write_to_terminal
+                        ~status:((if swapping then "disk change failed: " else "load failed: ")
+                          ^ message) state)
+                (fun ~port ~expected_workspace ->
+                  if swapping then Masc_tui_http.post_msx_change_disk
+                    ~expected_workspace ~host:server_peer_host ~port ~disk:cart
+                  else Masc_tui_http.post_msx_load ~expected_workspace
+                    ~host:server_peer_host ~port ~cart))
       | Some name when state.machine_source = Masc.Machine_lane.Msx
           && not (machine_changes_allowed state)
           && (List.mem name ["f5"; "f6"; "f7"; "f8"]
@@ -20213,24 +20301,39 @@ and is loaded on demand through keeper_skill.
              machine -- not as a game key, a checkpoint or a disk change. *)
           render_spectator state
       | Some "f5" ->
-          state.machine_interaction <- (match state.machine_interaction with
-            | Observe_machine -> Control_machine
-            | Control_machine -> Observe_machine);
-          state.msx_last_poll_ns <- 0L;
-          render_spectator state
+          (match state.machine_interaction with
+           | Control_machine ->
+               state.machine_interaction <- Observe_machine;
+               state.msx_last_poll_ns <- 0L;
+               render_spectator state
+           | Observe_machine ->
+               run_machine_change state ~mailbox:async_messages
+                 ~deliver:(fun _expected_workspace result ->
+                   (match result with
+                    | Ok () -> state.machine_interaction <- Control_machine
+                    | Error detail -> state.msx_notice <- Some detail);
+                   state.msx_last_poll_ns <- 0L;
+                   render_spectator state)
+                 (fun ~port:_ ~expected_workspace:_ -> Ok ()))
       | Some "f8" ->
           state.msx_carts <- Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
           Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
       | Some (("f6" | "f7") as name) ->
           let restore = name = "f7" in
-          let result = Masc_tui_http.post_msx_checkpoint
-              ~host:server_peer_host ~port:state.port ~restore ~slot:"quick" in
-          state.msx_notice <- Some (match result with
-            | Ok () -> if restore then "Restored quick checkpoint" else "Saved quick checkpoint"
-            | Error message -> "Checkpoint failed: " ^ message);
-          observe_msx_frame state;
-          state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-          render_spectator state
+          run_machine_change state ~mailbox:async_messages
+            ~deliver:(fun expected_workspace result ->
+              state.msx_notice <- Some (match result with
+                | Ok () -> if restore then "Restored quick checkpoint" else "Saved quick checkpoint"
+                | Error message -> "Checkpoint failed: " ^ message);
+              (* A refused change leaves the picture as it was: the refusal may
+                 mean the port now serves another workspace. *)
+              (match result with
+               | Ok () -> observe_msx_frame ?expected_workspace state
+               | Error _ -> ());
+              state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+              render_spectator state)
+            (fun ~port ~expected_workspace -> Masc_tui_http.post_msx_checkpoint
+              ~expected_workspace ~host:server_peer_host ~port ~restore ~slot:"quick")
       | Some "esc" ->
           (* esc closes the spectator; consume returns false and owes a repaint. *)
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
@@ -20250,14 +20353,15 @@ and is loaded on demand through keeper_skill.
              (e.g. deliberate non-key input) just repaints the cache. *)
           match Masc_tui_msx.server_key name with
           | Some server_key ->
-              (match
-                 Masc_tui_http.post_msx_press ~host:server_peer_host
-                   ~port:state.port ~keys:[ server_key ]
-               with
-               | Ok _ -> observe_msx_frame ~clear_notice:true state
-               | Error detail -> state.msx_notice <- Some detail);
-              state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-              render_spectator state
+              run_machine_change state ~mailbox:async_messages
+                ~deliver:(fun expected_workspace result ->
+                  (match result with
+                   | Ok _ -> observe_msx_frame ~clear_notice:true ?expected_workspace state
+                   | Error detail -> state.msx_notice <- Some detail);
+                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                  render_spectator state)
+                (fun ~port ~expected_workspace -> Masc_tui_http.post_msx_press
+                  ~expected_workspace ~host:server_peer_host ~port ~keys:[ server_key ])
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
       (* Async agenda state can change the usable row budget after the last

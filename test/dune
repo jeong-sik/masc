@@ -7113,7 +7113,7 @@
  (name test_tui_msx_graphics)
  (modules test_tui_msx_graphics)
  (libraries alcotest unix masc masc_tui_types masc_tui_interactive masc_tui_graphics
-   masc_tui_msx masc_tui_ansi masc_tui_machine_live))
+   masc_tui_msx masc_tui_ansi masc_tui_render_schedule masc_tui_machine_live))
 
 (test
  (name test_tui_interactive)

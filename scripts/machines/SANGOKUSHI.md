@@ -100,9 +100,9 @@ consequences, not a guaranteed way to preserve both officers.
 At the province prompt, command `19`, Return, then option `5`, Return opens the
 game's save flow. Swap to the data disk **only when D is requested**. Follow the
 slot and name prompts, inspect the displayed name, and wait for the game's
-completed-write/return-to-B prompt before exporting or swapping back. Short
-frame windows can miss typed characters; inspect the actual name rather than
-assuming every character arrived. Follow the visible B request afterward;
+completed-write/return-to-B prompt before exporting or swapping back. One local
+name-entry attempt displayed only part of the requested text; inspect the actual
+name rather than assuming every character arrived. Follow the visible B request afterward;
 swapping to A during an active campaign can disrupt the game's open files.
 
 The local run wrote the data disk and preserved those changes in a checkpoint;

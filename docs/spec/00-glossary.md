@@ -3310,8 +3310,8 @@ status: reference
   - **저장 위치**: `.masc/workspace-memory/briefing.json` (스키마 `workspace.memory.briefing.v1`).
   - **프롬프트 주입 형태**: 매 턴 Keeper의 시스템 프롬프트에 `## Shared workspace memory ledger` 헤더 아래 원장 메타데이터(`Current ledger SHA-256`, `Classified facts`, `Shared claims`, `Conflicts`)와 함께 요약문 본문(`{{briefing}}`) 형태로 전달된다.
   - **원장과의 구별 및 명칭 주의**:
-    - 프롬프트 섹션의 제목에 'ledger(원장)'라는 단어가 포함되어 있어 많은 이들이 이 섹션을 원장 데이터 그 자체로 오해하기 쉽다.
-    - 그러나 본문에 실리는 내용은 구조화된 원장(JSON 장부)이 아니라, 모델이 주장과 충돌을 자연어로 압축 요약한 '브리핑 글'이다.
+    - 프롬프트 섹션 제목에는 `ledger(원장)`가 있지만, 함께 전달되는 본문은 구조화된 원장(JSON 장부)이 아니라 브리핑 글이다.
+    - 브리핑 글은 모델이 원장의 주장과 충돌을 자연어로 요약한 글이다.
     - 브리핑 글의 합성 프롬프트(`workspace_memory_briefing`)는 임의의 바이트 목표를 맞추려고 문장을 자르거나 사실을 빼지 말라고 하므로 글이 상한 없이 커질 수 있다. 원장의 실제 분류 세부사항(각 키퍼 사실의 주장·충돌 배정 내역)을 보려면 요약 글이 아닌 `keeper_workspace_memory_read` 도구를 통해 원장을 직접 조회해야 한다.
   - **합성 및 캐시 불변식**: 완성본과 자료 식별자를 함께 보존한다. 새 합성이 진행되거나 실패한 동안에는 이전 완성본을 갱신 대기(`Stale`)로 표시하고, 첫 완성본이 없으면 준비 중임을 알린다. 자료와 합성 계약이 같으면 모델을 다시 부르지 않는다.
   → [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli) · [server_workspace_memory_curator](../../lib/server/server_workspace_memory_curator.ml) · [keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.ml)

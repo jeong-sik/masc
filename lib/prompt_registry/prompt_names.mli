@@ -94,6 +94,7 @@ val librarian_working_context : string
 val librarian_working_contexts_rule : string
 
 val workspace_memory_curator : string
+val workspace_memory_briefing : string
 
 val fusion_judge : string
 val fusion_judge_refine : string
@@ -274,6 +275,8 @@ val keeper_world_event_rows_scheduled_wake_title : string
 val keeper_world_event_rows_external_attention_title : string
 val keeper_world_event_rows_ask_title : string
 val keeper_world_event_rows_ask_skipped : string
+val keeper_world_event_rows_delegate_reply_lookup : string
+val keeper_world_event_rows_composition_detail_lookup : string
 val keeper_world_event_rows_completion_authority_title : string
 val keeper_world_event_rows_completion_authority_preview : string
 val keeper_world_event_rows_task_outcome_title : string
@@ -424,9 +427,17 @@ val agent_core_handoff_prompt_param_description : string
 val agent_core_agent_tool_prompt_param_description : string
 val keeper_context_workspace_memory_available : string
 val keeper_context_workspace_memory_unavailable : string
+val keeper_context_workspace_memory_briefing_current : string
+val keeper_context_workspace_memory_briefing_stale : string
+val keeper_context_workspace_memory_briefing_pending : string
+val keeper_context_workspace_memory_briefing_unavailable : string
 
 val candle_appraiser_grade : string
 
 val candle_appraiser_relation : string
 
 val candle_appraiser_weights : string
+
+val keeper_world_recent_work : string
+
+val keeper_world_recent_work_preview : string

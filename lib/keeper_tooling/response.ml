@@ -68,3 +68,24 @@ let accept_rejection_of_response ~runtime_id response =
 let response_has_text_or_tool_progress (response : Agent_core.Types.api_response) =
   Option.is_none (response_accept_rejection response)
 ;;
+
+type completion_policy = Require_progress | Allow_quiet_final
+
+let is_quiet_final ~policy (response : Agent_core.Types.api_response) =
+  match policy, response.stop_reason with
+  | Allow_quiet_final, Agent_core.Types.EndTurn ->
+    (match Agent_core.Response_shape.content_shape response
+        (Agent_core.Response_shape.summarize response) with
+     | Blank_text_only -> true
+     | Empty | Thinking_only | Tool_result_only | Media_only
+     | Mixed_without_deliverable_content | Has_deliverable_content -> false)
+  | Require_progress, _ -> false
+  | Allow_quiet_final,
+    (StopToolUse | MaxTokens | StopSequence | Refusal | ContentFilter
+    | RepetitionTruncation | PauseTurn | Compaction | ContextWindowExceeded
+    | UnmatchedToolCalls | Unknown _) -> false
+;;
+
+let accepts_response ~policy response =
+  response_has_text_or_tool_progress response || is_quiet_final ~policy response
+;;

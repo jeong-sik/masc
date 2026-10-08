@@ -42,3 +42,11 @@ let on_the_wire ~agent_cell ~built =
   | Some agent -> Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent)
   | None -> built
 ;;
+
+let for_request ~enabled ~tool_choice ~schema_names ~agent_cell ~built =
+  match enabled, tool_choice with
+  | false, _ | true, Some Agent_core.Types.None_ -> []
+  | true, (None | Some (Agent_core.Types.Auto | Any | Tool _)) ->
+    on_the_wire ~agent_cell ~built
+    |> List.filter (fun (tool : Agent_core.Tool.t) -> List.mem tool.schema.name schema_names)
+;;

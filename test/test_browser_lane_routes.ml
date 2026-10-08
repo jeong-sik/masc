@@ -68,7 +68,55 @@ let ping router ~headers =
 let host_headers presented =
   [ "x-lane", "live"; "x-lane-token", presented; "x-browser-client-id", client_id
   ; "x-browser-name", "firefox"; "x-browser-version", "155.0"
-  ; "x-browser-engine-version", "155.0" ]
+  ; "x-browser-engine-version", "155.0"; "x-browser-transport", "web_extension" ]
+
+let test_discovery_distinguishes_transports_of_the_same_browser () =
+  Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let decode headers =
+    let request = Httpun.Request.create
+      ~headers:(Httpun.Headers.of_list headers) `POST "/browser-lane/poll" in
+    Server_routes_http_routes_browser_lane.client_of_request request
+  in
+  let register ?transport id =
+    let headers = host_headers token
+      |> List.remove_assoc "x-browser-client-id"
+      |> List.remove_assoc "x-browser-transport" in
+    let headers = ("x-browser-client-id", id) :: headers in
+    let headers = match transport with None -> headers
+      | Some transport -> ("x-browser-transport", transport) :: headers in
+    let info = match decode headers with
+      | Ok info -> info | Error detail -> fail detail in
+    (match Browser_lane.register info with
+     | Ok _ -> () | Error detail -> fail detail);
+    Eio.Switch.on_release sw (fun () ->
+      ignore (Browser_lane.disconnect_client ~client_id:info.client_id));
+    info
+  in
+  let extension = register ~transport:"web_extension" "50000000-0000-4000-8000-000000000002" in
+  let bidi = register ~transport:"webdriver_bidi" "50000000-0000-4000-8000-000000000003" in
+  let installed = register "50000000-0000-4000-8000-000000000004" in
+  check bool "installed extension host keeps polling after the server upgrade" true
+    (installed.transport = Browser_lane.Web_extension);
+  check bool "explicit extension declaration keeps the installed client identity" true
+    (Result.is_ok (Browser_lane.register {installed with transport=Browser_lane.Web_extension}));
+  let clients = Browser_lane.active_clients () |> List.map Browser_lane.client_json in
+  let bidi_ids = List.filter_map (fun json ->
+    let open Yojson.Safe.Util in
+    if (json |> member "transport") = `String "webdriver_bidi"
+    then Some (json |> member "clientId" |> to_string) else None) clients in
+  check (list string) "discovery selects the BiDi client despite identical Firefox versions"
+    [Browser_lane.client_id_to_string bidi.client_id] bidi_ids;
+  check bool "a client id cannot change transport" true
+    (Browser_lane.register {extension with transport=Browser_lane.Webdriver_bidi}
+     = Error "client_identity_changed");
+  check bool "empty transport is rejected" true
+    (Result.is_error (decode (("x-browser-transport", "") ::
+      List.remove_assoc "x-browser-transport" (host_headers token))));
+  check bool "unknown transport is not guessed" true
+    (Result.is_error (decode (("x-browser-transport", "other") ::
+      List.remove_assoc "x-browser-transport" (host_headers token))))
 
 let test_ping_answers_only_the_lane_token_and_registers_no_client () =
   with_workspace @@ fun ~lane ~token_file ->
@@ -90,6 +138,9 @@ let test_ping_answers_only_the_lane_token_and_registers_no_client () =
 
 let () =
   run "browser lane routes"
-    [ ( "ping"
+    [ ( "discovery"
+      , [ test_case "distinguishes transports with identical browser metadata" `Quick
+            test_discovery_distinguishes_transports_of_the_same_browser ] )
+    ; ( "ping"
       , [ test_case "answers only the lane token and registers no client" `Quick
             test_ping_answers_only_the_lane_token_and_registers_no_client ] ) ]

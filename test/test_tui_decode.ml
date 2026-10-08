@@ -8229,6 +8229,7 @@ let keeper_turns_json =
                 , `Assoc
                     [ ("lane", `String "autonomous")
                     ; ("interrupt_token", `String "echo-turn-token")
+                    ; ("turn_ref", Ids.Turn_ref.to_yojson (Ids.Turn_ref.make ~trace_id:"autonomous" ~absolute_turn:3))
                     ; ("started_at_unix", `Float 1787828193.5)
                     ] )
               ]
@@ -8254,12 +8255,16 @@ let test_decode_keeper_turns () =
         running.Tui_decode.ktr_keeper_name;
       (match running.ktr_state with
        | Tui_decode.Keeper_turn_running
-           { lane; started_at_unix; interrupt_token; _ } ->
+           { lane; started_at_unix; interrupt_token; turn_ref; _ } ->
            Alcotest.(check bool) "autonomous lane" true
              (lane = Tui_decode.Turn_lane_autonomous);
            Alcotest.(check (float 0.001)) "started at" 1787828193.5
              started_at_unix;
-           Alcotest.(check string) "stop handle" "echo-turn-token" interrupt_token
+           Alcotest.(check string) "stop handle" "echo-turn-token" interrupt_token;
+           Alcotest.(check bool) "autonomous journal identity" true
+             (match turn_ref with
+              | Some turn_ref -> Ids.Turn_ref.equal turn_ref (Ids.Turn_ref.make ~trace_id:"autonomous" ~absolute_turn:3)
+              | None -> false)
        | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ ->
            Alcotest.fail "running keeper decoded as not running");
       Alcotest.(check bool) "idle keeper" true
@@ -8396,6 +8401,7 @@ let picker_default_runtime =
     ; ("is_default", `Bool false)
     ; ("rate_limited", `Bool false)
     ; ("rate_limit_resets_at", `Null)
+    ; ("failed_attempt", `Null)
     ]
 
 let picker_exact_runtime =
@@ -8413,6 +8419,7 @@ let picker_exact_runtime =
     ; ("is_default", `Bool false)
     ; ("rate_limited", `Bool false)
     ; ("rate_limit_resets_at", `Null)
+    ; ("failed_attempt", `Null)
     ]
 
 let runtime_resolved_json =
@@ -8449,6 +8456,60 @@ let runtime_resolved_json =
               ]
           ] )
     ]
+
+(* The failed attempt the lane walk orders by. A failure name this build does
+   not know is kept by name; a value that is not an object or null is a broken
+   payload, and so is a row that leaves the field out. *)
+let test_runtime_failed_attempt_is_read_typed () =
+  let row value =
+    match picker_default_runtime with
+    | `Assoc fields ->
+      let fields = List.remove_assoc "failed_attempt" fields in
+      `Assoc (match value with None -> fields | Some value -> ("failed_attempt", value) :: fields)
+    | _ -> Alcotest.fail "runtime fixture must be an object"
+  in
+  let decode value =
+    runtime_resolved_json
+    |> replace_assoc_field "default_runtime" (row value)
+    |> replace_assoc_field "runtimes" (`List [ row value; picker_exact_runtime ])
+    |> Tui_decode.decode_runtime_resolved
+    |> Result.map (fun (rows, _) ->
+         (List.find
+            (fun (row : Tui_decode.runtime_option) ->
+              String.equal row.ro_id "ollama_cloud.deepseek")
+            rows).Tui_decode.ro_failed_attempt)
+  in
+  let attempt failure =
+    `Assoc
+      [ ("noted_at", `Float 1790000000.)
+      ; ("failure", `String failure)
+      ; ("recorded_by", `String "alpha")
+      ]
+  in
+  (match decode (Some (attempt "provider_timeout")) with
+   | Ok
+       (Some
+         { Tui_decode.rfa_failure =
+             Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout
+         ; rfa_recorded_by = "alpha"
+         ; rfa_noted_at = 1790000000.
+         }) -> ()
+   | Ok _ -> Alcotest.fail "a known failure was not read as its kind"
+   | Error detail -> Alcotest.fail detail);
+  (match decode (Some (attempt "quota_drift")) with
+   | Ok (Some { Tui_decode.rfa_failure = Tui_decode.Unrecognised_attempt_failure "quota_drift"; _ }) -> ()
+   | Ok _ -> Alcotest.fail "an unknown failure was not kept by name"
+   | Error detail -> Alcotest.fail detail);
+  (match decode (Some `Null) with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "null read as a failed attempt"
+   | Error detail -> Alcotest.fail detail);
+  List.iter
+    (fun value ->
+       match decode value with
+       | Ok _ -> Alcotest.fail "a missing or malformed failed_attempt decoded"
+       | Error _ -> ())
+    [ None; Some (`String "provider_timeout") ]
 
 let test_runtime_rate_limit_requires_an_observation () =
   let row value =
@@ -8784,6 +8845,7 @@ let resolved_runtime id provider model =
     ; "is_default", `Bool false
     ; "rate_limited", `Bool false
     ; "rate_limit_resets_at", `Null
+    ; "failed_attempt", `Null
     ]
 
 let runtime_lane ?(declared = true) id runtime_ids =
@@ -12844,6 +12906,8 @@ let () =
     ( "decode_runtime_resolved",
       [ Alcotest.test_case "requires a rate-limit observation" `Quick
           test_runtime_rate_limit_requires_an_observation;
+        Alcotest.test_case "reads the failed attempt typed" `Quick
+          test_runtime_failed_attempt_is_read_typed;
         Alcotest.test_case "carries runtimes and assignments" `Quick
           test_decode_runtime_resolved;
         Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick

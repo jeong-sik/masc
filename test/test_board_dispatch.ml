@@ -1164,6 +1164,26 @@ let test_get_post_and_comments_missing_post () =
         (Printf.sprintf "expected Post_not_found, got %s"
            (Board.show_board_error e))
 
+(* A read answers only that the id did not parse or that nothing has it. The
+   [board_error] form keeps the same answers for callers that also write. *)
+let test_read_answers_only_parse_and_absence () =
+  (match Board_dispatch.read_post ~post_id:"never-existed" with
+   | Error (Board.Read_post_not_found "never-existed") -> ()
+   | Error e -> Alcotest.fail ("expected Read_post_not_found, got " ^ Board.show_board_read_error e)
+   | Ok _ -> Alcotest.fail "a missing post was read");
+  (match Board_dispatch.read_comments ~post_id:"../escape" with
+   | Error (Board.Read_invalid_id _) -> ()
+   | Error e -> Alcotest.fail ("expected Read_invalid_id, got " ^ Board.show_board_read_error e)
+   | Ok _ -> Alcotest.fail "an invalid post id was read");
+  (match Board_dispatch.read_comments ~post_id:"never-existed" with
+   | Ok [] -> ()
+   | Ok _ -> Alcotest.fail "a missing post returned comments"
+   | Error e -> Alcotest.fail ("expected Ok [], got " ^ Board.show_board_read_error e));
+  match Board_dispatch.get_post ~post_id:"never-existed" with
+  | Error (Board.Post_not_found "never-existed") -> ()
+  | Error e -> Alcotest.fail ("expected Post_not_found, got " ^ Board.show_board_error e)
+  | Ok _ -> Alcotest.fail "a missing post was read"
+
 (** {1 Vote Operations} *)
 
 let test_vote_post () =
@@ -2757,6 +2777,8 @@ let () =
         (with_eio test_get_post_and_comments_atomic);
       Alcotest.test_case "get_post_and_comments missing post" `Quick
         (with_eio test_get_post_and_comments_missing_post);
+      Alcotest.test_case "read answers only parse failure and absence" `Quick
+        (with_eio test_read_answers_only_parse_and_absence);
     ];
     "votes", [
       Alcotest.test_case "upvote" `Quick (with_eio test_vote_post);

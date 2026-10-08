@@ -65,12 +65,10 @@ let record_failure_observation
         publish_reason ())
    | Keeper_registry.Turn_consecutive_failures _
    | Keeper_registry.Heartbeat_consecutive_failures _
-   | Keeper_registry.Stale_termination_storm _
    | Keeper_registry.Provider_runtime_error _
    | Keeper_registry.Turn_configuration_error _
    | Keeper_registry.Fiber_unresolved _
    | Keeper_registry.Exception _
-   | Keeper_registry.Turn_overflow_failure
    | Keeper_registry.Operator_interrupt -> publish_reason ());
   Log.Keeper.warn
     "%s: turn failure observed (consecutive=%d); Keeper lifecycle remains active: %s"

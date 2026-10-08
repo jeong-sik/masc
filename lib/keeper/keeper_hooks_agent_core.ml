@@ -244,6 +244,8 @@ type tool_stream_observation =
       }
   | Turn_closed_without_sources of { turn : int }
 
+type tool_result_commit_policy = Require_commit | Observe_commit
+
 let make_hooks
     ?preview
     ?observation_token

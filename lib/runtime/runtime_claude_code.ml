@@ -259,6 +259,10 @@ type stream_event =
       { message_id : string option
       ; text : string
       }
+  | Thinking_delta of
+      { message_id : string option
+      ; text : string
+      }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -312,6 +316,7 @@ type error =
   | Turn_failed of string
   | Turn_failed_with_observation of
       { detail : string
+      ; api_error_status : int option
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
@@ -982,6 +987,7 @@ let parse_rate_limit ~expected_session_id fields =
 
 type assistant_block =
   | Assistant_text of string
+  | Assistant_thinking of string
   | Assistant_native_tool of Runtime_native_tools.observation
 
 type assistant_origin =
@@ -1040,7 +1046,12 @@ let assistant_blocks ~stage ~mcp_tool_names content =
                 }
               :: parsed)
              rest
-         | "thinking" -> loop parsed rest
+         | "thinking" ->
+           let* thinking = required_member stage "thinking" fields in
+           (match thinking with
+            | `String text -> loop (Assistant_thinking text :: parsed) rest
+            | _ -> protocol_error stage "thinking must be a string")
+         | "redacted_thinking" -> loop parsed rest
          | other ->
            protocol_error
              stage
@@ -1314,6 +1325,7 @@ let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~
     Error
       (Turn_failed_with_observation
          { detail = terminal_failure_detail ()
+         ; api_error_status
          ; tool_effect_attempted
          ; response_emitted
          })
@@ -1328,7 +1340,40 @@ let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~
 type partial_stream =
   { mutable message_id : string option
   ; mutable text_blocks : (string * int * Buffer.t) list
+  ; mutable thinking_blocks : (string * int * Buffer.t) list
   }
+
+type partial_channel = Text | Thinking
+
+let partial_blocks partial = function
+  | Text -> partial.text_blocks
+  | Thinking -> partial.thinking_blocks
+;;
+
+let set_partial_blocks partial channel blocks =
+  match channel with
+  | Text -> partial.text_blocks <- blocks
+  | Thinking -> partial.thinking_blocks <- blocks
+;;
+
+let emit_partial_text ~on_stream_event ~response_emitted ~message_id channel text =
+  if text <> "" then
+    match channel with
+    | Text ->
+        response_emitted := true;
+        emit_stream_event on_stream_event (Text_delta {message_id; text})
+    | Thinking -> emit_stream_event on_stream_event (Thinking_delta {message_id; text})
+;;
+
+let partial_text_value stage channel fields =
+  match channel with
+  | Text -> text_value stage fields
+  | Thinking ->
+      let* value = required_member stage "thinking" fields in
+      (match value with
+       | `String text -> Ok text
+       | _ -> protocol_error stage "thinking must be a string")
+;;
 
 let partial_block_index stage fields =
   let* index = optional_int stage "index" fields in
@@ -1365,25 +1410,25 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* block = assoc_at stage block in
         let* kind = required_string stage "type" block in
         (match kind with
-         | "text" ->
-             let* text = text_value stage block in
+         | ("text" | "thinking") as kind ->
+             let channel = if kind = "text" then Text else Thinking in
+             let* text = partial_text_value stage channel block in
              let buffer = Buffer.create 256 in
              Buffer.add_string buffer text;
              let* message_id = match partial.message_id with
                | Some id -> Ok id
-               | None -> protocol_error stage "text block has no message start" in
+               | None -> protocol_error stage "content block has no message start" in
              if List.exists (fun (id, held_index, _) -> id = message_id && held_index = index)
-                 partial.text_blocks then
-               protocol_error stage "text block index already started"
+                 (partial.text_blocks @ partial.thinking_blocks) then
+               protocol_error stage "content block index already started"
              else begin
-               partial.text_blocks <- partial.text_blocks @ [message_id, index, buffer];
-               if text <> "" then begin
-                 response_emitted := true;
-                 emit_stream_event on_stream_event (Text_delta {message_id=partial.message_id; text})
-               end;
+               set_partial_blocks partial channel
+                 (partial_blocks partial channel @ [message_id, index, buffer]);
+               emit_partial_text ~on_stream_event ~response_emitted
+                 ~message_id:partial.message_id channel text;
                Ok ()
              end
-         | "tool_use" | "thinking" | "redacted_thinking" -> Ok ()
+         | "tool_use" | "redacted_thinking" -> Ok ()
          | other -> protocol_error stage ("unsupported content block type " ^ other))
     | "content_block_delta" ->
         let* index = partial_block_index stage event in
@@ -1391,44 +1436,46 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* delta = assoc_at stage delta in
         let* kind = required_string stage "type" delta in
         (match kind with
-         | "text_delta" ->
-             let* text = text_value stage delta in
+         | ("text_delta" | "thinking_delta") as kind ->
+             let channel = if kind = "text_delta" then Text else Thinking in
+             let* text = partial_text_value stage channel delta in
              let held = List.find_opt (fun (id, held_index, _) ->
-               Some id = partial.message_id && held_index = index) partial.text_blocks in
+               Some id = partial.message_id && held_index = index) (partial_blocks partial channel) in
              (match held with
               | Some (_, _, buffer) ->
                   Buffer.add_string buffer text;
-                  if text <> "" then begin
-                    response_emitted := true;
-                    emit_stream_event on_stream_event (Text_delta {message_id=partial.message_id; text})
-                  end;
+                  emit_partial_text ~on_stream_event ~response_emitted
+                    ~message_id:partial.message_id channel text;
                   Ok ()
-              | _ -> protocol_error stage "text delta has no matching message/text block")
-         | "input_json_delta" | "thinking_delta" | "signature_delta" | "citations_delta" -> Ok ()
+              | _ -> protocol_error stage "content delta has no matching message/channel block")
+         | "input_json_delta" | "signature_delta" | "citations_delta" -> Ok ()
          | other -> protocol_error stage ("unsupported content delta type " ^ other))
     | "content_block_stop" ->
         let* index = partial_block_index stage event in
         (* Empty blocks have no complete assistant envelope. Retain nonempty
            stopped blocks until their per-block or aggregate envelope lands. *)
-        partial.text_blocks <- List.filter (fun (id, held_index, buffer) ->
-          not (Some id = partial.message_id && held_index = index && Buffer.length buffer = 0))
-          partial.text_blocks;
+        List.iter (fun channel ->
+          set_partial_blocks partial channel
+            (List.filter (fun (id, held_index, buffer) ->
+              not (Some id = partial.message_id && held_index = index && Buffer.length buffer = 0))
+              (partial_blocks partial channel))) [Text; Thinking];
         Ok ()
     | "message_delta" | "message_stop" | "ping" -> Ok ()
     | other -> protocol_error stage ("unsupported partial event type " ^ other)
 ;;
 
-let complete_partial_text partial ~message_id text =
+let complete_partial_text partial ~channel ~message_id text =
   if String.equal text "" then Ok text
   else match List.find_opt (fun (id, _, buffer) ->
-      Some id = message_id && Buffer.length buffer > 0) partial.text_blocks with
+      Some id = message_id && Buffer.length buffer > 0) (partial_blocks partial channel) with
   | Some (id, index, buffer) ->
       let prefix = Buffer.contents buffer in
       if String.starts_with ~prefix text then begin
-        partial.text_blocks <- List.filter (fun (held_id, held_index, _) ->
-          held_id <> id || held_index <> index) partial.text_blocks;
+        set_partial_blocks partial channel
+          (List.filter (fun (held_id, held_index, _) ->
+             held_id <> id || held_index <> index) (partial_blocks partial channel));
         Ok (String.sub text (String.length prefix) (String.length text - String.length prefix))
-      end else protocol_error "assistant text" "complete block conflicts with streamed text"
+      end else protocol_error "assistant content" "complete block conflicts with streamed content"
   | None -> Ok text
 ;;
 
@@ -1491,9 +1538,17 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
            | Api_error_diagnostic -> Ok ()
            | Model_response ->
                texts_rev := text :: !texts_rev;
-               let* remaining = complete_partial_text partial_stream ~message_id text in
+               let* remaining = complete_partial_text partial_stream ~channel:Text ~message_id text in
                if remaining <> "" then emit_stream_event on_stream_event
-                 (Text_delta {message_id; text=remaining});
+               (Text_delta {message_id; text=remaining});
+               Ok ())
+      | Assistant_thinking text ->
+          (match origin with
+           | Api_error_diagnostic -> Ok ()
+           | Model_response ->
+               let* remaining = complete_partial_text partial_stream ~channel:Thinking ~message_id text in
+               if remaining <> "" then emit_stream_event on_stream_event
+                 (Thinking_delta {message_id; text=remaining});
                Ok ())
       | Assistant_native_tool observation ->
           native_tool_attempted := true;
@@ -1586,7 +1641,11 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         assistant_texts
         |> String.concat "\n"
         |> String.trim
-        |> fun value -> if value = "" then None else Some value
+        |> fun value ->
+        (* A successful result with an explicit empty string is a completed
+           answer. Absence/null with no assistant text remains a protocol
+           failure; the Keeper chooses whether a quiet answer is admissible. *)
+        if value = "" then result else Some value
     in
     let* text =
       match text with
@@ -1890,7 +1949,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event
-    ~partial_stream:{message_id=None; text_blocks=[]}
+    ~partial_stream:{message_id=None; text_blocks=[]; thinking_blocks=[]}
     ~stream_started:(ref false)
     ~response_emitted:(ref false)
 ;;

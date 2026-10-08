@@ -5,7 +5,7 @@ type error =
   | Invalid_limit
   | Render_failed of string
   | Index_unavailable of string
-  | Fact_exceeds_limit of Ledger.fact_ref
+  | Invalid_batch of string
 
 type batch =
   { input : Yojson.Safe.t
@@ -16,10 +16,10 @@ type batch =
   }
 
 let error_to_string = function
-  | Invalid_limit -> "workspace curator request limit must be positive"
+  | Invalid_limit -> "workspace curator neighbor limit must be nonnegative"
   | Render_failed detail -> "workspace curator prompt render: " ^ detail
   | Index_unavailable detail -> "workspace curator neighbor index: " ^ detail
-  | Fact_exceeds_limit _ -> "one workspace fact and its neighbors exceed the admitted input limit"
+  | Invalid_batch detail -> "workspace curator inconsistent request: " ^ detail
 
 let fact_ref_json = function
   | Ledger.Ordinary { keeper_id; claim_sha256 } ->
@@ -68,84 +68,55 @@ let row_json ~ledger (pending : Ledger.pending_fact) neighbors =
 
 let input rows = `Assoc ["new_facts", `List rows]
 
-let prepare ~max_input_bytes ~neighbor_limit ~render ~ledger ~current ~pending =
-  if max_input_bytes <= 0 || neighbor_limit < 0 then Error Invalid_limit
+let ( let* ) = Result.bind
+
+let prepare ~neighbor_limit ~render ~ledger ~current ~pending =
+  if neighbor_limit < 0 then Error Invalid_limit
   else match pending with
   | [] -> Ok None
   | _ :: _ ->
-    let ( let* ) = Result.bind in
-    let render payload = render payload |> Result.map_error (fun detail -> Render_failed detail) in
-    (* The index still holds every current fact, but ask it only about facts
-       whose bare rows could fit in this request. Otherwise the first fill
-       would issue thousands of needless BM25 queries. *)
-    let rec candidates selected rows = function
-      | [] -> Ok (List.rev selected, [])
-      | (fact : Ledger.pending_fact) :: rest as remaining ->
-        let proposed = row_json ~ledger fact [] :: rows in
-        let* rendered = render (input (List.rev proposed)) in
-        if String.length rendered > max_input_bytes then
-          (match selected with
-           | [] -> Error (Fact_exceeds_limit fact.fact)
-           | _ :: _ -> Ok (List.rev selected, remaining))
-        else candidates (fact :: selected) proposed rest
-    in
-    let* candidates, tail = candidates [] [] pending in
     let texts = List.map (fun (fact : Ledger.pending_fact) ->
       keeper_id fact.fact, fact.claim) current in
     let queries = List.map (fun (fact : Ledger.pending_fact) ->
-      keeper_id fact.fact, fact.claim) candidates in
-    (match Index.rank_many_excluding_owners ~queries ~texts ~max_results:neighbor_limit with
-     | Error error -> Error (Index_unavailable (Index.error_to_string error))
-     | Ok (rankings, index_stats) ->
-       let sources = Array.of_list current in
-       let neighbors (pending : Ledger.pending_fact) ranked =
-         let rec take count selected = function
-           | [] -> List.rev selected
-           | _ when count >= neighbor_limit -> List.rev selected
-           | (ordinal, _) :: rest ->
-             let candidate = sources.(ordinal) in
-             if String.equal (keeper_id pending.fact) (keeper_id candidate.fact)
-                || candidate.fact = pending.fact
-             then take count selected rest
-             else take (count + 1) (candidate :: selected) rest
-         in
-         take 0 [] ranked in
-       let rec choose selected rows last_rendered = function
-         | [] ->
-           let payload = input (List.rev rows) in
-           (match last_rendered with
-            | Some rendered_prompt ->
-              Ok (Some { input = payload; rendered_prompt;
-                         selected = List.rev selected; remaining = tail; index_stats })
-            | None -> Error Invalid_limit)
-         | (fact, ranked) :: rest as remaining ->
-           let rec fit neighbors =
-             let proposed = row_json ~ledger fact neighbors :: rows in
-             let payload = input (List.rev proposed) in
-             let* rendered = render payload in
-             if String.length rendered <= max_input_bytes
-             then Ok (Some (proposed, payload, rendered))
-             else match List.rev neighbors with
-               | [] -> Ok None
-               | _ :: prior -> fit (List.rev prior)
-           in
-           let* fitted = fit (neighbors fact ranked) in
-           (match fitted with
-            | Some (proposed, payload, rendered) ->
-              (match rest with
-               | [] -> Ok (Some { input = payload; rendered_prompt = rendered;
-                                selected = List.rev (fact :: selected); remaining = tail;
-                                index_stats })
-               | _ :: _ -> choose (fact :: selected) proposed (Some rendered) rest)
-            | None ->
-              (match selected, last_rendered with
-               | [], _ -> Error (Fact_exceeds_limit fact.fact)
-               | _ :: _, Some rendered_prompt ->
-                 let payload = input (List.rev rows) in
-                 Ok (Some { input = payload; rendered_prompt;
-                            selected = List.rev selected;
-                            remaining = List.map fst remaining @ tail;
-                            index_stats })
-               | _ :: _, None -> Error Invalid_limit))
-       in
-       choose [] [] None (List.combine candidates rankings))
+      keeper_id fact.fact, fact.claim) pending in
+    let* rankings, index_stats =
+      Index.rank_many_excluding_owners ~queries ~texts ~max_results:neighbor_limit
+      |> Result.map_error (fun error -> Index_unavailable (Index.error_to_string error)) in
+    let sources = Array.of_list current in
+    let rows = List.map2 (fun fact ranked ->
+      let neighbors = List.map (fun (ordinal, _) -> sources.(ordinal)) ranked in
+      row_json ~ledger fact neighbors) pending rankings in
+    let input = input rows in
+    let* rendered_prompt = render input |> Result.map_error (fun detail -> Render_failed detail) in
+    Ok (Some { input; rendered_prompt; selected = pending; remaining = []; index_stats })
+
+let selected_rows batch =
+  match batch.input with
+  | `Assoc ["new_facts", `List rows] ->
+    let rec aligned facts rows = match facts, rows with
+      | [], [] -> true
+      | (fact : Ledger.pending_fact) :: facts, `Assoc fields :: rows ->
+        (match List.filter (fun (name, _) -> String.equal name "new_fact") fields with
+         | ["new_fact", `Assoc new_fact] ->
+           List.filter (fun (name, _) -> String.equal name "id") new_fact
+           = ["id", `String (fact_id fact.fact)]
+           && aligned facts rows
+         | _ -> false)
+      | _ -> false in
+    if aligned batch.selected rows then Ok rows
+    else Error (Invalid_batch "rows do not match the selected facts in order")
+  | _ -> Error (Invalid_batch "expected the new_facts array")
+
+let narrow ~render batch =
+  let* rows = selected_rows batch in
+  match batch.selected with
+  | [] | [_] -> Ok None
+  | _ :: _ :: _ ->
+    (* Finite whole-row bisection follows an actual provider refusal. This is
+       not a byte/token estimate and never trims a row's source context. *)
+    let prefix_length = List.length batch.selected / 2 in
+    let selected = List.take prefix_length batch.selected in
+    let remaining = List.drop prefix_length batch.selected @ batch.remaining in
+    let input = input (List.take prefix_length rows) in
+    let* rendered_prompt = render input |> Result.map_error (fun detail -> Render_failed detail) in
+    Ok (Some { input; rendered_prompt; selected; remaining; index_stats = batch.index_stats })

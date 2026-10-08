@@ -9,6 +9,8 @@ type content_channel = Public_text | Provider_reasoning
 
 type block_state =
   | Active_tool of tool_ref
+  | Active_native_tool of Keeper_chat_events.native_tool
+  | Ended_native_tool of Keeper_chat_events.native_tool
   | Occupied_non_tool_block of content_channel option
   | Invalid_tool_block of
       { failed_tool_call_id : string option
@@ -191,6 +193,8 @@ let occurrence_is_quarantined state occurrence =
           | Invalid_tool_block { quarantined_occurrence = Some recorded; _ } ->
             same_occurrence recorded occurrence
           | Active_tool _
+          | Active_native_tool _
+          | Ended_native_tool _
           | Occupied_non_tool_block _
           | Invalid_tool_block { quarantined_occurrence = None; _ }
           | Invalid_media_block
@@ -216,6 +220,8 @@ let first_quarantine_kind state occurrence =
              }
            when same_occurrence recorded occurrence -> Some kind
          | Active_tool _
+         | Active_native_tool _
+         | Ended_native_tool _
          | Occupied_non_tool_block _
          | Invalid_tool_block _
          | Invalid_media_block
@@ -299,6 +305,8 @@ let tools_in_current_scope state =
     |> List.filter_map (fun (_, block) ->
       match block with
       | Active_tool tool -> Some tool
+      | Active_native_tool _
+      | Ended_native_tool _
       | Occupied_non_tool_block _
       | Invalid_tool_block _
       | Active_media _
@@ -359,6 +367,8 @@ let poison_scope ?(preserve_committed = false) state ~kind ~reason =
                ; quarantine_kind = Some kind
                } )
          | Occupied_non_tool_block _
+         | Active_native_tool _
+         | Ended_native_tool _
          | Invalid_tool_block _
          | Active_media _
          | Invalid_media_block -> index, block)
@@ -419,24 +429,26 @@ let fail_stream state ~reason =
 ;;
 
 let reject_non_input_tool_delta ~stream_scope ~index ~delta_kind bridge_state =
-  let reject (tool : tool_ref) =
+  let reject ~occurrence ~tool_call_id =
     let reason =
       Printf.sprintf "non-input %s delta arrived for a tool-use block" delta_kind
     in
     Some
       { bridge_state =
-          invalidate_block ~quarantined_occurrence:tool.occurrence
+          invalidate_block ~quarantined_occurrence:occurrence
             ~quarantine_kind:Keeper_chat_events.Tool_delta_invalid_kind
-            bridge_state index ~failed_tool_call_id:tool.tool_call_id
+            bridge_state index ~failed_tool_call_id:tool_call_id
       ; chat_events =
-          [ protocol_error ~quarantined_occurrence:tool.occurrence
-              ~index ?tool_call_id:tool.tool_call_id ~reason
+          [ protocol_error ~quarantined_occurrence:occurrence
+              ~index ?tool_call_id ~reason
               Keeper_chat_events.Tool_delta_invalid_kind
           ]
       }
   in
   match stream_block_for_index bridge_state index with
-  | Some (Active_tool tool) -> reject tool
+  | Some (Active_tool tool) -> reject ~occurrence:tool.occurrence ~tool_call_id:tool.tool_call_id
+  | Some (Active_native_tool tool | Ended_native_tool tool) ->
+      reject ~occurrence:tool.occurrence ~tool_call_id:tool.tool_call_id
   | Some
       (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence; _ }) ->
     let reason =
@@ -460,7 +472,7 @@ let reject_non_input_tool_delta ~stream_scope ~index ~delta_kind bridge_state =
       }
     in
     (match finalized_tool_for_occurrence bridge_state occurrence with
-     | Some tool -> reject tool
+     | Some tool -> reject ~occurrence:tool.occurrence ~tool_call_id:tool.tool_call_id
      | None -> None)
 
 let media_persist_error_kind = function
@@ -547,6 +559,8 @@ let close_open_content_blocks ~redact_text ~base_dir state =
                  ~chunks ~encoded_bytes
          }
        | Occupied_non_tool_block _
+       | Active_native_tool _
+       | Ended_native_tool _
        | Invalid_tool_block _
        | Invalid_media_block ->
          { bridge_state = replace_block bridge_state index block; chat_events })
@@ -604,7 +618,7 @@ let tool_args_event ~redact_text ~stream_scope ~snapshot bridge_state index args
               ~reason:"tool argument event arrived after invalid tool block start"
               Tool_args_without_start ]
       }
-  | Some (Occupied_non_tool_block _) ->
+  | Some (Active_native_tool _ | Ended_native_tool _ | Occupied_non_tool_block _) ->
       { bridge_state
       ; chat_events =
           [ protocol_error ~index
@@ -949,7 +963,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                    ~reason:"media delta metadata changed for active media block"
                    Media_delta_invalid_block ]
            }
-       | Some (Occupied_non_tool_block _) ->
+       | Some (Active_native_tool _ | Ended_native_tool _ | Occupied_non_tool_block _) ->
          { bridge_state
          ; chat_events =
              [ protocol_error ~index
@@ -1031,7 +1045,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                         tname)
                    Tool_start_duplicate_index ]
            }
-       | Some (Occupied_non_tool_block _) ->
+       | Some (Active_native_tool _ | Ended_native_tool _ | Occupied_non_tool_block _) ->
          { bridge_state =
              invalidate_block
                ~quarantine_kind:Keeper_chat_events.Tool_start_duplicate_index
@@ -1127,7 +1141,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                  { failed_tool_call_id; quarantined_occurrence; _ }) ->
              invalidate ?quarantined_occurrence
                ?tool_call_id:failed_tool_call_id ()
-           | Some (Occupied_non_tool_block _ | Active_media _ | Invalid_media_block) ->
+           | Some (Active_native_tool _ | Ended_native_tool _ | Occupied_non_tool_block _ | Active_media _ | Invalid_media_block) ->
              invalidate ()
            | None ->
              let occurrence =
@@ -1163,7 +1177,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
               (Invalid_tool_block
                 { failed_tool_call_id; quarantined_occurrence; _ }) ->
             quarantined_occurrence, failed_tool_call_id
-          | Some (Occupied_non_tool_block _ | Active_media _ | Invalid_media_block) ->
+          | Some (Active_native_tool _ | Ended_native_tool _ | Occupied_non_tool_block _ | Active_media _ | Invalid_media_block) ->
             None, incoming_tool_call_id
           | None ->
             (match finalized_tool_for_occurrence bridge_state occurrence with
@@ -1200,6 +1214,15 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       if rejects_non_tool_identity
       then reject_non_tool_identity ()
       else (match stream_block_for_index bridge_state index with
+       | Some (Active_native_tool existing)
+         when String.equal content_type Runtime_native_tools.stream_content_type
+              && Option.equal String.equal tool_id existing.tool_call_id
+              && Option.equal String.equal tool_name existing.tool_call_name ->
+         { bridge_state; chat_events = [ block_start ] }
+       | Some (Active_native_tool existing | Ended_native_tool existing) ->
+         conflict ~quarantined_occurrence:existing.occurrence
+           ?tool_call_id:existing.tool_call_id
+           "content block header reused a native tool observation index"
        | Some (Active_tool existing) ->
          conflict ~quarantined_occurrence:existing.occurrence
            ?tool_call_id:existing.tool_call_id
@@ -1225,7 +1248,15 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
               ?tool_call_id:finalized.tool_call_id
               "non-tool content block header reused a closed tool occurrence"
           | None ->
-            if stream_start_is_media content_type
+            if String.equal content_type Runtime_native_tools.stream_content_type
+            then
+              let tool : Keeper_chat_events.native_tool =
+                { occurrence; tool_call_id = tool_id; tool_call_name = tool_name }
+              in
+              { bridge_state = replace_block bridge_state index (Active_native_tool tool)
+              ; chat_events = [ block_start; Native_tool_start tool ]
+              }
+            else if stream_start_is_media content_type
             then { bridge_state; chat_events = [ block_start ] }
             else
               { bridge_state =
@@ -1239,6 +1270,12 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
   | ContentBlockStop { index } -> (
       let block_stop = content_block_stop_event ~index in
       match stream_block_for_index bridge_state index with
+      | Some (Active_native_tool tool) ->
+          { bridge_state = replace_block bridge_state index (Ended_native_tool tool)
+          ; chat_events = [ block_stop; Native_tool_end tool ]
+          }
+      | Some (Ended_native_tool _) ->
+          { bridge_state; chat_events = [ block_stop ] }
       | Some (Active_tool tool) ->
           let bridge_state =
             remove_block bridge_state index

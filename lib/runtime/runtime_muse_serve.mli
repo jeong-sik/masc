@@ -172,7 +172,9 @@ type turn_result =
   ; model : string option
     (** The model the session started on, as the host reported it, or the
         model [session/setModel] selected on a resumed session. *)
-  ; text : string  (** The last completed agent message of the turn. *)
+  ; text : string option
+    (** The last completed agent message, including an explicit empty message.
+        [None] means no completed message supplied text. *)
   ; usage : Runtime_muse_msp.token_usage option
     (** Terminal aggregate, enriched with counted-once counts when the
         observed completions agree; otherwise the sum of this turn's unique

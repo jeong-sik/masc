@@ -74,6 +74,12 @@ let parse = function
         let* point = geometry Browser_lane.Pointer.point_of_json "point" in
         let* x = integer "x" in let* y = integer "y" in
         Ok (Browser_lane.Scroll_at {point;viewport;x;y})
+      | Some (`String "hover_at") ->
+        let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"from";"to"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "hover_at requires expectedUrl" in
+        let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
+        let* point = geometry Browser_lane.Pointer.point_of_json "point" in
+        Ok (Browser_lane.Hover_at {point;viewport})
       | Some (`String ("click_at" | "drag" as action)) ->
         let* () = excludes (["selector"; "text"; "documentId"; "nodeId"; "x"; "y"] @
           if action = "click_at" then ["from"; "to"] else ["point"]) in
@@ -86,7 +92,7 @@ let parse = function
           let* from = geometry Browser_lane.Pointer.point_of_json "from" in
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           Ok (Browser_lane.Drag {from;to_;viewport})
-      | _ -> Error "action must be activate_tab, click, follow_link, fill, scroll, click_at, scroll_at or drag" in
+      | _ -> Error "action must be activate_tab, click, follow_link, fill, scroll, click_at, scroll_at, hover_at or drag" in
     Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 

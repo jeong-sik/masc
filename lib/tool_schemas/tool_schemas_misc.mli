@@ -5,10 +5,9 @@
     parse function from that list, so a constructor added to one of them cannot
     stay out of the list its consumers walk.
 
-    The [masc_config] category enum SSOT lives in
-    [Tool_schemas_specs_types.config_category_enum_strings]
-    (issue #15257); [test/test_operator_surface_toml_parity.ml ::
-    the config category enum matches its owner] asserts it matches the producer-side
+    The [masc_config] category enum is declared in
+    [config/tools/masc_config.toml]; [test/test_operator_surface_toml_parity.ml ::
+    the config category enum matches its owner] checks it against
     [Env_config_snapshot.valid_config_category_strings]. *)
 
 (** {1 Enum string mirrors (SSOT)} *)
@@ -52,13 +51,7 @@ val schemas : Masc_domain.tool_schema list
 (** [schemas] is the generated [Masc_domain.tool_schema list] for misc tools.
     Operator controls are available through {!control_schemas}. Public-surface
     exclusion is enforced downstream by {!Tool_catalog.is_public_mcp} and
-    [public_mcp_surface_tools]. The schema [enum] fields derive from
-    [Tool_schemas_specs_types.config_category_enum_strings] so
-    adding a value updates the schema automatically.
-
-    This also named [dashboard_scope_enum_strings], which is not in the tree;
-    [config_category_enum_strings] is the only [*_enum_strings] that module
-    exports. *)
+    [public_mcp_surface_tools]. *)
 
 type mcp_runtime_operation =
   | Start

@@ -148,7 +148,7 @@ def main() -> None:
             "--config",
             str(config),
             "--runtime",
-            "ollama_cloud.deepseek-v4-flash",
+            "ollama_cloud.deepseek-v4.1-flash",
         ]
         try:
             orphan = Path(

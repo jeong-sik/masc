@@ -182,11 +182,12 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
         | Runtime_claude_code.Conversation_compacted -> on_compacted ()
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
-        | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
+    let thinking_indexes = Hashtbl.create 8 in
     let tool_indexes = Hashtbl.create 8 in
     let native_tool_indexes = Hashtbl.create 8 in
     (* Each [message.id] is one model response; the text blocks it carries are
@@ -204,6 +205,16 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
         | Runtime_claude_code.Text_delta { message_id; text } ->
           emit_text
             (Keeper_official_client_text_stream.forward text_stream ~message:message_id text)
+        | Runtime_claude_code.Thinking_delta { message_id; text } ->
+          let index = match Hashtbl.find_opt thinking_indexes message_id with
+            | Some index -> index
+            | None ->
+                let index = !next_tool_index in
+                incr next_tool_index;
+                Hashtbl.add thinking_indexes message_id index;
+                index in
+          emit (Agent_core.Types.ContentBlockDelta
+            { index; delta = Agent_core.Types.ThinkingDelta text })
         | Runtime_claude_code.Dynamic_tool_started
             { call_id; tool_name; arguments } ->
           Keeper_official_client_text_stream.tool_row text_stream;
@@ -246,11 +257,17 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
             ~raw_trace_run
             ~phase:`Started
             observation;
-          let index = !next_tool_index in
-          incr next_tool_index;
-          Option.iter
-            (fun identity -> Hashtbl.replace native_tool_indexes identity index)
-            observation.identity;
+          let index =
+            match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
+            | Some index -> index
+            | None ->
+                let index = !next_tool_index in
+                incr next_tool_index;
+                Option.iter
+                  (fun identity -> Hashtbl.add native_tool_indexes identity index)
+                  observation.identity;
+                index
+          in
           emit
             (Agent_core.Types.ContentBlockStart
                { index
@@ -311,6 +328,19 @@ let claude_error_to_core_error = function
          ; retry_after = retry_after_of_rate_limit rate_limit
          ; detail = Runtime_claude_code.error_to_string (Quota_blocked blocked)
          })
+  (* The CLI reports these denials in a terminal result, even when its
+     process subtype is [success]. Preserve the provider's HTTP distinction:
+     the existing account-access route asks for operator action after the
+     declared candidates are exhausted; a generic provider failure does not.
+     Activity still controls the separate effect fence at the caller. *)
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = Some 401; detail; _ } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError { provider = "claude_code"; detail })
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = Some 403; detail; _ } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthorizationError { provider = "claude_code"; detail })
   | Runtime_claude_code.Turn_failed detail
   | Runtime_claude_code.Turn_failed_with_observation { detail; _ } ->
     Agent_core.Error.Provider

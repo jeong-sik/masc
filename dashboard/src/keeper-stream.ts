@@ -6,7 +6,6 @@ import {
   toolDeliveryProvenance,
 } from './keeper-delivery-provenance'
 import {
-  formatKeeperVisibleReply,
   keeperTurnOutcomeSuppressesReply,
   normalizeKeeperConversationDetails,
   normalizeKeeperExternalEffectTarget,
@@ -1230,7 +1229,7 @@ export function applyKeeperStreamEvent(
                 streamState: null,
               }
             }
-            const text = formatKeeperVisibleReply(rawText)
+            const text = rawText
             const blocks = entry.blocks?.length ? entry.blocks : parseTextToChatBlocks(text)
             return {
               ...entry,

@@ -858,13 +858,13 @@ let handle_ambient ?resolved_keeper_name ~base_dir
     (* A photo with no caption is a message. Trimming the text alone read it
        as empty and dropped it, so a file posted without words never reached
        the Keeper at all. *)
-    let trimmed =
-      String.trim (Discord_gateway_state.content_with_attachments ~content ~attachments)
+    let content =
+      Discord_gateway_state.content_with_attachments ~content ~attachments
     in
-    if String.equal trimmed "" then
+    if String.equal (String.trim content) "" then
       Discord_observability.record_ambient
         Discord_observability.Ambient_dropped_empty
-    else if String.length trimmed > Channel_gate.max_content_length () then
+    else if String.length content > Channel_gate.max_content_length () then
       (* Same inbound bound the turn path enforces
          ([Channel_gate.handle_inbound] validation): a message this
          size cannot become a turn either; it is rejected, not
@@ -879,12 +879,12 @@ let handle_ambient ?resolved_keeper_name ~base_dir
       let channel_name = resolve_channel_name ~base_dir ~channel_id in
       let attention_event_id =
         record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~channel_name
-          ~message_id ~author_id ~author_name ~content:trimmed
+          ~message_id ~author_id ~author_name ~content
           ~mentions_bot:false ~route:"ambient"
           ~urgency:Keeper_external_attention.Ambient
       in
       Keeper_chat_store.append_user_message
-        ~base_dir ~keeper_name ~content:trimmed
+        ~base_dir ~keeper_name ~content
         ~surface:
           (Surface_ref.Discord
              {

@@ -456,7 +456,6 @@ let transition_task_outcome_r
           log_event
             config
             (transition_log_event
-               ~event_type:Task_transition
                ~agent_name
                ~task_id
                ~from_status:task.task_status

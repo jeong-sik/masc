@@ -18,21 +18,21 @@
 # Missing_catalog_models, RFC-0206)
 # refuses to boot (a fixture model named "smoke" is absent from the catalog and
 # was rejected, breaking this evidence step on every OCaml push to main).
-# deepseek-v4-flash is the catalog-known fleet default; the provider endpoint
-# below is an isolated dead port. The [models.deepseek-v4-flash] block mirrors
-# config/runtime.toml's shape so the runtime resolves; its model id is what the
-# gate matches against the catalog.
-default = "ollama_cloud.deepseek-v4-flash"
+# deepseek-v4.1-flash has an ollama_cloud row in the catalog; the provider
+# endpoint below is an isolated dead port. The [models."deepseek-v4.1-flash"]
+# block mirrors config/runtime.toml's shape so the runtime resolves; its model
+# id is what the gate matches against the catalog.
+default = "ollama_cloud.deepseek-v4.1-flash"
 
 # Startup requires every id in Standalone_lane.required_ids
 # to be declared here with a non-empty slot list; it synthesizes nothing. A slot
 # names a runtime binding from this same file, so the only slot this fixture can
 # offer is the binding it declares below.
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["ollama_cloud.deepseek-v4-flash"]
+slots = ["ollama_cloud.deepseek-v4.1-flash"]
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = ["ollama_cloud.deepseek-v4-flash"]
+slots = ["ollama_cloud.deepseek-v4.1-flash"]
 
 [providers.ollama_cloud]
 display-name = "Release Evidence Smoke"
@@ -50,17 +50,17 @@ exact-body-timeout-s = 1200.0
 type = "inline"
 value = "release-evidence-loopback"
 
-[models.deepseek-v4-flash]
+[models."deepseek-v4.1-flash"]
 # config/runtime.toml declares this on the same row: ollama.com /v1 turns
 # reasoning on when a request carries no control, so a row that says
 # nothing about reasoning is refused before dispatch (#36412) -- here that
 # refusal ended the first Keeper turn before the fixture model saw a request.
 reasoning-uncontrolled = true
-api-name = "deepseek-v4-flash"
+api-name = "deepseek-v4.1-flash"
 max-context = 32768
 tools-support = true
 streaming = true
 
-[ollama_cloud.deepseek-v4-flash]
+[ollama_cloud."deepseek-v4.1-flash"]
 is-default = true
 max-concurrent = 1

@@ -474,29 +474,33 @@ let announcements : announcement Queue.t = Queue.create ()
 let announcements_lock = Mutex.create ()
 let posting = Eio.Mutex.create ()
 (* A controller admission may invoke a normal DOS handler.  Those handlers
-   call [after_announcing] themselves, so a boolean on the queued notice is
-   not enough: a ready notice from the handler could otherwise be flushed
-   while the credential transaction is still held.  Keep a small process-wide
-   guard; an admitted call drains once its outer transaction has released the
-   guard.  Concurrent calls only postpone their board relay until that drain,
-   preserving the queue's machine order. *)
-let deferred_depth = Atomic.make 0
+   call [after_announcing] themselves, so the handler's notice must carry the
+   admission's own readiness flag.  A fiber-local binding lets concurrent
+   admissions defer only their own notices; a completed admission therefore
+   does not hold another call's Board wake-up behind it. *)
+let announcement_ready_key : bool Atomic.t Eio.Fiber.key = Eio.Fiber.create_key ()
+
+let announcement_ready () =
+  try Eio.Fiber.get announcement_ready_key with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> None
 
 let enqueue ~ready ~author content () =
   Mutex.protect announcements_lock (fun () -> Queue.push {author;content;ready} announcements)
 ;;
-let announce ~author content () = enqueue ~ready:(Atomic.make true) ~author content ()
+let announce ~author content () =
+  let ready = match announcement_ready () with
+    | Some ready -> ready
+    | None -> Atomic.make true in
+  enqueue ~ready ~author content ()
 ;;
 
 (* Queue in machine order, but keep this transaction's notices invisible to
    every flusher until its Auth admission has exited, including on exception. *)
 let with_deferred_announcements f =
   let ready = Atomic.make false in
-  ignore (Atomic.fetch_and_add deferred_depth 1);
-  Fun.protect ~finally:(fun () ->
-    Atomic.set ready true;
-    ignore (Atomic.fetch_and_add deferred_depth (-1)))
-    (fun () -> f (enqueue ~ready))
+  Fun.protect ~finally:(fun () -> Atomic.set ready true)
+    (fun () -> Eio.Fiber.with_binding announcement_ready_key ready (fun () -> f (enqueue ~ready)))
 ;;
 
 let flush_announcements () =
@@ -522,7 +526,7 @@ let flush_announcements () =
 ;;
 
 let after_announcing result =
-  if Atomic.get deferred_depth = 0 then flush_announcements ();
+  if Option.is_none (announcement_ready ()) then flush_announcements ();
   result
 ;;
 

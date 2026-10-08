@@ -1409,7 +1409,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env _sw conf
   let clock = Eio.Stdenv.clock env in
   let access = Lane_addon_sources.Operator_configuration in
   let exports () = Runtime.tool_exports ~config ~access ~reserved:[] in
-  check int "no installation exposes nothing" 0 (List.length (unwrap (exports ())));
+  check Alcotest.int "no installation exposes nothing" 0 (List.length (unwrap (exports ())));
   let attach_export ?(names = ["masc_msx_step"]) mode =
     let path = manifest dir mode in
     let original = In_channel.with_open_bin path In_channel.input_all in
@@ -1425,7 +1425,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env _sw conf
   let snapshot = match cached () with Some snapshot -> snapshot | None -> fail "missing attached observation" in
   check bool "completed observation is stable while worker remains alive" false snapshot.refreshing;
   check string "cached observation belongs to selected installation" first snapshot.instance_id;
-  check int "cached read performs no worker observation" calls_before (Hashtbl.find state.calls first);
+  check Alcotest.int "cached read performs no worker observation" calls_before (Hashtbl.find state.calls first);
   let handle = List.hd (unwrap (exports ())) in
   let call handle = Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:handle ~arguments:(`Assoc []) in
   check bool "live installation is callable" true (Result.is_ok (call handle));
@@ -1523,20 +1523,20 @@ let test_machine_dependencies_reject_cycles () = with_fixture (fun env _sw confi
       "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "input";"kind",`String source]]]] in
   check bool "self-capture rejected before creating a worker" true
     (Result.is_error (attach_machine ~id:"self-msx" ~export:"masc_msx_screen" ~source:"msx_capture"));
-  check int "self-cycle cannot launch a worker" 0 (Hashtbl.length state.bindings);
+  check Alcotest.int "self-cycle cannot launch a worker" 0 (Hashtbl.length state.bindings);
   let first = unwrap (attach_machine ~id:"msx" ~export:"masc_msx_screen" ~source:"dos_capture") |> text "instance_id" in
   await (Eio.Stdenv.clock env) (fun () -> int "observation_seq" (instance config first) > 0);
   let before = Hashtbl.length state.bindings in
   check bool "implicit machine cycle is rejected even across runs" true
     (Result.is_error (attach_machine ~id:"dos" ~export:"masc_dos_screen" ~source:"msx_capture"));
-  check int "rejected cycle cannot launch its second worker" before (Hashtbl.length state.bindings);
+  check Alcotest.int "rejected cycle cannot launch its second worker" before (Hashtbl.length state.bindings);
   detach config first;
   await_phase (Eio.Stdenv.clock env) config first "detached";
   let a,b = Eio.Fiber.pair
     (fun () -> attach_machine ~id:"concurrent-msx" ~export:"masc_msx_screen" ~source:"dos_capture")
     (fun () -> attach_machine ~id:"concurrent-dos" ~export:"masc_dos_screen" ~source:"msx_capture") in
   let accepted = List.filter_map (function Ok value -> Some (text "instance_id" value) | Error _ -> None) [a;b] in
-  check int "concurrent admission cannot publish both sides of a cycle" 1 (List.length accepted);
+  check Alcotest.int "concurrent admission cannot publish both sides of a cycle" 1 (List.length accepted);
   List.iter (fun id -> detach config id; await_phase (Eio.Stdenv.clock env) config id "detached") accepted)
 
 let () = run "Lane Add-on runtime" ["optional extension", [

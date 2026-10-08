@@ -82,3 +82,34 @@ Read-only `/health?full=1` observation on 2026-10-08 reported status `ok`, base 
 `/Users/dancer/me`, runtime root `/Users/dancer/me/.masc`, and no root divergence.
 This locates the requested runtime; it does not prove deployment of this patch.
 No runtime-owned data or Keeper configuration was modified.
+
+## Additional source inspection and verification request
+
+The following inspections distinguish harmful shared mutation from private
+accumulation; they are not a proof that every mutable value in MASC is safe.
+
+| Path | Observation | Decision |
+| --- | --- | --- |
+| `Board_core.list_posts`, `Board_votes.get_all_karma` | Cache lookup, rebuild and publication occur inside `with_lock`; outputs are immutable lists. Ranking uses `Board_sort`. | No repair justified by this inspection. Writer invalidation sites were located, but their full lifecycle is not certified here. |
+| `Keeper_identity_tool_search.carry_from_history` | Hashtbl and refs are allocated inside the call; returned names/dropped lists do not expose those cells. Inputs include the carry window. | Keep private accumulation; replacing it mechanically would not fix a demonstrated sharing defect. |
+| `File_version_cache` consumers | Schedule state, prompt body/split, and ask event lists are the cached values inspected. Schedule Memory backend bypasses filesystem-version caching. | No shared mutable value identified in these inspected consumers. This does not certify all possible polymorphic callers or filesystem races. |
+| `Keeper_run_tools_hook_accumulator.freeze` | Copies immutable output fields from the turn's callback accumulator. | No alias to a mutable output cell identified; callback serialization is a separate requirement, not proven by the word “freeze”. |
+| `Keeper_tool_composition_plan_index` | Mutable list is owned by the turn gate, unlike the removed process-global identity index. | No mechanical conversion in this slice; retained-gate lifetime deserves its own evidence before claiming safety. |
+
+Requested targeted behavior workflow:
+
+- Run: https://github.com/jeong-sik/masc/actions/runs/37776731943
+- Exact source: `f888f5f4923120400f7f5158e4bcb9173e6647a2` (both code repairs).
+- Suites: `test_keeper_identity_tools`, `test_keeper_tool_approval_gate`,
+  `test_keeper_tool_approval_policy`, `test_dashboard_http_core`,
+  `test_dashboard_namespace_truth`.
+- `minimal=true`: broad sandbox/presentation setup excluded by the workflow.
+- At the audit boundary the job was `in_progress`; no type-check or test success
+  is claimed. Do not redispatch just because this observation is old; inspect
+  this run's actual terminal result at the next work boundary.
+- This is targeted branch verification, not approved-combination verification,
+  full Release CI, a GitHub approval, or runtime deployment evidence.
+
+Completion remains unproven until the selected checks are assessed and any
+failures attributable to these changes are resolved. Broader producer inspection
+and review/integration evidence also remain separate from these source findings.

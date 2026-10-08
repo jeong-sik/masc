@@ -266,9 +266,13 @@ def journal_mailbox_recovers_terminal_tail(executable: str, state_kind: str) -> 
             'delivery_key': {'kind': 'operation', 'operation_id': operation_id}}]
 
     def operation():
+        # The server writes a turn's last journal lines before it makes the
+        # operation record terminal (Keeper_owner.on_execution_settled), so the
+        # record is Running until the journal fixture serves its tail.
+        state = state_kind if announce.is_set() else 'Running'
         result = {'schema': 'masc.keeper_chat_operation.v1', 'operation_id': operation_id,
-                  'state': state_kind}
-        if state_kind == 'Running':
+                  'state': state}
+        if state == 'Running':
             result['started_at'] = now
         else:
             result['completed_at'] = now + 3

@@ -522,7 +522,8 @@ let test_openai_tool_route_conflict_is_transactional () =
          ())
   in
   (match retry_events with
-   | [ ContentBlockStart { index = 0; content_type = "thinking"; _ }
+   | [ MessageStart {id="chunk-1";model="model-1";usage=None}
+     ; ContentBlockStart { index = 0; content_type = "thinking"; _ }
      ; ContentBlockDelta { index = 0; delta = ThinkingDelta "plan" }
      ; ContentBlockStart { index = 1; content_type = "text"; _ }
      ; ContentBlockDelta { index = 1; delta = TextDelta "answer" }
@@ -534,13 +535,13 @@ let test_openai_tool_route_conflict_is_transactional () =
   let shared_index_conflict, _ =
     S.openai_chunk_to_events
       shared_index_state
-      (openai_chunk
-         ~delta_tool_calls:
-           [ tc 0 "call-a" "first" (Some (S.Args_complete {|{"a":1}|}))
-           ; tc 0 "call-b" "second" (Some (S.Args_complete {|{"b":2}|}))
-           ; { S.tc_index = 0; tc_id = None; tc_name = None; tc_arguments = None }
-           ]
-         ())
+      { (openai_chunk
+           ~delta_tool_calls:
+             [ tc 0 "call-a" "first" (Some (S.Args_complete {|{"a":1}|}))
+             ; tc 0 "call-b" "second" (Some (S.Args_complete {|{"b":2}|}))
+             ; { S.tc_index = 0; tc_id = None; tc_name = None; tc_arguments = None }
+             ]
+           ()) with chunk_id=""; chunk_model="" }
   in
   (match shared_index_conflict with
    | [ SSEParseFailed { reason; _ } ] ->
@@ -558,7 +559,8 @@ let test_openai_tool_route_conflict_is_transactional () =
          ())
   in
   match shared_index_retry with
-  | [ ContentBlockStart { index = 0; content_type = "tool_use"; _ }
+  | [ MessageStart {id="chunk-1";model="model-1";usage=None}
+    ; ContentBlockStart { index = 0; content_type = "tool_use"; _ }
     ; ContentBlockDelta { index = 0; delta = InputJsonSnapshot {|{"a":1}|} }
     ] -> ()
   | _ -> fail "same-key journal rollback must restore the missing route"
@@ -595,7 +597,10 @@ let test_openai_event_edge_branches () =
   let first_tool_events, _ =
     S.openai_chunk_to_events tool_state (openai_chunk ~delta_tool_calls:[ tc_empty ] ())
   in
-  check_event_count "empty-args tool starts block only" 1 first_tool_events;
+  (match first_tool_events with
+   | [MessageStart {id="chunk-1";model="model-1";usage=None};
+      ContentBlockStart {index=0;content_type="tool_use";tool_id=Some "call-1";tool_name=Some "search"}] -> ()
+   | _ -> fail "empty-args tool emits its reported prelude and block header only");
   let reused_tool_events, _ =
     S.openai_chunk_to_events tool_state (openai_chunk ~delta_tool_calls:[ tc_none ] ())
   in
@@ -607,7 +612,8 @@ let test_openai_event_edge_branches () =
       (openai_chunk ~finish_reason:"refusal" ~chunk_usage:(usage ()) ())
   in
   match refusal_finish_events with
-  | [ MessageDelta { stop_reason = Some Refusal; usage = Some _ } ] -> ()
+  | [ MessageStart {id="chunk-1";model="model-1";usage=None};
+      MessageDelta { stop_reason = Some Refusal; usage = Some _ } ] -> ()
   | _ -> fail "expected refusal finish reason to map to Refusal"
 ;;
 

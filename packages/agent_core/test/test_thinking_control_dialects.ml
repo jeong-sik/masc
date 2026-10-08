@@ -738,9 +738,12 @@ let test_ollama_cloud_openai_compat_streams_reasoning_delta () =
       chunk
   in
   match events with
-  | [ ContentBlockStart { content_type = "thinking"; _ }
+  | [ MessageStart {id;model;usage=None}
+    ; ContentBlockStart { content_type = "thinking"; _ }
     ; ContentBlockDelta { delta = ThinkingDelta "9.9 is bigger."; _ }
-    ] -> ()
+    ] ->
+      check string "reported response id" chunk.chunk_id id;
+      check string "reported model" chunk.chunk_model model
   | _ -> fail "expected delta.reasoning to emit thinking block events, not visible text"
 ;;
 
@@ -938,7 +941,8 @@ let test_declared_reasoning_content_accumulates_as_typed_thinking () =
   let events1, _ = S.openai_chunk_to_events state chunk1 in
   let events2, _ = S.openai_chunk_to_events state chunk2 in
   match events1, events2 with
-  | ( [ ContentBlockStart { index = 0; content_type = "thinking"; _ }
+  | ( [ MessageStart {id="qwen-live-1";model="Qwen3.6-35B-A3B";usage=None}
+      ; ContentBlockStart { index = 0; content_type = "thinking"; _ }
       ; ContentBlockDelta { index = 0; delta = ThinkingDelta "inspect " }
       ]
     , [ ContentBlockDelta { index = 0; delta = ThinkingDelta "repository" } ] ) -> ()

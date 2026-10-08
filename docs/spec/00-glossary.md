@@ -1433,6 +1433,49 @@ status: reference
   남아 다음 로드에서 다시 쓰인다.
   → [Dos_lane](../../lib/dos_lane/dos_lane.mli)
 
+**DOS Core Identity (DOS 코어 식별자)**
+: 실행 중인 서버 프로세스가 링크한 `ocaml-dos` 코어의 정체성을 나타내는 식별 계약(#41812).
+  바이너리가 링크한 실제 코어 소스 다이제스트(`source_digest`), CI 고정 핀의 다이제스트
+  (`pinned_source_digest`), 그리고 두 다이제스트의 일치 여부(`matches_pin`)로 구성된다.
+  `Msx_lane.core`와 대칭을 이루며, `masc_dos_meta` 도구를 통해 게임 로드나 기계 기동, 조종권
+  (`Controller`) 획득 없이도 서버의 코어 일치 상태를 무부작용으로 검증할 수 있다. 다이제스트는
+  `ocaml-dos` 빌드 시점에 `lib/` 소스로부터 계산되므로(`Dos_core_identity`), 커밋 이력이 없는
+  opam 릴리스 패키지 환경에서도 대상 소스 불일치를 결정론적으로 감지한다(전체 바이너리 무결성이나
+  하위 디렉터리 변조를 검증하는 것은 아님).
+  → [Dos_lane.core](../../lib/dos_lane/dos_lane.mli) ·
+  [Tool_misc_dos_lane](../../lib/tool_misc_dos_lane.ml) ·
+  [masc_dos_meta](../../config/tools/masc_dos_meta.toml)
+
+**DOS Program Inventory (DOS 프로그램 인벤토리)**
+: 공유 DOS 머신에 배치된 연산자 소유 프로그램들의 정적 자산 목록 및 메타데이터 계약(#41819).
+  기본 위치는 `<base-path>/.masc/dos/programs/`이며, MASC 설치나 네트워크 다운로드로 채워지지 않고
+  연산자가 직접 배치한다. 읽기 전용 도구 `masc_dos_inventory`를 통해 머신을 기동하거나 조종권
+  (`Controller`)을 획득하지 않고도 무부작용으로 기본 자산을 조회할 수 있다.
+  - **기본 자산 범위 (Base Inventory Scope)**: 최상위의 단독 일반 파일(Regular)과 프로그램 디렉터리를
+    열거한다. 일반 파일은 이름·바이트 크기·SHA-256 다이제스트를 노출하며(확장자 필터링 없이 직렬화),
+    디렉터리는 이름과 직속 하위 파일 목록(`files`)을 담는다(디렉터리 자체에는 바이트 크기·해시를 두지
+    않음). 이 정보는 기본 배치 자산(`asset_scope: "base_inventory"`)만을 나타내며, `masc_dos_load`
+    시점에 합성되는 영속 저장본(`saved_overlay: "applied_on_load"`)이나 런타임에 게임이 생성한 파일은
+    포함하지 않는다.
+  - **호스트 경로 은닉 (Host Path Redaction)**: 작업공간 외부의 호스트 파일시스템 경로는 도구 출력과
+    오류 메시지 전반에서 엄격히 마스킹되며, 인벤토리 경계(`programs/`) 기준의 상대 이름만 노출된다.
+  - **소유 루트 권한 결속 및 실패 표면 분리 (Owned Inventory Root & Failure Separation)**: 인벤토리
+    열거와 해시 계산은 정규화된 루트 디스크립터를 잡은 상태(`Fs_compat.with_owned_inventory_root`)에서
+    이루어지며, 각 하위 항목은 `O_NOFOLLOW`로 열어 디스크립터 식별자(`fstat`)를 대조한다. 도트 항목(`.`, `..`)은
+    필터링되어 결정론적 정렬을 유지한다. 실패 표면은 둘로 분리된다:
+    - **개별 항목 실패**: 인벤토리 루트 밖으로 빠져나가는 심볼릭 링크, 비정규 파일, 디렉터리 내부 교체
+      경쟁은 도구 전체를 중단하지 않고 해당 항목의 `kind: "unavailable"` 및 사유로 보고된다.
+    - **루트 수준 실패**: 인벤토리 루트 디렉터리 자체가 열거 도중 교체되거나 파일시스템 접근이 불가한
+      경우 도구 호출 전체가 `Runtime_failure`로 거절된다.
+  - **게임 중립성 및 호환성 비보증 (Game-Neutral & No Compatibility Guarantee)**: MASC 런타임과 도구는
+    특정 상업용 게임의 내부 포맷을 해석하거나 제목별로 특화 분기하지 않는다. 디렉터리 내 실행 파일 후보
+    (`executable_candidates`)와 기본 부팅 파일(`default_boot`)은 정적 명명 규칙에 따라 객관적으로
+    제시될 뿐이며, 에뮬레이터 상에서의 실제 실행 성공이나 바이너리 호환성을 사전에 보증하는 것은 아니다.
+  → [Tool_misc_dos_lane](../../lib/tool_misc_dos_lane.ml) ·
+  [Fs_compat.with_owned_inventory_root](../../lib/fs_compat/fs_compat.mli) ·
+  [Fs_compat.read_owned_directory](../../lib/fs_compat/fs_compat.mli) ·
+  [DOS Programs Runbook](../operations/dos-programs-runbook.md)
+
 **조종권 (Controller)**
 : DOS Lane 기계의 시간을 움직일 수 있는 한 참가자의 차례. 참가자는 Keeper,
   운영자(`Admin`), 유효한 공유 DOS 플레이 초대(`Player`)의 이름으로 구분된다.

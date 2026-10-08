@@ -383,7 +383,7 @@ let test_inventory_directory_replacement_hides_child_names () =
             ~before_read:(fun real ->
               Unix.rename real moved;
               Unix.symlink outside real)
-            ~tool_name:"masc_dos_inventory" ~start_time:0.0 ~base_path
+            ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path
         in
         let response =
           Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result)

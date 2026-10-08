@@ -5175,6 +5175,14 @@ type schedule_form_refusal =
   ; sfr_workspace : workspace_input_identity option
   }
 
+type sent_image_read =
+  { sir_generation : int
+  ; sir_view : surface
+  ; sir_keeper : string option
+  ; sir_name : string
+  ; sir_authority : unit ref
+  }
+
 type lane_nested_read =
   | Lane_subscriptions_read
   | Lane_declaration_read of { path : string; edit : bool }
@@ -5422,6 +5430,7 @@ type state = {
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   (* Any new input cancels an outstanding asynchronous image preview. *)
+  mutable sent_image_read: sent_image_read option;
   (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
      set the loop draws no frames and every key belongs to the emulator. The
      machine is [Option] so it exists only once the screen has been opened,
@@ -9003,6 +9012,7 @@ let create_state
   image_open = false;
   browser_viewport = None;
   image_request_generation = 0;
+  sent_image_read = None;
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;

@@ -9161,6 +9161,18 @@ let conversation_image state =
       | Some image -> image, Masc_tui_image_preview.Staged_is_newer
       | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
 
+(* Settle the exact interrupted preview without replacing a newer selection. *)
+let settle_retired_sent_image state =
+  match state.sent_image_read with
+  | Some pending when pending.sir_authority != state.workspace_read_authority ->
+      state.sent_image_read <- None;
+      if not state.msx_open && pending.sir_generation = state.image_request_generation
+         && pending.sir_view = state.view && pending.sir_keeper = state.msg_target_keeper_name then
+        chat_notice state ~keeper_name:pending.sir_keeper ~kind:Notice_failure
+          (Printf.sprintf "sent image %s: preview interrupted by workspace reconnection; reopen the image after reconnecting"
+             pending.sir_name)
+  | Some _ | None -> ()
+
 (* Fetch retained wire bytes through the authenticated artifact endpoint. No
    local filename or reference-supplied URL is ever opened. The render fiber
    receives only the decoded image after network work completes. *)
@@ -9175,6 +9187,8 @@ let open_stored_image state ~mailbox ~notice ~name reference =
     let keeper_name = state.msg_target_keeper_name in
     let generation = state.image_request_generation in
     let view = state.view in
+    state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
+      sir_keeper=keeper_name; sir_name=name; sir_authority=state.workspace_read_authority};
     let run () =
       let result =
         (* The authenticated HTTP client needs the fiber's Eio handlers.
@@ -9194,7 +9208,9 @@ let open_stored_image state ~mailbox ~notice ~name reference =
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-    | None -> notice ~kind:Notice_failure "sent image preview requires an active connection"
+    | None ->
+        state.sent_image_read <- None;
+        notice ~kind:Notice_failure "sent image preview requires an active connection"
   end
   end
 
@@ -11023,6 +11039,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.lane_addons <- None;
   state.lane_addons_cached <- Masc_tui_lane_addons.initial;
   state.lane_nested_read_resume <- None;
+  state.sent_image_read <- None;
   reset_verification_rows state;
   state.verification <- None;
   state.verification_error <- None;
@@ -11479,6 +11496,7 @@ let apply_server_identity_reading state reading =
   | Workspace_identity_match_unconfirmed _ as unconfirmed ->
     state.workspace_identity <- unconfirmed;
     suspend_workspace_readings state;
+    settle_retired_sent_image state;
     (match !msx_pending_poll with
      | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
      | Poll_ready _ | Poll_pending _ -> ())
@@ -12363,6 +12381,7 @@ let read_authority state =
    that refresh brought. *)
 let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~(before : read_authority) =
+  settle_retired_sent_image state;
   resume_task_followups state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup;
   let workspace_moved = before.read_workspace <> state.workspace_authority in
@@ -16360,6 +16379,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
   | Sent_image_ready { generation; view; keeper_name; name; result } ->
+      (match state.sent_image_read with
+       | Some pending when pending.sir_generation = generation
+           && pending.sir_view = view && pending.sir_keeper = keeper_name
+           && pending.sir_name = name -> state.sent_image_read <- None
+       | Some _ | None -> ());
       if not state.msx_open && generation = state.image_request_generation
          && view = state.view && keeper_name = state.msg_target_keeper_name then begin
         let notice = chat_notice state ~keeper_name in

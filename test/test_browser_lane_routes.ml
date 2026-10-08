@@ -194,7 +194,7 @@ let test_a_refused_poll_names_its_reason () =
    server itself lists. *)
 let test_the_connection_list_says_where_the_bidi_host_stands () =
   let module Record = Masc.Browser_bidi_host_record in
-  let module Launcher = Masc.Browser_lane_launcher in
+  let module Status = Masc.Browser_bidi_host_status in
   let module U = Yojson.Safe.Util in
   let base = Filename.temp_dir "masc-browser-lane-clients-" "" in
   let lane = List.fold_left Filename.concat base [ ".masc"; "browser-lane" ] in
@@ -206,6 +206,16 @@ let test_the_connection_list_says_where_the_bidi_host_stands () =
     | _ -> fail "the connection list is not an object"
   in
   let host fields = List.assoc "bidiHost" fields in
+  (* What masc doctor says of the host, from the same observation. *)
+  let doctor () =
+    match
+      List.find_opt
+        (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_bidi_host)
+        (Onboarding_status.inspect ~base_path:(Some base)).checks
+    with
+    | Some found -> found.condition
+    | None -> fail "the doctor says nothing of the BiDi host"
+  in
   let client_ids fields =
     U.(List.assoc "clients" fields |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string))
   in
@@ -249,7 +259,9 @@ let test_the_connection_list_says_where_the_bidi_host_stands () =
   let fields = listing () in
   check string "a host that runs" "running" U.(host fields |> member "state" |> to_string);
   check bool "and that this server does not list is said to be missing here" true
-    (String_util.contains_substring (said fields) "This server does not list that client");
+    (String_util.contains_substring (said fields) "This server lists no BiDi connection");
+  check bool "which the doctor does not vouch for" true
+    (doctor () = Onboarding_status.Needs_verification);
   let info : Browser_lane.client_info =
     { client_id = lane_id; browser = Browser_lane.Firefox; version = "157.0"; engine_version = "157.0"
     ; transport = Browser_lane.Webdriver_bidi }
@@ -264,14 +276,19 @@ let test_the_connection_list_says_where_the_bidi_host_stands () =
     U.(host fields |> member "record" |> member "client_id" |> to_string);
   check bool "and says the host polls it" true
     (String_util.contains_substring (said fields) "It polls this server.");
-  (match Launcher.bidi_host_report_of_json (host fields) with
+  check bool "which is what satisfies the doctor" true (doctor () = Onboarding_status.Satisfied);
+  (match Status.report_of_json (host fields) with
    | Ok { state = Record.Running { pid; _ }; _ } -> check int "a reader of this build reads the report" (Unix.getpid ()) pid
    | Ok _ -> fail "the report was read as another state"
    | Error detail -> fail detail);
   (* A process that is no server does not say what a server would. *)
   Browser_lane.withdraw_serving_port ();
+  let fields = listing () in
   check bool "without a bound listener it does not claim to be polled" true
-    (String_util.contains_substring (said (listing ())) "not observed here")
+    (String_util.contains_substring (said fields) "not observed here");
+  check (list string) "the lane's connections are listed all the same" [ host_id ] (client_ids fields);
+  check bool "and the doctor does not vouch for the host" true
+    (doctor () = Onboarding_status.Needs_verification)
 
 let () =
   run "browser lane routes"

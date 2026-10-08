@@ -48,13 +48,12 @@ let goto = function
    own list. The BiDi host's state is that host's record on disk, which also
    says why a host that is not in the list ended. *)
 let clients_listing ~base_path =
-  let host = Browser_lane_launcher.observe ~base_path ~server:Browser_lane_launcher.current_server in
-  (* Listed with nothing in between that lets another fiber run, so the list
-     and what the report says of it are of one moment. *)
-  let clients = Browser_lane.active_clients () in
+  let host = Browser_bidi_host_status.observe ~base_path in
+  (* The list the report was made from, so the two say of one list. *)
   `Assoc
-    [ "clients", `List (List.map Browser_lane.client_json clients)
-    ; "bidiHost", Browser_lane_launcher.bidi_host_to_json host ]
+    [ "clients"
+    , `List (List.map Browser_lane.client_json (Browser_bidi_host_status.listed_clients host))
+    ; "bidiHost", Browser_bidi_host_status.to_json host ]
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/dashboard/browser-lane/clients"

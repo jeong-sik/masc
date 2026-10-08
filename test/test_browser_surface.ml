@@ -607,7 +607,7 @@ let test_keeper_hears_which_connection_serves_the_work () =
             (String_util.contains_substring (host_said data) fragment))
         [ "--remote-debugging-port PORT"
         (* This workspace has no browser lane, so its launcher is not there yet. *)
-        ; "then runs " ^ Filename.concat workspace ".masc/browser-lane/host/launch"
+        ; "then runs " ^ Filename.quote (Filename.concat workspace ".masc/browser-lane/host/launch")
           ^ " --bidi-url ws://127.0.0.1:PORT/session"
         ; "the operator first installs the lane by running the MASC browser host installer, \
            install-host.sh" ];
@@ -624,6 +624,8 @@ let test_keeper_hears_which_connection_serves_the_work () =
       let data = interact extension hover in
       check (list string) "a connected BiDi browser is offered for the retry" [id bidi]
         U.(data |> member "servingClients" |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string));
+      check (list string) "beside every connection of the same list" [id extension; id bidi]
+        U.(data |> member "clients" |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string));
       check bool "and the retry starts from that connection's own tabs" true
         (String_util.contains_substring U.(data |> member "retry" |> to_string) "list its tabs");
       check bool "an available BiDi connection needs no operator host remedy" false
@@ -664,8 +666,10 @@ let test_keeper_hears_which_connection_serves_the_work () =
       List.iter (fun fragment ->
           check bool ("with what comes before the next host: " ^ fragment) true
             (String_util.contains_substring (host_said data) fragment))
-        [ {|gave this reason: "BiDi command rejected: session not created".|}
-        ; "Firefox refused it a BiDi session"; "restarts that Firefox" ];
+        [ {|with this reason: "BiDi command rejected: session not created".|}
+        ; "Firefox refused it a BiDi session"
+        ; "The operator stops a host still attached to the Firefox at that address"
+        ; "that Firefox is restarted with --remote-debugging-port 9222 first" ];
       (* Work no BiDi connection does is refused without a word of the BiDi
          host, also when nothing connected serves it. *)
       ignore (Lane.disconnect_client ~client_id:extension.client_id);
@@ -739,9 +743,9 @@ let test_keeper_hears_why_the_bidi_host_is_gone () =
       List.iter (fun fragment ->
           check bool ("with why it ended and what comes before the next host: " ^ fragment) true
             (String_util.contains_substring (said data) fragment))
-        [ {|gave this reason: "BiDi connection ended: browser metadata frame write timed out".|}
-        ; "then runs " ^ Filename.concat workspace ".masc/browser-lane/host/launch"
-          ^ " --bidi-url ws://127.0.0.1:PORT/session" ];
+        [ {|with this reason: "BiDi connection ended: browser metadata frame write timed out".|}
+        ; "then runs " ^ Filename.quote (Filename.concat workspace ".masc/browser-lane/host/launch")
+          ^ " --bidi-url " ^ Filename.quote "ws://127.0.0.1:9222/session" ];
       check bool "the record itself stays with the readers that show it" true
         (U.(bidi data |> member "record") = `Null);
       (* A host that runs and holds the lock is named whatever the client

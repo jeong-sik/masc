@@ -79,6 +79,12 @@ port answers, and a result that may not have arrived is sent again before the
 next poll. The restarted server sees the same client ID, and Firefox is not
 asked for a new session.
 
+Sending a result again delivers it only when the first attempt was never
+handled. The server takes a result once, so when the first attempt arrived
+and only its answer was lost, the second is refused and the host logs that.
+A restarted server does not know requests the earlier process issued; a
+result for one of those is lost whichever attempt arrives.
+
 It ends by itself in three cases, and says which in its own log output:
 
 - Firefox closed the BiDi connection, or the connection failed. This ends a

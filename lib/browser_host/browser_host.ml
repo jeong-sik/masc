@@ -258,7 +258,8 @@ type result_undelivered =
   | Not_acknowledged
   | Issuer_moved
   | Token_unreadable of string
-  | Unreached_as_host_ended of http_error
+  | Refused_on_resend of http_error
+  | Unacknowledged_as_host_ended of http_error
   | Browser_left_first
 
 let http_error_message = function
@@ -275,8 +276,11 @@ let result_undelivered_message = function
   | Not_acknowledged -> "the server answered the result without an acknowledgement"
   | Issuer_moved -> "the server that issued the request stopped answering and another answers"
   | Token_unreadable detail -> detail
-  | Unreached_as_host_ended error ->
-      "the host was ending and its one attempt did not reach the server (" ^ http_error_message error ^ ")"
+  | Refused_on_resend error ->
+      "the server answered the re-sent result with " ^ http_error_message error
+      ^ "; it may have taken an earlier attempt"
+  | Unacknowledged_as_host_ended error ->
+      "the host was ending and its one attempt was not acknowledged (" ^ http_error_message error ^ ")"
   | Browser_left_first -> "the browser connection ended before the server acknowledged the result"
 
 (* A transport step under its deadline. The step's outcome stands when the
@@ -307,7 +311,7 @@ let post ~clock ~client ~server ~config ~info ~token path json =
           with
           (* cohttp-eio reports as [Failure] a peer that closed the connection
              before a response head, one that sent something that is not a
-             head, and a request it could not send. In each there is no
+             head, and a host name it could not resolve. In each there is no
              answer from the server, which a status or a body would be. *)
           | exception Failure _ -> Error No_response
           | response, body ->
@@ -440,16 +444,21 @@ let deliver link payload =
             | Unreached -> Unreached error))
 
 (* A result that may not have reached the server is sent again until it is
-   delivered or the server answers it. *)
-let rec publish link payload =
+   delivered or the server answers it. The server takes a result once: when
+   an earlier attempt did arrive and only its answer was lost, the attempt
+   after it is refused, and the host cannot tell that from a request the
+   server gave up on. A restarted server has no memory of the request, so
+   there the result is lost whichever attempt arrives. *)
+let rec publish ?(resent = false) link payload =
   match deliver link payload with
   | Delivered -> Ok ()
+  | Undelivered (Refused_by_server error) when resent -> Error (Refused_on_resend error)
   | Undelivered why -> Error why
   | Unreached error ->
       Log.Transport.warn "browser-host: result delivery failed: %s" (http_error_message error);
       Eio.Time.sleep link.clock reconnect_delay_sec;
       (match follow_workspace link with
-       | Unchanged -> publish link payload
+       | Unchanged -> publish ~resent:true link payload
        (* The server that issued the request no longer answers and another
           does; polling there registers the lane again. *)
        | Moved -> Error Issuer_moved)
@@ -460,7 +469,7 @@ let publish_once link payload =
   match deliver link payload with
   | Delivered -> Ok ()
   | Undelivered why -> Error why
-  | Unreached error -> Error (Unreached_as_host_ended error)
+  | Unreached error -> Error (Unacknowledged_as_host_ended error)
 
 let record_delivery = function
   | Ok () -> ()
@@ -612,8 +621,16 @@ let run_bidi env config url =
         match next with
         | Empty -> serve ()
         | Reject id ->
-            let* () = publish_while_attached (failure id "unsupported BiDi verb") in
-            serve ()
+            let payload = failure id "unsupported BiDi verb" in
+            (match Eio.Promise.peek ended with
+             (* Handed over as the connection ended: answered once, like a
+                command the connection ended under. *)
+             | Some reason ->
+                 record_delivery (publish_once link payload);
+                 Error (bidi_ended reason)
+             | None ->
+                 let* () = publish_while_attached payload in
+                 serve ())
         | Forward command ->
             let result =
               match

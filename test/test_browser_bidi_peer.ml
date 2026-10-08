@@ -174,6 +174,10 @@ let test_held_open_completion outcome () =
           ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port) (fun ~ended:_ _->outcome) in
         check (result unit string) "callback result preserved" outcome actual;
         check bool "socket EOF without any extra protocol write" true (Eio.Promise.await eof))))
+(* The window a scripted case gives the connection to attach and answer, and
+   the bound on the whole case. *)
+let scripted_timeout_sec = 1.
+let scripted_case_deadline_sec = 2.
 (* Firefox going away is told to whoever holds the connection, also when no
    command is in flight: a host waiting for work has to learn that the
    browser it serves is gone. *)
@@ -183,7 +187,9 @@ let test_a_closed_socket_ends_the_connection () =
       let clock=Eio.Stdenv.clock env in
       let listener=Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:1
         (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
-      let port=match Eio.Net.listening_addr listener with `Tcp (_,port)->port|_->fail "TCP expected" in
+      let port=match Eio.Net.listening_addr listener with
+        | `Tcp (_,port)->port
+        | `Unix _->fail "TCP expected" in
       let close,close_u=Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun ()->Eio.Switch.run (fun peer_sw ->
         let flow,_=Eio.Net.accept ~sw:peer_sw listener in
@@ -191,8 +197,8 @@ let test_a_closed_socket_ends_the_connection () =
         let key=match Ws_direct_eio.Handshake.request_key head with Ok key->key|Error e->fail e in
         Eio.Flow.copy_string (Ws_direct_eio.Handshake.server_response ~key) flow;
         Eio.Promise.await close));
-      Eio.Time.with_timeout_exn clock 2. (fun ()->
-        let actual=Peer.with_connection ~env ~timeout:1.
+      Eio.Time.with_timeout_exn clock scripted_case_deadline_sec (fun ()->
+        let actual=Peer.with_connection ~env ~timeout:scripted_timeout_sec
           ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port)
           (fun ~ended _->
             check bool "attached and idle: not ended" true (Eio.Promise.peek ended=None);

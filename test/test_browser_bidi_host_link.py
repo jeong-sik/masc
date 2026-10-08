@@ -32,8 +32,18 @@ RETRY_WAIT_SEC = 15
 # The lane answers an empty poll quickly, so a server that stops is noticed
 # by the next poll rather than at the end of a long one.
 POLL_WAIT_SEC = 0.2
+# A poll held longer than EXIT_WAIT_SEC, for the cases that need the host to
+# be inside one wait rather than between two.
+HELD_POLL_SEC = 10
 # A host that is going to exit does so well within this.
 EXIT_WAIT_SEC = 5
+# Process start, the WebSocket upgrade, session.new and the first poll.
+ATTACH_WAIT_SEC = 20
+# Once Firefox has left, the host gives a result already in flight
+# leaving_window_sec (0.25 s, browser_host.ml) to be acknowledged. The lane
+# holds its acknowledgement this long after Firefox left: inside that
+# window, with room on both sides.
+ACK_AFTER_LEAVING_SEC = 0.1
 # Long enough for a host that would wrongly exit to have done so.
 STAYS_ALIVE_SEC = 2
 PAGE = {"url": "https://example.test/", "title": "Fixture", "text": "fixture text",
@@ -49,8 +59,19 @@ class LaneState:
         self.result_posts = []
         self.drop_next_result = threading.Event()
         self.drop_every_result = False
+        # Take the next result as the real route does, lose the answer, and
+        # refuse the same result when it comes again.
+        self.take_then_drop_next_result = threading.Event()
+        self.taken = set()
+        # Hold the acknowledgement of the next result until the case lets go.
+        self.hold_ack = threading.Event()
+        self.release_ack = threading.Event()
+        self.result_received = threading.Event()
         self.disconnected = threading.Event()
         self.refuse_registration = False
+        self.poll_wait_sec = POLL_WAIT_SEC
+        # Statuses, or bodies the host cannot read, for the next polls.
+        self.poll_answers = queue.Queue()
 
 
 class LaneServer(http.server.ThreadingHTTPServer):
@@ -79,6 +100,21 @@ class Lane(http.server.BaseHTTPRequestHandler):
                 self.rfile.read(2)
         return json.loads(self.rfile.read(int(self.headers["Content-Length"])))
 
+    def answer(self, response):
+        data = response if isinstance(response, bytes) else json.dumps(response).encode()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def drop(self):
+        # The request arrived and no answer leaves.
+        self.close_connection = True
+        self.connection.shutdown(socket.SHUT_RDWR)
+
     def do_POST(self):
         body = self.body()
         state = self.server.state
@@ -95,19 +131,43 @@ class Lane(http.server.BaseHTTPRequestHandler):
                 self.send_error(400)
                 return
             try:
-                response = state.commands.get(timeout=POLL_WAIT_SEC)
+                scripted = state.poll_answers.get_nowait()
+            except queue.Empty:
+                pass
+            else:
+                if isinstance(scripted, int):
+                    self.send_error(scripted)
+                else:
+                    self.answer(scripted)
+                return
+            try:
+                response = state.commands.get(timeout=state.poll_wait_sec)
             except queue.Empty:
                 response = {"ok": True, "empty": True}
         elif self.path == "/browser-lane/result":
             state.result_posts.append(body)
+            state.result_received.set()
+            if body.get("id") in state.taken:
+                # The real route resolves a request once; the same result
+                # again finds nothing waiting for it.
+                self.send_error(400)
+                return
+            if state.take_then_drop_next_result.is_set():
+                state.take_then_drop_next_result.clear()
+                state.taken.add(body.get("id"))
+                state.results.put(body)
+                self.drop()
+                return
             if state.drop_every_result or state.drop_next_result.is_set():
-                # The request arrived and no answer leaves: to the host this
-                # is a result that may not have reached the server.
+                # Not taken either: to the host this is a result that may not
+                # have reached the server, and here it did not.
                 state.drop_next_result.clear()
-                self.close_connection = True
-                self.connection.shutdown(socket.SHUT_RDWR)
+                self.drop()
                 return
             state.results.put(body)
+            if state.hold_ack.is_set():
+                state.hold_ack.clear()
+                state.release_ack.wait(HELD_POLL_SEC)
             response = {"ok": True}
         elif self.path == "/browser-lane/disconnect":
             state.disconnected.set()
@@ -115,14 +175,7 @@ class Lane(http.server.BaseHTTPRequestHandler):
         else:
             self.send_error(404)
             return
-        data = json.dumps(response).encode()
-        try:
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        self.answer(response)
 
 
 def start_lane(port=0):
@@ -268,8 +321,9 @@ class BidiHostLink(unittest.TestCase):
         stop_lane(*entry)
 
     def attach(self, fixed):
-        """Start the host. [fixed] pins it to the lane with --server; without
-        it the workspace connection file names the port."""
+        """Start the host and wait for its first poll. [fixed] pins it to the
+        lane with --server; without it the workspace connection file names
+        the port."""
         argv = [str(HOST), "--base-path", str(self.base),
                 "--bidi-url", f"ws://127.0.0.1:{self.firefox.server_address[1]}/session"]
         if fixed:
@@ -281,7 +335,17 @@ class BidiHostLink(unittest.TestCase):
         self.process = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL,
                                         stdout=self.log, stderr=self.log)
         self.processes.append(self.process)
-        self.assertTrue(self.lane.state.polled.wait(EXIT_WAIT_SEC), self.host_log())
+        self.assertTrue(self.lane.state.polled.wait(ATTACH_WAIT_SEC), self.host_log())
+
+    def firefox_leaves(self):
+        for sock in self.firefox.state.sockets:
+            sock.shutdown(socket.SHUT_RDWR)
+
+    def wait_until(self, condition, what, within=EXIT_WAIT_SEC):
+        deadline = time.monotonic() + within
+        while not condition():
+            self.assertLess(time.monotonic(), deadline, what + "\n" + self.host_log())
+            time.sleep(0.02)
 
     def host_log(self):
         self.log.flush()
@@ -315,7 +379,12 @@ class BidiHostLink(unittest.TestCase):
         client = self.lane.state.polls[0]
         port = self.lane.server_port
         self.stop(self.lane)
-        self.assert_stays()
+        # Nothing listens on the port while the server is down, and nothing
+        # else takes it: a bound socket that does not listen refuses.
+        with socket.socket() as held:
+            held.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            held.bind(("127.0.0.1", port))
+            self.assert_stays()
         restarted, _ = self.lane_on(port)
         self.assertTrue(restarted.state.polled.wait(RETRY_WAIT_SEC), self.host_log())
         # The same client, and the same BiDi session: Firefox was not asked
@@ -337,40 +406,102 @@ class BidiHostLink(unittest.TestCase):
         self.assertTrue(self.call(moved)["ok"])
         self.assertEqual(self.firefox.state.methods.count("session.new"), 1)
 
-    def test_a_result_that_may_not_have_arrived_is_sent_again_not_run_again(self):
+    def test_a_result_the_server_never_handled_is_sent_again_not_run_again(self):
+        # The connection closed before the server handled the request at
+        # all. The server is still the same one, so the result sent again is
+        # the first it sees for that request.
         self.attach(fixed=True)
         self.lane.state.drop_next_result.set()
         answer = self.call(self.lane)
         self.assertTrue(answer["ok"], answer)
-        # The server saw the same result twice and took it once; the browser
-        # ran the command once.
+        # The same result arrived twice and was taken once; the browser ran
+        # the command once.
         self.assertEqual(len(self.lane.state.result_posts), 2)
         self.assertEqual(self.lane.state.result_posts[0], self.lane.state.result_posts[1])
         self.assertEqual(self.firefox.state.methods.count("browsingContext.getTree"), 1)
         self.assertIsNone(self.process.poll(), self.host_log())
 
+    def test_a_result_the_server_took_is_refused_when_sent_again(self):
+        # What the real route does when only its answer was lost: the request
+        # was resolved by the first attempt, so the second finds nothing
+        # waiting. The host says which case this may be and goes on.
+        self.attach(fixed=True)
+        self.lane.state.take_then_drop_next_result.set()
+        answer = self.call(self.lane)
+        self.assertTrue(answer["ok"], answer)
+        self.wait_until(lambda: len(self.lane.state.result_posts) == 2, "the result was not sent again",
+                        within=RETRY_WAIT_SEC)
+        self.assertEqual(self.firefox.state.methods.count("browsingContext.getTree"), 1)
+        self.assertTrue(self.call(self.lane)["ok"], "the host did not go on to the next command")
+        self.assertIn("result not delivered: the server answered the re-sent result with HTTP 400; "
+                      "it may have taken an earlier attempt", self.host_log())
+
+    def test_a_poll_the_server_fails_or_garbles_is_asked_again(self):
+        # A status the server gave, then a body that is JSON and not a poll
+        # answer. Each is followed by the host's pause and another poll.
+        self.attach(fixed=True)
+        self.lane.state.poll_answers.put(500)
+        self.lane.state.poll_answers.put(b'{"ok": true}')
+        self.wait_until(lambda: self.lane.state.poll_answers.qsize() == 0, "the polls were not asked again",
+                        within=RETRY_WAIT_SEC)
+        self.assertIsNone(self.process.poll(), self.host_log())
+        answer = self.call(self.lane)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(self.firefox.state.methods.count("session.new"), 1)
+
     def test_firefox_leaving_ends_a_host_that_waits_for_work(self):
+        # The lane holds an empty poll longer than the host is given to exit,
+        # so only a host that leaves its wait can pass.
+        self.lane.state.poll_wait_sec = HELD_POLL_SEC
         self.attach(fixed=True)
         self.assertTrue(self.call(self.lane)["ok"])
-        for sock in self.firefox.state.sockets:
-            sock.shutdown(socket.SHUT_RDWR)
+        polls = len(self.lane.state.polls)
+        self.wait_until(lambda: len(self.lane.state.polls) > polls, "the host did not poll again")
+        self.firefox_leaves()
         self.assert_ends("BiDi connection ended: BiDi EOF")
         # The server is told, so the dead connection is not listed.
         self.assertTrue(self.lane.state.disconnected.wait(EXIT_WAIT_SEC))
+
+    def test_firefox_leaving_ends_a_host_whose_server_is_down(self):
+        self.attach(fixed=True)
+        self.stop(self.lane)
+        self.wait_until(lambda: "poll failed" in self.host_log(), "the host did not notice the server")
+        self.firefox_leaves()
+        self.assert_ends("BiDi connection ended: BiDi EOF")
 
     def test_firefox_leaving_ends_a_host_that_is_sending_a_result_again(self):
         self.attach(fixed=True)
         self.lane.state.drop_every_result = True
         self.lane.state.commands.put({"id": str(uuid.uuid4()), "verb": "tabs.list", "args": {}})
-        deadline = time.monotonic() + EXIT_WAIT_SEC
-        while not self.lane.state.result_posts:
-            self.assertLess(time.monotonic(), deadline, self.host_log())
-            time.sleep(0.05)
-        for sock in self.firefox.state.sockets:
-            sock.shutdown(socket.SHUT_RDWR)
+        self.wait_until(lambda: self.lane.state.result_posts, "no result was posted")
+        self.firefox_leaves()
         self.assert_ends("BiDi connection ended: BiDi EOF")
-        # The host does not wait out a server that is not answering once the
-        # browser is gone, and it says what became of the result.
+        # The pause before the next attempt is not waited out once the
+        # browser is gone, and the host says what became of the result.
+        self.assertIn("result not delivered: the browser connection ended before the server acknowledged the result",
+                      self.host_log())
+
+    def test_a_result_acknowledged_just_after_firefox_left_is_not_reported_lost(self):
+        self.attach(fixed=True)
+        self.lane.state.hold_ack.set()
+        self.lane.state.commands.put({"id": str(uuid.uuid4()), "verb": "tabs.list", "args": {}})
+        self.assertTrue(self.lane.state.result_received.wait(EXIT_WAIT_SEC), self.host_log())
+        self.firefox_leaves()
+        time.sleep(ACK_AFTER_LEAVING_SEC)
+        self.lane.state.release_ack.set()
+        self.assert_ends("BiDi connection ended: BiDi EOF")
+        self.assertNotIn("result not delivered", self.host_log())
+
+    def test_a_result_never_acknowledged_does_not_hold_a_host_firefox_left(self):
+        self.attach(fixed=True)
+        self.lane.state.hold_ack.set()
+        self.lane.state.commands.put({"id": str(uuid.uuid4()), "verb": "tabs.list", "args": {}})
+        self.assertTrue(self.lane.state.result_received.wait(EXIT_WAIT_SEC), self.host_log())
+        self.firefox_leaves()
+        try:
+            self.assert_ends("BiDi connection ended: BiDi EOF")
+        finally:
+            self.lane.state.release_ack.set()
         self.assertIn("result not delivered: the browser connection ended before the server acknowledged the result",
                       self.host_log())
 
@@ -382,6 +513,7 @@ class BidiHostLink(unittest.TestCase):
         self.assertEqual(answer.get("effectPhase"), "not_started")
         self.assertEqual(answer["error"], "BiDi EOF")
         self.assert_ends("BiDi connection ended: BiDi EOF")
+        self.assertEqual(len(self.lane.state.result_posts), 1, "answered once")
 
     def test_a_refused_registration_ends_the_host(self):
         self.lane.state.refuse_registration = True

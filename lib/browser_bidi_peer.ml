@@ -249,7 +249,12 @@ let with_connection ~env ~timeout ~url use =
            | Ok reply->reply
            | Error `Deadline_exceeded->
              disconnect "BiDi transport deadline exceeded";
-             Error "BiDi transport deadline exceeded") in
+             Error "BiDi transport deadline exceeded"
+           (* The caller gave up on a command already written. Its reply is
+              unknown, so nothing more is written behind it. *)
+           | exception (Eio.Cancel.Cancelled _ as cancelled)->
+             disconnect "BiDi command cancelled";
+             raise cancelled) in
       (* The host owns the whole command deadline. A cancelled command ends this
          connection instead of admitting another write behind an unknown one. *)
       Ok (create ~command) in

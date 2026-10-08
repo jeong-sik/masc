@@ -74,6 +74,15 @@ val activity_json : unit -> Yojson.Safe.t
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
 
+val settle_checkpoint_effect :
+  restore:bool ->
+  persist:(Server_msx_checkpoint_receipt.state -> (unit, string) result) ->
+  notify:(unit -> unit) -> Server_msx_checkpoint_receipt.state -> (unit, string) result
+(** Settle completed worker evidence, then notify a committed or possibly applied
+    restore even if persistence failed. Saves and proven refusals stay silent.
+    A notification exception does not rewrite the stored receipt; its error
+    retains any persistence failure too. Cancellation still propagates. *)
+
 (** Save ([restore=false]) or restore the machine in the [config] workspace's
     checkpoint slot. An accepted restore wakes the Lane instances bound to the
     machine once, with [Machine_changed Msx]; a save or a refusal wakes nothing. *)

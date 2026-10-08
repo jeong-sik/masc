@@ -512,6 +512,19 @@ let checkpoint_request_with_workspace ~config ~body =
   | `Assoc fields when List.mem_assoc "expected_workspace" fields -> decode_write_body ~config ~body
   | _ -> Error (`Bad_request,write_error_json "checkpoint operation requires expected_workspace")
 
+let settle_checkpoint_effect ~restore ~persist ~notify settled =
+  let persisted = persist settled in
+  let notify_needed = match settled with
+    | Checkpoint_receipt.Committed _ | Unknown _ -> restore
+    | Pending | Refused _ -> false in
+  if not notify_needed then persisted else
+  match notify () with
+  | () -> persisted
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+      let message = "MSX restore observer notification failed: " ^ Printexc.to_string exn in
+      Error (match persisted with Ok () -> message | Error cause -> cause ^ "; " ^ message)
+
 let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
   let refused binding message =
     `Service_unavailable, `Assoc (receipt_json ~config
@@ -553,13 +566,13 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
                 | exn -> Checkpoint_receipt.Unknown (Printexc.to_string exn) in
               (* Publish from the worker, even when its HTTP caller stopped
                  waiting. A failed store write must never manufacture success. *)
-              match Checkpoint_receipt.settle ~path ~epoch:checkpoint_epoch binding settled with
-              | Error error -> Error (Checkpoint_receipt.error_to_string error)
-              | Ok () ->
-                  (match settled with
-                   | Committed _ | Unknown _ when restore -> machine_changed ~config
-                   | Pending | Committed _ | Refused _ | Unknown _ -> ());
-                  Ok {Checkpoint_receipt.binding;epoch=checkpoint_epoch;state=settled} in
+              match settle_checkpoint_effect ~restore
+                ~persist:(fun state ->
+                  Checkpoint_receipt.settle ~path ~epoch:checkpoint_epoch binding state
+                  |> Result.map_error Checkpoint_receipt.error_to_string)
+                ~notify:(fun () -> machine_changed ~config) settled with
+              | Error message -> Error message
+              | Ok () -> Ok {Checkpoint_receipt.binding;epoch=checkpoint_epoch;state=settled} in
             (match Executor_pool_ref.submit_strict run with
              | Ok (Ok receipt) ->
                  `OK, `Assoc (receipt_json ~config receipt)

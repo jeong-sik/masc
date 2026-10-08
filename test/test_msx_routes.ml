@@ -308,6 +308,36 @@ let test_checkpoint_receipt_lifecycle () =
        | Existing {state=Committed observed;epoch="server-a";_} -> observed=completed | _ -> false))
 ;;
 
+let test_checkpoint_settlement_notifies_possible_restore () =
+  let module Receipt = Server_msx_checkpoint_receipt in
+  let committed = Receipt.Committed {
+    mark={Msx_lane.count=1;incarnation="restored-machine"}; checkpoint_sha256=String.make 64 'a'} in
+  List.iter (fun (label, restore, state, expected_notification) ->
+    List.iter (fun persisted ->
+      let calls = ref [] in
+      let result = Route.settle_checkpoint_effect ~restore
+        ~persist:(fun actual ->
+          check bool (label ^ " persists exact effect evidence") true (actual=state);
+          calls := "persist" :: !calls; persisted)
+        ~notify:(fun () -> calls := "notify" :: !calls) state in
+      check bool (label ^ " retains persistence result") true (result=persisted);
+      check (list string) (label ^ " effect notification is independent of persistence")
+        (if expected_notification then ["persist";"notify"] else ["persist"])
+        (List.rev !calls)) [Ok (); Error "receipt store locked"])
+    ["committed restore",true,committed,true;
+     "possibly applied restore",true,Receipt.Unknown "worker raised after dispatch",true;
+     "proven refused restore",true,Receipt.Refused "no machine",false;
+     "committed save",false,committed,false;
+     "unknown save",false,Receipt.Unknown "save worker failed",false];
+  let original = ref None in
+  let notification_result = Route.settle_checkpoint_effect ~restore:true
+    ~persist:(fun state -> original:=Some state; Error "receipt store locked")
+    ~notify:(fun () -> raise (Failure "observer unavailable")) committed in
+  check bool "notification failure never replaces recorded effect evidence" true (!original=Some committed);
+  check (result unit string) "both independent failures remain visible"
+    (Error "receipt store locked; MSX restore observer notification failed: Failure(\"observer unavailable\")") notification_result
+;;
+
 let test_correlated_checkpoint_route () =
   with_tick_machine (fun () ->
     let config = Masc.Workspace.default_config (Filename.temp_dir "msx-correlated-" "") in
@@ -1012,6 +1042,7 @@ let () =
     "msx routes"
     [ ( "checkpoint"
       , [ test_case "correlated checkpoint route" `Quick test_correlated_checkpoint_route
+        ; test_case "checkpoint settlement notifies possible restore" `Quick test_checkpoint_settlement_notifies_possible_restore
         ; test_case "checkpoint receipt durable lifecycle" `Quick test_checkpoint_receipt_lifecycle
         ; test_case
             "validation, worker, restore and storage failure"

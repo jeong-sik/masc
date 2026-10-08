@@ -251,6 +251,8 @@ let test_detail_quotes_dotted_model_section () =
     ; max_tokens = None
     ; context = None; model_context = None
     ; same_login = []
+    ; login_group = None
+    ; account_label = None
     }
   in
   let detail = T.detail_lines row in
@@ -326,6 +328,77 @@ let test_detail_names_the_account () =
     (List.filteri (fun index _ -> index < 3)
        (T.detail_lines ~account_email:"someone@example.com" alpha))
 
+(* Ids of one login sit together and carry the same [#n]; the old order by
+   provider id alone put another account between them. *)
+let test_one_login_is_adjacent_and_tagged () =
+  let provider id home =
+    [ "[providers." ^ id ^ "]"; "protocol = 'codex-app-server'"; "command = 'codex'";
+      "is-non-interactive = true"; "model-set = 'family'";
+      "account-home = '" ^ home ^ "'" ]
+  in
+  let rows =
+    parse
+      ([ "[models.shared]"; "max-context = 500000";
+         "[model_sets.family]"; "models = ['shared']" ]
+       @ provider "codex_a" "/tmp/login-one"
+       @ provider "codex_m" "/tmp/login-two"
+       @ provider "codex_z" "/tmp/login-one")
+  in
+  check (Alcotest.list string) "the two ids of one login are adjacent"
+    [ "codex_a"; "codex_z"; "codex_m" ]
+    (List.map (fun (r : T.row) -> r.provider) rows);
+  check (Alcotest.list (Alcotest.option int)) "a shared login is numbered, a single id is not"
+    [ Some 1; Some 1; None ]
+    (List.map (fun (r : T.row) -> r.login_group) rows);
+  check (Alcotest.list string) "without a label the column shows the group"
+    [ "codex_a #1"; "codex_z #1"; "codex_m" ]
+    (List.map T.provider_text rows);
+  let labelled =
+    List.map (fun (r : T.row) -> { r with account_label = Some "someone" }) rows
+  in
+  check (Alcotest.list string) "a label replaces the group number"
+    [ "codex_a someone"; "codex_z someone"; "codex_m someone" ]
+    (List.map T.provider_text labelled);
+  (* The drawn column is the measured column: every row starts its model
+     name at the same cell with the label in place. *)
+  let width = 120 in
+  check bool "the labelled table fits a wide pane" true (T.fits ~width labelled);
+  (match T.render ~width ~pane:width labelled with
+   | _header :: lines ->
+     let model_at line =
+       let rec find i =
+         if i + 6 > String.length line then -1
+         else if String.sub line i 6 = "shared" then i else find (i + 1) in
+       find 0 in
+     check (Alcotest.list int) "model names line up under one column"
+       (List.map (fun _ -> model_at (List.hd lines)) lines)
+       (List.map model_at lines)
+   | [] -> Alcotest.fail "no table was drawn")
+
+let test_account_label_of_email () =
+  check string "the part before @" "someone" (T.account_label_of_email "someone@example.com");
+  check string "no @ keeps the text" "someone" (T.account_label_of_email "someone");
+  check bool "a long name is cut to the label column" true
+    (Masc_tui_message_layout.display_width
+       (T.account_label_of_email "a-very-long-account-name-indeed@example.com")
+     <= 18)
+
+let test_keepers_on_login () =
+  let alpha = row_named (parse sample) "alpha" in
+  let row = { alpha with provider = "codex_a"; same_login = [ "codex_z" ] } in
+  let assignments =
+    [ "zed", "codex_z.model"; "amy", "codex_a.model"; "lane-user", "sonnet-lane";
+      "other", "codex_ab.model" ]
+  in
+  check (Alcotest.list string) "direct assignments on any id of the login, sorted"
+    [ "amy"; "zed" ] (T.keepers_on_login ~assignments row);
+  check string "the count comes before the names"
+    "Keepers assigned directly (lanes not counted): 2 - amy, zed"
+    (List.nth (T.detail_lines ~keepers:[ "amy"; "zed" ] row) 2);
+  check string "an empty login says none"
+    "Keepers assigned directly (lanes not counted): none"
+    (List.nth (T.detail_lines ~keepers:[] row) 2)
+
 let test_invalid_is_error () =
   match T.parse ["[models.broken"] with
   | Error _ -> () | Ok _ -> Alcotest.fail "bad source was presented as an empty model list"
@@ -384,6 +457,9 @@ let () =
        Alcotest.test_case "shared model preserves each account and context" `Quick test_accounts_and_sets;
        Alcotest.test_case "ids on one login name each other" `Quick test_same_login_names_other_ids;
        Alcotest.test_case "detail names the account" `Quick test_detail_names_the_account;
+       Alcotest.test_case "one login is adjacent and tagged" `Quick test_one_login_is_adjacent_and_tagged;
+       Alcotest.test_case "account label of an email" `Quick test_account_label_of_email;
+       Alcotest.test_case "keepers on a login" `Quick test_keepers_on_login;
        Alcotest.test_case "invalid source is visible" `Quick test_invalid_is_error ])
     ; ( "parse"
       , [ Alcotest.test_case "reads both tables" `Quick test_reads_both_tables

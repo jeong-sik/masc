@@ -19,11 +19,21 @@ type row =
         (** Other provider ids whose [account-home] is this provider's, sorted.
             They are one client login under different ids; empty when the
             provider declares no account home or shares it with none. *)
+  ; login_group : int option
+        (** [Some n] when the login is shared: the same [n] on every id of one
+            login, counted from 1 in the order of each login's smallest id. *)
+  ; account_label : string option
+        (** Short name of the account, drawn beside the provider id. [parse]
+            leaves it [None]; the pane sets it from the account-email reading
+            with {!account_label_of_email}. *)
   }
 
 val parse : string list -> (row list, string) result
 (** [parse lines] reads the runtime.toml source the TUI already fetches for
-    the raw config pane. Rows come back sorted by provider then model.
+    the raw config pane. Rows come back sorted by login, then provider, then
+    model. A login is named by the smallest provider id on it, so ids that
+    share an account-home are adjacent and an id alone on its login keeps the
+    place its own name gives it.
 
     A model with a [\[models.NAME\]] table but no provider binding is
     skipped: it names no lane and has no [max-tokens] column to show. *)
@@ -53,7 +63,24 @@ val stacked_item_starts : pane:int -> row list -> int list
     begins -- one entry per row, in order. The pane's cursor walks bindings,
     not wrapped lines, so this is how it finds the line to mark and follow. *)
 
-val detail_lines : ?account_email:string -> row -> string list
+val provider_text : row -> string
+(** What the provider column draws: the id, then the account label when the
+    row has one, else [#n] for a shared login. Widths are measured from this
+    text. *)
+
+val account_label_of_email : string -> string
+(** The part of an email before [@], cut to a short column with a trailing
+    ellipsis when it is longer. Display text for telling accounts apart; the
+    detail line carries the whole email. *)
+
+val keepers_on_login : assignments:(string * string) list -> row -> string list
+(** Names of the Keepers whose runtime id is a binding of this row's provider
+    or of another id on the same login, sorted. [assignments] pairs a Keeper
+    name with its runtime id. A Keeper assigned to a lane is not here: its
+    runtime id names the lane, not an account. *)
+
+val detail_lines :
+  ?account_email:string -> ?keepers:string list -> row -> string list
 (** Selected-binding explanation for the Models pane. It names the effective
     API model and the exact TOML sections that own each knob. A model name that
     is not a bare TOML key is quoted in the section path.
@@ -61,7 +88,8 @@ val detail_lines : ?account_email:string -> row -> string list
     A provider id does not say which account it is. [account_email], the
     email the client reports for the provider's login, adds an [Account] line;
     a non-empty [same_login] adds a line naming the other provider ids on the
-    same login. The caller sanitizes [account_email] for the terminal. *)
+    same login; [keepers], from {!keepers_on_login}, adds a line with their
+    count and names. The caller sanitizes these for the terminal. *)
 
 val find_runtime : runtime_id:string -> row list -> (int * row) option
 (** Exact account/binding lookup for Runtime and Lane settings. *)

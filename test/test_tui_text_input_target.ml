@@ -45,7 +45,8 @@ let test_model_form_requires_current_workspace_reading () =
   let row : Masc_tui_model_runtime_table.row =
     { model="shared-name"; provider="shared-provider"; api_name=Some "api-model";
       reasoning_effort=None; temperature=None; context=Some ("binding",8192);
-      model_context=None; max_tokens=None; same_login=[] } in
+      model_context=None; max_tokens=None; same_login=[]; login_group=None;
+      account_label=None } in
   state.config_models_rows <- [row];
   check bool "retained rows cannot open without a current reading" true
     (Result.is_error (Tui_types.selected_config_model state));

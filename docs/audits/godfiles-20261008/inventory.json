@@ -420,7 +420,12 @@
       "path": "lib/keeper_runtime/keeper_event_queue_persistence.ml",
       "baseline_lines": 2107,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: pure fleet observation projection separated from durable discovery, acquisition and diagnostics; storage/WAL/cache/quarantine/transition responsibilities pending semantic review",
+      "current_lines": 1791,
+      "prs": [
+        42024
+      ],
+      "validation_artifact": "event-queue-fleet-projection/README.md"
     },
     {
       "path": "lib/keeper_runtime/keeper_event_queue_state.ml",

@@ -130,9 +130,11 @@ let decode json =
   (* OpenRouter renamed the display label; retain the same history series.
      Restrict the alias to its source so another provider's label is untouched. *)
   let kind =
-    if String.equal source (Usage.source_to_string Usage.Openrouter_key_read)
-       && String.equal kind "provider:credit limit"
-    then "provider:API key credit limit"
+    if String.equal source (Usage.source_to_string Usage.Openrouter_key_read) then
+      match kind with
+      | "provider:credit limit" -> "provider:API key credit limit"
+      | "provider:credit usage (all time)" -> "provider:API key usage (all time)"
+      | _ -> kind
     else kind
   in
   let* limit_id = optional_string "limit_id" json in

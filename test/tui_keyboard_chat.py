@@ -2024,35 +2024,21 @@ def chat_visibility_modes_interaction(
             )
         if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
             raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
-        # The skill header and its bold name must belong to one TURN on
-        # the completed screen, not separate turns or historical frames.
+        # Compact Origin_bare draws the activity label in the body's gutter,
+        # not a diagnostic TURN header. Require the settled Skill mark, label
+        # and bold name on the same current-screen row, inside the chat pane.
         styled_rows = screen_rows(completed, preserve_styles=True)
-        turn_rows = sorted(
+        skill_rows = [
             row for row, text in observed_rows.items()
             if title_row < row < composer_row
-            and re.search(rb"TURN #\d+", text)
-        )
-        skill_in_turn = False
-        for index, row in enumerate(turn_rows):
-            if re.search(
-                "◆\\s+SKILL\\s+│\\s+TURN #\\d+".encode(),
-                observed_rows[row],
-            ) is None:
-                continue
-            end_row = (
-                turn_rows[index + 1]
-                if index + 1 < len(turn_rows) else composer_row
-            )
-            if any(
-                b"\x1b[1mci-red-attribution" in text
-                for body_row, text in styled_rows.items()
-                if row < body_row < end_row
-            ):
-                skill_in_turn = True
-                break
-        if not skill_in_turn:
+            and re.search("◆\\s+SKILL\\s+│\\s+ci-red-attribution".encode(), text)
+        ]
+        if not any(
+            b"\x1b[1mci-red-attribution" in styled_rows.get(row, b"")
+            for row in skill_rows
+        ):
             raise AssertionError(
-                "the completed Skill TURN did not contain its bold skill name: "
+                "the completed compact Skill row did not contain its bold skill name: "
                 f"{styled_rows!r}"
             )
         # How far one invocation got is not on the resting row any more:

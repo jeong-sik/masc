@@ -522,7 +522,7 @@ assert init["method"] == "initialize", init
 if SCENARIO == "hang_init":
     drain()
 requested_capabilities = init["params"]["capabilities"]["requestedCapabilities"]
-expected_capabilities = [] if SCENARIO in ("text_only", "quiet_final", "missing_final") or (FIXTURE.get("usage_read_only") and requested_capabilities == []) else ["sessionMcp"]
+expected_capabilities = [] if SCENARIO == "text_only" or (FIXTURE.get("usage_read_only") and requested_capabilities == []) else ["sessionMcp"]
 assert init["params"]["capabilities"]["requestedCapabilities"] == expected_capabilities, init
 send({"jsonrpc": "2.0", "id": init["id"], "result": {
     "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
@@ -565,7 +565,7 @@ else:
 with open(os.path.join(HERE, "sessions.log"), "a") as handle:
     handle.write(mode + "\n")
 servers = opened["params"].get("config", {}).get("mcpServers", {})
-if SCENARIO in ("text_only", "quiet_final", "missing_final"):
+if SCENARIO == "text_only":
     assert servers == {}, servers
     server = None
 else:
@@ -755,12 +755,6 @@ if SCENARIO in ["turn_failed", "turn_failed_with_usage", "read_only_tool_failure
         terminal["usage"] = {"inputTokens": 10, "outputTokens": 2,
                              "cachedTokens": 0, "reasoningTokens": 0}
     notify("turn/completed", terminal)
-    drain()
-if SCENARIO in ["quiet_final", "missing_final"]:
-    if SCENARIO == "quiet_final":
-        item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
-                                "revision": 1, "status": "completed", "text": ""})
-    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
     drain()
 if SCENARIO == "text_only":
     item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
@@ -2539,29 +2533,10 @@ let test_attached_mcp_approvals_are_exact () =
       (Adapter.native_posture_note Runtime_native_tools.Native_read))
 ;;
 
-let test_quiet_final_preserves_muse_output_presence () =
-  List.iter (fun (name, expected) ->
-    with_scripted_host ~fixture:(scenario name) (fun ~base_path ->
-      let run = run_turn_with ~tools:[] ~base_path ~tool:(masc_probe_tool (ref `Null)) () in
-      match run.outcome.result with
-      | Error error -> fail (Agent_core.Error.to_string error)
-      | Ok run_result ->
-        let policy = Keeper_tooling.Response.Allow_quiet_final in
-        check bool "adapter preserves explicit message presence for acceptance" expected
-          (Keeper_tooling.Response.accepts_response ~policy run_result.response);
-        check bool "adapter preserves explicit message presence for finalization" expected
-          (Result.is_ok (Keeper_agent_run.For_testing.normalize_response_text_for_finalization
-            ~response_policy:policy ~runtime_id ~initial_messages:[] ~run_result
-            ~text:"" ~tool_names:[] ()))))
-    ["quiet_final", true; "missing_final", false]
-;;
-
 let () =
   run
     "keeper_muse_runtime"
-    [ ( "quiet completion", [test_case "explicit message survives adapter and acceptance" `Quick
-        test_quiet_final_preserves_muse_output_presence] )
-    ; ( "stream"
+    [ ( "stream"
       , [ test_case "identity-less native tool leaves no open block" `Quick test_native_tool_without_identity_does_not_open_a_block
         ; test_case "projection order" `Quick test_stream_order
         ; test_case "unstreamed reply is forwarded at the end" `Quick

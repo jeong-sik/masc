@@ -20,7 +20,8 @@ module Http = Http_server_eio
 
 let lane_token_path () =
   Env_config_core.resolve_against_base_path
-    (Filename.concat Common.masc_dirname "browser-lane/token")
+    (List.fold_left Filename.concat Common.masc_dirname
+       [ Common.browser_lane_dirname; Common.browser_lane_token_name ])
 ;;
 
 let lane_token () =

@@ -1265,8 +1265,10 @@ let test_first_activation_excludes_retained_repetition () =
     append (); append ();
     check (option (pair string int)) "three post-activation exact calls still yield"
       (Some ("keeper_tasks_list", 3)) (detect (seed cold));
-    check int "ledger history is preserved" 5
-      (List.length (Ledger.read_recent ~keeper_name ~n:10 ()));
+    let retained = match Ledger.read_recent ~keeper_name ~n:10 () with
+      | Ok rows -> rows
+      | Error (Ledger.Index_unavailable detail) -> fail detail in
+    check int "ledger history is preserved" 5 (List.length retained);
     let fresh = Agent_core.Context.create_sync () in
     (match Judged.reset_history fresh with
      | Error error -> fail (Judged.error_to_string error)

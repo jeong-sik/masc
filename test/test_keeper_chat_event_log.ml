@@ -175,7 +175,8 @@ let test_codec_round_trip_all_constructors () =
     all_events;
   List.iter (fun charge ->
     let event = E.Agent_core_stream_message_delta
-      { stop_reason = None;
+      { stream_scope = 0;
+        stop_reason = None;
         usage = Some { delta_usage_partial with cost_usd = Some charge } } in
     let encoded = L.keeper_chat_event_to_json event in
     let amount = Yojson.Safe.Util.(encoded |> member "usage" |> member "cost_usd" |> to_float) in
@@ -341,7 +342,8 @@ let test_journal_skips_non_finite_floats () =
        List.iteri
          (fun i charge ->
             let event = E.Agent_core_stream_message_delta
-                { stop_reason = Some Agent_core.Types.EndTurn
+                { stream_scope = 0
+                ; stop_reason = Some Agent_core.Types.EndTurn
                 ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
             (match L.append_result journal ~seq:(4 + i) ~ts:1_762_300_001.0 event with
              | Error _ -> ()
@@ -364,7 +366,8 @@ let test_journal_skips_non_finite_floats () =
          [ Float.nan; Float.infinity; Float.neg_infinity ];
        List.iter (fun charge ->
            let event = E.Agent_core_stream_message_delta
-               { stop_reason = None
+               { stream_scope = 0
+               ; stop_reason = None
                ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
            let _, projected = Projection.project ~timestamp:1_762_300_001.0
                ~redact_text:Fun.id ~redact_json:Fun.id Projection.initial event in

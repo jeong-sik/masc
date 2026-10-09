@@ -61,7 +61,9 @@ type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
   | Refresh_workspace_unconfirmed of
       { refresh_ticket : Http_refresh_order.ticket; detail : string; unreachable : bool;
-        approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option }
+        approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option;
+        latest_identity : (Masc.Tui_decode.server_identity, string) result
+        (* The identity read after the surfaces; it may name a workspace. *) }
   | Refresh_server_booting of
       { refresh_ticket : Http_refresh_order.ticket
       ; identity : (Masc.Tui_decode.server_identity, string) result
@@ -78,7 +80,7 @@ type preset_sink =
 (* The UI domain owns these refs. A posted tick is a mutation: closing its
    view invalidates presentation, never cancels or retries the request. Keep
    the pending request until its terminal mailbox result, even across reopen. *)
-type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority }
+type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority; poll_reading : unit ref }
 
 (* A DOS read changes nothing on the server. The current view owns one read;
    reopening may start another without waiting for an old view's HTTP timeout.
@@ -116,10 +118,13 @@ type resume_confirmation =
   | Owner_already_active
 
 type async_msg =
-  | Workspace_scoped of workspace_authority * async_msg
+  | Workspace_scoped of workspace_authority * unit ref option * async_msg
+  | Workspace_operation of async_msg
+  | Chat_command_read_completed of unit ref * async_msg
   | Workspace_identity_unconfirmed of
       { detail : string
-      ; reading : (Masc.Tui_decode.server_identity, string) result
+      ; latest : (Masc.Tui_decode.server_identity, string) result
+        (* The identity the refusing probe read; it may name a workspace. *)
       ; prior_contact : Masc_tui_server_lifecycle.contact
       ; refresh_ticket : Http_refresh_order.ticket }
   | Schedule_form_authority_refused of
@@ -127,7 +132,7 @@ type async_msg =
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_resume_confirmed of string * int * resume_confirmation
-  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
+  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (string list, string) result, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
       * (Masc_tui_lane_addons.configuration, string) result
@@ -135,6 +140,7 @@ type async_msg =
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool * string option
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
+  | Keeper_deletion_retry_done of string * (unit, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_msx_tick.response, string) result
   | Msx_activity_loaded of msx_poll_request
@@ -187,6 +193,8 @@ type async_msg =
   | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
       workspace_authority * string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
+      * (Masc.Tui_decode.server_identity, string) result option
+        (* The last identity its probes read, if any. *)
   | Board_post_refresh_done of
       Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of
@@ -334,6 +342,7 @@ type async_msg =
       int * (Masc_tui_loader.runtime_surface_load, string) result
   | Tools_loaded of int * string option * (Masc.Tui_decode_tools.tool_snapshot, string) result
   | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
+  | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list
@@ -534,7 +543,7 @@ type async_msg =
   | Code_entries_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_tree_node list, string) result
-  | Code_file_loaded of string Masc_tui_fetched.request * (string, string) result
+  | Code_file_loaded of code_file_load_intent * string Masc_tui_fetched.request * (string, string) result
   | Code_history_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc_tui_types.code_history_listing, string) result
@@ -607,3 +616,273 @@ type 'a mailed = {
   ready_at_ns : int64;
   message : 'a;
 }
+
+(* Snapshot authority is withdrawn independently of admitted effects. Keep
+   this match exhaustive: a new reply must choose whether it is a replaceable
+   observation or the outcome of an operation already sent. *)
+let account_login_action_is_read = function
+  | Masc_tui_account_login.Inventory | Refresh_saved _ | Refresh_retry | Recover | Discover | Preview_removal _
+  | Refresh_removed _ | Refresh_list _ -> true
+  | Activate_saved _ | Select_existing _ | Start _ | Input _
+  | Cancel | Prepare _ | Save _ | Close | Nothing | Remove _ -> false
+
+let rec workspace_message_is_read = function
+  | Workspace_scoped (_, _, message)
+  | Chat_command_read_completed (_, message) -> workspace_message_is_read message
+  | Workspace_operation _ -> false
+  | Keeper_queue_loaded (_, _, action, _) ->
+    (match action with Masc_tui_queue_inspection.Inspect -> true
+     | Pause | Resume | Cancel _ | Move_to_end _ | Edit _
+     | Cancel_event _ | Prioritize_event _ -> false)
+  (* A roster observation cannot release retained input after its read epoch
+     retires. A completed resume POST still owns its mutation receipt. *)
+  | Keeper_queue_resume_confirmed (_, _, Owner_already_active) -> true
+  | Keeper_queue_resume_confirmed (_, _, Owner_resumed) -> false
+  | Lane_declaration_loaded (_, request, _, _, _) ->
+    (match request with Masc_tui_lane_declaration.Read _ -> true | Save _ -> false)
+  | Account_login_json (_, _, action, _) -> account_login_action_is_read action
+  | Workspace_identity_unconfirmed _
+  | Keeper_chat_operation_loaded _
+  | Lane_application_loaded _
+  | Lane_package_catalog_loaded _
+  | Lane_package_preview_loaded _
+  | Lane_addons_loaded _
+  | Lane_subscriptions_loaded _
+  | Keeper_deletions_loaded _
+  | Msx_activity_loaded _
+  | Msx_live_loaded _
+  | Dos_live_loaded _
+  | Voice_agent_voices_loaded _
+  | Voice_wizard_reread _
+  | Voice_config_loaded _
+  | Voice_wizard_probed _
+  | Board_post_refresh_done _
+  | Keeper_chat_history_loaded _
+  | Keeper_chat_copy_loaded _
+  | Keeper_chat_journal_loaded _
+  | Context_inspector_loaded _
+  | Keeper_chat_older_loaded _
+  | Lanes_loaded _
+  | Lane_inventory_loaded _
+  | Clients_loaded _
+  | Lane_runs_loaded _
+  | Lane_run_detail_loaded _
+  | Measurement_artifact_loaded _
+  | Verification_loaded _
+  | Harness_loaded _
+  | Fusion_runs_loaded _
+  | Fusion_detail_loaded _
+  | Fusion_historical_detail_loaded _
+  | Fusion_launch_options_loaded _
+  | Repositories_loaded _
+  | Workspace_activity_loaded _
+  | Memory_loaded _
+  | Memory_input_loaded _
+  | Memory_facts_loaded _
+  | Repository_changes_loaded _
+  | Repository_changes_diff_loaded _
+  | File_changes_loaded _
+  | Keeper_chat_file_changes_loaded _
+  | Git_diff_loaded _
+  | Browser_history_list_loaded _
+  | Browser_history_page_loaded _
+  | Browser_lane_clients_loaded _
+  | Browser_lane_loaded _
+  | Browser_lane_scene_loaded _
+  | Browser_lane_screenshot_ready _
+  | Connectors_loaded _
+  | Runtime_surface_loaded _
+  | Tools_loaded _
+  | Skills_catalog_loaded _
+  | Skill_evidence_loaded _
+  | Tools_async_observation_loaded _
+  | Runtime_catalog_loaded _
+  | Keeper_tool_approvals_loaded _
+  | Approvals_summary_loaded _
+  | Sent_image_ready _
+  | Keeper_turns_loaded _
+  | Gate_snapshot_loaded _
+  | Keeper_gate_settings_loaded _
+  | Keeper_tool_modes_loaded _
+  | Goal_confirmation_loaded _
+  | Schedules_loaded _
+  | Schedule_wake_history_loaded _
+  | Keeper_schedules_loaded _
+  | System_logs_loaded _
+  | Keeper_calls_loaded _
+  | Goal_timeline_loaded _
+  | Task_history_loaded _
+  | Verification_evidence_loaded _
+  | Keeper_config_view_loaded _
+  | Keeper_items_loaded _
+  | Keeper_sandbox_view_loaded _
+  | Keeper_sandbox_logs_loaded _
+  | Exact_activity_read _
+  | Browser_activity_read _
+  | Machine_activity_read _
+  | Runtime_config_view_loaded _
+  | Runtime_params_loaded _
+  | Prompts_loaded _
+  | Keeper_board_quarantines_loaded _
+  | Presets_listed _
+  | Preset_detail_loaded _
+  | Preset_contents_shown _
+  | Play_invites_listed _
+  | Librarian_input_loaded _
+  | Resources_listed _
+  | Code_entries_loaded _
+  | Code_file_loaded _
+  | Code_history_loaded _
+  | Code_diff_loaded _
+  | Acting_pane_changes_loaded _
+  | Code_blame_loaded _
+  | Code_lsp_answered _
+  | Resource_read _
+  | Github_identity_view_loaded _
+  | Identity_providers_loaded _
+  | Observer_opened _
+  | Observer_received _
+  | Observer_closed _
+  | Keeper_chat_dispatch_started _
+    -> true
+  | Voice_wizard_saved _
+  | Msx_frame_loaded _
+  | Voice_agent_voice_saved _
+  | Voice_level _
+  | Voice_transcribed _
+  | Voice_silent _
+  | Voice_discarded _
+  | Voice_failed _
+  | Http_refresh_done _
+  | Http_refresh_failed _
+  (* Not a reply: the refresh that recovered the identity tells the loop to
+     read the confirm queue again. It belongs to that refresh, which is
+     ordered by its own tickets. *)
+  | Approvals_listing_superseded
+  | Surface_composer_released
+  | Http_scoped_refresh_done _
+  | Http_scoped_refresh_failed _
+  | Approval_decision_done _
+  | Ask_answer_done _
+  | Keeper_chat_done _
+  | Keeper_chat_stream_deltas _
+  | Keeper_chat_stream_unavailable _
+  | Keeper_run_next_done _
+  | Keeper_observed_interrupt_done _
+  | Keeper_chat_interrupt_done _
+  | Fusion_launched _
+  | Browser_lane_action_done _
+  | Browser_lane_follow_loaded _
+  | Connector_unbind_all_done _
+  | Runtime_lane_slots_written _
+  | Runtime_assignment_set _
+  | Keeper_chat_approval_answered _
+  | Keeper_chat_control_received _
+  | Gate_approval_resolved _
+  | Gate_auto_judge_retried _
+  | Gate_mode_set _
+  | Surface_tool_approval_answered _
+  | Keeper_tool_mode_set _
+  | Keeper_chat_dispatch_blocked _
+  | Schedule_form_authority_refused _
+  | Keeper_deletion_retry_done _
+  | Keeper_action_done _
+  | Board_new_post_done _
+  | Board_vote_done _
+  | Goal_transition_done _
+  | Goal_confirmation_submitted _
+  | Schedule_cancel_done _
+  | Verification_verdict_done _
+  | Harness_label_done _
+  | Task_cancel_done _
+  | Exact_activity_saved _
+  | Browser_activity_saved _
+  | Machine_activity_saved _
+  | Runtime_param_written _
+  | Board_quarantine_requeued _
+  | Board_quarantines_bulk_progress _
+  | Board_quarantines_bulk_requeued _
+  | Preset_saved _
+  | Preset_restored _
+  | Preset_deleted _
+  | Play_invite_issued _
+  | Play_invite_revoked _
+  | Identity_switch_set _
+  | Identity_login_started _
+  | Identity_refreshed _
+  | Identity_app_saved _
+  | Account_login_event _
+  | Account_login_removal _
+  | Github_login_lines _
+  | Github_login_finished _
+  | Github_token_saved _
+  | Task_dispatched _
+  | Task_dispatch_failed _
+  | Image_render_ready _
+    -> false
+
+let workspace_message_admitted state ~authority ~reading message =
+  workspace_reply_admitted state ~authority ~reading
+    ~kind:(if workspace_message_is_read message
+      then Workspace_observation else Workspace_operation_outcome)
+
+(* Capture the read intent while the exact effect owner is still Loading.
+   The UI applies the receipt first, then retains or dispatches this read. *)
+let retired_operation_observation state ~authority ~reading message =
+  let rec inspect = function
+    | Workspace_operation inner -> inspect inner
+    | Browser_lane_scene_loaded (generation, Ok _) ->
+        (match state.browser_lane with
+         | Some ({load=Browser_lane_view.Loading (current, operation); _} as view)
+           when current = generation && state.browser_lane_generation = generation ->
+             Option.map (fun read -> Browser_scene_observation (generation, view, read))
+               (Browser_lane_view.observation_after_effect operation)
+         | _ -> None)
+    | Lane_subscriptions_loaded (generation, Ok _) ->
+        (match state.lane_addons with
+         | Some view when view.generation = generation
+             && Option.is_some view.subscription_panel ->
+               Some (Lane_subscriptions_observation generation)
+         | _ -> None)
+    | _ -> None in
+  if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
+  then None else inspect message
+
+let rec project_workspace_operation_reply state ~authority ~reading message =
+  let project receipt observation = workspace_operation_reply state ~authority ~reading
+      (receipt, observation) in
+  match message with
+  | Workspace_operation inner ->
+      Workspace_operation (project_workspace_operation_reply state ~authority ~reading inner)
+  | Approval_decision_done (approval, decision, receipt, generation, observation) ->
+      let receipt, observation = project receipt observation in
+      Approval_decision_done (approval, decision, receipt, generation, observation)
+  | Ask_answer_done (label, receipt, observation) ->
+      let receipt, observation = project receipt observation in
+      Ask_answer_done (label, receipt, observation)
+  | Keeper_queue_loaded (keeper, control, action, Ok reply) ->
+      Keeper_queue_loaded (keeper, control, action,
+        Ok (workspace_operation_reply state ~authority ~reading reply))
+  | Lane_addons_loaded (generation, detail, Ok ({lar_snapshot=Some snapshot; _} as reply)) ->
+      let reply, observation = project reply (Ok snapshot) in
+      let reply = match observation with
+        | Ok snapshot -> {reply with lar_snapshot=Some snapshot}
+        | Error reason -> {reply with lar_snapshot=None; lar_inventory_read=`Failed reason} in
+      Lane_addons_loaded (generation, detail, Ok reply)
+  | Lane_subscriptions_loaded (generation, Ok snapshot) ->
+      let snapshot, observation = project snapshot (Ok snapshot.entries) in
+      let entries = match observation with
+        | Ok entries -> entries
+        | Error reason -> List.map (fun (subscription, _) ->
+            subscription, Masc_tui_lane_subscriptions.Unavailable reason) snapshot.entries in
+      Lane_subscriptions_loaded (generation, Ok {snapshot with entries})
+  | Browser_lane_scene_loaded (generation, result) ->
+      let (), result = project () result in
+      Browser_lane_scene_loaded (generation, result)
+  | Browser_lane_follow_loaded (generation, Ok (receipt, result)) ->
+      let receipt, result = project receipt result in
+      Browser_lane_follow_loaded (generation, Ok (receipt, result))
+  | Browser_lane_screenshot_ready reply ->
+      let (), result = project () reply.result in
+      Browser_lane_screenshot_ready {reply with result}
+  | _ -> message

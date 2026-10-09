@@ -16,6 +16,8 @@ type status_item =
      the server resolved. [Server_base_path] already names the server's, so
      the pair reads as the disagreement it is. *)
   | Workspace_mismatch of string
+  | Workspace_unconfirmed
+  (* Cached rows remain visible, but cannot authorize a new request. *)
   (* The server's executable resolved inside .worktrees/: a working tree's
      build is serving live traffic. Said only when the health probe says so;
      an older server that cannot say stays silent. *)
@@ -138,6 +140,8 @@ let status_item_projection = function
       { text = "MISMATCH local " ^ local ^ " (r:retry)"
       ; retention = Workspace_conflict
       }
+  | Workspace_unconfirmed ->
+    Some { text = "[workspace unconfirmed]"; retention = Workspace_conflict }
   | Server_worktree_binary ->
     Some
       { text = "WORKTREE server (not the root build)"

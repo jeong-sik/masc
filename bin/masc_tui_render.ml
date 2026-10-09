@@ -2957,7 +2957,8 @@ let render_keeper_list (state : state) =
       match keeper_rows_page state ~error:keepers_error with
       | Page_empty -> Some (match state.workspace_identity with
           | Workspace_identity_mismatch _ -> "   server Keeper roster is empty"
-          | Workspace_identity_match | Workspace_identity_unread ->
+          | Workspace_identity_match | Workspace_identity_match_unconfirmed _
+          | Workspace_identity_unread ->
             "   no keeper metadata under .masc/keepers/")
       | Page_unread -> Some page_unread_note
       | Page_failed -> None
@@ -9106,7 +9107,7 @@ let render_browser_history (state : state) (history : Browser_history.t) =
   let terminal_rows, cols = get_terminal_size () in
   let title = screen_title (" MASC Browser Lane · " ^ Terminal_text.single_line history.keeper_name ^ " · retained observations") in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  h/Esc:back to browser"
+    ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  R:recheck workspace  h/Esc:back to browser"
     ~body:(fun ~budget c ->
       let status = match history.content with
         | Listing -> "Reading the Keeper's recent tool receipts…"
@@ -12495,7 +12496,7 @@ let config_metadata_style = function
    budgeting the source viewport and keeping the cursor visible. *)
 let config_identity_rows ~cols (state : state) =
   let width = framed_inner_width cols in
-  match state.server_identity with
+  let rows = match state.server_identity with
   | None -> [Printf.sprintf "  port :%d · server identity unread" state.port]
   | Some identity ->
       let base = Terminal_text.single_line identity.Tui_decode.sid_base_path in
@@ -12534,7 +12535,15 @@ let config_identity_rows ~cols (state : state) =
       in
       Printf.sprintf "  base %s   masc %s" base masc
       :: (Masc_tui_text_block.rows ~max_cells:(max 1 (width - 2)) server
-          |> List.map (fun line -> "  " ^ line))
+          |> List.map (fun line -> "  " ^ line)) in
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match_unconfirmed reason ->
+      let notice = "(server identity unconfirmed: "
+        ^ Terminal_text.single_line reason ^ "; last confirmed below)" in
+      (Masc_tui_text_block.rows ~max_cells:(max 1 (width - 2)) notice
+       |> List.map (fun line -> "  " ^ line)) @ rows
+  | Workspace_identity_unread | Workspace_identity_match
+  | Workspace_identity_mismatch _ -> rows
 
 (* What the runtime.toml body spends above the source: the server identity,
    one row per metadata line, and the rule under them. *)

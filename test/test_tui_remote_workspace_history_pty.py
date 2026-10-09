@@ -1537,6 +1537,83 @@ def verification_workspace_withdrawal(binary: str) -> None:
         refresh=0.5, terminal_cols=300)
 
 
+def task_receipt_during_identity_outage(binary: str) -> None:
+    """A successful task POST survives an unread health probe without a duplicate POST."""
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    wire = WorkspaceWire(_keyboard_harness.json_payload_fixture(fixtures, ROSTER_PATH))
+    task_started, task_release = threading.Event(), threading.Event()
+    identity_unread = threading.Event()
+    created, requests = [], []
+    observer_requested, observer_release = hold_observer_before_headers(fixtures)
+
+    def health():
+        if identity_unread.is_set():
+            return _keyboard_harness.RawHttpResponse(503, b'{"error":"identity temporarily unread"}',
+                content_type="application/json")
+        return wire.health()
+
+    def mcp(body):
+        request = json.loads(body)
+        if request["method"] == "initialize":
+            return _keyboard_harness.RawHttpResponse(200, json.dumps({
+                "jsonrpc": "2.0", "id": request["id"], "result": {}}).encode(),
+                content_type="application/json", headers=(("Mcp-Session-Id", "task-outage"),))
+        assert request["params"]["name"] == "masc_add_task", request
+        created.append(request["params"]["arguments"])
+        task_started.set()
+        assert task_release.wait(timeout=30), "accepted task receipt not released"
+        return 200, {"jsonrpc": "2.0", "id": request["id"], "result": {
+            "content": [{"type": "text", "text": json.dumps({
+                "ok": True, "task_id": "task-9"})}], "isError": False}}
+
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": health, "/health?full=1": health,
+                     HISTORY_PATH: wire.history, MEMORY_PATH: wire.memory,
+                     "/mcp": _keyboard_harness.RequestHttpResponse(mcp),
+                     "/api/v1/keepers/chat/stream": (503, {"error": "capture accepted handoff"})})
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, observer_requested,
+                timeout=WAIT_SECONDS), "observer initialization did not settle"
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+            _keyboard_harness.send_and_wait(process, fd, output, b"/task accepted-before-outage",
+                _keyboard_harness.composer_showing(b"/task accepted-before-outage"))
+            os.write(fd, b"\r")
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, task_started,
+                timeout=WAIT_SECONDS), "task POST was not admitted before outage"
+            identity_unread.set()
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                lambda: b"[workspace unconfirmed]" in screen(output), timeout=WAIT_SECONDS), \
+                "health outage did not withdraw observation authority"
+            task_release.set()
+            _keyboard_harness.wait_for_output(process, fd, output, b"task-9 created for alpha",
+                timeout=WAIT_SECONDS)
+            assert not [p for p, _ in requests if p == "/api/v1/keepers/chat/stream"], requests
+            assert b"previous workspace" not in screen(output), "same A was reported as foreign"
+            _keyboard_harness.send_and_wait(process, fd, output, b"new-draft-after-task",
+                _keyboard_harness.composer_showing(b"new-draft-after-task"))
+            identity_unread.clear()
+            chat = _keyboard_harness.wait_for_http_request(process, fd, output, requests,
+                path="/api/v1/keepers/chat/stream")
+            assert json.loads(chat)["message"] == "[task-9] accepted-before-outage", chat
+            assert len(created) == 1, "recovery created the accepted task again"
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                lambda: _keyboard_harness.composer_showing(b"new-draft-after-task").search(screen(output)) is not None
+                    and b"[workspace unconfirmed]" not in screen(output), timeout=WAIT_SECONDS), \
+                "automatic task handoff consumed the newer composer draft"
+            leave_chat_for_roster(process, fd, output)
+            os.write(fd, b"q")
+        finally:
+            task_release.set()
+            observer_release.set()
+    _keyboard_harness.run_terminal_scenario(binary,
+        description="accepted task handoff waits through identity outage and preserves newer draft",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        http_requests=requests, refresh=0.5, terminal_cols=300)
+
+
 def task_dispatch_workspace_withdrawal(binary: str) -> None:
     """An A MCP initialization cannot create a task after B becomes current."""
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
@@ -1911,6 +1988,7 @@ if __name__ == "__main__":
             "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
             "scenario_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         }, indent=2) + "\n")
+    task_receipt_during_identity_outage(binary)
     task_dispatch_workspace_withdrawal(binary)
     verification_workspace_withdrawal(binary)
     tools_workspace_withdrawal(binary)

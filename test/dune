@@ -2822,6 +2822,7 @@
 (include stanzas/test_keeper_surface_status.inc)
 
 (include stanzas/test_keeper_memory_write.inc)
+(include stanzas/test_keeper_memory_write_growth_probe.inc)
 
 (include stanzas/test_keeper_memory_write_supersedes.inc)
 
@@ -3363,13 +3364,13 @@
 (test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
- (libraries masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
+ (libraries masc_tui_keeper_chat_log masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
   masc_tui_message_layout masc_tui_types))
 
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
+ (libraries masc_tui_account_login masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -3421,11 +3422,18 @@
   masc_tui_keeper_chat_transcript))
 
 (test
+ (name test_tui_chat_response_origins)
+ (modules test_tui_chat_response_origins)
+ (libraries alcotest astring masc masc_tui_types masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_log masc_tui_render_chat masc_tui_frame_presenter
+  masc_tui_ansi masc_tui_theme masc_tui_render_schedule masc_tui_roster_pane))
+
+(test
  (name test_tui_autonomous_journal)
  (modules test_tui_autonomous_journal)
  (libraries alcotest masc masc.masc_types masc_tui_types masc_tui_observer
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
-  masc_tui_keeper_chat_history masc_tui_render_chat
+  masc_tui_keeper_chat_history masc_tui_render_chat masc_tui_image_preview masc_tui_message_layout
   masc_tui_frame_presenter masc_tui_ansi masc_tui_render_schedule masc_tui_roster_pane astring yojson))
 
 (test
@@ -3455,6 +3463,8 @@
  (name test_tui_keeper_chat_history)
  (modules test_tui_keeper_chat_history)
  (libraries
+  masc_tui_keeper_chat_log
+  masc.masc_types
   masc_tui_image_preview
   ; The journal lines are the layout's typed values, matched by constructor.
   masc_tui_message_layout
@@ -3609,7 +3619,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries alcotest masc masc_tui_types masc_workspace unix))
+ (libraries alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_workspace masc_tui_fetched masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc.voice_setup masc.voice_wizard unix))
 
 (test
  (name test_tool_transport_prefix)
@@ -4033,7 +4043,7 @@
 (test
  (name test_tui_model_runtime_table)
  (modules test_tui_model_runtime_table)
- (libraries alcotest masc_tui_model_runtime_table masc_tui_message_layout))
+ (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout))
 
 (test
  (name test_tui_context_bars)
@@ -6851,6 +6861,74 @@
  (name runtest)
  (deps (alias runtest-test_tui_identity_login_poll_pty)))
 
+(rule
+ (alias runtest-test_tui_keeper_deletions_identity_pty)
+ (deps test_tui_keeper_deletions_identity_pty.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
+ (action
+  (run python3 %{dep:test_tui_keeper_deletions_identity_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keeper_deletions_identity_pty)))
+
+(rule
+ (alias runtest-test_tui_workspace_refusal_pty)
+ (deps test_tui_workspace_refusal_pty.py ../bin/masc_tui.exe
+  tui_keyboard_approvals.py
+  tui_keyboard_board.py
+  tui_keyboard_browser.py
+  tui_keyboard_chat.py
+  tui_keyboard_clients.py
+  tui_keyboard_context.py
+  tui_keyboard_dashboard.py
+  tui_keyboard_fusion.py
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_machines.py
+  tui_keyboard_memory.py
+  tui_keyboard_observer.py
+  tui_keyboard_planning.py
+  tui_keyboard_repositories.py
+  tui_keyboard_resources.py
+  tui_keyboard_runtime.py
+  tui_keyboard_schedule.py
+  tui_keyboard_startup.py
+  tui_keyboard_terminal.py
+  tui_keyboard_tools.py
+  tui_keyboard_voice.py
+  tui_keyboard_walk.py
+  tui_keyboard_workspace.py)
+ (action
+  (run python3 %{dep:test_tui_workspace_refusal_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_workspace_refusal_pty)))
+
 (test
  (name test_tui_log_channel_column)
  (modules test_tui_log_channel_column)
@@ -7040,7 +7118,7 @@
 (test
  (name test_tui_browser_lane)
  (modules test_tui_browser_lane)
- (libraries masc.browser_lane masc_tui_frame masc_tui_types))
+ (libraries masc masc.browser_lane masc.string_util masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 (test
  (name test_tui_browser_lane_text)
@@ -7117,7 +7195,7 @@
 (test
  (name test_tui_runtime_config_view)
  (modules test_tui_runtime_config_view)
- (libraries masc_tui_runtime_config_view))
+ (libraries masc_tui_runtime_config_view masc_tui_account_login))
 
 (test
  (name test_tui_runtime_listing)
@@ -8458,6 +8536,7 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_browser_bidi_peer.inc)
+(include stanzas/test_browser_bidi_host_record.inc)
 
 ; An attempt that published its answer must not publish a failure over it:
 ; the light body refresh, and the window around the attempt, run after it.
@@ -8657,7 +8736,7 @@
 
 (rule
  (alias runtest-test_tui_stale_chat_progress_pty)
- (deps test_tui_stale_chat_progress_pty.py tui_keyboard_harness.py ../bin/masc_tui.exe)
+ (deps test_tui_stale_chat_progress_pty.py tui_keyboard_harness.py tui_keyboard_observer.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_stale_chat_progress_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -9770,6 +9849,7 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_memory_workspace_pty)))
+(include stanzas/test_tui_operation_receipt_identity_pty.inc)
 
 (rule
  (alias runtest-test_tui_chat_progress_clock_pty)
@@ -9811,4 +9891,19 @@
  (modules test_h3_working_state_meaning)
  (libraries masc_test_deps))
 
+(test
+ (name test_lane_addon_tool_result)
+ (modules test_lane_addon_tool_result)
+ (libraries alcotest masc.lane_addon_tool_result masc.tool_types mcp_protocol yojson))
+
+(test
+ (name test_tui_models_account_reading)
+ (modules test_tui_models_account_reading)
+ (libraries alcotest masc_tui_types masc_tui_render_prim
+  masc_tui_runtime_config_view masc_tui_account_login))
+
 (include stanzas/test_tui_code_history_sources_pty.inc)
+
+(include stanzas/test_tui_code_history_diff_pty.inc)
+
+(include stanzas/test_tui_code_history_task_pty.inc)

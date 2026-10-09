@@ -249,3 +249,84 @@ def run_resources_regression(executable: str) -> None:
         interact=resources_detail_interaction(),
         http_fixtures=resources_mcp_fixture(),
     )
+
+
+def run_resources_unconfirmed_selection(executable: str) -> None:
+    """A new selection survives unread identity without issuing an MCP request."""
+    import threading
+    import tui_keyboard_harness as h
+
+    fixtures = resources_mcp_fixture()
+    original = fixtures["/mcp"]
+    assert isinstance(original, RequestHttpResponse)
+    lock = threading.Lock()
+    state = {"unconfirmed": False}
+    calls = []
+    full_health = fixtures["/health?full=1"]
+
+    def health(path):
+        with lock:
+            unconfirmed = state["unconfirmed"]
+        if unconfirmed:
+            return RawHttpResponse(503, b'{"error":"identity temporarily unread"}',
+                                   content_type="application/json")
+        return full_health if "full=1" in path else (200, {"status": "ok"})
+
+    def answer(body):
+        request = json.loads(body)
+        with lock:
+            calls.append((state["unconfirmed"], request.get("method"),
+                          request.get("params", {}).get("uri")))
+        return original.resolve(body)
+
+    for path in ("/health", "/health?full=1"):
+        fixtures[path] = h.PathHttpResponse(health)
+    fixtures["/mcp"] = RequestHttpResponse(answer, get_response=original.get_response)
+    fixtures["/mcp?sse_kind=observer"] = RawHttpResponse(
+        200, b"", content_type="text/event-stream")
+
+    def snapshot():
+        with lock:
+            return list(calls)
+
+    # The JSON renderer colors key, colon and string separately. Match the
+    # complete field while accepting those styling escapes between tokens.
+    status_ready = re.compile(
+        rb'"status"(?:\x1b\[[0-9;]*m|[ \t])*:(?:\x1b\[[0-9;]*m|[ \t])*"ok"'
+    )
+
+    def interact(process, fd, _slave, output, _base):
+        tab_until(process, fd, output, b"MASC System")
+        send_and_wait(process, fd, output, b"s", b"Event Log (JSON)")
+        send_and_wait(process, fd, output, b"\r", status_ready)
+        resize_and_wait(process, fd, output, rows=40, columns=200,
+                        needle=status_ready, controls=(FULL_REDRAW,),
+                        final_cursor=b"\x1b[?25l")
+        with lock:
+            state["unconfirmed"] = True
+        send_and_wait(process, fd, output, b"r", b"[workspace unconfirmed]")
+        # The URI appears in the detail, not the name-only list. A fresh
+        # frame showing B and its pending state proves the selection applied.
+        # Selection already redraws this detail pane. Capture that frame
+        # directly; a second resize is not guaranteed to emit a full redraw.
+        pending = send_and_wait(process, fd, output, b"]",
+                                b"masc://operator-handbook.md")
+        visible = h.screen_text(pending)
+        assert b"reading resource" in visible, visible
+        assert b'"status": "ok"' not in visible, visible
+        assert b"slots = 4" not in visible, visible
+        assert not any(unconfirmed for unconfirmed, _method, _uri in snapshot()), snapshot()
+        with lock:
+            state["unconfirmed"] = False
+        # Recovery alone must read B: no second selection or Enter is sent.
+        recovered = send_and_wait(process, fd, output, b"r", b"Operator handbook")
+        assert b"slots = 4" in CSI_RE.sub(b"", recovered), recovered
+        readings = snapshot()
+        assert any(method == "resources/read" and uri == "masc://operator-handbook.md"
+                   for _unconfirmed, method, uri in readings), readings
+        assert not any(unconfirmed for unconfirmed, _method, _uri in readings), readings
+        os.write(fd, b"q")
+
+    run_terminal_scenario(executable,
+        description="Resource B selection waits through unread identity and resumes in the same workspace",
+        interact=interact, http_fixtures=fixtures, refresh=60.0)

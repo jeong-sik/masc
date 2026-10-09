@@ -2289,6 +2289,90 @@ let test_async_append_defers_until_flush env =
           (Safe_ops.json_string_opt "keeper" entry)
       | _ -> Alcotest.fail "expected exactly one entry"))
 
+exception Post_commit_guard_failure
+
+let test_async_append_guard_commit_boundary env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber
+        ~sw ~clock:(Eio.Stdenv.clock env);
+      let keeper_name = "guard-k" in
+      let revision () = Keeper_tool_call_log.committed_revision ~keeper_name in
+      let before = revision () in
+      Keeper_tool_call_log.log_call ~keeper_name ~tool_name:"masc_status"
+        ~input:(`Assoc []) ~output_text:"ready" ~wire_outcome:Tool_result.Ok
+        ~duration_ms:1.0 ();
+      Fun.protect
+        ~finally:(fun () -> Dated_jsonl.set_append_guard (fun run -> run ()))
+        (fun () ->
+          Dated_jsonl.set_append_guard (fun _run -> ());
+          (match Keeper_tool_call_log.flush_now () with
+           | () -> Alcotest.fail "skipped append must not report flush success"
+           | exception Dated_jsonl.Append_guard_skipped -> ());
+          Alcotest.(check int) "uncommitted row remains queued" 1
+            (Keeper_tool_call_log.queued_count_for_testing ());
+          Alcotest.(check int) "no revision without commit" before (revision ());
+          Dated_jsonl.set_append_guard (fun run ->
+            run (); raise Post_commit_guard_failure);
+          (match Keeper_tool_call_log.flush_now () with
+           | () -> Alcotest.fail "post-commit failure must propagate"
+           | exception Post_commit_guard_failure -> ());
+          Alcotest.(check int) "committed row is not queued again" 0
+            (Keeper_tool_call_log.queued_count_for_testing ());
+          Alcotest.(check int) "commit invalidates cache despite later failure"
+            (before + 1) (revision ());
+          Dated_jsonl.set_append_guard (fun run -> run ());
+          Keeper_tool_call_log.flush_now ();
+          Alcotest.(check int) "repeated flush does not republish revision"
+            (before + 1) (revision ());
+          let rows = read_recent ~n:10 () |> List.filter (fun row ->
+            Safe_ops.json_string_opt "keeper" row = Some keeper_name
+            && Safe_ops.json_string_opt "tool" row = Some "masc_status") in
+          Alcotest.(check int) "exactly one tool-call row survives" 1 (List.length rows))))
+
+let test_repetition_flush_distinguishes_post_commit_failure ~pending_failure env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+      let keeper_name = "flush-frontier-k" in
+      List.iter (fun tool_name ->
+        Keeper_tool_call_log.log_call ~keeper_name ~tool_name ~input:(`Assoc [])
+          ~output_text:"same" ~input_fingerprint:"input" ~output_fingerprint:"output"
+          ~wire_outcome:Tool_result.Ok ~duration_ms:0. ()) ["first"; "second"];
+      Fun.protect
+        ~finally:(fun () -> Dated_jsonl.set_append_guard (fun run -> run ()))
+        (fun () ->
+          Dated_jsonl.set_append_guard (fun run ->
+            if pending_failure
+               && Keeper_tool_call_log.committed_revision ~keeper_name > 0
+            then ()
+            else (run (); raise Post_commit_guard_failure));
+          let flushed = Keeper_run_tools_setup.flush_ledger () in
+          if pending_failure then (
+            Alcotest.(check bool) "uncommitted row prevents a completed receipt" true
+              (Result.is_error flushed);
+            Alcotest.(check int) "the uncommitted row is retained" 1
+              (Keeper_tool_call_log.queued_count_for_testing ()))
+          else (
+            Alcotest.(check bool) "all committed rows permit frontier advancement" true
+              (Result.is_ok flushed);
+            Alcotest.(check int) "drain continues beyond post-commit failure" 0
+              (Keeper_tool_call_log.queued_count_for_testing ());
+            let judged = match Keeper_tool_call_log.current_frontier ~keeper_name with
+              | Ok frontier -> frontier
+              | Error (Index_unavailable detail) -> Alcotest.fail detail in
+            Dated_jsonl.set_append_guard (fun run -> run ());
+            let seeded = Keeper_run_tools_setup.seed_tool_calls_from_ledger
+                ~history_memo:(Keeper_tool_progress_identity.History_memo.create ())
+                ~judged ~history_tool_use_ids:[] ~keeper_name () in
+            Alcotest.(check int) "already-judged committed rows do not repeat next cycle"
+              0 (List.length seeded));
+          Dated_jsonl.set_append_guard (fun run -> run ());
+          Keeper_tool_call_log.flush_now ();
+          Alcotest.(check int) "both rows persist once after recovery" 2
+            (List.length (read_recent ~keeper_name ~n:10 ())))))
+;;
+
 (* A keeper's revision moves with its own committed appends only, so one
    keeper's tool calls do not make another keeper's derived caches stale. *)
 let test_a_keepers_revision_moves_with_its_own_appends_only env =
@@ -2721,6 +2805,223 @@ let test_read_index_rebuilds_wrong_schema_version () =
       (tool_names (index_rows store ~keeper_name:"alice" ())))
 ;;
 
+let test_frontier_reads_only_new_positions_and_restores () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    let names batch = tool_names (List.map (fun (row : _ Index.positioned) -> row.value) batch.Index.rows) in
+    let now = Unix.gettimeofday () in
+    write_rows store ~keeper:"alice" ~count:205 ~base_ts:now ~label:"old";
+    write_rows store ~keeper:"other" ~count:7 ~base_ts:now ~label:"foreign";
+    let first = read Index.empty_frontier in
+    Alcotest.(check int) "no sliding tail drops unjudged rows" 205 (List.length first.rows);
+    let restored = match Index.frontier_of_json (Index.frontier_to_json first.frontier) with
+      | Ok frontier -> frontier | Error detail -> Alcotest.fail detail in
+    Alcotest.(check int) "same position does not replay old rows" 0 (List.length (read restored).rows);
+    (* Observation times may go backwards; append offsets still move forward. *)
+    write_rows store ~keeper:"alice" ~count:2 ~base_ts:(now -. 1000.) ~label:"new";
+    let second = read restored in
+    Alcotest.(check (list string)) "new rows remain newest-append-first despite older timestamps"
+      ["alice-new-1"; "alice-new-0"] (names second);
+    let source = Agent_core.Context.create_sync () in
+    let target = Agent_core.Context.create_sync () in
+    Keeper_repetition_judged.record source {history_generation = Keeper_repetition_judged.Initial; history_pairs = 7; ledger_frontier = first.frontier};
+    Keeper_repetition_judged.record target {history_generation = Keeper_repetition_judged.Initial; history_pairs = 5; ledger_frontier = second.frontier};
+    let restored = match Keeper_repetition_judged.restore ~source ~target with
+      | Ok boundary -> boundary
+      | Error error -> Alcotest.fail (Keeper_repetition_judged.error_to_string error) in
+    Alcotest.(check int) "history count restores independently" 7 restored.history_pairs;
+    Alcotest.(check bool) "later ledger position is not pulled back by older history" true
+      (Index.equal_frontiers second.frontier restored.ledger_frontier);
+    Alcotest.(check int) "restored position reads no already-judged calls" 0
+      (List.length (read restored.ledger_frontier).rows))
+;;
+
+let test_frontier_restarts_replaced_and_truncated_files () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"old";
+    let first = read Index.empty_frontier in
+    let path = match Keeper_tool_call_log.current_log_path () with
+      | Some path -> path | None -> Alcotest.fail "missing fixture ledger path" in
+    Fs_compat.save_file path "";
+    write_rows store ~keeper:"alice" ~count:1 ~base_ts:(Unix.gettimeofday ()) ~label:"short";
+    let short = read first.frontier in
+    Alcotest.(check int) "truncation rereads the shorter file" 1 (List.length short.rows);
+    Alcotest.(check bool) "truncation releases the old cached evidence" true
+      (Index.equal_frontiers Index.empty_frontier short.retained);
+    Unix.rename path (path ^ ".saved");
+    write_rows store ~keeper:"alice" ~count:1 ~base_ts:(Unix.gettimeofday ()) ~label:"replacement";
+    let replacement = read short.frontier in
+    Alcotest.(check int) "replacement inode rereads from the beginning" 1 (List.length replacement.rows);
+    Alcotest.(check bool) "replacement releases old cached evidence" true
+      (Index.equal_frontiers Index.empty_frontier replacement.retained))
+;;
+
+(* A rewrite that keeps the inode and the byte length of every row leaves the
+   old frontier's offsets valid for the new rows. Only the generation tells
+   the two runs of the file apart. *)
+let test_frontier_restarts_a_same_inode_rewrite ~grow ~rebuild () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    let names batch = tool_names (List.map (fun (row : _ Index.positioned) -> row.value) batch.Index.rows) in
+    write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"aaa";
+    let first = read Index.empty_frontier in
+    Alcotest.(check int) "first read sees every row" 4 (List.length first.rows);
+    let path = match Keeper_tool_call_log.current_log_path () with
+      | Some path -> path | None -> Alcotest.fail "missing fixture ledger path" in
+    let inode_before = (Unix.stat path).Unix.st_ino in
+    let rewritten = String_util.replace_substring ~needle:"alice-aaa-" ~by:"alice-bbb-" (Fs_compat.load_file path) in
+    let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      ignore (Unix.write_substring fd rewritten 0 (String.length rewritten) : int));
+    Alcotest.(check int) "the rewrite keeps the inode" inode_before (Unix.stat path).Unix.st_ino;
+    if grow then (
+      let row = String.split_on_char '\n' rewritten |> List.hd |> Yojson.Safe.from_string in
+      Dated_jsonl.append store row);
+    if rebuild then (
+      let ledger_dir = Dated_jsonl.base_dir store in
+      Index.forget_for_ledger ~ledger_dir;
+      Unix.unlink (Index.database_path ~ledger_dir));
+    let second = read first.frontier in
+    Alcotest.(check (list string)) "the rewritten rows are all new evidence"
+      ((if grow then ["alice-bbb-0"] else [])
+       @ ["alice-bbb-3"; "alice-bbb-2"; "alice-bbb-1"; "alice-bbb-0"]) (names second);
+    Alcotest.(check bool) "cached evidence of the old run is released" true
+      (Index.equal_frontiers Index.empty_frontier second.retained);
+    Alcotest.(check int) "the new run is read once" 0 (List.length (read second.frontier).rows))
+;;
+
+let test_frontier_survives_disposable_index_rebuild ~schema_mismatch () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"judged";
+    let first = read Index.empty_frontier in
+    let held = match Index.frontier_of_json (Index.frontier_to_json first.frontier) with
+      | Ok held -> held | Error detail -> Alcotest.fail detail in
+    let ledger_dir = Dated_jsonl.base_dir store in
+    Index.forget_for_ledger ~ledger_dir;
+    let path = Index.database_path ~ledger_dir in
+    if schema_mismatch then (
+      let db = Sqlite3.db_open path in
+      Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db : bool)) (fun () ->
+        Alcotest.(check bool) "invalidate only the disposable schema" true
+          (Sqlite3.Rc.is_success (Sqlite3.exec db "PRAGMA user_version = 0"))))
+    else Unix.unlink path;
+    let rebuilt = read held in
+    Alcotest.(check int) "rebuild does not rejudge durable calls" 0 (List.length rebuilt.rows);
+    Alcotest.(check bool) "memo frontier survives unchanged file rebuild" true
+      (Index.equal_frontiers held rebuilt.retained);
+    write_rows store ~keeper:"alice" ~count:1 ~base_ts:(Unix.gettimeofday ()) ~label:"new";
+    let appended = read held in
+    Alcotest.(check (list string)) "ordinary append only supplies the new call"
+      ["alice-new-0"]
+      (tool_names (List.map (fun (row : _ Index.positioned) -> row.value) appended.rows)))
+;;
+
+let test_continuity_follows_ledger_retention () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let ledger_dir = Dated_jsonl.base_dir store in
+    let old = Jsonl_writer.dated_path ~base_dir:ledger_dir ~ts:0. in
+    Jsonl_writer.append_jsonl ~path:old.path
+      (`Assoc ["keeper", `String "alice"; "tool", `String "expired"; "ts", `Float 0.]);
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    let first = read Index.empty_frontier in
+    Alcotest.(check int) "expired file had a continuity record" 1 (List.length first.rows);
+    ignore (Dated_jsonl.prune store ~days:1 : int);
+    Alcotest.(check bool) "continuity does not prevent month removal" false
+      (Sys.file_exists (Filename.dirname old.path));
+    let retired = read first.frontier in
+    Alcotest.(check bool) "retained frontier releases the retired file" true
+      (Index.equal_frontiers Index.empty_frontier retired.retained);
+    Alcotest.(check int) "expired continuity records are removed" 0
+      (Array.length (Sys.readdir (Filename.concat ledger_dir ".continuity"))))
+;;
+
+let test_continuity_preserves_blank_and_incomplete_lines () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    write_rows store ~keeper:"alice" ~count:1 ~base_ts:(Unix.gettimeofday ()) ~label:"first";
+    let path = match Keeper_tool_call_log.current_log_path () with
+      | Some path -> path | None -> Alcotest.fail "missing ledger path" in
+    let row = Yojson.Safe.to_string
+      (`Assoc ["keeper", `String "alice"; "tool", `String "tail"; "ts", `Int 1]) in
+    let split = String.length row / 2 in
+    Fs_compat.append_file path ("\n" ^ String.sub row 0 split);
+    let first = read Index.empty_frontier in
+    Alcotest.(check int) "partial row is not evidence" 1 (List.length first.rows);
+    let ledger_dir = Dated_jsonl.base_dir store in
+    Index.forget_for_ledger ~ledger_dir;
+    Unix.unlink (Index.database_path ~ledger_dir);
+    let restored = read first.frontier in
+    Alcotest.(check int) "blank-line witness survives rebuild" 0 (List.length restored.rows);
+    Fs_compat.append_file path (String.sub row split (String.length row - split) ^ "\n");
+    let completed = read restored.frontier in
+    Alcotest.(check (list string)) "only the now-complete row becomes new evidence" ["tail"]
+      (tool_names (List.map (fun (row : _ Index.positioned) -> row.value) completed.rows)))
+;;
+
+let test_rows_after_keeps_only_the_projection () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:5 ~base_ts:(Unix.gettimeofday ()) ~label:"p";
+    let seen = ref 0 in
+    let project row =
+      incr seen;
+      match Safe_ops.json_string_opt "tool" row with
+      | Some name when not (String.equal name "alice-p-2") -> Some name
+      | Some _ | None -> None in
+    match Index.rows_after ~store ~keeper_name:"alice" ~after:Index.empty_frontier ~project with
+    | Error detail -> Alcotest.fail detail
+    | Ok batch ->
+      Alcotest.(check int) "every row passes through the projection" 5 !seen;
+      Alcotest.(check (list string)) "only projected values stay, newest append first"
+        ["alice-p-4"; "alice-p-3"; "alice-p-1"; "alice-p-0"]
+        (List.map (fun (row : string Index.positioned) -> row.value) batch.rows))
+;;
+
+let test_failed_flush_keeps_the_row_and_frontier env =
+  with_tmp_corrupt_tool_call_store (fun ~dir:_ ~masc_root ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+      Keeper_tool_call_log.log_call ~keeper_name:"alice" ~tool_name:"pending"
+        ~input:(`Assoc []) ~output_text:"answer" ~wire_outcome:Tool_result.Ok ~duration_ms:0. ();
+      let failed = match Keeper_tool_call_log.flush_now () with
+        | () -> false
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception _ -> true in
+      Alcotest.(check bool) "write failure is not reported as a successful flush" true failed;
+      Alcotest.(check int) "failed row remains queued" 1 (Keeper_tool_call_log.queued_count_for_testing ());
+      (match Keeper_tool_call_log.current_frontier ~keeper_name:"alice" with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "unreadable ledger supplied a successful frontier");
+      Unix.unlink (Filename.concat masc_root "tool_calls");
+      Fs_compat.mkdir_p (Filename.concat masc_root "tool_calls");
+      Keeper_tool_call_log.flush_now ();
+      Alcotest.(check int) "repair commits the retained row once" 1
+        (List.length (read_recent ~keeper_name:"alice" ~n:10 ()));
+      Alcotest.(check int) "successful repair drains the queue" 0
+        (Keeper_tool_call_log.queued_count_for_testing ())))
+;;
+
 let test_read_index_recovers_after_scan_io_failure () =
   with_tmp_log (fun () ->
     let store = log_store () in
@@ -2917,6 +3218,26 @@ let () =
             test_read_recent_picks_up_rows_appended_between_reads
         ; eio_test "read_recent rebuilds a removed index"
             test_read_recent_rebuilds_a_removed_index
+        ; eio_test "frontier reads only new append positions and restores independently"
+            test_frontier_reads_only_new_positions_and_restores
+        ; eio_test "frontier restarts replaced and truncated files"
+            test_frontier_restarts_replaced_and_truncated_files
+        ; eio_test "frontier restarts a same-inode rewrite"
+            (test_frontier_restarts_a_same_inode_rewrite ~grow:false ~rebuild:false)
+        ; eio_test "frontier restarts a larger same-inode rewrite"
+            (test_frontier_restarts_a_same_inode_rewrite ~grow:true ~rebuild:false)
+        ; eio_test "frontier sees larger rewrite even after index loss"
+            (test_frontier_restarts_a_same_inode_rewrite ~grow:true ~rebuild:true)
+        ; eio_test "frontier survives index file deletion"
+            (test_frontier_survives_disposable_index_rebuild ~schema_mismatch:false)
+        ; eio_test "frontier survives schema replacement"
+            (test_frontier_survives_disposable_index_rebuild ~schema_mismatch:true)
+        ; eio_test "continuity metadata follows data retention"
+            test_continuity_follows_ledger_retention
+        ; eio_test "continuity includes blank lines and waits for complete rows"
+            test_continuity_preserves_blank_and_incomplete_lines
+        ; eio_test "rows_after keeps only what the projection returns"
+            test_rows_after_keeps_only_the_projection
         ; eio_test "execution lookup covers history, keeper isolation and duplicate identities"
             test_execution_lookup_covers_complete_ledger
         ; eio_test "execution lookup preserves unordered duplicate evidence ordering"
@@ -2939,8 +3260,16 @@ let () =
             test_read_index_rejects_unlistable_month
         ] )
     ; ( "async_append",
-        [ eio_env_test "append queues until flush when async fiber is active"
+        [ eio_env_test "repetition flush advances past committed maintenance failures"
+            (test_repetition_flush_distinguishes_post_commit_failure ~pending_failure:false)
+        ; eio_env_test "repetition flush does not advance past an uncommitted row"
+            (test_repetition_flush_distinguishes_post_commit_failure ~pending_failure:true)
+        ; eio_env_test "append guard preserves commit and queue boundaries"
+            test_async_append_guard_commit_boundary
+        ; eio_env_test "append queues until flush when async fiber is active"
             test_async_append_defers_until_flush
+        ; eio_env_test "failed flush retains its row and publishes no frontier"
+            test_failed_flush_keeps_the_row_and_frontier
         ; eio_env_test "commit callback runs after synchronous readable append"
             (test_commit_callback_bypasses_async_queue ~success:true)
         ; eio_env_test "failed tool row commits before publication"

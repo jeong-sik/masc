@@ -282,6 +282,7 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertEqual(unrelated.read_text(), before_unrelated)
             self.assertFalse((root / "elsewhere").exists())
 
+    @unittest.skipUnless(shutil.which("zsh"), "zsh's zsystem flock holds the fcntl lock a BiDi host holds")
     def test_the_extension_host_is_stopped_and_the_running_bidi_host_is_kept(self):
         with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
             root = Path(temporary).resolve()
@@ -292,18 +293,33 @@ class LocalBuildInstall(unittest.TestCase):
                             "--manifest-dir", str(manifests)],
                            check=True, capture_output=True)
             host = base / ".masc/browser-lane/host/masc-browser-host"
+            lock = base / ".masc/browser-lane/bidi-host.lock"
+            lock.touch()
 
             # Each runs as the workspace's copy of the host with the arguments
-            # it was given, which is what ps shows. A bash builtin waits on
+            # it was given, which is what ps shows. A shell builtin waits on
             # stdin, so no other process is started.
             def running_as_host(*arguments):
                 return subprocess.Popen(["bash", "-c", 'exec -a "$0" /bin/bash -c "read line" "$0" "$@"',
                                          str(host), *arguments], stdin=subprocess.PIPE)
 
-            extension = running_as_host(str(root / "native manifests/masc_browser_host.json"), "masc@yousleepwhen")
-            bidi = running_as_host("--bidi-url", "ws://127.0.0.1:9222/session")
-            bidi_with_equals = running_as_host("--bidi-url=ws://127.0.0.1:9223/session")
+            # The BiDi host holds the workspace's host lock, a lockf (fcntl)
+            # lock (lib/browser_bidi_host_record.ml); zsystem flock takes the
+            # same kind.
+            bidi = subprocess.Popen(
+                ["bash", "-c",
+                 """exec -a "$0" zsh -c 'zmodload zsh/system; zsystem flock -f fd "$1"; print locked; read line' "$0" "$1" """,
+                 str(host), str(lock)],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            # ps joins arguments with spaces, so a path can read as a flag.
+            extension = running_as_host(str(root / "native manifests --bidi-url x/masc_browser_host.json"),
+                                        "masc@yousleepwhen")
+            # Given --bidi-url, but another holds the lock: such a host is
+            # refused and ends; nothing marks it as the workspace's host.
+            unlocked = running_as_host("--bidi-url", "ws://127.0.0.1:9222/session")
+            processes = (bidi, extension, unlocked)
             try:
+                self.assertEqual(bidi.stdout.readline(), b"locked\n")
                 # A host that was killed leaves its record without an ending,
                 # and its pid may now be another process's.
                 (base / ".masc/browser-lane/bidi-host.json").write_text(
@@ -318,18 +334,19 @@ class LocalBuildInstall(unittest.TestCase):
                                          "--base-path", str(workspace(root))],
                                         check=True, capture_output=True, text=True)
                 self.assertEqual(extension.wait(timeout=10), -15, result.stdout)
+                self.assertEqual(unlocked.wait(timeout=10), -15, result.stdout)
                 self.assertIsNone(bidi.poll(), "the BiDi host was stopped")
-                self.assertIsNone(bidi_with_equals.poll(), "the BiDi host given --bidi-url=URL was stopped")
-                self.assertIn(f"stopped host pid {extension.pid}; Firefox starts the new copy", result.stdout)
-                kept = re.search(r"kept BiDi host pid ([0-9, ]+), which nothing would start again", result.stdout)
-                self.assertIsNotNone(kept, result.stdout)
-                self.assertEqual(sorted(kept.group(1).split(", ")), sorted([str(bidi.pid), str(bidi_with_equals.pid)]))
+                stopped = re.search(r"stopped host pid ([0-9, ]+); Firefox starts the new copy", result.stdout)
+                self.assertIsNotNone(stopped, result.stdout)
+                self.assertEqual(sorted(stopped.group(1).split(", ")), sorted([str(extension.pid), str(unlocked.pid)]))
+                self.assertIn(f"kept BiDi host pid {bidi.pid}, which nothing would start again", result.stdout)
             finally:
-                for process in (extension, bidi, bidi_with_equals):
+                for process in processes:
                     if process.poll() is None:
                         process.kill()
                         process.wait()
                     process.stdin.close()
+                bidi.stdout.close()
 
     def test_no_registered_host_installs_binaries_and_says_so(self):
         with tempfile.TemporaryDirectory() as temporary:

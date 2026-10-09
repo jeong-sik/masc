@@ -12,9 +12,9 @@
 # manifest whose launcher lives under a workspace's browser-lane/host is
 # reinstalled from the new prefix binary under its own host name, and the host
 # processes started from that workspace are stopped; the extension reconnects
-# after five seconds and starts the new copy. A host started with --bidi-url
-# (a BiDi host) is left running on its old copy, because nothing would start
-# it again.
+# after five seconds and starts the new copy. The host holding the workspace's
+# BiDi host lock (a BiDi host) is left running on its old copy, because
+# nothing would start it again.
 #
 # Before anything is replaced, the new build judges the runtime.toml of the
 # workspace its server runs on (#39311). A refusal leaves every binary and
@@ -199,10 +199,12 @@ else
 fi
 
 python3 - "$repo/connectors/browser/install-host.sh" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
+import fcntl
 import json
 import os
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import sys
 
@@ -229,14 +231,34 @@ if not registered:
     print(f"no browser lane host is registered in {manifest_dir}")
     sys.exit(0)
 
-def bidi_host(arguments):
-    # Firefox starts an extension host with its manifest path and extension
-    # id, and starts it again once it stops. A BiDi host is started with
-    # --bidi-url, which the host also takes as --bidi-url=URL
-    # (bin/masc_browser_host.ml), and nothing starts a stopped one again.
-    return any(word == "--bidi-url" or word.startswith("--bidi-url=") for word in arguments.split())
+def bidi_host_pid(base):
+    # Firefox starts an extension host again once it stops; nothing starts a
+    # stopped BiDi host again. A BiDi host holds a lockf lock on
+    # bidi-host.lock while it runs (lib/browser_bidi_host_record.ml), and
+    # F_GETLK names the holder without taking the lock, so a host starting
+    # meanwhile is not refused. Its record's pid can outlive it, and ps joins
+    # arguments with spaces that a path may hold, so neither names it.
+    try:
+        fd = os.open(base / ".masc/browser-lane/bidi-host.lock", os.O_RDONLY)
+    except FileNotFoundError:
+        return None
+    try:
+        # struct flock orders its fields differently on the two platforms.
+        if sys.platform == "darwin":
+            layout = "@qqihh"
+            asked = struct.pack(layout, 0, 0, 0, fcntl.F_WRLCK, os.SEEK_SET)
+            _, _, holder, kind, _ = struct.unpack(layout, fcntl.fcntl(fd, fcntl.F_GETLK, asked))
+        elif sys.platform.startswith("linux"):
+            layout = "@hhqqi4x"
+            asked = struct.pack(layout, fcntl.F_WRLCK, os.SEEK_SET, 0, 0, 0)
+            kind, _, _, _, holder = struct.unpack(layout, fcntl.fcntl(fd, fcntl.F_GETLK, asked))
+        else:
+            sys.exit(f"cannot read the BiDi host lock's holder on {sys.platform}")
+    finally:
+        os.close(fd)
+    return None if kind == fcntl.F_UNLCK else str(holder)
 
-# -ww: the whole command, so the arguments after the host path are there to read.
+# -ww: whole commands, so a long host path is matched in full.
 running = subprocess.run(["ps", "-ww", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
 stopped_pids = set()
 for name, base in registered:
@@ -244,11 +266,12 @@ for name, base in registered:
                     "--host-name", name, "--manifest-dir", str(manifest_dir)],
                    check=True, stdout=subprocess.DEVNULL)
     host = str(base / ".masc/browser-lane/host/masc-browser-host")
+    bidi_host = bidi_host_pid(base)
     stopped, kept = [], []
     for line in running.splitlines():
         pid, _, command = line.strip().partition(" ")
         if (command == host or command.startswith(host + " ")) and pid not in stopped_pids:
-            if bidi_host(command[len(host):]):
+            if pid == bidi_host:
                 kept.append(pid)
                 continue
             try:

@@ -617,7 +617,18 @@ let test_a_host_that_cannot_write_its_record_leaves_the_last_one () =
     Unix.chmod lane 0o700;
     let next = taken ~pid:300 base in
     check int "and the workspace is free for the next host" 300 (on_disk lane).pid;
-    released next
+    released next;
+    (* That one lists no results, so nothing is archived and the record write
+       is what fails. *)
+    let left = on_disk lane in
+    Unix.chmod lane 0o500;
+    (match take ~pid:400 base with
+     | Error (Record.Unavailable _) -> ()
+     | Error (Record.Another_host _) -> fail "refused as a second host"
+     | Error (Record.Bad_address detail) -> fail detail
+     | Ok _ -> fail "a host took a workspace it cannot write to");
+    Unix.chmod lane 0o700;
+    check bool "the record without results stands too" true (on_disk lane = left)
 
 (* A command the server times out adds one result each time it is sent, so a
    long-lived host meets the limit through no fault of its own. The newest
@@ -694,6 +705,41 @@ let test_archival_precedes_eviction_and_failure_retains_evidence () =
    | Error _ -> () | Ok () -> fail "released host appended a result");
   check bool "released host leaves archive unchanged" true (archived_results base = archived)
 
+(* Without these, the next host's record would leave no trace of results
+   that may have taken effect, and a Keeper could repeat such an action. *)
+let test_the_next_host_archives_the_last_ones_results () =
+  with_workspace @@ fun ~base ~lane ->
+  let first = taken ~pid:100 base in
+  let left = [ noted; { noted with at = noted.at +. 1. } ] in
+  List.iter (fun one -> written (Record.note_unacknowledged first one)) left;
+  released first;
+  let next = taken ~pid:200 base in
+  check bool "the last host's results, under its pid" true
+    (archived_results base = List.map result_json left);
+  check int "the new record lists none of them" 0 (List.length (on_disk lane).unacknowledged);
+  released next
+
+let test_a_host_that_cannot_archive_them_does_not_take_the_workspace () =
+  with_workspace @@ fun ~base ~lane ->
+  let first = taken ~pid:100 base in
+  written (Record.note_unacknowledged first noted);
+  written (Record.ended first ~reason:"stopped by SIGINT" ~session:Record.No_session_left ~now:1_791_000_060.);
+  released first;
+  let left = on_disk lane in
+  let archive = Record.unacknowledged_archive_path ~base_path:base in
+  Unix.mkdir archive 0o700;
+  (match take ~pid:200 base with
+   | Error (Record.Unavailable detail) ->
+     check bool detail true (String_util.contains_substring detail "the last host's results")
+   | Error (Record.Another_host _) -> fail "refused as a second host"
+   | Error (Record.Bad_address detail) -> fail detail
+   | Ok _ -> fail "a host replaced results it could not archive");
+  check bool "the last host's record stands, with its results" true (on_disk lane = left);
+  Unix.rmdir archive;
+  let next = taken ~pid:300 base in
+  check int "and the workspace is free for the next host" 300 (on_disk lane).pid;
+  released next
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; argument; base ] when String.equal argument holder_argument -> hold base
@@ -729,4 +775,8 @@ let () =
           ; test_case "the kept results stop at the limit" `Quick
               test_the_kept_results_stop_at_the_limit
           ; test_case "archival precedes eviction and failure retains evidence" `Quick
-              test_archival_precedes_eviction_and_failure_retains_evidence ] ) ]
+              test_archival_precedes_eviction_and_failure_retains_evidence
+          ; test_case "the next host archives the last one's results" `Quick
+              test_the_next_host_archives_the_last_ones_results
+          ; test_case "a host that cannot archive them does not take the workspace" `Quick
+              test_a_host_that_cannot_archive_them_does_not_take_the_workspace ] ) ]

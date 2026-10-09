@@ -101,7 +101,8 @@ type entry =
           {!unacknowledged_limit} of them; when one more arrives, the oldest
           leave only after their metadata is durably appended to
           {!unacknowledged_archive_path}. Archive failure keeps the longer
-          list and reports an error. Each addition writes the whole record. *)
+          list and reports an error. Each addition writes the whole record.
+          The next host's {!take} archives whatever is left here. *)
   ; ended : ending option
   }
 
@@ -181,8 +182,12 @@ type taken =
   }
 
 (** Takes the lock and replaces the previous host's record with this host's.
-    The previous record stands when this fails: another host holds the lock,
-    the address is refused, or the record cannot be written. *)
+    The results that record lists in [unacknowledged] are first appended to
+    {!unacknowledged_archive_path}, under the previous host's [pid]. The
+    previous record stands when this fails: another host holds the lock, the
+    address is refused, those results cannot be archived, or the record cannot
+    be written. A previous record no reader can load is replaced without
+    archiving. *)
 val take
   :  base_path:string
   -> pid:int

@@ -468,6 +468,32 @@ let lock base_path =
                  Hashtbl.replace held_here identity ();
                  Locked (identity, descriptor)))))
 
+(* Archive rows for [results], under the host [entry] names. *)
+let archive_rows (entry : entry) results =
+  let row result =
+    `Assoc [ "schema", `Int 1; "pid", `Int entry.pid
+           ; "started_at", time entry.started_at
+           ; "client_id", `String (Browser_lane.client_id_to_string entry.client_id)
+           ; "result", unacknowledged_to_json result ]
+  in
+  results |> List.map (fun result -> Yojson.Safe.to_string (row result) ^ "\n") |> String.concat ""
+
+let archive base_path rows =
+  Result.map_error
+    (fun error -> "unacknowledged archive: " ^ Fs_compat.private_jsonl_transaction_error_to_string error)
+    (Result.map ignore
+       (Fs_compat.append_private_jsonl_durable_stable_result (unacknowledged_archive_path ~base_path) rows))
+
+(* The next host's record replaces the last one, and with it the results
+   that host holds no acknowledgement for. They are archived first. A record
+   no reader can load is replaced as it is, as the host status says. *)
+let keep_predecessor_results base_path =
+  match read_entry base_path with
+  | Ok (Some ({ unacknowledged = _ :: _; _ } as previous)) ->
+    Result.map_error (fun detail -> "the last host's results: " ^ detail)
+      (archive base_path (archive_rows previous previous.unacknowledged))
+  | Ok (Some { unacknowledged = []; _ }) | Ok None | Error _ -> Ok ()
+
 let take ~base_path ~pid ~bidi_url ~client_id ~now =
   match recorded_address bidi_url with
   | Error detail -> Error (Bad_address detail)
@@ -492,7 +518,11 @@ let take ~base_path ~pid ~bidi_url ~client_id ~now =
              ; ended = None }
          }
        in
-       (match write held with
+       (match
+          match keep_predecessor_results base_path with
+          | Error detail -> Error (Not_written detail)
+          | Ok () -> write held
+        with
         | Ok () -> Ok { held; not_synced = None }
         | Error (Not_synced detail) -> Ok { held; not_synced = Some detail }
         | Error (Not_written detail) ->
@@ -500,7 +530,7 @@ let take ~base_path ~pid ~bidi_url ~client_id ~now =
            | Ok () -> Error (Unavailable detail)
            | Error unreleased -> Error (Unavailable (detail ^ "; " ^ unreleased)))
         | exception exn ->
-          (* A cancelled write leaves through here. The workspace goes back
+          (* A cancelled archive or write leaves through here. The workspace goes back
              before it does; what the close said is not what is raised. *)
           let backtrace = Printexc.get_raw_backtrace () in
           ignore (release held : (unit, string) result);
@@ -524,22 +554,10 @@ let note_unacknowledged held noted =
   let excess = List.length kept - unacknowledged_limit in
   if excess <= 0 then replace held { held.entry with unacknowledged = kept }
   else
-  let archive_row result =
-    `Assoc [ "schema", `Int 1; "pid", `Int held.entry.pid
-           ; "started_at", time held.entry.started_at
-           ; "client_id", `String (Browser_lane.client_id_to_string held.entry.client_id)
-           ; "result", unacknowledged_to_json result ]
-  in
-  let suffix = List.take excess kept
-    |> List.map (fun result -> Yojson.Safe.to_string (archive_row result) ^ "\n")
-    |> String.concat "" in
-  match Fs_compat.append_private_jsonl_durable_stable_result
-      (unacknowledged_archive_path ~base_path:held.base_path) suffix with
-  | Ok _ ->
+  match archive held.base_path (archive_rows held.entry (List.take excess kept)) with
+  | Ok () ->
       replace held { held.entry with unacknowledged = List.drop excess kept }
-  | Error error ->
-      let detail = "unacknowledged archive: "
-        ^ Fs_compat.private_jsonl_transaction_error_to_string error in
+  | Error detail ->
       (* Preserve the new result as well as every unarchived predecessor.
          A later note retries archival; failure never authorizes eviction. *)
       (match replace held { held.entry with unacknowledged = kept } with

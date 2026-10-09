@@ -237,6 +237,9 @@ type tool_stream_observation =
       { turn : int
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
+  | Native_task_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; bound : Keeper_claude_task_binding.bound }
   | Native_tool_progress of
       { block_index : int; tool_call_id : string option; progress : Runtime_native_tools.progress }
   | Native_tool_completion of

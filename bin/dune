@@ -464,7 +464,7 @@
  (name masc_tui_keeper_chat_live)
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
- (libraries masc.runtime masc masc.masc_types masc_tui_keeper_chat_projection
+ (libraries masc.runtime masc masc.masc_types masc.agent_core masc_tui_keeper_chat_projection
   masc.sse_wire yojson))
 
 (library
@@ -649,6 +649,7 @@
  (libraries masc.runtime
   masc.keeper_chat_operations
   masc
+  masc.agent_core
   masc.keeper_tool_name
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
@@ -1595,7 +1596,7 @@
  (name masc_tui_runtime_config_view)
  (wrapped false)
  (modules masc_tui_runtime_config_view)
- (libraries masc_tui_message_layout yojson))
+ (libraries masc_tui_message_layout masc_tui_account_login yojson))
 
 (library
  (name masc_tui_runtime_account_form)
@@ -1778,7 +1779,7 @@
  (name masc_tui_render_prim)
  (wrapped false)
  (modules masc_tui_render_prim)
- (libraries masc_tui_message_input masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_account_login masc_tui_message_input masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_candle
   masc_tui_frame_timing
   masc_tui_next_request_band

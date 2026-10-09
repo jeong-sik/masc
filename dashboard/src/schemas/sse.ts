@@ -219,7 +219,7 @@ const KEEPER_CHAT_AG_UI_FIELDS_BY_TYPE = new Map<string, ReadonlySet<string>>([
   ['RUN_FINISHED', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId'])],
   ['RUN_ERROR', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'message', 'code'])],
   ['TEXT_MESSAGE_START', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'role'])],
-  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta'])],
+  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta', 'textStreamScope'])],
   ['TEXT_MESSAGE_END', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId'])],
   ['TOOL_CALL_START', new Set([
     ...KEEPER_CHAT_AG_UI_BASE_FIELDS,
@@ -469,10 +469,49 @@ function validateNativeToolCompletion(payload: unknown): SafeParseResult<true> {
     : fail(`${path}.exit_code`, 'Expected native exit code integer or null')
 }
 
+function isNonblankNativeRetryString(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  // Runtime_native_tools owns this predicate: OCaml String.trim removes these
+  // ASCII characters. ECMAScript trim removes additional Unicode content and
+  // would discard metadata already emitted by the canonical server codec.
+  for (const character of value) {
+    switch (character) {
+      case ' ': case '\t': case '\n': case '\r': case '\f': break
+      default: return true
+    }
+  }
+  return false
+}
+
 function validateNativeToolProgress(payload: unknown): SafeParseResult<true> {
   const path = 'ag_ui_event.value.progress'
   if (!isRecord(payload)) return fail(path, 'Expected native progress object')
   switch (payload.kind) {
+    case 'retry_reported':
+    case 'retry_cleared': {
+      const fields = ['kind', 'agent_id', 'subagent_type']
+      if (payload.kind === 'retry_reported') fields.push('attempt', 'max_retries', 'retry_delay_ms', 'error_status', 'error_category')
+      const object = exactCustomObject(payload, 'native retry observation', fields, path)
+      if (!object.success) return object
+      for (const field of ['agent_id', 'subagent_type']) {
+        const value = payload[field]
+        if (!isNonblankNativeRetryString(value))
+          return fail(`${path}.${field}`, 'Expected nonblank native retry identity')
+      }
+      if (payload.kind === 'retry_reported') {
+        for (const field of ['attempt', 'max_retries', 'retry_delay_ms']) {
+          const value = payload[field]
+          if (typeof value !== 'number' || !Number.isSafeInteger(value))
+            return fail(`${path}.${field}`, 'Expected native retry safe integer')
+        }
+        if (payload.error_status !== null
+          && (typeof payload.error_status !== 'number' || !Number.isSafeInteger(payload.error_status)))
+          return fail(`${path}.error_status`, 'Expected native retry status integer or null')
+        if (!isNonblankNativeRetryString(payload.error_category))
+          return fail(`${path}.error_category`, 'Expected native retry error category')
+      }
+      return ok(true)
+    }
     case 'output_observed': {
       const object = exactCustomObject(payload, 'native output observation', ['kind', 'byte_count'], path)
       if (!object.success) return object
@@ -567,8 +606,8 @@ function validateKeeperCustomPayload(
       'because',
     ],
     KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
-    KEEPER_STREAM_MESSAGE_START: ['provider_message_id', 'model', 'usage'],
-    KEEPER_STREAM_MESSAGE_DELTA: ['stop_reason', 'usage'],
+    KEEPER_STREAM_MESSAGE_START: ['stream_scope', 'provider_message_id', 'model', 'usage'],
+    KEEPER_STREAM_MESSAGE_DELTA: ['stream_scope', 'stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
     KEEPER_CONTENT_BLOCK_STOP: ['index'],
     KEEPER_NATIVE_TOOL_START: [
@@ -624,6 +663,8 @@ function validateKeeperCustomPayload(
       return observation.success ? validateNativeToolProgress(value.progress) : observation
     }
     case 'KEEPER_STREAM_MESSAGE_START': {
+      const scope = requiredInteger(value, 'stream_scope')
+      if (!scope.success) return scope
       const provider = requiredString(value, 'provider_message_id')
       if (!provider.success) return provider
       const model = requiredString(value, 'model')
@@ -631,6 +672,8 @@ function validateKeeperCustomPayload(
       return value.usage === undefined ? ok(true) : validateUsage(value.usage)
     }
     case 'KEEPER_STREAM_MESSAGE_DELTA': {
+      const scope = requiredInteger(value, 'stream_scope')
+      if (!scope.success) return scope
       const stopReason = optionalString(value, 'stop_reason')
       if (!stopReason.success) return stopReason
       return value.usage === undefined ? ok(true) : validateDeltaUsage(value.usage)
@@ -835,6 +878,13 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
         ? ok(true)
         : fail('ag_ui_event.role', 'Expected assistant or user AG-UI role')
     case 'TEXT_MESSAGE_CONTENT':
+      if ('textStreamScope' in value && (
+        typeof value.textStreamScope !== 'number'
+        || !Number.isSafeInteger(value.textStreamScope)
+        || value.textStreamScope < 0
+      )) {
+        return fail('ag_ui_event.textStreamScope', 'Expected textStreamScope non-negative integer')
+      }
       return typeof value.delta === 'string'
         ? ok(true)
         : fail('ag_ui_event.delta', 'Expected AG-UI text delta')

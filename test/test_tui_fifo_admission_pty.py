@@ -9,8 +9,130 @@ import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
 
 
+def recalled_admission(executable: str, release_mode: str) -> None:
+    """Accepted A cannot send recalled B; edit release revisits admission.
+
+    The client-rendered acceptance and the still-local B row establish the
+    hold. The fixture's actual POST payload establishes what release sends.
+    """
+    fixture = _keyboard_chat.AtomicChatFixture(
+        no_control_token=True, hold_first_acceptance=True
+    )
+    original = "수정 전 입력"
+    edited = "수정 후 입력"
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            _keyboard_chat.open_atomic_chat(process, master_fd, output)
+            _keyboard_harness.send_and_wait(
+                process, master_fd, output, b"first",
+                _keyboard_harness.composer_showing(b"first"),
+            )
+            os.write(master_fd, b"\r")
+            if not _keyboard_harness.wait_for_fixture_event(
+                process, master_fd, output, fixture.first_post_received, timeout=5
+            ):
+                raise AssertionError("first POST never reached the fixture")
+            _keyboard_harness.send_and_wait(
+                process, master_fd, output, original.encode(),
+                _keyboard_harness.composer_showing(original.encode()),
+            )
+            _keyboard_harness.send_and_wait(
+                process, master_fd, output, b"\r", "내 메시지 2건 대기".encode()
+            )
+            _keyboard_harness.send_and_wait(
+                process, master_fd, output, b"\x10",
+                _keyboard_harness.composer_showing(original.encode()),
+            )
+            _keyboard_harness.send_and_wait(
+                process, master_fd, output,
+                b"\x7f" * len(original) + edited.encode(),
+                _keyboard_harness.composer_showing(edited.encode()),
+            )
+            _keyboard_harness.read_available(master_fd, output)
+            acceptance_start = len(output)
+            fixture.release_first_acceptance.set()
+            accepted_label = "처리 대기".encode()
+            _keyboard_harness.wait_for_output(
+                process, master_fd, output, accepted_label,
+                start=acceptance_start, timeout=5,
+            )
+            accepted_end = _keyboard_harness.end_of_needle(
+                output, accepted_label, acceptance_start
+            )
+            _keyboard_harness.wait_for_output(
+                process, master_fd, output, _keyboard_harness.FRAME_END,
+                start=accepted_end, timeout=5,
+            )
+            # This checks the current screen, including unchanged rows, after
+            # the Accepted mailbox handler and its synchronous launch decision.
+            rows = _keyboard_harness.screen_rows(bytes(output))
+            if not any(original.encode() in row and "전송 대기".encode() in row
+                       for row in rows.values()):
+                raise AssertionError("recalled input left the local queue on acceptance")
+            # Accepted is applied before its frame and synchronous queue
+            # dispatch decision. Inspect a fresh redraw of that local state;
+            # Ctrl-T is globally owned by the mouse toggle, and typing /queue
+            # would replace the recalled edit whose ownership we are testing.
+            drawn = _keyboard_harness.resize_and_wait(
+                process, master_fd, output, rows=40, columns=121,
+                needle=edited.encode(),
+                controls=(_keyboard_harness.FULL_REDRAW,),
+                final_cursor=b"\x1b[?25h",
+            )
+            rows = _keyboard_harness.screen_rows(drawn)
+            if not any(original.encode() in row and "전송 대기".encode() in row
+                       for row in rows.values()):
+                raise AssertionError("fresh frame lost the recalled local queue item")
+            if edited.encode() not in _keyboard_harness.screen_text(drawn):
+                raise AssertionError("fresh frame lost the recalled editor")
+            with fixture.lock:
+                received = [item["message"] for item in fixture.received]
+            if received != ["first"]:
+                raise AssertionError(f"recalled old payload was sent: {received!r}")
+            release_key = {"Enter": b"\r", "Ctrl-U": b"\x15", "Esc": b"\x1b"}[release_mode]
+            os.write(master_fd, release_key)
+            _keyboard_chat.wait_for_atomic_admissions(
+                process, master_fd, output, fixture, 2
+            )
+            expected = edited if release_mode == "Enter" else original
+            with fixture.lock:
+                submitted = list(fixture.submitted)
+                received = [item["message"] for item in fixture.received]
+            if received != ["first", expected]:
+                raise AssertionError(f"release did not send exactly its owned payload: {received!r}")
+            if len({item["request_id"] for item in submitted}) != 2:
+                raise AssertionError("release duplicated or replaced the first request identity")
+            if fixture.release.is_set():
+                raise AssertionError("released admission waited for root completion")
+            fixture.release.set()
+            _keyboard_harness.wait_for_output(
+                process, master_fd, output, ("reply-" + expected).encode(),
+                start=acceptance_start, timeout=10,
+            )
+            _keyboard_harness.escape_to_keeper_detail(
+                process, master_fd, output, name=b"alpha"
+            )
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            os.write(master_fd, b"q")
+        finally:
+            fixture.release_first_acceptance.set()
+            fixture.release_interrupt.set()
+            fixture.release.set()
+
+    _keyboard_harness.run_terminal_scenario(
+        executable,
+        description=f"Recalled admission remains local until {release_mode}",
+        interact=interact,
+        http_fixtures=fixture.fixtures,
+        refresh=0.2,
+    )
+
 
 def run(executable: str) -> None:
+    for release_mode in ("Enter", "Ctrl-U", "Esc"):
+        recalled_admission(executable, release_mode)
+
     fixture = _keyboard_chat.AtomicChatFixture(no_control_token=True, hold_first_acceptance=True)
 
     def interact(process, master_fd, _slave_fd, output, _base_path):

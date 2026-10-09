@@ -11,3 +11,5 @@ Focused HTTP/main-TUI bytecode objects and setup-credential executable build com
 Editor JSON decoding, conflict-document interpretation and Skill save statuses are source-review-only in this unit. The credential tests do not execute those codecs or an HTTP round trip. No actual terminal, installation, full CI, formal GitHub approval or merge is claimed. Final evidence-delta review is pending.
 
 Both original candidates remain partially improved: HTTP credential/request/response policies and runtime materialization/storage/cache semantics still require audit. A source follow-up remains: sel_snapshot_revision has no read consumer, while sel_access is still a wire string checked by the editor. These client-contract questions are not certified by the extraction or credential tests. The 171-file campaign remains incomplete.
+
+The unused loaded snapshot and string access follow-ups recorded at this code head are addressed by [#42148](https://github.com/jeong-sik/masc/pull/42148), with separate protocol fixture evidence in [../skill-read-contract/README.md](../skill-read-contract/README.md). This does not expand the original credential-test scope.

@@ -1,0 +1,41 @@
+[2026-10-09 21:54:34] [INFO] [MCP] Tag registry initialized: 195 tools registered
+Testing `server Skill editor'.
+This run has ID `24PQ33AS'.
+
+  [OK]          editor          0   load preview and publish.
+  [SKIP]        editor          1   near-miss fence is diagnosed in preview.
+  [SKIP]        editor          2   invalid candidate is never written.
+  [SKIP]        editor          3   invalid new Skill is never created.
+  [SKIP]        editor          4   composition preview exposes validated flow.
+  [SKIP]        editor          5   external edit conflicts.
+  [OK]          editor          6   read-only source rejects save.
+  [SKIP]        editor          7   unreadable body is never written.
+  [SKIP]        editor          8   oversized candidate is never written.
+  [SKIP]        editor          9   saved but unpublished is explicit.
+  [SKIP]        editor         10   create publishes without host path input.
+  [SKIP]        editor         11   create behind an earlier source names the...
+  [SKIP]        editor         12   delete exact reference and publish.
+  [SKIP]        editor         13   delete removes the empty package and the ...
+  [SKIP]        editor         14   delete keeps a package that holds other f...
+  [SKIP]        editor         15   delete stale revision does not mutate.
+  [SKIP]        editor         16   delete stale published revision does not ...
+  [SKIP]        editor         17   delete restores pre-mutation replacement.
+  [SKIP]        editor         18   delete retains quarantine when original r...
+  [SKIP]        editor         19   delete retains open-fd write after verifi...
+  [SKIP]        editor         20   delete cancellation after move is typed.
+  [SKIP]        editor         21   delete parent cancellation while waiting ...
+  [SKIP]        editor         22   delete cancellation after verification is...
+  [SKIP]        editor         23   delete cancellation after quarantine is t...
+  [SKIP]        editor         24   delete refresh cancellation is unpublished.
+  [SKIP]        editor         25   delete moved settlement failure is typed.
+  [SKIP]        editor         26   delete requires confirmation.
+  [SKIP]        editor         27   delete read-only source does not mutate.
+  [SKIP]        editor         28   delete missing file is not found.
+  [SKIP]        editor         29   delete rejects symlink leaf.
+  [SKIP]        editor         30   delete rejects symlink directory escape.
+  [SKIP]        editor         31   deleted but unpublished is explicit.
+  [SKIP]        editor         32   server skill snapshot runtime refresh fro...
+  [OK]          editor         33   client read contract rejects unknown auth...
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/server Skill editor'.
+Test Successful in 0.008s. 3 tests run.

@@ -2472,6 +2472,115 @@ let test_revision_evidence_never_invents_links () =
    | Error _ -> () | Ok _ -> fail "negative evidence frontier accepted")
 ;;
 
+let successor_recall ~keepers_dir =
+  Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok
+;;
+
+let revise_into ~keepers_dir old targets =
+  let revisions = List.map (fun target ->
+    {Types.superseded=Types.memory_id old; superseded_by=Types.memory_id target}) targets in
+  apply_disposition ~keepers_dir ~revisions ~new_claims:targets
+    ~dropped_statements:[{Types.memory_id=Types.memory_id old; reason="verified explicit correction"}] () |> require_ok
+;;
+
+let test_successor_recall_tracks_multistep_split_incarnations () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a = fact ~claim:"A scope covers R001 to R200" () in
+  let b = fact ~claim:"B corrects R015" () in
+  let c = fact ~claim:"C preserves other release policies" () in
+  let d = fact ~claim:"D verifies R015 correction" () in
+  let binding = recall_binding 1 (fact ~claim:"R015 original policy" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  check bool "initial binding remains direct" true
+    ((successor_recall ~keepers_dir).direct_bindings=[binding]);
+  ignore (revise_into ~keepers_dir a [b;c]);
+  ignore (revise_into ~keepers_dir b [d]);
+  let view = successor_recall ~keepers_dir in
+  check int "split has two current path candidates" 2 (List.length view.successor_candidates);
+  check int "retired original is never a direct binding" 0 (List.length view.direct_bindings);
+  check bool "paths retain original target and historical source without adopting them" true
+    (List.for_all (fun (candidate : Current.successor_recall_candidate) ->
+      candidate.binding=binding && candidate.original_target=a) view.successor_candidates);
+  check (list int) "chain follows revision order with no depth cut" [1;2]
+    (List.map (fun (candidate : Current.successor_recall_candidate) -> List.length candidate.path)
+      view.successor_candidates |> List.sort Int.compare);
+  for _ = 1 to 20 do
+    ignore (apply_disposition ~keepers_dir () |> require_ok);
+    let cached = successor_recall ~keepers_dir in
+    check bool "unchanged local observations preserve exact successor paths" true
+      (cached.successor_candidates=view.successor_candidates && cached.unresolved=view.unresolved)
+  done;
+  let current = Option.get view.snapshot in
+  ignore (replace ~keepers_dir ~expected_revision:(Some current.revision) ~facts:[c] () |> require_ok);
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:500.
+    ~source:(source Current.Explicit_write) d |> require_upsert_ok);
+  let after = successor_recall ~keepers_dir in
+  check (list string) "re-added terminal cannot revive dead branch" [Types.memory_id c]
+    (List.map (fun (candidate : Current.successor_recall_candidate) -> Types.memory_id candidate.target)
+      after.successor_candidates);
+  check bool "conclusive retirement remains distinct from history failure" true
+    (List.exists (fun (item : Current.recall_unresolved) -> match item.reason with
+      | Current.Retired_without_successor _ -> true | _ -> false) after.unresolved)
+;;
+
+let test_successor_recall_preserves_current_on_missing_history () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a = fact ~claim:"original target" () and b = fact ~claim:"current successor" () in
+  let binding = recall_binding 1 (fact ~claim:"original source" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  ignore (revise_into ~keepers_dir a [b]);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let original = Fs_compat.load_file journal in
+  let rows = Fs_compat.load_jsonl journal in
+  Fs_compat.invalidate_cached_writer journal;
+  let strip keys = rows |> List.map (function
+    | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> not (List.mem key keys)) fields)
+    | json -> json) |> List.map Yojson.Safe.to_string |> String.concat "\n" in
+  List.iter (fun (keys, expect_missing) ->
+    Fs_compat.save_file journal (strip keys ^ "\n");
+    let view = successor_recall ~keepers_dir in
+    check bool "ordinary current facts survive lineage failure" true
+      (Option.map (fun (snapshot : Current.t) -> snapshot.facts) view.snapshot=Some [b]);
+    check int "no invented successor for incomplete evidence" 0 (List.length view.successor_candidates);
+    check bool "unknown transition is distinguished from absent edge evidence" true
+      (List.exists (fun (item : Current.recall_unresolved) -> match item.reason with
+        | Current.Missing_transition _ -> expect_missing
+        | Current.Unrecorded_lineage _ -> not expect_missing
+        | _ -> false) view.unresolved))
+    [["commit_effect";"revision_links"],true; ["revision_links"],false];
+  Fs_compat.save_file journal "broken JSON\n";
+  let broken = successor_recall ~keepers_dir in
+  check bool "unreadable history does not erase ordinary snapshot" true (Option.is_some broken.snapshot);
+  check bool "unreadable evidence is explicit" true
+    (List.exists (fun (item : Current.recall_unresolved) -> match item.reason with
+      | Current.History_unavailable _ -> true | _ -> false) broken.unresolved);
+  Fs_compat.save_file journal original
+;;
+
+let test_successor_recall_rejects_phantom_target_added_later () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a = fact ~claim:"A original" () and b = fact ~claim:"B unrelated later addition" () in
+  let c = fact ~claim:"C actual revision target" () in
+  let binding = recall_binding 1 (fact ~claim:"source A" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  ignore (revise_into ~keepers_dir a [c]);
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) b |> require_upsert_ok);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let rows = Fs_compat.load_jsonl journal |> List.map (fun json ->
+    if Yojson.Safe.Util.member "revision" json = `Int 2 then
+      map_field "revision_links" (fun _ -> `List [`Assoc [
+        "superseded",`String (Types.memory_id a); "superseded_by",`String (Types.memory_id b)]]) json
+    else json) in
+  Fs_compat.invalidate_cached_writer journal;
+  Fs_compat.save_file journal (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n");
+  let view = successor_recall ~keepers_dir in
+  check int "future unrelated addition cannot authorize past edge" 0 (List.length view.successor_candidates);
+  check bool "phantom target has explicit invalid transition evidence" true
+    (List.exists (fun (item : Current.recall_unresolved) ->
+      item.reason=Current.Invalid_transition 2) view.unresolved)
+;;
+
 let test_prepared_receipt_before_revision_links_recovers_with_no_lineage () =
   with_temp_keepers @@ fun keepers_dir ->
   (* A receipt written before the [revision_links] field existed must decode:
@@ -3909,6 +4018,12 @@ let () =
             test_declared_revision_links_survive_journal_failure
         ; test_case "revision evidence does not invent missing links or re-add lineage" `Quick
             test_revision_evidence_never_invents_links
+        ; test_case "successor recall follows multistep splits without incarnation revival" `Quick
+            test_successor_recall_tracks_multistep_split_incarnations
+        ; test_case "successor lineage failures preserve ordinary current results" `Quick
+            test_successor_recall_preserves_current_on_missing_history
+        ; test_case "successor recall rejects phantom target added in a later revision" `Quick
+            test_successor_recall_rejects_phantom_target_added_later
         ; test_case "prepared receipt before revision links recovers with no lineage" `Quick
             test_prepared_receipt_before_revision_links_recovers_with_no_lineage
         ; test_case "legacy removal line clears its legacy receipt once" `Quick

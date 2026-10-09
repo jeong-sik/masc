@@ -360,6 +360,10 @@ let replay filename () =
     "consumption_and_lookup_receipt_bytes",`Int (file_bytes
       (Current.durable_range_receipt_path ~keepers_dir ~keeper_id));
     "pending_queue_bytes",`Int (file_bytes queue_path)] in
+  let successor_state = Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id |> require in
+  let successor_observation = `Assoc ["structural_candidates",`Int (List.length successor_state.successor_candidates);
+    "direct_bindings",`Int (List.length successor_state.direct_bindings);
+    "unresolved_paths",`Int (List.length successor_state.unresolved)] in
   let recall_after = recall () in
   let recall_all_after = recall ~source:"all" () in
   let binding_snapshot, recall_bindings =
@@ -562,6 +566,7 @@ let replay filename () =
     "current_facts",`List (List.map Memory.fact_to_json current_facts);
     "current_snapshot_present",`Bool (Option.is_some current);
     "restored_state",restored_state;
+    "successor_observation",successor_observation;
     "committed_revision_evidence",`List revision_evidence_json;
     "recall_before",`List recall_before;
     "recall_all_before",`List recall_all_before;
@@ -636,8 +641,8 @@ let test_incomplete_lookup_keeps_direct_search_with failure () =
     check int "unverifiable historical alias is withheld" 0
       (member "match_count" alias |> Yojson.Safe.Util.to_int);
     check bool "incomplete lookup never asserts absence" true (member "no_match" alias = `Null);
-    List.iter (fun result -> check string "lookup gap is model-visible" "incomplete"
-      (member "admission_lookup_verification" result |> json_string "status")) [direct;alias])
+    check string "query-matching historical lookup gap is model-visible" "incomplete"
+      (member "successor_recall" alias |> json_string "status"))
     ["current";"all"]
 
 let () =

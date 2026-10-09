@@ -516,6 +516,52 @@ val read_with_admission_recall_for_keepers_dir :
     stable writer lock may advance its exact file identity; any unexpected
     metadata change requires full verification, including external growth. *)
 
+type recall_unresolved_reason =
+  | History_unavailable of string
+  | Missing_transition of int
+  | Invalid_transition of int
+  | Unrecorded_lineage of int
+  | Retired_without_successor of int
+
+type recall_unresolved =
+  { binding : admission_recall_binding
+  ; reason : recall_unresolved_reason
+  }
+
+type successor_recall_candidate =
+  { binding : admission_recall_binding
+  ; born_revision : int
+  ; original_target : Keeper_memory_os_types.fact
+  ; target : Keeper_memory_os_types.fact
+  ; path : revision_evidence list
+  }
+
+type successor_recall =
+  { receipt_verification : (unit, string) result
+  ; snapshot : t option
+  ; direct_bindings : admission_recall_binding list
+  ; successor_candidates : successor_recall_candidate list
+  ; unresolved : recall_unresolved list
+  }
+
+val revision_evidence_to_json : revision_evidence -> Yojson.Safe.t
+val recall_unresolved_reason_to_string : recall_unresolved_reason -> string
+val recall_unresolved_reason_to_json : recall_unresolved_reason -> Yojson.Safe.t
+
+val read_successor_recall_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> (successor_recall, string) result
+(** Coherent current facts and historical-source successor candidates. Receipt
+    failures retain direct snapshot facts with [receipt_verification = Error _]
+    and no unverified aliases. Consumers must report incomplete lookup even
+    when no candidate can be recovered. Only
+    complete marked snapshot transitions and explicit applied revision edges
+    are followed, in revision order, with no depth limit. Split paths remain
+    separate evidence. A later same-identity addition cannot resurrect a dead
+    path. Candidates have not passed semantic relevance/preservation judgment.
+    Lineage failures are returned separately without discarding current facts.
+    [Retired_without_successor] is conclusive retirement, not unreadable history.
+    No bindings means no journal scan. No receipts or bindings are retargeted. *)
+
 val apply_disposition
   :  ?on_committed:(disposition -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

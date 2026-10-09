@@ -311,7 +311,7 @@ def main():
                 assert status == 200 and live['source_kind'] == machine + '_capture'
                 row, = snapshot['rows']
                 assert row['lane_id'] == machine + '/screen'
-                assert live['incarnation'] == row['fields']['input_history']['incarnation']
+                assert live['incarnation'] == row['subject_id']
                 screen = live['screen']
                 pixels = base64.b64decode(screen['rgb_base64'], validate=True)
                 assert len(pixels) == screen['width'] * screen['height'] * 3

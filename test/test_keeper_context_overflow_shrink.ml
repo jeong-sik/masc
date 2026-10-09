@@ -111,6 +111,7 @@ let test_non_overflow_error_never_shrinks () =
   in
   let result =
     Try_provider.context_overflow_shrink_sequence
+      ~on_memory_capacity_refusal:(fun ~refusal:_ -> fail "unauthorized memory reprojection")
       ~starting_capacity:1024
       ~same_run_retry_authorized:always_authorized
       ~shrink_admits_history:always_admits_history
@@ -139,6 +140,7 @@ let test_checkpoint_boundary_blocks_shrink_even_on_overflow () =
   in
   let result =
     Try_provider.context_overflow_shrink_sequence
+      ~on_memory_capacity_refusal:(fun ~refusal:_ -> fail "unauthorized memory reprojection")
       ~starting_capacity:1024
       ~same_run_retry_authorized:(fun () -> false)
       ~shrink_admits_history:always_admits_history
@@ -294,11 +296,83 @@ let test_the_shrink_stops_at_the_first_inadmissible_step () =
     (List.rev !attempted_capacities)
 ;;
 
+let test_memory_reprojection_retries_without_shrinking_history () =
+  let capacities = ref [] in
+  let reset = ref false in
+  let refusal = context_overflow () in
+  let result = Try_provider.context_overflow_shrink_sequence
+      ~starting_capacity:1024 ~same_run_retry_authorized:always_authorized
+      ~on_memory_capacity_refusal:(fun ~refusal:observed ->
+        check bool "reprojection receives the exact typed refusal" true (observed = refusal);
+        Ok Masc.Keeper_memory_delivery_reprojection.Reprojected)
+      ~on_memory_retry:(fun () -> reset := true)
+      ~shrink_capacity:(fun ~capacity ~default_capacity:_ -> capacity)
+      ~shrink_admits_history:(fun ~capacity:_ -> false)
+      ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity:_ ->
+        fail "memory-only retry must not claim a history shrink")
+      ~attempt:(fun ~capacity ->
+        capacities := capacity :: !capacities;
+        if !reset then Ok "reprojected request" else Error refusal) () in
+  check bool "recovery reset precedes the retry" true (result = Ok "reprojected request");
+  check (list int) "memory-only retry preserves history capacity" [1024;1024]
+    (List.rev !capacities)
+;;
+
+let test_unchanged_memory_needs_a_real_history_target () =
+  List.iter (fun next_capacity ->
+    let capacities = ref [] in
+    let callbacks = ref 0 in
+    let refusal = context_overflow () in
+    let result = Try_provider.context_overflow_shrink_sequence
+        ~starting_capacity:1024 ~same_run_retry_authorized:always_authorized
+        ~on_memory_capacity_refusal:(fun ~refusal:_ ->
+          incr callbacks;
+          Ok Masc.Keeper_memory_delivery_reprojection.Unchanged)
+        ~on_memory_retry:(fun () -> fail "unchanged memory cannot authorize a retry")
+        ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
+          match next_capacity with None -> capacity | Some next -> next)
+        ~shrink_admits_history:always_admits_history
+        ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity:_ -> ())
+        ~attempt:(fun ~capacity ->
+          capacities := capacity :: !capacities;
+          if capacity < 1024 then Ok "history reduced" else Error refusal) () in
+    check int "memory selection considered once for the refusal" 1 !callbacks;
+    match next_capacity with
+    | None ->
+      check bool "unchanged memory preserves the original refusal" true (result = Error refusal);
+      check (list int) "no invented half-capacity request" [1024] (List.rev !capacities)
+    | Some target ->
+      check bool "existing history shrink remains available" true (result = Ok "history reduced");
+      check (list int) "only the measured history target is retried" [1024;target]
+        (List.rev !capacities)) [None;Some 512]
+;;
+
+let test_memory_receipt_failure_stops_retry_with_original_refusal () =
+  let attempts = ref 0 in
+  let refusal = context_overflow () in
+  let result = Try_provider.context_overflow_shrink_sequence
+      ~starting_capacity:1024 ~same_run_retry_authorized:always_authorized
+      ~on_memory_capacity_refusal:(fun ~refusal:_ -> Error "receipt persistence failed")
+      ~on_memory_retry:(fun () -> fail "unpersisted selection cannot reset recovery")
+      ~shrink_admits_history:always_admits_history
+      ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity:_ ->
+        fail "receipt failure cannot fall through to history retry")
+      ~attempt:(fun ~capacity:_ -> incr attempts; Error refusal) () in
+  check bool "provider refusal remains the reported error" true (result = Error refusal);
+  check int "no request follows failed receipt persistence" 1 !attempts
+;;
+
 let () =
   run
     "keeper_context_overflow_shrink"
     [ ( "context_overflow_shrink_sequence"
-      , [ test_case
+      , [ test_case "memory reprojection retries at unchanged history capacity" `Quick
+            test_memory_reprojection_retries_without_shrinking_history
+        ; test_case "unchanged memory requires a real history target" `Quick
+            test_unchanged_memory_needs_a_real_history_target
+        ; test_case "failed memory receipt preserves the provider refusal" `Quick
+            test_memory_receipt_failure_stops_retry_with_original_refusal
+        ; test_case
             "halves capacity on repeated overflow until success"
             `Quick
             test_halves_capacity_on_repeated_overflow_until_success

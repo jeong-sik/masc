@@ -106,10 +106,24 @@ It ends by itself in three cases, and says which in its own log output:
   host that is waiting for work too; a command the connection ended under is
   answered first.
 - A command's outcome is unknown.
-- The server refuses the client's registration. It does so, for one, once it
-  has retired that client after two minutes without a poll.
+- The server refuses the client's registration for a reason that asking
+  again would not change: the request is one it cannot read, it holds the
+  client ID as another browser, or it calls a client ID ended on the first
+  poll that ID ever sent.
 
 The reason is not reported to the server.
+
+A server that has ended the host's connection for its silence does not end
+the host. The server ends a connection after two minutes without a poll,
+which is what a host meets after its machine slept or it was suspended in
+the terminal, and it serves that client ID no more. The host then registers
+again under a new `clientId` and keeps its BiDi session, so Firefox is not
+asked for another. The one case that does end it is the last one above: an
+ID that had sent no poll before cannot have fallen silent, and another new
+ID would be told the same.
+A Keeper that held the old `clientId` reads the list of connections again
+and takes the new one; requests under the old one are refused as
+`selected_client_disconnected`.
 
 Attaching again is the host command alone. A host that is stopped, or ends
 by itself, first ends the BiDi session it asked for; Firefox keeps running

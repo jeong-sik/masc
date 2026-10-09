@@ -819,14 +819,24 @@ let checkpoint_json (st : machine) =
     ]
 ;;
 
+type checkpoint_effect = {
+  observation : observation;
+  mark : change_mark;
+  checkpoint_sha256 : string;
+}
+
 let save ~path =
   locked (fun () ->
     match !state with
     | None -> Error No_machine
     | Some st ->
       try
-        atomic_write path (Yojson.Safe.to_string (checkpoint_json st));
-        Ok (observe st)
+        let contents = Yojson.Safe.to_string (checkpoint_json st) in
+        let checkpoint_sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
+        atomic_write path contents;
+        Ok { observation = observe st;
+             mark = { count = !change_count; incarnation = st.incarnation };
+             checkpoint_sha256 }
       with Sys_error message -> Error (Unreadable message))
 ;;
 
@@ -892,12 +902,17 @@ let restore ~path ~ledger_dir =
   then Error (Invalid_request ("no MSX checkpoint at " ^ path))
   else
   let decoded =
-    try decode_checkpoint (Yojson.Safe.from_string (read_file path)) with
+    try
+      let contents = read_file path in
+      let checkpoint_sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
+      Result.map (fun decoded -> decoded, checkpoint_sha256)
+        (decode_checkpoint (Yojson.Safe.from_string contents))
+    with
     | Sys_error message -> Error (Unreadable message)
     | Yojson.Json_error message -> Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
   match decoded with
   | Error e -> Error e
-  | Ok (m, frame, cart, disk, disk_id, media, entries) ->
+  | Ok ((m, frame, cart, disk, disk_id, media, entries), checkpoint_sha256) ->
     locked (fun () ->
       let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
       try
@@ -908,7 +923,9 @@ let restore ~path ~ledger_dir =
                   input_count = List.length entries} in
         state := Some st;
         mark_change ();
-        Ok (observe st)
+        Ok { observation = observe st;
+             mark = { count = !change_count; incarnation = st.incarnation };
+             checkpoint_sha256 }
       with Sys_error message -> Error (Unreadable message))
 ;;
 

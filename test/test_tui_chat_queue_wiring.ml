@@ -1735,7 +1735,8 @@ let test_journal_replacement_retains_history_media () =
       let log=Tui_types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:1. in
       let events=[line 0 1. (E.Run_started {run_id="media-run";thread_id="keeper:alpha"});
         line 1 1.1 (E.Reply_details {reply=reply_text;turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
-          turn_ref=Ids.Turn_ref.make ~trace_id:"media" ~absolute_turn:1})] @
+          turn_ref=Ids.Turn_ref.make ~trace_id:"media" ~absolute_turn:1;
+          terminal_stream_scope=None})] @
         (if finished then [line 2 1.2 (E.Run_finished {run_id="media-run"})] else []) in
       ignore (Tui_types.turn_log_add_journaled log events);
       Log.commit log.tl_log;

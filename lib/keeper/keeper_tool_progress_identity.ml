@@ -78,8 +78,13 @@ let retain_confirmation_identity ~tool_name original redacted =
 
 (* A memory write returns the content-addressed [memory_id]; a retract
    receives that id as input. The answer therefore groups changing write
-   requests and snapshot stamps by the claim they affect. *)
-type memory_identity = Memory_write of string | Memory_retract of string
+   requests and snapshot stamps by the claim they affect. A write also says
+   what it did to that claim ([identity_disposition]): inserting a claim and
+   observing it again are different answers, so the disposition stays in the
+   write's identity. *)
+type memory_identity =
+  | Memory_write of { disposition : string option; memory_id : string }
+  | Memory_retract of string
 
 let memory_id_of_json = function
   | `Assoc fields ->
@@ -91,13 +96,24 @@ let memory_id_of_json = function
     None
 ;;
 
+let disposition_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "identity_disposition" fields with
+     | Some (`String disposition) -> Some disposition
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+     | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    None
+;;
+
 let memory_identity ~tool_name ~input ~output_text =
   match Keeper_tool_answer.resolve tool_name with
   | Keeper_tool_answer.Keeper_handler Keeper_tool_descriptor.Tool_memory_write ->
-    Option.bind
-      (Keeper_tool_answer.answer ~tool_name ~output_text)
-      memory_id_of_json
-    |> Option.map (fun memory_id -> Memory_write memory_id)
+    Option.bind (Keeper_tool_answer.answer ~tool_name ~output_text) (fun answer ->
+      Option.map
+        (fun memory_id ->
+          Memory_write { disposition = disposition_of_json answer; memory_id })
+        (memory_id_of_json answer))
   | Keeper_tool_answer.Keeper_handler Keeper_tool_descriptor.Tool_memory_retract ->
     Option.map (fun memory_id -> Memory_retract memory_id)
       (memory_id_of_json input)
@@ -106,8 +122,13 @@ let memory_identity ~tool_name ~input ~output_text =
 ;;
 
 let memory_identity_fingerprint = function
-  | Memory_write memory_id ->
-    digest_json (`Assoc [ "tool", `String "write"; "memory_id", `String memory_id ])
+  | Memory_write { disposition; memory_id } ->
+    digest_json
+      (`Assoc
+        [ "tool", `String "write"
+        ; "disposition", (match disposition with Some d -> `String d | None -> `Null)
+        ; "memory_id", `String memory_id
+        ])
   | Memory_retract memory_id ->
     digest_json (`Assoc [ "tool", `String "retract"; "memory_id", `String memory_id ])
 ;;

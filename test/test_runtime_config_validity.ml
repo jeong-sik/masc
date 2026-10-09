@@ -1602,6 +1602,7 @@ let catalog_decided_capability_pairs
       ; supports_response_format_json
       ; supports_structured_output
       ; supports_system_prompt
+      ; supports_assistant_prefill
       ; supports_prompt_caching
       ; supports_top_k
       ; supports_min_p
@@ -1628,6 +1629,7 @@ let catalog_decided_capability_pairs
     , supports_structured_output
     , resolved.supports_structured_output )
   ; "supports-system-prompt", supports_system_prompt, resolved.supports_system_prompt
+  ; "supports-assistant-prefill", supports_assistant_prefill, resolved.supports_assistant_prefill
   ; "supports-prompt-caching", supports_prompt_caching, resolved.supports_prompt_caching
   ; "supports-top-k", supports_top_k, resolved.supports_top_k
   ; "supports-min-p", supports_min_p, resolved.supports_min_p

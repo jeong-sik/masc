@@ -327,7 +327,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
        See keeper_chat_tool_trail.mli. *)
     Keeper_chat_tool_trail.on_event !tool_trail event;
     match event with
-    | Text_delta text ->
+    | Text_delta {text; _} ->
         let acc_text = acc_text ^ text in
         let patch_content = streaming_patch_content acc_text in
         (match msg_id with

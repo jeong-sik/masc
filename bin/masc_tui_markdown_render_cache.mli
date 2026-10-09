@@ -52,6 +52,15 @@ val render_growing :
     snapshot renders from the previous suffix boundary. A non-prefix snapshot
     or any visual-key change starts again from the complete source. *)
 
+type measurement = { height : int; nonblank_lines : int }
+
+val measure_growing_details :
+  'identity t -> theme_revision:int -> palette_generation:int -> width:int ->
+  renderer:(width:int -> string -> Masc_tui_markdown.streaming_render) ->
+  identity:'identity -> text:string -> measurement
+(** Height plus raw nonblank logical-line count. Appends scan only newly
+    arrived bytes for the logical count, retaining the final line's state. *)
+
 val measure_growing :
   'identity t ->
   theme_revision:int ->

@@ -5874,3 +5874,5 @@
 (include stanzas/test_keeper_memory_select_capture.inc)
 
 (include stanzas/test_keeper_memory_select_provider_wire.inc)
+
+(include stanzas/test_keeper_event_genealogy_capture.inc)

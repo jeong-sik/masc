@@ -77,7 +77,7 @@ let parse = function
       | None -> Ok None | Some (`Int value) when value>0 -> Ok (Some value)
       | _ -> Error "limit must be a positive integer when supplied." in Ok (purpose,limit)
   | _ -> Error "Expected an argument object."
-let handle ?turn_ref ~config ~(meta : Keeper_meta_contract.keeper_meta) ~args () =
+let handle ?turn_ref ?clock ~config ~(meta : Keeper_meta_contract.keeper_meta) ~args () =
   match parse args with
   | Error detail -> Keeper_tool_execution.failure_data ~class_:Tool_result.Policy_rejection ~message:detail
       (`Assoc ["error",`String detail])
@@ -95,7 +95,7 @@ let handle ?turn_ref ~config ~(meta : Keeper_meta_contract.keeper_meta) ~args ()
         "keeper_instructions",`String meta.instructions;
         "turn_ref",(match turn_ref with None -> `Null | Some turn -> Ids.Turn_ref.to_yojson turn)] in
       let io=Io.create ~config ~keeper_id:meta.name ~destinations in
-      let outcomes=Select.select_resolved_many ~evaluate:(Io.evaluate io) ~purpose
+      let outcomes=Select.select_resolved_many ~evaluate:(Io.evaluate ?clock io) ~purpose
         (List.map (fun row -> row.choice,row.detail) before.candidates) in
       let after=collect ~config ~meta ~keepers_dir in
       let publication_policy=Typesafeai_config.workspace_memory_selection_destinations ~keeper_id:meta.name in

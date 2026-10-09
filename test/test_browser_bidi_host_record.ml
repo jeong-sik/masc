@@ -605,6 +605,81 @@ let test_a_host_that_cannot_write_its_record_leaves_the_last_one () =
     check int "and the workspace is free for the next host" 300 (on_disk lane).pid;
     released next
 
+(* A command the server times out adds one result each time it is sent, so a
+   long-lived host meets the limit through no fault of its own. The newest
+   stay whole and the oldest leave, and the trimmed record is still one this
+   build reads, which a taller layout would not be. *)
+let test_the_kept_results_stop_at_the_limit () =
+  with_workspace @@ fun ~base ~lane ->
+  let held = taken ~pid:100 base in
+  let past =
+    List.init (Record.unacknowledged_limit + 8) (fun n -> { noted with at = 1_791_000_030. +. float_of_int n })
+  in
+  List.iter (fun one -> written (Record.note_unacknowledged held one)) past;
+  let record = on_disk lane in
+  check int "the record counts no more than the limit" Record.unacknowledged_limit
+    (List.length record.unacknowledged);
+  check bool "the newest stayed whole" true
+    (record.unacknowledged = List.drop (List.length past - Record.unacknowledged_limit) past);
+  let oldest = (List.hd record.unacknowledged).at in
+  let newest = (List.nth record.unacknowledged (Record.unacknowledged_limit - 1)).at in
+  check bool "the order is still oldest first" true (oldest <= newest);
+  (* One more comes, and the oldest of the kept ones leaves for it. *)
+  written (Record.note_unacknowledged held noted);
+  let record = on_disk lane in
+  check int "still at the limit" Record.unacknowledged_limit (List.length record.unacknowledged);
+  check bool "the oldest of the kept left first" true (List.hd record.unacknowledged = List.nth past 9);
+  (* What the host writes past the limit is what a reader takes, all the
+     same: a field added for what was dropped would turn every reader built
+     for this layout away from the whole record. *)
+  check bool "the trimmed record reads back as it was written" true
+    (Record.entry_of_json (Record.entry_to_json record) = Ok record);
+  released held
+
+let archived_results base =
+  In_channel.with_open_bin (Record.unacknowledged_archive_path ~base_path:base)
+    In_channel.input_lines
+  |> List.map (fun line ->
+       let json = Yojson.Safe.from_string line in
+       let open Yojson.Safe.Util in
+       check int "archive row schema" 1 (json |> member "schema" |> to_int);
+       check int "archive keeps host identity" 100 (json |> member "pid" |> to_int);
+       json |> member "result")
+
+let result_json noted =
+  let open Yojson.Safe.Util in
+  Record.entry_to_json { entry with unacknowledged = [noted] }
+  |> member "unacknowledged" |> to_list |> List.hd
+
+let test_archival_precedes_eviction_and_failure_retains_evidence () =
+  with_workspace @@ fun ~base ~lane ->
+  let held = taken ~pid:100 base in
+  let rows = List.init (Record.unacknowledged_limit + 2)
+      (fun n -> { noted with at = noted.at +. float_of_int n }) in
+  let initial = List.take Record.unacknowledged_limit rows in
+  List.iter (fun row -> written (Record.note_unacknowledged held row)) initial;
+  let archive = Record.unacknowledged_archive_path ~base_path:base in
+  Unix.mkdir archive 0o700;
+  let next = List.nth rows Record.unacknowledged_limit in
+  (match Record.note_unacknowledged held next with
+   | Error _ -> () | Ok () -> fail "unwritable archive authorized eviction");
+  check bool "archive failure preserves all evidence on disk" true
+    ((on_disk lane).unacknowledged = initial @ [next]);
+  Unix.rmdir archive;
+  written (Record.note_unacknowledged held (List.nth rows (Record.unacknowledged_limit + 1)));
+  let archived = archived_results base in
+  check bool "exact evicted metadata is durable" true
+    (archived = List.map result_json (List.take 2 rows));
+  check bool "archive plus snapshot retains the complete history" true
+    (archived @ List.map result_json (on_disk lane).unacknowledged
+     = List.map result_json rows);
+  check int "successful retry restores bounded snapshot" Record.unacknowledged_limit
+    (List.length (on_disk lane).unacknowledged);
+  released held;
+  (match Record.note_unacknowledged held noted with
+   | Error _ -> () | Ok () -> fail "released host appended a result");
+  check bool "released host leaves archive unchanged" true (archived_results base = archived)
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; argument; base ] when String.equal argument holder_argument -> hold base
@@ -636,4 +711,8 @@ let () =
           ; test_case "the address is kept without what it could carry" `Quick
               test_the_address_is_kept_without_what_it_could_carry
           ; test_case "a host that cannot write its record leaves the last one" `Quick
-              test_a_host_that_cannot_write_its_record_leaves_the_last_one ] ) ]
+              test_a_host_that_cannot_write_its_record_leaves_the_last_one
+          ; test_case "the kept results stop at the limit" `Quick
+              test_the_kept_results_stop_at_the_limit
+          ; test_case "archival precedes eviction and failure retains evidence" `Quick
+              test_archival_precedes_eviction_and_failure_retains_evidence ] ) ]

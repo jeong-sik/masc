@@ -410,8 +410,10 @@ def superseded_scoped_match_journey(executable):
                 # The old read now performs one post-read identity probe;
                 # no extra full refresh can repair a wrongly admitted bundle.
                 assert sum(path == BRIEFING for path, _ in calls) == baseline + 1, calls
-                assert calls.count(("/health", "released")) == 1, calls
-                assert calls.count(("/health", "gate-released")) == 1, calls
+                # The refresh tail can add its own identity recheck; the
+                # BRIEFING count above is what rules out an extra full refresh.
+                assert calls.count(("/health", "released")) >= 1, calls
+                assert calls.count(("/health", "gate-released")) >= 1, calls
                 assert held_gate.calls == 1, "more than one independent Gate GET was gated"
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")

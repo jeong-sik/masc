@@ -1301,7 +1301,7 @@ let test_new_input_preserves_running_output () =
       [{Tui_decode.ktr_chat_control_token=None; ktr_keeper_name="alpha";
         ktr_state=Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=1.;
           interrupt_token="fixture"; turn_ref=None; preview=Some {ktp_status_text="working";
-            ktp_updated_at_unix=3.; ktp_text_tail="AUTONOMOUS_TAIL"; ktp_last_tool=None}}}];
+            ktp_updated_at_unix=3.; ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail="AUTONOMOUS_TAIL"; ktp_last_tool=None}}}];
     check bool "autonomous output survives a working chat subscription" true
       (Astring.String.is_infix ~affix:"AUTONOMOUS_TAIL" (screen ())))
 ;;
@@ -3671,7 +3671,7 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     Tui_types.hold_settled_log state running;
     let preview : Tui_decode.keeper_turn_preview =
       { ktp_status_text = "glm · receiving response"; ktp_updated_at_unix = 130.
-      ; ktp_text_tail = "said"; ktp_last_tool = None }
+      ; ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail = "said"; ktp_last_tool = None }
     in
     state.keeper_turns <-
       [ { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
@@ -5839,7 +5839,7 @@ let test_speech_keeps_original_words_across_metadata_and_retry () =
           ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
             interrupt_token="preview-stop"; turn_ref=None;
             preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
-              ktp_text_tail="관측 답변 원문"; ktp_last_tool=None}}}];
+              ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail="관측 답변 원문"; ktp_last_tool=None}}}];
         let preview = Masc_tui_render_chat.polled_turn_output_entries state ~keeper_name:"alpha"
             ~role_label_column:(Layout.chat_role_label_width ~pane_cells:columns) in
         check (list string) "polled speech separates its observation status"
@@ -5886,7 +5886,7 @@ let test_search_measures_original_message_rows () =
       (List.exists (fun line -> Astring.String.is_infix ~affix:"TURN #24"
           (Masc_tui_theme.strip_sgr line)) newest.Masc_tui_frame_presenter.lines);
     match Masc_tui_render_chat.keeper_message_find_scroll state ~keeper_name:"alpha"
-        ~needle:"SEARCH_TARGET" ~older_than:None with
+        ~needle:"SEARCH_TARGET" ~older_than:None |> fun result -> result.match_result with
     | None -> fail "search lost the original input"
     | Some (position, _) ->
         Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll position);
@@ -5963,7 +5963,7 @@ let test_scroll_pins_follow_live_and_hold_transient_rows () =
        ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
          interrupt_token="one-observed-turn"; turn_ref=None;
          preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
-           ktp_text_tail=text; ktp_last_tool=None}}} in
+           ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail=text; ktp_last_tool=None}}} in
     polled.keeper_turns <- [preview long_body];
     ignore (draw polled);
     Tui_types.set_msg_scroll polled 5;
@@ -5974,7 +5974,7 @@ let test_scroll_pins_follow_live_and_hold_transient_rows () =
     let searched = fresh () in
     searched.msg_history <- history 1;
     (match Masc_tui_render_chat.keeper_message_find_scroll searched ~keeper_name:"alpha"
-        ~needle:"line-00" ~older_than:None with
+        ~needle:"line-00" ~older_than:None |> fun result -> result.match_result with
      | None -> fail "short search target missing"
      | Some (position, _) -> Tui_types.apply_clamped_scroll searched (Message_scroll position));
     ignore (draw searched);
@@ -6041,7 +6041,7 @@ let test_expanded_chat_diagnostics_preserve_settled_identity () =
     ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
       interrupt_token="preview-source"; turn_ref=None;
       preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
-        ktp_text_tail=String.concat "\n" (List.init 100 (Printf.sprintf "preview-line-%03d"));
+        ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail=String.concat "\n" (List.init 100 (Printf.sprintf "preview-line-%03d"));
         ktp_last_tool=None}}}];
   let frame, _ = Masc_tui_render_chat.render_keeper_message state in
   let screen = String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in

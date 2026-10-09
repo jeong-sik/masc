@@ -112,10 +112,7 @@ let escape_text code =
    the walk below copies an all-ASCII text unchanged. A frame sanitises
    every cell it draws, and most cells -- names, ids, counts, key hints --
    are only ASCII, so such a text is returned as it came. *)
-let escape_invisible text =
-  if String.for_all (fun byte -> byte < '\x80') text then text
-  else
-  let output = Buffer.create (String.length text) in
+let emit_invisible ~copy ~replace text =
   let length = String.length text in
   (* [base]: the scalar before this one, when it was drawn and is not itself
      ignorable. The one selector kept is VS15/VS16 right after a text-default
@@ -147,7 +144,7 @@ let escape_invisible text =
       in
       match flag_tags with
       | Some tail ->
-        Buffer.add_substring output text index (step + tail);
+        copy index (step + tail);
         walk (index + step + tail) ~after_pictograph:true ~base:None
       | None ->
         let joins_two_pictographs =
@@ -169,8 +166,8 @@ let escape_invisible text =
           && not (joins_two_pictographs || selects_its_base)
         in
         if escaped
-        then Buffer.add_string output (escape_text code)
-        else Buffer.add_substring output text index step;
+        then replace index (escape_text code)
+        else copy index step;
         let base =
           if valid && (not escaped) && not (is_invisible_codepoint code)
           then Some scalar
@@ -191,8 +188,17 @@ let escape_invisible text =
         in
         walk (index + step) ~after_pictograph ~base)
   in
-  walk 0 ~after_pictograph:false ~base:None;
-  Buffer.contents output
+  walk 0 ~after_pictograph:false ~base:None
+;;
+
+let escape_invisible text =
+  if String.for_all (fun byte -> byte < '\x80') text then text
+  else
+    let output = Buffer.create (String.length text) in
+    emit_invisible text
+      ~copy:(Buffer.add_substring output text)
+      ~replace:(fun _ replacement -> Buffer.add_string output replacement);
+    Buffer.contents output
 ;;
 
 (* Printable ASCII (0x20..0x7E) is the one input both passes below copy
@@ -200,12 +206,9 @@ let escape_invisible text =
    through [escape_invisible], no scalar a terminal draws as nothing. It is
    returned as it came; DEL and every other control still take the escape
    table. *)
-let sanitize_terminal_text text =
-  if String.for_all (fun byte -> byte >= ' ' && byte <= '~') text then text
-  else
+let emit_terminal_controls ~copy ~replace text =
   let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
   let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
-  let output = Buffer.create (String.length text) in
   let byte_at index = Char.code text.[index] in
   let is_continuation byte = byte >= 0x80 && byte <= 0xBF in
   let valid_utf8_length index =
@@ -258,11 +261,11 @@ let sanitize_terminal_text text =
       if
         byte < 0x20 || (byte >= 0x7F && byte <= 0x9F)
       then (
-        Buffer.add_string output (escaped_byte byte);
+        replace index (escaped_byte byte);
         append (index + 1))
       else if byte < 0x80
       then (
-        Buffer.add_char output text.[index];
+        copy index 1;
         append (index + 1))
       else if
         byte = 0xC2
@@ -270,19 +273,28 @@ let sanitize_terminal_text text =
         && let next = Char.code text.[index + 1] in
            next >= 0x80 && next <= 0x9F
       then (
-        Buffer.add_string output (escaped_codepoint (Char.code text.[index + 1]));
+        replace index (escaped_codepoint (Char.code text.[index + 1]));
         append (index + 2))
       else
         match valid_utf8_length index with
         | Some length ->
-          Buffer.add_substring output text index length;
+          copy index length;
           append (index + length)
         | None ->
-          Buffer.add_string output (escaped_byte byte);
+          replace index (escaped_byte byte);
           append (index + 1))
   in
-  append 0;
-  escape_invisible (Buffer.contents output)
+  append 0
+;;
+
+let sanitize_terminal_text text =
+  if String.for_all (fun byte -> byte >= ' ' && byte <= '~') text then text
+  else
+    let output = Buffer.create (String.length text) in
+    emit_terminal_controls text
+      ~copy:(Buffer.add_substring output text)
+      ~replace:(fun _ replacement -> Buffer.add_string output replacement);
+    escape_invisible (Buffer.contents output)
 ;;
 
 (* A text whose line breaks are its own shape, read whole rather than as one
@@ -293,6 +305,65 @@ let sanitize_terminal_lines text =
   String.split_on_char '\n' text
   |> List.map sanitize_terminal_text
   |> String.concat "\n"
+;;
+
+(* Both passes use the same emission decisions as the string-only APIs.
+   Copied bytes retain their exact byte positions; all bytes of an escape
+   expansion belong to the original scalar/invalid byte that caused it. *)
+type mapped_text = { text : string; source_bytes : int array }
+
+let mapped_text value = value.text
+
+let source_byte_at value offset =
+  if offset < 0 || offset >= Array.length value.source_bytes then None
+  else Some value.source_bytes.(offset)
+
+let output_byte_at_source value source =
+  (* Emission order is monotone. Return the first byte of an expansion, so a
+     retained source point never resumes partway through its visible escape. *)
+  let rec lower first last =
+    if first >= last then first
+    else let middle = first + (last - first) / 2 in
+      if value.source_bytes.(middle) < source then lower (middle + 1) last
+      else lower first middle in
+  let at = lower 0 (Array.length value.source_bytes) in
+  if at < Array.length value.source_bytes && value.source_bytes.(at) = source
+  then Some at else None
+
+let mapped_pass ~emit ~input ~source_at =
+  let output = Buffer.create (String.length input) in
+  let positions = ref [] in
+  let copy start length =
+    Buffer.add_substring output input start length;
+    for at = start to start + length - 1 do
+      positions := source_at at :: !positions
+    done in
+  let replace start replacement =
+    Buffer.add_string output replacement;
+    let source = source_at start in
+    for _ = 1 to String.length replacement do positions := source :: !positions done in
+  emit ~copy ~replace input;
+  {text=Buffer.contents output; source_bytes=Array.of_list (List.rev !positions)}
+
+let sanitize_terminal_lines_with_source text =
+  let output = Buffer.create (String.length text) in
+  let positions = ref [] in
+  let append value =
+    Buffer.add_string output value.text;
+    Array.iter (fun source -> positions := source :: !positions) value.source_bytes in
+  let rec lines start =
+    let ending = match String.index_from_opt text start '\n' with
+      | Some ending -> ending | None -> String.length text in
+    let line = String.sub text start (ending - start) in
+    let controls = mapped_pass ~emit:emit_terminal_controls ~input:line
+      ~source_at:(fun at -> start + at) in
+    append (mapped_pass ~emit:emit_invisible ~input:controls.text
+      ~source_at:(fun at -> controls.source_bytes.(at)));
+    if ending < String.length text then (
+      Buffer.add_char output '\n'; positions := ending :: !positions;
+      lines (ending + 1)) in
+  lines 0;
+  {text=Buffer.contents output; source_bytes=Array.of_list (List.rev !positions)}
 ;;
 
 (* One row of a text that has rows. The terminal boundary escapes control

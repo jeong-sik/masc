@@ -27,6 +27,8 @@ let measure ~include_nested root =
          | Pexp_apply ({pexp_desc = Pexp_ident name; _}, _) ->
              let name = lid name.txt in
              Hashtbl.replace calls name ();
+             (* mutable_writes is the selected operation count documented in
+                README.md, plus Pexp_setfield; it is not all effects. *)
              if List.mem name [":="; "Hashtbl.replace"; "Hashtbl.add"; "Hashtbl.remove"; "Buffer.add_string"; "Buffer.clear"] then incr writes
          | _ -> ());
         Ast_iterator.default_iterator.expr self e;

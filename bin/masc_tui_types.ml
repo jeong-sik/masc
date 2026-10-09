@@ -2779,8 +2779,11 @@ and surface_needs_of_surface : surface -> surface_needs = function
         ; needs_provider_history = true
         ; needs_account_emails = true
       }
+  (* The Models pane names the account behind a provider id, so Config reads
+     account emails as Usage does. *)
+  | Config -> { nothing with needs_account_emails = true }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
-  | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
+  | Repositories | Code | Changes | Connectors | Runtime | Resources
   | Tools ->
       nothing
 
@@ -5158,6 +5161,7 @@ type runtime_config_reading = {
   rcv_source_text : string;
   rcv_rows : (string * string) list list;
   rcv_metadata : Masc_tui_runtime_config_view.metadata;
+  rcv_account_emails : (Masc_tui_account_login.account_emails, string) result;
 }
 
 type runtime_config_edit_view = Config_edit_draft | Config_edit_current of (string * string) list list

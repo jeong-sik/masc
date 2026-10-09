@@ -9813,9 +9813,18 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_lane_addon_tool_result)
+ (modules test_lane_addon_tool_result)
+ (libraries alcotest masc.lane_addon_tool_result masc.tool_types mcp_protocol yojson))
+
+(test
  (name test_tui_models_account_reading)
  (modules test_tui_models_account_reading)
  (libraries alcotest masc_tui_types masc_tui_render_prim
   masc_tui_runtime_config_view masc_tui_account_login))
 
 (include stanzas/test_tui_code_history_sources_pty.inc)
+
+(include stanzas/test_tui_code_history_diff_pty.inc)
+
+(include stanzas/test_tui_code_history_task_pty.inc)

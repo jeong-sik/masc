@@ -59,7 +59,7 @@ one toolchain job. The small `release-behavior.yml` workflow runs the explicit
 The receipt records the profile, exact suite list and manifest SHA-256; publication
 rejects a missing or different selection even when the behavior job is green.
 There is no known-failure exemption list. Every selected suite must pass.
-The behavior lane runs product suites. CI/review/PTY-helper, build-checker and evidence-validator self-tests are not part of the test suite. The optional credential check runs the scanner directly against the tracked tree.
+The behavior lane runs product suites. CI/review, build-checker and evidence-validator self-tests are not part of the test suite. The optional credential check runs the scanner directly against the tracked tree.
 Presentation tools and the broad sandbox image are prepared only for explicitly requested full regression runs. The dashboard is
 built once with the production configuration and shared by all native targets;
 type checks and dashboard payload-consumer tests stay in their own job. That
